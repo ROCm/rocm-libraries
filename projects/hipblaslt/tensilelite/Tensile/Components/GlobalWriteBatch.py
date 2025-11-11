@@ -38,8 +38,9 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   VFmaF64, VFmaMixF32, VAndB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
   VLShiftRightB32, VMacF32, VMadMixF32, VMaxF32, VMovB32, VMovB64, VMulF32, VMulF64, \
   VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32, \
-  VCmpClassF32, VMed3F32, VPrngB32, VCvtSRF32toFP8
+  VCmpClassF32, VMed3F32, VPrngB32, VCvtSRF32toFP8, MacroInstruction
 from rocisa.functions import vectorStaticMultiply
+from rocisa.macro import PseudoRandomGeneratorModule
 
 from ..Common import DataDirection, SemanticVersion
 from ..Common.DataType import DataType
@@ -874,7 +875,12 @@ class GlobalWriteBatchWriter:
         module.add(waitcntInst)
 
     if self.kernel["ProblemType"]["StochasticRounding"]:
-      vgprRND = self.parentWriter.vgprPool.checkOut(1)
+      if self.parentWriter.states.asmCaps["v_prng_b32"]:
+        vgprRND = self.parentWriter.vgprPool.checkOut(1)
+      else:
+        # legacy PRNG approach needs extra 2 VGPRs
+        # Ref.: Module("StochasticRoundingCvt")
+        vgprRND = self.parentWriter.vgprPool.checkOut(3)
 
     module.addComment1("apply mask, calc new C and issue writes")
     # module.add(self.getBomb()) # can see store addresses just before the store inst
@@ -2712,6 +2718,9 @@ def stochasticRoundingCvt(self, gwvw, destIdx, elementSumIdx, fp8CVTVgprStruct, 
   vgprFp8Min    = fp8CVTVgprStruct.vgprFp8Min
   vgprFp8Max    = fp8CVTVgprStruct.vgprFp8Max
   vRand = vgprTmp #seed
+  if not self.parentWriter.states.asmCaps["v_prng_b32"]:
+    vTemp0 = vgprTmp+1
+    vTemp1 = vgprTmp+2
 
   module = Module("StochasticRoundingCvt")
 
@@ -2724,11 +2733,16 @@ def stochasticRoundingCvt(self, gwvw, destIdx, elementSumIdx, fp8CVTVgprStruct, 
     module.add(VMed3F32(dst=vgpr(vgprFp8Temp), src0=vgpr(formatVgpr), src1= vgpr(vgprFp8Min), src2=vgpr(vgprFp8Max)))
     module.add(VCndMaskB32(dst=vgpr(formatVgpr), src0=vgpr(vgprFp8Temp), src1=vgpr(formatVgpr), src2=sgpr(tmpS01,laneSGPRC)))
 
-    # NOTE: Current PRNG seed implementation simply uses the value to be converted directly as seed.
-    # For thread ID-based seed design, see the legacy PRND_GENERATOR approach in tensilelite/rocisa/rocisa/include/macro.hpp
-    module.add(VPrngB32(dst=vgpr(vRand),src=vgpr(formatVgpr),comment="Pseudo Random Number Generator"))
+    if self.parentWriter.states.asmCaps["v_prng_b32"]:
+      # NOTE: Current PRNG seed implementation simply uses the value to be converted directly as seed.
+      # For thread ID-based seed design, see the legacy PRND_GENERATOR approach in tensilelite/rocisa/rocisa/include/macro.hpp
+      module.add(VPrngB32(dst=vgpr(vRand),src=vgpr(formatVgpr),comment="Pseudo Random Number Generator"))
+    else:
+      if self.parentWriter.states.asmCaps["HasVgprMSB"]:
+        module.add(PseudoRandomGeneratorModule(vRand, vgprFp8Temp, vTemp0, vTemp1))
+      else:
+        module.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgprFp8Temp, vTemp0, vTemp1]))
     # sels=[vi%4] selects which byte within the packed VGPR to write the FP8 value to
     module.add(VCvtSRF32toFP8(dst=vgpr(d), src0=vgpr(formatVgpr), src1=vgpr(vRand), sels=[vi%4]))
-
 
   return module
