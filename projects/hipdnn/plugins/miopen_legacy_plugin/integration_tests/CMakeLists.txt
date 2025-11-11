@@ -25,7 +25,7 @@ target_compile_options(miopen_plugin_integration_test PRIVATE ${HIPDNN_WARNING_C
 # libhipdnn_backend.so HIPDNN_PLUGIN_ENGINE_SUBDIR is provided by the sdk
 target_compile_definitions(
     miopen_plugin_integration_test
-    PRIVATE PLUGIN_PATH="../lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_legacy_plugin"
+    PRIVATE PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_legacy_plugin"
 )
 
 target_link_libraries(
