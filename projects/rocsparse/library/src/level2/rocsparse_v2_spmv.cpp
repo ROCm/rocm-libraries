@@ -355,7 +355,9 @@ public:
 
             if(num_extras <= 0)
             {
+                // LCOV_EXCL_START
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+                // LCOV_EXCL_STOP
             }
 
             count     = num_extras;
@@ -364,7 +366,9 @@ public:
 
             if(z_vecs == nullptr)
             {
+                // LCOV_EXCL_START
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_memory_error);
+                // LCOV_EXCL_STOP
             }
 
             for(int64_t i = 0; i < count; ++i)

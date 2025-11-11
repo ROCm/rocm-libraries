@@ -90,7 +90,8 @@ namespace rocsparse
                     T gamma = gamma_device_array[i];
                     if(gamma != static_cast<T>(0))
                     {
-                        sum = rocsparse::fma<T>(gamma, z_arrays[i][row], sum);
+                        sum = rocsparse::fma<T>(
+                            gamma, rocsparse::nontemporal_load(z_arrays[i] + row), sum);
                     }
                 }
                 y[row] = sum;
@@ -394,7 +395,10 @@ namespace rocsparse
                         T gamma = gamma_device_array[i];
                         if(gamma != static_cast<T>(0))
                         {
-                            temp_sum = rocsparse::fma<T>(gamma, z_arrays[i][local_row], temp_sum);
+                            temp_sum = rocsparse::fma<T>(
+                                gamma,
+                                rocsparse::nontemporal_load(z_arrays[i] + local_row),
+                                temp_sum);
                         }
                     }
                     y[local_row] = temp_sum;
@@ -432,7 +436,10 @@ namespace rocsparse
                         T gamma = gamma_device_array[i];
                         if(gamma != static_cast<T>(0))
                         {
-                            temp_sum = rocsparse::fma<T>(gamma, z_arrays[i][local_row], temp_sum);
+                            temp_sum = rocsparse::fma<T>(
+                                gamma,
+                                rocsparse::nontemporal_load(z_arrays[i] + local_row),
+                                temp_sum);
                         }
                     }
 
@@ -494,7 +501,8 @@ namespace rocsparse
                         T gamma = gamma_device_array[i];
                         if(gamma != static_cast<T>(0))
                         {
-                            temp_sum = rocsparse::fma<T>(gamma, z_arrays[i][r], temp_sum);
+                            temp_sum = rocsparse::fma<T>(
+                                gamma, rocsparse::nontemporal_load(z_arrays[i] + r), temp_sum);
                         }
                     }
 
@@ -533,7 +541,8 @@ namespace rocsparse
                     T gamma = gamma_device_array[i];
                     if(gamma != static_cast<T>(0))
                     {
-                        temp_sum = rocsparse::fma<T>(gamma, z_arrays[i][row], temp_sum);
+                        temp_sum = rocsparse::fma<T>(
+                            gamma, rocsparse::nontemporal_load(z_arrays[i] + row), temp_sum);
                     }
                 }
 
@@ -938,7 +947,8 @@ namespace rocsparse
                 T gamma = gamma_device_array[i];
                 if(gamma != static_cast<T>(0))
                 {
-                    temp_sum = rocsparse::fma<T>(gamma, z_arrays[i][row], temp_sum);
+                    temp_sum = rocsparse::fma<T>(
+                        gamma, rocsparse::nontemporal_load(z_arrays[i] + row), temp_sum);
                 }
             }
 
@@ -1031,7 +1041,8 @@ namespace rocsparse
                 T gamma = gamma_device_array[i];
                 if(gamma != static_cast<T>(0))
                 {
-                    temp_sum = rocsparse::fma<T>(gamma, z_arrays[i][row], temp_sum);
+                    temp_sum = rocsparse::fma<T>(
+                        gamma, rocsparse::nontemporal_load(z_arrays[i] + row), temp_sum);
                 }
             }
 

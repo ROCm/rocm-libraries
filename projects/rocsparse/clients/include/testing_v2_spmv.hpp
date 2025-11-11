@@ -470,234 +470,205 @@ public:
         EXPECT_ROCSPARSE_STATUS(rocsparse_spmat_set_attribute(
                                     matA, rocsparse_spmat_storage_mode, &storage, sizeof(storage)),
                                 rocsparse_status_success);
+        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
-        // Test both pointer modes for alpha/beta/gamma
-        for(int pointer_mode = 0; pointer_mode < 1; ++pointer_mode)
+        // Run buffer size
+        rocsparse_spmv_descr spmv_descr;
+        CHECK_ROCSPARSE_ERROR(rocsparse_create_spmv_descr(&spmv_descr));
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(
+            handle, spmv_descr, rocsparse_spmv_input_alg, &alg, sizeof(alg), nullptr));
+        CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(
+            handle, spmv_descr, rocsparse_spmv_input_operation, &trans, sizeof(trans), nullptr));
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(handle,
+                                                       spmv_descr,
+                                                       rocsparse_spmv_input_compute_datatype,
+                                                       &ttype,
+                                                       sizeof(ttype),
+                                                       nullptr));
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(handle,
+                                                       spmv_descr,
+                                                       rocsparse_spmv_input_scalar_datatype,
+                                                       &ttype,
+                                                       sizeof(ttype),
+                                                       nullptr));
+
+        // Create gamma dnvec with host values
+        rocsparse_dnvec_descr gamma_vec;
+        CHECK_ROCSPARSE_ERROR(rocsparse_create_dnvec_descr(&gamma_vec, 1, h_gamma, ttype));
+
+        rocsparse_const_dnvec_descr z_vecs[1] = {extra};
+
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_spmv_set_extra(handle, spmv_descr, 1, gamma_vec, z_vecs, nullptr));
+
+        size_t buffer_size = 0;
+        CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv_buffer_size(handle,
+                                                            spmv_descr,
+                                                            matA,
+                                                            x,
+                                                            y,
+                                                            rocsparse_v2_spmv_stage_analysis,
+                                                            &buffer_size,
+                                                            nullptr));
+
+        void* dbuffer = nullptr;
+        CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
+
+        // Run analysis
+        CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv(handle,
+                                                spmv_descr,
+                                                h_alpha,
+                                                matA,
+                                                x,
+                                                h_beta,
+                                                y,
+                                                rocsparse_v2_spmv_stage_analysis,
+                                                buffer_size,
+                                                dbuffer,
+                                                nullptr));
+
+        CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
+        dbuffer = nullptr;
+        CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv_buffer_size(handle,
+                                                            spmv_descr,
+                                                            matA,
+                                                            x,
+                                                            y,
+                                                            rocsparse_v2_spmv_stage_compute,
+                                                            &buffer_size,
+                                                            nullptr));
+        CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
+
+        if(arg.unit_check)
         {
-            if(pointer_mode == 0)
+            // Run solve
+            CHECK_ROCSPARSE_ERROR(testing::rocsparse_v2_spmv(handle,
+                                                             spmv_descr,
+                                                             h_alpha,
+                                                             matA,
+                                                             x,
+                                                             h_beta,
+                                                             y,
+                                                             rocsparse_v2_spmv_stage_compute,
+                                                             buffer_size,
+                                                             dbuffer,
+                                                             nullptr));
+
+            host_dense_matrix<Y> hy_copy(hy);
+            traits::host_calculation(trans, h_alpha, hA, hx, h_beta, hy, alg, matrix_type);
+
+            const size_t hy_size = (trans == rocsparse_operation_none) ? M : N;
+
+            for(size_t i = 0; i < hy_size; ++i)
             {
-                CHECK_ROCSPARSE_ERROR(
-                    rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+                hy[i] += gamma_val * h_extra[i];
+            }
+
+            hy.near_check(dy);
+
+            if(ROCSPARSE_REPRODUCIBILITY)
+            {
+                rocsparse_reproducibility::save("Y_pointer_mode_host_extra", dy);
+            }
+
+            dy.transfer_from(hy_copy);
+        }
+
+        // Clear extra vector after computation
+        CHECK_ROCSPARSE_ERROR(rocsparse_spmv_clear_extra(handle, spmv_descr, nullptr));
+
+        if(arg.timing)
+        {
+            const double gpu_time_used
+                = rocsparse_clients::run_benchmark(arg,
+                                                   rocsparse_v2_spmv,
+                                                   handle,
+                                                   spmv_descr,
+                                                   h_alpha,
+                                                   matA,
+                                                   x,
+                                                   h_beta,
+                                                   y,
+                                                   rocsparse_v2_spmv_stage_compute,
+                                                   buffer_size,
+                                                   dbuffer,
+                                                   nullptr);
+
+            const double gflop_count = traits::gflop_count(hA, *h_beta != static_cast<T>(0));
+            const double gbyte_count = traits::byte_count(hA, *h_beta != static_cast<T>(0));
+
+            const double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
+            const double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);
+
+            if(arg.sparsity_pattern_statistics)
+            {
+                int64_t min_nnz_row;
+                int64_t median_nnz_row;
+                int64_t max_nnz_row;
+                rocsparse_matrix_statistics::get_nnz_per_row(
+                    dA, min_nnz_row, median_nnz_row, max_nnz_row);
+
+                int64_t min_nnz_col;
+                int64_t median_nnz_col;
+                int64_t max_nnz_col;
+                rocsparse_matrix_statistics::get_nnz_per_column(
+                    dA, min_nnz_col, median_nnz_col, max_nnz_col);
+                traits::display_info(arg,
+                                     display_key_t::trans_A,
+                                     rocsparse_operation2string(trans),
+                                     dA,
+                                     display_key_t::min_nnz_per_row,
+                                     min_nnz_row,
+                                     display_key_t::max_nnz_per_row,
+                                     max_nnz_row,
+                                     display_key_t::median_nnz_per_row,
+                                     median_nnz_row,
+                                     display_key_t::min_nnz_per_col,
+                                     min_nnz_col,
+                                     display_key_t::max_nnz_per_col,
+                                     max_nnz_col,
+                                     display_key_t::median_nnz_per_col,
+                                     median_nnz_col,
+                                     display_key_t::alpha,
+                                     *h_alpha,
+                                     display_key_t::beta,
+                                     *h_beta,
+                                     display_key_t::algorithm,
+                                     rocsparse_spmvalg2string(alg),
+                                     display_key_t::gflops,
+                                     gpu_gflops,
+                                     display_key_t::bandwidth,
+                                     gpu_gbyte,
+                                     display_key_t::time_ms,
+                                     get_gpu_time_msec(gpu_time_used));
             }
             else
             {
-                CHECK_ROCSPARSE_ERROR(
-                    rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
+                traits::display_info(arg,
+                                     display_key_t::trans_A,
+                                     rocsparse_operation2string(trans),
+                                     dA,
+                                     display_key_t::alpha,
+                                     *h_alpha,
+                                     display_key_t::beta,
+                                     *h_beta,
+                                     display_key_t::algorithm,
+                                     rocsparse_spmvalg2string(alg),
+                                     display_key_t::gflops,
+                                     gpu_gflops,
+                                     display_key_t::bandwidth,
+                                     gpu_gbyte,
+                                     display_key_t::time_ms,
+                                     get_gpu_time_msec(gpu_time_used));
             }
-
-            // Run buffer size
-            rocsparse_spmv_descr spmv_descr;
-            CHECK_ROCSPARSE_ERROR(rocsparse_create_spmv_descr(&spmv_descr));
-
-            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(
-                handle, spmv_descr, rocsparse_spmv_input_alg, &alg, sizeof(alg), nullptr));
-            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(handle,
-                                                           spmv_descr,
-                                                           rocsparse_spmv_input_operation,
-                                                           &trans,
-                                                           sizeof(trans),
-                                                           nullptr));
-
-            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(handle,
-                                                           spmv_descr,
-                                                           rocsparse_spmv_input_compute_datatype,
-                                                           &ttype,
-                                                           sizeof(ttype),
-                                                           nullptr));
-
-            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(handle,
-                                                           spmv_descr,
-                                                           rocsparse_spmv_input_scalar_datatype,
-                                                           &ttype,
-                                                           sizeof(ttype),
-                                                           nullptr));
-
-            // Create gamma dnvec with host values
-            rocsparse_dnvec_descr gamma_vec;
-            CHECK_ROCSPARSE_ERROR(rocsparse_create_dnvec_descr(&gamma_vec, 1, h_gamma, ttype));
-
-            rocsparse_const_dnvec_descr z_vecs[1] = {extra};
-
-            CHECK_ROCSPARSE_ERROR(
-                rocsparse_spmv_set_extra(handle, spmv_descr, 1, gamma_vec, z_vecs, nullptr));
-
-            size_t buffer_size = 0;
-            CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv_buffer_size(handle,
-                                                                spmv_descr,
-                                                                matA,
-                                                                x,
-                                                                y,
-                                                                rocsparse_v2_spmv_stage_analysis,
-                                                                &buffer_size,
-                                                                nullptr));
-
-            void* dbuffer = nullptr;
-            CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
-
-            // Run analysis
-            CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv(handle,
-                                                    spmv_descr,
-                                                    pointer_mode == 0 ? h_alpha : d_alpha,
-                                                    matA,
-                                                    x,
-                                                    pointer_mode == 0 ? h_beta : d_beta,
-                                                    y,
-                                                    rocsparse_v2_spmv_stage_analysis,
-                                                    buffer_size,
-                                                    dbuffer,
-                                                    nullptr));
-
-            CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
-            dbuffer = nullptr;
-            CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv_buffer_size(handle,
-                                                                spmv_descr,
-                                                                matA,
-                                                                x,
-                                                                y,
-                                                                rocsparse_v2_spmv_stage_compute,
-                                                                &buffer_size,
-                                                                nullptr));
-            CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
-
-            if(arg.unit_check)
-            {
-                // Run solve
-                CHECK_ROCSPARSE_ERROR(
-                    testing::rocsparse_v2_spmv(handle,
-                                               spmv_descr,
-                                               pointer_mode == 0 ? h_alpha : d_alpha,
-                                               matA,
-                                               x,
-                                               pointer_mode == 0 ? h_beta : d_beta,
-                                               y,
-                                               rocsparse_v2_spmv_stage_compute,
-                                               buffer_size,
-                                               dbuffer,
-                                               nullptr));
-
-                host_dense_matrix<Y> hy_copy(hy);
-                traits::host_calculation(trans,
-                                         pointer_mode == 0 ? h_alpha : d_alpha,
-                                         hA,
-                                         hx,
-                                         pointer_mode == 0 ? h_beta : d_beta,
-                                         hy,
-                                         alg,
-                                         matrix_type);
-
-                const size_t hy_size = (trans == rocsparse_operation_none) ? M : N;
-
-                for(size_t i = 0; i < hy_size; ++i)
-                {
-                    hy[i] += gamma_val * h_extra[i];
-                }
-
-                hy.near_check(dy);
-
-                if(ROCSPARSE_REPRODUCIBILITY)
-                {
-                    rocsparse_reproducibility::save(pointer_mode == 0
-                                                        ? "Y_pointer_mode_host_extra"
-                                                        : "Y_pointer_mode_device_extra",
-                                                    dy);
-                }
-
-                dy.transfer_from(hy_copy);
-            }
-
-            // Clear extra vector after computation
-            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_clear_extra(handle, spmv_descr, nullptr));
-
-            if(arg.timing)
-            {
-                const double gpu_time_used
-                    = rocsparse_clients::run_benchmark(arg,
-                                                       rocsparse_v2_spmv,
-                                                       handle,
-                                                       spmv_descr,
-                                                       pointer_mode == 0 ? h_alpha : d_alpha,
-                                                       matA,
-                                                       x,
-                                                       pointer_mode == 0 ? h_beta : d_beta,
-                                                       y,
-                                                       rocsparse_v2_spmv_stage_compute,
-                                                       buffer_size,
-                                                       dbuffer,
-                                                       nullptr);
-
-                const double gflop_count = traits::gflop_count(hA, *h_beta != static_cast<T>(0));
-                const double gbyte_count = traits::byte_count(hA, *h_beta != static_cast<T>(0));
-
-                const double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
-                const double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);
-
-                if(arg.sparsity_pattern_statistics)
-                {
-                    int64_t min_nnz_row;
-                    int64_t median_nnz_row;
-                    int64_t max_nnz_row;
-                    rocsparse_matrix_statistics::get_nnz_per_row(
-                        dA, min_nnz_row, median_nnz_row, max_nnz_row);
-
-                    int64_t min_nnz_col;
-                    int64_t median_nnz_col;
-                    int64_t max_nnz_col;
-                    rocsparse_matrix_statistics::get_nnz_per_column(
-                        dA, min_nnz_col, median_nnz_col, max_nnz_col);
-                    traits::display_info(arg,
-                                         display_key_t::trans_A,
-                                         rocsparse_operation2string(trans),
-                                         dA,
-                                         display_key_t::min_nnz_per_row,
-                                         min_nnz_row,
-                                         display_key_t::max_nnz_per_row,
-                                         max_nnz_row,
-                                         display_key_t::median_nnz_per_row,
-                                         median_nnz_row,
-                                         display_key_t::min_nnz_per_col,
-                                         min_nnz_col,
-                                         display_key_t::max_nnz_per_col,
-                                         max_nnz_col,
-                                         display_key_t::median_nnz_per_col,
-                                         median_nnz_col,
-                                         display_key_t::alpha,
-                                         *h_alpha,
-                                         display_key_t::beta,
-                                         *h_beta,
-                                         display_key_t::algorithm,
-                                         rocsparse_spmvalg2string(alg),
-                                         display_key_t::gflops,
-                                         gpu_gflops,
-                                         display_key_t::bandwidth,
-                                         gpu_gbyte,
-                                         display_key_t::time_ms,
-                                         get_gpu_time_msec(gpu_time_used));
-                }
-                else
-                {
-                    traits::display_info(arg,
-                                         display_key_t::trans_A,
-                                         rocsparse_operation2string(trans),
-                                         dA,
-                                         display_key_t::alpha,
-                                         *h_alpha,
-                                         display_key_t::beta,
-                                         *h_beta,
-                                         display_key_t::algorithm,
-                                         rocsparse_spmvalg2string(alg),
-                                         display_key_t::gflops,
-                                         gpu_gflops,
-                                         display_key_t::bandwidth,
-                                         gpu_gbyte,
-                                         display_key_t::time_ms,
-                                         get_gpu_time_msec(gpu_time_used));
-                }
-            }
-
-            CHECK_ROCSPARSE_ERROR(rocsparse_destroy_dnvec_descr(gamma_vec));
-            CHECK_ROCSPARSE_ERROR(rocsparse_destroy_spmv_descr(spmv_descr));
-            CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
         }
+
+        CHECK_ROCSPARSE_ERROR(rocsparse_destroy_dnvec_descr(gamma_vec));
+        CHECK_ROCSPARSE_ERROR(rocsparse_destroy_spmv_descr(spmv_descr));
+        CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
 
         // Test enable/disable extra functionality
         if(matrix_type == rocsparse_matrix_type_general && arg.unit_check)

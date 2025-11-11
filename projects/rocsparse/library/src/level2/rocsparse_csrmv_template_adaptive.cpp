@@ -665,7 +665,9 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         else
         {
             // throw an error here as the extra data cannot be retrieved
+            // LCOV_EXCL_START
             return rocsparse_status_invalid_value;
+            // LCOV_EXCL_STOP
         }
     }
 

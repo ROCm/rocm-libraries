@@ -880,7 +880,7 @@ Tests:
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
-  spmv_alg: [rocsparse_spmv_alg_csr_adaptive]
+  spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_rowsplit, rocsparse_spmv_alg_csr_nnzsplit]
 
 - name: v2_spmv_csr_res
   category: pre_checkin

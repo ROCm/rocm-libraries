@@ -226,7 +226,7 @@ namespace rocsparse
             T gamma = gamma_values[i]; // gamma is a scalar value from the array
             if(gamma != static_cast<T>(0))
             {
-                tmp = fma(gamma, static_cast<T>(x_arrays[i][gid]), tmp);
+                tmp = rocsparse::fma<T>(gamma, rocsparse::nontemporal_load(x_arrays[i] + gid), tmp);
             }
         }
 
@@ -648,40 +648,6 @@ rocsparse_status
 }
 
 template <typename I, typename X, typename Y, typename T>
-rocsparse_status rocsparse::axpby_array(rocsparse_handle handle,
-                                        I                length,
-                                        const T*         alpha_device_host,
-                                        const X*         x_array,
-                                        const T*         beta_device_host,
-                                        Y*               y_array)
-{
-    if(length > 0)
-    {
-        const bool on_host = handle->pointer_mode == rocsparse_pointer_mode_host;
-        if(on_host && *alpha_device_host == 0 && *beta_device_host == 0)
-        {
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(y_array, 0, sizeof(Y) * length, handle->stream));
-        }
-        else
-        {
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::axpby_kernel<256>),
-                dim3((length - 1) / 256 + 1),
-                dim3(256),
-                0,
-                handle->stream,
-                length,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                x_array,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-                y_array,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
-        }
-    }
-    return rocsparse_status_success;
-}
-
-template <typename I, typename X, typename Y, typename T>
 rocsparse_status rocsparse::axpby_array_batched(rocsparse_handle handle,
                                                 I                length,
                                                 rocsparse_int    num_extra,
@@ -896,12 +862,6 @@ INSTANTIATE(int64_t, rocsparse_double_complex);
 #define INSTANTIATE(ITYPE, ATYPE, TTYPE)                                                          \
     template rocsparse_status rocsparse::scale_array(                                             \
         rocsparse_handle handle, ITYPE length, const TTYPE* scalar_device_host, ATYPE* array);    \
-    template rocsparse_status rocsparse::axpby_array(rocsparse_handle handle,                     \
-                                                     ITYPE            length,                     \
-                                                     const TTYPE*     alpha_device_host,          \
-                                                     const ATYPE*     x_array,                    \
-                                                     const TTYPE*     beta_device_host,           \
-                                                     ATYPE*           y_array);                             \
     template rocsparse_status rocsparse::axpby_array_batched(rocsparse_handle handle,             \
                                                              ITYPE            length,             \
                                                              rocsparse_int    num_extra,          \
