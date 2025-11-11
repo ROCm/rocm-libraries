@@ -42,8 +42,18 @@ namespace rocRoller
         {
         public:
             TopologicalCompare() = delete;
-            TopologicalCompare(KernelGraphPtr graph)
+
+            TopologicalCompare(KernelGraph const& graph)
+                : m_graph(&graph){};
+
+            TopologicalCompare(KernelGraph const* graph)
                 : m_graph(graph)
+            {
+                AssertFatal(graph);
+            };
+
+            TopologicalCompare(KernelGraphPtr graph)
+                : m_graph(graph.get())
             {
                 AssertFatal(graph);
             };
@@ -55,7 +65,7 @@ namespace rocRoller
             }
 
         private:
-            KernelGraphPtr m_graph;
+            KernelGraph const* m_graph;
         };
 
         // Return value of colourByUnrollValue.  A colour-mapping is...
