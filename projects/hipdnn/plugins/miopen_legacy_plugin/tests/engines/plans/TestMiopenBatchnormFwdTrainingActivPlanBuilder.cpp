@@ -66,6 +66,18 @@ TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
     EXPECT_FALSE(applicable);
 }
 
+TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder,
+       IsApplicableReturnsTrueForFusionWithoutRunningStatistics)
+{
+    // Create a fused batchnorm training + activation graph WITHOUT running statistics
+    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingActivGraph();
+    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+
+    EXPECT_TRUE(applicable);
+}
+
 TEST_F(TestMiopenBatchnormFwdTrainingActivPlanBuilder, IsApplicableReturnsFalseForNonReluActivation)
 {
     // Graph with SIGMOID_FWD instead of RELU_FWD

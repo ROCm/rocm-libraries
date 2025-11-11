@@ -378,8 +378,6 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
         const auto& bnAttr = opGraph.getNodeWrapper(0)
                                  .attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
 
-        checkTensorVirtuality1Node(bnAttr, opGraph.getTensorMap());
-
         BatchnormFwdTrainingParams params(bnAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params));
         executionContext.setPlan(std::move(plan));
@@ -391,8 +389,6 @@ void MiopenBatchnormFwdTrainingPlanBuilder::buildPlan(
                                  .attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
         const auto& activAttr = opGraph.getNodeWrapper(1)
                                     .attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
-
-        checkTensorVirtuality2Node(bnAttr, activAttr, opGraph.getTensorMap());
 
         BatchnormFwdTrainingParams params(bnAttr, activAttr, opGraph.getTensorMap());
         auto plan = std::make_unique<BatchnormFwdTrainingPlan>(std::move(params));
