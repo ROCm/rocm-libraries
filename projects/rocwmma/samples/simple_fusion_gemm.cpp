@@ -955,7 +955,7 @@ ROCWMMA_KERNEL void __launch_bounds__(256) gemm_rocwmma_d(uint32_t       m,
                 auto sv_mToffset = sv_iter * get<1>(macroTileSize);
                 auto sv_wpoffset = sv_mToffset + get<1>(localWarpOffset);
 
-                ////  load v and calcualte sv
+                ////  load v and calculate sv
                 using GRBuffVMap1d = GetDataLayout_t<GRBuffV>;
                 auto globalReadOffsetV
                     = GRBuffVMap1d::fromMatrixCoord(make_coord2d(0u, get<1>(macroTileCoord)), 1u)
