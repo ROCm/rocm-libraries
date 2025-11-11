@@ -1839,6 +1839,8 @@ ds_read_b128 v[vgprValuB_T0_I0+20:vgprValuB_T0_I0+23], v[vgprLocalReadAddrB] off
 ds_read_b128 v[vgprValuB_T0_I0+24:vgprValuB_T0_I0+27], v[vgprLocalReadAddrB] offset:18432 // L -> Reg lro=0 swapByteOffset=0 ti=128 vIdx=0 eIdx=0 rIdx=6 oIdx=0 buffer=0 iui=0
 ds_read_b128 v[vgprValuB_T0_I0+28:vgprValuB_T0_I0+31], v[vgprLocalReadAddrB] offset:19456 // L -> Reg lro=0 swapByteOffset=0 ti=128 vIdx=0 eIdx=0 rIdx=7 oIdx=0 buffer=0 iui=0
 
+s_branch label_startPreLoopPLR
+
 label_skipPGR2:
 s_waitcnt vmcnt(8)                                 // wait for global read
 s_barrier
