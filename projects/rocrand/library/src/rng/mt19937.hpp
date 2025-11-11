@@ -82,7 +82,10 @@ unsigned int wrap_n(unsigned int i)
 
 // Config is not actually used for kernel launch here, but is needed to check the number of generators
 // As this kernel is not dependent on any type just use void for the config, as mt19937 is not tuned for types independently, so all configs are the same for different types.
-template<unsigned int jump_ahead_thread_count, class ConfigProvider, bool IsDynamic>
+template<unsigned int jump_ahead_thread_count,
+         class ConfigProvider,
+         bool              IsDynamic,
+         host::target_arch Arch = host::target_arch::unknown>
 __forceinline__ __host__ __device__
 void jump_ahead_mt19937(dim3 block_idx,
                         dim3 thread_idx,
@@ -102,7 +105,8 @@ void jump_ahead_mt19937(dim3 block_idx,
     }
 #endif
 
-    constexpr generator_config config = ConfigProvider::template device_config<void>(IsDynamic);
+    constexpr generator_config config
+        = ConfigProvider::template device_config<void, Arch>(IsDynamic);
     constexpr unsigned int     GeneratorCount
         = config.threads * config.blocks / mt19937_octo_engine::threads_per_generator;
     static_assert(GeneratorCount <= mt19937_jumps_radix * mt19937_jumps_radix
@@ -203,7 +207,7 @@ void jump_ahead_mt19937(dim3 block_idx,
                 unsigned int tm = temp[wrap_n(ptr + mt19937_constants::m)];
                 unsigned int y
                     = (t0 & mt19937_constants::upper_mask) | (t1 & mt19937_constants::lower_mask);
-                temp[ptr] = tm ^ (y >> 1) ^ ((y & 0x1U) ? mt19937_constants::matrix_a : 0);
+                temp[ptr] = tm ^ (y >> 1) ^ (((y & 1) ? -1 : 0) & mt19937_constants::matrix_a);
             }
             system::syncthreads<isDevice>{}();
             ptr = wrap_n(ptr + 1);
@@ -276,7 +280,7 @@ void jump_ahead_mt19937(dim3 block_idx,
 
 // This kernel is not explicitly tuned, but uses the same configs as the generate-kernels.
 // As this kernel is not dependent on any type just use void for the config, as mt19937 is not tuned for types independently, so all configs are the same for different types.
-template<class ConfigProvider, bool IsDynamic>
+template<class ConfigProvider, bool IsDynamic, host::target_arch Arch = host::target_arch::unknown>
 __forceinline__ __host__ __device__
 void init_engines_mt19937(dim3 block_idx,
                           dim3 thread_idx,
@@ -285,7 +289,8 @@ void init_engines_mt19937(dim3 block_idx,
                           unsigned int* __restrict__ octo_engines,
                           const unsigned int* __restrict__ engines)
 {
-    constexpr generator_config config     = ConfigProvider::template device_config<void>(IsDynamic);
+    constexpr generator_config config
+        = ConfigProvider::template device_config<void, Arch>(IsDynamic);
     constexpr unsigned int     block_size = config.threads;
     constexpr unsigned int     grid_size  = config.blocks;
     constexpr unsigned int     stride     = block_size * grid_size;
@@ -304,7 +309,12 @@ void init_engines_mt19937(dim3 block_idx,
     accessor.save(thread_id, engine);
 }
 
-template<class ConfigProvider, bool IsDynamic, class T, class VecT, class Distribution>
+template<class ConfigProvider,
+         bool IsDynamic,
+         class T,
+         class VecT,
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
 __forceinline__ __host__ __device__
 void generate_short_mt19937(dim3 block_idx,
                             dim3 thread_idx,
@@ -326,7 +336,7 @@ void generate_short_mt19937(dim3 block_idx,
         return;
     }
 #endif
-    constexpr generator_config config     = ConfigProvider::template device_config<T>(IsDynamic);
+    constexpr generator_config config = ConfigProvider::template device_config<T, Arch>(IsDynamic);
     constexpr unsigned int     block_size = config.threads;
     constexpr unsigned int     grid_size  = config.blocks;
     constexpr unsigned int     stride     = block_size * grid_size;
@@ -432,7 +442,12 @@ void generate_short_mt19937(dim3 block_idx,
     // clang-format on
 }
 
-template<class ConfigProvider, bool IsDynamic, class T, class VecT, class Distribution>
+template<class ConfigProvider,
+         bool IsDynamic,
+         class T,
+         class VecT,
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
 __forceinline__ __host__ __device__
 void generate_long_mt19937(dim3 block_idx,
                            dim3 thread_idx,
@@ -454,7 +469,7 @@ void generate_long_mt19937(dim3 block_idx,
         return;
     }
 #endif
-    constexpr generator_config config     = ConfigProvider::template device_config<T>(IsDynamic);
+    constexpr generator_config config = ConfigProvider::template device_config<T, Arch>(IsDynamic);
     constexpr unsigned int     block_size = config.threads;
     constexpr unsigned int     grid_size  = config.blocks;
     constexpr unsigned int     threads_per_generator = mt19937_octo_engine::threads_per_generator;
@@ -808,6 +823,13 @@ public:
         }
         m_generator_count = config.threads * config.blocks / threads_per_generator;
 
+        host::target_arch target_arch;
+        hipError_t        result = host::get_device_arch(m_stream, target_arch);
+        if(result != hipSuccess)
+        {
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
+
         if(m_engines != nullptr)
         {
             system_type::free(m_engines);
@@ -853,10 +875,16 @@ public:
             m_order,
             [&, this](auto is_dynamic)
             {
-                status = system_type::template launch<
+                auto jump_ahead_mt19937_kernel = [&] __host__ __device__(auto arch, auto... args)
+                {
+                    jump_ahead_mt19937<jump_ahead_thread_count, ConfigProvider, is_dynamic, arch>(
+                        args...);
+                };
 
-                    jump_ahead_mt19937<jump_ahead_thread_count, ConfigProvider, is_dynamic>,
+                status = system_type::template launch<
                     static_block_size_config_provider<jump_ahead_thread_count>>(
+                    jump_ahead_mt19937_kernel,
+                    target_arch,
                     dim3(m_generator_count),
                     dim3(jump_ahead_thread_count),
                     0,
@@ -879,14 +907,18 @@ public:
             m_order,
             [&, this](auto is_dynamic)
             {
-                status
-                    = system_type::template launch<init_engines_mt19937<ConfigProvider, is_dynamic>,
-                                                   ConfigProvider>(dim3(config.blocks),
-                                                                   dim3(config.threads),
-                                                                   0,
-                                                                   m_stream,
-                                                                   m_engines,
-                                                                   d_engines);
+                auto init_engines_mt19937_kernel = [&] __host__ __device__(auto arch, auto... args)
+                {
+                    init_engines_mt19937<ConfigProvider, is_dynamic, arch>(args...);
+                };
+                status = system_type::template launch<ConfigProvider>(init_engines_mt19937_kernel,
+                                                                      target_arch,
+                                                                      dim3(config.blocks),
+                                                                      dim3(config.threads),
+                                                                      0,
+                                                                      m_stream,
+                                                                      m_engines,
+                                                                      d_engines);
             });
         if(status != ROCRAND_STATUS_SUCCESS)
         {
@@ -937,6 +969,13 @@ public:
             return ROCRAND_STATUS_SUCCESS;
         }
 
+        host::target_arch target_arch;
+        hipError_t        result = host::get_device_arch(m_stream, target_arch);
+        if(result != hipSuccess)
+        {
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
+
         using vec_type = rocrand_impl::aligned_vec_type<T, output_width>;
 
         const uintptr_t uintptr = reinterpret_cast<uintptr_t>(data);
@@ -977,31 +1016,36 @@ public:
             // Engines have enough values, generated by the previous generate_long_mt19937 call.
             // This kernel does not load and store engines but loads values directly from global
             // memory.
-            dynamic_dispatch(
-                m_order,
-                [&, this](auto is_dynamic)
-                {
-                    status = system_type::template launch<generate_short_mt19937<ConfigProvider,
-                                                                                 is_dynamic,
-                                                                                 T,
-                                                                                 vec_type,
-                                                                                 Distribution>,
-                                                          ConfigProvider,
-                                                          T,
-                                                          is_dynamic>(dim3(config.blocks),
-                                                                      dim3(config.threads),
-                                                                      0,
-                                                                      m_stream,
-                                                                      m_engines,
-                                                                      m_start_input,
-                                                                      data,
-                                                                      size,
-                                                                      vec_data,
-                                                                      vec_size,
-                                                                      head_size,
-                                                                      tail_size,
-                                                                      distribution);
-                });
+            dynamic_dispatch(m_order,
+                             [&, this](auto is_dynamic)
+                             {
+                                 auto generate_short_mt19937_kernel = [&] __host__ __device__(auto arch, auto... args)
+                                 {
+                                     generate_short_mt19937<ConfigProvider,
+                                                            is_dynamic,
+                                                            T,
+                                                            vec_type,
+                                                            Distribution,
+                                                            arch>(args...);
+                                 };
+                                 status
+                                     = system_type::template launch<ConfigProvider, T, is_dynamic>(
+                                         generate_short_mt19937_kernel,
+                                         target_arch,
+                                         dim3(config.blocks),
+                                         dim3(config.threads),
+                                         0,
+                                         m_stream,
+                                         m_engines,
+                                         m_start_input,
+                                         data,
+                                         size,
+                                         vec_data,
+                                         vec_size,
+                                         head_size,
+                                         tail_size,
+                                         distribution);
+                             });
             if(status != ROCRAND_STATUS_SUCCESS)
             {
                 return status;
@@ -1010,31 +1054,36 @@ public:
         else
         {
             // There are not enough generated values or no values at all
-            dynamic_dispatch(
-                m_order,
-                [&, this](auto is_dynamic)
-                {
-                    status = system_type::template launch<generate_long_mt19937<ConfigProvider,
-                                                                                is_dynamic,
-                                                                                T,
-                                                                                vec_type,
-                                                                                Distribution>,
-                                                          ConfigProvider,
-                                                          T,
-                                                          is_dynamic>(dim3(config.blocks),
-                                                                      dim3(config.threads),
-                                                                      0,
-                                                                      m_stream,
-                                                                      m_engines,
-                                                                      m_start_input,
-                                                                      data,
-                                                                      size,
-                                                                      vec_data,
-                                                                      vec_size,
-                                                                      head_size,
-                                                                      tail_size,
-                                                                      distribution);
-                });
+            dynamic_dispatch(m_order,
+                             [&, this](auto is_dynamic)
+                             {
+                                 auto generate_long_mt19937_kernel = [&] __host__ __device__(auto arch, auto... args)
+                                 {
+                                     generate_long_mt19937<ConfigProvider,
+                                                           is_dynamic,
+                                                           T,
+                                                           vec_type,
+                                                           Distribution,
+                                                           arch>(args...);
+                                 };
+                                 status
+                                     = system_type::template launch<ConfigProvider, T, is_dynamic>(
+                                         generate_long_mt19937_kernel,
+                                         target_arch,
+                                         dim3(config.blocks),
+                                         dim3(config.threads),
+                                         0,
+                                         m_stream,
+                                         m_engines,
+                                         m_start_input,
+                                         data,
+                                         size,
+                                         vec_data,
+                                         vec_size,
+                                         head_size,
+                                         tail_size,
+                                         distribution);
+                             });
             if(status != ROCRAND_STATUS_SUCCESS)
             {
                 return status;

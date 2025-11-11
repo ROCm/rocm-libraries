@@ -22,6 +22,12 @@ class TensorAttributes:
             "virtual": self.virtual
         }
 
+    def to_gpu(self):
+        self.tensor = self.tensor.cuda()
+
+    def to_cpu(self):
+        self.tensor = self.tensor.cpu()
+
     @staticmethod
     def empty(dtype: torch.dtype=torch.float, dims: list[int]=[], uid: int=None, name: str="", virtual: bool=False):
         return TensorAttributes(torch.empty(dims, dtype=dtype), uid, name, virtual)
@@ -30,7 +36,7 @@ class TensorAttributes:
     def random(min_val, max_val, dtype: torch.dtype, dims: list[int], generator: torch.Generator = None):
         if (dtype == torch.int or dtype == torch.int8 or dtype == torch.int16
             or dtype == torch.int32 or dtype == torch.int64):
-            return TensorAttributes(torch.randint(min_val, max_val, dtype=dtype, size=dims, generator=generator))
+            return TensorAttributes(torch.randint(low=int(min_val), high=int(max_val), dtype=dtype, size=dims, generator=generator))
 
         tensor = torch.rand(dtype=dtype, size=dims, generator=generator)
         return TensorAttributes(tensor*(max_val - min_val) + min_val)
@@ -39,6 +45,7 @@ class TensorAttributes:
     def from_dict(d: dict):
         dtype = DTypeConverter.from_string(d["data_type"])
         return TensorAttributes.empty(dtype, d["dims"], d["uid"], d["name"], d["virtual"])
+
 
 
 def dump_data_as_binary(filename: str, tensor_attr: TensorAttributes):

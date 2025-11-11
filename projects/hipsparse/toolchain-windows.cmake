@@ -26,8 +26,6 @@ else()
     message(WARNING "Compiler was not found. CMAKE_CXX_COMPILER will not be explicitly set.")
 endif()
 
-set(python "python")
-
 # working
 #set(CMAKE_Fortran_COMPILER "C:/Strawberry/c/bin/gfortran.exe")
 

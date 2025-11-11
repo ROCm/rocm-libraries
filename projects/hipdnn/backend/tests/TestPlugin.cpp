@@ -11,9 +11,10 @@
 #include <gtest/gtest.h>
 #include <utility>
 
+#include "TestPluginConstants.hpp"
 #include "plugin/PluginCore.hpp"
+#include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
-#include <hipdnn_sdk/test_utilities/TempDirectory.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 
 using namespace hipdnn_backend;
@@ -78,7 +79,7 @@ protected:
 
 bool TestPluginCallback::s_callbackCalled = false;
 
-const std::filesystem::path TEST_PLUGIN_DIR = "lib/test_plugins";
+const auto TEST_PLUGIN_DIR = std::filesystem::path(plugin_constants::getTestPluginDefaultDir());
 
 const auto PLUGIN_PATH1 = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN1_NAME;
 const auto PLUGIN_PATH2 = ".." / TEST_PLUGIN_DIR / TEST_PLUGIN2_NAME;
@@ -123,7 +124,7 @@ TEST(TestPluginManager, LoadPluginsFromDirectory)
 {
     std::filesystem::path tempPluginDir
         = hipdnn_backend::platform_utilities::getCurrentModuleDirectory() /= "temp_plugin_dir";
-    TempDirectory tempDir(tempPluginDir);
+    ScopedDirectory tempDir(tempPluginDir);
 
     std::filesystem::copy_file(
         FULL_PLUGIN_PATH1, tempDir.path() / std::filesystem::path(FULL_PLUGIN_PATH1).filename());
@@ -203,7 +204,7 @@ TEST(TestPluginManager, LoadPluginsAdditiveWithDefault)
 {
     std::filesystem::path tempPluginDir
         = hipdnn_backend::platform_utilities::getCurrentModuleDirectory() /= "test_plugins_dir";
-    TempDirectory defaultDir(tempPluginDir);
+    ScopedDirectory defaultDir(tempPluginDir);
 
     // Place a plugin in the default directory
     std::filesystem::copy_file(
@@ -231,7 +232,7 @@ TEST(TestPluginManager, LoadPluginsCombinedFileAndDirectory)
         = hipdnn_backend::platform_utilities::getCurrentModuleDirectory()
         /= "temp_plugin_dir_combined";
 
-    TempDirectory tempDir(tempPluginDir);
+    ScopedDirectory tempDir(tempPluginDir);
 
     std::filesystem::copy_file(
         FULL_PLUGIN_PATH1, tempDir.path() / std::filesystem::path(FULL_PLUGIN_PATH1).filename());

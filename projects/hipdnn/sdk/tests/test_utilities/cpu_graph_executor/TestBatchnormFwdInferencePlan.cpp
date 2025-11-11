@@ -9,8 +9,10 @@
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
+#include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 using namespace hipdnn_sdk::test_utilities;
@@ -39,11 +41,14 @@ protected:
 TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 {
     auto tolerance = batchnorm::getToleranceInference<float>();
-    double epsilon = 1e-3;
     std::vector<int64_t> dims = {6, 3, 32, 32};
-    unsigned int seed = 1;
-    auto graph = buildBatchnormFwdInferenceGraph(
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
+    unsigned int seed = getGlobalTestSeed();
+    auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 dims,
+                                                 TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
@@ -58,10 +63,9 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
                                        *tensorMap.at(attributes.scale_tensor_uid()),
                                        *tensorMap.at(attributes.bias_tensor_uid()),
                                        *tensorMap.at(attributes.mean_tensor_uid()),
-                                       *tensorMap.at(attributes.inv_variance_tensor_uid()),
-                                       epsilon);
+                                       *tensorMap.at(attributes.inv_variance_tensor_uid()));
 
-    std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toVariantPack();
+    std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
     auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());
@@ -83,10 +87,9 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
                                                                      *shallowBiasTensor,
                                                                      *shallowMeanTensor,
                                                                      *shallowInvVarTensor,
-                                                                     *shallowYTensor,
-                                                                     epsilon);
+                                                                     *shallowYTensor);
 
-    BatchnormFwdPlan<float, float, float> fwdPlan(std::move(params));
+    BatchnormFwdPlan<float, float, float, float> fwdPlan(std::move(params));
     fwdPlan.execute(variantPack);
 
     CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
@@ -98,34 +101,53 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 TEST(TestBatchnormFwdInferencePlanBuilder, PlanConstruction)
 {
     std::vector<int64_t> dims = {1, 1, 1, 1};
-    auto graph = buildBatchnormFwdInferenceGraph(
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
+    auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 dims,
+                                                 TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    BatchnormFwdInferencePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
+    BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT>
+        patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
-    bool result = dynamic_cast<BatchnormFwdPlan<float, float, float>*>(builtPlan.get()) != nullptr;
+    bool result
+        = dynamic_cast<BatchnormFwdPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
     EXPECT_TRUE(result);
 }
 
 TEST(TestBatchnormFwdInferencePlanBuilder, IsApplicable)
 {
     std::vector<int64_t> dims = {1, 1, 1, 1};
-    auto graph = buildBatchnormFwdInferenceGraph(
-        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
+    auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 DataType::FLOAT,
+                                                 dims,
+                                                 TensorLayout::NHWC);
     auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
     GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    BatchnormFwdInferencePlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT>
         floatPlanBuilder;
 
     EXPECT_TRUE(
         floatPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));
 
-    BatchnormFwdInferencePlanBuilder<DataType::FLOAT, DataType::HALF, DataType::FLOAT>
+    BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
+                                     DataType::HALF,
+                                     DataType::FLOAT,
+                                     DataType::FLOAT>
         badTypesPlanBuilder;
     EXPECT_FALSE(
         badTypesPlanBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()));

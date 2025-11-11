@@ -203,6 +203,83 @@ private:
         _sub_nodes = std::move(reorderedNodes);
     }
 
+    static std::unordered_set<int64_t>
+        getUsedIds(const std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors)
+    {
+        std::unordered_set<int64_t> usedIds;
+        for(const auto& tensor : allTensors)
+        {
+            if(tensor && tensor->has_uid())
+            {
+                usedIds.insert(tensor->get_uid());
+            }
+        }
+        return usedIds;
+    }
+
+    static int64_t getUnusedTensorUid(int64_t& currentTensorId,
+                                      std::unordered_set<int64_t>& usedIds)
+    {
+        while(usedIds.find(currentTensorId) != usedIds.end())
+        {
+            ++currentTensorId;
+        }
+        usedIds.insert(currentTensorId);
+        return currentTensorId++;
+    }
+
+    static void populateHipdnnTensorIds(
+        const std::unordered_set<std::shared_ptr<TensorAttributes>>& allTensors,
+        std::unordered_set<int64_t>& usedIds)
+    {
+        int64_t currentTensorId = 0;
+
+        for(const auto& tensor : allTensors)
+        {
+            if(!tensor)
+            {
+                continue;
+            }
+
+            if(!tensor->has_uid())
+            {
+                tensor->set_uid(getUnusedTensorUid(currentTensorId, usedIds));
+            }
+        }
+    }
+
+    static Error checkNoDuplicateTensorIdsImpl(
+        std::unordered_set<std::shared_ptr<TensorAttributes>> const& allTensors)
+    {
+        std::unordered_set<int64_t> seenUids;
+        std::unordered_set<int64_t> duplicateUids;
+
+        for(const auto& tensor : allTensors)
+        {
+            if(tensor && tensor->has_uid())
+            {
+                auto uid = tensor->get_uid();
+                if(!seenUids.insert(uid).second)
+                {
+                    duplicateUids.insert(uid);
+                }
+            }
+        }
+
+        if(!duplicateUids.empty())
+        {
+            std::string errorMsg = "Duplicate tensor UIDs found in the graph: ";
+            for(const auto& uid : duplicateUids)
+            {
+                errorMsg += std::to_string(uid) + ", ";
+            }
+            errorMsg.erase(errorMsg.length() - 2);
+            return {ErrorCode::INVALID_VALUE, errorMsg};
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
 public:
     Graph()
         : INode(GraphAttributes{})
@@ -214,7 +291,10 @@ public:
     {
         HIPDNN_FE_LOG_INFO("Validating graph {}", graph_attributes.get_name());
 
-        auto result = checkNoDuplicateTensorIds();
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
+
+        auto result = checkNoDuplicateTensorIdsImpl(allTensors);
         if(result.code != ErrorCode::OK)
         {
             return result;
@@ -226,28 +306,30 @@ public:
             return result;
         }
 
-        return validateSubtree();
+        result = validateSubtree();
+        if(result.code != ErrorCode::OK)
+        {
+            return result;
+        }
+
+        for(const auto& tensor : allTensors)
+        {
+            result = tensor->validate();
+            if(result.code != ErrorCode::OK)
+            {
+                return result;
+            }
+        }
+
+        return {ErrorCode::OK, ""};
     }
 
     Error checkNoDuplicateTensorIds()
     {
-        std::unordered_set<int64_t> usedTensorUids;
-        std::unordered_set<int64_t> duplicateTensorUids;
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
 
-        gatherHipdnnTensorIdsSubtree(usedTensorUids, duplicateTensorUids);
-
-        if(!duplicateTensorUids.empty())
-        {
-            std::string errorMsg = "Duplicate tensor UIDs found in the graph: ";
-            for(const auto& uid : duplicateTensorUids)
-            {
-                errorMsg += std::to_string(uid) + ", ";
-            }
-            errorMsg.erase(errorMsg.length() - 2);
-            return {ErrorCode::INVALID_VALUE, errorMsg};
-        }
-
-        return {ErrorCode::OK, ""};
+        return checkNoDuplicateTensorIdsImpl(allTensors);
     }
 
     Error topologicallySortGraph()
@@ -283,20 +365,18 @@ public:
 
     flatbuffers::DetachedBuffer buildFlatbufferOperationGraph()
     {
-        std::unordered_set<int64_t> usedTensorUids;
-        std::unordered_set<int64_t> duplicateTensorIds;
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+        gatherHipdnnTensorsSubtree(allTensors);
 
-        gatherHipdnnTensorIdsSubtree(usedTensorUids, duplicateTensorIds);
+        auto usedIds = getUsedIds(allTensors);
 
-        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorLookup;
-        int64_t currentTensorId = 0;
+        populateHipdnnTensorIds(allTensors, usedIds);
 
-        populateHipdnnTensorIdsSubtree(tensorLookup, currentTensorId, usedTensorUids);
         flatbuffers::FlatBufferBuilder builder;
 
         std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>>
             tensorAttributes;
-        for(auto& [_, tensor] : tensorLookup)
+        for(auto& tensor : allTensors)
         {
             if(tensor)
             {

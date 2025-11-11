@@ -3,6 +3,19 @@
 
 #pragma once
 
+#if defined(_WIN32)
+#define SKIP_IF_WINDOWS()                               \
+    do                                                  \
+    {                                                   \
+        GTEST_SKIP() << "Disable this test in Windows"; \
+    } while(0)
+#else
+#define SKIP_IF_WINDOWS() \
+    do                    \
+    {                     \
+    } while(0)
+#endif
+
 #ifdef ADDRESS_SANITIZER
 #define SKIP_IF_NO_DEVICES()                              \
     do                                                    \
@@ -10,11 +23,10 @@
         GTEST_SKIP() << "Disable device tests with ASAN"; \
     } while(0)
 
-#elif _WIN32
-#define SKIP_IF_NO_DEVICES()                               \
-    do                                                     \
-    {                                                      \
-        GTEST_SKIP() << "Disable device tests with WIN32"; \
+#define SKIP_IF_ASAN()                                            \
+    do                                                            \
+    {                                                             \
+        GTEST_SKIP() << "Disable this test when ASAN is Enabled"; \
     } while(0)
 
 #else
@@ -28,4 +40,10 @@
             GTEST_SKIP() << "No devices available. Skipping test."; \
         }                                                           \
     } while(0)
+
+#define SKIP_IF_ASAN() \
+    do                 \
+    {                  \
+    } while(0)
+
 #endif

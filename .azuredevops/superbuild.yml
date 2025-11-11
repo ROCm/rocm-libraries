@@ -41,6 +41,7 @@ trigger:
     - ./**/*.md
 
 pr:
+  autoCancel: false
   branches:
     include:
     - develop

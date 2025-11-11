@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
+#include <hipdnn_sdk/utilities/StaticCast.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <numeric>
@@ -20,7 +21,8 @@ using namespace hipdnn_sdk::test_utilities;
 
 template <class InputDataType,
           class ScaleBiasDataType,
-          class MeanVarianceDataType = ScaleBiasDataType>
+          class MeanVarianceDataType = ScaleBiasDataType,
+          class ComputeDataType = MeanVarianceDataType>
 class CpuFpReferenceBatchnormImpl
 {
 public:
@@ -28,9 +30,8 @@ public:
                                       const TensorBase<ScaleBiasDataType>& scale,
                                       const TensorBase<ScaleBiasDataType>& bias,
                                       const TensorBase<MeanVarianceDataType>& estimatedMean,
-                                      const TensorBase<MeanVarianceDataType>& estimatedVariance,
-                                      TensorBase<InputDataType>& output,
-                                      double epsilon)
+                                      const TensorBase<MeanVarianceDataType>& invVariance,
+                                      TensorBase<InputDataType>& output)
     {
         if(input.dims().size() < 2)
         {
@@ -38,41 +39,27 @@ public:
                 "Batchnorm inference requires at least 2D tensor (batch and channel).");
         }
 
-        auto nChannels = input.dims().at(1);
-
-        // Build dimensions for iteration: [batch, spatial...]
-        std::vector<int64_t> batchAndSpatial = {input.dims()[0]};
-        batchAndSpatial.insert(batchAndSpatial.end(), input.dims().begin() + 2, input.dims().end());
-
-        std::vector<int64_t> channels(static_cast<size_t>(nChannels));
-        std::iota(channels.begin(), channels.end(), 0);
-
-        std::for_each(channels.begin(), channels.end(), [&](int64_t cidx) {
-            auto mean = estimatedMean.getHostValue(0, cidx);
-            auto variance = estimatedVariance.getHostValue(0, cidx);
+        auto batchnormFwdInferenceFunc = [&](const std::vector<int64_t>& indices) {
+            auto cidx = indices[1];
+            auto mean = staticCast<ComputeDataType>(estimatedMean.getHostValue(0, cidx));
+            auto invVarianceValue = staticCast<ComputeDataType>(invVariance.getHostValue(0, cidx));
 
             //There is some extra casting in here to deal with double -> float implicit casts.
-            MeanVarianceDataType invVariance
-                = static_cast<MeanVarianceDataType>(1.0f)
-                  / sqrtInternal(variance
-                                 + static_cast<MeanVarianceDataType>(static_cast<float>(epsilon)));
+            auto inVal = staticCast<ComputeDataType>(input.getHostValue(indices));
+            ComputeDataType elemStd = inVal - mean;
+            ComputeDataType inhat = elemStd * invVarianceValue;
 
-            // process the batch per channel
-            iterateAlongDimensions(
-                batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
-                    auto fullIndices
-                        = buildTensorIndices(batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
+            output.setHostValue(
+                staticCast<InputDataType>(
+                    (staticCast<ComputeDataType>(scale.getHostValue(0, cidx)) * inhat)
+                    + staticCast<ComputeDataType>(bias.getHostValue(0, cidx))),
+                indices);
+        };
 
-                    auto inVal = static_cast<MeanVarianceDataType>(input.getHostValue(fullIndices));
-                    MeanVarianceDataType elemStd = inVal - mean;
-                    MeanVarianceDataType inhat = elemStd * invVariance;
-                    output.setHostValue(
-                        static_cast<InputDataType>(
-                            (scale.getHostValue(0, cidx) * static_cast<ScaleBiasDataType>(inhat))
-                            + bias.getHostValue(0, cidx)),
-                        fullIndices);
-                });
-        });
+        // Iterate all indices in parallel
+        auto parallelFunc = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
+            batchnormFwdInferenceFunc, input.dims());
+        parallelFunc(std::thread::hardware_concurrency());
 
         output.memory().markHostModified(); // Mark output memory as modified on host
     }
@@ -82,8 +69,8 @@ public:
                              const TensorBase<ScaleBiasDataType>& scale,
                              const TensorBase<ScaleBiasDataType>& bias,
                              TensorBase<InputDataType>& y,
-                             MeanVarianceDataType epsilon,
-                             MeanVarianceDataType momentum,
+                             double epsilon,
+                             double momentum,
                              TensorBase<MeanVarianceDataType>* mean = nullptr,
                              TensorBase<MeanVarianceDataType>* invVariance = nullptr,
                              const TensorBase<MeanVarianceDataType>* prevRunningMean = nullptr,
@@ -97,83 +84,96 @@ public:
                 "Batchnorm training requires at least 2D tensor (batch and channel).");
         }
 
-        auto nChannels = x.dims().at(1);
         int64_t elementsPerChannel = calculateElementsPerChannel(x.dims());
 
-        auto nhw = static_cast<MeanVarianceDataType>(static_cast<float>(elementsPerChannel));
+        auto nhw = staticCast<ComputeDataType>(elementsPerChannel);
+        auto epsilonCompute = staticCast<ComputeDataType>(epsilon);
+        auto momentumCompute = staticCast<ComputeDataType>(momentum);
 
         // Build dimensions for iteration: [batch, spatial...]
         std::vector<int64_t> batchAndSpatial = {x.dims()[0]};
         batchAndSpatial.insert(batchAndSpatial.end(), x.dims().begin() + 2, x.dims().end());
 
-        std::vector<int64_t> channels(static_cast<size_t>(nChannels));
-        std::iota(channels.begin(), channels.end(), 0);
-
-        std::for_each(channels.begin(), channels.end(), [&](int64_t cidx) {
-            auto meanAccum = static_cast<MeanVarianceDataType>(0.0);
-            auto varianceAccum = static_cast<MeanVarianceDataType>(0.0);
+        auto batchnormFwdTrainingFunc = [&](const std::vector<int64_t>& indices) {
+            auto cidx = indices[0];
+            auto meanAccum = staticCast<ComputeDataType>(0.0);
+            auto varianceAccum = staticCast<ComputeDataType>(0.0);
 
             // Calculate mean and variance for this channel
             iterateAlongDimensions(
                 batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
                     auto fullIndices
                         = buildTensorIndices(batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
-                    auto inVal = static_cast<MeanVarianceDataType>(x.getHostValue(fullIndices));
+                    auto inVal = staticCast<ComputeDataType>(x.getHostValue(fullIndices));
                     meanAccum = meanAccum + inVal;
                     varianceAccum = varianceAccum + (inVal * inVal);
                 });
 
-            MeanVarianceDataType channelMean = meanAccum = meanAccum / nhw;
-            MeanVarianceDataType channelVariance
-                = (varianceAccum / nhw) - (channelMean * channelMean);
+            // NOTE: Different operation order from MIOpen produces expected FP differences.
+            // Both implementations are correct; validated using RMS error tolerance
+            ComputeDataType channelMean = meanAccum / nhw;
+            ComputeDataType channelVariance = (varianceAccum / nhw) - (channelMean * channelMean);
 
             auto invVar
-                = static_cast<MeanVarianceDataType>(1.0) / sqrtInternal(channelVariance + epsilon);
+                = staticCast<ComputeDataType>(1.0) / sqrtInternal(channelVariance + epsilonCompute);
 
             // Apply normalization with scale and bias
             iterateAlongDimensions(
                 batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
                     auto fullIndices
                         = buildTensorIndices(batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
-                    auto xVal = static_cast<MeanVarianceDataType>(x.getHostValue(fullIndices));
+                    auto xVal = staticCast<ComputeDataType>(x.getHostValue(fullIndices));
                     auto xHat = (xVal - channelMean) * invVar;
 
                     y.setHostValue(
-                        static_cast<InputDataType>(scale.getHostValue(0, cidx)
-                                                       * static_cast<ScaleBiasDataType>(xHat)
-                                                   + bias.getHostValue(0, cidx)),
+                        staticCast<InputDataType>(
+                            staticCast<ComputeDataType>(scale.getHostValue(0, cidx)) * xHat
+                            + staticCast<ComputeDataType>(bias.getHostValue(0, cidx))),
                         fullIndices);
                 });
 
             // Save mean and inverse variance for backward pass if provided
             if(mean != nullptr)
             {
-                mean->setHostValue(channelMean, 0, cidx);
+                mean->setHostValue(staticCast<MeanVarianceDataType>(channelMean), 0, cidx);
             }
 
             if(invVariance != nullptr)
             {
-                invVariance->setHostValue(invVar, 0, cidx);
+                invVariance->setHostValue(staticCast<MeanVarianceDataType>(invVar), 0, cidx);
             }
 
             // Update running statistics if all required tensors are provided
             if(prevRunningMean != nullptr && prevRunningVariance != nullptr
                && nextRunningMean != nullptr && nextRunningVariance != nullptr)
             {
-                auto one = static_cast<MeanVarianceDataType>(1.0f);
-                auto currentMean = prevRunningMean->getHostValue(0, cidx);
-                auto newMean = (one - momentum) * currentMean + momentum * channelMean;
+                auto one = staticCast<ComputeDataType>(1.0f);
+                auto currentMean
+                    = staticCast<ComputeDataType>(prevRunningMean->getHostValue(0, cidx));
+                auto newMean = staticCast<MeanVarianceDataType>(
+                    (one - momentumCompute) * currentMean + momentumCompute * channelMean);
                 nextRunningMean->setHostValue(newMean, 0, cidx);
 
-                auto currentVar = prevRunningVariance->getHostValue(0, cidx);
+                auto currentVar
+                    = staticCast<ComputeDataType>(prevRunningVariance->getHostValue(0, cidx));
                 // Apply Bessel's correction for unbiased variance estimate
-                auto adjustedVariance = (nhw == one) ? channelVariance
-                                                     : static_cast<MeanVarianceDataType>(
-                                                           (nhw / (nhw - one)) * channelVariance);
-                auto newVar = (one - momentum) * currentVar + momentum * adjustedVariance;
+                ComputeDataType adjustedVariance
+                    = (nhw == one)
+                          ? channelVariance
+                          : staticCast<ComputeDataType>((nhw / (nhw - one)) * channelVariance);
+                auto newVar = staticCast<MeanVarianceDataType>(
+                    (one - momentumCompute) * currentVar + momentumCompute * adjustedVariance);
                 nextRunningVariance->setHostValue(newVar, 0, cidx);
             }
-        });
+        };
+
+        // Build dimensions for parallel iteration
+        auto nChannels = x.dims().at(1);
+        std::vector<int64_t> parallelDims = {nChannels};
+
+        auto parallelFunc = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
+            batchnormFwdTrainingFunc, parallelDims);
+        parallelFunc(std::thread::hardware_concurrency());
 
         // Mark all modified tensors as host-modified
         y.memory().markHostModified();
@@ -214,35 +214,33 @@ public:
                 "Batchnorm backward requires at least 2D tensor (batch and channel).");
         }
 
-        auto nChannels = x.dims().at(1);
         int64_t elementsPerChannel = calculateElementsPerChannel(x.dims());
         //Cant cast directly from int64 to half or bloat16 so cast to float first.
-        auto nhwF = static_cast<MeanVarianceDataType>(static_cast<float>(elementsPerChannel));
-
-        std::vector<int64_t> channels(static_cast<size_t>(nChannels));
-        std::iota(channels.begin(), channels.end(), 0);
+        auto nhwF = staticCast<ComputeDataType>(elementsPerChannel);
 
         // Include batch dimension with spatial dimensions for iteration
         std::vector<int64_t> batchAndSpatial = {x.dims()[0]}; // batch dimension
         batchAndSpatial.insert(batchAndSpatial.end(), x.dims().begin() + 2, x.dims().end());
 
-        std::for_each(channels.begin(), channels.end(), [&](int64_t cidx) {
-            auto channelMean = mean.getHostValue(0, cidx);
-            auto channelInvVariance = invVariance.getHostValue(0, cidx); // 1 / sqrt(var + eps)
-            auto channelScale = scale.getHostValue(0, cidx);
+        auto batchnormBwdFunc = [&](const std::vector<int64_t>& indices) {
+            auto cidx = indices[0];
+            auto channelMean = staticCast<ComputeDataType>(mean.getHostValue(0, cidx));
+            auto channelInvVariance = staticCast<ComputeDataType>(
+                invVariance.getHostValue(0, cidx)); // 1 / sqrt(var + eps)
+            auto channelScale = staticCast<ComputeDataType>(scale.getHostValue(0, cidx));
 
             // Calculate dot product for (x - mean) * channelInvVariance * dy and ∑ dy for this channel
-            auto dotProduct = static_cast<MeanVarianceDataType>(0.0);
-            auto sumDy = static_cast<MeanVarianceDataType>(0.0);
+            auto dotProduct = staticCast<ComputeDataType>(0.0);
+            auto sumDy = staticCast<ComputeDataType>(0.0);
 
             iterateAlongDimensions(
                 batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
                     auto fullIndices
                         = buildTensorIndices(batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
-                    auto xVal = static_cast<MeanVarianceDataType>(x.getHostValue(fullIndices));
-                    auto dyVal = static_cast<MeanVarianceDataType>(dy.getHostValue(fullIndices));
+                    auto xVal = staticCast<ComputeDataType>(x.getHostValue(fullIndices));
+                    auto dyVal = staticCast<ComputeDataType>(dy.getHostValue(fullIndices));
 
-                    MeanVarianceDataType xHat = (xVal - channelMean) * channelInvVariance;
+                    ComputeDataType xHat = (xVal - channelMean) * channelInvVariance;
                     // for half no += operator exists
                     dotProduct = dotProduct + (xHat * dyVal);
                     sumDy = sumDy + dyVal;
@@ -253,28 +251,35 @@ public:
             // - dbias = ∑ dy
             // - dx = scale * invVariance * (dy - mean(dy) - xHat * mean(dy * xHat))
 
-            dscale.setHostValue(static_cast<ScaleBiasDataType>(dotProduct), 0, cidx);
-            dbias.setHostValue(static_cast<ScaleBiasDataType>(sumDy), 0, cidx);
+            dscale.setHostValue(staticCast<ScaleBiasDataType>(dotProduct), 0, cidx);
+            dbias.setHostValue(staticCast<ScaleBiasDataType>(sumDy), 0, cidx);
 
-            MeanVarianceDataType meanDy = sumDy / nhwF;
-            MeanVarianceDataType meanDyXhat = dotProduct / nhwF;
-            MeanVarianceDataType scalarCoef
-                = static_cast<MeanVarianceDataType>(channelScale) * channelInvVariance;
+            auto meanDy = sumDy / nhwF;
+            auto meanDyXhat = dotProduct / nhwF;
+            auto scalarCoef = channelScale * channelInvVariance;
 
             iterateAlongDimensions(
                 batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
                     auto fullIndices
                         = buildTensorIndices(batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
 
-                    auto xVal = static_cast<MeanVarianceDataType>(x.getHostValue(fullIndices));
-                    auto dyVal = static_cast<MeanVarianceDataType>(dy.getHostValue(fullIndices));
+                    auto xVal = staticCast<ComputeDataType>(x.getHostValue(fullIndices));
+                    auto dyVal = staticCast<ComputeDataType>(dy.getHostValue(fullIndices));
 
-                    MeanVarianceDataType xHat = (xVal - channelMean) * channelInvVariance;
-                    MeanVarianceDataType dxVal = (dyVal - meanDy - xHat * meanDyXhat) * scalarCoef;
+                    auto xHat = (xVal - channelMean) * channelInvVariance;
+                    auto dxVal = (dyVal - meanDy - xHat * meanDyXhat) * scalarCoef;
 
-                    dx.setHostValue(static_cast<InputDataType>(dxVal), fullIndices);
+                    dx.setHostValue(staticCast<InputDataType>(dxVal), fullIndices);
                 });
-        });
+        };
+
+        // Build dimensions for parallel iteration - only channels
+        auto nChannels = x.dims().at(1);
+        std::vector<int64_t> parallelDims = {nChannels};
+
+        auto parallelFunc
+            = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(batchnormBwdFunc, parallelDims);
+        parallelFunc(std::thread::hardware_concurrency());
 
         dx.memory().markHostModified();
         dscale.memory().markHostModified();

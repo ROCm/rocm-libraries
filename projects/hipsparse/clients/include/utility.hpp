@@ -30,6 +30,7 @@
 #include <complex>
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
+#include <inttypes.h>
 #include <math.h>
 #include <sstream>
 #include <stdio.h>
@@ -50,6 +51,82 @@
 std::string hipsparse_exepath();
 /*! \brief Return path where the test data file (hipsparse_test.data) is located */
 std::string hipsparse_datapath();
+
+inline void missing_file_error_message(const char* filename)
+{
+    std::cerr << "#" << std::endl;
+    std::cerr << "# error:" << std::endl;
+    std::cerr << "# cannot open file '" << filename << "'" << std::endl;
+    std::cerr << "#" << std::endl;
+    std::cerr << "# PLEASE READ CAREFULLY !" << std::endl;
+    std::cerr << "#" << std::endl;
+    std::cerr << "# What could be the reason of this error: " << std::endl;
+    std::cerr << "# You are running the testing application and it expects to find the file "
+                 "at the specified location. This means that either you did not download the test "
+                 "matrices, or you did not specify the location of the folder containing your "
+                 "files. If you want to specify the location of the folder containing your files, "
+                 "then you will find the needed information with 'hipsparse-test --help'."
+                 "If you need to download matrices, then a cmake script "
+                 "'hipsparse_clientmatrices.cmake' is available from the hipsparse client package."
+              << std::endl;
+    std::cerr << "#" << std::endl;
+    std::cerr
+        << "# Examples: 'hipsparse_clientmatrices.cmake -DCMAKE_MATRICES_DIR=<path-of-your-folder>'"
+        << std::endl;
+    std::cerr << "#           'hipsparse-test --matrices-dir <path-of-your-folder>'" << std::endl;
+    std::cerr << "# (or        'export "
+                 "HIPSPARSE_CLIENTS_MATRICES_DIR=<path-of-your-folder>;hipsparse-test')"
+              << std::endl;
+    std::cerr << "#" << std::endl;
+}
+
+static const char* s_hipsparse_clients_matrices_dir = nullptr;
+
+inline const char* get_hipsparse_clients_matrices_dir()
+{
+    return s_hipsparse_clients_matrices_dir;
+}
+
+inline std::string get_filename(const std::string& matrix_filename)
+{
+    std::string matrix_filename_with_ext = matrix_filename;
+
+    // Check if file already has extension, keep it, otherwise add .bin extension
+    size_t last_dot_pos = matrix_filename_with_ext.find_last_of('.');
+    if(last_dot_pos == std::string::npos || last_dot_pos == 0)
+    {
+        matrix_filename_with_ext += ".bin";
+    }
+
+    const char* matrices_dir = get_hipsparse_clients_matrices_dir();
+    if(matrices_dir == nullptr)
+    {
+        matrices_dir = getenv("HIPSPARSE_CLIENTS_MATRICES_DIR");
+    }
+
+    std::string r;
+    if(matrices_dir != nullptr)
+    {
+        r = std::string(matrices_dir) + "/" + matrix_filename_with_ext;
+    }
+    else
+    {
+        r = hipsparse_exepath() + "../matrices/" + matrix_filename_with_ext;
+    }
+
+    FILE* tmpf = fopen(r.c_str(), "r");
+    if(!tmpf)
+    {
+        missing_file_error_message(r.c_str());
+        std::cerr << "exit(HIPSPARSE_STATUS_INTERNAL_ERROR)" << std::endl;
+        exit(HIPSPARSE_STATUS_INTERNAL_ERROR);
+    }
+    else
+    {
+        fclose(tmpf);
+    }
+    return r;
+}
 
 /*!\file
  * \brief provide data initialization and timing utilities.
@@ -765,13 +842,13 @@ static void sort(std::vector<I>& perm, std::vector<I>& unsorted_row, std::vector
 template <typename I>
 inline void scan(const char* line, I* nrow, I* ncol, int64_t* nnz)
 {
-    sscanf(line, "%d %d %ld", nrow, ncol, nnz);
+    sscanf(line, "%d %d %" PRId64, nrow, ncol, nnz);
 }
 
 template <>
 inline void scan<int64_t>(const char* line, int64_t* nrow, int64_t* ncol, int64_t* nnz)
 {
-    sscanf(line, "%ld %ld %ld", nrow, ncol, nnz);
+    sscanf(line, "%" PRId64 " %" PRId64 " %" PRId64, nrow, ncol, nnz);
 }
 
 template <typename I, typename T>
@@ -1070,7 +1147,7 @@ bool generate_csr_matrix(const std::string    filename,
                          hipsparseIndexBase_t idx_base)
 {
     // If no filename passed, generate matrix
-    if(filename == "")
+    if(filename == "" || filename == "*")
     {
         double scale = 0.02;
         if(nrow > 1000 || ncol > 1000)
@@ -1098,11 +1175,19 @@ bool generate_csr_matrix(const std::string    filename,
     }
     else
     {
-        std::string extension = filename.substr(filename.find_last_of(".") + 1);
+        std::string full_filename_path = get_filename(filename);
+        std::string extension = full_filename_path.substr(full_filename_path.find_last_of(".") + 1);
+
         if(extension == "bin")
         {
-            if(read_bin_matrix(
-                   filename.c_str(), nrow, ncol, nnz, csr_row_ptr, csr_col_ind, csr_val, idx_base)
+            if(read_bin_matrix(full_filename_path.c_str(),
+                               nrow,
+                               ncol,
+                               nnz,
+                               csr_row_ptr,
+                               csr_col_ind,
+                               csr_val,
+                               idx_base)
                == 0)
             {
                 return true;
@@ -1112,7 +1197,7 @@ bool generate_csr_matrix(const std::string    filename,
         {
             int64_t        nnz_count;
             std::vector<J> coo_row_ind;
-            if(read_mtx_matrix(filename.c_str(),
+            if(read_mtx_matrix(full_filename_path.c_str(),
                                nrow,
                                ncol,
                                nnz_count,
@@ -1160,7 +1245,7 @@ bool generate_coo_matrix(const std::string    filename,
                          hipsparseIndexBase_t idx_base)
 {
     // If no filename passed, generate matrix
-    if(filename == "")
+    if(filename == "" || filename == "*")
     {
         double scale = 0.02;
         if(nrow > 1000 || ncol > 1000)
@@ -1175,12 +1260,20 @@ bool generate_coo_matrix(const std::string    filename,
     }
     else
     {
-        std::string extension = filename.substr(filename.find_last_of(".") + 1);
+        std::string full_filename_path = get_filename(filename);
+        std::string extension = full_filename_path.substr(full_filename_path.find_last_of(".") + 1);
+
         if(extension == "bin")
         {
             std::vector<I> csr_row_ptr;
-            if(read_bin_matrix(
-                   filename.c_str(), nrow, ncol, nnz, csr_row_ptr, coo_col_ind, coo_val, idx_base)
+            if(read_bin_matrix(full_filename_path.c_str(),
+                               nrow,
+                               ncol,
+                               nnz,
+                               csr_row_ptr,
+                               coo_col_ind,
+                               coo_val,
+                               idx_base)
                == 0)
             {
                 coo_row_ind.resize(nnz);
@@ -1201,7 +1294,7 @@ bool generate_coo_matrix(const std::string    filename,
         else if(extension == "mtx")
         {
             int64_t nnz_count;
-            if(read_mtx_matrix(filename.c_str(),
+            if(read_mtx_matrix(full_filename_path.c_str(),
                                nrow,
                                ncol,
                                nnz_count,
@@ -6635,73 +6728,6 @@ double get_time_us_sync(hipStream_t stream);
 #ifdef __cplusplus
 }
 #endif
-
-inline void missing_file_error_message(const char* filename)
-{
-    std::cerr << "#" << std::endl;
-    std::cerr << "# error:" << std::endl;
-    std::cerr << "# cannot open file '" << filename << "'" << std::endl;
-    std::cerr << "#" << std::endl;
-    std::cerr << "# PLEASE READ CAREFULLY !" << std::endl;
-    std::cerr << "#" << std::endl;
-    std::cerr << "# What could be the reason of this error: " << std::endl;
-    std::cerr << "# You are running the testing application and it expects to find the file "
-                 "at the specified location. This means that either you did not download the test "
-                 "matrices, or you did not specify the location of the folder containing your "
-                 "files. If you want to specify the location of the folder containing your files, "
-                 "then you will find the needed information with 'hipsparse-test --help'."
-                 "If you need to download matrices, then a cmake script "
-                 "'hipsparse_clientmatrices.cmake' is available from the hipsparse client package."
-              << std::endl;
-    std::cerr << "#" << std::endl;
-    std::cerr
-        << "# Examples: 'hipsparse_clientmatrices.cmake -DCMAKE_MATRICES_DIR=<path-of-your-folder>'"
-        << std::endl;
-    std::cerr << "#           'hipsparse-test --matrices-dir <path-of-your-folder>'" << std::endl;
-    std::cerr << "# (or        'export "
-                 "HIPSPARSE_CLIENTS_MATRICES_DIR=<path-of-your-folder>;hipsparse-test')"
-              << std::endl;
-    std::cerr << "#" << std::endl;
-}
-
-static const char* s_hipsparse_clients_matrices_dir = nullptr;
-
-inline const char* get_hipsparse_clients_matrices_dir()
-{
-    return s_hipsparse_clients_matrices_dir;
-}
-
-inline std::string get_filename(const std::string& bin_file)
-{
-    const char* matrices_dir = get_hipsparse_clients_matrices_dir();
-    if(matrices_dir == nullptr)
-    {
-        matrices_dir = getenv("HIPSPARSE_CLIENTS_MATRICES_DIR");
-    }
-
-    std::string r;
-    if(matrices_dir != nullptr)
-    {
-        r = std::string(matrices_dir) + "/" + bin_file;
-    }
-    else
-    {
-        r = hipsparse_exepath() + "../matrices/" + bin_file;
-    }
-
-    FILE* tmpf = fopen(r.c_str(), "r");
-    if(!tmpf)
-    {
-        missing_file_error_message(r.c_str());
-        std::cerr << "exit(HIPSPARSE_STATUS_INTERNAL_ERROR)" << std::endl;
-        exit(HIPSPARSE_STATUS_INTERNAL_ERROR);
-    }
-    else
-    {
-        fclose(tmpf);
-    }
-    return r;
-}
 
 struct testhyb
 {

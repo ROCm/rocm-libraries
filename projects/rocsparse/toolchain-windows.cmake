@@ -51,10 +51,6 @@ endif()
 message("CMAKE_CXX_COMPILER : ${CMAKE_CXX_COMPILER}")
 message("CMAKE_C_COMPILER : ${CMAKE_C_COMPILER}")
 
-if (NOT python)
-  set(python "python") # take default for windows
-endif()
-
 # working
 #set(CMAKE_Fortran_COMPILER "C:/Strawberry/c/bin/gfortran.exe")
 

@@ -27,7 +27,13 @@ import pathlib
 from itertools import product
 from typing import List
 
-from rrperf.problems import CodeGenRun, GEMMRun, TensileRun, TypeParameters
+from rrperf.problems import (
+    CodeGenRun,
+    GEMMRun,
+    MKNLTuple,
+    TensileRun,
+    TypeParameters,
+)
 from rrperf.utils import rocm_gfx
 
 repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
@@ -997,8 +1003,8 @@ def fp4_target():
         workgroup_size_y=2,
         unroll_x=0,
         unroll_y=0,
-        loadLDS_A=True,
-        loadLDS_B=True,
+        load_A="BufferToLDSViaVGPR",
+        load_B="BufferToLDSViaVGPR",
         loadLDSScale_A=True,
         loadLDSScale_B=True,
         storeLDS_D=True,
@@ -1022,6 +1028,7 @@ def fp4_target():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 64 // 32 * 2 * 2, 64, 64 // 32 * 2 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1044,8 +1051,8 @@ def fp4_target_d2lds_mi32x32x64_pf2x1():
         workgroup_size_y=2,
         unroll_x=0,
         unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
         loadLDSScale_A=True,
         loadLDSScale_B=True,
         storeLDS_D=True,
@@ -1069,6 +1076,7 @@ def fp4_target_d2lds_mi32x32x64_pf2x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 64 // 32 * 2 * 2, 64, 64 // 32 * 2 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1117,8 +1125,8 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
         workgroup_size_y=2,
         unroll_x=0,
         unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
         loadLDSScale_A=False,
         loadLDSScale_B=False,
         storeLDS_D=False,
@@ -1145,6 +1153,7 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 64 // 32 * 2 * 4, 64, 64 // 32 * 2 * 4),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1177,8 +1186,8 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
         workgroup_size_y=2,
         unroll_x=0,
         unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
         loadLDSScale_A=False,
         loadLDSScale_B=False,
         storeLDS_D=False,
@@ -1206,6 +1215,7 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 128 // 32 * 1 * 4, 64, 128 // 32 * 1 * 4),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1238,8 +1248,8 @@ def does_this_fail():
         workgroup_size_y=2,
         unroll_x=0,
         unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
         loadLDSScale_A=False,
         loadLDSScale_B=False,
         storeLDS_D=False,
@@ -1284,8 +1294,8 @@ def fp4_single_scale_target_d2lds_mi16x16x128_pf4x1():
         workgroup_size_y=2,
         unroll_x=0,
         unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
         loadLDSScale_A=False,
         loadLDSScale_B=False,
         storeLDS_D=False,
@@ -1384,8 +1394,8 @@ def mxfp8_target_128x256():
         workgroup_size_y=2,
         unroll_x=0,
         unroll_y=0,
-        loadLDS_A=True,
-        loadLDS_B=True,
+        load_A="BufferToLDSViaVGPR",
+        load_B="BufferToLDSViaVGPR",
         loadLDSScale_A=True,
         loadLDSScale_B=True,
         storeLDS_D=True,
@@ -1409,6 +1419,7 @@ def mxfp8_target_128x256():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 128 // 32 * 1 * 2, 64, 128 // 32 * 1 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1431,8 +1442,8 @@ def mxfp8_target_256x128():
         workgroup_size_y=2,
         unroll_x=0,
         unroll_y=0,
-        loadLDS_A=True,
-        loadLDS_B=True,
+        load_A="BufferToLDSViaVGPR",
+        load_B="BufferToLDSViaVGPR",
         loadLDSScale_A=True,
         loadLDSScale_B=True,
         storeLDS_D=True,
@@ -1456,6 +1467,7 @@ def mxfp8_target_256x128():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 128 // 32 * 1 * 2, 64, 128 // 32 * 1 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1478,8 +1490,8 @@ def mxfp8_target_d2lds_mi32x32x64_pf2x1():
         workgroup_size_y=2,
         unroll_x=0,
         unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
         loadLDSScale_A=True,
         loadLDSScale_B=True,
         storeLDS_D=True,
@@ -1503,6 +1515,7 @@ def mxfp8_target_d2lds_mi32x32x64_pf2x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 64 // 32 * 2 * 2, 64, 64 // 32 * 2 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1530,8 +1543,8 @@ def mxfp8_target_d2lds_mi32x32x64_pf4x1():
         workgroup_size_y=2,
         unroll_x=0,
         unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
         loadLDSScale_A=False,
         loadLDSScale_B=False,
         storeLDS_D=False,
@@ -1558,6 +1571,7 @@ def mxfp8_target_d2lds_mi32x32x64_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 64 // 32 * 2 * 4, 64, 64 // 32 * 2 * 4),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1585,8 +1599,8 @@ def mxfp8_target_d2lds_mi16x16x128_pf4x1():
         workgroup_size_y=2,
         unroll_x=0,
         unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
         loadLDSScale_A=False,
         loadLDSScale_B=False,
         storeLDS_D=False,
@@ -1613,6 +1627,7 @@ def mxfp8_target_d2lds_mi16x16x128_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 128 // 32 * 1 * 4, 64, 128 // 32 * 1 * 4),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1640,8 +1655,8 @@ def fp8_target_d2lds_mi16x16x128_pf4x1():
         workgroup_size_y=2,
         unroll_x=0,
         unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
         loadLDSScale_A=False,
         loadLDSScale_B=False,
         storeLDS_D=False,
@@ -1723,14 +1738,14 @@ def all():
         yield from fp8_kernels()
         yield from mxfp8_kernels()
         yield from mx_gemms_f8f6f4()
-    else:
-        yield from sgemm()
-        yield from hgemm()
-        yield from hgemm_no_store_LDS()
-        yield from streamk()
-        yield from streamk_sweep()
-        yield from scalar_is_zero()
-        yield from codegen()
+
+    yield from sgemm()
+    yield from hgemm()
+    yield from hgemm_no_store_LDS()
+    yield from streamk()
+    yield from streamk_sweep()
+    yield from scalar_is_zero()
+    yield from codegen()
 
 
 def all_gfx120X():

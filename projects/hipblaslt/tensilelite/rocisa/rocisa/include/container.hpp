@@ -102,15 +102,19 @@ namespace rocisa
 
     struct FLATModifiers : public Container
     {
-        FLATModifiers(int  offset12 = 0,
-                      bool glc      = false,
-                      bool slc      = false,
-                      bool lds      = false,
-                      bool isStore  = false)
+        FLATModifiers(int        offset12 = 0,
+                      bool       glc      = false,
+                      bool       slc      = false,
+                      bool       dlc      = false,
+                      CacheScope scope    = CacheScope::SCOPE_NONE,
+                      bool       lds      = false,
+                      bool       isStore  = false)
             : Container()
             , offset12(offset12)
             , glc(glc)
             , slc(slc)
+            , dlc(dlc)
+            , scope(scope)
             , lds(lds)
             , isStore(isStore)
         {
@@ -121,6 +125,8 @@ namespace rocisa
             , offset12(other.offset12)
             , glc(other.glc)
             , slc(other.slc)
+            , dlc(other.dlc)
+            , scope(other.scope)
             , lds(other.lds)
             , isStore(other.isStore)
         {
@@ -133,7 +139,8 @@ namespace rocisa
 
         std::string toString() const override
         {
-            auto        hasGLCModifier = rocIsa::getInstance().getAsmCaps()["HasGLCModifier"];
+            auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
+            auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
             std::string kStr;
             if(offset12 != 0)
             {
@@ -141,11 +148,19 @@ namespace rocisa
             }
             if(glc)
             {
-                kStr += " " + getGlcBitName(hasGLCModifier);
+                kStr += " " + getGlcBitName();
             }
             if(slc)
             {
-                kStr += " " + getSlcBitName(hasGLCModifier);
+                kStr += " " + getSlcBitName();
+            }
+            if(hasDLCModifier && dlc)
+            {
+                kStr += " dlc";
+            }
+            if(hasSCOPEModifier && scope != CacheScope::SCOPE_NONE)
+            {
+                kStr += " scope:" + ::rocisa::toString(scope);
             }
             if(lds)
             {
@@ -154,11 +169,13 @@ namespace rocisa
             return kStr;
         }
 
-        int  offset12;
-        bool glc;
-        bool slc;
-        bool lds;
-        bool isStore;
+        int        offset12;
+        bool       glc;
+        bool       slc;
+        bool       dlc;
+        CacheScope scope;
+        bool       lds;
+        bool       isStore;
     };
 
     struct GLOBALModifiers : public Container
@@ -190,23 +207,27 @@ namespace rocisa
             return kStr;
         }
 
-        int  offset;
+        int offset;
     };
 
     struct MUBUFModifiers : public Container
     {
-        MUBUFModifiers(bool offen    = false,
-                       int  offset12 = 0,
-                       bool glc      = false,
-                       bool slc      = false,
-                       bool nt       = false,
-                       bool lds      = false,
-                       bool isStore  = false)
+        MUBUFModifiers(bool       offen    = false,
+                       int        offset12 = 0,
+                       bool       glc      = false,
+                       bool       slc      = false,
+                       bool       dlc      = false,
+                       CacheScope scope    = CacheScope::SCOPE_NONE,
+                       bool       nt       = false,
+                       bool       lds      = false,
+                       bool       isStore  = false)
             : Container()
             , offen(offen)
             , offset12(offset12)
             , glc(glc)
             , slc(slc)
+            , dlc(dlc)
+            , scope(scope)
             , nt(nt)
             , lds(lds)
             , isStore(isStore)
@@ -219,6 +240,8 @@ namespace rocisa
             , offset12(other.offset12)
             , glc(other.glc)
             , slc(other.slc)
+            , dlc(other.dlc)
+            , scope(other.scope)
             , nt(other.nt)
             , lds(other.lds)
             , isStore(other.isStore)
@@ -232,25 +255,29 @@ namespace rocisa
 
         std::string toString() const override
         {
-            auto        hasGLCModifier = rocIsa::getInstance().getAsmCaps()["HasGLCModifier"];
-            auto        hasSLCModifier = rocIsa::getInstance().getAsmCaps()["HasSLCModifier"];
-            auto        hasNTModifier  = rocIsa::getInstance().getAsmCaps()["HasNTModifier"];
+            auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
+            auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
+            auto        hasNTModifier    = rocIsa::getInstance().getAsmCaps()["HasNTModifier"];
             std::string kStr;
             if(offen)
             {
                 kStr += " offen offset:" + std::to_string(offset12);
             }
-            if(glc || slc || lds)
-            {
-                kStr += ",";
-            }
             if(glc)
             {
-                kStr += " " + getGlcBitName(hasGLCModifier);
+                kStr += " " + getGlcBitName();
             }
             if(slc)
             {
-                kStr += " " + getSlcBitName(hasGLCModifier);
+                kStr += " " + getSlcBitName();
+            }
+            if(hasDLCModifier && dlc)
+            {
+                kStr += " dlc";
+            }
+            if(hasSCOPEModifier && scope != CacheScope::SCOPE_NONE)
+            {
+                kStr += " scope:" + ::rocisa::toString(scope);
             }
             if(hasNTModifier && nt)
             {
@@ -263,20 +290,28 @@ namespace rocisa
             return kStr;
         }
 
-        bool offen;
-        int  offset12;
-        bool glc;
-        bool slc;
-        bool nt;
-        bool lds;
-        bool isStore;
+        bool       offen;
+        int        offset12;
+        bool       glc;
+        bool       slc;
+        bool       dlc;
+        CacheScope scope;
+        bool       nt;
+        bool       lds;
+        bool       isStore;
     };
 
     struct SMEMModifiers : public Container
     {
-        SMEMModifiers(bool glc = false, bool nv = false, int offset = 0)
+        SMEMModifiers(bool       glc    = false,
+                      bool       dlc    = false,
+                      CacheScope scope  = CacheScope::SCOPE_NONE,
+                      bool       nv     = false,
+                      int        offset = 0)
             : Container()
             , glc(glc)
+            , dlc(dlc)
+            , scope(scope)
             , nv(nv)
             , offset(offset) // 20u 21s shaes the same
         {
@@ -285,6 +320,8 @@ namespace rocisa
         SMEMModifiers(const SMEMModifiers& other)
             : Container()
             , glc(other.glc)
+            , dlc(other.dlc)
+            , scope(other.scope)
             , nv(other.nv)
             , offset(other.offset)
         {
@@ -297,14 +334,24 @@ namespace rocisa
 
         std::string toString() const override
         {
+            auto        hasDLCModifier   = rocIsa::getInstance().getAsmCaps()["HasDLCModifier"];
+            auto        hasSCOPEModifier = rocIsa::getInstance().getAsmCaps()["HasSCOPEModifier"];
             std::string kStr;
             if(offset != 0)
             {
                 kStr += " offset:" + std::to_string(offset);
             }
-            if(glc)
+            if(!hasSCOPEModifier && glc)
             {
                 kStr += " glc";
+            }
+            if(hasDLCModifier && dlc)
+            {
+                kStr += " dlc";
+            }
+            if(hasSCOPEModifier && scope != CacheScope::SCOPE_NONE)
+            {
+                kStr += " scope:" + ::rocisa::toString(scope);
             }
             if(nv)
             {
@@ -313,9 +360,11 @@ namespace rocisa
             return kStr;
         }
 
-        bool glc;
-        bool nv;
-        int  offset;
+        bool       glc;
+        bool       dlc;
+        CacheScope scope;
+        bool       nv;
+        int        offset;
     };
 
     struct SDWAModifiers : public Container
@@ -651,6 +700,7 @@ namespace rocisa
         bool                   isMinus;
         bool                   isAbs;
         bool                   isMacro;
+        bool                   isOff;
 
         RegisterContainer(const std::string&            regType,
                           const std::optional<RegName>& regName,
@@ -665,6 +715,7 @@ namespace rocisa
             , isMinus(false)
             , isAbs(false)
             , isMacro(false)
+            , isOff(false)
         {
         }
 
@@ -672,6 +723,7 @@ namespace rocisa
                           const std::optional<RegName>& regName,
                           bool                          isAbs,
                           bool                          isMacro,
+                          bool                          isOff,
                           int                           regIdx = 0,
                           float                         regNum = 1)
             : Container()
@@ -683,6 +735,7 @@ namespace rocisa
             , isMinus(false)
             , isAbs(isAbs)
             , isMacro(isMacro)
+            , isOff(isOff)
         {
         }
 
@@ -696,6 +749,7 @@ namespace rocisa
             , isMinus(other.isMinus)
             , isAbs(other.isAbs)
             , isMacro(other.isMacro)
+            , isOff(other.isOff)
         {
         }
 
@@ -719,6 +773,7 @@ namespace rocisa
             , isMinus(other.isMinus)
             , isAbs(other.isAbs)
             , isMacro(other.isMacro)
+            , isOff(other.isOff)
         {
         }
 
@@ -734,6 +789,7 @@ namespace rocisa
                 isMinus     = other.isMinus;
                 isAbs       = other.isAbs;
                 isMacro     = other.isMacro;
+                isOff       = other.isOff;
             }
             return *this;
         }
@@ -750,6 +806,7 @@ namespace rocisa
                 isMinus     = other.isMinus;
                 isAbs       = other.isAbs;
                 isMacro     = other.isMacro;
+                isOff       = other.isOff;
             }
             return *this;
         }
@@ -861,6 +918,11 @@ namespace rocisa
 
         std::string toString() const override
         {
+            if(isOff)
+            {
+                return "off";
+            }
+
             std::string minusStr = isMinus ? "-" : "";
             minusStr             = isAbs ? "abs(" + minusStr : minusStr;
             auto absStr          = isAbs ? ")" : "";
@@ -1122,8 +1184,11 @@ namespace rocisa
     // Overloaded functions to create specific GPR containers with default regNum = 1.f
     std::shared_ptr<RegisterContainer> vgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> vgpr(int idx, float regNum = 1.f);
-    std::shared_ptr<RegisterContainer>
-        vgpr(const std::string& name, float regNum = 1.f, bool isMacro = false, bool isAbs = false);
+    std::shared_ptr<RegisterContainer> vgpr(const std::string& name,
+                                            float              regNum  = 1.f,
+                                            bool               isMacro = false,
+                                            bool               isAbs   = false,
+                                            bool               isOff   = false);
     std::shared_ptr<RegisterContainer> sgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> sgpr(int idx, float regNum = 1.f);
     std::shared_ptr<RegisterContainer>

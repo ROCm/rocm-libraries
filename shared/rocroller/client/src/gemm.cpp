@@ -25,7 +25,7 @@
  *******************************************************************************/
 
 #include <filesystem>
-#include <span>
+#include <string>
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -45,6 +45,7 @@
 #include <common/Utilities.hpp>
 #include <common/mxDataGen.hpp>
 
+#include "client/CLI_Utils.hpp"
 #include "client/DataParallelGEMMSolution.hpp"
 #include "client/GEMMParameters.hpp"
 #include "client/GEMMParameters_serialization.hpp"
@@ -55,6 +56,8 @@
 #include <CLI/CLI.hpp>
 
 using namespace rocRoller;
+
+namespace SolutionParams = rocRoller::Parameters::Solution;
 
 enum ReturnCodes : int
 {
@@ -67,11 +70,6 @@ enum ReturnCodes : int
 namespace rocRoller::Client::GEMMClient
 {
     using GEMMSolutionPtr = std::shared_ptr<Client::GEMMClient::GEMMSolution>;
-
-    struct MNKTuple
-    {
-        int m, n, k;
-    };
 
     template <typename A, typename B, typename C, typename D>
     std::pair<bool, double>
@@ -422,6 +420,15 @@ namespace rocRoller::Client::GEMMClient
 
         result.kernelAssemble = TimerPool::nanoseconds("Assembler::assembleMachineCode");
         result.kernelGenerate = TimerPool::nanoseconds("CommandKernel::generateKernel");
+
+        if(commandKernel->getContext() && commandKernel->getContext()->kernel())
+        {
+            auto assemblyKernel = commandKernel->getContext()->kernel();
+            result.sgprCount    = assemblyKernel->sgpr_count();
+            result.vgprCount    = assemblyKernel->vgpr_count();
+            result.agprCount    = assemblyKernel->agpr_count();
+            result.ldsBytes     = assemblyKernel->group_segment_fixed_size();
+        }
 
         if(benchmarkParams.check)
         {
@@ -1047,109 +1054,6 @@ namespace rocRoller::Client::GEMMClient
 
 namespace rocRoller::Client::GEMMClient::CLI
 {
-
-    constexpr bool PARSE_SUCCESS = true;
-    constexpr bool PARSE_FAILURE = false;
-
-    static bool ParseMI(const std::string&                                 arg,
-                        rocRoller::Client::GEMMClient::SolutionParameters& solution)
-    {
-        if(arg.empty())
-            return PARSE_FAILURE;
-
-        solution.waveB = 1;
-
-        bool fail = false;
-        bool isB  = false;
-        try
-        {
-            std::istringstream iss(arg);
-            std::string        token;
-
-            iss.exceptions(std::ios_base::eofbit | std::ios_base::failbit | std::ios_base::badbit);
-            std::getline(iss, token, 'x');
-            solution.waveM = std::stoi(token);
-            std::getline(iss, token, 'x');
-            solution.waveN = std::stoi(token);
-
-            iss.exceptions(std::ios_base::failbit | std::ios_base::badbit);
-            std::getline(iss, token, 'x');
-            solution.waveK = std::stoi(token);
-
-            isB = true;
-            std::getline(iss, token, 'x');
-            solution.waveB = std::stoi(token);
-        }
-        catch(const std::invalid_argument&)
-        {
-            if(!isB)
-                fail = true;
-        }
-        catch(const std::ios_base::failure&)
-        {
-            if(!isB)
-                fail = true;
-        }
-
-        fail |= (solution.waveM < 1) || (solution.waveN < 1) || (solution.waveK < 1)
-                || (solution.waveB < 1);
-
-        if(fail)
-        {
-            std::cerr << "Invalid format for Matrix Instruction." << std::endl;
-            std::cerr << std::endl;
-            std::cerr << "The MI argument should be formatted like:" << std::endl;
-            std::cerr << std::endl;
-            std::cerr << "    --mi=MxNxKxB" << std::endl;
-            std::cerr << std::endl;
-            std::cerr << "For example: --mi=32x32x2x1" << std::endl;
-
-            return PARSE_FAILURE;
-        }
-
-        return PARSE_SUCCESS;
-    }
-
-    static bool ParseMNK(const std::string& arg, rocRoller::Client::GEMMClient::MNKTuple& mnk)
-    {
-        if(arg.empty())
-            return PARSE_FAILURE;
-
-        bool fail = false;
-        try
-        {
-            std::istringstream iss(arg);
-            std::string        token;
-
-            iss.exceptions(std::ios_base::eofbit | std::ios_base::failbit | std::ios_base::badbit);
-            std::getline(iss, token, 'x');
-            mnk.m = std::stoi(token);
-            std::getline(iss, token, 'x');
-            mnk.n = std::stoi(token);
-            iss.exceptions(std::ios_base::failbit | std::ios_base::badbit);
-            std::getline(iss, token, 'x');
-            mnk.k = std::stoi(token);
-        }
-        catch(const std::invalid_argument&)
-        {
-            fail = true;
-        }
-        catch(const std::ios_base::failure&)
-        {
-            fail = true;
-        }
-
-        fail |= (mnk.m < 1) || (mnk.n < 1) || (mnk.k < 1);
-
-        if(fail)
-        {
-            std::cerr << "Invalid format for M/N/K tuple." << std::endl;
-            return PARSE_FAILURE;
-        }
-
-        return PARSE_SUCCESS;
-    }
-
     constexpr auto SolutionParameterArguments = std::make_tuple(
         std::make_pair("--arch", &SolutionParameters::architecture),
         std::make_pair("--mac_m", &SolutionParameters::macM),
@@ -1167,12 +1071,11 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--loadLDSScale_A", &SolutionParameters::loadLDSScaleA),
         std::make_pair("--loadLDSScale_B", &SolutionParameters::loadLDSScaleB),
         std::make_pair("--swizzleScale", &SolutionParameters::swizzleScale),
+        std::make_pair("--sts", &SolutionParameters::swizzleTileSize),
         std::make_pair("--prefetchScale", &SolutionParameters::prefetchScale),
-        std::make_pair("--loadLDS_A", &SolutionParameters::loadLDSA),
-        std::make_pair("--loadLDS_B", &SolutionParameters::loadLDSB),
+        std::make_pair("--load_A", &SolutionParameters::loadPathA),
+        std::make_pair("--load_B", &SolutionParameters::loadPathB),
         std::make_pair("--storeLDS_D", &SolutionParameters::storeLDSD),
-        std::make_pair("--direct2LDS_A", &SolutionParameters::direct2LDSA),
-        std::make_pair("--direct2LDS_B", &SolutionParameters::direct2LDSB),
         std::make_pair("--prefetch", &SolutionParameters::prefetch),
         std::make_pair("--prefetchInFlight", &SolutionParameters::prefetchInFlight),
         std::make_pair("--prefetchLDSFactor", &SolutionParameters::prefetchLDSFactor),
@@ -1220,9 +1123,13 @@ namespace rocRoller::Client::GEMMClient::CLI
             return rocRoller::Client::GEMMClient::CLI::getSolutionParameterArgumentName(x);
         };
 
-        auto update = [&](const std::string& optionName, auto& value) {
+        auto update = [&](const std::string& optionName, auto& value) -> bool {
             if(app.get_option(optionName)->count())
+            {
                 value = app.get_option(optionName)->as<std::decay_t<decltype(value)>>();
+                return true;
+            }
+            return false;
         };
 
         // Architecture
@@ -1235,6 +1142,7 @@ namespace rocRoller::Client::GEMMClient::CLI
 
         // Workgroup tile size
 
+        bool wgtsSet = false;
         if(app.get_option("--wgts")->count())
         {
             rocRoller::Client::GEMMClient::MNKTuple mnk{0, 0, 0};
@@ -1243,18 +1151,30 @@ namespace rocRoller::Client::GEMMClient::CLI
             solution.macM = mnk.m;
             solution.macN = mnk.n;
             solution.macK = mnk.k;
+            wgtsSet       = true;
         }
 
-        update(SN(&SP::macM), solution.macM);
-        update(SN(&SP::macN), solution.macN);
-        update(SN(&SP::macK), solution.macK);
+        bool macSet = false;
+        macSet |= update(SN(&SP::macM), solution.macM);
+        macSet |= update(SN(&SP::macN), solution.macN);
+        macSet |= update(SN(&SP::macK), solution.macK);
+        if(wgtsSet && macSet)
+        {
+            Throw<FatalError>("Workgroup tile size was overspecified.  Please use only --wgts or "
+                              "the --mac_M, --mac_N, and --mac_K arguments; but not both.");
+        }
 
         // Matrix instruction
 
         if(app.get_option("--mi")->count())
         {
-            if(!ParseMI(app.get_option("--mi")->as<std::string>(), solution))
+            auto x = rocRoller::Client::GEMMClient::MNKBTuple{0, 0, 0, 1};
+            if(!ParseMNKB(app.get_option("--mi")->as<std::string>(), x))
                 Throw<FatalError>("Failed to parse MI argument.");
+            solution.waveM = x.m;
+            solution.waveN = x.n;
+            solution.waveK = x.k;
+            solution.waveB = x.b;
         }
 
         update(SN(&SP::waveM), solution.waveM);
@@ -1279,44 +1199,38 @@ namespace rocRoller::Client::GEMMClient::CLI
         {
             auto arg = app.get_option("--lds")->as<std::string>();
 
-            solution.loadLDSA = false;
+            solution.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
             if(arg.find('A') != std::string::npos)
-                solution.loadLDSA = true;
+                solution.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
-            solution.loadLDSB = false;
+            solution.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
             if(arg.find('B') != std::string::npos)
-                solution.loadLDSB = true;
+                solution.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
             solution.storeLDSD = false;
             if(arg.find('D') != std::string::npos)
                 solution.storeLDSD = true;
         }
 
-        update(SN(&SP::loadLDSA), solution.loadLDSA);
-        update(SN(&SP::loadLDSB), solution.loadLDSB);
+        update(SN(&SP::loadPathA), solution.loadPathA);
+        update(SN(&SP::loadPathB), solution.loadPathB);
         update(SN(&SP::storeLDSD), solution.storeLDSD);
 
         if(app.get_option("--d2lds")->count())
         {
             auto arg = app.get_option("--d2lds")->as<std::string>();
 
-            solution.direct2LDSA = false;
+            solution.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
             if(arg.find('A') != std::string::npos)
-            {
-                solution.loadLDSA    = true;
-                solution.direct2LDSA = true;
-            }
+                solution.loadPathA = SolutionParams::LoadPath::BufferToLDS;
 
-            solution.direct2LDSB = false;
+            solution.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
             if(arg.find('B') != std::string::npos)
-            {
-                solution.loadLDSB    = true;
-                solution.direct2LDSB = true;
-            }
+                solution.loadPathB = SolutionParams::LoadPath::BufferToLDS;
         }
 
-        update(SN(&SP::direct2LDSA), solution.direct2LDSA);
-        update(SN(&SP::direct2LDSB), solution.direct2LDSB);
+        update(SN(&SP::loadPathA), solution.loadPathA);
+        update(SN(&SP::loadPathB), solution.loadPathB);
 
         if(app.get_option("--mxlds")->count())
         {
@@ -1337,6 +1251,7 @@ namespace rocRoller::Client::GEMMClient::CLI
         // Swizzling
 
         update(SN(&SP::swizzleScale), solution.swizzleScale);
+        update(SN(&SP::swizzleTileSize), solution.swizzleTileSize);
         update(SN(&SP::prefetchScale), solution.prefetchScale);
 
         // Prefetching
@@ -1408,12 +1323,9 @@ int main(int argc, const char* argv[])
         .swizzleScale  = false,
         .prefetchScale = false,
 
-        .loadLDSA  = true,
-        .loadLDSB  = true,
+        .loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR,
+        .loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR,
         .storeLDSD = true,
-
-        .direct2LDSA = false,
-        .direct2LDSB = false,
 
         .prefetch          = false,
         .prefetchInFlight  = 0,
@@ -1459,8 +1371,8 @@ int main(int argc, const char* argv[])
         .numWarmUp        = 3,
         .numOuter         = 5,
         .numInner         = 2,
-        .check            = true,
         .rotatingBuffSize = 32'000'000ull,
+        .check            = true,
         .visualize        = false,
     };
 
@@ -1599,13 +1511,16 @@ int main(int argc, const char* argv[])
     app.add_option(SN(&SP::unrollX), "Unroll size in X.");
     app.add_option(SN(&SP::unrollY), "Unroll size in Y.");
 
-    app.add_flag(SN(&SP::loadLDSA), "Use LDS when loading A.");
-    app.add_flag(SN(&SP::loadLDSB), "Use LDS when loading B.");
+    app.add_option(
+        SN(&SP::loadPathA),
+        solution.loadPathA,
+        "How to load A (BufferToVGPR, BufferToLDSViaVGPR, BufferToLDS). Default: BufferToLDS");
+    app.add_option(
+        SN(&SP::loadPathB),
+        solution.loadPathB,
+        "How to load A (BufferToVGPR, BufferToLDSViaVGPR, BufferToLDS). Default: BufferToLDS");
     app.add_flag(SN(&SP::storeLDSD), "Use LDS when storing D.");
     app.add_option("--lds", "Use LDS for A/B/D.");
-
-    app.add_flag(SN(&SP::direct2LDSA), "Use direct-to-LDS when loading A.");
-    app.add_flag(SN(&SP::direct2LDSB), "Use direct-to-LDS when loading B.");
     app.add_option("--d2lds", "Use direct-to-LDS for A/B.");
 
     app.add_flag(SN(&SP::betaInFma), "Use beta in FMA instruction instead of alpha.");
@@ -1630,6 +1545,9 @@ int main(int argc, const char* argv[])
     app.add_option("--mxlds", "Use LDS for A/B scales.");
 
     app.add_flag(SN(&SP::swizzleScale), "Use Swizzle when loading A and B scale.");
+    app.add_option(SN(&SP::swizzleTileSize),
+                   "Size of swizzle tile in MxK/NxL format.  The A scale swizzle-tile is MxK.  The "
+                   "B scale swizzle-tile is NxL.");
     app.add_flag(SN(&SP::prefetchScale), "Prefetch scale values with using Swizzled scales.");
 
     app.add_option("--workgroupMappingValue",
@@ -2044,7 +1962,8 @@ int main(int argc, const char* argv[])
             solution.prefetchMixMemOps = false;
 
         // TODO: enable (prefetchMixMemOps == true && prefetchLDSFactor == 2 && direct2LDSA/B = true)
-        if(solution.prefetchLDSFactor == 2 && (solution.direct2LDSA || solution.direct2LDSB))
+        if(solution.prefetchLDSFactor == 2
+           && (IsBufferToLDS(solution.loadPathA) || IsBufferToLDS(solution.loadPathB)))
             solution.prefetchMixMemOps = false;
     }
 

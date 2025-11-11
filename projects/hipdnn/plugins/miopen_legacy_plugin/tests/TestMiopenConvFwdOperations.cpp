@@ -3,10 +3,12 @@
 
 #include <gtest/gtest.h>
 
+#include <MiopenLegacyPlugin.hpp>
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
@@ -38,7 +40,7 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
-        hipdnnPluginStatus_t status = hipdnnEnginePluginCreate(&_handle);
+        hipdnnPluginStatus_t status = hipdnnEnginePluginCreateImpl(&_handle);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
     }
 
@@ -46,7 +48,7 @@ protected:
     {
         if(_handle != nullptr)
         {
-            hipdnnPluginStatus_t status = hipdnnEnginePluginDestroy(_handle);
+            hipdnnPluginStatus_t status = hipdnnEnginePluginDestroyImpl(_handle);
             ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
         }
     }
@@ -91,26 +93,26 @@ protected:
 
         hipdnnPluginStatus_t status;
         hipdnnEnginePluginExecutionContext_t executionContext;
-        status = hipdnnEnginePluginCreateExecutionContext(
+        status = hipdnnEnginePluginCreateExecutionContextImpl(
             _handle, &engineConfig, &opGraph, &executionContext);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
 
         size_t workspaceSize;
-        status = hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
+        status = hipdnnEnginePluginGetWorkspaceSizeFromExecutionContextImpl(
             _handle, executionContext, &workspaceSize);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
         hipdnn_sdk::utilities::Workspace workspace(workspaceSize);
 
-        status = hipdnnEnginePluginExecuteOpGraph(_handle,
-                                                  executionContext,
-                                                  workspace.get(),
-                                                  deviceBuffers.data(),
-                                                  static_cast<uint32_t>(deviceBuffers.size()));
+        status = hipdnnEnginePluginExecuteOpGraphImpl(_handle,
+                                                      executionContext,
+                                                      workspace.get(),
+                                                      deviceBuffers.data(),
+                                                      static_cast<uint32_t>(deviceBuffers.size()));
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
 
         yTensor.memory().markDeviceModified();
 
-        status = hipdnnEnginePluginDestroyExecutionContext(_handle, executionContext);
+        status = hipdnnEnginePluginDestroyExecutionContextImpl(_handle, executionContext);
         ASSERT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
 
         Tensor<DataType> xTensorCpu(xTensor.dims(), _layout);
@@ -130,7 +132,7 @@ protected:
 
         CpuFpReferenceValidation<DataType> cpuRefValidationInput(tolerance, tolerance);
 
-        EXPECT_TRUE(cpuRefValidationInput.allClose(yTensorCpu.memory(), yTensor.memory()));
+        EXPECT_TRUE(cpuRefValidationInput.allClose(yTensorCpu, yTensor));
     }
 
     hipdnnEnginePluginHandle_t _handle = nullptr;
@@ -138,7 +140,8 @@ protected:
 
 std::vector<ConvTestCase> getTestCases()
 {
-    unsigned seed = std::random_device{}();
+    unsigned seed = getGlobalTestSeed();
+    ;
 
     return {
         {{1, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
