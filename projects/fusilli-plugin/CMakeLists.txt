@@ -26,25 +26,25 @@ include(FusilliPluginDependencyUtils)
 # Global constants
 set(FUSILLI_PLUGIN_NAME fusilli_plugin)
 set(FUSILLI_PLUGIN_ENGINE_ID 1001)
-set(FUSILLI_HASH "5970f13835942213c7d4fd6171b936ee9fe9be73" CACHE STRING "Git hash for Fusilli")
-set(HIP_DNN_HASH "4e0a0452cfcb8fdb86e9c40a6e43debab4d4ecbc" CACHE STRING "Git hash for hipDNN")
 
 # Dependencies
 set(HIP_PLATFORM "amd")
 find_package(hip REQUIRED)
+find_package(IREERuntime CONFIG REQUIRED)
+find_package(hipdnn_sdk CONFIG REQUIRED)
+find_package(Fusilli CONFIG REQUIRED)
+
+# GTest is still fetched since TheRock doesn't provide it
 fusilli_plugin_dependency(GTest GTEST_VERSION 1.16.0)
-fusilli_plugin_dependency(IREERuntime)
-# Use local path if user set -DHIPDNN_LOCAL_PATH otherwise hash.
-if(HIPDNN_LOCAL_PATH)
-    fusilli_plugin_dependency(hipdnn_frontend LOCAL_PATH ${HIPDNN_LOCAL_PATH})
-else()
-    fusilli_plugin_dependency(hipdnn_frontend HIP_DNN_HASH ${HIP_DNN_HASH})
+
+# Define hipDNN variables that were previously provided by building hipDNN
+# These are needed since hipdnn_sdk config doesn't export them
+if(NOT DEFINED HIPDNN_PLUGIN_ENGINE_SUBDIR)
+    set(HIPDNN_PLUGIN_ENGINE_SUBDIR "hipdnn_plugins/engines")
 endif()
-# Use local path if user set -DFUSILLI_LOCAL_PATH otherwise hash.
-if(FUSILLI_LOCAL_PATH)
-    fusilli_plugin_dependency(Fusilli LOCAL_PATH ${FUSILLI_LOCAL_PATH})
-else()
-    fusilli_plugin_dependency(Fusilli FUSILLI_HASH ${FUSILLI_HASH})
+if(NOT DEFINED HIPDNN_BUILD_PLUGIN_ENGINE_DIR)
+    set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR
+        "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}")
 endif()
 
 # Includes
@@ -54,7 +54,6 @@ include_directories(include)
 add_library(${FUSILLI_PLUGIN_NAME} SHARED
     src/fusilli_plugin.cpp
 )
-target_compile_options(${FUSILLI_PLUGIN_NAME} PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_link_libraries(${FUSILLI_PLUGIN_NAME} PRIVATE hipdnn_sdk hip::host fusilli::fusilli)
 target_compile_definitions(${FUSILLI_PLUGIN_NAME} PRIVATE
   FUSILLI_PLUGIN_NAME="${FUSILLI_PLUGIN_NAME}"
