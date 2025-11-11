@@ -700,6 +700,7 @@ namespace rocsparse
               typename A,
               typename X,
               typename Y,
+              typename Z,
               typename T>
     ROCSPARSE_DEVICE_ILF void csrmvn_lrb_short_rows_device(bool                 conj,
                                                            I                    nnz,
@@ -713,6 +714,9 @@ namespace rocsparse
                                                            const X*             x,
                                                            T                    beta,
                                                            Y*                   y,
+                                                           rocsparse_int        num_extra,
+                                                           const T*             gamma_device_array,
+                                                           const Z* const*      z_arrays,
                                                            rocsparse_index_base idx_base)
     {
         const uint32_t lid = hipThreadIdx_x;
@@ -777,6 +781,18 @@ namespace rocsparse
             {
                 acc = rocsparse::fma<T>(beta, y[row_id], acc);
             }
+
+            // Add contributions from all extra vectors
+            for(rocsparse_int i = 0; i < num_extra; ++i)
+            {
+                T gamma = gamma_device_array[i];
+                if(gamma != static_cast<T>(0))
+                {
+                    acc = rocsparse::fma<T>(
+                        gamma, rocsparse::nontemporal_load(z_arrays[i] + row_id), acc);
+                }
+            }
+
             y[row_id] = acc;
         }
     }
@@ -791,19 +807,23 @@ namespace rocsparse
               typename A,
               typename X,
               typename Y,
+              typename Z,
               typename T>
-    ROCSPARSE_DEVICE_ILF void csrmvn_lrb_short_rows_2_device(bool                 conj,
-                                                             I                    nnz,
-                                                             const J*             rows_bins,
-                                                             const J*             n_rows_bins,
-                                                             const uint32_t       bin_id,
-                                                             T                    alpha,
-                                                             const I*             csr_row_ptr,
-                                                             const J*             csr_col_ind,
-                                                             const A*             csr_val,
-                                                             const X*             x,
-                                                             T                    beta,
-                                                             Y*                   y,
+    ROCSPARSE_DEVICE_ILF void csrmvn_lrb_short_rows_2_device(bool            conj,
+                                                             I               nnz,
+                                                             const J*        rows_bins,
+                                                             const J*        n_rows_bins,
+                                                             const uint32_t  bin_id,
+                                                             T               alpha,
+                                                             const I*        csr_row_ptr,
+                                                             const J*        csr_col_ind,
+                                                             const A*        csr_val,
+                                                             const X*        x,
+                                                             T               beta,
+                                                             Y*              y,
+                                                             rocsparse_int   num_extra,
+                                                             const T*        gamma_device_array,
+                                                             const Z* const* z_arrays,
                                                              rocsparse_index_base idx_base)
     {
         const uint32_t lid = hipThreadIdx_x;
@@ -870,6 +890,18 @@ namespace rocsparse
 
                 if(beta != 0)
                     acc = rocsparse::fma<T>(beta, y[row_id], acc);
+
+                // Add contributions from all extra vectors
+                for(rocsparse_int i = 0; i < num_extra; ++i)
+                {
+                    T gamma = gamma_device_array[i];
+                    if(gamma != static_cast<T>(0))
+                    {
+                        acc = rocsparse::fma<T>(
+                            gamma, rocsparse::nontemporal_load(z_arrays[i] + row_id), acc);
+                    }
+                }
+
                 y[row_id] = acc;
             }
         }
@@ -1058,6 +1090,7 @@ namespace rocsparse
               typename A,
               typename X,
               typename Y,
+              typename Z,
               typename T>
     ROCSPARSE_DEVICE_ILF void csrmvn_lrb_long_rows_device(bool                 conj,
                                                           I                    nnz,
@@ -1072,6 +1105,9 @@ namespace rocsparse
                                                           const X*             x,
                                                           T                    beta,
                                                           Y*                   y,
+                                                          rocsparse_int        num_extra,
+                                                          const T*             gamma_device_array,
+                                                          const Z* const*      z_arrays,
                                                           rocsparse_index_base idx_base)
     {
         __shared__ T partialSums[BLOCKSIZE];
@@ -1179,7 +1215,23 @@ namespace rocsparse
                 wg_flags[gid] ^= 1U;
             }
 
-            rocsparse::atomic_add((y + row), partialSums[0]);
+            T extra_sum = partialSums[0];
+
+            // Add contributions from all extra vectors (only for the first workgroup)
+            if(gid == first_wg_in_row)
+            {
+                for(rocsparse_int i = 0; i < num_extra; ++i)
+                {
+                    T gamma = gamma_device_array[i];
+                    if(gamma != static_cast<T>(0))
+                    {
+                        extra_sum = rocsparse::fma<T>(
+                            gamma, rocsparse::nontemporal_load(z_arrays[i] + row), extra_sum);
+                    }
+                }
+            }
+
+            rocsparse::atomic_add((y + row), extra_sum);
         }
     }
 }
