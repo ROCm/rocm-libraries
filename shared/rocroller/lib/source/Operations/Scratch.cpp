@@ -65,8 +65,10 @@ namespace rocRoller
         {
             switch(policy)
             {
-            case ScratchPolicy::None: return "None";
-            case ScratchPolicy::ZeroedBeforeAndAfter: return "ZeroedBeforeAndAfter";
+            case ScratchPolicy::None:
+                return "None";
+            case ScratchPolicy::ZeroedBeforeAndAfter:
+                return "ZeroedBeforeAndAfter";
             case ScratchPolicy::Count:;
             }
             return "Invalid";
@@ -79,5 +81,3 @@ namespace rocRoller
 
     }
 }
-
-

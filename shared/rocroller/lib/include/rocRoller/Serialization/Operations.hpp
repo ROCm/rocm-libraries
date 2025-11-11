@@ -557,7 +557,8 @@ namespace rocRoller
         {
             static Operations::Operation call()
             {
-                return Operations::Scratch(Operations::OperationTag(-1), Operations::ScratchPolicy::None);
+                return Operations::Scratch(Operations::OperationTag(-1),
+                                           Operations::ScratchPolicy::None);
             }
         };
 

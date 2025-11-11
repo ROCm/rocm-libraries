@@ -43,7 +43,7 @@ namespace rocRoller
 
         enum class ScratchPolicy
         {
-            None                 = 0, //< No guarantees about scratch space content
+            None = 0, //< No guarantees about scratch space content
             ZeroedBeforeAndAfter, //< Scratch space is zeroed before and after kernel launch
             Count
         };
@@ -53,5 +53,3 @@ namespace rocRoller
 
     }
 }
-
-

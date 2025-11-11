@@ -48,7 +48,7 @@ namespace ScratchOperationTest
         }
 
         SECTION("operator<< for ScratchPolicy")
-        {   
+        {
             std::ostringstream oss;
             oss << ScratchPolicy::None;
             CHECK(oss.str() == "None");
@@ -87,7 +87,7 @@ namespace ScratchOperationTest
 
         SECTION("Create Scratch with None policy and tag")
         {
-            auto tag = OperationTag();
+            auto    tag = OperationTag();
             Scratch scratch(tag, ScratchPolicy::None);
             CHECK(scratch.policy() == ScratchPolicy::None);
             CHECK(scratch.getTag() == tag);
@@ -119,7 +119,7 @@ namespace ScratchOperationTest
 
         SECTION("Verify format is Scratch(PolicyName)")
         {
-            Scratch scratch(OperationTag(), ScratchPolicy::None);
+            Scratch     scratch(OperationTag(), ScratchPolicy::None);
             std::string str = scratch.toString();
             CHECK(str.substr(0, 8) == "Scratch(");
             CHECK(str.back() == ')');
@@ -130,15 +130,15 @@ namespace ScratchOperationTest
     {
         SECTION("Same policy should be equal")
         {
-            auto tag1 = OperationTag();
-            auto tag2 = OperationTag();
+            auto    tag1 = OperationTag();
+            auto    tag2 = OperationTag();
             Scratch scratch1(tag1, ScratchPolicy::None);
             Scratch scratch2(tag2, ScratchPolicy::None);
             CHECK(tag1 == tag2);
             CHECK(scratch1 == scratch2);
 
-            auto tag3 = OperationTag();
-            auto tag4 = OperationTag();
+            auto    tag3 = OperationTag();
+            auto    tag4 = OperationTag();
             Scratch scratch3(tag3, ScratchPolicy::ZeroedBeforeAndAfter);
             Scratch scratch4(tag4, ScratchPolicy::ZeroedBeforeAndAfter);
             CHECK(tag3 == tag4);
@@ -164,9 +164,10 @@ namespace ScratchOperationTest
         SECTION("Add Scratch operation to Command")
         {
             auto command = std::make_shared<Command>();
-            auto tag = command->allocateTag();
+            auto tag     = command->allocateTag();
 
-            auto scratchTag = command->addOperation(Scratch(tag, ScratchPolicy::ZeroedBeforeAndAfter));
+            auto scratchTag
+                = command->addOperation(Scratch(tag, ScratchPolicy::ZeroedBeforeAndAfter));
 
             CHECK(tag.uninitialized() == false);
         }
@@ -193,7 +194,7 @@ namespace ScratchOperationTest
     {
         SECTION("ToString visitor")
         {
-            Scratch scratch(OperationTag(), ScratchPolicy::ZeroedBeforeAndAfter);
+            Scratch         scratch(OperationTag(), ScratchPolicy::ZeroedBeforeAndAfter);
             ToStringVisitor toStringVisitor;
 
             std::string str = toStringVisitor(scratch);
@@ -202,7 +203,7 @@ namespace ScratchOperationTest
 
         SECTION("VariableTypeVisitor returns DataType::None")
         {
-            Scratch scratch(OperationTag(), ScratchPolicy::None);
+            Scratch             scratch(OperationTag(), ScratchPolicy::None);
             VariableTypeVisitor typeVisitor;
 
             auto varType = typeVisitor(scratch);
@@ -211,8 +212,8 @@ namespace ScratchOperationTest
 
         SECTION("SetCommand visitor")
         {
-            auto command = std::make_shared<Command>();
-            auto tag = command->allocateTag();
+            auto    command = std::make_shared<Command>();
+            auto    tag     = command->allocateTag();
             Scratch scratch(tag, ScratchPolicy::None);
 
             SetCommand setCommandVisitor(command);
@@ -224,5 +225,3 @@ namespace ScratchOperationTest
         }
     }
 }
-
-
