@@ -47,16 +47,19 @@ namespace rocRoller
             Scratch() = delete;
 
             /**
+             * @param tag Operation tag for this scratch space
              * @param policy Scratch space policy (guarantees about content)
             */
-            explicit Scratch(ScratchPolicy policy);
+            explicit Scratch(OperationTag tag, ScratchPolicy policy);
 
+            OperationTag  getTag() const;
             ScratchPolicy policy() const;
             std::string   toString() const;
 
             bool operator==(Scratch const&) const;
 
         private:
+            OperationTag  m_tag;
             ScratchPolicy m_policy;
 
             template <typename T1, typename T2, typename T3>
@@ -64,4 +67,5 @@ namespace rocRoller
         };
     }
 }
+
 

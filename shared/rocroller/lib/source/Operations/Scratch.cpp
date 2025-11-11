@@ -32,10 +32,16 @@ namespace rocRoller
 {
     namespace Operations
     {
-        Scratch::Scratch(ScratchPolicy policy)
+        Scratch::Scratch(OperationTag tag, ScratchPolicy policy)
             : BaseOperation()
+            , m_tag(tag)
             , m_policy(policy)
         {
+        }
+
+        OperationTag Scratch::getTag() const
+        {
+            return m_tag;
         }
 
         ScratchPolicy Scratch::policy() const
@@ -73,4 +79,5 @@ namespace rocRoller
 
     }
 }
+
 
