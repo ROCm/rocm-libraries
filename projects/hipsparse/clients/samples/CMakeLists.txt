@@ -101,8 +101,6 @@ if(NOT USE_CUDA)
   set(DOCUMENTATION_EXAMPLES ${DOCUMENTATION_EXAMPLES_CPP} ${DOCUMENTATION_EXAMPLES_C} ${DOCUMENTATION_EXAMPLES_F90})
 
   foreach(file ${DOCUMENTATION_EXAMPLES})
-      get_filename_component(file_ext ${file} LAST_EXT)
-      message(STATUS "Found ${file_ext} file: ${file}")
       add_hipsparse_example(${file})
   endforeach()
 endif()
