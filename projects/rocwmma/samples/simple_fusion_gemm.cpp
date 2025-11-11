@@ -1298,7 +1298,7 @@ ROCWMMA_HOST void gemm_test(uint32_t m, uint32_t n, uint32_t k, ComputeT alpha, 
     gemm_cpu_simple<InputT, OutputT, ComputeT, DataLayoutA, DataLayoutB, DataLayoutC>(
         m, n, k, matrixA.data(), matrixB.data(), matrixT_ref.data(), lda, ldb, ldc);
 
-    //convert int32 to int8
+    // Convert int32 to int8
     for(int i = 0; i < m; i++)
     {
         for(int j = 0; j < n; j++)
