@@ -51,7 +51,7 @@ To test the origami Python bindings:
 
 ```bash
 # configure with python bindings and tests enabled 
-cmake -S . -B build/ -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ -DCMAKE_INSTALL_PREFIX=/opt/rocm -D ORIGAMI ENABLE_PYTHON=ON -D ORIGAMI_BUILD_TESTING=ON
+cmake -S . -B build/ -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ -DCMAKE_INSTALL_PREFIX=/opt/rocm -D ORIGAMI_ENABLE_PYTHON=ON -D ORIGAMI_BUILD_TESTING=ON
 
 # build 
 cmake --build build/ --parallel

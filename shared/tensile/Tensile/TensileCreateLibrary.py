@@ -488,6 +488,7 @@ def writeKernels(
         os.name != "nt",
         # Use globalParameters here, not params
         Path(globalParameters["WorkingPath"]),
+        # This won't affect the ISA for code-gen, only for post-build assembly kernel compilation
         globalParameters["CurrentISA"],
         params["PrintLevel"],
     )

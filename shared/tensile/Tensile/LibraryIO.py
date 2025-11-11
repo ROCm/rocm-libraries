@@ -22,10 +22,9 @@
 #
 ################################################################################
 
-from .Common import printExit, printWarning, versionIsCompatible
+from .Common import architectureMap, gfxArch, printExit, printWarning, versionIsCompatible
 from .SolutionStructs import Solution, ProblemSizes, ProblemType
 from . import __version__
-from . import Common
 from . import SolutionLibrary
 from .Utilities.ConditionalImports import yamlLoader, yamlDumper
 
@@ -191,6 +190,13 @@ def parseLibraryLogicData(data, srcFile="?"):
     if "Fp16AltImplRound" not in data:
         data["Fp16AltImplRound"] = False
 
+    if "ArchitectureName" not in data:
+        raise ValueError("'ArchitectureName' not found in logic file data" \
+            f" Review the library logic file {srcFile}.")
+    elif data["ArchitectureName"] not in architectureMap:
+        raise ValueError(f"{data['ArchitectureName']} is not a supported architecture." \
+            f" Review the library logic file {srcFile}.")
+
     if not versionIsCompatible(data["MinimumRequiredVersion"]):
         printWarning("Version = {} in library logic file {} does not match Tensile version = {}" \
                 .format(srcFile, data["MinimumRequiredVersion"], __version__) )
@@ -203,7 +209,8 @@ def parseLibraryLogicData(data, srcFile="?"):
         if solutionState["ProblemType"] == "derive":
             solutionState["ProblemType"] = problemType
         if solutionState["KernelLanguage"] == "Assembly":
-            solutionState["ISA"] = Common.gfxArch(data["ArchitectureName"])
+            # Set solution ISA based on the top-level gfx architecture in the library logic file
+            solutionState["ISA"] = gfxArch(data["ArchitectureName"])
         else:
             solutionState["ISA"] = (0, 0, 0)
         # force redo the deriving of parameters, make sure old version logic yamls can be validated
@@ -245,6 +252,10 @@ def parseLibraryLogicList(data, srcFile="?"):
         rv["ArchitectureName"] = data[2]
         rv["CUCount"] = None
         rv["IsAPU"] = None
+
+    if architectureMap[rv["ArchitectureName"]] != rv["ScheduleName"]:
+        raise ValueError(f"Architecture mismatch: {rv['ArchitectureName']} does not match " \
+            f" {rv['ScheduleName']}. Review the library logic file {srcFile}.")
 
     rv["ExactLogic"] = data[7]
     # data[8] previously contained range logic, which has been retired
