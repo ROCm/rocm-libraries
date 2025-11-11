@@ -775,7 +775,14 @@ public:
             dy.transfer_from(hy_enabled);
 
             // Disable extras and run again
-            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_disable_extra(handle, spmv_descr, nullptr));
+            int32_t disable_extra = 0;
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(handle,
+                                                           spmv_descr,
+                                                           rocsparse_spmv_input_enable_extra,
+                                                           &disable_extra,
+                                                           sizeof(disable_extra),
+                                                           nullptr));
 
             CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv(handle,
                                                     spmv_descr,
@@ -808,7 +815,14 @@ public:
             // Re-enable extras and verify we get the same result as before
             dy.transfer_from(hy_enabled);
 
-            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_enable_extra(handle, spmv_descr, nullptr));
+            int32_t enable_extra = 1;
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_spmv_set_input(handle,
+                                                           spmv_descr,
+                                                           rocsparse_spmv_input_enable_extra,
+                                                           &enable_extra,
+                                                           sizeof(enable_extra),
+                                                           nullptr));
 
             CHECK_ROCSPARSE_ERROR(rocsparse_v2_spmv(handle,
                                                     spmv_descr,
@@ -836,10 +850,24 @@ public:
 
             // These should return errors since no extras are set
             rocsparse_status status;
-            status = rocsparse_spmv_enable_extra(handle, spmv_descr, nullptr);
+            int32_t          enable_extra_test = 1;
+
+            status = rocsparse_spmv_set_input(handle,
+                                              spmv_descr,
+                                              rocsparse_spmv_input_enable_extra,
+                                              &enable_extra_test,
+                                              sizeof(enable_extra_test),
+                                              nullptr);
             unit_check_enum(status, rocsparse_status_invalid_value);
 
-            status = rocsparse_spmv_disable_extra(handle, spmv_descr, nullptr);
+            int32_t disable_extra_test = 0;
+
+            status = rocsparse_spmv_set_input(handle,
+                                              spmv_descr,
+                                              rocsparse_spmv_input_enable_extra,
+                                              &disable_extra_test,
+                                              sizeof(disable_extra_test),
+                                              nullptr);
             unit_check_enum(status, rocsparse_status_invalid_value);
 
             CHECK_ROCSPARSE_ERROR(rocsparse_destroy_dnvec_descr(gamma_vec));

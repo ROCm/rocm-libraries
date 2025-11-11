@@ -71,6 +71,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_input value_)
     case rocsparse_spmv_input_compute_datatype:
     case rocsparse_spmv_input_scalar_datatype:
     case rocsparse_spmv_input_nnz_use_starting_block_ids:
+    case rocsparse_spmv_input_enable_extra:
     {
         return false;
     }
@@ -225,6 +226,16 @@ public:
         return this->m_use_starting_block_ids;
     }
 
+    void set_enable_extra(bool value)
+    {
+        this->extras.set_enable(value);
+    }
+
+    bool has_extras() const
+    {
+        return this->extras.has_extras();
+    }
+
     // Residual computation parameters
     struct extra_vectors
     {
@@ -322,6 +333,12 @@ public:
         void disable()
         {
             enabled = false;
+        }
+
+        // Set enable state directly
+        void set_enable(bool value)
+        {
+            enabled = value;
         }
 
         void clear()
@@ -537,6 +554,22 @@ try
             4, size_in_bytes, size_in_bytes != sizeof(bool), rocsparse_status_invalid_size);
         const bool use_starting_block_ids = *reinterpret_cast<const bool*>(in);
         descr->set_use_starting_block_ids(use_starting_block_ids);
+        return rocsparse_status_success;
+    }
+
+    case rocsparse_spmv_input_enable_extra:
+    {
+        ROCSPARSE_CHECKARG(
+            4, size_in_bytes, size_in_bytes != sizeof(int32_t), rocsparse_status_invalid_size);
+
+        // Check if extras have been set
+        if(!descr->has_extras())
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        }
+
+        const int32_t enable_extra = *reinterpret_cast<const int32_t*>(in);
+        descr->set_enable_extra(enable_extra != 0);
         return rocsparse_status_success;
     }
         // LCOV_EXCL_START
@@ -1332,60 +1365,6 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, descr);
 
     descr->extras.clear();
-
-    return rocsparse_status_success;
-    // LCOV_EXCL_START
-}
-catch(...)
-{
-    RETURN_ROCSPARSE_EXCEPTION();
-}
-// LCOV_EXCL_STOP
-
-extern "C" rocsparse_status rocsparse_spmv_enable_extra(rocsparse_handle     handle,
-                                                        rocsparse_spmv_descr descr,
-                                                        rocsparse_error*     p_error)
-try
-{
-    ROCSPARSE_ROUTINE_TRACE;
-
-    ROCSPARSE_CHECKARG_HANDLE(0, handle);
-    ROCSPARSE_CHECKARG_POINTER(1, descr);
-
-    // Check if extras have been set
-    if(!descr->extras.has_extras())
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    }
-
-    descr->extras.enable();
-
-    return rocsparse_status_success;
-    // LCOV_EXCL_START
-}
-catch(...)
-{
-    RETURN_ROCSPARSE_EXCEPTION();
-}
-// LCOV_EXCL_STOP
-
-extern "C" rocsparse_status rocsparse_spmv_disable_extra(rocsparse_handle     handle,
-                                                         rocsparse_spmv_descr descr,
-                                                         rocsparse_error*     p_error)
-try
-{
-    ROCSPARSE_ROUTINE_TRACE;
-
-    ROCSPARSE_CHECKARG_HANDLE(0, handle);
-    ROCSPARSE_CHECKARG_POINTER(1, descr);
-
-    // Check if extras have been set
-    if(!descr->extras.has_extras())
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    }
-
-    descr->extras.disable();
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

@@ -162,7 +162,13 @@ int main()
     std::cout << "Demonstrating enable/disable extra functionality...\n";
 
     // Disable extra vectors temporarily
-    ROCSPARSE_CHECK(rocsparse_spmv_disable_extra(handle, spmv_descr, nullptr));
+    int32_t disable_extra = 0;
+    ROCSPARSE_CHECK(rocsparse_spmv_set_input(handle,
+                                             spmv_descr,
+                                             rocsparse_spmv_input_enable_extra,
+                                             &disable_extra,
+                                             sizeof(disable_extra),
+                                             nullptr));
     std::cout << "Extra vectors disabled\n";
 
     // Run SpMV again without extra vectors
@@ -181,7 +187,13 @@ int main()
     std::cout << "SpMV without extra vectors computed\n";
 
     // Re-enable extra vectors
-    ROCSPARSE_CHECK(rocsparse_spmv_enable_extra(handle, spmv_descr, nullptr));
+    int32_t enable_extra = 1;
+    ROCSPARSE_CHECK(rocsparse_spmv_set_input(handle,
+                                             spmv_descr,
+                                             rocsparse_spmv_input_enable_extra,
+                                             &enable_extra,
+                                             sizeof(enable_extra),
+                                             nullptr));
     std::cout << "Extra vectors re-enabled\n";
 
     // Run SpMV again with extra vectors
