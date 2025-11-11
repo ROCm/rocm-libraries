@@ -1278,7 +1278,7 @@ ROCWMMA_HOST void gemm_test(uint32_t m, uint32_t n, uint32_t k, ComputeT alpha, 
     // Echo performance
     std::cout << "TBlockX, TBlockY, " << "BlocksX, BlocksY, " << "BlkM, BlkN, BlkK, "
               << "MatM, MatN, MatK, " << "alpha, lda, ldb, " << "beta, ldc, ldd, "
-              << "elapsedMs, Problem Size(GFlops), TFlops/s" << "," << "sizeof(intputT)"
+              << "elapsedMs, Problem Size(GFlops), TFlops/s" << "," << "sizeof(InputT)"
               << std::endl;
 
     std::cout << hTBLOCK_X << ", " << hTBLOCK_Y << ", " << hBLOCKS_X << ", " << hBLOCKS_Y << ", "
