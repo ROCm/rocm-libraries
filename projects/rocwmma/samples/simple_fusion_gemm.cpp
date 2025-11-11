@@ -793,7 +793,7 @@ ROCWMMA_KERNEL void __launch_bounds__(256) gemm_rocwmma_d(uint32_t       m,
             using GRBuffAMap1d = GetDataLayout_t<GRBuffA>;
             using GRBuffBMap1d = GetDataLayout_t<GRBuffB>;
 
-            // Initial globa read address offsets
+            // Initial global read address offsets
             auto globalReadOffsetA
                 = GRBuffAMap1d::fromMatrixCoord(make_coord2d(get<0>(macroTileCoord), 0u), lda);
             auto globalReadOffsetB
