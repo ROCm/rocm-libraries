@@ -236,6 +236,7 @@ __host__ static inline void fillRand(DataT* mat, uint32_t m, uint32_t n)
 }
 
 #include <iomanip>
+
 template <typename DataLayoutT, typename DataT>
 __host__ static inline void fillEnc(DataT* mat, uint32_t m, uint32_t n)
 {
