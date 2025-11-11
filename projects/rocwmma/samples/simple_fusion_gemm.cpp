@@ -35,7 +35,6 @@
 #include <rocwmma/rocwmma_transforms.hpp>
 
 #include "common.hpp"
-// #include <stdio.h>
 /* Motivation
 *
 * For this particular fusion 2 GEMM kernel:
