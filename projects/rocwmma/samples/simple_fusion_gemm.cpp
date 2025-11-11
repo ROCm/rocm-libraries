@@ -56,7 +56,6 @@
 * Since tensors in neural networks are typically 4-D (B, H, N, D or B, N, H, D),
 * with batch and head usually serving as the parallel dimensions,
 * we parallelize only along the M dimension and handle the N/K dimensions via loops.
-
 *
 * In the simple_gemm sample, each warp is responsible for computing
 * one output D tile of the final result. In the current sample, each
