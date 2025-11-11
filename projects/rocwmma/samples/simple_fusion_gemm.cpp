@@ -654,7 +654,6 @@ ROCWMMA_DEVICE static inline void convertI32toI8(MfmaFragAcc (&frags_i32)[BLOCKS
 #pragma unroll
             for(int k = 0; k < frags_i32[i][j].num_elements; ++k)
             {
-                //frags_i8[i][j].x[k] = static_cast<int8_t>(frags_i32[i][j].x[k]);
                 int32_t value = frags_i32[i][j].x[k];
                 if(value > INT8_MAX)
                 {
