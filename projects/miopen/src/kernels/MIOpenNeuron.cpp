@@ -57,7 +57,7 @@ extern "C" __global__ void MIOpenActiveFwdLite(const FP_TYPE* bot,
                                                const long bot_offset,
                                                const long top_offset)
 {
-    const unsigned int tid   = blockIdx.x * blockDim.x + threadIdx.x;
+    const unsigned int tid   = blockIdx.x * LOCAL_SIZE + threadIdx.x;
     const unsigned int index = tid * MIOPEN_READ_UNIT;
 
     if(tid >= map_size_aligned)
@@ -87,7 +87,7 @@ extern "C" __global__ void MIOpenActiveFwd2DLite(const FP_TYPE* bot,
                                                  const uint bot_stride,
                                                  const uint top_stride)
 {
-    const unsigned int x_id = blockIdx.x * blockDim.x + threadIdx.x;
+    const unsigned int x_id = blockIdx.x * LOCAL_SIZE + threadIdx.x;
     const unsigned int y    = blockIdx.y * blockDim.y + threadIdx.y;
 
     if(x_id >= map_size_aligned)
@@ -123,7 +123,7 @@ extern "C" __global__ void MIOpenActiveBwdLite(FP_TYPE* bot_diff,
                                                const long bot_offset,
                                                const long top_offset)
 {
-    const unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    const unsigned int tid = blockIdx.x * LOCAL_SIZE + threadIdx.x;
     int index              = tid * MIOPEN_READ_UNIT;
 
     if(tid >= map_size_aligned)
@@ -166,7 +166,7 @@ extern "C" __global__ void MIOpenActiveBwd2DLite(FP_TYPE* bot_diff,
                                                  const uint bot_stride,
                                                  const uint top_stride)
 {
-    const unsigned int x_id = blockIdx.x * blockDim.x + threadIdx.x;
+    const unsigned int x_id = blockIdx.x * LOCAL_SIZE + threadIdx.x;
     const unsigned int y    = blockIdx.y * blockDim.y + threadIdx.y;
 
     if(x_id >= map_size_aligned)
