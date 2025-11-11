@@ -123,11 +123,7 @@
 * In general, the process would flow like the following:
 *
 *       Start
-
-
 *         |
-
-
 *         v
 *   Loop: ab_i = 0:B blocks
 *   ^            |
