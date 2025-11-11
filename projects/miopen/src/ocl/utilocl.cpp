@@ -23,6 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include <cstring>
 #include <miopen/datatype.hpp>
 #include <miopen/float_equal.hpp>
 #include <miopen/kernel_cache.hpp>
@@ -33,6 +34,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 
 #define WG_SIZE (static_cast<size_t>(256))
 #define MAX_ACTIVE_THREADS (64 * 4 * 64)
@@ -1051,7 +1053,8 @@ float transpose_NCHW2Vec(const Handle& handle,
                          const void* alpha,
                          const void* beta)
 {
-    std::string program_name = "MIOpenUtilKernels5.cl";
+    const bool use_hip_kernel = std::strcmp(std::getenv("USE_HIP_KERNEL"), "1") == 0;
+    std::string program_name = use_hip_kernel ? "MIOpenUtilKernels5Hip.cpp" : "MIOpenUtilKernels5.cl";
 
     if(!(vec_size == 2 || vec_size == 4))
     {
@@ -1093,7 +1096,7 @@ float transpose_NCHW2Vec(const Handle& handle,
         auto n_vec = (trans && (n % vec_size != 0)) ? (n + (vec_size - n % vec_size)) : n;
         auto c_vec = (!trans && (c % vec_size != 0)) ? (c + (vec_size - c % vec_size)) : c;
 
-        std::string kernel_name = "transpose_NCHW2Vec";
+        std::string kernel_name = use_hip_kernel ? "TransposeNCHW2Vec" : "transpose_NCHW2Vec";
 
         int RD_BLCK   = ((hw) % (vec_size * 2) == 0) ? static_cast<int>(vec_size) * 2
                                                      : static_cast<int>(vec_size);
