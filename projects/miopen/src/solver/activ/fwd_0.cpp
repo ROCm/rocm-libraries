@@ -88,9 +88,13 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
                             : (x_lens.size() == 4) ? x_lens[3]
                                                    : x_lens[4]);
 
-    const auto packed    = problem.GetXDesc().IsPacked() && problem.GetYDesc().IsPacked();
-    const auto read_len  = (packed) ? x_elem_sz : x_width2D;
-    const auto read_unit = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
+    const auto packed       = problem.GetXDesc().IsPacked() && problem.GetYDesc().IsPacked();
+    const auto read_len     = (packed) ? x_elem_sz : x_width2D;
+    const auto element_size = (problem.GetXDesc().GetType() == miopenHalf) ? 2 : 4;
+    const auto read_unit    = (read_len % 8 == 0 && element_size == 2) ? 8
+                              : (read_len % 4 == 0)                    ? 4
+                              : (read_len % 2 == 0)                    ? 2
+                                                                       : 1;
 
     const auto READ_TYPE = ((read_unit == 1) ? "FP_TYPE" : "FP_TYPE" + std::to_string(read_unit));
 
@@ -108,6 +112,7 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
         {"MIOPEN_READ_UNIT", read_unit},
         {"MIOPEN_READ_TYPE", READ_TYPE},
         {"MIOPEN_NRN_OP_ID", problem.GetActivDesc().GetMode()},
+        {"LOCAL_SIZE", local_work_size},
     };
 
     if(problem.GetXDesc().GetType() == miopenFloat)

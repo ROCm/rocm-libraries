@@ -247,10 +247,14 @@ ConvSolution ActivBwdSolver1::GetSolution(const ExecutionContext&,
 
     int activ_mode = problem.GetActivDesc().GetMode();
 
-    constexpr const auto hw_wave_sz  = 64;
-    constexpr const size_t read_unit = 4;
+    constexpr const auto hw_wave_sz = 64;
 
+    const auto element_size     = (xDesc.GetType() == miopenHalf) ? 2 : 4;
     const size_t map_size       = static_cast<size_t>(wIn) * hIn * nIn * cIn;
+    const auto read_unit        = (map_size % 8 == 0 && element_size == 2) ? 8
+                                  : (map_size % 4 == 0)                    ? 4
+                                  : (map_size % 2 == 0)                    ? 2
+                                                                           : 1;
     const auto map_size_aligned = (map_size + read_unit - 1) / read_unit;
     const auto N_PIXS_OFF       = map_size - (map_size / read_unit) * read_unit;
 

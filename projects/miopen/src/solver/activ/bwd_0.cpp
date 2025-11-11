@@ -122,7 +122,12 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
 
     const auto read_len = (packed) ? dx_elem_sz : dx_width2D;
 
-    const auto read_unit = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
+    const auto element_size = (problem.GetXDesc().GetType() == miopenHalf) ? 2 : 4;
+    const auto read_unit    = (read_len % 8 == 0 && element_size == 2) ? 8
+                              : (read_len % 4 == 0)                    ? 4
+                              : (read_len % 2 == 0)                    ? 2
+                                                                       : 1;
+
     const auto READ_TYPE = (read_unit == 1) ? "FP_TYPE" : "FP_TYPE" + std::to_string(read_unit);
     const auto map_size_aligned = (read_len + read_unit - 1) / read_unit;
 
@@ -133,6 +138,7 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
         {"MIOPEN_READ_UNIT", read_unit},
         {"MIOPEN_READ_TYPE", READ_TYPE},
         {"MIOPEN_NRN_OP_ID", problem.GetActivDesc().GetMode()},
+        {"LOCAL_SIZE", local_work_size},
     };
 
     if(xDesc.GetType() == miopenFloat)

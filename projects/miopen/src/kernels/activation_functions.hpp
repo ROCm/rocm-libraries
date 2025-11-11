@@ -326,7 +326,7 @@ __forceinline__ __device__ void ActivationFunction(T (&__restrict__ res)[N],
                                                    const T beta,
                                                    const T alpha)
 {
-    static_assert(N <= 4);
+    static_assert(N * sizeof(T) <= 16);
     if constexpr(MIOPEN_NRN_OP_ID == MIOPEN_NEURON_PASTHRU)
     {
         ActivationFunction_PassThru(res, data, gamma, beta, alpha);
@@ -579,7 +579,7 @@ __forceinline__ __device__ void ActivationFunction_Diff(T (&__restrict__ bot_dif
                                                         const T beta,
                                                         const T alpha)
 {
-    static_assert(N <= 4);
+    static_assert(N * sizeof(T) <= 16);
     if constexpr(MIOPEN_NRN_OP_ID == MIOPEN_NEURON_PASTHRU)
     {
         ActivationFunction_PassThru_Diff(
