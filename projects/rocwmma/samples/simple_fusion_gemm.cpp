@@ -960,7 +960,6 @@ ROCWMMA_KERNEL void __launch_bounds__(256) gemm_rocwmma_d(uint32_t       m,
 
                 auto ldsWriteOffsetV = MACRO_TILE_X * MACRO_TILE_Y;
                 auto ldsReadOffsetS  = get<0>(localWarpOffset) * ldsld_new;
-                // =get<0>(localWarpOffset) * ldsld_new + get<1>(localWarpOffset);
                 auto ldsReadOffsetV = ldsWriteOffsetV
                                       + LWBuffVMap1d::fromMatrixCoord(
                                           make_coord2d(get<1>(localWarpOffset), 0u), ldsld_new);
