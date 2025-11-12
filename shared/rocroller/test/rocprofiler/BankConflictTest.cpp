@@ -325,7 +325,7 @@ namespace rocRollerTest
 
                         CHECK(actualLastSWaitcntCycles == predictedCycles);
                         if(write && instrDwords == 4)
-                            // ds_write_b128 requires queue info
+                            // ds_write_b128 requires LDS instruction queue status information to properly predict
                             CHECK_THAT(actualMaxLdsInstrCycles,
                                        Catch::Matchers::WithinAbs(predictedCycles, 12ul));
                         else

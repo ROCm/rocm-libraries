@@ -129,7 +129,7 @@ namespace rocRoller::Scheduling::LDSBankModel
     uint getInstructionIssueCycles(const MemoryOpLDS& memoryOp, uint dwords);
 
     /**
-     * @brief Get the equilibrium cycles when contineously issuing the same instruction
+     * @brief Get the equilibrium cycles when continuously issuing the same instruction
      * 
      * @param instr The LDS instruction with memory operation details and addresses
      * @param gfx The GPU architecture
@@ -150,9 +150,9 @@ namespace rocRoller::Scheduling::LDSBankModel
     /**
      * @brief Returns the number of threads that can operate per clock for a given memory operation
      * 
+     * @param memoryOp Read/write
      * @param dwords Number of dwords (1 for b32, 2 for b64, 3 for b96, 4 for b128)
      * @param gfx The GPU architecture
-     * @param memoryOp Read/write
      */
     uint getThreadsPerClock(const MemoryOpLDS& memoryOp, uint dwords, GPUArchitectureGFX gfx);
 
