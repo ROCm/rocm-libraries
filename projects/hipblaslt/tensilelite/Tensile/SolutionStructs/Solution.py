@@ -1735,7 +1735,7 @@ class Solution(collections.abc.Mapping):
               if state["_DepthUA"] * tmpBpe * state["VectorWidthA"] > 128:
                 LdsBlockSizePerPadA = roundUpToNearestMultiple(state["_DepthUA"] * tmpBpe * state["VectorWidthA"], 128)
             else:
-              if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
+              if state["MatrixInstB"] == 1 and state["MatrixInstM"] in [16, 32]:
                 LdsBlockSizePerPadA = state["MacroTile0"] * tmpBpe * lrvw
               else:
                 LdsBlockSizePerPadA = 0
@@ -1749,7 +1749,7 @@ class Solution(collections.abc.Mapping):
               if state["_DepthUB"] * tmpBpe * state["VectorWidthB"] > 128:
                 LdsBlockSizePerPadB = roundUpToNearestMultiple(state["_DepthUB"] * tmpBpe * state["VectorWidthB"], 128)
             else:
-              if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
+              if state["MatrixInstB"] == 1 and state["MatrixInstM"] in [16, 32]:
                 LdsBlockSizePerPadB = state["MacroTile1"] * tmpBpe * lrvw
               else:
                 LdsBlockSizePerPadB = 0
