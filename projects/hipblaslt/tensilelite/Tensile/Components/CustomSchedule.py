@@ -487,7 +487,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment=""),
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),]
 
-    elif isTN and not useLDSTr and TLDS == 1:
+    elif isTN(kernel) and not useLDSTr and TLDS == 1:
         #index and code pair
         syncTable = [8, SBarrier(comment="for GRA start"),
                     23, SWaitCnt(dscnt=17, vlcnt=-1, vscnt=-1, comment="for LRB1-4"),
