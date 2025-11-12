@@ -2428,20 +2428,27 @@ class KernelWriter(metaclass=abc.ABCMeta):
     #TODO: TDM wave separated
     if tdmA and tdmB and prod(kernel["MIWaveGroup"]) > 1:
       module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA, tensorParametersB))
+      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+        module.add(self.tdmGlobalOffsetWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
       module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA, tensorParametersB))
+      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+        module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
       tdmInited = True
 
     # Tile offset assignment A(MXSA)
-    if tdmA and not tdmInited:
-      module.add(self.tdmGlobalOffset(kernel, tensorParametersA))
-      module.add(self.initTDMDescriptor(kernel, tensorParametersA))
+    #TODO: TDM handles MXSA and MXSB
+    if tdmA:
+      if not tdmInited:
+        module.add(self.tdmGlobalOffset(kernel, tensorParametersA))
+        module.add(self.initTDMDescriptor(kernel, tensorParametersA))
     else:
       module.add(self.removeGRSrdVariableSgprsFromPool(kernel))
       module.addComment1("global read addresses: tile offset assignment a")
       module.add(self.graTileAssignment(kernel, tensorParametersA))
     if kernel["ProblemType"]["MXBlockA"]:
-      module.addComment1("global read addresses: tile offset assignment mxsa")
-      module.add(self.graTileAssignment(kernel, tensorParametersA["MX"]))
+      if not tdmA:
+        module.addComment1("global read addresses: tile offset assignment mxsa")
+        module.add(self.graTileAssignment(kernel, tensorParametersA["MX"]))
     # Tile offset assignment Metadata
     if kernel["ProblemType"]["Sparse"]:
       module.addComment1("global read addresses: tile offset assignment metadata")
@@ -2452,11 +2459,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self.graTileAssignment(kernel, tPM))
     # Tile offset assignment B(MXSB)
     if kernel["ProblemType"]["MXBlockB"]:
-      module.addComment1("global read addresses: tile offset assignment mxsb")
-      module.add(self.graTileAssignment(kernel, tensorParametersB["MX"]))
-    if tdmB and not tdmInited:
-      module.add(self.tdmGlobalOffset(kernel, tensorParametersB))
-      module.add(self.initTDMDescriptor(kernel, tensorParametersB))
+      if not tdmB:
+        module.addComment1("global read addresses: tile offset assignment mxsb")
+        module.add(self.graTileAssignment(kernel, tensorParametersB["MX"]))
+    if tdmB:
+      if not tdmInited:
+        module.add(self.tdmGlobalOffset(kernel, tensorParametersB))
+        module.add(self.initTDMDescriptor(kernel, tensorParametersB))
     else:
       module.addComment1("global read addresses: tile offset assignment b")
       module.add(self.graTileAssignment(kernel, tensorParametersB))
@@ -2466,16 +2475,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment1("global read addresses: unroll assignment a")
       module.add(self.graUnrollAssignment(kernel, tensorParametersA))
     if kernel["ProblemType"]["MXBlockA"]:
-      module.addComment1("global read addresses: unroll assignment mxsa")
-      module.add(self.graUnrollAssignment(kernel, tensorParametersA["MX"]))
+      if not tdmA:
+        module.addComment1("global read addresses: unroll assignment mxsa")
+        module.add(self.graUnrollAssignment(kernel, tensorParametersA["MX"]))
     # Unroll assignment Metadata
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       module.addComment1("global read addresses: unroll assignment metadata")
       module.add(self.graUnrollAssignment(kernel, tPM))
     # Unroll assignment B(MXSB)
     if kernel["ProblemType"]["MXBlockB"]:
-      module.addComment1("global read addresses: unroll assignment mxsb")
-      module.add(self.graUnrollAssignment(kernel, tensorParametersB["MX"]))
+      if not tdmB:
+        module.addComment1("global read addresses: unroll assignment mxsb")
+        module.add(self.graUnrollAssignment(kernel, tensorParametersB["MX"]))
     if not tdmB:
       module.addComment1("global read addresses: unroll assignment b")
       module.add(self.graUnrollAssignment(kernel, tensorParametersB))
@@ -2497,7 +2508,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(self.graTileOffsets(kernel, tensorParametersA))
     if kernel["ProblemType"]["MXBlockA"]:
       module.addComment1("global read addresses: tile offsets mxsa")
-      module.add(self.graTileOffsets(kernel, tensorParametersA["MX"]))
+      if not tdmA:
+        module.add(self.graTileOffsets(kernel, tensorParametersA["MX"]))
     # Tile offsets Metadata
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       module.addComment1("global read addresses: tile offsets metadata")
@@ -2506,7 +2518,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Tile offsets B(MXSB)
     if kernel["ProblemType"]["MXBlockB"]:
       module.addComment1("global read addresses: tile offsets mxsb")
-      module.add(self.graTileOffsets(kernel, tensorParametersB["MX"]))
+      if not tdmB:
+        module.add(self.graTileOffsets(kernel, tensorParametersB["MX"]))
     if not tdmB:
       module.addComment1("global read addresses: tile offsets b")
       module.add(self.graTileOffsets(kernel, tensorParametersB))
@@ -2517,7 +2530,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(self.graUnrollOffsets(kernel, tensorParametersA))
     if kernel["ProblemType"]["MXBlockA"]:
       module.addComment1("global read addresses: unroll offsets mxsa")
-      module.add(self.graUnrollOffsets(kernel, tensorParametersA["MX"]))
+      if not tdmA:
+        module.add(self.graUnrollOffsets(kernel, tensorParametersA["MX"]))
     # Unroll offsets Metadata
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       module.addComment1("global read addresses: unroll offsets metadata")
@@ -2525,7 +2539,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Unroll offsets B(MXSB)
     if kernel["ProblemType"]["MXBlockB"]:
       module.addComment1("global read addresses: unroll offsets mxsb")
-      module.add(self.graUnrollOffsets(kernel, tensorParametersB["MX"]))
+      if not tdmB:
+        module.add(self.graUnrollOffsets(kernel, tensorParametersB["MX"]))
+
     if not tdmB:
       module.addComment1("global read addresses: unroll offsets b")
       module.add(self.graUnrollOffsets(kernel, tensorParametersB))
@@ -2588,11 +2604,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(self.removeGROffsetsVariableSgprsFromPool(kernel))
       module.addComment1("global read addresses: final offsets a")
       module.add(self.graFinalOffsets(kernel, tensorParametersA))
-    else:
-      releaseTensorTmpGprs(tensorParametersA)
-
-    # Final offsets Metadata
-    if kernel["ProblemType"]["MXBlockA"]:
+      # releaseTensorTmpGprs(tensorParametersA)
+    if not tdmA and kernel["ProblemType"]["MXBlockA"]:
       module.addComment1("global read addresses: final offsets mxsa")
       module.add(self.graFinalOffsets(kernel, tensorParametersA["MX"]))
     if kernel["ProblemType"]["Sparse"]:
@@ -2602,14 +2615,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       else:
         module.add(self.graFinalOffsets(kernel, tPM))
     # Final offsets B(MXSB)
-    if kernel["ProblemType"]["MXBlockB"]:
+    if not tdmB and kernel["ProblemType"]["MXBlockB"]:
       module.addComment1("global read addresses: final offsets mxsb")
       module.add(self.graFinalOffsets(kernel, tensorParametersB["MX"]))
     if not tdmB:
       module.addComment1("global read addresses: final offsets b")
       module.add(self.graFinalOffsets(kernel, tensorParametersB))
-    else:
-      releaseTensorTmpGprs(tensorParametersB)
+      # releaseTensorTmpGprs(tensorParametersB)
 
     self.dontAppendCode = False
     self.dontAppendCode = self.dontAppendCode or forceNoTileCode
@@ -2620,7 +2632,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not tdmA:
         module.addComment1("global read addresses: addresses a")
         module.add(self.graAddresses(kernel, tensorParametersA))
-      if kernel["ProblemType"]["MXBlockA"]:
+      if not tdmA and kernel["ProblemType"]["MXBlockA"]:
         module.addComment1("global read addresses: addresses mxsa")
         module.add(self.graAddresses(kernel, tensorParametersA["MX"]))
       # Addresses Metadata
@@ -2628,7 +2640,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.addComment1("global read addresses: addresses metadata")
         module.add(self.graAddresses(kernel, tPM))
       # Addresses B(MXSB)
-      if kernel["ProblemType"]["MXBlockB"]:
+      if not tdmB and kernel["ProblemType"]["MXBlockB"]:
         module.addComment1("global read addresses: addresses mxsb")
         module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
       if not tdmB:
@@ -2641,7 +2653,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     #TODO: TDM wave separated
     if tdmA and tdmB and prod(kernel["MIWaveGroup"]) > 1:
-      module.add(self.tdmSetupIncrementWaveSeparated(kernel))
+      module.add(self.tdmSetupIncrementWaveSeparated(kernel, tensorParametersA, tensorParametersB))
+
+      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+        module.add(self.tdmSetupIncrementWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
+
 
     self.dontAppendCode = self.dontAppendCode or forceNoTileCode
 
@@ -2679,9 +2695,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not tdmA:
         module.add(self.calculateStagger(kernel, tensorParametersA))
       if kernel["ProblemType"]["MXBlockA"]:
-        module.add(self.calculateStagger(kernel, tensorParametersA["MX"]))
+        if not tdmA:
+          module.add(self.calculateStagger(kernel, tensorParametersA["MX"]))
       if kernel["ProblemType"]["MXBlockB"]:
-        module.add(self.calculateStagger(kernel, tensorParametersB["MX"]))
+        if not tdmB:
+          module.add(self.calculateStagger(kernel, tensorParametersB["MX"]))
       # Calculate stagger Metadata
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
         module.add(self.calculateStagger(kernel,tPM))
@@ -2719,8 +2737,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # if DirectToVgpr is enabled and swapGlobalRead is true, swap the order of global read (B->A)
       tensorParameters1st = tensorParametersA
       tensorParameters2nd = tensorParametersB
+      tdm1st, tdm2nd = kernel["enableTDMA"], kernel["enableTDMB"]
       if self.isSwapGlobalReadOrderForDtvOrDtl(kernel, prefetch1=True):
         tensorParameters1st, tensorParameters2nd = tensorParameters2nd, tensorParameters1st
+        tdm1st, tdm2nd = tdm2nd, tdm1st
       pfi = 1 if kernel["PrefetchGlobalRead"] < 3 else kernel["PrefetchGlobalRead"] - 1
       module.addComment1("prefetch: global -> local")
       module.add(self.openSumAtLeastUnroll(kernel, prefetch=True, isOptNLL=isOptNLL))
@@ -3104,13 +3124,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
             else:
               pointerLWCode.addComment1("local write swap offsets a")
               pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA))
+
             if "MX" in tensorParametersA:
               pointerLWCode.addComment1("local write swap offsets mxsa")
-              pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
+              if kernel["enableTDMA"]:
+                pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersA["MX"]))
+              else:
+                pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
             # Swap offsets B(MXSB)
             if "MX" in tensorParametersB:
               pointerLWCode.addComment1("local write swap offsets mxsb")
-              pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
+              #TODO: TDM refactor
+              if kernel["enableTDMA"] and kernel["enableTDMB"] and prod(kernel["MIWaveGroup"]) == 1:
+                pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersB["MX"]))
+              elif not kernel["enableTDMB"]:
+                pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
             if kernel["enableTDMB"]:
               #TODO: TDM refactor
               if prod(kernel["MIWaveGroup"]) == 1:
@@ -3413,18 +3441,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       else:
         self.codes.localWriteMXSB = Module()
       self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersB)
-    elif kernel["enableTDMA"] and kernel["enableTDMB"]:
-      #TODO: force mx ds write when TDM enabled
-      self.codes.localWriteA = Module()
-      self.codes.localWriteB = Module()
-      if "MX" in tensorParametersA:
-        self.codes.localWriteMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])
-      else:
-        self.codes.localWriteMXSA = Module()
-      if "MX" in tensorParametersB:
-        self.codes.localWriteMXSB = self.localWriteDo(kernel, tensorParametersB["MX"])
-      else:
-        self.codes.localWriteMXSB = Module()
     else:
       self.codes.localWriteA = Module()
       self.codes.localWriteMXSA = Module()
@@ -3464,16 +3480,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(tempLWCodeModB)
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "2prefetch wait for local write"))
         module.add(self._syncThreads(kernel))
-      elif kernel["enableTDMA"] and kernel["enableTDMB"]:
-        #TODO: force ds write here for TDM enabled
-        if "MX" in tensorParametersA:
-          module.addComment1("local write mxsa")
-          tempLWCodeModMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])
-          module.add(tempLWCodeModMXSA)
-        if "MX" in tensorParametersB:
-          module.addComment1("local write mxsb")
-          tempLWCodeModMXSB = self.localWriteDo(kernel, tensorParametersB["MX"])
-          module.add(tempLWCodeModMXSB)
       # debug Local state
       """
       module.add("    /* print Local state */" + self.endLine)
@@ -3593,18 +3599,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
             else:
               self.codes.localWriteMXSB = Module()
             self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersB)
-        elif kernel["enableTDMA"] and kernel["enableTDMB"]:
-          #TODO: force mx ds write when TDM enabled
-          self.codes.localWriteA = Module()
-          self.codes.localWriteB = Module()
-          if "MX" in tensorParametersB:
-            self.codes.localWriteMXSA = self.localWriteDo(kernel, tensorParametersB["MX"], swapAB=dsWriteBA)
-          else:
-            self.codes.localWriteMXSA = Module()
-          if "MX" in tensorParametersA:
-            self.codes.localWriteMXSB = self.localWriteDo(kernel, tensorParametersA["MX"], swapAB=dsWriteBA)
-          else:
-            self.codes.localWriteMXSB = Module()
         else:
           self.codes.localWriteA = Module()
           self.codes.localWriteMXSA = Module()
@@ -3860,11 +3854,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
             pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA))
           if kernel["ProblemType"]["MXBlockA"]:
             pointerLWCode.addComment1("local write swap offsets mxsa")
-            pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
+            if kernel["enableTDMA"]:
+              pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersA["MX"]))
+            else:
+              pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
           # Swap offsets B(MXSB)
           if kernel["ProblemType"]["MXBlockB"]:
-            pointerLWCode.addComment1("local write swap offsets mxsb")
-            pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
+            if kernel["enableTDMA"] and kernel["enableTDMB"] and prod(kernel["MIWaveGroup"]) == 1:
+              pointerLWCode.addComment1("local write swap offsets mxsb")
+            elif not kernel["enableTDMB"]:
+              pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
           if kernel["enableTDMB"]:
             #TODO: TDM refactor
             if prod(kernel["MIWaveGroup"]) == 1:
@@ -4096,9 +4095,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not kernel["NoLdsWriteCode"]:
         preLoopLocalWriteCode = self.preLoopLocalWriteDo(kernel, tensorParametersA, tensorParametersB)
         module.add(preLoopLocalWriteCode)
-      elif kernel["enableTDMA"] and kernel["enableTDMB"]:
-        preLoopLocalWriteCode = self.preLoopLocalWriteDoMX(kernel, tensorParametersA, tensorParametersB)
-        module.add(preLoopLocalWriteCode)
+      # elif kernel["enableTDMA"] and kernel["enableTDMB"]:
+      #   preLoopLocalWriteCode = self.preLoopLocalWriteDoMX(kernel, tensorParametersA, tensorParametersB)
+      #   module.add(preLoopLocalWriteCode)
 
       #TODO: TDM
       # Swap local ptrs A(MXSA)
@@ -4110,11 +4109,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA))
       if "MX" in tensorParametersA:
         module.addComment1("local write swap mxsa")
-        module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
+        if kernel["enableTDMA"]:
+          module.add(self.tdmSwapLdsOffset(kernel, tensorParametersA["MX"]))
+        else:
+          module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
       # Swap local ptrs B(MXSB)
       if "MX" in tensorParametersB:
         module.addComment1("local write swap mxsb")
-        module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
+        if kernel["enableTDMA"] and kernel["enableTDMB"] and prod(kernel["MIWaveGroup"]) == 1:
+          module.add(self.tdmSwapLdsOffset(kernel, tensorParametersB["MX"]))
+        elif not kernel["enableTDMB"]:
+          module.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
+
       if kernel["enableTDMB"]:
         #TODO: TDM refactor
         if prod(kernel["MIWaveGroup"]) == 1:
@@ -4530,30 +4536,36 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # Update local write pointers in case the upcoming global reads are writing directly to LDS:
       if kernel["PrefetchGlobalRead"]:
+        #TODO: TDM
         module.addComment1("local write reset offsets a")
-        module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersA))
-        if kernel["ExpandPointerSwap"]:
-          # reset local write offset in asm code as well
-          module.add(self.localWriteResetOffsets(kernel, False, tensorParametersA))
+        if not kernel["enableTDMA"]:
+          module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersA))
+          if kernel["ExpandPointerSwap"]:
+            # reset local write offset in asm code as well
+            module.add(self.localWriteResetOffsets(kernel, False, tensorParametersA))
+
         module.addComment1("local write reset offsets b")
-        module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersB))
-        if kernel["ExpandPointerSwap"]:
-          # reset local write offset in asm code as well
-          module.add(self.localWriteResetOffsets(kernel, False, tensorParametersB))
+        if not kernel["enableTDMB"]:
+          module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersB))
+          if kernel["ExpandPointerSwap"]:
+            # reset local write offset in asm code as well
+            module.add(self.localWriteResetOffsets(kernel, False, tensorParametersB))
 
         if kernel["ProblemType"]["MXBlockA"]:
-          module.addComment1("local write reset offsets mxsa")
-          module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersA["MX"]))
-          if kernel["ExpandPointerSwap"]:
-            # reset local write offset in asm code as well
-            module.add(self.localWriteResetOffsets(kernel, False, tensorParametersA["MX"]))
+          if not kernel["enableTDMA"]:
+            module.addComment1("local write reset offsets mxsa")
+            module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersA["MX"]))
+            if kernel["ExpandPointerSwap"]:
+              # reset local write offset in asm code as well
+              module.add(self.localWriteResetOffsets(kernel, False, tensorParametersA["MX"]))
 
         if kernel["ProblemType"]["MXBlockB"]:
-          module.addComment1("local write reset offsets mxsb")
-          module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersB["MX"]))
-          if kernel["ExpandPointerSwap"]:
-            # reset local write offset in asm code as well
-            module.add(self.localWriteResetOffsets(kernel, False, tensorParametersB["MX"]))
+          if not kernel["enableTDMA"]:
+            module.addComment1("local write reset offsets mxsb")
+            module.add(self.localWriteResetOffsets(kernel,  kernel["ExpandPointerSwap"], tensorParametersB["MX"]))
+            if kernel["ExpandPointerSwap"]:
+              # reset local write offset in asm code as well
+              module.add(self.localWriteResetOffsets(kernel, False, tensorParametersB["MX"]))
 
       # tail: global read
       # Check out VGPR for DTVA
@@ -4779,31 +4791,24 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["ProblemType"]["MacDataTypeA"].is6bitFloat() or kernel["ProblemType"]["MacDataTypeB"].is6bitFloat():
             module.add(self.shiftVgpr6bitFloat(tensorParametersA, tensorParametersB))
           module.addComment1("local write a")
-          tempLWCodeModA = self.localWriteDo(kernel, tensorParametersA)
-          module.add(tempLWCodeModA)
+          if not kernel["enableTDMA"]:
+            tempLWCodeModA = self.localWriteDo(kernel, tensorParametersA)
+            module.add(tempLWCodeModA)
           if "MX" in tensorParametersA:
             module.addComment1("local write mxsa")
-            tempLWCodeModMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])
-            module.add(tempLWCodeModMXSA)
+            if not kernel["enableTDMA"]:
+              tempLWCodeModMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])
+              module.add(tempLWCodeModMXSA)
           # Tail: local write B(MXSB)
           if "MX" in tensorParametersB:
             module.addComment1("local write mxsb")
-            tempLWCodeModMXSB = self.localWriteDo(kernel, tensorParametersB["MX"])
-            module.add(tempLWCodeModMXSB)
+            if not kernel["enableTDMB"]:
+              tempLWCodeModMXSB = self.localWriteDo(kernel, tensorParametersB["MX"])
+              module.add(tempLWCodeModMXSB)
           module.addComment1("local write b")
-          tempLWCodeModB = self.localWriteDo(kernel, tensorParametersB)
-          module.add(tempLWCodeModB)
-      elif kernel["enableTDMA"] and kernel["enableTDMB"]:
-        #TODO: force write when TDM enabled
-        if "MX" in tensorParametersA:
-          module.addComment1("local write mxsa")
-          tempLWCodeModMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])
-          module.add(tempLWCodeModMXSA)
-        # Tail: local write B(MXSB)
-        if "MX" in tensorParametersB:
-          module.addComment1("local write mxsb")
-          tempLWCodeModMXSB = self.localWriteDo(kernel, tensorParametersB["MX"])
-          module.add(tempLWCodeModMXSB)
+          if not kernel["enableTDMB"]:
+            tempLWCodeModB = self.localWriteDo(kernel, tensorParametersB)
+            module.add(tempLWCodeModB)
       # change local read policy from wider local read to one unit of K at a time
       # DirectToVgpr case, use original wider local read instead of recalculating local read address
       if not (kernel["DirectToVgprA"] or kernel["DirectToVgprB"]):
@@ -5968,7 +5973,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       else:
         statesMXSANumVgprG2LAllocated = statesMXSANumVgprG2L
 
-      if not kernel["DirectToLdsMXSA"] or self.do["KeepDirectToLdsAlloc"]:
+      if (not kernel["DirectToLdsMXSA"] or self.do["KeepDirectToLdsAlloc"]) and not kernel["enableTDMA"]:
         self.states.mxsa.numVgprG2L = statesMXSANumVgprG2L
         self.states.mxsa.numVgprG2LAllocated = statesMXSANumVgprG2LAllocated
         self.states.mxsa.numVgprG2LTailloopAllocated = self.states.mxsa.numVgprG2LAllocated
@@ -6054,7 +6059,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       else:
         statesMXSBNumVgprG2LAllocated = statesMXSBNumVgprG2L
 
-      if not kernel["DirectToLdsMXSB"] or self.do["KeepDirectToLdsAlloc"]:
+      if (not kernel["DirectToLdsMXSB"] or self.do["KeepDirectToLdsAlloc"]) and not kernel["enableTDMB"]:
         self.states.mxsb.numVgprG2L = statesMXSBNumVgprG2L
         self.states.mxsb.numVgprG2LAllocated = statesMXSBNumVgprG2LAllocated
         self.states.mxsb.numVgprG2LTailloopAllocated = self.states.mxsb.numVgprG2LAllocated
@@ -6099,13 +6104,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["ProblemType"]["MXBlockB"]:
       self.states.mxsb.numVgprLocalReadAddr = 1 * self.states.rpla
 
-    self.states.a.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprA"] else 1 * self.states.rpla
-    self.states.b.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprB"] else 1 * self.states.rpla
+    self.states.a.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprA"] or kernel["enableTDMA"] else 1 * self.states.rpla
+    self.states.b.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprB"] or kernel["enableTDMB"] else 1 * self.states.rpla
     self.states.m.numVgprLocalWriteAddr = 0 if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"] else 1 * self.states.rpla
     if kernel["ProblemType"]["MXBlockA"]:
-      self.states.mxsa.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprMXSA"] else 1 * self.states.rpla
+      self.states.mxsa.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprMXSA"] or kernel["enableTDMA"] else 1 * self.states.rpla
     if kernel["ProblemType"]["MXBlockB"]:
-      self.states.mxsb.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprMXSB"] else 1 * self.states.rpla
+      self.states.mxsb.numVgprLocalWriteAddr = 0 if kernel["LocalWriteUseSgprMXSB"] or kernel["enableTDMB"] else 1 * self.states.rpla
 
     self.states.a.numVgprLocalReadSwapAddr = 0
     self.states.b.numVgprLocalReadSwapAddr = 0
@@ -6239,7 +6244,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     numGlobalReadInstructionsA = int(numGlobalReadsA * tensorParametersA["bpeGR"])//\
         (tensorParametersA["globalReadInstruction"].blockWidth * 4)
 
-    if kernel["BufferLoad"]:
+    if kernel["enableTDMA"]:
+      self.states.a.numVgprGlobalReadOffsets = 0
+    elif kernel["BufferLoad"]:
       self.states.a.numVgprGlobalReadOffsets = roundUp(numGlobalReadInstructionsA * self.states.rpgo)
     else:
       numVgprGlobalReadAddressesA = numGlobalReadInstructionsA * self.states.rpga
@@ -6257,7 +6264,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numGlobalReadInstructionsMXSA = int(numGlobalReadsMXSA / \
           (tensorParametersMXSA["globalReadInstruction"].blockWidth * 4))
 
-      if kernel["BufferLoad"]:
+      if kernel["enableTDMA"]:
+        self.states.mxsa.numVgprGlobalReadOffsets = 0
+      elif kernel["BufferLoad"]:
         self.states.mxsa.numVgprGlobalReadOffsets = roundUp(numGlobalReadInstructionsMXSA * self.states.rpgo)
       else:
         numVgprGlobalReadAddressesMXSA = numGlobalReadInstructionsMXSA * self.states.rpga
@@ -6273,7 +6282,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         * kernel["NumLoadsPerpendicularB"] * kernel["GlobalReadVectorWidthB"]
     numGlobalReadInstructionsB = int(numGlobalReadsB * tensorParametersB["bpeGR"])// \
         (tensorParametersB["globalReadInstruction"].blockWidth * 4)
-    if kernel["BufferLoad"]:
+    
+    if kernel["enableTDMB"]:
+      self.states.b.numVgprGlobalReadOffsets = 0
+    elif kernel["BufferLoad"]:
       self.states.b.numVgprGlobalReadOffsets = roundUp(numGlobalReadInstructionsB * self.states.rpgo)
     else:
       numVgprGlobalReadAddressesB = numGlobalReadInstructionsB * self.states.rpga
@@ -6290,7 +6302,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numGlobalReadInstructionsMXSB = int(numGlobalReadsMXSB / \
           (tensorParametersMXSB["globalReadInstruction"].blockWidth * 4))
 
-      if kernel["BufferLoad"]:
+      if kernel["enableTDMB"]:
+        self.states.mxsb.numVgprGlobalReadOffsets = 0
+      elif kernel["BufferLoad"]:
         self.states.mxsb.numVgprGlobalReadOffsets = roundUp(numGlobalReadInstructionsMXSB * self.states.rpgo)
       else:
         numVgprGlobalReadAddressesMXSB = numGlobalReadInstructionsMXSB * self.states.rpga
@@ -6833,11 +6847,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.states.a.numVgprLocalReadSwapAddr > 0:
       self.states.a.startVgprLocalReadSwapAddr = vgprIdx
       vgprIdx += 1
+    if self.states.mxsa.numVgprLocalReadSwapAddr > 0:
+      self.states.mxsa.startVgprLocalReadSwapAddr = vgprIdx
+      vgprIdx += 1
     if self.states.m.numVgprLocalReadSwapAddr > 0:
       self.states.m.startVgprLocalReadSwapAddr = vgprIdx
       vgprIdx += 1
     if self.states.b.numVgprLocalReadSwapAddr > 0:
       self.states.b.startVgprLocalReadSwapAddr = vgprIdx
+      vgprIdx += 1
+    if self.states.mxsb.numVgprLocalReadSwapAddr > 0:
+      self.states.mxsb.startVgprLocalReadSwapAddr = vgprIdx
       vgprIdx += 1
     if self.states.a.numVgprLocalWriteSwapAddr > 0:
       self.states.a.startVgprLocalWriteSwapAddr = vgprIdx
@@ -8396,7 +8416,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def tdmIncrementABWaveSperated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
-  def tdmSetupIncrementWaveSeparated(self, kernel) -> Module:
+  def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
 ##############################################################################
