@@ -82,7 +82,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
     invVarianceTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
                                            static_cast<IntermediateType>(1.0f));
 
-
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[x->get_uid()] = xTensor.memory().deviceData();
     variantPack[scale->get_uid()] = scaleTensor.memory().deviceData();

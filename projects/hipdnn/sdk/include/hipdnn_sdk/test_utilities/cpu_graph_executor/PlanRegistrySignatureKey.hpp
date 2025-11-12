@@ -80,6 +80,7 @@ struct fmt::formatter<hipdnn_sdk::test_utilities::PlanRegistrySignatureKey>
     auto format(const hipdnn_sdk::test_utilities::PlanRegistrySignatureKey& key,
                 FormatContext& ctx) const
     {
-        return std::visit([&ctx](auto&& arg) { return fmt::format_to(ctx.out(), "{}", arg); }, key);
+        return std::visit([&ctx](const auto& arg) { return fmt::format_to(ctx.out(), "{}", arg); },
+                          key);
     }
 };
