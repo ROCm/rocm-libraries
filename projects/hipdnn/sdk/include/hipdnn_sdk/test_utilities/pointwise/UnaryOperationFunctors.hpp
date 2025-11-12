@@ -18,7 +18,7 @@ namespace test_utilities
 namespace pointwise
 {
 
-template <typename OutputType, typename ComputeType = float>
+template <typename ComputeType = float>
 struct ReluForward
 {
     ComputeType lowerClip;
@@ -35,44 +35,50 @@ struct ReluForward
     }
 
     template <typename X>
-    auto operator()(const X& x) const -> OutputType
+    auto operator()(const X& x) const -> ComputeType
     {
         auto xCompute = static_cast<ComputeType>(x);
 
         if(xCompute <= lowerClip)
         {
-            ComputeType result = (lowerSlope * (xCompute - lowerClip)) + lowerClip;
-            return safeConvert<OutputType>(result);
+            return (lowerSlope * (xCompute - lowerClip)) + lowerClip;
         }
         if(xCompute >= upperClip)
         {
-            return safeConvert<OutputType>(upperClip);
+            return upperClip;
         }
-        return safeConvert<OutputType>(xCompute);
+        return xCompute;
     }
 };
 
-template <typename OutputType, typename ComputeType = float>
+template <typename ComputeType = float>
 struct SigmoidForward
 {
     template <typename X>
-    auto operator()(const X& x) const -> OutputType
+    auto operator()(const X& x) const -> ComputeType
     {
         auto xCompute = static_cast<ComputeType>(x);
-        ComputeType result = ComputeType{1} / (ComputeType{1} + std::exp(-xCompute));
-        return safeConvert<OutputType>(result);
+        return ComputeType{1} / (ComputeType{1} + std::exp(-xCompute));
     }
 };
 
-template <typename OutputType, typename ComputeType = float>
+template <typename ComputeType = float>
 struct TanhForward
 {
     template <typename X>
-    auto operator()(const X& x) const -> OutputType
+    auto operator()(const X& x) const -> ComputeType
     {
         auto xCompute = static_cast<ComputeType>(x);
-        ComputeType result = std::tanh(xCompute);
-        return safeConvert<OutputType>(result);
+        return std::tanh(xCompute);
+    }
+};
+
+struct Identity
+{
+    template <typename X>
+    auto operator()(const X& x) const -> X
+    {
+        return x;
     }
 };
 

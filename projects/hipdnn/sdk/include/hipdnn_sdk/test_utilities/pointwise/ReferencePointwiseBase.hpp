@@ -109,14 +109,13 @@ private:
         switch(operation)
         {
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD:
-            policy.executeUnary(input, output, pointwise::ReluForward<OutputType, ComputeType>{});
+            policy.executeUnary(input, output, pointwise::ReluForward<ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_FWD:
-            policy.executeUnary(
-                input, output, pointwise::SigmoidForward<OutputType, ComputeType>{});
+            policy.executeUnary(input, output, pointwise::SigmoidForward<ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::TANH_FWD:
-            policy.executeUnary(input, output, pointwise::TanhForward<OutputType, ComputeType>{});
+            policy.executeUnary(input, output, pointwise::TanhForward<ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::ABS:
             policy.executeUnary(input, output, pointwise::AbsoluteValue{});
@@ -146,12 +145,12 @@ private:
         switch(operation)
         {
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD:
-            policy.executeUnary(input,
-                                output,
-                                pointwise::ReluForward<OutputType, ComputeType>{
-                                    static_cast<ComputeType>(lowerClip),
-                                    static_cast<ComputeType>(upperClip),
-                                    static_cast<ComputeType>(lowerSlope)});
+            policy.executeUnary(
+                input,
+                output,
+                pointwise::ReluForward<ComputeType>{static_cast<ComputeType>(lowerClip),
+                                                    static_cast<ComputeType>(upperClip),
+                                                    static_cast<ComputeType>(lowerSlope)});
             break;
         default:
             throw std::runtime_error("Unsupported parameterized pointwise operation: "
@@ -182,15 +181,15 @@ private:
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
             policy.executeBinaryBroadcast(
-                input1, input2, output, pointwise::ReluBackward<OutputType, ComputeType>{});
+                input1, input2, output, pointwise::ReluBackward<ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD:
             policy.executeBinaryBroadcast(
-                input1, input2, output, pointwise::SigmoidBackward<OutputType, ComputeType>{});
+                input1, input2, output, pointwise::SigmoidBackward<ComputeType>{});
             break;
         case hipdnn_sdk::data_objects::PointwiseMode::TANH_BWD:
             policy.executeBinaryBroadcast(
-                input1, input2, output, pointwise::TanhBackward<OutputType, ComputeType>{});
+                input1, input2, output, pointwise::TanhBackward<ComputeType>{});
             break;
         default:
             throw std::runtime_error("Unsupported binary pointwise operation: "
@@ -215,14 +214,13 @@ private:
         switch(operation)
         {
         case hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD:
-            policy.executeBinaryBroadcast(
-                input1,
-                input2,
-                output,
-                pointwise::ParameterizedReluBackward<OutputType, ComputeType>{
-                    static_cast<ComputeType>(lowerClip),
-                    static_cast<ComputeType>(upperClip),
-                    static_cast<ComputeType>(lowerSlope)});
+            policy.executeBinaryBroadcast(input1,
+                                          input2,
+                                          output,
+                                          pointwise::ParameterizedReluBackward<ComputeType>{
+                                              static_cast<ComputeType>(lowerClip),
+                                              static_cast<ComputeType>(upperClip),
+                                              static_cast<ComputeType>(lowerSlope)});
             break;
         default:
             throw std::runtime_error("Unsupported parameterized binary pointwise operation: "
