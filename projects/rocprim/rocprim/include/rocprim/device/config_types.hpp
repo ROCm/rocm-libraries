@@ -429,20 +429,6 @@ struct default_config_selector
 };
 
 template<typename Config, target_arch Arch>
-struct non_blev_batch_memcpy_config_selector
-{
-    static constexpr unsigned int block_size = Config::template architecture_config<Arch>::params
-                                                   .non_blev_batch_memcpy_kernel_config.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct blev_batch_memcpy_config_selector
-{
-    static constexpr unsigned int block_size = Config::template architecture_config<Arch>::params
-                                                   .blev_batch_memcpy_kernel_config.block_size;
-};
-
-template<typename Config, target_arch Arch>
 struct histogram_config_selector
 {
     static constexpr unsigned int block_size
@@ -664,9 +650,9 @@ void trampoline_kernel(Kernel kernel)
 }
 
 template<class Config,
-         class Kernel,
          class ConfigSelector,
-         template<class, class, class> class LaunchSelector = default_config_selector>
+         template<class, class, class> class LaunchSelector = default_config_static_selector,
+         class Kernel>
 auto make_launch_plan(target target_current, Kernel kernel) -> launch_plan<Kernel>
 {
     using Targets = typename ConfigSelector::targets;
@@ -716,8 +702,7 @@ template<class Config,
 hipError_t execute_launch_plan(
     target t, Kernel kernel, dim3 grid_size, dim3 block_size, size_t shmem, hipStream_t stream)
 {
-    const auto launch_plan
-        = make_launch_plan<Config, Kernel, ConfigSelector, LaunchSelector>(t, kernel);
+    const auto launch_plan = make_launch_plan<Config, ConfigSelector, LaunchSelector>(t, kernel);
     launch_plan.launch(grid_size, block_size, shmem, stream);
     return hipGetLastError();
 }

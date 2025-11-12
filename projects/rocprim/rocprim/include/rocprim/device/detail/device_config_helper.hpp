@@ -878,9 +878,9 @@ struct adjacent_difference_config_tag
 
 struct adjacent_difference_config_params
 {
-    kernel_config_params          kernel_config;
-    ::rocprim::block_load_method  block_load_method;
-    ::rocprim::block_store_method block_store_method;
+    kernel_config_params          kernel_config{};
+    ::rocprim::block_load_method  block_load_method{};
+    ::rocprim::block_store_method block_store_method{};
 };
 } // namespace detail
 
@@ -919,16 +919,17 @@ namespace detail
 {
 
 template<class Value>
-struct default_adjacent_difference_config_base
+constexpr adjacent_difference_config_params adjacent_difference_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
-    using type = adjacent_difference_config<
-        limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
-        ::rocprim::max(1u, 16u / item_scale),
+    return adjacent_difference_config_params{
+        {limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 16u / item_scale)},
         ::rocprim::block_load_method::block_load_transpose,
-        ::rocprim::block_store_method::block_store_transpose>;
+        ::rocprim::block_store_method::block_store_transpose
+    };
 };
 
 } // namespace detail
@@ -942,19 +943,19 @@ struct batch_memcpy_config_tag
 struct batch_memcpy_config_params
 {
     /// \brief Kernel config for thread- and warp-level copy
-    kernel_config_params non_blev_batch_memcpy_kernel_config;
+    kernel_config_params non_blev_batch_memcpy_kernel_config{};
 
     /// \brief Number of bytes per thread for thread-level copy
-    unsigned int tlev_items_per_thread;
+    unsigned int tlev_items_per_thread = 0;
 
     /// \brief Kernel config for block-level copy
-    kernel_config_params blev_batch_memcpy_kernel_config;
+    kernel_config_params blev_batch_memcpy_kernel_config{};
 
     /// \brief Minimum size to use warp-level copy instead of thread-level
-    unsigned int wlev_size_threshold;
+    unsigned int wlev_size_threshold = 0;
 
     /// \brief Minimum size to use block-level copy instead of warp-level
-    unsigned int blev_size_threshold;
+    unsigned int blev_size_threshold = 0;
 };
 } // namespace detail
 
@@ -1001,19 +1002,20 @@ namespace detail
 {
 
 template<class Value>
-struct default_batch_memcpy_config_base
+constexpr batch_memcpy_config_params batch_memcpy_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
-    using type
-        = batch_memcpy_config<limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
-                              ::rocprim::max(1u, 16u / item_scale),
-                              ::rocprim::max(1u, 16u / item_scale),
-                              limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
-                              ::rocprim::max(1u, 16u / item_scale),
-                              128,
-                              1024>;
+    return batch_memcpy_config_params{
+        {limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 16u / item_scale)},
+        ::rocprim::max(1u, 16u / item_scale),
+        {limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 16u / item_scale)},
+        128,
+        1024
+    };
 };
 
 } // namespace detail
@@ -1372,7 +1374,7 @@ struct adjacent_find_config_tag
 
 struct adjacent_find_config_params
 {
-    kernel_config_params kernel_config;
+    kernel_config_params kernel_config{};
 };
 
 } // namespace detail
@@ -1415,23 +1417,26 @@ namespace detail
 {
 
 template<class Value>
-struct default_find_first_of_config_base
+constexpr find_first_of_config_params find_first_of_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
-    using type = find_first_of_config<256, ::rocprim::max(1u, 16u / item_scale)>;
+    return find_first_of_config_params{
+        {256, ::rocprim::max(1u, 16u / item_scale)}
+    };
 };
 
 template<typename InputT>
-struct default_adjacent_find_config_base
+constexpr adjacent_find_config_params adjacent_find_config_params_base()
 {
-    static constexpr unsigned int item_scale
+    constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(InputT), sizeof(int));
 
-    using type
-        = adjacent_find_config<limit_block_size<1024U, sizeof(InputT), ROCPRIM_WARP_SIZE_64>::value,
-                               ::rocprim::max(1u, 16u / item_scale)>;
+    return adjacent_find_config_params{
+        {limit_block_size<1024U, sizeof(InputT), ROCPRIM_WARP_SIZE_64>::value,
+         ::rocprim::max(1u, 16u / item_scale)}
+    };
 };
 
 } // namespace detail
