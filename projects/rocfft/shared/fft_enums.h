@@ -65,11 +65,16 @@ enum fft_transform_type
 
 inline void validate_or_throw(fft_transform_type dft_kind, const std::string& func_name)
 {
-    if(dft_kind != fft_transform_type_complex_forward
-       && dft_kind != fft_transform_type_complex_inverse
-       && dft_kind != fft_transform_type_real_forward
-       && dft_kind != fft_transform_type_real_inverse)
+    switch(dft_kind)
+    {
+    case fft_transform_type::fft_transform_type_complex_forward:
+    case fft_transform_type::fft_transform_type_complex_inverse:
+    case fft_transform_type::fft_transform_type_real_forward:
+    case fft_transform_type::fft_transform_type_real_inverse:
+        return;
+    default:
         throw std::invalid_argument("invalid type of transform for " + func_name);
+    }
 }
 
 inline constexpr bool is_real(const fft_transform_type& dft_type)
@@ -107,8 +112,15 @@ enum fft_precision
 
 inline void validate_or_throw(fft_precision prec, const std::string& func_name)
 {
-    if(prec != fft_precision_half && prec != fft_precision_single && prec != fft_precision_double)
+    switch(prec)
+    {
+    case fft_precision::fft_precision_half:
+    case fft_precision::fft_precision_single:
+    case fft_precision::fft_precision_double:
+        return;
+    default:
         throw std::invalid_argument("invalid precision for " + func_name);
+    }
 }
 
 template <>
@@ -125,8 +137,14 @@ enum fft_io
 
 inline void validate_or_throw(fft_io io, const std::string& func_name)
 {
-    if(io != fft_io::fft_io_in && io != fft_io::fft_io_out)
+    switch(io)
+    {
+    case fft_io::fft_io_in:
+    case fft_io::fft_io_out:
+        return;
+    default:
         throw std::invalid_argument("invalid io flag for " + func_name);
+    }
 }
 
 template <>
@@ -144,9 +162,15 @@ enum fft_auto_allocation
 
 inline void validate_or_throw(fft_auto_allocation auto_alloc, const std::string& func_name)
 {
-    if(auto_alloc != fft_auto_allocation_on && auto_alloc != fft_auto_allocation_off
-       && auto_alloc != fft_auto_allocation_default)
+    switch(auto_alloc)
+    {
+    case fft_auto_allocation::fft_auto_allocation_on:
+    case fft_auto_allocation::fft_auto_allocation_off:
+    case fft_auto_allocation::fft_auto_allocation_default:
+        return;
+    default:
         throw std::invalid_argument("invalid auto-allocation setting for " + func_name);
+    }
 }
 
 template <>
@@ -168,10 +192,16 @@ enum fft_input_generator
 
 inline void validate_or_throw(fft_input_generator input_gen, const std::string& func_name)
 {
-    if(input_gen != fft_input_random_generator_device
-       && input_gen != fft_input_random_generator_host && input_gen != fft_input_generator_device
-       && input_gen != fft_input_generator_host)
+    switch(input_gen)
+    {
+    case fft_input_generator::fft_input_random_generator_device:
+    case fft_input_generator::fft_input_random_generator_host:
+    case fft_input_generator::fft_input_generator_device:
+    case fft_input_generator::fft_input_generator_host:
+        return;
+    default:
         throw std::invalid_argument("invalid input generator for " + func_name);
+    }
 }
 
 template <>
@@ -192,11 +222,19 @@ enum fft_array_type
 
 inline void validate_or_throw(fft_array_type array_type, const std::string& func_name)
 {
-    if(array_type != fft_array_type_complex_interleaved
-       && array_type != fft_array_type_complex_planar && array_type != fft_array_type_real
-       && array_type != fft_array_type_hermitian_interleaved
-       && array_type != fft_array_type_hermitian_planar && array_type != fft_array_type_unset)
+    switch(array_type)
+    {
+
+    case fft_array_type::fft_array_type_complex_interleaved:
+    case fft_array_type::fft_array_type_complex_planar:
+    case fft_array_type::fft_array_type_real:
+    case fft_array_type::fft_array_type_hermitian_interleaved:
+    case fft_array_type::fft_array_type_hermitian_planar:
+    case fft_array_type::fft_array_type_unset:
+        return;
+    default:
         throw std::invalid_argument("invalid array type for " + func_name);
+    }
 }
 
 template <>
@@ -214,8 +252,14 @@ enum fft_result_placement
 
 inline void validate_or_throw(fft_result_placement placement, const std::string& func_name)
 {
-    if(placement != fft_placement_inplace && placement != fft_placement_notinplace)
+    switch(placement)
+    {
+    case fft_result_placement::fft_placement_inplace:
+    case fft_result_placement::fft_placement_notinplace:
+        return;
+    default:
         throw std::invalid_argument("invalid placement for " + func_name);
+    }
 }
 
 template <>
