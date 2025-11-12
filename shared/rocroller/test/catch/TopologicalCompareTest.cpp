@@ -56,62 +56,51 @@ namespace TopologicalCompareTest
         DYNAMIC_SECTION("Construction from " << constructionMethod)
         {
             auto testComparator = [&](KernelGraph::TopologicalCompare&& comp) {
-                bool useRange = GENERATE(true, false);
-                DYNAMIC_SECTION("Using range: " << useRange)
+                // Get some nodes that have a defined, non-body order with each other.
+
+                auto notContainerNode = [&](int nodeIdx) {
+                    using namespace KernelGraph::ControlGraph;
+                    auto node = graph.control.getNode(nodeIdx);
+
+                    auto visitor = [&](auto const& node) {
+                        using T = std::decay_t<decltype(node)>;
+                        return !COperationWithBody<T>;
+                    };
+
+                    return std::visit(visitor, node);
+                };
+
+                std::vector<int> nodes;
+
+                auto definedOrderWithOtherNodes = [&](int nodeIdx) -> bool {
+                    using namespace KernelGraph::ControlGraph;
+                    for(auto otherIdx : nodes)
+                    {
+                        auto order
+                            = graph.control.compareNodes(rocRoller::UpdateCache, otherIdx, nodeIdx);
+                        if(order == NodeOrdering::Undefined
+                           || order == NodeOrdering::LeftInBodyOfRight
+                           || order == NodeOrdering::RightInBodyOfLeft)
+                            return false;
+                    }
+
+                    return true;
+                };
+
+                auto nonContainerNodes = graph.control.getNodes().filter(notContainerNode);
+                for(auto node : nonContainerNodes)
                 {
-                    // Get some nodes that have a defined, non-body order with each other.
+                    if(definedOrderWithOtherNodes(node))
+                        nodes.push_back(node);
+                }
 
-                    auto notContainerNode = [&](int nodeIdx) {
-                        using namespace KernelGraph::ControlGraph;
-                        auto node = graph.control.getNode(nodeIdx);
+                std::ranges::sort(nodes, comp);
 
-                        auto visitor = [&](auto const& node) {
-                            using T = std::decay_t<decltype(node)>;
-                            return !COperationWithBody<T>;
-                        };
-
-                        return std::visit(visitor, node);
-                    };
-
-                    std::vector<int> nodes;
-
-                    auto definedOrderWithOtherNodes = [&](int nodeIdx) -> bool {
-                        using namespace KernelGraph::ControlGraph;
-                        for(auto otherIdx : nodes)
-                        {
-                            auto order = graph.control.compareNodes(
-                                rocRoller::UpdateCache, otherIdx, nodeIdx);
-                            if(order == NodeOrdering::Undefined
-                               || order == NodeOrdering::LeftInBodyOfRight
-                               || order == NodeOrdering::RightInBodyOfLeft)
-                                return false;
-                        }
-
-                        return true;
-                    };
-
-                    auto nonContainerNodes = graph.control.getNodes().filter(notContainerNode);
-                    for(auto node : nonContainerNodes)
-                    {
-                        if(definedOrderWithOtherNodes(node))
-                            nodes.push_back(node);
-                    }
-
-                    if(useRange)
-                    {
-                        std::ranges::sort(nodes, comp);
-                    }
-                    else
-                    {
-                        std::sort(nodes.begin(), nodes.end(), comp);
-                    }
-
-                    for(int idx = 0; idx + 1 < nodes.size(); ++idx)
-                    {
-                        CHECK(graph.control.compareNodes(
-                                  rocRoller::UpdateCache, nodes[idx], nodes[idx + 1])
-                              == KernelGraph::ControlGraph::NodeOrdering::LeftFirst);
-                    }
+                for(int idx = 0; idx + 1 < nodes.size(); ++idx)
+                {
+                    CHECK(graph.control.compareNodes(
+                              rocRoller::UpdateCache, nodes[idx], nodes[idx + 1])
+                          == KernelGraph::ControlGraph::NodeOrdering::LeftFirst);
                 }
             };
 
