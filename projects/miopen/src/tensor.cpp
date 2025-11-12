@@ -2150,6 +2150,7 @@ void OpTensor(const Handle& handle,
                          solver::SolverContainer<solver::tensorOp::Op2dTensorLite>{} +
                          solver::SolverContainer<solver::tensorOp::Op2dTensorSquash>{} +
                          solver::SolverContainer<solver::tensorOp::Op5dTensorGeneric>{} +
+                         solver::SolverContainer<solver::tensorOp::Op5dTensorGenericContiguous>{} +
                          solver::SolverContainer<solver::tensorOp::Op4dTensorGeneric>{} +
                          solver::SolverContainer<solver::tensorOp::Op3dTensorGeneric>{} +
                          solver::SolverContainer<solver::tensorOp::Op2dTensorGeneric>{} +

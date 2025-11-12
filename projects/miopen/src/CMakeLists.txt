@@ -335,6 +335,7 @@ set( MIOpen_Source
     solver/tensorOp/Op4dTensorGeneric.cpp
     solver/tensorOp/Op4dTensorLite.cpp
     solver/tensorOp/Op5dTensorGeneric.cpp
+    solver/tensorOp/Op5dTensorGenericContiguous.cpp
     solver/tensorOp/OpTensorFwdBias.cpp
     solver/tensorOp/OpTensorLeadingOnes.cpp
     subbuffers.cpp

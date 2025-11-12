@@ -631,3 +631,442 @@ extern "C" __global__ void Op4dTensorLite(const MIOPEN_TYPE* a,
     }
 }
 #endif // USE_4D_TENSOR_LITE
+
+#ifdef USE_5D_TENSOR_GENERIC
+
+// register-level packet processing to improve parallelism and reduce div/mod overhead.
+// PACK_T = how many consecutive elements each thread handles per inner iteration.
+// If the solver didn't define it at JIT time, fall back to 8 for standalone builds.
+#ifndef PACK_T
+#define PACK_T 8
+#endif
+
+static_assert(PACK_T >= 1 && PACK_T <= 16, "PACK_T must be in [1..16]");
+
+// Adaptive selection between the narrow (32-bit) and wide (64-bit) index/offset types.
+// 32-bit for faster arithmetic when the address range allows that. 64-bit
+// to safely handle very large tensors or strides/offsets.
+#ifdef USE_INDEX32
+using offset_t = uint64_t;
+using len_t    = unsigned int;
+using idx_t    = uint32_t;
+#else
+using offset_t = uint64_t;
+using len_t    = unsigned long long;
+using idx_t    = uint64_t;
+#endif
+
+// below - __restrict__ is used to allow compiler to aggressively optimize load/read operations
+// on tensors since we guarantee that there is no overlap between a, b, c pointers
+extern "C" __global__ void Op5dTensorGeneric(const MIOPEN_TYPE* __restrict__ a,
+                                             const MIOPEN_TYPE* __restrict__ b,
+                                             MIOPEN_TYPE* __restrict__ c,
+                                             const offset_t Aoffset,
+                                             const offset_t Boffset,
+                                             const offset_t Coffset,
+                                             const len_t b_n,
+                                             const len_t b_c,
+                                             const len_t b_d,
+                                             const len_t b_h,
+                                             const len_t b_w,
+                                             const len_t c_n,
+                                             const len_t c_c,
+                                             const len_t c_d,
+                                             const len_t c_h,
+                                             const len_t c_w,
+                                             const len_t a_nstride,
+                                             const len_t a_cstride,
+                                             const len_t a_dstride,
+                                             const len_t a_hstride,
+                                             const len_t a_wstride,
+                                             const len_t b_nstride,
+                                             const len_t b_cstride,
+                                             const len_t b_dstride,
+                                             const len_t b_hstride,
+                                             const len_t b_wstride,
+                                             const len_t c_nstride,
+                                             const len_t c_cstride,
+                                             const len_t c_dstride,
+                                             const len_t c_hstride,
+                                             const len_t c_wstride,
+                                             const MIOPEN_TYPE alpha0,
+                                             const MIOPEN_TYPE alpha1,
+                                             const MIOPEN_TYPE beta,
+                                             const len_t total_work,
+                                             const bool use_beta)
+{
+    const MIOPEN_TYPE* a_base = a + static_cast<size_t>(Aoffset);
+    const MIOPEN_TYPE* b_base = b + static_cast<size_t>(Boffset);
+    MIOPEN_TYPE* c_base       = c + static_cast<size_t>(Coffset);
+
+// USE_PACKED_INNER toggles optimization on
+#ifndef USE_PACKED_INNER
+#define USE_PACKED_INNER 1
+#endif
+
+    // calc thread index and total thread count
+    const idx_t tcount = static_cast<idx_t>(blockDim.x) * static_cast<idx_t>(gridDim.x);
+    const idx_t tid    = static_cast<idx_t>(blockIdx.x) * static_cast<idx_t>(blockDim.x) +
+                      static_cast<idx_t>(threadIdx.x);
+
+#if USE_PACKED_INNER
+    // keep wide_t strictly 64-bit to avoid overflow in index calculations
+    using wide_t = uint64_t;
+
+    // each thread processes multiple PACK_T-sized blocks, cast to wider type only for the
+    // current packs amount and total work, to avoid potential overflow
+    for(wide_t i = static_cast<wide_t>(tid);
+        i * static_cast<wide_t>(PACK_T) < static_cast<wide_t>(total_work);
+        i += static_cast<wide_t>(tcount))
+    {
+
+        // additional guard to avoid internal overflow when using 32-bit idx_t
+        const wide_t base = i * static_cast<wide_t>(PACK_T);
+
+        // Decompose indices for C ( == A) per one block of PACK_T elements
+        const wide_t cw  = static_cast<wide_t>(c_w);
+        const wide_t ch  = static_cast<wide_t>(c_h);
+        const wide_t cd  = static_cast<wide_t>(c_d);
+        const wide_t ccw = static_cast<wide_t>(c_c);
+
+        wide_t tmp_w = base;
+
+        const idx_t w0 = static_cast<idx_t>(tmp_w % cw);
+        tmp_w /= cw;
+        const idx_t h0 = static_cast<idx_t>(tmp_w % ch);
+        tmp_w /= ch;
+        const idx_t d0 = static_cast<idx_t>(tmp_w % cd);
+        tmp_w /= cd;
+        const idx_t c0 = static_cast<idx_t>(tmp_w % ccw);
+        tmp_w /= ccw;
+        const idx_t n0 = static_cast<idx_t>(tmp_w);
+
+        // Broadcast indices for B, each dimension of B may be either 1, i.e.
+        // broadcast or equal to the corresponding C dim.
+        const idx_t bn0 = (b_n == 1) ? 0 : ((b_n == c_n) ? n0 : (n0 % static_cast<idx_t>(b_n)));
+        const idx_t bc0 = (b_c == 1) ? 0 : ((b_c == c_c) ? c0 : (c0 % static_cast<idx_t>(b_c)));
+        const idx_t bd0 = (b_d == 1) ? 0 : ((b_d == c_d) ? d0 : (d0 % static_cast<idx_t>(b_d)));
+        const idx_t bh0 = (b_h == 1) ? 0 : ((b_h == c_h) ? h0 : (h0 % static_cast<idx_t>(b_h)));
+
+        // Check W for possible broadcasting for A and B When true,
+        // the same element reused for all W positions for A only case with stride == 0
+        // for B: stride == 0 or size == 1
+        const bool aw0 = (a_wstride == 0);
+        const bool bw0 = (b_w == 1) || (b_wstride == 0);
+
+        // Base offsets for A, B, C tensors
+        wide_t a_off = static_cast<wide_t>(n0) * a_nstride + static_cast<wide_t>(c0) * a_cstride +
+                       static_cast<wide_t>(d0) * a_dstride + static_cast<wide_t>(h0) * a_hstride +
+                       (aw0 ? static_cast<wide_t>(0) : static_cast<wide_t>(w0) * a_wstride);
+
+        wide_t b_off = static_cast<wide_t>(bn0) * b_nstride + static_cast<wide_t>(bc0) * b_cstride +
+                       static_cast<wide_t>(bd0) * b_dstride + static_cast<wide_t>(bh0) * b_hstride +
+                       (bw0 ? static_cast<wide_t>(0) : static_cast<wide_t>(w0) * b_wstride);
+
+        wide_t c_off = static_cast<wide_t>(n0) * c_nstride + static_cast<wide_t>(c0) * c_cstride +
+                       static_cast<wide_t>(d0) * c_dstride + static_cast<wide_t>(h0) * c_hstride +
+                       static_cast<wide_t>(w0) * c_wstride;
+
+        // Increments for A, B, C ptrs
+        const wide_t a_inc_w = aw0 ? static_cast<wide_t>(0) : static_cast<wide_t>(a_wstride);
+        const wide_t b_inc_w = bw0 ? static_cast<wide_t>(0) : static_cast<wide_t>(b_wstride);
+        const wide_t c_inc_w = static_cast<wide_t>(c_wstride);
+
+        // Remaining elements in current C-row by W. Compute via wide_t then narrow.
+        const wide_t w_rem_w = cw - static_cast<wide_t>(w0);
+        const idx_t w_run    = static_cast<idx_t>(
+            w_rem_w < static_cast<wide_t>(PACK_T) ? w_rem_w : static_cast<wide_t>(PACK_T));
+
+        // for broadcasted A or B, cache the reused value - save redundant loads
+        MIOPEN_TYPE av_cached = MIOPEN_TYPE(0);
+        if(aw0)
+            av_cached = a_base[static_cast<size_t>(a_off)];
+
+        MIOPEN_TYPE bv_cached = MIOPEN_TYPE(0);
+        if(bw0)
+            bv_cached = b_base[static_cast<size_t>(b_off)];
+
+// "unroll" below - to unwind small simple loops for better
+// performance through improving instruction-level parallelism
+// assumed for pack sizes 8 or 16, otherwise may reduce performance
+#pragma unroll PACK_T
+
+        // execute operation for the main part of the pack
+        for(idx_t k = 0; k < static_cast<idx_t>(PACK_T); ++k)
+        {
+            if(k < w_run)
+            {
+                const MIOPEN_TYPE av  = aw0 ? av_cached : a_base[static_cast<size_t>(a_off)];
+                const MIOPEN_TYPE bv  = bw0 ? bv_cached : b_base[static_cast<size_t>(b_off)];
+                const MIOPEN_TYPE res = MIOPEN_TENSOR_OP(av * alpha0, bv * alpha1);
+
+                if(!use_beta)
+                {
+                    c_base[static_cast<size_t>(c_off)] = res;
+                }
+                else
+                {
+                    const MIOPEN_TYPE cv               = c_base[static_cast<size_t>(c_off)];
+                    c_base[static_cast<size_t>(c_off)] = res + cv * beta;
+                }
+
+                a_off += a_inc_w;
+                b_off += b_inc_w;
+                c_off += c_inc_w;
+            }
+        }
+
+        // process remaining elements (tail) if any are present
+        for(idx_t k = w_run; k < static_cast<idx_t>(PACK_T); ++k)
+        {
+            const wide_t idx_w = base + static_cast<wide_t>(k);
+            if(idx_w >= static_cast<wide_t>(total_work))
+                break;
+
+            // decompose linear index using cw/ch/cd/ccw defined above
+            const idx_t w  = static_cast<idx_t>(idx_w % cw);
+            const idx_t h  = static_cast<idx_t>((idx_w / cw) % ch);
+            const idx_t d  = static_cast<idx_t>((idx_w / (cw * ch)) % cd);
+            const idx_t c1 = static_cast<idx_t>((idx_w / (cw * ch * cd)) % ccw);
+            const idx_t n  = static_cast<idx_t>(idx_w / (cw * ch * cd * ccw));
+
+            // B broadcast mapping
+            const idx_t bn = (b_n == 1) ? 0 : ((b_n == c_n) ? n : (n % static_cast<idx_t>(b_n)));
+            const idx_t bc = (b_c == 1) ? 0 : ((b_c == c_c) ? c1 : (c1 % static_cast<idx_t>(b_c)));
+            const idx_t bd = (b_d == 1) ? 0 : ((b_d == c_d) ? d : (d % static_cast<idx_t>(b_d)));
+            const idx_t bh = (b_h == 1) ? 0 : ((b_h == c_h) ? h : (h % static_cast<idx_t>(b_h)));
+            const idx_t bw = (b_w == 1) ? 0 : ((b_w == c_w) ? w : (w % static_cast<idx_t>(b_w)));
+
+            // offsets
+            const wide_t a_off_tail =
+                static_cast<wide_t>(n) * a_nstride + static_cast<wide_t>(c1) * a_cstride +
+                static_cast<wide_t>(d) * a_dstride + static_cast<wide_t>(h) * a_hstride +
+                static_cast<wide_t>(w) * a_wstride;
+
+            const wide_t b_off_tail =
+                static_cast<wide_t>(bn) * b_nstride + static_cast<wide_t>(bc) * b_cstride +
+                static_cast<wide_t>(bd) * b_dstride + static_cast<wide_t>(bh) * b_hstride +
+                static_cast<wide_t>(bw) * b_wstride;
+
+            const wide_t c_off_tail =
+                static_cast<wide_t>(n) * c_nstride + static_cast<wide_t>(c1) * c_cstride +
+                static_cast<wide_t>(d) * c_dstride + static_cast<wide_t>(h) * c_hstride +
+                static_cast<wide_t>(w) * c_wstride;
+
+            // execute tensor op for the tail part
+            const MIOPEN_TYPE av      = a_base[static_cast<size_t>(a_off_tail)];
+            const MIOPEN_TYPE bv_tail = bw0 ? bv_cached : b_base[static_cast<size_t>(b_off_tail)];
+            const MIOPEN_TYPE tmp     = MIOPEN_TENSOR_OP(av * alpha0, bv_tail * alpha1);
+
+            if(!use_beta)
+            {
+                c_base[static_cast<size_t>(c_off_tail)] = tmp;
+            }
+            else
+            {
+                const MIOPEN_TYPE cv                    = c_base[static_cast<size_t>(c_off_tail)];
+                c_base[static_cast<size_t>(c_off_tail)] = tmp + cv * beta;
+            }
+        }
+    }
+#else
+    // scalar version without inner packing
+    using wide_t = uint64_t;
+
+#pragma unroll 1
+    for(wide_t i = static_cast<wide_t>(tid); i < static_cast<wide_t>(total_work);
+        i += static_cast<wide_t>(tcount))
+    {
+        // widen dims once
+        const wide_t cw  = static_cast<wide_t>(c_w);
+        const wide_t ch  = static_cast<wide_t>(c_h);
+        const wide_t cd  = static_cast<wide_t>(c_d);
+        const wide_t ccw = static_cast<wide_t>(c_c);
+
+        // decompose linear index
+        const idx_t w  = static_cast<idx_t>(i % cw);
+        const idx_t h  = static_cast<idx_t>((i / cw) % ch);
+        const idx_t d  = static_cast<idx_t>((i / (cw * ch)) % cd);
+        const idx_t c1 = static_cast<idx_t>((i / (cw * ch * cd)) % ccw);
+        const idx_t n  = static_cast<idx_t>(i / (cw * ch * cd * ccw));
+
+        // B broadcast mapping (len_t -> idx_t)
+        const idx_t bn = (b_n == 1) ? 0 : ((b_n == c_n) ? n : (n % static_cast<idx_t>(b_n)));
+        const idx_t bc = (b_c == 1) ? 0 : ((b_c == c_c) ? c1 : (c1 % static_cast<idx_t>(b_c)));
+        const idx_t bd = (b_d == 1) ? 0 : ((b_d == c_d) ? d : (d % static_cast<idx_t>(b_d)));
+        const idx_t bh = (b_h == 1) ? 0 : ((b_h == c_h) ? h : (h % static_cast<idx_t>(b_h)));
+        const idx_t bw = (b_w == 1) ? 0 : ((b_w == c_w) ? w : (w % static_cast<idx_t>(b_w)));
+
+        // offsets в idx_t
+        const wide_t a_off =
+            static_cast<wide_t>(n) * a_nstride + static_cast<wide_t>(c1) * a_cstride +
+            static_cast<wide_t>(d) * a_dstride + static_cast<wide_t>(h) * a_hstride +
+            static_cast<wide_t>(w) * a_wstride;
+
+        const wide_t b_off =
+            static_cast<wide_t>(bn) * b_nstride + static_cast<wide_t>(bc) * b_cstride +
+            static_cast<wide_t>(bd) * b_dstride + static_cast<wide_t>(bh) * b_hstride +
+            static_cast<wide_t>(bw) * b_wstride;
+
+        const wide_t c_off =
+            static_cast<wide_t>(n) * c_nstride + static_cast<wide_t>(c1) * c_cstride +
+            static_cast<wide_t>(d) * c_dstride + static_cast<wide_t>(h) * c_hstride +
+            static_cast<wide_t>(w) * c_wstride;
+
+        // execute tensor op
+        const MIOPEN_TYPE av  = a_base[static_cast<size_t>(a_off)];
+        const MIOPEN_TYPE bv  = b_base[static_cast<size_t>(b_off)];
+        const MIOPEN_TYPE tmp = MIOPEN_TENSOR_OP(av * alpha0, bv * alpha1);
+
+        if(!use_beta)
+        {
+               c_base[static_cast<size_t>(c_off)] = tmp;
+        }
+        else
+        {
+               const MIOPEN_TYPE cv               = c_base[static_cast<size_t>(c_off)];
+               c_base[static_cast<size_t>(c_off)] = tmp + cv * beta;
+        }
+    }
+#endif
+}
+#endif
+
+#ifdef USE_5D_TENSOR_GENERIC_CONTIGUOUS
+// register-level packet processing to improve parallelism and reduce div/mod overhead.
+// PACK_T = how many consecutive elements each thread handles per inner iteration.
+// If the solver didn't define it at JIT time, fall back to 8 for standalone builds.
+#ifndef PACK_T
+#define PACK_T 8
+#endif
+
+static_assert(PACK_T >= 1 && PACK_T <= 16, "PACK_T must be in [1..16]");
+
+// Adaptive selection between the narrow (32-bit) and wide (64-bit) index/offset types.
+// 32-bit for faster arithmetic when the address range allows that. 64-bit
+// to safely handle very large tensors or strides/offsets.
+#ifdef USE_INDEX32
+using offset_t = uint64_t;
+using len_t    = unsigned int;
+using idx_t    = uint32_t;
+#else
+using offset_t = uint64_t;
+using len_t    = unsigned long long;
+using idx_t    = uint64_t;
+#endif
+
+// below - __restrict__ is used to allow compiler to aggressively optimize load/read operations
+// on tensors since we guarantee that there is no overlap between a, b, c pointers
+extern "C" __global__ void Op5dTensorGenericContiguous(const MIOPEN_TYPE* __restrict__ a,
+                                                       const MIOPEN_TYPE* __restrict__ b,
+                                                       MIOPEN_TYPE* __restrict__ c,
+                                                       const offset_t Aoffset,
+                                                       const offset_t Boffset,
+                                                       const offset_t Coffset,
+                                                       [[maybe_unused]] const len_t b_n,
+                                                       [[maybe_unused]] const len_t b_c,
+                                                       [[maybe_unused]] const len_t b_d,
+                                                       [[maybe_unused]] const len_t b_h,
+                                                       const len_t b_w,
+                                                       [[maybe_unused]] const len_t c_n,
+                                                       [[maybe_unused]] const len_t c_c,
+                                                       [[maybe_unused]] const len_t c_d,
+                                                       [[maybe_unused]] const len_t c_h,
+                                                       const len_t c_w,
+                                                       const MIOPEN_TYPE alpha0,
+                                                       const MIOPEN_TYPE alpha1,
+                                                       const MIOPEN_TYPE beta,
+                                                       const len_t total_work,
+                                                       const bool use_beta)
+{
+    const MIOPEN_TYPE* a_base = a + static_cast<size_t>(Aoffset);
+    const MIOPEN_TYPE* b_base = b + static_cast<size_t>(Boffset);
+    MIOPEN_TYPE* c_base       = c + static_cast<size_t>(Coffset);
+
+    const uint64_t tid    = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint64_t stride = uint64_t(blockDim.x) * gridDim.x;
+
+    constexpr int pack_size  = PACK_T;
+    const int effective_pack = (c_w < 16) ? 1 : pack_size;
+
+    for(uint64_t base = tid * effective_pack; base < total_work; base += stride * effective_pack)
+    {
+        const uint64_t remaining =
+            (base + effective_pack <= total_work) ? effective_pack : total_work - base;
+
+        if(effective_pack == 1)
+        {
+            // narrow path (c_w < 16) -> reduce register pressure by processing single element per thread
+            const size_t idx = static_cast<size_t>(base);
+
+            const MIOPEN_TYPE a_val = a_base[idx];
+            const MIOPEN_TYPE b_val = b_base[idx];
+
+            MIOPEN_TYPE tmp = MIOPEN_TENSOR_OP(a_val * alpha0, b_val * alpha1);
+
+            if(use_beta)
+            {
+                const MIOPEN_TYPE c_val = c_base[idx];
+                c_base[idx] = tmp + beta * c_val;
+            }
+            else
+            {
+                c_base[idx] = tmp;
+            }
+        }
+        else
+        {
+            // wide path (c_w >= 16): process multiple elements per thread
+            // process per pack size
+            MIOPEN_TYPE a_val[pack_size];
+            MIOPEN_TYPE b_val[pack_size];
+            MIOPEN_TYPE c_val[pack_size];
+
+            // Load A and B values
+    #pragma unroll
+            for(int i = 0; i < pack_size; i++)
+            {
+                if(i < remaining)
+                {
+                    a_val[i] = a_base[static_cast<size_t>(base) + i];
+                    b_val[i] = b_base[static_cast<size_t>(base) + i];
+                }
+            }
+
+            // Load C if needed
+            if(use_beta)
+            {
+    #pragma unroll
+                for(int i = 0; i < pack_size; i++)
+                {
+                    if(i < remaining)
+                    {
+                        c_val[i] = c_base[static_cast<size_t>(base) + i];
+                    }
+                }
+            }
+
+            // execute tensor op
+    #pragma unroll
+            for(int i = 0; i < pack_size; i++)
+            {
+                if(i < remaining)
+                {
+                    MIOPEN_TYPE tmp = MIOPEN_TENSOR_OP(a_val[i] * alpha0, b_val[i] * alpha1);
+                    c_val[i]        = use_beta ? (tmp + beta * c_val[i]) : tmp;
+                }
+            }
+
+            // Store results
+    #pragma unroll
+            for(int i = 0; i < pack_size; i++)
+            {
+                if(i < remaining)
+                {
+                    c_base[static_cast<size_t>(base) + i] = c_val[i];
+                }
+            }
+        }
+    }
+}
+#endif
