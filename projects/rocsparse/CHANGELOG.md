@@ -13,7 +13,7 @@ Documentation for rocSPARSE is available at
 * Added nnz split algorithm `rocsparse_spmv_alg_csr_nnzsplit` to `rocsparse_spmv`. This algorithm might be superior to the existing adaptive algorithm `rocsparse_spmv_alg_csr_adaptive` when running the computation a small number of times because it avoids paying the analysis cost of the adaptive algorithm.
 
 ### Changed
-* Make rocblas required when user requests it when building from source. Previously, we were silently not using rocblas if it could not be found. Users can still opt out of using rocblas when building from source by using the `--no-rocblas` option with `install.sh` or `rmake.py` build scripts.
+* Make rocBLAS a requirement when it's requested when building from source. Previously, rocBLAS was not used if it could not be found. To opt out of using rocblas when building from source, use the `--no-rocblas` option with the `install.sh` or `rmake.py` build scripts.
 
 ### Optimized
 * Significantly improved `rocsparse_sddmm` routine when using CSR format especially as the number of columns in the dense `A` matrix (or rows in the dense `B` matrix increase).
