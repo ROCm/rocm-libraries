@@ -41,10 +41,7 @@ include(toolchain-options)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-if(NOT python)
-  find_package(Python3 REQUIRED COMPONENTS Interpreter)
-  set(python "${Python3_EXECUTABLE}")
-endif()
+find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
 # ########################################################################
 # Main
@@ -400,7 +397,7 @@ if(BUILD_CODE_COVERAGE)
   #
   add_custom_target(coverage_analysis
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
-    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocblas-coverage_%m.profraw" ${python} ./clients/staging/rocblas_rtest.py -t code_coverage
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocblas-coverage_%m.profraw" ${Python3_EXECUTABLE} ./clients/staging/rocblas_rtest.py -t code_coverage
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 
