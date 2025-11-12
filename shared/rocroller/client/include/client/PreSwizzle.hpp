@@ -53,17 +53,28 @@ namespace rocRoller::Client
         auto tileK    = tile[1];
         auto subTileK = tile[2];
 
-        size_t instPerTileK   = tileK / subTileK;
-        size_t instKPerTileMN = tileMN / subTileK;
+        AssertFatal(tileMN == 64 || tileMN == 32, ShowValue(tileMN));
+        AssertFatal(tileK % 4 == 0, ShowValue(tileK));
 
-        std::vector<size_t> srcSizes = {subTileK,
-                                        instPerTileK,
+        size_t nLanesPerSIMD   = 16;
+        size_t nSIMDsPerWave   = 4;
+        size_t nSIMDIndex      = tileMN / nLanesPerSIMD;
+        size_t nSIMDBlock      = nSIMDsPerWave / nSIMDIndex;
+        size_t nVGPRIndex      = std::min(nSIMDIndex, subTileK);
+        size_t nVGPRBlock      = tileK / nSIMDBlock / nVGPRIndex;
+        size_t nSIMDIndexIndex = nVGPRIndex;
+        size_t nSIMDIndexBlock = nSIMDIndex / nSIMDIndexIndex;
+
+        std::vector<size_t> srcSizes = {nVGPRIndex,
+                                        nVGPRBlock,
+                                        nSIMDBlock,
                                         desc.size(0) / (tileK),
-                                        instKPerTileMN,
-                                        subTileK,
+                                        nLanesPerSIMD,
+                                        nSIMDIndexIndex,
+                                        nSIMDIndexBlock,
                                         desc.size(1) / (tileMN)};
 
-        TensorDescriptor src(desc.dataType(), srcSizes);
+        TensorDescriptor src(desc.dataType(), srcSizes), dst;
 
         AssertFatal(src.totalAllocatedElements() == desc.totalAllocatedElements(),
                     ShowValue(src.totalAllocatedElements()),
@@ -72,8 +83,21 @@ namespace rocRoller::Client
                     ShowValue(src),
                     ShowValue(desc));
 
-        auto dst
-            = TensorDescriptor::ShuffledNoPadding(desc.dataType(), srcSizes, {4, 1, 2, 3, 0, 5});
+        if(tileMN == 64)
+        {
+            dst = TensorDescriptor::ShuffledNoPadding(
+                desc.dataType(), srcSizes, {5, 1, 2, 3, 4, 0, 6, 7});
+        }
+        else if(tileMN == 32 && subTileK == 4)
+        {
+            dst = TensorDescriptor::ShuffledNoPadding(
+                desc.dataType(), srcSizes, {5, 2, 1, 3, 4, 0, 6, 7});
+        }
+        else if(tileMN == 32 && subTileK == 2)
+        {
+            dst = TensorDescriptor::ShuffledNoPadding(
+                desc.dataType(), srcSizes, {1, 2, 0, 3, 4, 5, 6, 7});
+        }
 
         AssertFatal(src.totalAllocatedElements() == dst.totalAllocatedElements(),
                     ShowValue(src.totalAllocatedElements()),
