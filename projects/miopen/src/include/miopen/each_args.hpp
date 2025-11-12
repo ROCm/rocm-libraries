@@ -26,9 +26,10 @@
 #ifndef GUARD_MIOPEN_EACH_ARGS_HPP
 #define GUARD_MIOPEN_EACH_ARGS_HPP
 
+#include <utility>
 #include <initializer_list>
 #include <type_traits>
-#include <utility>
+#include <tuple>
 
 namespace miopen {
 namespace detail {
