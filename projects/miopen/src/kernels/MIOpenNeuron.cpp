@@ -28,8 +28,6 @@
 
 #define MIOPEN_NRN_GROUP_SZ2 1
 
-#include "vector_types.hpp"
-#include <hip/hip_fp16.h>
 #include "activation_functions.hpp"
 
 #ifdef LITE
