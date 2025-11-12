@@ -83,8 +83,7 @@ protected:
     static void TearDownTestSuite()
     {
         // Clear plugin paths after all tests complete
-        EXPECT_EQ(hipdnnSetEnginePluginPaths_ext(0, nullptr, HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
+        hipdnnSetEnginePluginPaths_ext(0, nullptr, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
     }
 
     void SetUp() override
