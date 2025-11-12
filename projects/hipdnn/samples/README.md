@@ -210,3 +210,41 @@ Executes the backward pass (filter gradient) of a 2D convolution operation to co
     - `K` = number of output channels (filters)
     - `C` = number of input channels per filter
     - `R, S` = filter spatial dimensions (height, width)
+
+### [**`FusedConvFpropActiv`**](./convolution/FusedConvFpropActiv.cpp)
+
+Executes a fused convolution forward pass with activation function in a single graph.
+
+The fused graph consists of two operations:
+
+1. **Convolution Forward**: Performs standard convolution
+    ```python
+    conv_y = conv(x, w, stride, padding, dilation)
+    ```
+
+2. **Activation (Clamped ReLU)**: Applies ReLU activation with upper and lower clipping bounds to convolution output
+    ```python
+    y = clamp(relu(conv_y), lower_clip, upper_clip) = min(max(conv_y, lower_clip), upper_clip)
+    ```
+
+**Key Features:**
+- Demonstrates kernel fusion by combining convolution and activation in a single graph
+- The intermediate convolution output (`conv_y`) is marked as virtual, allowing the backend to optimize memory usage and potentially fuse operations
+- Shows performance benefits of operation fusion compared to separate kernel launches
+- Uses `CpuReferenceGraphExecutor` for validation, which executes the entire fused graph on CPU
+
+**Graph Flow:**
+```
+Inputs: x (input tensor), w (filter weights)
+          ↓
+     conv_y = convolution_forward(x, w, stride, padding, dilation)
+          ↓ (virtual tensor)
+     y = activation_forward(conv_y, mode=RELU)
+          ↓
+Output: y (activated convolution result)
+```
+
+**Performance Benefits:**
+- Reduces memory bandwidth by avoiding intermediate tensor writes/reads
+- Eliminates kernel launch overhead between operations
+- Enables better cache utilization by processing data in a single pass
