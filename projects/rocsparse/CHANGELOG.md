@@ -16,7 +16,7 @@ Documentation for rocSPARSE is available at
 * Make rocBLAS a requirement when it's requested when building from source. Previously, rocBLAS was not used if it could not be found. To opt out of using rocblas when building from source, use the `--no-rocblas` option with the `install.sh` or `rmake.py` build scripts.
 
 ### Optimized
-* Significantly improved `rocsparse_sddmm` routine when using CSR format especially as the number of columns in the dense `A` matrix (or rows in the dense `B` matrix increase).
+* Significantly improved the `rocsparse_sddmm` routine when using CSR format, especially as the number of columns in the dense `A` matrix (or rows in the dense `B` matrix) increase.
 * Improved the user documentation.
 
 ### Resolved issues
