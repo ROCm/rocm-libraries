@@ -14,18 +14,19 @@
    cmake -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/clang++ -G Ninja ..
    ninja
    ```
+   - Note: If you have installed hipdnn to a custom location you just need to specify the `CMAKE_PREFIX_PATH` to point to the install location.  Ensure you specify the full path and not a relative one.
 
 The sample executables will be created in the `build` directory.
 
 ## Running Samples
 
 All samples accept the following command line options:
-- `--cpu-validation` - Enable CPU reference validation of results
+- `--verify-cpu` - Enable CPU reference validation of results
 - `--help` - Displays help message
 
 Example:
 ```bash
-./build/conv_forward --cpu-validation
+./build/conv_forward --verify-cpu
 ```
 
 ## Profiling Samples
