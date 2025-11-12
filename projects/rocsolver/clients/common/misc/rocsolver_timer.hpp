@@ -28,9 +28,8 @@
 #pragma once
 
 #include "common_host_helpers.hpp"
-#include <hip/hip_runtime.h>
-
 #include <algorithm>
+#include <hip/hip_runtime.h>
 #include <numeric>
 #include <vector>
 
