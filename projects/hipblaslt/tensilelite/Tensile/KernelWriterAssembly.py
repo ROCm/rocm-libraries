@@ -619,16 +619,29 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("tdmAGroup0", 4, 4))
       module.add(self.defineSgpr("tdmAGroup1", 8, 4))
 
+      if kernel["ProblemType"]["MXBlockA"]:
+        module.add(self.defineSgpr("tdmMXSAGroup0", 4, 4))
+        module.add(self.defineSgpr("tdmMXSAGroup1", 8, 4))
+
     if kernel["enableTDMB"]:
       if prod(kernel["MIWaveGroup"]) > 1:
         module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
         module.add(RegSet("s", "sgprtdmBGroup1", "sgprtdmAGroup1"))
+        if kernel["ProblemType"]["MXBlockB"]:
+          module.add(RegSet("s", "sgprtdmMXSBGroup0", "sgprtdmMXSAGroup0"))
+          module.add(RegSet("s", "sgprtdmMXSBGroup1", "sgprtdmMXSAGroup1"))
       else:
         module.add(self.defineSgpr("tdmBGroup0", 4, 4))
         module.add(self.defineSgpr("tdmBGroup1", 8, 4))
+        if kernel["ProblemType"]["MXBlockB"]:
+          module.add(self.defineSgpr("tdmMXSBGroup0", 4, 4))
+          module.add(self.defineSgpr("tdmMXSBGroup1", 8, 4))
 
     if kernel["enableTDMA"] and kernel["enableTDMB"]:
-      module.add(self.defineSgpr("tdmIncs", 1))
+      module.add(self.defineSgpr("tdmABIncs", 1))
+
+      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
+        module.add(self.defineSgpr("tdmMXSAMXSBIncs", 1))
 
     if kernel["BufferLoad"]:
        # resource descriptor (SRD) A and B, must be aligned on 4-SGPR boundary
@@ -638,10 +651,10 @@ class KernelWriterAssembly(KernelWriter):
       if not kernel["enableTDMB"]:
         module.add(self.defineSgpr("SrdB", 4, 4))
         self.addSgprVarToPool("SrdB")
-      if kernel["ProblemType"]["MXBlockA"]:
+      if kernel["ProblemType"]["MXBlockA"] and not kernel["enableTDMA"]:
         module.add(self.defineSgpr("SrdMXSA", 4, 4))
         self.addSgprVarToPool("SrdMXSA")
-      if kernel["ProblemType"]["MXBlockB"]:
+      if kernel["ProblemType"]["MXBlockB"] and not kernel["enableTDMB"]:
         module.add(self.defineSgpr("SrdMXSB", 4, 4))
         self.addSgprVarToPool("SrdMXSB")
       if kernel["ProblemType"]["Sparse"]:
@@ -654,10 +667,10 @@ class KernelWriterAssembly(KernelWriter):
       if not kernel["enableTDMB"]:
         module.add(self.defineSgpr("ShadowLimitB", 2, 2))
         self.addSgprVarToPool("ShadowLimitB")
-      if kernel["ProblemType"]["MXBlockA"]:
+      if kernel["ProblemType"]["MXBlockA"] and not kernel["enableTDMA"]:
         module.add(self.defineSgpr("ShadowLimitMXSA", 2, 2))
         self.addSgprVarToPool("ShadowLimitMXSA")
-      if kernel["ProblemType"]["MXBlockB"]:
+      if kernel["ProblemType"]["MXBlockB"] and not kernel["enableTDMB"]:
         module.add(self.defineSgpr("ShadowLimitMXSB", 2, 2))
         self.addSgprVarToPool("ShadowLimitMXSB")
       if kernel["ProblemType"]["Sparse"]:
@@ -1283,6 +1296,12 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.b.numVgprLocalReadSwapAddr > 0:
       module.add(RegSet("v", "vgprLocalReadSwapAddrB", \
           self.states.b.startVgprLocalReadSwapAddr))
+    if self.states.mxsa.numVgprLocalReadSwapAddr > 0:
+      module.add(RegSet("v", "vgprLocalReadSwapAddrMXSA", \
+          self.states.mxsa.startVgprLocalReadSwapAddr))
+    if self.states.mxsb.numVgprLocalReadSwapAddr > 0:
+      module.add(RegSet("v", "vgprLocalReadSwapAddrMXSB", \
+          self.states.mxsb.startVgprLocalReadSwapAddr))
     if self.states.m.numVgprLocalReadSwapAddr > 0:
       module.add(RegSet("v", "vgprLocalReadSwapAddrMetadata", \
           self.states.m.startVgprLocalReadSwapAddr))
@@ -1887,9 +1906,14 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.lraSwapAddressesForDTLPad(kernel, tPA))
       module.add(self.lraAddressesInitFor3LDSBlk(kernel, tPA, False, True))
 
+    if self.states.mxsa.numVgprLocalReadAddr > 0:
+      module.add(self.lraSwapAddressesForDTLPad(kernel, tPA["MX"]))
+      
     if self.states.b.numVgprLocalReadAddr > 0:
       module.add(self.lraSwapAddressesForDTLPad(kernel, tPB))
       module.add(self.lraAddressesInitFor3LDSBlk(kernel, tPB, False, True))
+    if self.states.mxsb.numVgprLocalReadAddr > 0:
+      module.add(self.lraSwapAddressesForDTLPad(kernel, tPB["MX"]))
     if self.states.m.numVgprLocalReadAddr > 0:
       module.add(self.lraSwapAddressesForDTLPad(kernel, tPM))
 
@@ -1904,39 +1928,46 @@ class KernelWriterAssembly(KernelWriter):
     module.addComment2("Local Write Addresses")
 
     # tile assignments
-    module.add(self.lwaTileAssignment(kernel, tPA))
-    if kernel["ProblemType"]["MXBlockA"]:
-      module.add(self.lwaTileAssignment(kernel, tPA["MX"]))
-    if kernel["ProblemType"]["MXBlockB"]:
-      module.add(self.lwaTileAssignment(kernel, tPB["MX"]))
+    if not kernel["enableTDMA"]:
+      module.add(self.lwaTileAssignment(kernel, tPA))
+      if kernel["ProblemType"]["MXBlockA"]:
+        module.add(self.lwaTileAssignment(kernel, tPA["MX"]))
+    if not kernel["enableTDMB"]:
+      module.add(self.lwaTileAssignment(kernel, tPB))
+      if kernel["ProblemType"]["MXBlockB"]:
+        module.add(self.lwaTileAssignment(kernel, tPB["MX"]))
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       module.add(self.lwaTileAssignment(kernel, tPM))
-    module.add(self.lwaTileAssignment(kernel, tPB))
 
     # unroll assignments
-    module.add(self.lwaUnrollAssignment(kernel, tPA))
-    if kernel["ProblemType"]["MXBlockA"]:
-      module.add(self.lwaUnrollAssignment(kernel, tPA["MX"]))
-    if kernel["ProblemType"]["MXBlockB"]:
-      module.add(self.lwaUnrollAssignment(kernel, tPB["MX"]))
+    if not kernel["enableTDMA"]:
+      module.add(self.lwaUnrollAssignment(kernel, tPA))
+      if kernel["ProblemType"]["MXBlockA"]:
+        module.add(self.lwaUnrollAssignment(kernel, tPA["MX"]))
+    if not kernel["enableTDMB"]:
+      module.add(self.lwaUnrollAssignment(kernel, tPB))
+      if kernel["ProblemType"]["MXBlockB"]:
+        module.add(self.lwaUnrollAssignment(kernel, tPB["MX"]))
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       module.add(self.lwaUnrollAssignment(kernel, tPM))
-    module.add(self.lwaUnrollAssignment(kernel, tPB))
 
     # first offsets
     module.addComment1("local write addresses: first offset a")
-    module.add(self.lwaFirstOffset(kernel, tPA))
-    if kernel["ProblemType"]["MXBlockA"]:
-      module.addComment1("local write addresses: first offset mxsa")
-      module.add(self.lwaFirstOffset(kernel, tPA["MX"]))
-    if kernel["ProblemType"]["MXBlockB"]:
-      module.addComment1("local write addresses: first offset mxsb")
-      module.add(self.lwaFirstOffset(kernel, tPB["MX"]))
+    if not kernel["enableTDMA"]:
+      module.add(self.lwaFirstOffset(kernel, tPA))
+      if kernel["ProblemType"]["MXBlockA"]:
+        module.addComment1("local write addresses: first offset mxsa")
+        module.add(self.lwaFirstOffset(kernel, tPA["MX"]))
+    if not kernel["enableTDMB"]:
+      if kernel["ProblemType"]["MXBlockB"]:
+        module.addComment1("local write addresses: first offset mxsb")
+        module.add(self.lwaFirstOffset(kernel, tPB["MX"]))
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       module.addComment1("local write addresses: first offset metadata")
       module.add(self.lwaFirstOffset(kernel, tPM))
     module.addComment1("local write addresses: first offset b")
-    module.add(self.lwaFirstOffset(kernel, tPB))
+    if not kernel["enableTDMB"]:
+      module.add(self.lwaFirstOffset(kernel, tPB))
 
     return module
 
@@ -2558,11 +2589,11 @@ class KernelWriterAssembly(KernelWriter):
         prePad = int(self.states.srdShiftLeft["B"] * tPB["bpeGR"]) # leave room in case we have to pointer shift
         module.add(SSubU32(dst=sgpr("AddressB+0"), src0=sgpr("AddressB+0"), src1=prePad, comment="pre-pad to make room for possible pointer shift"))
         module.add(SSubBU32(dst=sgpr("AddressB+1"), src0=sgpr("AddressB+1"), src1=0, comment="pre-pad to make room for possible pointer shift"))
-      if kernel["ProblemType"]["MXBlockA"]:
+      if not kernel["enableTDMA"] and kernel["ProblemType"]["MXBlockA"]:
         prePad = int(self.states.srdShiftLeft["MXSA"]) # leave room in case we have to pointer shift
         module.add(SSubU32(dst=sgpr("AddressMXSA+0"), src0=sgpr("AddressMXSA+0"), src1=prePad, comment="pre-pad to make room for possible pointer shift"))
         module.add(SSubBU32(dst=sgpr("AddressMXSA+1"), src0=sgpr("AddressMXSA+1"), src1=0, comment="pre-pad to make room for possible pointer shift"))
-      if kernel["ProblemType"]["MXBlockB"]:
+      if not kernel["enableTDMB"] and kernel["ProblemType"]["MXBlockB"]:
         prePad = int(self.states.srdShiftLeft["MXSB"]) # leave room in case we have to pointer shift
         module.add(SSubU32(dst=sgpr("AddressMXSB+0"), src0=sgpr("AddressMXSB+0"), src1=prePad, comment="pre-pad to make room for possible pointer shift"))
         module.add(SSubBU32(dst=sgpr("AddressMXSB+1"), src0=sgpr("AddressMXSB+1"), src1=0, comment="pre-pad to make room for possible pointer shift"))
@@ -9024,27 +9055,29 @@ class KernelWriterAssembly(KernelWriter):
       incCodeA = imod.add(Module("globalReadIncrementA"))
       incCodeA.add(self.tdmIncrementABWaveSperated(kernel, tPA, tPB))
       incCodeB = imod.add(Module("globalReadIncrementB"))
-      if "MX" in tPA:
-        self.globalReadIncrement(kernel, incCodeA, loopIdx, tPA["MX"], prefetchIndex)
-      if "MX" in tPB:
-        self.globalReadIncrement(kernel, incCodeB, loopIdx, tPB["MX"], prefetchIndex)
+      # if "MX" in tPA:
+      #   self.globalReadIncrement(kernel, incCodeA, loopIdx, tPA["MX"], prefetchIndex)
+      # if "MX" in tPB:
+      #   self.globalReadIncrement(kernel, incCodeB, loopIdx, tPB["MX"], prefetchIndex)
+      if "MX" in tPA and "MX" in tPB:
+        incCodeB.add(self.tdmIncrementABWaveSperated(kernel, tPA["MX"], tPB["MX"]))
       return imod
 
     incCodeA = imod.add(Module("globalReadIncrementA"))
     if tPA != None:
-      if not kernel["enableTDMA"]:
+      if not tdmA:
         self.globalReadIncrement(kernel, incCodeA, loopIdx, tPA, prefetchIndex)
       else:
         incCodeA.add(self.tdmIncrementAB(kernel, tPA))
-      if "MX" in tPA:
+      if "MX" in tPA and not tdmA:
         self.globalReadIncrement(kernel, incCodeA, loopIdx, tPA["MX"], prefetchIndex)
     incCodeB = imod.add(Module("globalReadIncrementB"))
     if tPB != None:
-      if not kernel["enableTDMB"]:
+      if not tdmB:
         self.globalReadIncrement(kernel, incCodeB, loopIdx, tPB, prefetchIndex)
       else:
         incCodeB.add(self.tdmIncrementAB(kernel, tPB))
-      if "MX" in tPB:
+      if "MX" in tPB and not tdmB:
         self.globalReadIncrement(kernel, incCodeB, loopIdx, tPB["MX"], prefetchIndex)
     return imod
 
@@ -9944,11 +9977,24 @@ class KernelWriterAssembly(KernelWriter):
       imod.add(comp.issueLoad("tdmAGroup0", "tdmAGroup1", None, None))
       return imod
 
+    if tc == "MXSA" and kernel["enableTDMA"]:
+      comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+      if kernel["ProblemType"]["MXBlockA"]:
+        imod.add(comp.issueLoad("tdmMXSAGroup0", "tdmMXSAGroup1", None, None))
+      return imod
+
     if tc == "B" and kernel["enableTDMB"]:
       #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
       if prod(kernel["MIWaveGroup"]) == 1:
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
         imod.add(comp.issueLoad("tdmBGroup0", "tdmBGroup1", None, None))
+      return imod
+
+    if tc == "MXSB" and kernel["enableTDMB"]:
+      #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
+      if prod(kernel["MIWaveGroup"]) == 1:
+        comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+        imod.add(comp.issueLoad("tdmMXSBGroup0", "tdmMXSBGroup1", None, None))
       return imod
 
     # sizeK % LOCAL_DEPTHU
@@ -10305,38 +10351,29 @@ class KernelWriterAssembly(KernelWriter):
 
   def tdmSwapLdsOffset(self, kernel, tP) -> Module:
     tc: str = tP["tensorChar"]
+    strippedTc: str = tc[-1]
+    oppositeStrippedTc = "A" if strippedTc == "B" else "B"
     needSwap: bool = not kernel["1LDSBuffer"]
 
     if not needSwap:
       return Module("TDM LDS swap (Empty)")
 
     module: Module = Module("TDM LDS swap")
-    module.addComment(f"TDM LDS swap(pow2: {kernel["LdsAlignPow2"]})")
+    module.addComment(f"TDM LDS swap(aligned pow2: {not kernel["StoreSwapAddr"]})")
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     ldsAddrSgprName: str = comp.getLdsAddrSgprName(f"tdm{tc}Group0")
 
-    if kernel["LdsAlignPow2"]:
+    if not kernel["StoreSwapAddr"]:
       swapMask: int = kernel[f"LdsOffsetA_Blk"]
       module.add(SXorB32(sgpr(ldsAddrSgprName), sgpr(ldsAddrSgprName), hex(swapMask)))
     else:
-      #TODO: Refactor, this is for wave separated only
       assert prod(kernel["MIWaveGroup"]) > 1
-      with self.allocTmpSgpr(2) as tmpSgprRes:
-        wavelen: int = kernel["WavefrontSize"]
-        waveIdSgprIdx: int = tmpSgprRes.idx
-        baseAddrSgprIdx: int = tmpSgprRes.idx + 1
-        module.add(VReadfirstlaneB32(sgpr(waveIdSgprIdx), vgpr("Serial"), "first tId"))
-        module.add(SLShiftRightB32(sgpr(waveIdSgprIdx), ceil(log2(wavelen)), sgpr(waveIdSgprIdx), "wId=fTid // wavelen"))
-        module.add(SMovB32(sgpr(baseAddrSgprIdx), kernel["LdsOffsetA_Blk"], "Init as A blk"))
-        module.add(SBitcmp1B32(sgpr(waveIdSgprIdx), 0, "Check parity of wId"))
-        module.add(SCSelectB32(sgpr(baseAddrSgprIdx), kernel["LdsOffsetB_Blk"], sgpr(baseAddrSgprIdx), "Set to B blk if odd"))
-        module.add(SMovB32(sgpr(waveIdSgprIdx), kernel["LdsNumElementsAlignedA"], "Init as A size"))
-        module.add(SCSelectB32(sgpr(waveIdSgprIdx), kernel["LdsNumElementsAlignedB"], sgpr(waveIdSgprIdx), "Set to B if odd"))
-        module.add(SCmpLtU32(sgpr(ldsAddrSgprName), sgpr(baseAddrSgprIdx), "Check if < blk offset"))
-        module.add(SMovB32(sgpr(baseAddrSgprIdx), -1, "Init as -1"))
-        module.add(SCSelectB32(sgpr(baseAddrSgprIdx), 1, sgpr(baseAddrSgprIdx), "neg or pos"))
-        module.add(SMulI32(sgpr(baseAddrSgprIdx), sgpr(baseAddrSgprIdx), sgpr(waveIdSgprIdx), "Mul to offset"))
-        module.add(SAddI32(sgpr(ldsAddrSgprName), sgpr(ldsAddrSgprName), sgpr(baseAddrSgprIdx), "Do swap"))
+      with self.allocTmpSgpr(1) as tmpSgprRes:
+        tmpSgprIdx: int = tmpSgprRes.idx
+        module.add(SCmpLtU32(sgpr(ldsAddrSgprName), kernel["LdsOffsetA_Blk"], "Check if < blk offset"))
+        module.add(SMovB32(sgpr(tmpSgprIdx), -kernel["LdsOffsetA_Blk"], "Init as -blk"))
+        module.add(SCSelectB32(sgpr(tmpSgprIdx), kernel["LdsOffsetA_Blk"], sgpr(tmpSgprIdx), "<: +blk, >=: -blk"))
+        module.add(SAddI32(sgpr(ldsAddrSgprName), sgpr(ldsAddrSgprName), sgpr(tmpSgprIdx), "Do swap"))
     return module
 
   ##############################################################################
@@ -16576,6 +16613,9 @@ class KernelWriterAssembly(KernelWriter):
     dtype: DataType = kernel["ProblemType"][f"DataType{tc}"]
     mt: int = kernel[f"MacroTile{ti}"]
     du: int = kernel["DepthU"]
+    isMX: bool = tc.startswith("MX")
+    duScale = kernel["ProblemType"][f"MXBlock{tc[-1]}"] if isMX else 1
+    du //= duScale
     sizeTile0, sizeTile1 = du, mt
     bpe: float = tP["bpeGR"]
     #TODO: temp hack
@@ -16600,9 +16640,16 @@ class KernelWriterAssembly(KernelWriter):
 
     #TODO: refactor, currently special handling for FP4 along K-dim
     sizeShifter = 1 if dtype.isFloat4() else 0
+    sizeShifter += ceil(log2(duScale))
+
     mod.add(comp.setIterationEnabled(descSgprName(1), False))
     mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), self, sizeShifter))
     mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(ti), self))
+
+    if tc.startswith("MX"):
+      #reset to 0 since scale of sizeTile0 and stride for MX is not required
+      sizeShifter = 1 if dtype.isFloat4() else 0
+
     mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
     mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numComp, self))
     mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifter))
@@ -16611,9 +16658,11 @@ class KernelWriterAssembly(KernelWriter):
   def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB) -> Module:
     #TODO: TDM implement
     mod = Module("TDM Init Wave Separated")
-    tdmInitLblA = Label("TDMInitA", "")
-    tdmInitLblB = Label("TDMInitB", "")
-    tdmInitLblEnd = Label("TDMInitEnd", "")
+    tcA: str = tPA["tensorChar"]
+    tcB: str = tPB["tensorChar"]
+    tdmInitLblA = Label(f"TDMInit{tcA}", "")
+    tdmInitLblB = Label(f"TDMInit{tcB}", "")
+    tdmInitLblEnd = Label(f"TDMInit{tcA}{tcB}End", "")
     mod.add(tdmInitLblA)
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
@@ -16640,9 +16689,11 @@ class KernelWriterAssembly(KernelWriter):
     #TODO: TDM implement
     mod = Module("TDM Global Offset Wave Separated")
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-    tdmGlobalOffsetLblA = Label("TDMGlobalOffsetA", "")
-    tdmGlobalOffsetLblB = Label("TDMGlobalOffsetB", "")
-    tdmGlobalOffsetLblEnd = Label("TDMGlobalOffsetEnd", "")
+    tcA: str = tPA["tensorChar"]
+    tcB: str = tPB["tensorChar"]
+    tdmGlobalOffsetLblA = Label(f"TDMGlobalOffset{tcA}", "")
+    tdmGlobalOffsetLblB = Label(f"TDMGlobalOffset{tcB}", "")
+    tdmGlobalOffsetLblEnd = Label(f"TDMGlobalOffset{tcA}{tcB}End", "")
     mod.add(tdmGlobalOffsetLblA)
 
     with self.allocTmpSgpr(1) as tmpSgprRes:
@@ -16653,10 +16704,10 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(SBitcmp1B32(sgpr(waveIdSgprIdx), 0, "Check parity of wId"))
       mod.add(SCBranchSCC1(tdmGlobalOffsetLblB.getLabelName(), "Jump to B if wId is odd"))
 
-    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPA, "AddressA"))
+    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPA, f"Address{tcA}"))
     mod.add(SBranch(tdmGlobalOffsetLblEnd.getLabelName()))
     mod.add(tdmGlobalOffsetLblB)
-    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPB, "AddressB"))
+    mod.add(comp.calculateStartAddrWaveSeparated(self, kernel, tPB, f"Address{tcB}"))
     mod.add(tdmGlobalOffsetLblEnd)
     return mod
 
@@ -16670,20 +16721,23 @@ class KernelWriterAssembly(KernelWriter):
   def tdmIncrementABWaveSperated(self, kernel, tPA, tPB) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     #TODO: TDM replace by universal tdm group sgpr
-    tc: str = tPA['tensorChar']
+    tcA: str = tPA['tensorChar']
+    tcB: str = tPB['tensorChar']
     mod = Module("TDMGlobalIncrementsWaveSeparated")
-    mod.add(comp.incrementGlobalAddr(f"tdm{tc}Group0", "tdmIncs"))
+    mod.add(comp.incrementGlobalAddr(f"tdm{tcA}Group0", f"tdm{tcA}{tcB}Incs"))
     return mod
 
-  def tdmSetupIncrementWaveSeparated(self, kernel) -> Module:
+  def tdmSetupIncrementWaveSeparated(self, kernel, tpA, tpB) -> Module:
     mod = Module()
-    comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
+    tcA: str = tpA["tensorChar"]
+    tcB: str = tpB["tensorChar"]
     wavelen: int = kernel["WavefrontSize"]
-    mod.add(VReadfirstlaneB32(sgpr("tdmIncs"), vgpr("Serial"), "first tId"))
-    mod.add(SLShiftRightB32(sgpr("tdmIncs"), ceil(log2(wavelen)), sgpr("tdmIncs"), "wId=fTid // wavelen"))
-    mod.add(SBitcmp1B32(sgpr("tdmIncs"), 0, "Check parity of wId"))
+    incSgprName = f"tdm{tcA}{tcB}Incs"
+    mod.add(VReadfirstlaneB32(sgpr(incSgprName), vgpr("Serial"), "first tId"))
+    mod.add(SLShiftRightB32(sgpr(incSgprName), ceil(log2(wavelen)), sgpr(incSgprName), "wId=fTid // wavelen"))
+    mod.add(SBitcmp1B32(sgpr(incSgprName), 0, "Check parity of wId"))
     #TODO: should not directly use GRIA and GRIB
-    mod.add(SCSelectB32(sgpr("tdmIncs"), sgpr("GlobalReadIncsB"), sgpr("GlobalReadIncsA")))
+    mod.add(SCSelectB32(sgpr(incSgprName), sgpr(f"GlobalReadIncs{tcB}"), sgpr(f"GlobalReadIncs{tcA}")))
     return mod
 
 def _getEccOffset(totalWidth, bpr, bpe, glvw, idx, numVgprG2L):

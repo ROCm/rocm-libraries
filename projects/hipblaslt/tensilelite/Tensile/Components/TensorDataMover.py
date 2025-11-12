@@ -59,7 +59,7 @@ class TensorDataMoverLoad(TensorDataMover):
         #TODO here we assume TN
         mod = Module()
         tc: str = tp["tensorChar"]
-        tIdx: int = 0 if tp["isA"] else 1
+        tIdx: int = tp["idx"]
         bpe: float = tp["bpeGR"]
         assert bpe > 0, "bpe must > 0"
         sgprStrideName: str = f"Stride{tc}{writer.states.indexChars[tp['idx']]}"
@@ -69,7 +69,7 @@ class TensorDataMoverLoad(TensorDataMover):
         numWaves: int = prod(kernel["MIWaveGroup"])
         assert numWaves > 1
         wavelen: int = kernel["WavefrontSize"]
-        mt: int = kernel["MacroTile0"] if tc == "A" else kernel["MacroTile1"]
+        mt: int = kernel["MacroTile0"] if tc.endswith("A") else kernel["MacroTile1"]
 
         mod.addComment(f"TDM wave separated calc start addr of {tc}")
 
