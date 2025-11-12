@@ -66,56 +66,61 @@ extern "C" {
 *      }
 *  \endcode
 *
-*  \note
+ *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
 *  It may return before the actual computation has finished.
 *
-*  @param[in]
-*  handle      handle to the hipsparse library context queue.
-*  @param[in]
-*  transA      matrix \f$A\f$ operation type.
-*  @param[in]
-*  m           number of rows of the sparse CSR matrix \f$A\f$.
-*  @param[in]
-*  n           number of columns of the dense matrix \f$op(B)\f$ and \f$C\f$.
-*  @param[in]
-*  k           number of columns of the sparse CSR matrix \f$A\f$.
-*  @param[in]
-*  nnz         number of non-zero entries of the sparse CSR matrix \f$A\f$.
-*  @param[in]
-*  alpha       scalar \f$\alpha\f$.
-*  @param[in]
-*  descrA      descriptor of the sparse CSR matrix \f$A\f$. Currently, only
-*              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
-*  @param[in]
-*  csrSortedValA array of \p nnz elements of the sparse CSR matrix \f$A\f$.
-*  @param[in]
-*  csrSortedRowPtrA array of \p m+1 elements that point to the start of every row of the
-*              sparse CSR matrix \f$A\f$.
-*  @param[in]
-*  csrSortedColIndA array of \p nnz elements containing the column indices of the sparse
-*              CSR matrix \f$A\f$.
-*  @param[in]
-*  B           array of dimension \p ldb*n (\f$op(B) == B\f$),
-*              \p ldb*k otherwise.
-*  @param[in]
-*  ldb         leading dimension of \f$B\f$, must be at least \f$\max{(1, k)}\f$
-*              (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
-*  @param[in]
-*  beta        scalar \f$\beta\f$.
-*  @param[inout]
-*  C           array of dimension \p ldc*n.
-*  @param[in]
-*  ldc         leading dimension of \f$C\f$, must be at least \f$\max{(1, m)}\f$
-*              (\f$op(A) == A\f$), \f$\max{(1, k)}\f$ otherwise.
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnz, \p ldb, \p ldc
-*              \p descrA, \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA,
-*              \p B, \p beta or \p C is invalid.
-*  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
-*  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
-*              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*  @param[in]
+*  handle              handle to the hipsparse library context queue.
+*  @param[in]
+*  transA              matrix \f$A\f$ operation type.
+*  @param[in]
+*  m                   number of rows of the sparse CSR matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  n                   number of columns of the dense matrix \f$op(B)\f$ and \f$C\f$. Must be non-negative.
+*  @param[in]
+*  k                   number of columns of the sparse CSR matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  nnz                 number of non-zero entries of the sparse CSR matrix \f$A\f$. Must be non-negative.
+*  @param[in]
+*  alpha               scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA              descriptor of the sparse CSR matrix \f$A\f$. Currently, only
+*                      \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  csrSortedValA       array of \p nnz elements of the sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedRowPtrA    array of \p m+1 elements that point to the start of every row of the
+*                      sparse CSR matrix \f$A\f$.
+*  @param[in]
+*  csrSortedColIndA    array of \p nnz elements containing the column indices of the sparse
+*                      CSR matrix \f$A\f$.
+*  @param[in]
+*  B                   array of dimension \p ldb*n (\f$op(B) == B\f$),
+*                      \p ldb*k otherwise.
+*  @param[in]
+*  ldb                 leading dimension of \f$B\f$, must be at least \f$\max{(1, k)}\f$
+*                      (\f$op(B) == B\f$), \f$\max{(1, n)}\f$ otherwise.
+*  @param[in]
+*  beta                scalar \f$\beta\f$.
+*  @param[inout]
+*  C                   array of dimension \p ldc*n.
+*  @param[in]
+*  ldc                 leading dimension of \f$C\f$, must be at least \f$\max{(1, m)}\f$
+*                      (\f$op(A) == A\f$), \f$\max{(1, k)}\f$ otherwise.
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha or \p beta is nullptr,
+*          \p m, \p n, \p k or \p nnz is negative, \p ldb or \p ldc is invalid, or
+*          \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p B or \p C is nullptr.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
+*          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 *
 *  \par Example
 *  \snippet example_hipsparse_csrmm.cpp doc example

@@ -62,6 +62,10 @@ extern "C" {
 *  <tr><td>HIP_C_64F
 *  </table>
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be 
+*  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
 *  handle      handle to the hipsparse library context queue.
 *  @param[in]
@@ -73,9 +77,10 @@ extern "C" {
 *  @param[inout]
 *  vecY        dense vector descriptor \f$y\f$.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p c_coeff, \p s_coeff, \p vecX or \p vecY pointer is
-*              invalid.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p c_coeff, \p s_coeff, \p vecX or \p vecY is nullptr,
+*          or the vector sizes or data types are incompatible.
 *
 *  \par Example
 *  \snippet example_hipsparse_rot.cpp doc example

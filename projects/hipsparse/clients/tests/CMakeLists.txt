@@ -49,8 +49,8 @@ else()
   if(NOT CMAKE_MATRICES_DIR STREQUAL "${PROJECT_BINARY_DIR}/matrices")
     message("Copy matrix files from ${CMAKE_MATRICES_DIR} to ${PROJECT_BINARY_DIR}/matrices")
 
-    execute_process(COMMAND cp -r ${CMAKE_MATRICES_DIR} ${PROJECT_BINARY_DIR}/matrices RESULT_VARIABLE STATUS WORKING_DIRECTORY ${CMAKE_MATRICES_DIR})
-
+    file(COPY ${CMAKE_MATRICES_DIR}/ DESTINATION ${PROJECT_BINARY_DIR}/matrices)
+  
     if(STATUS AND NOT STATUS EQUAL 0)
       message(FATAL_ERROR "Failed to copy matrix .bin files, aborting.")
     endif()
@@ -212,25 +212,54 @@ set_target_properties(hipsparse-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJ
 
 rocm_install(TARGETS hipsparse-test COMPONENT tests)
 
-set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml 
-                         test_doti.yaml 
+set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
+                         test_doti.yaml
                          test_dotci.yaml
                          test_sctr.yaml
                          test_roti.yaml
                          test_gthr.yaml
                          test_gthrz.yaml
-
-                         test_bsrmv.yaml 
-                         test_csrmv.yaml 
+                         
+                         test_bsrmv.yaml
+                         test_csrmv.yaml
                          test_bsrsv2.yaml
-                         test_csrsv2.yaml 
+                         test_csrsv2.yaml
                          test_gemvi.yaml
-                         test_hybmv.yaml)
+                         test_hybmv.yaml
+                         
+                         test_bsrmm.yaml
+                         test_bsrsm2.yaml
+                         test_csrmm.yaml
+                         test_csrsm2.yaml
+                         test_gemmi.yaml
+
+                         test_bsr2csr.yaml
+                         test_coo2csr.yaml
+                         test_csc2dense.yaml
+                         test_csr2bsr.yaml
+                         test_csr2coo.yaml
+                         test_csr2csc.yaml
+                         test_csr2csc_ex2.yaml
+                         test_csr2csr_compress.yaml
+                         test_csr2dense.yaml
+                         test_csr2gebsr.yaml
+                         test_csr2hyb.yaml
+                         test_csru2csr.yaml
+                         test_dense2csc.yaml
+                         test_dense2csr.yaml
+                         test_gebsr2csr.yaml
+                         test_gebsr2gebsc.yaml
+                         test_gebsr2gebsr.yaml
+                         test_hyb2csr.yaml
+                         test_prune_csr2csr.yaml
+                         test_prune_csr2csr_by_percentage.yaml
+                         test_prune_dense2csr.yaml
+                         test_prune_dense2csr_by_percentage.yaml)
 
 # Prepare testing data
 set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparse_test.data")
 add_custom_command(OUTPUT "${HIPSPARSE_TEST_DATA}"
-                   COMMAND ${python} ../common/hipsparse_gentest.py -m ${PROJECT_BINARY_DIR}/matrices -I ../include hipsparse_test.yaml -o "${HIPSPARSE_TEST_DATA}"
+                   COMMAND ${Python3_EXECUTABLE} ../common/hipsparse_gentest.py -m ${PROJECT_BINARY_DIR}/matrices -I ../include hipsparse_test.yaml -o "${HIPSPARSE_TEST_DATA}"
                    DEPENDS ../common/hipsparse_gentest.py hipsparse_test.yaml ../include/hipsparse_common.yaml ${HIPSPARSE_TEST_YAMLS}
                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 add_custom_target(hipsparse-test-data

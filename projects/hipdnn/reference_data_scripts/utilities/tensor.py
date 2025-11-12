@@ -23,10 +23,10 @@ class TensorAttributes:
         }
 
     def to_gpu(self):
-        tensor = self.tensor.cuda()
+        self.tensor = self.tensor.cuda()
 
     def to_cpu(self):
-        tensor = self.tensor.cpu()
+        self.tensor = self.tensor.cpu()
 
     @staticmethod
     def empty(dtype: torch.dtype=torch.float, dims: list[int]=[], uid: int=None, name: str="", virtual: bool=False):
