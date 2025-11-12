@@ -298,6 +298,60 @@ def isTT(kernel):
 def isTN(kernel):
     return kernel["ProblemType"]["TransposeA"] and not kernel["ProblemType"]["TransposeB"]
 
+def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
+
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+
+    if isTN(kernel) and TLDS == 1:
+
+        nglshift = nllshift = 16
+        #zb03
+        syncTable = [0, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Permit last 2 ds reads B."),
+                    11, SWaitCnt(dscnt=4+1, vlcnt=-1, vscnt=-1, comment="4 ds reads A_x1 launched, 1 ds reads B_x1 launched."),
+                    11, SBarrier(comment=""),
+                    24, SWaitCnt(dscnt=2, vlcnt=3+3, vscnt=-1, comment="2 ss reads of B x1. 3 grs this iter + 3 from previous."),
+                    24, SBarrier(comment=""),
+                    31, SWaitCnt(dscnt=1+2+1, vlcnt=6+2, vscnt=-1, comment="1 ds reads of B x1 + 3 Ax0_i+1. 6 GRs launched + 2 left."),
+                    31, SBarrier(comment=""),
+                    38, SWaitCnt(dscnt=6, vlcnt=9+2, vscnt=-1, comment="DS reads launched this iter. 9 GRs this iter + 2 GRs left."),
+                    38, SBarrier(comment=""),
+                    43, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Only global reads for this iter"),
+                    43, SBarrier(comment="")]
+
+        syncCode = syncTable[1::2]
+        optSchedule = {
+            'SYNC'   : [syncTable[::2]],
+            'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
+            'GRIncB' : [[9,10,11,12,13,14,15,16,17]],
+            'LRA0'   : [[1,3,5,7,  12,14,16,18],  # these are for loading A x1 registers
+                        [2,4,6,8,  13,15,17,19]],
+            'LRB0'   : [[ 9,  20,22], # these are for loading B x1 registers
+                        [10,  21,23]],
+            'GRA'    : [[18,18,20,20,22,22,   25,25,27,27,29,29, 32,32,33,33],
+                        [19,19,21,21,23,23,   26,26,28,28,30,30, 32,32,34,34]],
+            'GRB'    : [[35,35,  39,39,41,41],
+                        [36,36,  40,40,42,42]],
+            'LRA1'   : [[25,27,  32,34,36,  39,40,43],
+                        [26,28,  33,35,37,  39,40,44]],
+            'LRB1'   : [[41, 44,46],
+                        [41, 45,47]],
+            'LRSA'   : [[24]], # this must come before next reads of A X0 - so the LRA1 
+            'LRSB'   : [[40]], # this must come before next reads of B X0 - so the LRB1
+            'LWSA'   : [[35]],  # swap after last gr a
+            'LWSB'   : [[45]],  # swap after last gr b
+            'LCC'   : [[47, 47]],
+        }
+
+    else:
+        return False, None
+
+
+    numMfma = 48
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
 def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
 
@@ -660,6 +714,7 @@ def hasCustomSchedule(kernel):
     is256x256x128DTL = [MT0, MT1, DU, PGR, PLR, DTL] == [256, 256, 128, 2, 0, True]
     is160x256x64DTL = [MT0, MT1, DU, PGR, PLR, DTL] == [160, 256, 64, 2, 1, True]
     is256x160x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL] == [256, 160, 64, 2, 1, True]
+    is256x96x64DTL = [MT0, MT1, DU, PGR, PLR, DTL] == [256, 96, 64, 2, 1, True]
 
     if is256x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
         return _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS)
@@ -671,5 +726,7 @@ def hasCustomSchedule(kernel):
         return _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS)
     elif is256x160x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
         return _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS)
+    elif is256x96x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16,16,32,1] and MIWG == [2,2]:
+        return _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS)
 
     return False, None
