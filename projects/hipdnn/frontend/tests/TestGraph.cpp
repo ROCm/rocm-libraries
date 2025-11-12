@@ -1427,6 +1427,7 @@ TEST_F(TestGraph, CanSuccessfullyCreateExecutionPlans)
         });
 
     auto engineConfigDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x3345);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
         .WillOnce([&engineConfigDesc](hipdnnBackendDescriptorType_t,
                                       hipdnnBackendDescriptor_t* descriptor) {
@@ -1434,6 +1435,38 @@ TEST_F(TestGraph, CanSuccessfullyCreateExecutionPlans)
             return HIPDNN_STATUS_SUCCESS;
         });
     EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc));
+
+    // Get engine from first config (ID = 10)
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineConfigDesc,
+                                    HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    nullptr,
+                                    _))
+        .WillOnce([&engineDesc](hipdnnBackendDescriptor_t,
+                                hipdnnBackendAttributeName_t,
+                                hipdnnBackendAttributeType_t,
+                                int64_t,
+                                int64_t*,
+                                void* arrayOfElements) {
+            *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = engineDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Get ID from first engine
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t*,
+                     void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements) = 10;
+            return HIPDNN_STATUS_SUCCESS;
+        });
 
     // Second call: actual data retrieval
     EXPECT_CALL(*_mockBackend,
@@ -1480,7 +1513,7 @@ TEST_F(TestGraph, PreferredEngineIdSelectsSpecificConfig)
 
     // Set preferred engine ID
     int64_t preferredEngineId = 42;
-    graph.set_preferred_engine_id(preferredEngineId);
+    graph.set_preferred_engine_id_ext(preferredEngineId);
 
     auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
     EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
@@ -1678,7 +1711,7 @@ TEST_F(TestGraph, PreferredEngineIdFallsBackToTopConfig)
 
     // Set preferred engine ID that doesn't exist
     int64_t preferredEngineId = 999;
-    graph.set_preferred_engine_id(preferredEngineId);
+    graph.set_preferred_engine_id_ext(preferredEngineId);
 
     auto graphDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x1234);
     EXPECT_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
@@ -1878,7 +1911,6 @@ TEST_F(TestGraph, CheckSupportSucceedsWhenExecutionPlanCreated)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    const std::vector<HeuristicMode> heurModes = {HeuristicMode::FALLBACK};
     auto tensorAttributes = createBasicBatchnormGraph(graph);
     graph.build_operation_graph(_handle);
 
@@ -1899,34 +1931,72 @@ TEST_F(TestGraph, CheckSupportSucceedsWhenExecutionPlanCreated)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    graph.create_execution_plans(heurModes);
-
-    auto result = graph.check_support();
-    EXPECT_TRUE(result.is_good());
-    EXPECT_EQ(result.get_message(), "");
-}
-
-TEST_F(TestGraph, EngineConfigAndExecutionPlanAreFinalizedAfterBuildPlans)
-{
-    ::testing::FLAGS_gmock_verbose = "error";
-    Graph graph;
-    const std::vector<HeuristicMode> heurModes = {HeuristicMode::FALLBACK};
-    auto tensorAttributes = createBasicBatchnormGraph(graph);
-
-    ON_CALL(*_mockBackend, backendCreateAndDeserializeGraphExt(_, _, _))
-        .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
-    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _))
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
-    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
-
-    auto result = graph.build_operation_graph(_handle);
-    EXPECT_TRUE(result.is_good());
+    auto heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
+        .WillOnce(
+            [&heurDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = heurDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    EXPECT_CALL(*_mockBackend, backendFinalize(heurDesc));
 
     auto engineConfigDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x3345);
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
         .WillOnce([&engineConfigDesc](hipdnnBackendDescriptorType_t,
                                       hipdnnBackendDescriptor_t* descriptor) {
             *descriptor = engineConfigDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc));
+
+    // Get engine from first config (ID = 10)
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineConfigDesc,
+                                    HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    nullptr,
+                                    _))
+        .WillOnce([&engineDesc](hipdnnBackendDescriptor_t,
+                                hipdnnBackendAttributeName_t,
+                                hipdnnBackendAttributeType_t,
+                                int64_t,
+                                int64_t*,
+                                void* arrayOfElements) {
+            *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = engineDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Get ID from first engine
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t*,
+                     void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements) = 10;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Second call: actual data retrieval
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _,
+                                    NotNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* retrievedCount,
+                     void*) {
+            *retrievedCount = 1;
             return HIPDNN_STATUS_SUCCESS;
         });
 
@@ -1937,6 +2007,24 @@ TEST_F(TestGraph, EngineConfigAndExecutionPlanAreFinalizedAfterBuildPlans)
             *descriptor = executionPlanDesc;
             return HIPDNN_STATUS_SUCCESS;
         });
+
+    const std::vector<HeuristicMode> heurModes = {HeuristicMode::FALLBACK};
+    graph.create_execution_plans(heurModes);
+
+    auto result = graph.check_support();
+    EXPECT_TRUE(result.is_good());
+    EXPECT_EQ(result.get_message(), "");
+}
+
+TEST_F(TestGraph, ExecutionPlanisFinalizedAfterBuildPlans)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    auto tensorAttributes = createBasicBatchnormGraph(graph);
+    graph.build_operation_graph(_handle);
+
+    ON_CALL(*_mockBackend, backendCreateDescriptor(_, _))
+        .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
 
     ON_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
         .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
@@ -1952,27 +2040,89 @@ TEST_F(TestGraph, EngineConfigAndExecutionPlanAreFinalizedAfterBuildPlans)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    result = graph.create_execution_plans(heurModes);
-    EXPECT_TRUE(result.is_good());
+    auto heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
+        .WillOnce(
+            [&heurDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = heurDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    EXPECT_CALL(*_mockBackend, backendFinalize(heurDesc));
 
+    auto engineConfigDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x3345);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
+        .WillOnce([&engineConfigDesc](hipdnnBackendDescriptorType_t,
+                                      hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = engineConfigDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc));
+
+    // Get engine from first config (ID = 10)
     EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(executionPlanDesc,
-                                    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG,
+                backendGetAttribute(engineConfigDesc,
+                                    HIPDNN_ATTR_ENGINECFG_ENGINE,
                                     HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                     1,
+                                    nullptr,
                                     _))
-        .WillOnce([&engineConfigDesc](hipdnnBackendDescriptor_t,
-                                      hipdnnBackendAttributeName_t,
-                                      hipdnnBackendAttributeType_t,
-                                      int64_t,
-                                      const void* arrayOfElements) {
-            EXPECT_EQ(engineConfigDesc,
-                      *static_cast<const hipdnnBackendDescriptor_t*>(arrayOfElements));
+        .WillOnce([&engineDesc](hipdnnBackendDescriptor_t,
+                                hipdnnBackendAttributeName_t,
+                                hipdnnBackendAttributeType_t,
+                                int64_t,
+                                int64_t*,
+                                void* arrayOfElements) {
+            *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = engineDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Get ID from first engine
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t*,
+                     void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements) = 10;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Second call: actual data retrieval
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _,
+                                    NotNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* retrievedCount,
+                     void*) {
+            *retrievedCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+        .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
+                                       hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = executionPlanDesc;
             return HIPDNN_STATUS_SUCCESS;
         });
 
     EXPECT_CALL(*_mockBackend, backendFinalize(executionPlanDesc))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+
+    const std::vector<HeuristicMode> heurModes = {HeuristicMode::FALLBACK};
+    auto result = graph.create_execution_plans(heurModes);
+    EXPECT_TRUE(result.is_good());
 
     result = graph.build_plans();
     EXPECT_TRUE(result.is_good());
@@ -1983,19 +2133,11 @@ TEST_F(TestGraph, WorkspaceSizeIsRetrievedFromExecutionPlan)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     Graph graph;
-    const std::vector<HeuristicMode> heurModes = {HeuristicMode::FALLBACK};
     auto tensorAttributes = createBasicBatchnormGraph(graph);
     graph.build_operation_graph(_handle);
 
-    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _))
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
-    auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
-    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
-        .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
-                                       hipdnnBackendDescriptor_t* descriptor) {
-            *descriptor = executionPlanDesc;
-            return HIPDNN_STATUS_SUCCESS;
-        });
+    ON_CALL(*_mockBackend, backendCreateDescriptor(_, _))
+        .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
 
     ON_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
         .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
@@ -2011,6 +2153,84 @@ TEST_F(TestGraph, WorkspaceSizeIsRetrievedFromExecutionPlan)
             return HIPDNN_STATUS_SUCCESS;
         });
 
+    auto heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
+        .WillOnce(
+            [&heurDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = heurDesc;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    EXPECT_CALL(*_mockBackend, backendFinalize(heurDesc));
+
+    auto engineConfigDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2345);
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x3345);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINECFG_DESCRIPTOR, _))
+        .WillOnce([&engineConfigDesc](hipdnnBackendDescriptorType_t,
+                                      hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = engineConfigDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend, backendFinalize(engineConfigDesc));
+
+    // Get engine from first config (ID = 10)
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineConfigDesc,
+                                    HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    nullptr,
+                                    _))
+        .WillOnce([&engineDesc](hipdnnBackendDescriptor_t,
+                                hipdnnBackendAttributeName_t,
+                                hipdnnBackendAttributeType_t,
+                                int64_t,
+                                int64_t*,
+                                void* arrayOfElements) {
+            *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = engineDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Get ID from first engine
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t*,
+                     void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements) = 10;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Second call: actual data retrieval
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _,
+                                    NotNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* retrievedCount,
+                     void*) {
+            *retrievedCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    auto executionPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9876);
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, _))
+        .WillOnce([&executionPlanDesc](hipdnnBackendDescriptorType_t,
+                                       hipdnnBackendDescriptor_t* descriptor) {
+            *descriptor = executionPlanDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const std::vector<HeuristicMode> heurModes = {HeuristicMode::FALLBACK};
     graph.create_execution_plans(heurModes);
 
     int64_t workspaceSize = 123454;
@@ -2075,6 +2295,7 @@ TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
     // create_execution_plans mocks
     auto heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x2000);
     auto engineCfgDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x3000);
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x3345);
     auto execPlanDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x4000);
 
     EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
@@ -2113,6 +2334,39 @@ TEST_F(TestGraph, ExecutePacksVariantPackAndPassesTheCorrectArguments)
             *desc = engineCfgDesc;
             return HIPDNN_STATUS_SUCCESS;
         });
+
+    // Get engine from first config (ID = 10)
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(engineCfgDesc,
+                                    HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    nullptr,
+                                    _))
+        .WillOnce([&engineDesc](hipdnnBackendDescriptor_t,
+                                hipdnnBackendAttributeName_t,
+                                hipdnnBackendAttributeType_t,
+                                int64_t,
+                                int64_t*,
+                                void* arrayOfElements) {
+            *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = engineDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Get ID from first engine
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t*,
+                     void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements) = 10;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(heurDesc,
                                     HIPDNN_ATTR_ENGINEHEUR_RESULTS,

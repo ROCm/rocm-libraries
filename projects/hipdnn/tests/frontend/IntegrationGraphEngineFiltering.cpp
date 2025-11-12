@@ -150,7 +150,7 @@ protected:
         // Set preferred engine ID if specified
         if(testCase.preferredEngineId.has_value())
         {
-            graph->set_preferred_engine_id(testCase.preferredEngineId);
+            graph->set_preferred_engine_id_ext(testCase.preferredEngineId);
         }
 
         auto result = graph->validate();
