@@ -306,7 +306,9 @@ using DataLayoutB   = col_major;
 using DataLayoutC   = row_major;
 using DataLayoutLds = col_major;
 using DataLayoutV   = col_major;
-// can't modify
+
+// It's for 2rd GEMM,currently not support modify
+// If switching to col_major, code modifications will be required.
 using DataLayoutLds_new = row_major;
 ///
 /// Fragment types
