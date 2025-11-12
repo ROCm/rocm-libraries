@@ -4259,7 +4259,7 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
   NumLoadsPerpendicularB: 4
 */
 
-#else
+#elif defined(CFF_CGEMM_CHOICE_0)
 
 /* Cijk_Alik_Bljk_CB_MT008x008x16_K1_NT64_SU04_TTNE04 */
 
@@ -4380,9 +4380,6 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
 
     /* allocate local memory */
     __shared__ DATA_TYPE localMemory[LDS_NUM_ELEMENTS];
-    DATA_TYPE ZERO;
-    ZERO.x = 0;
-    ZERO.y = 0;
 
     /******************************************/
     /* Global Read Addresses                  */
@@ -4458,10 +4455,10 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
     auto globalReadB_0_1 = reinterpret_cast<VECTOR_TYPE const*>(B + globalReadOffsetB_0_1);
 
     /* global read addresses: increments a */
-    unsigned long globalReadIncAL = static_cast<unsigned long>(strideAL) * DEPTHU;
+    unsigned long globalReadIncAL = static_cast<unsigned long>(strideAL) * DEPTHU / VECTOR_WIDTH;
 
     /* global read addresses: increments b */
-    unsigned long globalReadIncBL = static_cast<unsigned long>(strideBL) * DEPTHU;
+    unsigned long globalReadIncBL = static_cast<unsigned long>(strideBL) * DEPTHU / VECTOR_WIDTH;
 
     /******************************************/
     /* Local Write Addresses                  */
@@ -4542,16 +4539,12 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
         b_0_1 = *globalReadB_0_1;
 
         /* global read inc a */
-        globalReadA_0_0 = reinterpret_cast<VECTOR_TYPE const*>(
-            reinterpret_cast<DATA_TYPE const*>(globalReadA_0_0) + globalReadIncAL);
-        globalReadA_0_1 = reinterpret_cast<VECTOR_TYPE const*>(
-            reinterpret_cast<DATA_TYPE const*>(globalReadA_0_1) + globalReadIncAL);
+        globalReadA_0_0 += globalReadIncAL;
+        globalReadA_0_1 += globalReadIncAL;
 
         /* global read inc b */
-        globalReadB_0_0 = reinterpret_cast<VECTOR_TYPE const*>(
-            reinterpret_cast<DATA_TYPE const*>(globalReadB_0_0) + globalReadIncBL);
-        globalReadB_0_1 = reinterpret_cast<VECTOR_TYPE const*>(
-            reinterpret_cast<DATA_TYPE const*>(globalReadB_0_1) + globalReadIncBL);
+        globalReadB_0_0 += globalReadIncBL;
+        globalReadB_0_1 += globalReadIncBL;
         __syncthreads();
 
         /* local write a */
@@ -4637,12 +4630,12 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
     /******************************************/
 
     /* global read a */
-    a_0_0 = (globalReadOffsetAL_0 >= (sizeL % DEPTHU)) ? ZERO : *globalReadA_0_0;
-    a_0_1 = (globalReadOffsetAL_0 >= (sizeL % DEPTHU)) ? ZERO : *globalReadA_0_1;
+    a_0_0 = (globalReadOffsetAL_0 >= (sizeL % DEPTHU)) ? DATA_TYPE{} : *globalReadA_0_0;
+    a_0_1 = (globalReadOffsetAL_0 >= (sizeL % DEPTHU)) ? DATA_TYPE{} : *globalReadA_0_1;
 
     /* global read b */
-    b_0_0 = (globalReadOffsetBL_0 >= (sizeL % DEPTHU)) ? ZERO : *globalReadB_0_0;
-    b_0_1 = (globalReadOffsetBL_0 >= (sizeL % DEPTHU)) ? ZERO : *globalReadB_0_1;
+    b_0_0 = (globalReadOffsetBL_0 >= (sizeL % DEPTHU)) ? DATA_TYPE{} : *globalReadB_0_0;
+    b_0_1 = (globalReadOffsetBL_0 >= (sizeL % DEPTHU)) ? DATA_TYPE{} : *globalReadB_0_1;
 
     /* local write init pointers a */
     localWriteA_0_0 = reinterpret_cast<VECTOR_TYPE*>(localMemory + localWriteOffsetA_0_0);
