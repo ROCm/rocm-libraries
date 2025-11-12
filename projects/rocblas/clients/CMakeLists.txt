@@ -159,8 +159,10 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
       find_libblis(gcc)
       if(NOT BLAS_LIBRARY)
         find_libblis(aocc)
+        set(WARN_NOT_ILP64_PREFERRED true) # found via aocc
       endif()
       if(NOT BLAS_LIBRARY)
+        set(WARN_NOT_ILP64_PREFERRED false) # reset warning, not found via installed aocc
         if(EXISTS      "${BUILD_DIR}/deps/amd-blis/lib/ILP64/libblis-mt.a") # 4.0 and 4.1.0
           set( BLAS_LIBRARY ${BUILD_DIR}/deps/amd-blis/lib/ILP64/libblis-mt.a )
           set( BLIS_INCLUDE_DIR ${BUILD_DIR}/deps/amd-blis/include/ILP64 )
@@ -186,8 +188,6 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
             endif()
           endif()
         endif()
-      else()
-        set(WARN_NOT_ILP64_PREFERRED TRUE) # found via aocc
       endif()
     else()
       find_package( BLAS REQUIRED )
