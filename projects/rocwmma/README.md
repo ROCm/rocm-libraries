@@ -90,7 +90,7 @@ pip3 install -r sphinx/requirements.txt
 python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
 ```
 
-The HTML documentation can be viewed in your browser by opening `docs/_build/html/index.html` result.
+The HTML documentation can be viewed in your browser by opening the `docs/_build/html/index.html` result.
 
 ### Pdf
 
