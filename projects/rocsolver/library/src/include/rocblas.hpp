@@ -2261,11 +2261,13 @@ rocblas_status rocblasCall_trsm_mem(rocblas_side side,
         no_opt_size could be used in the future if we generalize the use of
         rocblas_workmode parameter **/
 
-    int64_t m_64 = m;
-    int64_t n_64 = n;
-    int64_t lda_64 = lda;
-    int64_t ldb_64 = ldb;
-    int64_t batch_count_64 = batch_count;
+    int64_t const m_64 = m;
+    int64_t const n_64 = n;
+    int64_t const lda_64 = lda;
+    int64_t const ldb_64 = ldb;
+    int64_t const batch_count_64 = batch_count;
+
+    rocblas_status istat = rocblas_status_success;
 
     // can't infer batched based on input params
 
@@ -2279,7 +2281,7 @@ rocblas_status rocblasCall_trsm_mem(rocblas_side side,
         size_t w_invA_arr_size = 0;
         size_t w_x_tmp_size_backup = 0;
 
-        rocblas_status const istat = rocblas_internal_trsm_batched_workspace_max_size_64<T>(
+        istat = rocblas_internal_trsm_batched_workspace_max_size_64<T>(
             side, m_64, n_64, batch_count_64,
 
             &w_x_tmp_size, &w_x_tmp_arr_size, &w_invA_size, &w_invA_arr_size, &w_x_tmp_size_backup);
@@ -2290,8 +2292,6 @@ rocblas_status rocblasCall_trsm_mem(rocblas_side side,
         *x_temp_arr = w_x_tmp_arr_size;
         *invA = w_invA_size;
         *invA_arr = w_invA_arr_size;
-
-        return (istat);
     }
     else
     {
@@ -2299,10 +2299,10 @@ rocblas_status rocblasCall_trsm_mem(rocblas_side side,
         size_t w_invA_size = 0;
         size_t w_x_tmp_size_backup = 0;
 
-        rocblas_status const istat = rocblas_internal_trsm_workspace_max_size_64<T>(
-            side, m_64, n_64, batch_count_64,
+        istat = rocblas_internal_trsm_workspace_max_size_64<T>(side, m_64, n_64, batch_count_64,
 
-            &w_x_tmp_size, &w_invA_size, &w_x_tmp_size_backup);
+                                                               &w_x_tmp_size, &w_invA_size,
+                                                               &w_x_tmp_size_backup);
 
         w_x_tmp_size = std::max(w_x_tmp_size, w_x_tmp_size_backup);
 
@@ -2311,8 +2311,36 @@ rocblas_status rocblasCall_trsm_mem(rocblas_side side,
         *invA = w_invA_size;
         *invA_arr = sizeof(T*) * batch_count_64;
 
-        return (istat);
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        };
+
+        {
+            // ----------------------------------------------
+            // extra check for robustness, should be harmless
+            // ----------------------------------------------
+            int64_t supplied_invA_size = 0;
+
+            size_t w_x_tmp_size = 0;
+            size_t w_x_tmp_arr_size = 0;
+            size_t w_invA_size = 0;
+            size_t w_invA_arr_size = 0;
+            size_t w_x_tmp_size_backup = 0;
+
+            istat = rocblas_internal_trsm_workspace_size_64<T>(
+                side, transA, m_64, n_64, lda_64, ldb_64, batch_count_64, supplied_invA_size,
+
+                &w_x_tmp_size, &w_x_tmp_arr_size, &w_invA_size, &w_invA_arr_size,
+                &w_x_tmp_size_backup);
+
+            *x_temp = std::max(*x_temp, std::max(w_x_tmp_size, w_x_tmp_size_backup));
+            *x_temp_arr = std::max(*x_temp_arr, w_x_tmp_arr_size);
+            *invA = std::max(*invA, w_invA_size);
+            *invA_arr = std::max(*invA_arr, w_invA_arr_size);
+        }
     }
+    return (istat);
 }
 
 // trsm
