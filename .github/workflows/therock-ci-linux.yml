@@ -47,7 +47,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: b40c1b3bf23f1d8248bdf403aa6b89572d4f9a08 # TODO: Add rocWMMA; TheRock PR: #1938
+          ref: d24cccc1820fa5469b88c0f14e36a14349d38cac # 2025-11-12 commit
 
       - name: Install python deps
         run: |
