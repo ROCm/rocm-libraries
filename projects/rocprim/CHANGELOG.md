@@ -2,6 +2,50 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM 4.1.0 for ROCm 7.1
+
+### Added
+
+* Added `get_sreg_lanemask_lt`, `get_sreg_lanemask_le`, `get_sreg_lanemask_gt` and `get_sreg_lanemask_ge`.
+* Added `rocprim::transform_output_iterator` and `rocprim::make_transform_output_iterator`.
+* Added experimental support for SPIR-V, to use the correct tuned config for part of the appliable algorithms.
+* Added a new cmake option, `BUILD_OFFLOAD_COMPRESS`. When rocPRIM is build with this option enabled, the `--offload-compress` switch is passed to the compiler. This causes the compiler to compress the binary that it generates. Compression can be useful in cases where you are compiling for a large number of targets, since this often results in a large binary. Without compression, in some cases, the generated binary may become so large symbols are placed out of range, resulting in linking errors. The new `BUILD_OFFLOAD_COMPRESS` option is set to `ON` by default.
+* Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
+* Added `rocprim::apply` which applies a function to a `rocprim::tuple`.
+* Added a new cmake option, `BENCHMARK_USE_AMDSMI`. It is set to `OFF` by default. When this option is set to `ON`, it lets benchmarks use AMD SMI to output more GPU statistics.
+* Added missing benchmarks, such that every autotuned specialization is now benchmarked.
+* Added `apply_config_improvements.py`, which generates improved configs by taking the best specializations from old and new configs.
+  * Run the script with `--help` for usage instructions, and see `projects/rocprim/docs/concepts/tuning.rst` for documentation.
+* Added the first tested example program for `device_search`, which is linked in the documentation.
+
+### Changed
+
+* Changed tests to support `ptr-to-const` output in `/test/rocprim/test_device_batch_memcpy.cpp`.
+
+### Optimizations
+
+* Improved performance of many algorithms, by updating their tuned configs.
+  * 891 specializations have been improved.
+  * 399 specializations have been added.
+
+### Upcoming changes
+
+* Deprecated the `->` operator for the `zip_iterator`.
+
+### Resolved issues
+
+* Fixed `device_select`, `device_merge`, and `device_merge_sort` not allocating the correct amount of virtual shared memory on the host.
+* Fixed the `->` operator for the `transform_iterator`, the `texture_cache_iterator` and the `arg_index_iterator`, by now returning a proxy pointer.
+  * The `arg_index_iterator` also now only returns the internal iterator for the `->`.
+* Fixed the issue where `rocprim::device_scan_by_key` failed when performing an "in-place" inclusive scan by reusing "keys" as output, by adding a buffer to store the last keys of each block (excluding the last block). This fix only affects the specific case of reusing "keys" as output in an inclusive scan, and does not affect other cases.
+
+## rocPRIM 4.0.1 for ROCm 7.0.2
+
+### Resolved issues
+
+* Fixed compilation issue when using `rocprim::texture_cache_iterator`.
+* Fixed a HIP version check used to determine whether hipStreamLegacy is supported. This resolves runtime errors that occur when hipStreamLegacy is used in versions of ROCm later than 6.4.
+
 ## rocPRIM 4.0.0 for ROCm 7.0
 
 ### Added
@@ -25,6 +69,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added initial value support for warp- and block-level inclusive scan.
 * Added support for building tests with device-side random data generation, making them finish faster. This requires rocRAND, and is enabled with the `WITH_ROCRAND=ON` build flag.
 * Added tests and documentation to `lookback_scan_state`. It is still in the `detail` namespace.
+
+### Optimizations
+
+* Improved performance of `rocprim::device_select` and `rocprim::device_partition` when using multiple streams on the MI3XX architecture.
 
 ### Changed
 

@@ -39,7 +39,7 @@ extern "C" {
 *  \p rocsparse_csr2coo converts the CSR array containing the row offsets, that point
 *  to the start of every row, into a COO array of row indices.
 *
-*  \p rocsparse_csr2coo can also be used to convert a CSC array containing the column offsets 
+*  \p rocsparse_csr2coo can also be used to convert a CSC array containing the column offsets
 *  into a COO array of column indices.
 *
 *  \note
@@ -73,47 +73,7 @@ extern "C" {
 *
 *  \par Example
 *  This example converts a CSR matrix into a COO matrix.
-*  \code{.c}
-*      //     1 2 0 3 0
-*      // A = 0 4 5 0 0
-*      //     6 0 0 7 8
-*
-*      rocsparse_int m   = 3;
-*      rocsparse_int n   = 5;
-*      rocsparse_int nnz = 8;
-*
-*      csr_row_ptr[m+1] = {0, 3, 5, 8};             // device memory
-*      csr_col_ind[nnz] = {0, 1, 3, 1, 2, 0, 3, 4}; // device memory
-*      csr_val[nnz]     = {1, 2, 3, 4, 5, 6, 7, 8}; // device memory
-*
-*      // Allocate COO matrix arrays
-*      rocsparse_int* coo_row_ind;
-*      rocsparse_int* coo_col_ind;
-*      float* coo_val;
-*
-*      hipMalloc((void**)&coo_row_ind, sizeof(rocsparse_int) * nnz);
-*      hipMalloc((void**)&coo_col_ind, sizeof(rocsparse_int) * nnz);
-*      hipMalloc((void**)&coo_val, sizeof(float) * nnz);
-*
-*      // Convert the csr row offsets into coo row indices
-*      rocsparse_csr2coo(handle,
-*                        csr_row_ptr,
-*                        nnz,
-*                        m,
-*                        coo_row_ind,
-*                        rocsparse_index_base_zero);
-*
-*      // Copy the column and value arrays
-*      hipMemcpy(coo_col_ind,
-*                csr_col_ind,
-*                sizeof(rocsparse_int) * nnz,
-*                hipMemcpyDeviceToDevice);
-*
-*      hipMemcpy(coo_val,
-*                csr_val,
-*                sizeof(float) * nnz,
-*                hipMemcpyDeviceToDevice);
-*  \endcode
+*  \snippet example_rocsparse_csr2coo.cpp doc example
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_csr2coo(rocsparse_handle     handle,

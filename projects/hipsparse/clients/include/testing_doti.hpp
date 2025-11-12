@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_doti_bad_arg(void)
+void testing_doti_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int                  nnz       = 100;

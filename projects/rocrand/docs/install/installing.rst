@@ -35,15 +35,9 @@ rocRAND has the following prerequisites:
 
       If GoogleTest is not already installed, it will be automatically downloaded and built.
 
-The following additional components are required to use rocRAND on AMD platforms:
-
 *  ROCm (see the :doc:`ROCm installation guide <rocm-install-on-linux:install/quick-start>`)
 *  A HIP-clang compiler, which must be set as the C++ compiler on the ROCm platform.
 
-The following additional components are required to use rocRAND on NVIDIA CUDA platforms:
-
-*  HIP
-*  The latest CUDA SDK
 
 Install using prebuilt packages
 ===============================
@@ -153,9 +147,7 @@ To build rocRAND, use CMake with the following configuration:
    # Install
    [sudo] make install
 
-To build for the ROCm platform, ``<compiler>`` should be set to ``hipcc``. To build for CUDA,
-``<compiler>`` should be set to the host compiler. For CUDA, if the location of ``nvcc`` isn't on the path, it might need to be
-passed explicitly using ``-DCMAKE_CUDA_COMPILER=<path-to-nvcc>``.
+To build for the ROCm platform, ``<compiler>`` should be set to ``hipcc``.
 Additionally, the directory where ``FindHIP.cmake`` is installed needs to be passed explicitly
 using ``-DCMAKE_MODULE_PATH``. By default, this file is installed in ``/opt/rocm/hip/cmake``.
 
@@ -165,6 +157,9 @@ In addition to the built-in CMake options, the following configuration options a
 * ``BUILD_TEST``: Controls whether to build the rocRAND tests. Defaults to ``OFF``.
 * ``BUILD_BENCHMARK``: Controls whether to build the rocRAND benchmarks. Defaults to ``OFF``.
 * ``BUILD_ADDRESS_SANITIZER`` Controls whether to build with address sanitization enabled. Defaults to ``OFF``.
+* ``USE_SYSTEM_LIB``. Defaults to ``OFF``. Set to ``ON`` to use the installed ``ROCm`` libraries when building the
+  tests. For this option to take effect, ``BUILD_TEST`` must be ``ON`` and the version of the installed ``rocrand``
+  library must be compatible with the version of the tests.
 
 To install rocRAND with a non-standard installation location of ROCm, pass ``-DCMAKE_PREFIX_PATH=</path/to/opt/rocm/>``
 or set the environment variable ``ROCM_PATH`` to ``path/to/opt/rocm``.

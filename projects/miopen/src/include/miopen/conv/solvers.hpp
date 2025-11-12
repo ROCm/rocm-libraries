@@ -4498,6 +4498,7 @@ struct PerformanceConfigHipImplicitGemm3DGroupFwdXdlops
     : PerfConfigBaseCK<PerformanceConfigHipImplicitGemm3DGroupFwdXdlops>
 {
     int index             = 0;
+    int split_k           = 0; // not used for this solver, but required for AI heuristics interface
     std::string kernel_id = "";
     std::vector<std::string> valid_kernels;
 
@@ -4512,7 +4513,8 @@ struct PerformanceConfigHipImplicitGemm3DGroupFwdXdlops
         : PerformanceConfigHipImplicitGemm3DGroupFwdXdlops(0, "")
     {
     }
-    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
+                                               const miopen::conv::ProblemDescription&);
     MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
     MIOPEN_INTERNALS_EXPORT bool IsValidValue() const;
     bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
@@ -4528,6 +4530,7 @@ private:
     void Init(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
+    void InitValidKernels(const miopen::conv::ProblemDescription& problem);
 };
 
 struct ConvHipImplicitGemm3DGroupFwdXdlops final
@@ -4556,11 +4559,8 @@ struct ConvHipImplicitGemm3DGroupFwdXdlops final
     GetSolution(const ExecutionContext&,
                 const miopen::conv::ProblemDescription&,
                 const PerformanceConfigHipImplicitGemm3DGroupFwdXdlops&) const override;
-    /// \ref igemm_get_wti_magic_number
-    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
-    {
-        return 0.02f;
-    };
+    MIOPEN_INTERNALS_EXPORT float GetWti(const ExecutionContext&,
+                                         const miopen::conv::ProblemDescription&) const override;
 
     MIOPEN_INTERNALS_EXPORT size_t GetWorkspaceSize(
         const ExecutionContext&, const miopen::conv::ProblemDescription&) const override;
@@ -4590,7 +4590,8 @@ struct PerformanceConfigHipImplicitGemm3DGroupWrwXdlops
         : PerformanceConfigHipImplicitGemm3DGroupWrwXdlops(0, "")
     {
     }
-    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
+                                               const miopen::conv::ProblemDescription&);
     MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
     MIOPEN_INTERNALS_EXPORT bool IsValidValue() const;
     bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
@@ -4606,6 +4607,7 @@ private:
     void Init(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
+    void InitValidKernels(const miopen::conv::ProblemDescription& problem);
 };
 
 struct ConvHipImplicitGemm3DGroupWrwXdlops final
@@ -4647,12 +4649,17 @@ struct ConvHipImplicitGemm3DGroupWrwXdlops final
 private:
     template <typename DataType>
     bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
+
+    template <typename DataType>
+    std::size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription&) const;
+    size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
 };
 
 struct PerformanceConfigHipImplicitGemm3DGroupBwdXdlops
     : PerfConfigBaseCK<PerformanceConfigHipImplicitGemm3DGroupBwdXdlops>
 {
     int index;
+    int split_k = 0; // not used for this solver, but required for AI heuristics interface
     std::string kernel_id;
     std::vector<std::string> valid_kernels;
     PerformanceConfigHipImplicitGemm3DGroupBwdXdlops(int idx, std::string kernl_id)
@@ -4667,7 +4674,8 @@ struct PerformanceConfigHipImplicitGemm3DGroupBwdXdlops
         : PerformanceConfigHipImplicitGemm3DGroupBwdXdlops(0, "")
     {
     }
-    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
+                                               const miopen::conv::ProblemDescription&);
     MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
     MIOPEN_INTERNALS_EXPORT bool IsValidValue() const;
     bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
@@ -4683,6 +4691,7 @@ private:
     void Init(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
+    void InitValidKernels(const miopen::conv::ProblemDescription& problem);
 };
 
 struct ConvHipImplicitGemm3DGroupBwdXdlops final
@@ -4819,6 +4828,8 @@ struct ConvHipImplicitGemmGroupBwdXdlops final
 private:
     template <typename DataType>
     bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
+
+    size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
 };
 
 struct PerformanceConfigHipImplicitGemmGroupWrwXdlops
@@ -4913,6 +4924,8 @@ struct ConvHipImplicitGemmGroupWrwXdlops final
 private:
     template <typename DataType>
     bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
+
+    size_t GetCKMaxWorkspaceSize(const miopen::conv::ProblemDescription& problem) const;
 };
 
 } // namespace conv

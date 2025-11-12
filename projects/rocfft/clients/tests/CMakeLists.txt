@@ -100,6 +100,13 @@ add_executable( rtc_helper_crash rtc_helper_crash.cpp )
 # of a mismatch
 target_compile_options( rocfft-test PRIVATE -Xarch_device -O3 )
 
+# callback functions need to be built as relocatable device code
+# (causes failure at link stage on Windows)
+if (NOT WIN32)
+  target_compile_options( rocfft-test PRIVATE -fgpu-rdc )
+  target_link_options( rocfft-test PRIVATE -fgpu-rdc )
+endif()
+
 find_package( Boost REQUIRED )
 set( Boost_DEBUG ON )
 set( Boost_DETAILED_FAILURE_MSG ON )
@@ -108,7 +115,57 @@ option( BUILD_FFTW "Download and build FFTW" OFF )
 
 # look for installed FFTW if we weren't asked to build it
 if( NOT BUILD_FFTW )
+  # searching FFTW with FindFFTW.cmake that is provided by project
+  # because distro versions of FFTW does not include the cmake specific
+  # helper files
   find_package( FFTW 3.0 MODULE COMPONENTS FLOAT DOUBLE )
+  if( FFTW_FOUND )
+    message(STATUS "FFTW found by FindFFTW.cmake")
+  else()
+    # searching fftw versions build from source code which contain
+    # cmake helper files like FFTW3Config.cmake
+    find_package(FFTW3 CONFIG QUIET )
+    find_package(FFTW3f CONFIG QUIET )
+    if( FFTW3_FOUND AND FFTW3f_FOUND )
+      message(STATUS "FFTW3 found by using the FFTW3Config.cmake")
+      if ( NOT WIN32 )
+        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_RELEASE)
+        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_RELEASE)
+      else()
+        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_RELEASE)
+        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_RELEASE)
+      endif()
+
+      # Look for omp (preferred) or thread libraries. These are not a
+      # hard requirement, but are nice to have to make FFTW run faster.
+      # To simplify the testing, we will not accept a mixed combination
+      # where FFTW is only build agauns the OMP library support and
+      # FFTWF is only build with the THREADS library support.
+      find_library(FFTW_OMP_LIBRARY NAMES fftw3_omp HINTS ${FFTW3_LIBRARY_DIRS})
+      find_library(FFTWF_OMP_LIBRARY NAMES fftw3f_omp HINTS ${FFTW3f_LIBRARY_DIRS})
+      if ( FFTW_OMP_LIBRARY AND FFTWF_OMP_LIBRARY )
+        list( APPEND fftw3_libs ${FFTW_OMP_LIBRARY} )
+        list( APPEND fftw3f_libs ${FFTWF_OMP_LIBRARY} )
+        set( FFTW_MULTITHREAD TRUE )
+      else()
+        find_library( FFTW_THREADS_LIBRARY fftw3_threads HINTS ${FFTW3_LIBRARY_DIRS} )
+        find_library( FFTWF_THREADS_LIBRARY fftw3f_threads HINTS ${FFTW3f_LIBRARY_DIRS} )
+        if ( FFTW_THREADS_LIBRARY AND FFTWF_THREADS_LIBRARY )
+          list( APPEND fftw3_libs ${FFTW_THREADS_LIBRARY} )
+          list( APPEND fftw3f_libs ${FFTWF_THREADS_LIBRARY} )
+          set( FFTW_MULTITHREAD TRUE )
+        endif()
+      endif()
+
+      set (FFTW_FOUND ${FFTW3_FOUND})
+      set (FFTW_INCLUDE_DIRS ${FFTW3_INCLUDE_DIRS})
+      set (FFTW_LIBRARIES ${fftw3_libs} )
+      list( APPEND FFTW_LIBRARIES ${fftw3f_libs} )
+    endif()
+  endif()
+  message(STATUS "FFTW_FOUND: ${FFTW_FOUND}")
+  message(STATUS "FFTW_INCLUDE_DIRS: ${FFTW_INCLUDE_DIRS}")
+  message(STATUS "FFTW_LIBRARIES: ${FFTW_LIBRARIES}")
 endif()
 
 include( ExternalProject )
@@ -159,7 +216,7 @@ if( BUILD_FFTW OR NOT FFTW_FOUND )
                       DEPENDS fftw_double)
   ExternalProject_Get_Property( fftw_single source_dir binary_dir )
 
-  set(FFTW_INCLUDES
+  set(FFTW_INCLUDE_DIRS
       ${CMAKE_CURRENT_BINARY_DIR}/src/fftw/api)
   set(FFTW_LIBRARIES
       ${FFTW_LIBRARIES_DOUBLE}
@@ -180,23 +237,51 @@ endif()
 
 set( rocfft-test_include_dirs
   $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
-  $<BUILD_INTERFACE:${FFTW_INCLUDES}>
+  $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
   ${ROCM_CLANG_ROOT}/include
   )
 
 set( rocfft-test_link_libs
-  ${FFTW_LIBRARIES} OpenMP::OpenMP_CXX
+  ${FFTW_LIBRARIES}
   )
 
-include( ../cmake/build-gtest.cmake )
+option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
+if( BUILD_CLIENTS_TESTS_OPENMP )
+  # Attempt to find a config version, which provides openmp_LIB_DIR.
+  find_package( OpenMP CONFIG QUIET PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
+  if( NOT OpenMP_FOUND OR NOT DEFINED openmp_LIB_DIR )
+     # Fall-back to module mode.
+     find_package( OpenMP MODULE REQUIRED )
+     set( BUILD_RPATH "${HIP_CLANG_ROOT}/lib" )
+     set( INSTALL_RPATH "$ORIGIN/../llvm/lib" )
+  else()
+     set( BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}" )
+     set( INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}" )
+  endif()
+  if( TARGET OpenMP::omp )
+    set( ROCFFT_OPENMP_LIBRARY OpenMP::omp )
+  else()
+    set( ROCFFT_OPENMP_LIBRARY OpenMP::OpenMP_CXX )
+  endif()
+  list( APPEND rocfft-test_link_libs ${ROCFFT_OPENMP_LIBRARY} )
 
-if( BUILD_GTEST OR NOT GTEST_FOUND )
+  set_target_properties( rocfft-test PROPERTIES
+     BUILD_RPATH "{$BUILD_RPATH}"
+  )
+  set_target_properties( rocfft-test PROPERTIES
+    INSTALL_RPATH "${INSTALL_RPATH}"
+  )
+endif()
+
+find_package( GTest QUIET )
+
+if( GTest_FOUND )
+    target_link_libraries( rocfft-test PRIVATE GTest::gtest )
+else()
+  include( ../cmake/build-gtest.cmake )
   add_dependencies( rocfft-test gtest )
   list( APPEND rocfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
-  list( APPEND rocfft-test_link_libs ${GTEST_LIBRARIES} )
-else()  
-  list( APPEND rocfft-test_include_dirs $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
   list( APPEND rocfft-test_link_libs ${GTEST_LIBRARIES} )
 endif()
 
@@ -229,6 +314,7 @@ if ( USE_HIPRAND )
   PRIVATE
   hip::hiprand
   )
+  target_compile_definitions( rocfft-test PRIVATE USE_HIPRAND )
 endif()
 
 if( ROCFFT_MPI_ENABLE )
@@ -262,27 +348,15 @@ if( USE_CUDA )
     )
   target_compile_definitions( rocfft-test PRIVATE __HIP_PLATFORM_NVCC__ )
 endif( )
-target_link_libraries( rocfft-test PRIVATE ${ROCFFT_CLIENTS_HOST_LINK_LIBS} ${ROCFFT_CLIENTS_DEVICE_LINK_LIBS} )
+target_link_libraries( rocfft-test PRIVATE
+   ${ROCFFT_CLIENTS_HOST_LINK_LIBS}
+   ${ROCFFT_CLIENTS_DEVICE_LINK_LIBS} )
 
 include( ../../cmake/sqlite.cmake )
 target_link_libraries( rocfft-test PUBLIC ${ROCFFT_SQLITE_LIB} )
 target_include_directories( rocfft-test PRIVATE ${sqlite_local_SOURCE_DIR} )
 
 set_property( TARGET rocfft-test APPEND PROPERTY LINK_LIBRARIES ${ROCFFT_SQLITE_LIB} )
-
-option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
-
-if( BUILD_CLIENTS_TESTS_OPENMP )
-  find_package(OpenMP REQUIRED)
-  if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
-    target_link_libraries( rocfft-test PRIVATE OpenMP::OpenMP_CXX -L${HIP_CLANG_ROOT}/lib -Wl,-rpath=${HIP_CLANG_ROOT}/lib )
-    target_include_directories( rocfft-test PRIVATE ${HIP_CLANG_ROOT}/include )
-  else()
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-      target_link_libraries( rocfft-test PRIVATE OpenMP::OpenMP_CXX )
-    endif()
-  endif()
-endif()
 
 if(FFTW_MULTITHREAD)
   target_compile_options( rocfft-test PRIVATE -DFFTW_MULTITHREAD )
@@ -335,7 +409,16 @@ if( ROCFFT_MPI_ENABLE )
   # normal and dynamic-loading MPI worker processes
   foreach(worker rocfft_mpi_worker dyna_rocfft_mpi_worker)
     add_executable( ${worker} rocfft_mpi_worker.cpp )
-    if( BUILD_FFTW  OR NOT FFTW_FOUND )
+
+    if( BUILD_CLIENTS_TESTS_OPENMP )
+      set_target_properties( ${worker} PROPERTIES
+         BUILD_RPATH "${BUILD_RPATH}"
+      )
+      set_target_properties( ${worker} PROPERTIES
+        INSTALL_RPATH "${INSTALL_RPATH}"
+      )
+    endif()
+    if( BUILD_FFTW OR NOT FFTW_FOUND )
       add_dependencies( ${worker} fftw_double fftw_single )
     endif()
     target_include_directories( ${worker}
@@ -343,54 +426,57 @@ if( ROCFFT_MPI_ENABLE )
       ${CMAKE_BINARY_DIR}/include
       ${CMAKE_CURRENT_SOURCE_DIR}/../../library/include/
       ${MPI_C_INCLUDE_PATH}
-      $<BUILD_INTERFACE:${FFTW_INCLUDES}>
+      $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
     )
     target_compile_options( ${worker} PRIVATE ${WARNING_FLAGS} )
 
-  if ( ROCFFT_CRAY_MPI_ENABLE )
-    target_link_libraries( ${worker}
-      OpenMP::OpenMP_CXX 
-      hip::hiprand
-      hip::device
-      MPI::MPI_CXX
-      ${FFTW_LIBRARIES}
-      "mpi_gtl_hsa"
-    )
-      get_filename_component( MPI_LIBDIR ${MPI_LIBRARY} DIRECTORY )
-      target_link_directories( ${worker}
-	PRIVATE
-	${MPI_LIBDIR}/../../../../gtl/lib )
+    if ( ROCFFT_CRAY_MPI_ENABLE )
+      target_link_libraries( ${worker} PRIVATE
+        ${ROCFFT_OPENMP_LIBRARY}
+        hip::hiprand
+        hip::device
+        MPI::MPI_CXX
+        ${FFTW_LIBRARIES}
+        "mpi_gtl_hsa"
+      )
+        get_filename_component( MPI_LIBDIR ${MPI_LIBRARY} DIRECTORY )
+        target_link_directories( ${worker}
+  	PRIVATE
+  	${MPI_LIBDIR}/../../../../gtl/lib )
     else()
-    target_link_libraries( ${worker}
-      OpenMP::OpenMP_CXX 
-      hip::hiprand
-      hip::device
-      MPI::MPI_CXX
-      ${FFTW_LIBRARIES}
-    )    
+      target_link_libraries( ${worker} PRIVATE
+        ${ROCFFT_OPENMP_LIBRARY}
+        hip::hiprand
+        hip::device
+        MPI::MPI_CXX
+        ${FFTW_LIBRARIES}
+      )    
     endif()
+
+    target_compile_definitions( ${worker} PRIVATE USE_HIPRAND )
+
     set_target_properties(${worker}
                           PROPERTIES 
                           RUNTIME_OUTPUT_DIRECTORY 
                           ${TESTS_OUT_DIR})
     rocm_install(TARGETS ${worker} COMPONENT tests)
-    
+
   endforeach()
 
   # link normal MPI worker against rocFFT
-  target_link_libraries( rocfft_mpi_worker
+  target_link_libraries( rocfft_mpi_worker PRIVATE
     roc::rocfft
   )
 
   # dyna worker only needs to dynamically load libraries
   target_compile_definitions( dyna_rocfft_mpi_worker PRIVATE ROCFFT_DYNA_MPI_WORKER )
-  target_link_libraries( dyna_rocfft_mpi_worker
+  target_link_libraries( dyna_rocfft_mpi_worker PRIVATE
     ${CMAKE_DL_LIBS}
   )
 
 endif()
 
-set(COVERAGE_TEST_OPTIONS "--smoketest" CACHE STRING "Command line arguments for rocfft-test when generating a code coverage report")
+set(COVERAGE_TEST_OPTIONS "--smoketest;--gtest_filter=-*call*" CACHE STRING "Command line arguments for rocfft-test when generating a code coverage report")
 
 if(BUILD_CODE_COVERAGE)
   # Coverage won't work in a standalone build of the tests, as we can't
@@ -430,6 +516,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocfft-coverage_*.profraw -o ./coverage-report/rocfft.profdata
     COMMAND ${LLVM_COV} report -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata
     COMMAND ${LLVM_COV} show -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/librocfft.so -instr-profile=./coverage-report/rocfft.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 

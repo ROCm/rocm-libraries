@@ -228,6 +228,36 @@ namespace rocRoller
                 return rv;
             }
 
+            std::optional<int> getLoadForExchange(int exchangeTag, KernelGraph const& graph)
+            {
+                auto isLoadPredicate = [&](int operation) -> bool {
+                    auto maybeLoad = graph.control.get<LoadTiled>(operation);
+                    return maybeLoad.has_value();
+                };
+
+                auto findConnections = [&](int coordinate) -> std::optional<int> {
+                    for(auto c : graph.mapper.getCoordinateConnections(coordinate))
+                        if(isLoadPredicate(c.control))
+                            return c.control;
+                    return {};
+                };
+
+                auto exchangeTileTag = graph.mapper.get<MacroTile>(exchangeTag);
+                for(auto const edge :
+                    graph.coordinates.getNeighbours<GD::Downstream>(exchangeTileTag))
+                {
+                    auto maybeIndex = graph.coordinates.get<Index>(edge);
+                    if(!maybeIndex)
+                        continue;
+                    auto indexTileTag
+                        = only(graph.coordinates.getNeighbours<GD::Downstream>(edge)).value();
+                    auto tag = findConnections(indexTileTag);
+                    if(tag.has_value())
+                        return tag;
+                }
+                return {};
+            }
+
             bool isLoadForExchange(int loadTag, KernelGraph const& graph)
             {
                 auto isExchangePredicate = [&](int operation) -> bool {
@@ -377,8 +407,6 @@ namespace rocRoller
 
         KernelGraph AddPrefetch::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::AddPrefetch");
-
             auto graph = original;
             removeRedundantBodyEdges(graph);
             removeRedundantNOPs(graph);
@@ -601,8 +629,8 @@ namespace rocRoller
             }
 
             // StoreLDS next
-            auto storeLDScounter = 0;
-            auto direct2LDSTile  = 0;
+            auto storeLDScounter   = 0;
+            auto direct2LDSCounter = 0;
             for(auto load : loadsByUnroll[0])
             {
                 logger->debug("  prefetch: pre-loop commit lds: unroll {} user {}", 0, load.user);
@@ -614,12 +642,20 @@ namespace rocRoller
                 graph.mapper.connect<LDS>(preBarrier, ldsTileTag, storeLDScounter);
                 storeLDScounter++;
 
-                auto ldsTile = graph.coordinates.getNode<LDS>(ldsTileTag);
-                if(ldsTile.isDirect2LDS)
-                    direct2LDSTile++;
+                auto op = std::get<Operation>(graph.control.getElement(load.globalOperation));
+                if(std::holds_alternative<LoadTiled>(op))
+                {
+                    auto macroTile = graph.coordinates.get<MacroTile>(
+                        graph.mapper.get<MacroTile>(load.globalOperation));
+                    if(macroTile && macroTile->memoryType == MemoryType::WAVE_Direct2LDS)
+                    {
+                        direct2LDSCounter++;
+                    }
+                }
             }
 
-            auto prefetchDirect2LDS = ((direct2LDSTile > 0) && (storeLDScounter == direct2LDSTile));
+            auto prefetchDirect2LDS
+                = ((direct2LDSCounter > 0) && (storeLDScounter == direct2LDSCounter));
 
             graph.control.addElement(Body(), {scope}, {preChain[0]});
             for(uint i = 1; i < preChain.size(); ++i)
@@ -960,7 +996,7 @@ namespace rocRoller
             }
 
             //
-            // Make exchanges happen first!
+            // Make exchange scale loads happen first!
             //
             {
                 auto isExchangePredicate = graph.control.isElemType<Exchange>();
@@ -969,17 +1005,31 @@ namespace rocRoller
                 auto exchanges
                     = graph.control.findNodes(bodies, isExchangePredicate).to<std::vector>();
 
-                for(auto exchangeTag : exchanges)
+                std::map<int, int> scaleLoadU;
+
+                for(auto const exchangeTag : exchanges)
                 {
                     auto prefetchGlobalU
                         = (m_exchangeSegment[exchangeTag] + numInFlight) % numUnroll;
 
+                    auto loadTag = getLoadForExchange(exchangeTag, graph);
+                    AssertFatal(loadTag.has_value(),
+                                "couldn't find the load associated with the exchange");
+
+                    auto const search = scaleLoadU.find(loadTag.value());
+                    if(search == scaleLoadU.end() || search->second > prefetchGlobalU)
+                        scaleLoadU[loadTag.value()] = prefetchGlobalU;
+                }
+
+                for(auto const [loadTag, u] : scaleLoadU)
+                {
                     std::unordered_set<int> orderBeforeTags;
-                    for(auto info : loadsByUnroll[prefetchGlobalU])
+                    for(auto const info : loadsByUnroll[u])
                         orderBeforeTags.insert(info.globalChain);
 
-                    for(auto orderBeforeTag : orderBeforeTags)
-                        graph.control.addElement(Sequence(), {exchangeTag}, {orderBeforeTag});
+                    auto topOp = getTopSetCoordinate(graph, loadTag);
+                    for(auto const orderBeforeTag : orderBeforeTags)
+                        graph.control.addElement(Sequence(), {topOp}, {orderBeforeTag});
                 }
             }
         }
@@ -1385,11 +1435,10 @@ namespace rocRoller
                     for(auto op :
                         k.control.depthFirstVisit(starts, onlyFollowSequenceEdges, GD::Downstream))
                     {
-                        auto outgoing
-                            = k.control.getNeighbours(op, GD::Downstream).to<std::unordered_set>();
+                        auto outgoing = k.control.getNeighbours(op, GD::Downstream);
                         for(auto tag : m_prefetchDelete[forLoop])
                         {
-                            outgoing.erase(tag);
+                            std::erase(outgoing, tag);
                         }
                         if(outgoing.empty())
                         {
@@ -1402,6 +1451,8 @@ namespace rocRoller
 
         ConstraintStatus AcceptablePrefetchNodes(const KernelGraph& k)
         {
+            TIMER(t, "Constraint::AcceptablePrefetchNodes");
+
             ConstraintStatus retval;
 
             for(auto [forLoop, numUnroll] : findPrefetch(k))

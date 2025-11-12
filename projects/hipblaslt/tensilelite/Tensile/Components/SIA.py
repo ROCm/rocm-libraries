@@ -33,14 +33,13 @@ from ..Component import SIA
 
 from copy import deepcopy
 from typing import Tuple
-
 PRECISION = 100
 class SIA3(SIA):
     kernel = {"ScheduleIterAlg": 3}
     def __call__(self):
         assert(0)
 
-    def schedIntoIteration(self, writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, firstIter, lastLoop, lastLc, maxVmcnt, globalReadIncACode, globalReadIncBCode, isNGLL):
+    def schedIntoIteration(self, writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, firstIter, lastLoop, lastLc, globalReadIncACode, globalReadIncBCode, isNGLL):
         # Get schedule information
         numMfmaBetweenLWandBarrier, latencyLeft = getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB)
         #########
@@ -87,14 +86,14 @@ class SIA3(SIA):
             startIterItem = numLocalWriteModPerIter - (writer.states.lwStartMfmaIndex % writer.states.numMfmaPerIter) * numLocalWritesPerSched
             schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSched, localWriteEndIter, \
               itemsGRToSchedLater, itemsLWToSched, startIter, readsToWait, readsToWaitNGLL, \
-              firstIter, lastLc, maxVmcnt, isNGLL, startIterItem)
+              firstIter, lastLc, isNGLL, startIterItem)
 
 class SIA2(SIA):
     kernel = {"ScheduleIterAlg": 2}
     def __call__(self):
         assert(0)
 
-    def schedIntoIteration(self, writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, firstIter, lastLoop, lastLc, maxVmcnt, globalReadIncACode, globalReadIncBCode, isNGLL):
+    def schedIntoIteration(self, writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, firstIter, lastLoop, lastLc, globalReadIncACode, globalReadIncBCode, isNGLL):
         # Get schedule information
         numGlobalReadInsPerIter, numLocalWriteModPerIter, numEmptyGlobalReadIncCode = getScheduleParams(kernel)
         numLocalWritesPerSched = numLocalWriteModPerIter
@@ -115,14 +114,14 @@ class SIA2(SIA):
             readsToWait, readsToWaitNGLL = getReadsToWait(writer, kernel)
             schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSched, localWriteEndIter, \
               itemsGRToSchedLater, itemsLWToSched, startIter, readsToWait, readsToWaitNGLL, \
-              firstIter, lastLc, maxVmcnt, isNGLL)
+              firstIter, lastLc, isNGLL)
 
 class SIA1(SIA):
     kernel = {"ScheduleIterAlg": 1}
     def __call__(self):
         assert(0)
 
-    def schedIntoIteration(self, writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, firstIter, lastLoop, lastLc, maxVmcnt, globalReadIncACode, globalReadIncBCode, isNGLL):
+    def schedIntoIteration(self, writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, firstIter, lastLoop, lastLc, globalReadIncACode, globalReadIncBCode, isNGLL):
         # Get schedule information
         numGlobalReadInsPerIter, numLocalWriteModPerIter, numEmptyGlobalReadIncCode = getScheduleParams(kernel)
         numLocalWritesPerSched = numLocalWriteModPerIter
@@ -143,7 +142,7 @@ class SIA1(SIA):
             readsToWait, readsToWaitNGLL = getReadsToWait(writer, kernel)
             schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSched, localWriteEndIter, \
               itemsGRToSchedLater, itemsLWToSched, startIter, readsToWait, readsToWaitNGLL, \
-              firstIter, lastLc, maxVmcnt, isNGLL)
+              firstIter, lastLc, isNGLL)
 
 ################################################################################
 ################################################################################
@@ -258,6 +257,11 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
     # final index definition
     writer.states.numMfmaForNextLoopLR = min(writer.states.numMfmaForNextLoopLR,numMfmaPerIter-1)
     writer.states.syncPlrMfmaIndex = numMfmaPerIter*(kernel["LoopIters"]-writer.states.numItersPLR+1) - writer.states.numMfmaForNextLoopLR - 1 if writer.states.numItersPLR else 0
+    
+    if kernel["ForceUnrollSubIter"]:
+        if ( kernel["ProblemType"]["DataType"].isComplex()):
+            writer.states.syncPlrMfmaIndex = writer.states.syncPlrMfmaIndex *4   # Complex
+
     numMfmaBetweenLWandBarrier = 2 if kernel["MatrixInstM"] == 32 else 3
     writer.states.lwEndMfmaIndex = max(writer.states.syncPlrMfmaIndex - numMfmaBetweenLWandBarrier,0) if writer.states.numItersPLR else numMfmaPerIter*kernel["LoopIters"] - 1
     if kernel["DirectToLds"] and kernel["PrefetchGlobalRead"] == 2:
@@ -369,7 +373,7 @@ def getNumLocalWritePerMfma(writer, kernel, lwStartMfmaIndex):
     #     mfma--24-mfma--24-mfma--24-mfma--24-mfma--24-mfma--24-mfma--24-mfma--24-mfma
     # we need LWPM to get precise LWPM
     # so we iterate formula 10 times to get LWPM
-    while oldValue != newValue and loop < 10:
+    while oldValue != newValue and newValue > 0 and loop < 10:
         loop += 1
         oldValue = newValue
         newValue = roundUp((writesToSched+1 + (oldValue - (writesToSched+1) % oldValue) + oldValue%PRECISION) / numMfmaCanSched)
@@ -749,7 +753,7 @@ def getReadsToWait(writer, kernel):
 
 def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSched, localWriteEndIter, \
   itemsGRToSchedLater, itemsLWToSched, startIter, readsToWait, readsToWaitNGLL, \
-  firstIter, lastLc, maxVmcnt, isNGLL, startIterItem = None):
+  firstIter, lastLc, isNGLL, startIterItem = None):
     # schedule here
     localwriteCnt        = 0
     globalReadInstOffset = 0
@@ -837,11 +841,9 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                             # TODO - can schedule these writes across iters, should figure this out above
                             readsToWait = readsToWait - 1
                             readsToWaitNGLL = readsToWaitNGLL - 1
-                            imodList.append(SWaitCnt(lgkmcnt=-1, \
-                                vmcnt=min(maxVmcnt, readsToWait), vscnt=-1, \
+                            imodList.append(SWaitCnt(vlcnt=readsToWait, \
                                 comment="wait for global read before writing to local"))
-                            imodNGLLList.append(SWaitCnt(lgkmcnt=-1, \
-                                vmcnt=min(maxVmcnt, readsToWaitNGLL), vscnt=-1, \
+                            imodNGLLList.append(SWaitCnt(vlcnt=readsToWaitNGLL, \
                                 comment="wait for global read before writing to local"))
                         # PK and StoreCUnroll is removed so you cannot find any HolderContainer in s_waitcnt
                         if kernel["PrefetchGlobalRead"]==2:
@@ -849,7 +851,7 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                             if hasHolder:
                                 readsToWaitAdjust = readsToWait
                                 if kernel["NoLdsWriteCode"] and kernel["PrefetchGlobalRead"]!=2:
-                                    # DirectToLds for both A and B case, use  the number of global read for both A and B as vmcnt (only for PGR=1)
+                                    # DirectToLds for both A and B case, use  the number of global read for both A and B as vlcnt (only for PGR=1)
                                     readsToWaitAdjust = len(list(writer.codes.globalReadA.middle.items())) + len(list(writer.codes.globalReadB.middle.items()))
                                 for wc in wcList:
                                     replaceHolder(wc, (readsToWaitAdjust))
@@ -901,7 +903,7 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                                 imodList.append(itemGR)
                             else:
                                 imodList.append(itemGR)
-                            readsToWait = readsToWait + readsInc # GR instruction increments vmcnt
+                            readsToWait = readsToWait + readsInc # GR instruction increments vlcnt
                             itemsGRToSchedLater.pop(0)
 
                     if readCnt == 2:
@@ -1038,8 +1040,9 @@ def hasHolderInWaitCnt(module: Item):
             wcList.extend(tmpList)
     elif isinstance(module, SWaitCnt):
         wcList.append(module)
-        if isinstance(module.lgkmcnt, HolderContainer) or \
-           isinstance(module.vmcnt, HolderContainer) or \
+        if isinstance(module.dscnt, HolderContainer) or \
+           isinstance(module.kmcnt, HolderContainer) or \
+           isinstance(module.vlcnt, HolderContainer) or \
            isinstance(module.vscnt, HolderContainer):
            hasHolder = True
     return hasHolder, wcList

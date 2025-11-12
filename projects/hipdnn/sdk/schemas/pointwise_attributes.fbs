@@ -1,0 +1,72 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+include "data_types.fbs";
+
+namespace hipdnn_sdk.data_objects;
+
+enum PointwiseMode : byte { 
+    UNSET = 0,
+    ABS = 1,
+    ADD = 2,
+    ADD_SQUARE = 3,
+    BINARY_SELECT = 4,
+    CEIL = 5,
+    CMP_EQ = 6,
+    CMP_GE = 7,
+    CMP_GT = 8,
+    CMP_LE = 9,
+    CMP_LT = 10,
+    CMP_NEQ = 11,
+    DIV = 12,
+    ELU_BWD = 13,
+    ELU_FWD = 14,
+    ERF = 15,
+    EXP = 16,
+    FLOOR = 17,
+    GELU_APPROX_TANH_BWD = 18,
+    GELU_APPROX_TANH_FWD = 19,
+    GELU_BWD = 20,
+    GELU_FWD = 21,
+    GEN_INDEX = 22,
+    IDENTITY = 23,
+    LOG = 24,
+    LOGICAL_AND = 25,
+    LOGICAL_NOT = 26,
+    LOGICAL_OR = 27,
+    MAX_OP = 28, // Max is reserved
+    MIN_OP = 29, // Min is reserved
+    MUL = 30,
+    NEG = 31,
+    RECIPROCAL = 32,
+    RELU_BWD = 33,
+    RELU_FWD = 34,
+    RSQRT = 35,
+    SIGMOID_BWD = 36,
+    SIGMOID_FWD = 37,
+    SIN = 38,
+    SOFTPLUS_BWD = 39,
+    SOFTPLUS_FWD = 40,
+    SQRT = 41,
+    SUB = 42,
+    SWISH_BWD = 43,
+    SWISH_FWD = 44,
+    TAN = 45,
+    TANH_BWD = 46,
+    TANH_FWD = 47
+}
+
+table PointwiseAttributes {
+    operation: PointwiseMode;
+    relu_lower_clip: float = null;
+    relu_upper_clip: float = null;
+    relu_lower_clip_slope: float = null;
+    axis_tensor_uid: long = null;
+    in_0_tensor_uid: long;
+    in_1_tensor_uid: long = null;
+    in_2_tensor_uid: long = null;
+    out_0_tensor_uid: long;
+    swish_beta: float = null;
+    elu_alpha: float = null;
+    softplus_beta: float = null;
+}

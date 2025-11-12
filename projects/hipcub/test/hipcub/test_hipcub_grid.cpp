@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -29,16 +29,25 @@
 
 #include "common_test_header.hpp"
 
-#include "hipcub/block/block_reduce.hpp"
-#include "hipcub/thread/thread_operators.hpp"
+#include <hipcub/block/block_reduce.hpp>
+#include <hipcub/thread/thread_operators.hpp>
 
-#include "hipcub/grid/grid_barrier.hpp"
-#include "hipcub/grid/grid_even_share.hpp"
-#include "hipcub/grid/grid_queue.hpp"
+#include <hipcub/grid/grid_barrier.hpp>
+#include <hipcub/grid/grid_even_share.hpp>
+#include <hipcub/grid/grid_queue.hpp>
 
-__global__ void KernelGridBarrier(
-    hipcub::GridBarrier global_barrier,
-    int iterations)
+#if defined(__HIP_PLATFORM_NVIDIA__)
+_CCCL_SUPPRESS_DEPRECATED_PUSH
+#else
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+#endif
+__global__
+void KernelGridBarrier(hipcub::GridBarrier global_barrier, int iterations)
+#if defined(__HIP_PLATFORM_NVIDIA__)
+    _CCCL_SUPPRESS_DEPRECATED_POP
+#else
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+#endif
 {
     for (int i = 0; i < iterations; i++)
     {
@@ -80,8 +89,17 @@ TEST(HipcubGridTests, GridBarrier)
     {
         occupancy = grid_size / sm_count;
     }
-
+#if defined(__HIP_PLATFORM_NVIDIA__)
+    _CCCL_SUPPRESS_DEPRECATED_PUSH
+#else
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+#endif
     hipcub::GridBarrierLifetime global_barrier;
+#if defined(__HIP_PLATFORM_NVIDIA__)
+    _CCCL_SUPPRESS_DEPRECATED_POP
+#else
+    HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+#endif
     HIP_CHECK(global_barrier.Setup(grid_size));
 
     KernelGridBarrier<<<grid_size, block_size>>>(global_barrier, iterations);
@@ -314,5 +332,6 @@ TEST(HipcubGridTests, GridQueue)
 
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
+        HIP_CHECK(hipFree(queue_allocations));
     }
 }

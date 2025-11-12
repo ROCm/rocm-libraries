@@ -56,15 +56,15 @@ static inline bool FindImplicitGemmDynamicKernelBwd(const ProblemDescription& pr
     int c          = ProblemInterpreter::GetInputChannelC(problem);
     int ho         = ProblemInterpreter::GetOutputHeightHo(problem);
     int wo         = ProblemInterpreter::GetOutputWidthWo(problem);
-    int stride_h   = ProblemInterpreter::GetAdjustedConvolutionStrideH(problem);
-    int stride_w   = ProblemInterpreter::GetAdjustedConvolutionStrideW(problem);
-    int dilation_h = ProblemInterpreter::GetAdjustedConvolutionDilationH(problem);
-    int dilation_w = ProblemInterpreter::GetAdjustedConvolutionDilationW(problem);
+    int stride_h  = ProblemInterpreter::GetAdjustedAsmInputStrideH(problem);
+    int stride_w = ProblemInterpreter::GetAdjustedAsmInputStrideW(problem);
     int pad_h      = ProblemInterpreter::GetInputLeftPadH(problem);
     int pad_w      = ProblemInterpreter::GetInputLeftPadW(problem);
+    int dilation_h = ProblemInterpreter::GetAdjustedConvolutionDilationH(problem);
+    int dilation_w = ProblemInterpreter::GetAdjustedConvolutionDilationW(problem);
     int y          = ProblemInterpreter::GetFilterHeightY(problem);
     int x          = ProblemInterpreter::GetFilterWidthX(problem);
-
+    
     int gcd_stride_dilation_h = gcd(stride_h, dilation_h);
     int gcd_stride_dilation_w = gcd(stride_w, dilation_w);
     int y_tilda     = stride_h / gcd_stride_dilation_h;

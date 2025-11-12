@@ -28,7 +28,15 @@
 
 #include <thrust/detail/config.h>
 
-#ifdef _CCCL_CUDA_COMPILER
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if _CCCL_HAS_CUDA_COMPILER
 
 #  include <thrust/system/cuda/config.h>
 
@@ -37,6 +45,8 @@
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
 #  include <thrust/extrema.h>
+#  include <thrust/iterator/counting_iterator.h>
+#  include <thrust/iterator/transform_iterator.h>
 #  include <thrust/pair.h>
 #  include <thrust/system/cuda/detail/cdp_dispatch.h>
 #  include <thrust/system/cuda/detail/reduce.h>
@@ -244,7 +254,7 @@ cudaError_t THRUST_RUNTIME_FUNCTION doit_step(
       cub::GridQueue<UnsignedSize>::AllocationSize(), // bytes needed for grid queue descriptor0
       vshmem_size // size of virtualized shared memory storage
     };
-    status = cub::AliasTemporaries(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes);
+    status = cub::detail::AliasTemporaries(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes);
     CUDA_CUB_RET_IF_FAIL(status);
     if (d_temp_storage == nullptr)
     {
@@ -265,7 +275,7 @@ cudaError_t THRUST_RUNTIME_FUNCTION doit_step(
     else if (reduce_plan.grid_mapping == cub::GRID_MAPPING_DYNAMIC)
     {
       // Work is distributed dynamically
-      size_t num_tiles = cub::DivideAndRoundUp(num_items, reduce_plan.items_per_tile);
+      size_t num_tiles = ::cuda::ceil_div(num_items, reduce_plan.items_per_tile);
 
       // if not enough to fill the device with threadblocks
       // then fill the device with threadblocks
@@ -362,10 +372,10 @@ element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, BinaryPr
 
   IndexType num_items = static_cast<IndexType>(thrust::distance(first, last));
 
-  using iterator_tuple = tuple<ItemsIt, counting_iterator_t<IndexType>>;
+  using iterator_tuple = tuple<ItemsIt, counting_iterator<IndexType>>;
   using zip_iterator   = zip_iterator<iterator_tuple>;
 
-  iterator_tuple iter_tuple = thrust::make_tuple(first, counting_iterator_t<IndexType>(0));
+  iterator_tuple iter_tuple = thrust::make_tuple(first, counting_iterator<IndexType>(0));
 
   using arg_min_t = ArgFunctor<InputType, IndexType, BinaryPred>;
   using T         = tuple<InputType, IndexType>;
@@ -435,15 +445,15 @@ minmax_element(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, B
 
      const auto num_items = static_cast<IndexType>(thrust::distance(first, last));
 
-     using iterator_tuple = tuple<ItemsIt, counting_iterator_t<IndexType>>;
+     using iterator_tuple = tuple<ItemsIt, counting_iterator<IndexType>>;
      using zip_iterator   = zip_iterator<iterator_tuple>;
 
-     iterator_tuple iter_tuple = thrust::make_tuple(first, counting_iterator_t<IndexType>(0));
+     iterator_tuple iter_tuple = thrust::make_tuple(first, counting_iterator<IndexType>(0));
 
      using arg_minmax_t   = __extrema::arg_minmax_f<InputType, IndexType, BinaryPred>;
      using two_pairs_type = typename arg_minmax_t::two_pairs_type;
      using duplicate_t    = typename arg_minmax_t::duplicate_tuple;
-     using transform_t    = transform_input_iterator_t<two_pairs_type, zip_iterator, duplicate_t>;
+     using transform_t    = transform_iterator<duplicate_t, zip_iterator, two_pairs_type, two_pairs_type>;
 
      zip_iterator begin    = make_zip_iterator(iter_tuple);
      two_pairs_type result = __extrema::extrema(

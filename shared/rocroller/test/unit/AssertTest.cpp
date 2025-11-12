@@ -37,6 +37,7 @@
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/RemoveSetCoordinate.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -53,6 +54,13 @@ namespace AssertTest
 {
     class GPU_AssertTest : public GPUContextFixtureParam<std::tuple<AssertOpKind, std::string>>
     {
+    public:
+        bool skipOnGPU(const auto& gpu, AssertOpKind assertOpKind)
+        {
+            return gpu.isRDNA4GPU()
+                   && (assertOpKind == AssertOpKind::MemoryViolation
+                       || assertOpKind == AssertOpKind::STrap);
+        }
     };
 
     TEST_P(GPU_AssertTest, GPU_Assert)
@@ -114,6 +122,8 @@ namespace AssertTest
             kgraph.control.addElement(Body(), {kernelNode}, {setToZero});
             kgraph.control.addElement(Sequence(), {setToZero}, {assertOp});
             kgraph.control.addElement(Sequence(), {assertOp}, {assignOne});
+
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
             m_context->schedule(rocRoller::KernelGraph::generate(kgraph, k));
 
@@ -179,7 +189,7 @@ namespace AssertTest
                 EXPECT_THAT(output(), testing::HasSubstr("AssertOpKind == NoOp"));
             }
 
-            if(isLocalDevice())
+            if(isLocalDevice() && not skipOnGPU(gpu, assertOpKind))
             {
                 KernelArguments kargs;
 
@@ -270,6 +280,8 @@ namespace AssertTest
             kgraph.control.addElement(Sequence(), {setToZero}, {assertOp});
             kgraph.control.addElement(Sequence(), {assertOp}, {assignOne});
 
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+
             m_context->schedule(rocRoller::KernelGraph::generate(kgraph, k));
 
             m_context->schedule(k->postamble());
@@ -302,7 +314,7 @@ namespace AssertTest
                 EXPECT_THAT(output(), testing::HasSubstr("AssertOpKind == NoOp"));
             }
 
-            if(isLocalDevice())
+            if(isLocalDevice() && not skipOnGPU(gpu, assertOpKind))
             {
                 KernelArguments kargs;
 

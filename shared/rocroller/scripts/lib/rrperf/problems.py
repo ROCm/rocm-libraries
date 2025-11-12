@@ -24,10 +24,11 @@
 ################################################################################
 
 import pathlib
-from dataclasses import dataclass, field, fields, asdict
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any, List, Optional
-import yaml
 
+import yaml
+from rrperf.utils import get_dataclass_id
 
 repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
@@ -53,6 +54,31 @@ def convert_class_params(cls, obj):
             setattr(obj, f.name, getattr(obj, f.name))
 
 
+@dataclass(unsafe_hash=True)
+class MNKTuple:
+    """M/N/K tuple"""
+
+    m: int
+    n: int
+    k: int
+
+    def __str__(self):
+        return f"{self.m}x{self.n}x{self.k}"
+
+
+@dataclass(unsafe_hash=True)
+class MKNLTuple:
+    """MxK/NxL tuple"""
+
+    m: int
+    k: int
+    n: int
+    l: int
+
+    def __str__(self):
+        return f"{self.m}x{self.k}/{self.n}x{self.l}"
+
+
 @dataclass
 class RRPerfResult:
     """Base class for timing results.
@@ -72,6 +98,12 @@ class RRPerfResult:
 
     checked: bool = field(repr=False, hash=False, compare=False, default=False)
     correct: bool = field(repr=False, hash=False, compare=False, default=True)
+
+    sgprCount: int = field(repr=False, hash=False, compare=False, default=0)
+    vgprCount: int = field(repr=False, hash=False, compare=False, default=0)
+    agprCount: int = field(repr=False, hash=False, compare=False, default=0)
+
+    ldsBytes: int = field(repr=False, hash=False, compare=False, default=0)
 
 
 @dataclass(unsafe_hash=True)
@@ -127,18 +159,13 @@ class GPUArchitectureTarget:
     Xnack: bool = False
     Sramecc: bool = False
 
-    def __str__(self):
+    def asArgs(self) -> List[str]:
         if len(self.ArchString) == 0:
-            return ""
-        else:
-            archFeatures: str = ""
-            archFeatures += archFeatures + (":xnack+" if self.Xnack else "")
-            archFeatures += archFeatures + (":sramecc+" if self.Sramecc else "")
-            return (
-                f"--arch={self.ArchString}" + archFeatures
-                if len(self.ArchString) != 0
-                else ""
-            )
+            return []
+        arch = self.ArchString
+        arch += ":xnack+" if self.Xnack else ""
+        arch += ":sramecc+" if self.Sramecc else ""
+        return ["--arch=" + arch]
 
 
 #
@@ -160,7 +187,8 @@ class GEMMProblem:
     scaleValue_A: float = 1.0
     scaleValue_B: float = 1.0
 
-    workgroupMapping: tuple[int, int] = (-1, -1)
+    workgroupMappingDim: int = -1
+    workgroupMappingValue: int = -1
 
     def __post_init__(self):
         convert_class_params(GEMMProblem, self)
@@ -179,23 +207,21 @@ class GEMMSolution:
     wave_k: int = -1
     wave_b: int = -1
 
-    workgroup_size_x: int = 64 * 2
-    workgroup_size_y: int = 2
+    workgroup_size_x: int = -1
+    workgroup_size_y: int = -1
     workgroupRemapXCC: bool = False
     workgroupRemapXCCValue: int = -1
 
     unroll_x: int = 0
     unroll_y: int = 0
 
-    loadLDS_A: bool = True
-    loadLDS_B: bool = True
+    load_A: str = "BufferToLDSViaVGPR"
+    load_B: str = "BufferToLDSViaVGPR"
     storeLDS_D: bool = True
     betaInFma: bool = True
 
-    direct2LDS_A: bool = False
-    direct2LDS_B: bool = False
-
     scheduler: str = "Priority"
+    schedulerCost: str = "LinearWeighted"
 
     prefetch: bool = True
     prefetchInFlight: int = 2
@@ -205,11 +231,13 @@ class GEMMSolution:
     loadLDSScale_A: bool = False
     loadLDSScale_B: bool = False
     swizzleScale: bool = False
+    swizzleTileSize: MKNLTuple = MKNLTuple(0, 0, 0, 0)
     prefetchScale: bool = False
 
     streamK: bool = False
     numWGs: int = 0
     streamKTwoTile: bool = False
+    streamKTwoTileDPFirst: bool = False
 
     architecture: GPUArchitectureTarget = GPUArchitectureTarget()
     matchMemoryAccess: bool = True
@@ -228,10 +256,16 @@ class GEMM(GEMMProblem, GEMMSolution):
     numOuter: int = 1
     numInner: int = 10
 
+    noCheck: bool = False
+
     visualize: bool = False
 
     def __post_init__(self):
         convert_class_params(GEMM, self)
+
+    @property
+    def id(self):
+        return get_dataclass_id(self)
 
     @property
     def run_invariant_token(self):
@@ -285,7 +319,7 @@ class GEMM(GEMMProblem, GEMMSolution):
 class GEMMRun(GEMM):
     """GEMM run interface."""
 
-    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
 
     @property
     def group(self):
@@ -293,25 +327,6 @@ class GEMMRun(GEMM):
 
     def set_output(self, path: pathlib.Path):
         self.output = path
-
-    def parseArgDict(self, arg_dict: dict[str, Any]) -> List[str]:
-        args = []
-        for key, value in arg_dict.items():
-            # TODO: supported these parameters in our client?
-            if key == "version":
-                pass
-            elif key == "types":
-                args.extend(TypeParameters(**value).asArgs())
-            elif key == "architecture":
-                arg = str(GPUArchitectureTarget(**value))
-                if len(arg) > 0:
-                    args.append(arg)
-            else:
-                if isinstance(value, tuple):
-                    args.append(f"--{key}={','.join(map(str, value))}")
-                else:
-                    args.append(f"--{key}={value}")
-        return args
 
     def command(
         self, generate_only=False, architecture=None, **extra_args
@@ -322,6 +337,7 @@ class GEMMRun(GEMM):
             "numWarmUp": "num_warmup",
             "numOuter": "num_outer",
             "numInner": "num_inner",
+            "swizzleTileSize": "sts",
         }
 
         command = "client/rocroller-gemm"
@@ -334,15 +350,27 @@ class GEMMRun(GEMM):
         if architecture is not None:
             self.architecture.ArchString = architecture
 
-        arg_dict = {argName(key): value for key, value in asdict(self).items()}
-        for key, value in extra_args.items():
-            arg_dict[key] = value
+        arg_dict = {
+            argName(key): value
+            for key, value in (
+                (f.name, getattr(self, f.name)) for f in fields(self.__class__)
+            )
+        }
+        arg_dict.update(extra_args)
 
         if generate_only:
             for attr in ["yaml", "num_warmup", "num_inner", "num_outer"]:
                 arg_dict.pop(attr)
+        arg_dict.pop("version")
 
-        args = self.parseArgDict(arg_dict)
+        args = []
+        for key, value in arg_dict.items():
+            if hasattr(value, "asArgs"):
+                args.extend(value.asArgs())
+            elif isinstance(value, tuple):
+                args.append(f"--{key}={','.join(map(str, value))}")
+            else:
+                args.append(f"--{key}={str(value)}")
 
         if generate_only:
             args.append("generate")
@@ -375,8 +403,9 @@ class GEMMResult(GEMM, RRPerfResult):
             "n": self.mac_n,
             "k": self.mac_k,
             "WG": str(self.workgroup_size_x) + "/" + str(self.workgroup_size_y),
-            "LDS": TF(self.loadLDS_A) + TF(self.loadLDS_B) + TF(self.storeLDS_D),
-            "Direct2LDS": TF(self.direct2LDS_A) + TF(self.direct2LDS_B),
+            "Load_A": TF(self.load_A),
+            "Load_B": TF(self.load_B),
+            "Store_D": TF(self.storeLDS_D),
             "PF": TF(self.prefetch)
             + "/"
             + str(self.prefetchInFlight)
@@ -385,6 +414,7 @@ class GEMMResult(GEMM, RRPerfResult):
             "SCH": self.scheduler[0],
             "SK": TF(self.streamK) + "/" + str(self.numWGs),
             "2TSK": TF(self.streamKTwoTile),
+            "DPFirst": TF(self.streamKTwoTileDPFirst),
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]
             ),
@@ -405,6 +435,10 @@ class CodeGen:
 
     numWarmUp: int = 2
     numRuns: int = 10
+
+    @property
+    def id(self):
+        return get_dataclass_id(self)
 
     @property
     def run_invariant_token(self):
@@ -454,7 +488,7 @@ class CodeGen:
 class CodeGenRun(CodeGen):
     """CodeGen run interface."""
 
-    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
 
     @property
     def group(self):
@@ -487,8 +521,8 @@ class CodeGenResult(CodeGen, RRPerfResult):
 class TensileRun(GEMM):
     """Tensile run interface."""
 
-    config: pathlib.Path = field(repr=False, default=None, hash=False)
-    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    config: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
+    output: pathlib.Path = field(repr=False, default=None, hash=False, compare=False)
     tensile_commit: str = "rocm-6.0.0"
 
     @property
@@ -536,6 +570,29 @@ _base_to_run_class = {
 }
 
 
+def cast_missing_parameters(result):
+    """
+    Cast parameters in previous GEMMResult version into existing parameters
+
+    Args:
+        result: a dictionary with parameters (keys) and their values
+
+    """
+    if "workgroupMapping" in result:
+
+        assert (
+            len(result["workgroupMapping"]) == 2
+        ), "workgroupMapping should contain a dimension and a value"
+
+        wgmDim = result["workgroupMapping"][0]
+        wgmValue = result["workgroupMapping"][1]
+
+        del result["workgroupMapping"]
+
+        result["workgroupMappingDim"] = wgmDim
+        result["workgroupMappingValue"] = wgmValue
+
+
 def load_results(path: pathlib.Path):
     """
     Load results from a YAML file `path` and return an array of RESULT objects.
@@ -544,6 +601,7 @@ def load_results(path: pathlib.Path):
     for r in yaml.load_all(path.read_text(), Loader=yaml.FullLoader):
         ResultClass = _client_to_result_class[r["resultType"]]
         r.pop("path", None)
+        cast_missing_parameters(r)
         rv.append(ResultClass(path=path, **r))
     return rv
 

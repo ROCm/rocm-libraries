@@ -41,7 +41,6 @@
 #include "../hipfft_params.h"
 #include "hipfft/hipfft.h"
 #include "hipfft_accuracy_test.h"
-#include "hipfft_test_params.h"
 
 // initialize static class member of hipfft_params
 std::vector<gpubuf> hipfft_params::externally_managed_workareas = std::vector<gpubuf>();
@@ -62,6 +61,11 @@ double real_prob_factor;
 double complex_planar_prob_factor;
 // Modifier for probability of running tests with callbacks
 double callback_prob_factor;
+// Constraints for the hipfftw tests
+size_t      max_length_for_hipfftw_test;
+size_t      max_io_gb_for_hipfftw_test;
+size_t      max_num_arg_validation_tests_per_hipfftw_plan_type;
+std::string hipfftw_token_for_functional_test;
 
 // Transform parameters for manual test:
 hipfft_params manual_params;
@@ -173,13 +177,10 @@ void precompile_test_kernels(const std::string& precompile_file)
                 continue;
 
             // only care about accuracy tests
-            if(name.find("vs_fftw/") != std::string::npos)
+            const auto pos = name.find("vs_fftw/");
+            if(pos != std::string::npos)
             {
-                // [possible TODO] move above check to nesting loop's scope as a
-                // check on the test suite's name (i.e., if it includes "accuracy_test").
-                // That would allow other (hypothetical) accuracy test instances than
-                // "vs_fftw/" to be considered as well...
-                name.erase(0, 8);
+                name.erase(0, pos + 8);
 
                 // change batch to 1, so we don't waste time creating
                 // multiple plans that differ only by batch
@@ -202,7 +203,7 @@ void precompile_test_kernels(const std::string& precompile_file)
     std::mt19937       dist(dev());
     std::shuffle(tokens.begin(), tokens.end(), dist);
     auto precompile_begin = std::chrono::steady_clock::now();
-    std::cout << "precompiling " << tokens.size() << " FFT plans...\n";
+    std::cout << "precompiling kernels for " << tokens.size() << " tokens...\n";
 
     for(auto&& t : tokens)
         tokenQueue.push(std::move(t));
@@ -225,6 +226,13 @@ void precompile_test_kernels(const std::string& precompile_file)
                     params.from_token(token);
                     params.validate();
                     params.create_plan();
+                    if(params.is_forward())
+                    {
+                        hipfft_params inverse_params;
+                        inverse_params.inverse_from_forward(params);
+                        inverse_params.validate();
+                        inverse_params.create_plan();
+                    }
                 }
                 catch(fft_params::work_buffer_alloc_failure&)
                 {
@@ -279,7 +287,9 @@ int main(int argc, char* argv[])
     const auto opt_help = app.add_flag("-h, --help", "Produces this help message");
     app.add_option("-v, --verbose", verbose, "Print out detailed information for the tests")
         ->default_val(0);
-    app.add_option("--test_prob", test_prob, "Probability of running individual tests")
+    app.add_option("--test_prob",
+                   test_prob,
+                   "Probability of running individual tests (excluding non-minimal hipfftw tests)")
         ->default_val(1.0)
         ->check(CLI::Range(0.0, 1.0));
     app.add_option("--real_prob",
@@ -303,6 +313,27 @@ int main(int argc, char* argv[])
                    "Probability multiplier for running individual callback transforms")
         ->default_val(0.1)
         ->check(CLI::NonNegativeNumber);
+    app.add_option("--max_hipfftw_test_len",
+                   max_length_for_hipfftw_test,
+                   "Maximum length to be considered in hipfftw tests")
+        ->default_val(8192)
+        ->check(CLI::PositiveNumber);
+    app.add_option("--max_io_gb_for_hipfftw_test",
+                   max_io_gb_for_hipfftw_test,
+                   "Maximum size of I/O to be considered in hipfftw tests in GiB")
+        ->default_val(1) /* 1 GiB */
+        ->check(CLI::PositiveNumber);
+
+    app.add_option(
+           "--max_num_arg_validation_tests_per_hipfftw_plan_type",
+           max_num_arg_validation_tests_per_hipfftw_plan_type,
+           "Maximum number of argument-validation tests per kind of hipfftw plan creation function")
+        ->default_val(256)
+        ->check(CLI::PositiveNumber);
+    app.add_option("--hipfftw_token",
+                   hipfftw_token_for_functional_test,
+                   "manual token for hipfftw functional test")
+        ->default_val("");
 
     app.add_option("--fftw_compare", fftw_compare, "Compare to FFTW in accuracy tests")
         ->default_val(true);
@@ -328,9 +359,9 @@ int main(int argc, char* argv[])
         ->default_val(default_seed_dev());
     app.add_flag("--smoketest", "Run a short (approx 5 minute) randomized selection of tests")
         ->each([&](const std::string&) {
-            // The objective is to have an test that takes about 5 minutes, so just set the probability
-            // per test to a small value to achieve this result.
-            test_prob = 0.02;
+            // The objective is to have an test that takes about 5 minutes, so just set the
+            // probability per test to a small value to achieve this result.
+            test_prob = 0.002;
         });
     // Token string to fully specify fft params for the manual test.
     std::string test_token;
@@ -478,6 +509,7 @@ int main(int argc, char* argv[])
     // set any "unset" parameters of manual_params before initiating gtests
     // (makes the token reported by gtest less ambiguous)
     manual_params.validate();
+    std::cout << "Using random_seed = " << random_seed << std::endl;
 
     // extract remaining arguments for subsequent gtest initialization
     std::vector<std::string> remaining_args = app.remaining();
@@ -526,7 +558,6 @@ int main(int argc, char* argv[])
         }
     }
 
-    std::cout << "Using random_seed = " << random_seed << std::endl;
     std::cout << "half epsilon: " << half_epsilon << "\tsingle epsilon: " << single_epsilon
               << "\tdouble epsilon: " << double_epsilon << std::endl;
 
@@ -621,6 +652,9 @@ int main(int argc, char* argv[])
     std::cout << "single precision max l2 epsilon:     " << max_l2_eps_single << std::endl;
     std::cout << "double precision max l-inf epsilon: " << max_linf_eps_double << std::endl;
     std::cout << "double precision max l2 epsilon:     " << max_l2_eps_double << std::endl;
+    std::cout << "Used random_seed = " << random_seed << std::endl;
+
+    hipfft_params::externally_managed_workareas.clear();
 
     return retval;
 }

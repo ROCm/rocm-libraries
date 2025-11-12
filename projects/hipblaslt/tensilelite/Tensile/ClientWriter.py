@@ -39,7 +39,6 @@ from Tensile.Toolchain.Component import Assembler
 import rocisa
 
 from . import ROOT_PATH
-from . import ClientExecutable
 from . import LibraryIO
 from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientExecutionLock,\
                            LIBRARY_LOGIC_DIR, LIBRARY_CLIENT_DIR
@@ -121,7 +120,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
 
   clientParametersPaths = []
   splitGSU = False
-  printSolutionRejectionReason = False
+  printSolutionRejectionReason = True
   printIndexAssignmentInfo = False
   for logicFileName in logicFiles:
     (scheduleName, _, problemType, _, exactLogic, newLibrary) \
@@ -204,7 +203,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
 ################################################################################
 def runNewClient(scriptPath, clientParametersPath, cxxCompiler: str, cCompiler: str, clientBuildDir=None):
 
-  clientExe = ClientExecutable.getClientExecutable(cxxCompiler, cCompiler, clientBuildDir)
+  clientExe = getClientExecutablePath()
   iniFile = "--config-file={}".format(clientParametersPath)
   args = [clientExe, iniFile]
 
@@ -242,6 +241,9 @@ def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, target
 
   if globalParameters["KeepBuildTmp"]:
     callCreateLibraryCmd += " --keep-build-tmp"
+
+  if globalParameters["DisableAsmComments"]:
+    callCreateLibraryCmd += " --disable-asm-comments"
 
   callCreateLibraryCmd += " --architecture=" + targetGfx
   callCreateLibraryCmd += " --code-object-version=" + globalParameters["CodeObjectVersion"]
@@ -295,7 +297,7 @@ def writeRunScript(path, forBenchmark, enableTileSelection, cxxCompiler: str, cC
 
     runScriptFile.write("ERR1=0\n")
 
-    clientExe = ClientExecutable.getClientExecutable(cxxCompiler, cCompiler, buildDir)
+    clientExe = getClientExecutablePath()
     for configFile in configPaths:
       runScriptFile.write("{} --config-file {}\n".format(clientExe, configFile))
     runScriptFile.write("ERR2=$?\n\n")
@@ -320,7 +322,8 @@ fi
         runScriptFile.write("%s -d 0 --setfan 50\n" % globalParameters["ROCmSMIPath"])
   else:
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {} --best-solution 1\n".format(ClientExecutable.getClientExecutable(cxxCompiler, cCompiler, buildDir), configFile))
+      runScriptFile.write("{} --config-file {} --best-solution 1\n".format(getClientExecutablePath(), configFile))
+
   if os.name != "nt":
     runScriptFile.write("exit $ERR\n")
   runScriptFile.close()
@@ -514,7 +517,7 @@ def pruneModeName(mode):
     if mode == 5: return 'Prune0X0X'
     if mode == 6: return 'Prune00XX'
 
-def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile=None):
+def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile=None, probSolMap={}):
 
     assert os.path.exists(sourceDir), f"sourceDir={sourceDir} does not exist"
 
@@ -574,9 +577,14 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('strided-batched', problemType.stridedBatched)
         param('grouped-gemm', problemType.groupedGemm)
 
+        probIdx = 0
         for problem in problemSizes.problems:
             for key,value in problemSizeParams(problemType, problem, factorDimArgs.factorDims):
                 param(key,value)
+            if probIdx in probSolMap:
+                solutionIdx = probSolMap[probIdx]
+                param('prob-sol-map', str(f'{probIdx},{solutionIdx}'),)
+            probIdx += 1
 
         if activationArgs:
           for setting in activationArgs.settingList:
@@ -674,7 +682,8 @@ def writeClientConfig(
       deviceId: int,
       gfxName: str,
       configBase = "ClientParameters",
-      libraryFile = None
+      libraryFile = None,
+      probSolMap = {}
     ):
 
     sourceDir = os.path.join(stepBaseDir, "source")
@@ -694,7 +703,7 @@ def writeClientConfig(
       resultsFileName = os.path.join(stepBaseDir, "../Data", stepName+".csv")
 
     newSolution = next(iter(newLibrary.solutions.values()))
-    writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, newSolution.problemType, sourceDir, codeObjectFiles, resultsFileName, filename, deviceId, gfxName, libraryFile)
+    writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, newSolution.problemType, sourceDir, codeObjectFiles, resultsFileName, filename, deviceId, gfxName, libraryFile, probSolMap)
 
     return filename
 
@@ -716,3 +725,15 @@ def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataF
       problemType = ContractionsProblemType.FromOriginalState(problemTypeDict)
 
     writeClientConfigIni(True, problemSizes, "", "", "", "", problemType, libraryRootPath, codeObjectFiles, dataFilePath, configFile, deviceId, gfxName)
+
+def getClientExecutablePath():
+  clientExe = globalParameters.get("PrebuiltClient")
+
+  if not os.path.isfile(clientExe):
+    raise FileNotFoundError(
+        f"Tensile client executable not found at '{clientExe}'.\n"
+        "Please ensure the client is built or provide a valid path using the --prebuilt-client flag.\n"
+        "To build, run: `invoke build-client` (you may need to `pip3 install invoke` first).\n"
+        "For custom cmake build instructions, please refer to the README in next-cmake."
+    )
+  return clientExe

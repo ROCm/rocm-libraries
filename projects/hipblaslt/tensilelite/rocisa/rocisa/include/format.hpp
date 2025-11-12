@@ -1,3 +1,10 @@
+/*******************************************************************************
+ *
+ * Copyright (C) Advanced Micro Devices, Inc., or its affiliates.
+ * SPDX-License-Identifier: MIT
+ *
+ *******************************************************************************/
+
 #pragma once
 #include <iomanip>
 #include <sstream>
@@ -44,15 +51,17 @@ namespace rocisa
     }
 
     // Format string with comment function
-    inline std::string
-        formatStr(bool outputInlineAsm, const std::string& instStr, const std::string& comment)
+    inline std::string formatStr(bool               outputInlineAsm,
+                                 const std::string& instStr,
+                                 const std::string& comment,
+                                 bool               noComment)
     {
         std::string formattedStr = instStr;
         if(outputInlineAsm)
         {
             formattedStr = "\"" + formattedStr + "\\n\\t\"";
         }
-        if(!comment.empty())
+        if(!comment.empty() && !noComment)
         {
             std::string buffer = formattedStr
                                  + std::string(std::max(0, 50 - int(formattedStr.length())), ' ')

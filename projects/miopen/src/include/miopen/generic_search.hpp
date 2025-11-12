@@ -38,6 +38,7 @@
 #include <miopen/mt_queue.hpp>
 #include <miopen/generic_search_controls.hpp>
 #include <miopen/utility/modified_z.hpp>
+#include <miopen/conv/problem_description.hpp>
 
 #include <algorithm>
 #include <vector>
@@ -306,6 +307,48 @@ GetAllSolutions(const Solver s, const Context& context_, const Problem& problem)
 std::size_t GetTuningIterationsMax();
 std::chrono::milliseconds GetTuningTimeMax(); // returns the max allowed time in milliseconds
 std::size_t GetTuningThreadsMax();
+std::size_t GetTuningPatience();
+
+template <typename Context>
+std::chrono::milliseconds GetTuningTimeMax(const Context& ctx,
+                                           const miopen::conv::ProblemDescription& problem)
+{
+    const auto& conv     = problem.GetConv();
+    const auto& findMode = conv.findMode;
+    auto tuningMs        = env::value(MIOPEN_TUNING_TIME_MS_MAX);
+    if(findMode.IsTrustVerify(ctx) && !findMode.IsExhaustive(ctx))
+    {
+        if(tuningMs == MIOPEN_DEFAULT_TUNING_TIME_MS_MAX)
+            tuningMs = 1000;
+    }
+    return std::chrono::milliseconds{tuningMs};
+}
+
+template <typename Context, typename Problem>
+std::chrono::milliseconds GetTuningTimeMax(const Context&, const Problem&)
+{
+    return GetTuningTimeMax();
+}
+
+template <typename Context>
+std::size_t GetTuningPatience(const Context& ctx, const miopen::conv::ProblemDescription& problem)
+{
+    const auto& conv     = problem.GetConv();
+    const auto& findMode = conv.findMode;
+    auto patience        = env::value(MIOPEN_TUNING_PATIENCE);
+    if(findMode.IsTrustVerify(ctx) && !findMode.IsExhaustive(ctx))
+    {
+        if(patience == MIOPEN_DEFAULT_TUNING_PATIENCE)
+            patience = 6;
+    }
+    return patience;
+}
+
+template <typename Context, typename Problem>
+std::size_t GetTuningPatience(const Context&, const Problem&)
+{
+    return GetTuningPatience();
+}
 
 template <typename PerformanceConfig, typename Solver, typename Context, typename Problem>
 void CompileAgent(size_t thread_index,
@@ -320,7 +363,7 @@ void CompileAgent(size_t thread_index,
     const auto start_time =
         std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now());
     const auto data_size   = data.size();
-    const auto time_budget = GetTuningTimeMax();
+    const auto time_budget = GetTuningTimeMax(context, problem);
     const auto& profile_h  = context.GetStream();
     // start the counter
     for(auto idx = thread_index; idx < data_size; idx += total_threads)
@@ -372,11 +415,18 @@ void CompileAgent(size_t thread_index,
     MIOPEN_LOG_I2("Thread: " << thread_index << " Done, completed tuning");
 }
 
+struct SolutionPerf
+{
+    std::string params;
+    float time;
+};
+
 template <class Solver, class Context, class Problem>
 auto GenericSearch(const Solver s,
                    const Context& context_,
                    const Problem& problem,
-                   const AnyInvokeParams& invoke_ctx_)
+                   const AnyInvokeParams& invoke_ctx_,
+                   std::vector<SolutionPerf>* perf_sols = nullptr)
     -> decltype(s.GetDefaultPerformanceConfig(context_, problem))
 {
     auto context                  = context_;
@@ -392,6 +442,12 @@ auto GenericSearch(const Solver s,
         return copy;
     }();
 
+    // list of sampled solutions
+    if(perf_sols)
+    {
+        perf_sols->erase(perf_sols->begin(), perf_sols->end());
+    }
+
     auto& profile_h = context.GetStream();
     const AutoEnableProfiling enableProfiling{profile_h};
 
@@ -405,7 +461,7 @@ auto GenericSearch(const Solver s,
     std::shuffle(all_configs.begin(), all_configs.end(), rng);
     std::size_t n_runs_total = std::min(all_configs.size(), GetTuningIterationsMax());
     all_configs.resize(n_runs_total);
-    std::size_t patience = env::value(MIOPEN_TUNING_PATIENCE);
+    std::size_t patience = GetTuningPatience(context, problem);
 
     if(all_configs.empty())
     {
@@ -469,7 +525,6 @@ auto GenericSearch(const Solver s,
                 break;
             }
 
-            last_imprv++;
             MIOPEN_LOG_I2("Waiting for item in queue");
             const auto kinder     = solution_queue.pop();
             auto current_config   = std::get<0>(kinder);
@@ -498,24 +553,12 @@ auto GenericSearch(const Solver s,
 
             try
             {
-                if(default_solution.workspace_sz != current_solution.workspace_sz)
-                {
-                    ret = -2;
-                    MIOPEN_LOG_E('#' << n_current << " (" << n_runs_total << ") "
-                                     << "Workspace size should not depend on PerformanceConfig: "
-                                     << default_solution.workspace_sz
-                                     << " != " << current_solution.workspace_sz);
-                }
-
                 invoker = profile_h.PrepareInvoker(*current_solution.invoker_factory,
                                                    current_solution.construction_params);
 
-                // Warm-up run for first time invoker is used
-                if(n_current == 0)
-                {
-                    invoker(profile_h, invoke_ctx);
-                    profile_h.ResetKernelTime();
-                }
+                // Warm-up run for every configuration to eliminate cold-start bias
+                invoker(profile_h, invoke_ctx);
+                profile_h.ResetKernelTime();
 
                 invoker(profile_h, invoke_ctx);
                 elapsed_time = profile_h.GetKernelTime();
@@ -545,6 +588,7 @@ auto GenericSearch(const Solver s,
                 // config), then gather 9 more samples, and remove positive z-score outliers. Use
                 // the mean value with outliers removed for calculating best config.
                 constexpr int N_RUNS = 10;
+                last_imprv++;
                 if(elapsed_time / worst_time < 1.10f)
                 {
                     MIOPEN_LOG_I2("Finding average for: " << elapsed_time << " / " << best_time
@@ -592,6 +636,10 @@ auto GenericSearch(const Solver s,
                         }
                     }
                 }
+                if(perf_sols)
+                {
+                    perf_sols->push_back({current_config.ToString(), elapsed_time});
+                }
             }
 
             // Banchmarked kernels will not be used anymore.
@@ -630,8 +678,13 @@ auto GenericSearch(const Solver s,
 
     if(!is_passed)
         MIOPEN_THROW("Search failed");
-    // Run once with the default config and show score.
 
+    if(perf_sols)
+        std::sort(perf_sols->begin(), perf_sols->end(), [](SolutionPerf a, SolutionPerf b) {
+            return a.time < b.time;
+        });
+
+    // Run once with the default config and show score.
     const auto& invoker = profile_h.PrepareInvoker(*default_solution.invoker_factory,
                                                    default_solution.construction_params);
     invoker(profile_h, invoke_ctx);

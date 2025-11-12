@@ -35,7 +35,7 @@ extern "C" {
 /*! \ingroup conv_module
 *  \details
 *  \p rocsparse_gebsr2gebsc_buffer_size returns the size of the temporary storage buffer
-*  required by \ref rocsparse_sgebsr2gebsc "rocsparse_Xgebsr2gebsc()". 
+*  required by \ref rocsparse_sgebsr2gebsc "rocsparse_Xgebsr2gebsc()".
 *  The temporary storage buffer must be allocated by the user.
 *
 *  \note
@@ -130,19 +130,19 @@ rocsparse_status rocsparse_zgebsr2gebsc_buffer_size(rocsparse_handle            
 *  \brief Convert a sparse GEneral BSR matrix into a sparse GEneral BSC matrix
 *
 *  \details
-*  \p rocsparse_gebsr2gebsc converts a GEneral BSR matrix into a GEneral BSC matrix. The resulting 
-*  matrix can also be seen as the transpose of the input matrix. \p rocsparse_gebsr2gebsc can also 
-*  be used to convert a GEneral BSC matrix into a GEneral BSR matrix. 
+*  \p rocsparse_gebsr2gebsc converts a GEneral BSR matrix into a GEneral BSC matrix. The resulting
+*  matrix can also be seen as the transpose of the input matrix. \p rocsparse_gebsr2gebsc can also
+*  be used to convert a GEneral BSC matrix into a GEneral BSR matrix.
 *
-*  The conversion of a sparse matrix from GEneral BSR to GEneral BSC format involves two steps. First, the 
-*  user calls \ref rocsparse_sgebsr2gebsc_buffer_size "rocsparse_Xgebsr2gebsc_buffer_size()" in order to 
-*  determine the size of the required tempory storage buffer. The user then allocates this buffer. Secondly, 
-*  the user calls \p rocsparse_gebsr2gebsc to complete the conversion. Once the conversion is complete, the 
+*  The conversion of a sparse matrix from GEneral BSR to GEneral BSC format involves two steps. First, the
+*  user calls \ref rocsparse_sgebsr2gebsc_buffer_size "rocsparse_Xgebsr2gebsc_buffer_size()" in order to
+*  determine the size of the required tempory storage buffer. The user then allocates this buffer. Secondly,
+*  the user calls \p rocsparse_gebsr2gebsc to complete the conversion. Once the conversion is complete, the
 *  user must free the temporary buffer.
 *
-*  \p rocsparse_gebsr2gebsc takes a \ref rocsparse_action parameter as input. This \p copy_values parameter 
-*  decides whether \p bsc_row_ind and \p bsc_val are filled during conversion (\ref rocsparse_action_numeric) 
-*  or whether only \p bsc_row_ind is filled (\ref rocsparse_action_symbolic). Using 
+*  \p rocsparse_gebsr2gebsc takes a \ref rocsparse_action parameter as input. This \p copy_values parameter
+*  decides whether \p bsc_row_ind and \p bsc_val are filled during conversion (\ref rocsparse_action_numeric)
+*  or whether only \p bsc_row_ind is filled (\ref rocsparse_action_symbolic). Using
 *  \ref rocsparse_action_symbolic is useful for example if only the sparsity pattern is required.
 *
 *  \note
@@ -202,93 +202,7 @@ rocsparse_status rocsparse_zgebsr2gebsc_buffer_size(rocsparse_handle            
 *
 *  \par Example
 *  This example computes the transpose of a GEneral BSR matrix.
-*  \code{.c}
-*      //     1 2 0 3
-*      // A = 0 4 5 0
-*      //     6 0 0 7
-*      //     1 2 3 4
-*
-*      rocsparse_int mb_A   = 2;
-*      rocsparse_int nb_A   = 2;
-*      rocsparse_int nnzb_A = 4;
-*      rocsparse_int row_block_dim = 2;
-*      rocsparse_int col_block_dim = 2;
-*
-*      std::vector<rocsparse_int> hbsr_row_ptr_A = {0, 2, 4}; 
-*      std::vector<rocsparse_int> hbsr_col_ind_A = {0, 1, 0, 1}; 
-*      std::vector<float> hbsr_val_A     = {1, 2, 0, 4, 0, 3, 5, 0, 6, 0, 1, 2, 0, 7, 3, 4};
-*
-*      rocsparse_int* dbsr_row_ptr_A = nullptr;
-*      rocsparse_int* dbsr_col_ind_A = nullptr;
-*      float* dbsr_val_A = nullptr;
-*      hipMalloc((void**)&dbsr_row_ptr_A, sizeof(rocsparse_int) * (mb_A + 1));
-*      hipMalloc((void**)&dbsr_col_ind_A, sizeof(rocsparse_int) * nnzb_A);
-*      hipMalloc((void**)&dbsr_val_A, sizeof(float) * nnzb_A * row_block_dim * col_block_dim);
-*
-*      hipMemcpy(dbsr_row_ptr_A, hbsr_row_ptr_A.data(), sizeof(rocsparse_int) * (mb_A + 1), hipMemcpyHostToDevice);
-*      hipMemcpy(dbsr_col_ind_A, hbsr_col_ind_A.data(), sizeof(rocsparse_int) * nnzb_A, hipMemcpyHostToDevice);
-*      hipMemcpy(dbsr_val_A, hbsr_val_A.data(), sizeof(float) * nnzb_A * row_block_dim * col_block_dim, hipMemcpyHostToDevice);
-*
-*      // Allocate memory for transposed BSR matrix
-*      rocsparse_int mb_T   = nb_A;
-*      rocsparse_int nb_T   = mb_A;
-*      rocsparse_int nnzb_T = nnzb_A;
-*
-*      rocsparse_int* dbsr_row_ptr_T = nullptr;
-*      rocsparse_int* dbsr_col_ind_T = nullptr;
-*      float* dbsr_val_T = nullptr;
-*      hipMalloc((void**)&dbsr_row_ptr_T, sizeof(rocsparse_int) * (mb_T + 1));
-*      hipMalloc((void**)&dbsr_col_ind_T, sizeof(rocsparse_int) * nnzb_T);
-*      hipMalloc((void**)&dbsr_val_T, sizeof(float) * nnzb_A * row_block_dim * col_block_dim);
-*
-*      rocsparse_handle handle;
-*      rocsparse_create_handle(&handle);
-*
-*      // Obtain the temporary buffer size
-*      size_t buffer_size;
-*      rocsparse_sgebsr2gebsc_buffer_size(handle,
-*                                       mb_A,
-*                                       nb_A,
-*                                       nnzb_A,
-*                                       dbsr_val_A,
-*                                       dbsr_row_ptr_A,
-*                                       dbsr_col_ind_A,
-*                                       row_block_dim,
-*                                       col_block_dim,
-*                                       &buffer_size);
-*
-*      // Allocate temporary buffer
-*      void* temp_buffer;
-*      hipMalloc(&temp_buffer, buffer_size);
-*
-*      rocsparse_sgebsr2gebsc(handle,
-*                           mb_A,
-*                           nb_A,
-*                           nnzb_A,
-*                           dbsr_val_A,
-*                           dbsr_row_ptr_A,
-*                           dbsr_col_ind_A,
-*                           row_block_dim,
-*                           col_block_dim,
-*                           dbsr_val_T,
-*                           dbsr_col_ind_T,
-*                           dbsr_row_ptr_T,
-*                           rocsparse_action_numeric,
-*                           rocsparse_index_base_zero,
-*                           temp_buffer);
-*
-*      rocsparse_destroy_handle(handle);
-*
-*      hipFree(temp_buffer);
-*
-*      hipFree(dbsr_row_ptr_A);
-*      hipFree(dbsr_col_ind_A);
-*      hipFree(dbsr_val_A);
-*
-*      hipFree(dbsr_row_ptr_T);
-*      hipFree(dbsr_col_ind_T);
-*      hipFree(dbsr_val_T);
-*  \endcode
+*  \snippet example_rocsparse_gebsr2gebsc.cpp doc example
 */
 /**@{*/
 

@@ -265,6 +265,15 @@ namespace rocRoller
                         auto        aIdx = graphIndices[a];
                         auto        bIdx = graphIndices[b];
 
+                        // This can happen with Exchange nodes
+                        // when scaleSkipPermlane=True, because
+                        // src and dst of each Exchange point
+                        // to the same macrotile (register allocation),
+                        // and therefore recorded twice in the
+                        // ControlFlowRWTracer.
+                        if(aRec.control == bRec.control)
+                            continue;
+
                         auto order = kgraph.control.compareNodes(
                             rocRoller::UpdateCache, aRec.control, bRec.control);
 
@@ -562,8 +571,6 @@ namespace rocRoller
 
         KernelGraph AliasDataFlowTags::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::AliasDataFlowTags");
-
             auto rv = original;
 
             auto aliases = AliasDataFlowTagsDetail::findAliasCandidates(rv);

@@ -16,6 +16,7 @@ function display_help()
   echo "    [-d|--dependencies] install build dependencies"
   echo "    [-r]--relocatable] create a package to support relocatable ROCm"
   echo "    [-c|--clients] build library clients too (combines with -i & -d)"
+  echo "    [-o|--clients-only] build clients only"
   echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
   echo "    [-k|--relwithdebinfo] -DCMAKE_BUILD_TYPE=RelWithDebInfo"
   echo "    [--codecoverage] build with code coverage profiling enabled"
@@ -267,6 +268,7 @@ supported_distro
 install_package=false
 install_dependencies=false
 build_clients=false
+build_clients_only=false
 build_cuda=false
 build_static=false
 build_release=true
@@ -285,7 +287,7 @@ compiler=${CXX}
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,compiler:,cuda,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,matrices-dir:,matrices-dir-install:,rm-legacy-include-dir --options hicdgrk -- "$@")
+  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,clients-only,dependencies,debug,compiler:,cuda,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,matrices-dir:,matrices-dir-install:,rm-legacy-include-dir --options hicodgrk -- "$@")
 else
   echo "Need a new version of getopt"
   exit 1
@@ -312,6 +314,9 @@ while true; do
         shift ;;
     -c|--clients)
         build_clients=true
+        shift ;;
+    -o|--clients-only)
+        build_clients_only=true
         shift ;;
     -r|--relocatable)
         build_relocatable=true
@@ -365,7 +370,7 @@ done
 
 # Note 'compiler' variable not changed after this point. This ensures that everything is built with the same compiler
 # provided by the user through either setting CXX externally (in which case compiler=${CXX} followed by CXX=${compiler})
-# or through using --compiler option. This is important so that googletest and hipsparse are built with the same 
+# or through using --compiler option. This is important so that googletest and hipsparse are built with the same
 # compiler to ensure settings like position independent code is consistent when linking.
 CXX=${compiler}
 
@@ -499,6 +504,17 @@ pushd .
   # clients
   if [[ "${build_clients}" == true ]]; then
     cmake_client_options="${cmake_client_options} -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON"
+    #
+    # Add matrices_dir if exists.
+    #
+    if ! [[ "${matrices_dir}" == "" ]];then
+        cmake_client_options="${cmake_client_options} -DCMAKE_MATRICES_DIR=${matrices_dir}"
+    fi
+  fi
+
+  # clients only
+  if [[ "${build_clients_only}" == true ]]; then
+    cmake_client_options="${cmake_client_options} -DBUILD_CLIENTS_ONLY=ON -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON"
     #
     # Add matrices_dir if exists.
     #

@@ -335,7 +335,7 @@ namespace rocRoller
 
             for(auto const& input : location.incoming)
             {
-                auto parent    = *only(ctrl.getNeighbours<Graph::Direction::Upstream>(input));
+                auto parent    = ctrl.getNeighbours<Graph::Direction::Upstream>(input).front();
                 auto edge      = ctrl.getElement(input);
                 auto maybeBody = ctrl.get<CG::Body>(input);
 
@@ -358,7 +358,7 @@ namespace rocRoller
 
             for(auto const& output : location.outgoing)
             {
-                auto child = *only(ctrl.getNeighbours<Graph::Direction::Downstream>(output));
+                auto child = ctrl.getNeighbours<Graph::Direction::Downstream>(output).front();
                 auto edge  = ctrl.getElement(output);
                 auto maybeSequence = ctrl.get<CG::Sequence>(output);
                 auto maybeBody     = ctrl.get<CG::Body>(output);
@@ -386,9 +386,8 @@ namespace rocRoller
             auto location = graph.control.getLocation(op);
             for(auto const& input : location.incoming)
             {
-                auto edge = graph.control.getElement(input);
-                int  parent
-                    = *graph.control.getNeighbours<Graph::Direction::Upstream>(input).begin();
+                auto edge  = graph.control.getElement(input);
+                int parent = graph.control.getNeighbours<Graph::Direction::Upstream>(input).front();
                 graph.control.deleteElement(input);
                 if(graph.control.getInputNodeIndices<CG::Body>(top).to<std::unordered_set>().count(
                        parent)
@@ -410,7 +409,7 @@ namespace rocRoller
                     continue;
                 auto edge = graph.control.getElement(output);
                 int  child
-                    = *graph.control.getNeighbours<Graph::Direction::Downstream>(output).begin();
+                    = graph.control.getNeighbours<Graph::Direction::Downstream>(output).front();
                 graph.control.deleteElement(output);
                 graph.control.addElement(edge, {bottom}, {child});
             }
@@ -422,9 +421,8 @@ namespace rocRoller
             auto location = graph.control.getLocation(op);
             for(auto const& input : location.incoming)
             {
-                auto edge = graph.control.getElement(input);
-                int  parent
-                    = *graph.control.getNeighbours<Graph::Direction::Upstream>(input).begin();
+                auto edge  = graph.control.getElement(input);
+                int parent = graph.control.getNeighbours<Graph::Direction::Upstream>(input).front();
                 graph.control.deleteElement(input);
                 if(graph.control.getInputNodeIndices<CG::Body>(newOp)
                        .to<std::unordered_set>()
@@ -501,11 +499,12 @@ namespace rocRoller
                 if(maybePassThrough)
                 {
                     // If it's a PassThrough edge, purge the coordinate
-                    auto coordTag = only(kgraph.coordinates.getNeighbours(edgeTag, direction));
-                    if(coordTag)
+                    auto coordTags = kgraph.coordinates.getNeighbours(edgeTag, direction);
+                    if(!coordTags.empty())
                     {
-                        kgraph.coordinates.deleteElement(*coordTag);
-                        kgraph.mapper.purgeMappingsTo(*coordTag);
+                        auto coordTag = coordTags.front();
+                        kgraph.coordinates.deleteElement(coordTag);
+                        kgraph.mapper.purgeMappingsTo(coordTag);
                     }
                 }
                 if(maybePassThrough || maybeDataFlow)
@@ -547,14 +546,11 @@ namespace rocRoller
             return kgraph.coordinates.get<CT::LDS>(tag) || kgraph.coordinates.get<CT::User>(tag);
         }
 
-        std::pair<int, Graph::Direction>
-            getOperationTarget(int tag, KernelGraph const& kgraph, bool isDirect2LDS)
+        std::pair<int, Graph::Direction> getOperationTarget(int                tag,
+                                                            KernelGraph const& kgraph,
+                                                            bool isStorePartOfBidirectionalOp)
         {
             auto elem = kgraph.control.getElement(tag);
-            if(isDirect2LDS)
-            {
-                return {kgraph.mapper.get<CT::LDS>(tag), GD::Upstream};
-            }
 
             using result = std::pair<int, Graph::Direction>;
 
@@ -564,10 +560,15 @@ namespace rocRoller
                         -> result {
                         return {kgraph.mapper.get<CT::User>(tag), GD::Upstream};
                     },
-                    [&](CIsAnyOf<CG::LoadTiled,
-                                 CG::LoadVGPR,
-                                 CG::LoadSGPR,
-                                 CG::LoadTileDirect2LDS> auto const& op) -> result {
+                    [&](CIsAnyOf<CG::LoadTileDirect2LDS> auto const& op) -> result {
+                        if(isStorePartOfBidirectionalOp)
+                        {
+                            return {kgraph.mapper.get<CT::LDS>(tag), GD::Upstream};
+                        }
+                        return {kgraph.mapper.get<CT::User>(tag), GD::Downstream};
+                    },
+                    [&](CIsAnyOf<CG::LoadTiled, CG::LoadVGPR, CG::LoadSGPR> auto const& op)
+                        -> result {
                         return {kgraph.mapper.get<CT::User>(tag), GD::Downstream};
                     },
                     [&](CG::StoreLDSTile const& op) -> result {
@@ -804,16 +805,14 @@ namespace rocRoller
 
             std::optional<int> rv;
 
-            auto forNeighbours
-                = kgraph.coordinates.getNeighbours<GD::Upstream>(forLoopCoord).to<std::vector>();
+            auto forNeighbours = kgraph.coordinates.getNeighbours<GD::Upstream>(forLoopCoord);
             for(auto forNeighbour : forNeighbours)
             {
                 auto split = kgraph.coordinates.get<CT::Split>(forNeighbour);
                 if(split)
                 {
                     auto splitNeighbours
-                        = kgraph.coordinates.getNeighbours<GD::Downstream>(forNeighbour)
-                              .to<std::vector>();
+                        = kgraph.coordinates.getNeighbours<GD::Downstream>(forNeighbour);
                     for(auto splitNeighbour : splitNeighbours)
                     {
                         auto unroll = kgraph.coordinates.get<CT::Unroll>(splitNeighbour);
@@ -1261,16 +1260,18 @@ namespace rocRoller
         /**
         * @brief Get coordinates required by the code-generator.
         */
-        std::vector<int>
-            getCodeGeneratorCoordinates(KernelGraph const& graph, int tag, bool isDirect2LDS)
+        std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph,
+                                                     int                tag,
+                                                     bool               isStorePartOfGlobalToLDSOp)
         {
             auto [tileTag, tile] = graph.getDimension<CT::MacroTile>(tag);
-            if(isDirect2LDS)
+            if(isStorePartOfGlobalToLDSOp)
             {
                 return {graph.mapper.get<CT::ElementNumber>(tag, 2),
                         graph.mapper.get<CT::ElementNumber>(tag, 3)};
             }
-            if(tile.memoryType == MemoryType::VGPR || tile.memoryType == MemoryType::WAVE_SPLIT)
+            if(tile.memoryType == MemoryType::VGPR || tile.memoryType == MemoryType::WAVE_SPLIT
+               || tile.memoryType == MemoryType::WAVE_Direct2LDS)
             {
                 return {graph.mapper.get<CT::ElementNumber>(tag, 0),
                         graph.mapper.get<CT::ElementNumber>(tag, 1)};
@@ -1369,20 +1370,22 @@ namespace rocRoller
             // Sequence edge, we have found a new body-parent. This should hold for
             // any valid (walkable) control graph.
 
-            while(auto edge
-                  = graph.getNeighbours<Graph::Direction::Upstream>(control).take(1).only())
+            auto neighbours = graph.getNeighbours<Graph::Direction::Upstream>(control);
+            while(!neighbours.empty())
             {
-                auto node = graph.getNeighbours<Graph::Direction::Upstream>(*edge).take(1).only();
-                AssertFatal(node.has_value(), "Edge does not connect two nodes!");
-                AssertFatal(!visitedNodes.contains(*node), "Graph contains cycle!");
-                visitedNodes.insert(*node);
+                auto edge  = neighbours.front();
+                auto nodes = graph.getNeighbours<Graph::Direction::Upstream>(edge);
+                AssertFatal(!nodes.empty(), "Edge does not connect two nodes!");
+                auto node = nodes.front();
+                AssertFatal(!visitedNodes.contains(node), "Graph contains cycle!");
+                visitedNodes.insert(node);
 
                 auto isContaining
-                    = !std::holds_alternative<ControlGraph::Sequence>(graph.getEdge(*edge));
+                    = !std::holds_alternative<ControlGraph::Sequence>(graph.getEdge(edge));
                 if(isContaining)
-                    rv.push_front(*node);
+                    rv.push_front(node);
 
-                control = *node;
+                neighbours = graph.getNeighbours<Graph::Direction::Upstream>(node);
             }
 
             return rv;
@@ -1393,5 +1396,25 @@ namespace rocRoller
             return controlStack(control, graph.control);
         }
 
+        std::optional<Graph::Direction> danglingDirection(KernelGraph const& graph, int tag)
+        {
+            bool const isUpstreamEmpty
+                = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(tag).empty();
+            bool const isDownstreamEmpty
+                = graph.coordinates.getNeighbours<Graph::Direction::Downstream>(tag).empty();
+
+            if(isUpstreamEmpty == isDownstreamEmpty)
+            {
+                // Not dangling if both directions are empty or not empty.
+                return std::nullopt;
+            }
+
+            return isUpstreamEmpty ? Graph::Direction::Upstream : Graph::Direction::Downstream;
+        }
+
+        bool isGlobalToLDSOp(KernelGraph const& graph, int op)
+        {
+            return graph.control.get<ControlGraph::LoadTileDirect2LDS>(op).has_value();
+        }
     }
 }

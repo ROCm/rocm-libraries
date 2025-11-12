@@ -448,7 +448,7 @@ namespace rocRoller::KernelGraph
             if(!incomingEdge)
                 return false;
 
-            auto outgoingEdges = graph.control.getNeighbours<GD::Downstream>(nop).to<std::vector>();
+            auto outgoingEdges = graph.control.getNeighbours<GD::Downstream>(nop);
 
             for(auto outEdge : outgoingEdges)
             {
@@ -478,7 +478,7 @@ namespace rocRoller::KernelGraph
             if(!outgoingEdge)
                 return false;
 
-            auto incomingEdges = graph.control.getNeighbours<GD::Upstream>(nop).to<std::vector>();
+            auto incomingEdges = graph.control.getNeighbours<GD::Upstream>(nop);
 
             for(auto inEdge : incomingEdges)
             {
@@ -534,7 +534,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph Simplify::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::Simplify");
         auto graph = original;
         removeRedundantSequenceEdges(graph);
         removeRedundantBodyEdges(graph);

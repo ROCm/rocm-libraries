@@ -101,6 +101,8 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
         | Controls hipBLASLt kernel selection strategy for GEMM operations.
       - | 0: Default (standard tuned libraries, no Stream-K)
         | 2: Stream-K (enables Stream-K library for consistent performance)
+        | This variable has no effect on the AMD Instinct™ MI350 series. Stream-K is always used.
+
 
     * - | ``TENSILE_STREAMK_DYNAMIC_GRID``
         | Controls Stream-K dynamic grid size selection behavior.
@@ -117,3 +119,22 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
       - | Integer value specifying maximum compute units
         | Example: 32 (limits GEMM kernels to 32 compute units)
         | Default: All available compute units
+
+Type overrides
+======================
+
+Overrides for specific types.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 70,30
+
+    * - **Environment variable**
+      - **Value**
+
+    * - | ``HIPBLASLT_OVERRIDE_COMPUTE_TYPE_XF32``
+        | Overrides the compute type used for GEMMs which specify a compute type of ``XF32``.
+      - | -1: Off (Default)
+        | 0: F32
+        | 1: XF32(eg TF32)
+        | 2: F32_BF16

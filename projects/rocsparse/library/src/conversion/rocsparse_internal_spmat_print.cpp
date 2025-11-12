@@ -293,6 +293,44 @@ rocsparse_status rocsparse::internal_spmat_print(std::ostream&               out
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_spmat_get_format(descr, &format));
     switch(format)
     {
+    case rocsparse_format_sell:
+    {
+        int64_t              m;
+        int64_t              n;
+        int64_t              nnz;
+        int64_t              sell_slice_size;
+        int64_t              sell_colval_size;
+        const void*          ptr;
+        const void*          ind;
+        const void*          val;
+        rocsparse_indextype  ptr_type;
+        rocsparse_indextype  ind_type;
+        rocsparse_index_base base;
+        rocsparse_datatype   val_type;
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_const_sell_get(descr,
+                                                           &m,
+                                                           &n,
+                                                           &nnz,
+                                                           &sell_slice_size,
+                                                           &sell_colval_size,
+                                                           &ptr,
+                                                           &ind,
+                                                           &val,
+                                                           &ptr_type,
+                                                           &ind_type,
+                                                           &base,
+                                                           &val_type));
+        out << "- format           : " << rocsparse::enum_utils::to_string(format) << std::endl;
+        out << "- m                : " << m << std::endl;
+        out << "- n                : " << n << std::endl;
+        out << "- nnz              : " << nnz << std::endl;
+        out << "- sell_slice_size  : " << sell_slice_size << std::endl;
+        out << "- sell_colval_size : " << sell_colval_size << std::endl;
+        out << "- ptr_type  : " << rocsparse::enum_utils::to_string(ptr_type) << std::endl;
+        out << "- ind_type  : " << rocsparse::enum_utils::to_string(ind_type) << std::endl;
+        out << "- data_type : " << rocsparse::enum_utils::to_string(val_type) << std::endl;
+        break;
+    }
     case rocsparse_format_bell:
     {
         int64_t              m;
@@ -328,7 +366,6 @@ rocsparse_status rocsparse::internal_spmat_print(std::ostream&               out
         break;
     }
     case rocsparse_format_ell:
-
     {
         int64_t              m;
         int64_t              n;

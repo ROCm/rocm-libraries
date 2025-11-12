@@ -89,13 +89,6 @@ foreach( sample ${sample_list} )
       target_compile_options( ${sample} PRIVATE -arch sm_53 -gencode=arch=compute_53,code=sm_53 -Xptxas=-w)
     endif()
     target_link_libraries( ${sample} PRIVATE ${CUDA_LIBRARIES} )
-  else()
-    if( USE_HIPRAND AND NOT hiprand_FOUND )
-      find_package( hiprand REQUIRED )
-    endif()
-    if ( USE_HIPRAND )
-      target_link_libraries( ${sample} PRIVATE hip::hiprand )
-    endif()
   endif()
 
   target_include_directories( ${sample}
@@ -124,8 +117,15 @@ foreach( sample ${sample_list} )
   
 endforeach()
 
-# cuFFT callback code must be compiled with -dc to enable relocatable
-# device code
-if( BUILD_WITH_LIB STREQUAL "CUDA" AND hipfft_callback IN_LIST sample_list )
-  target_compile_options( hipfft_callback PRIVATE -dc )
+# callback code must be compiled as relocatable device code
+if( hipfft_callback IN_LIST sample_list )
+  if( BUILD_WITH_LIB STREQUAL "CUDA" )
+    target_compile_options( hipfft_callback PRIVATE -dc )
+  else()
+    # -fgpu-rdc causes failure at link stage on Windows
+    if (NOT WIN32)
+      target_compile_options( hipfft_callback PRIVATE -fgpu-rdc )
+      target_link_options( hipfft_callback PRIVATE -fgpu-rdc )
+    endif()
+  endif()
 endif()

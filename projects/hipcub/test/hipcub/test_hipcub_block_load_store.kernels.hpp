@@ -26,8 +26,8 @@
 #include "test_utils.hpp"
 
 // hipcub API
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_store.hpp"
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_store.hpp>
 
 template<class Type,
          hipcub::BlockLoadAlgorithm  Load,

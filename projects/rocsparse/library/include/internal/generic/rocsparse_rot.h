@@ -52,7 +52,7 @@ extern "C" {
 *      }
 *  \endcode
 *
-*  \p rocsparse_rot supports the following uniform precision data types for the sparse and dense vectors x and 
+*  \p rocsparse_rot supports the following uniform precision data types for the sparse and dense vectors x and
 *  y and compute types for the scalars \f$c\f$ and \f$s\f$.
 *
 *  \par Uniform Precisions:
@@ -88,102 +88,7 @@ extern "C" {
 *  \retval     rocsparse_status_invalid_pointer \p c, \p s, \p x or \p y pointer is
 *              invalid.
 *  \par Example
-*  \code{.c}
-*   // Number of non-zeros of the sparse vector
-*   int nnz = 3;
-*
-*   // Size of sparse and dense vector
-*   int size = 9;
-*
-*   // Sparse index vector
-*   std::vector<int> hx_ind = {0, 3, 5};
-*
-*   // Sparse value vector
-*   std::vector<float> hx_val = {1.0f, 2.0f, 3.0f};
-*
-*   // Dense vector
-*   std::vector<float> hy = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
-*
-*   // Scalar c
-*   float c = 3.7f;
-*
-*   // Scalar s
-*   float s = 1.2f;
-*
-*   // Offload data to device
-*   int* dx_ind;
-*   float* dx_val;
-*   float* dy;
-*   hipMalloc((void**)&dx_ind, sizeof(int) * nnz);
-*   hipMalloc((void**)&dx_val, sizeof(float) * nnz);
-*   hipMalloc((void**)&dy, sizeof(float) * size);
-*
-*   hipMemcpy(dx_ind, hx_ind.data(), sizeof(int) * nnz, hipMemcpyHostToDevice);
-*   hipMemcpy(dx_val, hx_val.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
-*   hipMemcpy(dy, hy.data(), sizeof(float) * size, hipMemcpyHostToDevice);
-*
-*   rocsparse_handle     handle;
-*   rocsparse_spvec_descr vecX;
-*   rocsparse_dnvec_descr vecY;
-*
-*   rocsparse_indextype idx_type = rocsparse_indextype_i32;
-*   rocsparse_datatype  data_type = rocsparse_datatype_f32_r;
-*   rocsparse_index_base idx_base = rocsparse_index_base_zero;
-*
-*   rocsparse_create_handle(&handle);
-*
-*   // Create sparse vector X
-*   rocsparse_create_spvec_descr(&vecX,
-*                                size,
-*                                nnz,
-*                                dx_ind,
-*                                dx_val,
-*                                idx_type,
-*                                idx_base,
-*                                data_type);
-*
-*   // Create dense vector Y
-*   rocsparse_create_dnvec_descr(&vecY,
-*                                size,
-*                                dy,
-*                                data_type);
-*
-*   // Call rot
-*   rocsparse_rot(handle, (void*)&c, (void*)&s, vecX, vecY);
-*
-*   rocsparse_spvec_get_values(vecX, (void**)&dx_val);
-*   rocsparse_dnvec_get_values(vecY, (void**)&dy);
-*
-*   // Copy result back to host
-*   hipMemcpy(hx_val.data(), dx_val, sizeof(float) * nnz, hipMemcpyDeviceToHost);
-*   hipMemcpy(hy.data(), dy, sizeof(float) * size, hipMemcpyDeviceToHost);
-*
-*   std::cout << "x" << std::endl;
-*   for(size_t i = 0; i < hx_val.size(); ++i)
-*   {
-*       std::cout << hx_val[i] << " ";
-*   }
-*
-*   std::cout << std::endl;
-*
-*   std::cout << "y" << std::endl;
-*   for(size_t i = 0; i < hy.size(); ++i)
-*   {
-*       std::cout << hy[i] << " ";
-*   }
-*
-*   std::cout << std::endl;
-*
-*   // Clear rocSPARSE
-*   rocsparse_destroy_spvec_descr(vecX);
-*   rocsparse_destroy_dnvec_descr(vecY);
-*   rocsparse_destroy_handle(handle);
-*
-*   // Clear device memory
-*   hipFree(dx_ind);
-*   hipFree(dx_val);
-*   hipFree(dy);
-*  \endcode
+*  \snippet example_rocsparse_rot.cpp doc example
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_rot(rocsparse_handle      handle,

@@ -3,8 +3,11 @@
 rocSPARSE exposes a common interface that provides Basic Linear Algebra Subroutines (BLAS) for
 sparse computation. It's implemented on top of AMD
 [ROCm](https://github.com/ROCm/ROCm) runtime and toolchains. rocSPARSE is
-created using the [HIP](https://github.com/ROCm/HIP/) programming
+created using the [HIP](https://github.com/ROCm/rocm-systems/tree/develop/projects/hip) programming
 language and optimized for AMD's latest discrete GPUs.
+
+> [!NOTE]
+> For portability, ROCm provides the **[hipSPARSE](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse)** library. hipSPARSE includes a comprehensive, portable interface that supports multiple backends (including rocSPARSE and cuSPARSE). For documentation and examples, see the [hipSPARSE documentation](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
 ## Documentation
 
@@ -134,5 +137,5 @@ To submit an issue, a bug, or a feature request, use the rocm-libraries GitHub
 
 ## License
 
-Our [license file](https://github.com/ROCm/rocSPARSE) is located in the main
+The [license file](https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocsparse/LICENSE.md) is located in the main
 repository.

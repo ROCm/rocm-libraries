@@ -45,7 +45,7 @@ To build hipSPARSELt from source, follow the instructions in this section.
 To compile and run hipSPARSELt, the `ROCm platform <https://github.com/ROCm/ROCm>`_ is required.
 The build also requires the following compile-time dependencies:
 
-*  `hipSPARSE <https://github.com/ROCm/hipSPARSE>`_
+*  `hipSPARSE <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse>`_
 *  `git <https://git-scm.com/>`_
 *  `CMake <https://cmake.org/>`_ (Version 3.5 or later)
 *  `GoogleTest <https://github.com/google/googletest>`_ (Optional: only required to build the clients)
@@ -79,7 +79,7 @@ Use the following commands for a sparse checkout:
 
 .. note::
 
-   To build ROCm 6.4 and older, use the hipSPARSELt repository at `<https://github.com/ROCm/hipSPARSELt>`_.
+   To build ROCm 6.4.3 and earlier, use the hipSPARSELt repository at `<https://github.com/ROCm/hipSPARSELt>`_.
    For more information, see the documentation associated with the release you want to build.
 
 Building hipSPARSELt using the install script

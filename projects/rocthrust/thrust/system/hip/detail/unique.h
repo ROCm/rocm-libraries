@@ -25,17 +25,25 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  ******************************************************************************/
-
 #pragma once
 
 #include <thrust/detail/config.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #  include <thrust/system/hip/config.h>
 
+#  include <thrust/advance.h>
+#  include <thrust/count.h>
 #  include <thrust/detail/minmax.h>
-#  include <thrust/detail/mpl/math.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
@@ -52,11 +60,11 @@
 THRUST_NAMESPACE_BEGIN
 
 template <typename DerivedPolicy, typename ForwardIterator, typename BinaryPredicate>
-ForwardIterator THRUST_HOST_DEVICE
-unique(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
-       ForwardIterator first,
-       ForwardIterator last,
-       BinaryPredicate binary_pred);
+THRUST_HOST_DEVICE ForwardIterator unique(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  ForwardIterator first,
+  ForwardIterator last,
+  BinaryPredicate binary_pred);
 
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename BinaryPredicate>
 THRUST_HOST_DEVICE OutputIterator unique_copy(
@@ -66,12 +74,24 @@ THRUST_HOST_DEVICE OutputIterator unique_copy(
   OutputIterator result,
   BinaryPredicate binary_pred);
 
+template <typename DerivedPolicy, typename ForwardIterator, typename BinaryPredicate>
+THRUST_HOST_DEVICE typename thrust::iterator_traits<ForwardIterator>::difference_type unique_count(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  ForwardIterator first,
+  ForwardIterator last,
+  BinaryPredicate binary_pred);
+
 namespace hip_rocprim
 {
+
+// XXX  it should be possible to unify unique & unique_by_key into a single
+//      agent with various specializations, similar to what is done
+//      with partition
 namespace __unique
 {
+
 template <typename Derived, typename ItemsInputIt, typename ItemsOutputIt, typename BinaryPred>
-THRUST_HIP_RUNTIME_FUNCTION ItemsOutputIt unique(
+THRUST_RUNTIME_FUNCTION ItemsOutputIt unique(
   execution_policy<Derived>& policy,
   ItemsInputIt items_first,
   ItemsInputIt items_last,
@@ -79,7 +99,8 @@ THRUST_HIP_RUNTIME_FUNCTION ItemsOutputIt unique(
   BinaryPred binary_pred)
 {
   using namespace thrust::system::hip_rocprim::temp_storage;
-  using size_type = size_t;
+  //  using size_type = typename iterator_traits<ItemsInputIt>::difference_type;
+  using size_type = int;
 
   size_type num_items       = static_cast<size_type>(thrust::distance(items_first, items_last));
   size_t temp_storage_bytes = 0;
@@ -105,7 +126,7 @@ THRUST_HIP_RUNTIME_FUNCTION ItemsOutputIt unique(
       debug_sync),
     "unique failed on 1st step");
 
-  size_t storage_size;
+  size_t storage_size = 0;
   void* ptr       = nullptr;
   void* temp_stor = nullptr;
   size_type* d_num_selected_out;
@@ -140,7 +161,7 @@ THRUST_HIP_RUNTIME_FUNCTION ItemsOutputIt unique(
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class InputIt, class OutputIt, class BinaryPred>
-OutputIt THRUST_HIP_FUNCTION
+OutputIt THRUST_HOST_DEVICE
 unique_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, BinaryPred binary_pred)
 {
   // struct workaround is required for HIP-clang
@@ -149,12 +170,12 @@ unique_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, Outp
     THRUST_HOST static OutputIt
     par(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, BinaryPred binary_pred)
     {
-      return __unique::unique(policy, first, last, result, binary_pred);
+      return result = __unique::unique(policy, first, last, result, binary_pred);
     }
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, BinaryPred binary_pred)
     {
-      return thrust::unique_copy(cvt_to_seq(derived_cast(policy)), first, last, result, binary_pred);
+      return result = thrust::unique_copy(cvt_to_seq(derived_cast(policy)), first, last, result, binary_pred);
     }
   };
 #  if __THRUST_HAS_HIPRT__
@@ -165,27 +186,27 @@ unique_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, Outp
 }
 
 template <class Derived, class InputIt, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION unique_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
+OutputIt THRUST_HOST_DEVICE unique_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
   using input_type = typename iterator_traits<InputIt>::value_type;
   return hip_rocprim::unique_copy(policy, first, last, result, equal_to<input_type>());
 }
 
 THRUST_EXEC_CHECK_DISABLE
-template <class Derived, class InputIt, class BinaryPred>
-InputIt THRUST_HIP_FUNCTION
-unique(execution_policy<Derived>& policy, InputIt first, InputIt last, BinaryPred binary_pred)
+template <class Derived, class ForwardIt, class BinaryPred>
+ForwardIt THRUST_HOST_DEVICE
+unique(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last, BinaryPred binary_pred)
 {
   // struct workaround is required for HIP-clang
   struct workaround
   {
-    THRUST_HOST static InputIt
-    par(execution_policy<Derived>& policy, InputIt first, InputIt last, BinaryPred binary_pred)
+    THRUST_HOST static ForwardIt
+    par(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last, BinaryPred binary_pred)
     {
       return hip_rocprim::unique_copy(policy, first, last, first, binary_pred);
     }
-    THRUST_DEVICE static InputIt
-    seq(execution_policy<Derived>& policy, InputIt first, InputIt last, BinaryPred binary_pred)
+    THRUST_DEVICE static ForwardIt
+    seq(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last, BinaryPred binary_pred)
     {
       return thrust::unique(cvt_to_seq(derived_cast(policy)), first, last, binary_pred);
     }
@@ -197,10 +218,10 @@ unique(execution_policy<Derived>& policy, InputIt first, InputIt last, BinaryPre
 #  endif
 }
 
-template <class Derived, class InputIt>
-InputIt THRUST_HIP_FUNCTION unique(execution_policy<Derived>& policy, InputIt first, InputIt last)
+template <class Derived, class ForwardIt>
+ForwardIt THRUST_HOST_DEVICE unique(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last)
 {
-  using input_type = typename iterator_traits<InputIt>::value_type;
+  using input_type = typename iterator_traits<ForwardIt>::value_type;
   return hip_rocprim::unique(policy, first, last, equal_to<input_type>());
 }
 
@@ -218,7 +239,7 @@ struct zip_adj_not_predicate
 
 THRUST_EXEC_CHECK_DISABLE
 template <class Derived, class ForwardIt, class BinaryPred>
-typename thrust::iterator_traits<ForwardIt>::difference_type THRUST_HIP_FUNCTION
+typename thrust::iterator_traits<ForwardIt>::difference_type THRUST_HOST_DEVICE
 unique_count(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last, BinaryPred binary_pred)
 {
   if (first == last)
@@ -233,6 +254,7 @@ unique_count(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last,
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
 
+//
 #  include <thrust/memory.h>
 #  include <thrust/unique.h>
 #endif

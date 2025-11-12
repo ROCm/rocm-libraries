@@ -75,7 +75,8 @@ template<unsigned int OutputPerThread,
          class Engine,
          class Constant,
          class T,
-         class Distribution>
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
 void generate_sobol_host(dim3,
                          dim3,
                          dim3,
@@ -96,12 +97,13 @@ template<unsigned int OutputPerThread,
          class Distribution,
          int block_size>
 __global__
-    __launch_bounds__(block_size) void generate_sobol_kernel(T*                 data,
-                                                             const size_t       n,
-                                                             const Constant*    direction_vectors,
-                                                             const Constant*    scramble_constants,
-                                                             const unsigned int offset,
-                                                             Distribution       distribution)
+    __launch_bounds__(block_size)
+void generate_sobol_kernel(T*                 data,
+                           const size_t       n,
+                           const Constant*    direction_vectors,
+                           const Constant*    scramble_constants,
+                           const unsigned int offset,
+                           Distribution       distribution)
 #else
 template<unsigned int OutputPerThread,
          bool         Scrambled,
@@ -110,7 +112,8 @@ template<unsigned int OutputPerThread,
          class T,
          class Distribution,
          int block_size>
-__global__ __launch_bounds__(block_size) void generate_sobol_kernel(
+__global__ __launch_bounds__(block_size)
+void generate_sobol_kernel(
     T*, const size_t, const Constant*, const Constant*, const unsigned int, Distribution)
 {}
 
@@ -119,7 +122,8 @@ template<unsigned int OutputPerThread,
          class Engine,
          class Constant,
          class T,
-         class Distribution>
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
 void generate_sobol_host(dim3               block_idx,
                          dim3               thread_idx,
                          dim3               grid_dim,
@@ -158,7 +162,7 @@ void generate_sobol_host(dim3               block_idx,
             // On AMD GPUs we must use a constexpr size shared array for performance.
             // But this code won't compile with NVCC, because we are in a __host__ __device__
             // function.
-            __shared__ Constant shared_vectors[vector_size];
+        __shared__ Constant shared_vectors[vector_size];
 #else
             // NVCC won't accept extern __shared__ Constant shared_bytes[];
             // Thereby we must resort to aliasing.
@@ -207,7 +211,7 @@ void generate_sobol_host(dim3               block_idx,
     {
         const uintptr_t uintptr   = reinterpret_cast<uintptr_t>(data);
         const size_t misalignment = (output_per_thread - uintptr / sizeof(T)) % output_per_thread;
-        const unsigned int head_size    = cpp_utils::min(n, misalignment);
+        const unsigned int head_size = cpp_utils::min(n, misalignment);
         const unsigned int tail_size = (n - head_size) % output_per_thread;
         const size_t       vec_n     = (n - head_size) / output_per_thread;
 
@@ -450,6 +454,7 @@ private:
         {
             return status;
         }
+
         const hipError_t error = hipMemcpy(*scramble_constants,
                                            get_scramble_constants_ptr(),
                                            sizeof(constant_type) * SCRAMBLED_SOBOL_DIM,
@@ -494,27 +499,17 @@ private:
     template<bool IsDevice = system_type::is_device(), bool IsScrambled = Scrambled>
     std::enable_if_t<IsDevice && IsScrambled> deallocate()
     {
-        hipError_t error;
-
-        error = hipFree(m_direction_vectors);
-        if(error != hipErrorInvalidValue)
+        hipError_t m_dir_error   = hipFree(m_direction_vectors);
+        hipError_t m_scram_error = hipFree(m_scramble_constants);
+        if((m_dir_error != hipErrorInvalidValue) && (m_scram_error != hipErrorInvalidValue))
         {
             // hipErrorInvalidValue is thrown when hipFree tries to call an already
             // deallocated section of memory. This may occur when 'hipDeviceReset()' is
             // used before the current class' deconstructor is called.
             return;
         }
-        ROCRAND_HIP_FATAL_ASSERT(error);
-
-        error = hipFree(m_scramble_constants);
-        if(error != hipErrorInvalidValue)
-        {
-            // hipErrorInvalidValue is thrown when hipFree tries to call an already
-            // deallocated section of memory. This may occur when 'hipDeviceReset()' is
-            // used before the current class' deconstructor is called.
-            return;
-        }
-        ROCRAND_HIP_FATAL_ASSERT(error);
+        ROCRAND_HIP_FATAL_ASSERT(m_dir_error);
+        ROCRAND_HIP_FATAL_ASSERT(m_scram_error);
     }
 };
 
@@ -526,7 +521,7 @@ public:
     using system_type                         = System;
     using base_type                           = generator_impl_base;
     using engine_type       = sobol_device_engine_t<Is64, Scrambled, system_type::is_device()>;
-    using constant_type = std::conditional_t<Is64, unsigned long long int, unsigned int>;
+    using constant_type     = std::conditional_t<Is64, unsigned long long int, unsigned int>;
     using constant_accessor = sobol_constant_accessor<system_type, Is64, Scrambled>;
     using poisson_distribution_manager_t
         = poisson_distribution_manager<DISCRETE_METHOD_CDF, system_type>;
@@ -539,6 +534,7 @@ public:
                              hipStream_t        stream = 0)
         : base_type(order, offset, stream)
     {
+
         rocrand_status status = get_constants().get_direction_vectors(&m_direction_vectors);
         if(status != ROCRAND_STATUS_SUCCESS)
         {
@@ -723,13 +719,27 @@ public:
         else
         {
             using block_size_provider = static_block_size_config_provider<threads>;
-            status = system_type::template launch<generate_sobol_host<output_per_thread,
-                                                                      Scrambled,
-                                                                      engine_type,
-                                                                      constant_type,
-                                                                      T,
-                                                                      Distribution>,
-                                                  block_size_provider>(dim3(blocks_x, blocks_y),
+
+            host::target_arch target_arch;
+            hipError_t        result = host::get_device_arch(m_stream, target_arch);
+            if(result != hipSuccess)
+            {
+                return ROCRAND_STATUS_INTERNAL_ERROR;
+            }
+
+            auto generate_sobol_host_kernel = [&] __host__ __device__(auto arch, auto... args)
+            {
+                generate_sobol_host<output_per_thread,
+                                    Scrambled,
+                                    engine_type,
+                                    constant_type,
+                                    T,
+                                    Distribution,
+                                    arch>(args...);
+            };
+            status = system_type::template launch<block_size_provider>(generate_sobol_host_kernel,
+                                                                       target_arch,
+                                                                       dim3(blocks_x, blocks_y),
                                                                        dim3(threads),
                                                                        shared_mem_bytes,
                                                                        m_stream,

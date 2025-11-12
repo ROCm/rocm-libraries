@@ -67,6 +67,8 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     bool                   gradient = false;
     bool swizzleA = matA->order != HIPBLASLT_ORDER_COL && matA->order != HIPBLASLT_ORDER_ROW;
     bool swizzleB = matB->order != HIPBLASLT_ORDER_COL && matB->order != HIPBLASLT_ORDER_ROW;
+    // no need to do batched swizzle stride check here, it was done in set-problem stage
+
     rocblaslt_status isValid = rocblaslt_matmul_valid_args(matmul_descr,
                                                            A,
                                                            B,
@@ -249,6 +251,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
     bool                   gradient = false;
     bool swizzleA = matA->order != HIPBLASLT_ORDER_COL && matA->order != HIPBLASLT_ORDER_ROW;
     bool swizzleB = matB->order != HIPBLASLT_ORDER_COL && matB->order != HIPBLASLT_ORDER_ROW;
+
     rocblaslt_status isValid = rocblaslt_matmul_valid_args(matmul_descr,
                                                            A,
                                                            B,
@@ -675,7 +678,7 @@ rocblaslt_status
                                                        matmul_descr[i]->act0,
                                                        matmul_descr[i]->act1,
                                                        0,
-                                                       handle->Synchronizer,
+                                                       (char*)handle->Synchronizer+(409600*i*sizeof(int)),
                                                        swizzleA,
                                                        swizzleB});
     }
@@ -864,6 +867,11 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
     bool strided_batch = true;
     bool grouped_gemm  = false;
 
+    bool swizzleA
+        = problemtype.order_a != HIPBLASLT_ORDER_COL && problemtype.order_a != HIPBLASLT_ORDER_ROW;
+    bool swizzleB
+        = problemtype.order_b != HIPBLASLT_ORDER_COL && problemtype.order_b != HIPBLASLT_ORDER_ROW;
+
     auto status = validateMatmulArgs(m,
                                      n,
                                      k,
@@ -1009,9 +1017,8 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         rocEpilogue.act1,
         0,
         handle->Synchronizer,
-        /*TODO: support C++ API */
-        false,
-        false};
+        swizzleA,
+        swizzleB};
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -1078,7 +1085,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp(const rocblaslt_handle           hand
         return rocblaslt_status_invalid_handle;
     }
 
-    if(matA->type != matB->type || matC->type != matD->type)
+    if(matC->type != matD->type)
     {
         log_error(__func__, "invalid matrix datatype");
         return rocblaslt_status_type_mismatch;
@@ -1128,6 +1135,8 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
     hipDataType            type_b       = problemtype[0].type_b;
     hipDataType            type_c       = problemtype[0].type_c;
     hipDataType            type_d       = problemtype[0].type_d;
+    hipblasLtOrder_t       orderA       = problemtype[0].order_a;
+    hipblasLtOrder_t       orderB       = problemtype[0].order_b;
 
     std::vector<const void*>        A_vec, B_vec, C_vec, alpha_vec, beta_vec;
     std::vector<void*>              D_vec, E_vec, amaxD_vec;
@@ -1266,6 +1275,9 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
     bool strided_batch = true;
     bool grouped_gemm  = true;
 
+    bool swizzleA = orderA != HIPBLASLT_ORDER_COL && orderA != HIPBLASLT_ORDER_ROW;
+    bool swizzleB = orderB != HIPBLASLT_ORDER_COL && orderB != HIPBLASLT_ORDER_ROW;
+
     std::vector<RocblasltContractionProblem> problems;
     for(int i = 0; i < m.size(); i++)
     {
@@ -1333,10 +1345,9 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         rocEpilogue[iIdx].act0,
                                         rocEpilogue[iIdx].act1,
                                         0,
-                                        handle->Synchronizer,
-                                        /*TODO: support grouped gemm */
-                                        false,
-                                        false});
+                                        (char*)handle->Synchronizer+(409600*i*sizeof(int)),
+                                        swizzleA,
+                                        swizzleB});
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }
@@ -1484,11 +1495,12 @@ rocblaslt_status rocblaslt_makeArgument_cpp(rocblaslt_handle              handle
                                             const rocblaslt_matmul_algo&  algo,
                                             const rocblaslt::RocTuningV2* tuning,
                                             void*                         workspace,
+                                            size_t                        workspaceSizeInBytes,
                                             bool                          useUserArgs,
                                             hipStream_t                   stream,
                                             std::shared_ptr<void>         gemmData)
 {
-    return makeArgument(handle, gemmType, algo, tuning, workspace, useUserArgs, stream, gemmData);
+    return makeArgument(handle, gemmType, algo, tuning, workspace, workspaceSizeInBytes, useUserArgs, stream, gemmData);
 }
 
 std::string rocblaslt_get_kernel_name_from_data_cpp(rocblaslt_handle             handle,

@@ -82,8 +82,13 @@ namespace rocRoller
                         = DataParallelGEMMSolution::makeCommandParameters(command, solutionParams);
 
                     params->loopOverOutputTilesDimensions = {0, 1};
-                    params->streamK                       = true;
-                    params->streamKTwoTile                = solutionParams.streamKTwoTile;
+
+                    StreamKMode streamKMode = StreamKMode::Standard;
+                    if(solutionParams.streamKTwoTileDPFirst)
+                        streamKMode = StreamKMode::TwoTileDPFirst;
+                    else if(solutionParams.streamKTwoTile)
+                        streamKMode = StreamKMode::TwoTile;
+                    params->streamK = streamKMode;
 
                     return params;
                 }
@@ -100,17 +105,18 @@ namespace rocRoller
                     return commandArgs;
                 }
 
-                void validateRunParameters(CommandPtr               command,
-                                           ProblemParameters const& problemParams,
-                                           RunParameters const&     runParams,
-                                           CommandKernelPtr         commandKernel) override
+                void validateRunParameters(CommandPtr                 command,
+                                           ProblemParameters const&   problemParams,
+                                           RunParameters const&       runParams,
+                                           BenchmarkParameters const& benchmarkParams,
+                                           CommandKernelPtr           commandKernel) override
                 {
                     DataParallelGEMMSolution::validateRunParameters(
-                        command, problemParams, runParams, commandKernel);
+                        command, problemParams, runParams, benchmarkParams, commandKernel);
 
                     // Determine the number of WGs on the device
                     hipDeviceProp_t deviceProperties;
-                    AssertFatal(hipGetDeviceProperties(&deviceProperties, runParams.device)
+                    AssertFatal(hipGetDeviceProperties(&deviceProperties, benchmarkParams.device)
                                 == (hipError_t)HIP_SUCCESS);
                     auto numWGs = deviceProperties.multiProcessorCount;
 

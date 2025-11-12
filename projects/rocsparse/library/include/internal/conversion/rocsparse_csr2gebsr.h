@@ -34,7 +34,7 @@ extern "C" {
 /*! \ingroup conv_module
 *  \details
 *  \p rocsparse_csr2gebsr_buffer_size returns the size of the temporary buffer that is required
-*  by \ref rocsparse_csr2gebsr_nnz and \ref rocsparse_scsr2gebsr "rocsparse_Xcsr2gebsr()". The 
+*  by \ref rocsparse_csr2gebsr_nnz and \ref rocsparse_scsr2gebsr "rocsparse_Xcsr2gebsr()". The
 *  temporary storage buffer must be allocated by the user.
 *
 *  \note
@@ -77,7 +77,7 @@ extern "C" {
 *  col_block_dim   the col block dimension of the GEneral BSR matrix. Between 1 and \p n
 *
 *  @param[out]
-*  buffer_size  number of bytes of the temporary storage buffer required by \ref rocsparse_csr2gebsr_nnz 
+*  buffer_size  number of bytes of the temporary storage buffer required by \ref rocsparse_csr2gebsr_nnz
 *               and \ref rocsparse_scsr2gebsr "rocsparse_Xcsr2gebsr()".
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
@@ -139,13 +139,13 @@ rocsparse_status rocsparse_zcsr2gebsr_buffer_size(rocsparse_handle              
 
 /*! \ingroup conv_module
 *  \details
-*  This function takes a sparse CSR matrix as input and computes the block row offset array, \p bsr_row_ptr, 
-*  and the total number of nonzero blocks, \p bsr_nnz_devhost, that will result from converting the CSR format 
-*  input matrix to a GEneral BSR format output matrix. This function is the second step in the conversion and 
+*  This function takes a sparse CSR matrix as input and computes the block row offset array, \p bsr_row_ptr,
+*  and the total number of nonzero blocks, \p bsr_nnz_devhost, that will result from converting the CSR format
+*  input matrix to a GEneral BSR format output matrix. This function is the second step in the conversion and
 *  is used in conjunction with \ref rocsparse_scsr2gebsr_buffer_size "rocsparse_Xcsr2gebsr_buffer_size()" and
 *  \ref rocsparse_scsr2gebsr "rocsparse_Xcsr2gebsr()".
 *
-*  \p rocsparse_csr2gebsr_nnz accepts both host and device pointers for \p bsr_nnz_devhost which can be set by 
+*  \p rocsparse_csr2gebsr_nnz accepts both host and device pointers for \p bsr_nnz_devhost which can be set by
 *  calling \ref rocsparse_set_pointer_mode prior to calling \p rocsparse_csr2gebsr_nnz.
 *
 *  \note
@@ -175,7 +175,7 @@ rocsparse_status rocsparse_zcsr2gebsr_buffer_size(rocsparse_handle              
 *  bsr_descr        descriptor of the sparse GEneral BSR matrix. Currently, only
 *                   \ref rocsparse_matrix_type_general is supported.
 *  @param[out]
-*  bsr_row_ptr      integer array containing \p mb+1 elements that point to the start of each block row of the 
+*  bsr_row_ptr      integer array containing \p mb+1 elements that point to the start of each block row of the
 *                   General BSR matrix
 *  @param[in]
 *  row_block_dim    the row block dimension of the GEneral BSR matrix. Between \f$1\f$ and \f$\min(m, n)\f$
@@ -223,16 +223,16 @@ rocsparse_status rocsparse_csr2gebsr_nnz(rocsparse_handle          handle,
 *    mb = (m + row\_block\_dim - 1) / row\_block\_dim \\
 *    nb = (n + col\_block\_dim - 1) / col\_block\_dim
 *  \f]
-*  Allocation size for \p bsr_val and \p bsr_col_ind is computed using \ref rocsparse_csr2bsr_nnz() 
+*  Allocation size for \p bsr_val and \p bsr_col_ind is computed using \ref rocsparse_csr2bsr_nnz()
 *  which also fills in \p bsr_row_ptr.
 *
-*  Converting from a sparse CSR matrix to a sparse GEneral BSR matrix requires three steps. First, 
-*  the user calls \ref rocsparse_scsr2gebsr_buffer_size "rocsparse_Xcsr2gebsr_buffer_size()" in 
+*  Converting from a sparse CSR matrix to a sparse GEneral BSR matrix requires three steps. First,
+*  the user calls \ref rocsparse_scsr2gebsr_buffer_size "rocsparse_Xcsr2gebsr_buffer_size()" in
 *  order to determine the size of the required temporary storage buffer. Once this has been determined,
-*  the user allocates this buffer. The user also now allocates the \p bsr_row_ptr array to have length 
-*  \p mb+1 and passes this to the function \ref rocsparse_csr2gebsr_nnz. This will fill the \p bsr_row_ptr 
-*  array and also compute the total number of nonzero blocks in the GEneral BSR matrix. Now that the total 
-*  number of nonzero blocks is known, the user can allocate the \p bsr_col_ind and \p bsr_val arrays. 
+*  the user allocates this buffer. The user also now allocates the \p bsr_row_ptr array to have length
+*  \p mb+1 and passes this to the function \ref rocsparse_csr2gebsr_nnz. This will fill the \p bsr_row_ptr
+*  array and also compute the total number of nonzero blocks in the GEneral BSR matrix. Now that the total
+*  number of nonzero blocks is known, the user can allocate the \p bsr_col_ind and \p bsr_val arrays.
 *  Finally, the user calls \p rocsparse_csr2gebsr to complete the conversion. See example below.
 *
 *  \note
@@ -286,117 +286,7 @@ rocsparse_status rocsparse_csr2gebsr_nnz(rocsparse_handle          handle,
 *
 *  \par Example
 *  This example converts a CSR matrix into an BSR matrix.
-*  \code{.c}
-*      //     1 4 0 0 0 0
-*      // A = 0 2 3 0 0 0
-*      //     5 0 0 7 8 0
-*      //     0 0 9 0 6 0
-*
-*      rocsparse_int m   = 4;
-*      rocsparse_int n   = 6;
-*      rocsparse_int row_block_dim = 2;
-*      rocsparse_int col_block_dim = 3;
-*      rocsparse_int nnz = 9;
-*      rocsparse_int mb = (m + row_block_dim - 1) / row_block_dim;
-*      rocsparse_int nb = (n + col_block_dim - 1) / col_block_dim;
-*
-*      rocsparse_direction dir = rocsparse_direction_row;
-*
-*      std::vector<rocsparse_int> hcsr_row_ptr = {0, 2, 4, 7, 9};
-*      std::vector<rocsparse_int> hcsr_col_ind = {0, 1, 1, 2, 0, 3, 4, 2, 4};
-*      std::vector<float> hcsr_val = {1, 4, 2, 3, 5, 7, 8, 9, 6};
-*
-*      rocsparse_int* dcsr_row_ptr = nullptr;
-*      rocsparse_int* dcsr_col_ind = nullptr;
-*      float* dcsr_val = nullptr;
-*
-*      hipMalloc((void**)&dcsr_row_ptr, sizeof(rocsparse_int) * (m + 1));
-*      hipMalloc((void**)&dcsr_col_ind, sizeof(rocsparse_int) * nnz);
-*      hipMalloc((void**)&dcsr_val, sizeof(float) * nnz);
-*
-*      hipMemcpy(dcsr_row_ptr, hcsr_row_ptr.data(), sizeof(rocsparse_int) * (m + 1), hipMemcpyHostToDevice);
-*      hipMemcpy(dcsr_col_ind, hcsr_col_ind.data(), sizeof(rocsparse_int) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dcsr_val, hcsr_val.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*      rocsparse_handle handle;
-*      rocsparse_create_handle(&handle);
-*
-*      rocsparse_mat_descr csr_descr;
-*      rocsparse_create_mat_descr(&csr_descr);
-*
-*      rocsparse_mat_descr bsr_descr;
-*      rocsparse_create_mat_descr(&bsr_descr);
-*
-*      size_t buffer_size;
-*      rocsparse_scsr2gebsr_buffer_size(handle,
-*                                       dir,
-*                                       m,
-*                                       n,
-*                                       csr_descr,
-*                                       dcsr_val,
-*                                       dcsr_row_ptr,
-*                                       dcsr_col_ind,
-*                                       row_block_dim,
-*                                       col_block_dim,
-*                                       &buffer_size);
-*
-*      void* buffer = nullptr;
-*      hipMalloc((void**)&buffer, buffer_size);
-*
-*      rocsparse_int* dbsr_row_ptr = nullptr;
-*      hipMalloc(&dbsr_row_ptr, sizeof(rocsparse_int) *(mb + 1));
-*
-*      rocsparse_int nnzb;
-*      rocsparse_csr2gebsr_nnz(handle,
-*                              dir,
-*                              m,
-*                              n,
-*                              csr_descr,
-*                              dcsr_row_ptr,
-*                              dcsr_col_ind,
-*                              bsr_descr,
-*                              dbsr_row_ptr,
-*                              row_block_dim,
-*                              col_block_dim,
-*                              &nnzb,
-*                              buffer);
-*               
-*      rocsparse_int* dbsr_col_ind = nullptr;
-*      float* dbsr_val = nullptr;
-*      hipMalloc((void**)&dbsr_col_ind, sizeof(rocsparse_int) * nnzb);
-*      hipMalloc((void**)&dbsr_val, sizeof(float) * nnzb * row_block_dim * col_block_dim);
-*
-*      rocsparse_scsr2gebsr(handle,
-*                           dir,
-*                           m,
-*                           n,
-*                           csr_descr,
-*                           dcsr_val,
-*                           dcsr_row_ptr,
-*                           dcsr_col_ind,
-*                           bsr_descr,
-*                           dbsr_val,
-*                           dbsr_row_ptr,
-*                           dbsr_col_ind,
-*                           row_block_dim,
-*                           col_block_dim,
-*                           buffer);
-*
-*      hipFree(buffer);
-*
-*      hipFree(dcsr_row_ptr);
-*      hipFree(dcsr_col_ind);
-*      hipFree(dcsr_val);
-*
-*      hipFree(dbsr_row_ptr);
-*      hipFree(dbsr_col_ind);
-*      hipFree(dbsr_val);
-*
-*      rocsparse_destroy_mat_descr(csr_descr);
-*      rocsparse_destroy_mat_descr(bsr_descr);
-*
-*      rocsparse_destroy_handle(handle);
-*  \endcode
+*  \snippet example_rocsparse_csr2gebsr.cpp doc example
 */
 /**@{*/
 ROCSPARSE_EXPORT

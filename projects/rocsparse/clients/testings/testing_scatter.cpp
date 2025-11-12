@@ -57,8 +57,8 @@ void testing_scatter(const Arguments& arg)
     // Initialize data on CPU
     rocsparse_seedrand();
     rocsparse_init_index(hx_ind, nnz, base, size + base);
-    rocsparse_init<T>(hx_val, 1, nnz, 1);
-    rocsparse_init<T>(hy, 1, size, 1);
+    rocsparse_init<T>(hx_val, 1, nnz, 1, arg.convert_to_int);
+    rocsparse_init<T>(hy, 1, size, 1, arg.convert_to_int);
     hy_gold = hy;
 
     // Allocate device memory

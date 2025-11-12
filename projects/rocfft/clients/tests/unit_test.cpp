@@ -23,6 +23,7 @@
 #include "../../shared/concurrency.h"
 #include "../../shared/environment.h"
 #include "../../shared/gpubuf.h"
+#include "../../shared/params_gen.h"
 #include "../../shared/precision_type.h"
 #include "../../shared/rocfft_complex.h"
 #include "hip/hip_runtime_api.h"
@@ -60,6 +61,12 @@ namespace fs = std::filesystem;
 
 TEST(rocfft_UnitTest, plan_description)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     rocfft_plan_description desc = nullptr;
     ASSERT_TRUE(rocfft_status_success == rocfft_plan_description_create(&desc));
 
@@ -107,6 +114,12 @@ TEST(rocfft_UnitTest, plan_description_reuse)
 {
     // check that a plan description can be reused between different
     // plans, with different layout parameters for each.
+
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
 
     // allocate plan description once
     rocfft_plan_description desc = nullptr;
@@ -196,6 +209,12 @@ TEST(rocfft_UnitTest, plan_description_reuse)
 // run a transform with all log levels enabled
 TEST(rocfft_UnitTest, log_levels)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     // clean up environment and temporary file when we exit
     BOOST_SCOPE_EXIT_ALL(=)
     {
@@ -267,6 +286,12 @@ TEST(rocfft_UnitTest, log_levels)
 // Check whether logs can be emitted from multiple threads properly
 TEST(rocfft_UnitTest, log_multithreading)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     static const int   NUM_THREADS          = 10;
     static const int   NUM_ITERS_PER_THREAD = 50;
     static const char* TRACE_FILE           = "trace.log";
@@ -394,18 +419,36 @@ void workmem_test(workmem_sizer sizer,
 // - library should allocate
 TEST(rocfft_UnitTest, workmem_missing)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     workmem_test([](size_t) { return 0; }, rocfft_status_success);
 }
 
 // check what happens if work memory is required but not enough is provided
 TEST(rocfft_UnitTest, workmem_small)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     workmem_test([](size_t requested) { return requested / 2; }, rocfft_status_invalid_work_buffer);
 }
 
 // hard to imagine this being a problem, but try giving too much as well
 TEST(rocfft_UnitTest, workmem_big)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     workmem_test([](size_t requested) { return requested * 2; }, rocfft_status_success);
 }
 
@@ -414,13 +457,25 @@ TEST(rocfft_UnitTest, workmem_big)
 // allocates
 TEST(rocfft_UnitTest, workmem_null)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     workmem_test([](size_t requested) { return requested; }, rocfft_status_success, true);
 }
 
 static const size_t RTC_PROBLEM_SIZE = 2304;
-// runtime compilation cache tests
-TEST(rocfft_UnitTest, rtc_cache)
+// runtime compilation cache tests main loop
+void rtc_cache_main()
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     // PRECONDITIONS
 
     // - set cache location to custom path, requires uninitializing
@@ -567,9 +622,27 @@ TEST(rocfft_UnitTest, rtc_cache)
     ASSERT_TRUE(fft_kernel_was_compiled());
 }
 
+// run the main body of rtc cache tests twice to uncover potential
+// problems with thread reuse between iterations
+TEST(rocfft_UnitTest, rtc_cache_iter_1)
+{
+    rtc_cache_main();
+}
+
+TEST(rocfft_UnitTest, rtc_cache_iter_2)
+{
+    rtc_cache_main();
+}
+
 // make sure cache API functions tolerate null pointers without crashing
 TEST(rocfft_UnitTest, rtc_cache_null)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     void*  buf     = nullptr;
     size_t buf_len = 0;
     ASSERT_EQ(rocfft_cache_serialize(nullptr, &buf_len), rocfft_status_invalid_arg_value);
@@ -582,6 +655,12 @@ TEST(rocfft_UnitTest, rtc_cache_null)
 // make sure RTC gracefully handles a helper process that crashes
 TEST(rocfft_UnitTest, rtc_helper_crash)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
 #ifdef WIN32
     char filename[MAX_PATH];
     GetModuleFileNameA(NULL, filename, MAX_PATH);
@@ -647,6 +726,12 @@ TEST(rocfft_UnitTest, rtc_helper_crash)
 
 TEST(rocfft_UnitTest, rtc_test_harness)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     // check that hipcc is available since this test requires it
     //
     // NOTE: using system() for launching subprocesses for simplicity

@@ -17,13 +17,11 @@
 
 namespace ck_tile {
 
-namespace detail {
 template <typename Distribution>
 CK_TILE_HOST_DEVICE auto get_partition_index(Distribution)
 {
-    return Distribution::_get_partition_index();
+    return Distribution::get_partition_index();
 }
-} // namespace detail
 
 // distributed span
 template <index_t... PartialHsLengths>
@@ -91,7 +89,7 @@ struct tile_distribution
     CK_TILE_HOST_DEVICE static constexpr index_t get_num_of_dimension_p() { return NDimP; }
     CK_TILE_HOST_DEVICE static constexpr index_t get_num_of_dimension_r() { return NDimR; }
 
-    CK_TILE_HOST_DEVICE static auto _get_partition_index()
+    CK_TILE_HOST_DEVICE static auto get_partition_index()
     {
         // only support warp-tile and block-tile
         static_assert(NDimP == 1 or NDimP == 2, "wrong!");
@@ -172,9 +170,9 @@ struct tile_distribution
     }
 #endif
 
-    template <typename PartitionIndex = decltype(_get_partition_index())>
+    template <typename PartitionIndex = decltype(get_partition_index())>
     CK_TILE_HOST_DEVICE auto
-    calculate_index(const PartitionIndex& ps_idx = _get_partition_index()) const
+    calculate_index(const PartitionIndex& ps_idx = get_partition_index()) const
     {
         const auto ps_ys_idx = container_concat(ps_idx, array<index_t, NDimY>{0});
         const auto window_adaptor_thread_coord_tmp =
@@ -228,25 +226,24 @@ struct tile_distribution
     {
         return PsYs2XsAdaptor::is_static() && Ys2DDescriptor::is_static();
     }
-
-    CK_TILE_HOST_DEVICE void print() const
-    {
-        printf("tile_distribution{");
-        //
-        printf("tile_distribution_encoding: ");
-        print(DstrEncode{});
-        printf(", ");
-        //
-        printf("ps_ys_to_xs_: ");
-        print(ps_ys_to_xs_);
-        printf(", ");
-        //
-        printf("ys_to_d_: ");
-        print(ys_to_d_);
-        //
-        printf("}");
-    }
 };
+
+template <typename T>
+struct is_tile_distribution : std::false_type
+{
+};
+template <typename PsYs2XsAdaptor,
+          typename Ys2DDescriptor,
+          typename StaticTileDistributionEncoding,
+          typename TileDistributionDetail>
+struct is_tile_distribution<tile_distribution<PsYs2XsAdaptor,
+                                              Ys2DDescriptor,
+                                              StaticTileDistributionEncoding,
+                                              TileDistributionDetail>> : std::true_type
+{
+};
+template <typename T>
+inline constexpr bool is_tile_distribution_v = is_tile_distribution<T>::value;
 
 namespace detail {
 
@@ -710,4 +707,27 @@ CK_TILE_HOST_DEVICE constexpr auto slice_distribution_from_x(
 }
 
 } // namespace detail
+
+// Free print function for tile_distribution
+template <typename PsYs2XsAdaptor_,
+          typename Ys2DDescriptor_,
+          typename StaticTileDistributionEncoding_,
+          typename TileDistributionDetail_>
+CK_TILE_HOST_DEVICE void print(const tile_distribution<PsYs2XsAdaptor_,
+                                                       Ys2DDescriptor_,
+                                                       StaticTileDistributionEncoding_,
+                                                       TileDistributionDetail_>& distribution)
+{
+    printf("tile_distribution{");
+    printf("tile_distribution_encoding: ");
+    print(StaticTileDistributionEncoding_{});
+    printf(", ");
+    printf("ps_ys_to_xs_: ");
+    print(distribution.ps_ys_to_xs_);
+    printf(", ");
+    printf("ys_to_d_: ");
+    print(distribution.ys_to_d_);
+    printf("}\n");
+}
+
 } // namespace ck_tile

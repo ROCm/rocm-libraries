@@ -98,10 +98,10 @@ auto GetConvHighTolTestCases(miopenDataType_t datatype)
 
     return std::vector{
         // clang-format off
-        // Regression tests for w=1, h=1 stride bug  
-        TestCase{{3, 1, 1, 1}, {1, 1, 3, 3}, {2, 4}, {2, 1}, {1, 1}, datatype},
-        TestCase{{1, 1, 1, 5}, {1, 1, 3, 6}, {2, 1}, {2, 1}, {1, 1}, datatype},
-        TestCase{{2, 1, 2, 1}, {1, 1, 3, 3}, {2, 2}, {2, 2}, {1, 1}, datatype},
+        // Regression tests for wo=1/ho=1 stride clamping bug  
+        TestCase{{32, 3, 1, 1}, {64, 3,  3,  5}, {1, 2}, {100, 7}, {1, 1}, datatype},
+        TestCase{{32, 3, 2, 2}, {64, 3,  3,  5}, {2, 4}, {  4, 6}, {1, 1}, datatype},
+        TestCase{{32, 3, 7, 9}, {64, 3, 10, 12}, {3, 3}, {  4, 5}, {1, 1}, datatype},
         // clang-format on
     };
 }
@@ -131,6 +131,12 @@ using GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwd_BFP16 =
     GPU_UnitTestConvSolverBwd_BFP16;
 using GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwd_FP32 =
     GPU_UnitTestConvSolverBwd_FP32;
+using GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwdHighTol_FP16 =
+    GPU_UnitTestConvSolverBwd_FP16;
+using GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwdHighTol_BFP16 =
+    GPU_UnitTestConvSolverBwd_BFP16;
+using GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwdHighTol_FP32 =
+    GPU_UnitTestConvSolverBwd_FP32;
 using CPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCDevApplicabilityBwd_NONE =
     CPU_UnitTestConvSolverDevApplicabilityBwd_NONE;
 
@@ -147,6 +153,24 @@ TEST_P(GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwd_BFP16,
 };
 
 TEST_P(GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwd_FP32,
+       ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC)
+{
+    this->RunTest(miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC{});
+};
+
+TEST_P(GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwdHighTol_FP16,
+       ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC)
+{
+    this->RunTest(miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC{});
+};
+
+TEST_P(GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwdHighTol_BFP16,
+       ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC)
+{
+    this->RunTest(miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC{});
+};
+
+TEST_P(GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwdHighTol_FP32,
        ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC)
 {
     this->RunTest(miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC{});
@@ -198,24 +222,26 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::ValuesIn(GetConvFullTestCases(miopenFloat))));
 
 // High Tol tests
-INSTANTIATE_TEST_SUITE_P(FullHighTol,
-                         GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwd_FP16,
-                         testing::Combine(testing::Values(GetHighTolTestParams(miopenHalf)),
-                                          testing::Values(miopenConvolutionAlgoImplicitGEMM),
-                                          testing::ValuesIn(GetConvHighTolTestCases(miopenHalf))));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwdHighTol_FP16,
+    testing::Combine(testing::Values(GetHighTolTestParams(miopenHalf)),
+                     testing::Values(miopenConvolutionAlgoImplicitGEMM),
+                     testing::ValuesIn(GetConvHighTolTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
-    FullHighTol,
-    GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwd_BFP16,
+    Full,
+    GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwdHighTol_BFP16,
     testing::Combine(testing::Values(GetHighTolTestParams(miopenBFloat16)),
                      testing::Values(miopenConvolutionAlgoImplicitGEMM),
                      testing::ValuesIn(GetConvHighTolTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(FullHighTol,
-                         GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwd_FP32,
-                         testing::Combine(testing::Values(GetHighTolTestParams(miopenFloat)),
-                                          testing::Values(miopenConvolutionAlgoImplicitGEMM),
-                                          testing::ValuesIn(GetConvHighTolTestCases(miopenFloat))));
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicBwdXdlopsNHWCBwdHighTol_FP32,
+    testing::Combine(testing::Values(GetHighTolTestParams(miopenFloat)),
+                     testing::Values(miopenConvolutionAlgoImplicitGEMM),
+                     testing::ValuesIn(GetConvHighTolTestCases(miopenFloat))));
 
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(

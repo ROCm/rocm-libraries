@@ -68,6 +68,7 @@
 #include "device/device_segmented_sort.hpp"
 #include "device/device_select.hpp"
 #include "device/device_spmv.hpp"
+#include "device/device_transform.hpp"
 
 // Grid
 #include <cub/grid/grid_even_share.cuh> // IWYU pragma: export
@@ -85,7 +86,6 @@
 #include <cub/iterator/counting_input_iterator.cuh> // IWYU pragma: export
 #include <cub/iterator/discard_output_iterator.cuh> // IWYU pragma: export
 #include <cub/iterator/tex_obj_input_iterator.cuh> // IWYU pragma: export
-#include <cub/iterator/tex_ref_input_iterator.cuh> // IWYU pragma: export
 #include <cub/iterator/transform_input_iterator.cuh> // IWYU pragma: export
 
 // Thread

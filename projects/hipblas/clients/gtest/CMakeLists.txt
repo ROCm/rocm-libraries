@@ -22,15 +22,6 @@
 set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )
 
-# Linking lapack library requires fortran flags
-if(NOT WIN32)
-    enable_language( Fortran )
-endif()
-
-if( NOT TARGET hipblas )
-  find_package( hipblas REQUIRED CONFIG PATHS /opt/rocm/hipblas )
-endif( )
-
 set(hipblas_test_source
   hipblas_gtest_main.cpp
   hipblas_test.cpp
@@ -117,7 +108,11 @@ set( hipblas_test_common
   ${BLIS_CPP}
 )
 
-add_executable( hipblas-test ${hipblas_f90_source} ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} )
+if(BUILD_FORTRAN_CLIENTS)
+  add_executable( hipblas-test ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} $<TARGET_OBJECTS:hipblas_fortran_client> )
+else()
+  add_executable( hipblas-test ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} )
+endif()
 
 target_include_directories( hipblas-test
   PRIVATE
@@ -139,7 +134,7 @@ target_include_directories( hipblas-test
 
 target_link_libraries( hipblas-test PRIVATE roc::hipblas GTest::gtest GTest::gtest_main )
 
-if (NOT WIN32)
+if (BUILD_FORTRAN_CLIENTS)
     target_link_libraries( hipblas-test PRIVATE hipblas_fortran_client )
 endif()
 
@@ -239,7 +234,7 @@ if( BUILD_WITH_SOLVER )
 endif()
 
 add_custom_command( OUTPUT "${HIPBLAS_TEST_DATA}"
-                    COMMAND ${python} ../common/hipblas_gentest.py -I ../include hipblas_gtest.yaml -o "${HIPBLAS_TEST_DATA}"
+                    COMMAND ${Python3_EXECUTABLE} ../common/hipblas_gentest.py -I ../include hipblas_gtest.yaml -o "${HIPBLAS_TEST_DATA}"
                     DEPENDS ../common/hipblas_gentest.py ../include/hipblas_common.yaml "${HIPBLAS_AUX_YAML_DATA}" "${HIPBLAS_L1_YAML_DATA}" "${HIPBLAS_L2_YAML_DATA}" "${HIPBLAS_L3_YAML_DATA}" "${HIPBLAS_EX_YAML_DATA}" "${HIPBLAS_SOLVER_YAML_DATA}" hipblas_gtest.yaml
                     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
 

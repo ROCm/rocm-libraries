@@ -17,13 +17,10 @@ subtrees:
     title: Use multi-level logging
   - file: howto/clients
     title: Run rocSOLVER clients
-  - file: howto/contribute
-    title: Contribute to rocSOLVER
-
 
 - caption: Examples
   entries:
-  - url: https://github.com/ROCm/rocSOLVER/tree/develop/clients/samples
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsolver/clients/samples
     title: Client samples
 
 - caption: API reference
@@ -57,3 +54,5 @@ subtrees:
 - caption: About
   entries:
   - file: license.rst
+  - file: contribute
+    title: Contribute to rocSOLVER

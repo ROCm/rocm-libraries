@@ -115,7 +115,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION
 endif()
 if(WIN32)
     list(APPEND __clang_cxx_compile_options
-        -fdelayed-template-parsing
         -fms-extensions
         -fms-compatibility)
 endif()
@@ -125,9 +124,9 @@ set(__gnu_cxx_compile_options
 )
 
 add_compile_options(
-    "$<$<CXX_COMPILER_ID:MSVC>:${__msvc_cxx_compile_options}>"
-    "$<$<CXX_COMPILER_ID:Clang>:${__default_cxx_compile_options};${__clang_cxx_compile_options}>"
-    "$<$<CXX_COMPILER_ID:GNU>:${__default_cxx_compile_options};${__gnu_cxx_compile_options}>"
+    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:${__msvc_cxx_compile_options}>"
+    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:Clang>>:${__default_cxx_compile_options};${__clang_cxx_compile_options}>"
+    "$<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU>>:${__default_cxx_compile_options};${__gnu_cxx_compile_options}>"
 )
 
 unset(__msvc_cxx_compile_options)

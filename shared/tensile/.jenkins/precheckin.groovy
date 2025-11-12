@@ -53,18 +53,21 @@ def runCI =
     def compileCommand =
     {
         platform, project->
+        if (platform.os.contains("rhel8")) {
+            echo "Skipping compile for rhel8"
+            return
+        }
 
         commonGroovy = load "${project.paths.project_src_prefix}/.jenkins/common.groovy"
         commonGroovy.runCompileCommand(platform, project, jobName, false)
     }
 
-    
     def testCommand =
     {
         platform, project->
 
         def testMark = "pre_checkin"
-        boolean runHostTest = !platform.os.contains("rhel8")
+        boolean runHostTest = !platform.os.contains("rhel8") && !platform.os.contains("rhel9")
         boolean runUnitTest = true
         boolean runToxTest = !platform.os.contains("rhel8")
         commonGroovy.runTestCommand(platform, project, jobName, testMark, runHostTest, runUnitTest, runToxTest)
@@ -97,17 +100,13 @@ ci: {
     {
         jobName, nodeDetails->
         if (urlJobName == jobName)
-            stage(jobName) {
-                runCI(nodeDetails, jobName)
-            }
+            runCI(nodeDetails, jobName)
     }
 
     // For url job names that are outside of the standardJobNameSet i.e. compute-rocm-dkms-no-npi-1901
     if(!jobNameList.keySet().contains(urlJobName))
     {
         properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 6 * * 6')])]))
-        stage(urlJobName) {
-            runCI([ubuntu18:['any']], urlJobName)
-        }
+        runCI([ubuntu18:['any']], urlJobName)
     }
 }

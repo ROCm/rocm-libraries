@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
+#include "ck/utility/env.hpp"
 #include "ck/utility/common_header.hpp"
 #include "ck/tensor_description/multi_index_transform_helper.hpp"
 #include "ck/tensor_description/tensor_descriptor.hpp"
@@ -54,7 +55,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
         const Block2CTileMap block_2_ctile_map,
         const ComputePtrOffsetOfBatch compute_ptr_offset_of_batch)
 {
-#if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
+#if(defined(__gfx11__) || defined(__gfx12__))
     // offset base pointer for each work-group
     const index_t num_blocks_per_batch =
         __builtin_amdgcn_readfirstlane(get_grid_size() / batch_count);
@@ -147,7 +148,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
         const ComputePtrOffsetOfBatch compute_ptr_offset_of_batch,
         const Block2CTileMap block_2_etile_map)
 {
-#if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
+#if(defined(__gfx11__) || defined(__gfx12__))
     // printf("entry kernel launch");
     __shared__ char p_shared[GridwiseOp::SharedMemTrait::lds_size];
 
@@ -236,7 +237,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
                                          const CDEElementwiseOperation cde_element_op,
                                          const Block2CTileMap block_2_ctile_map)
 {
-#if(!defined(__HIP_DEVICE_COMPILE__) || defined(__gfx11__) || defined(__gfx12__))
+#if(defined(__gfx11__) || defined(__gfx12__))
     __shared__ char p_shared[GridwiseOp::SharedMemTrait::lds_size];
 
     GridwiseOp::template Run<HasMainKBlockLoop>(p_a_grid,
@@ -653,13 +654,19 @@ struct GridwiseGemmMultipleD_Wmma
         if(!(M == e_grid_desc_m_n.GetLength(I0) && N == e_grid_desc_m_n.GetLength(I1) &&
              K == GetBProblemsizeNK()[I1]))
         {
-            printf("GridwiseOp: ABE descriptor dimension cross check failure\n");
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                printf("GridwiseOp: ABE descriptor dimension cross check failure\n");
+            }
             return false;
         }
 
         if(!(M % MPerBlock == 0 && N % NPerBlock == 0 && K % KPerBlock == 0))
         {
-            printf("GridwiseOp: Problemsize descriptor dimension check failure\n");
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                printf("GridwiseOp: Problemsize descriptor dimension check failure\n");
+            }
             return false;
         }
 
@@ -747,20 +754,29 @@ struct GridwiseGemmMultipleD_Wmma
 
         if(!valid)
         {
-            printf("GridwiseOp: D descriptor dimension check failure\n");
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                printf("GridwiseOp: D descriptor dimension check failure\n");
+            }
             return false;
         }
 
         if(!(M == e_grid_desc_m_n.GetLength(I0) && N == e_grid_desc_m_n.GetLength(I1) &&
              K == GetBProblemsizeNK()[I1]))
         {
-            printf("GridwiseOp: ABE descriptor dimension cross check failure\n");
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                printf("GridwiseOp: ABE descriptor dimension cross check failure\n");
+            }
             return false;
         }
 
         if(!(M % MPerBlock == 0 && N % NPerBlock == 0 && K % KPerBlock == 0))
         {
-            printf("GridwiseOp: Problemsize descriptor dimension check failure\n");
+            if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+            {
+                printf("GridwiseOp: Problemsize descriptor dimension check failure\n");
+            }
             return false;
         }
 
