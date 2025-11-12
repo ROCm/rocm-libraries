@@ -2100,13 +2100,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["UseCustomMainLoopSchedule"]:
       module = Module()
       if isNGLL:
-        module.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1, comment="Wait for all PGR to complete"))
-        module.add(SBarrier(comment=""))
         module.addComment0("Code-path 0, useGR=0, usePLR=1, useGRInc=1, useLoop = 0")
         module.add(MacroInstruction(name="MAINLOOP", args=[0,0,1,1,0]))
       else:
-        module.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1, comment="Wait for all PGR to complete"))
-        module.add(SBarrier(comment=""))
         module.addComment0("Code-path 0, useGR=0, usePLR=0, useGRInc=0, useLoop = 0")
         module.add(MacroInstruction(name="MAINLOOP", args=[0,0,0,0,0]))
       return module

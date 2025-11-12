@@ -48,17 +48,17 @@ extern "C" {
 *  @param[in]
 *  vecY                dense vector descriptor.
 *  @param[out]
-*  result              pointer to the result, can be host or device memory
+*  result              pointer to the result, can be host or device memory.
 *  @param[in]
 *  computeType         floating point precision for the SpVV computation.
 *  @param[out]
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
 *
-*  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX, \p vecY, \p result or \p pBufferSizeInBytes
-*               pointer is invalid.
-*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType is currently not
-*               supported.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX, \p vecY, \p result or 
+*          \p pBufferSizeInBytes is nullptr.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType is currently not supported.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

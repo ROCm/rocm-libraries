@@ -135,7 +135,7 @@ extern "C" {
 *  dirA        direction that specified whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW or by
 *              \ref HIPSPARSE_DIRECTION_COLUMN.
 *  @param[in]
-*  m           number of rows of the sparse CSR matrix.
+*  m           number of rows of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
 *  n           number of columns of the sparse CSR matrix.
 *  @param[in]

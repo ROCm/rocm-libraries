@@ -50,16 +50,20 @@ extern "C" {
 *
 *  See hipsparseSpruneDense2csr() for a full code example.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be 
+*  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
 *  handle             handle to the hipsparse library context queue.
 *  @param[in]
-*  m                  number of rows of the dense matrix \p A.
+*  m                  number of rows of the dense matrix \p A. Must be non-negative.
 *  @param[in]
-*  n                  number of columns of the dense matrix \p A.
+*  n                  number of columns of the dense matrix \p A. Must be non-negative.
 *  @param[in]
-*  A                  array of dimensions (\p lda, \p n)
+*  A                  array of dimensions (\p lda, \p n).
 *  @param[in]
-*  lda                leading dimension of dense array \p A.
+*  lda                leading dimension of dense array \p A. Must be at least \p m.
 *  @param[in]
 *  threshold          pointer to the pruning non-negative threshold which can exist in either host or device memory.
 *  @param[in]
@@ -76,9 +80,11 @@ extern "C" {
 *                     hipsparseSpruneDense2csrNnz(), hipsparseDpruneDense2csrNnz(),
 *                     hipsparseSpruneDense2csr() and hipsparseDpruneDense2csr().
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle or \p pBufferSizeInBytes pointer is invalid.
-*  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle or \p pBufferSizeInBytes is nullptr,
+*          or \p m or \p n is negative.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 /**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
