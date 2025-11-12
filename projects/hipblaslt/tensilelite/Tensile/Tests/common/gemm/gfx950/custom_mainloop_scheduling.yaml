@@ -417,6 +417,10 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
+          - Range: [[192], [256], [1], [64, 64, 256]]
+          - Range: [[192], [256], [1], [1, 1, 64]]
+          - Range: [[192], [256], [1], [32, 64, 256]]
+          - Range: [[6144], [8192], [1], [64, 64, 256]]
           - Exact: [3072, 4096, 1, 8192]
         - BiasTypeArgs: ['b']
   ########################################
