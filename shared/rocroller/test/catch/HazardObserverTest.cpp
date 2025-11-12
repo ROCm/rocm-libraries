@@ -407,10 +407,10 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(arch.isRDNAGPU())
-            {
-                SKIP("RDNA not supported yet");
-            }
+            // if(arch.isRDNAGPU())
+            // {
+            //     SKIP("RDNA not supported yet");
+            // }
 
             SECTION("Hazard with VALU write followed by a readlane or permlane")
             {
@@ -687,7 +687,7 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(TestContext::ForTarget(arch)->targetArchitecture().HasCapability(
+            if(!TestContext::ForTarget(arch)->targetArchitecture().HasCapability(
                    GPUCapability::HasAccCD))
             {
                 SKIP("Architecture " + arch.toString() + " does not use Accumulator registers.");
