@@ -35,8 +35,9 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-if(NOT CMAKE_CXX_STANDARD EQUAL 17)
-  message(FATAL_ERROR "Only C++17 is supported")
+set(ALLOWED_CXX_STANDARDS 17 20 23 26)
+if(NOT CMAKE_CXX_STANDARD IN_LIST ALLOWED_CXX_STANDARDS)
+  message(FATAL_ERROR "Only C++17, C++20, C++23 and C++26 are supported")
 endif()
 
 # Set HIP flags

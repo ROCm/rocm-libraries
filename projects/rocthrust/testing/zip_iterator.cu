@@ -54,10 +54,14 @@ void TestZipIteratorTraits()
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(!_THRUST_STD::output_iterator<it, int>);
+#endif
+#if _THRUST_HAS_DEVICE_SYSTEM_STD // The fallback version of zip_iterator lacks these iterator concepts.
   static_assert(_THRUST_STD::input_iterator<it>);
   static_assert(_THRUST_STD::forward_iterator<it>);
   static_assert(_THRUST_STD::bidirectional_iterator<it>);
   static_assert(_THRUST_STD::random_access_iterator<it>);
+#endif
+#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
   static_assert(!_THRUST_STD::contiguous_iterator<it>);
 #endif
 }
