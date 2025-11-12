@@ -65,8 +65,10 @@ extern "C" {
 *  @param[out]
 *  vecY         dense vector descriptor \f$y\f$.
 *
-*  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX or \p vecY pointer is invalid.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p vecX or \p vecY is nullptr,
+*          or the vector sizes or data types are incompatible.
 *
 *  \par Example
 *  \snippet example_hipsparse_scatter.cpp doc example

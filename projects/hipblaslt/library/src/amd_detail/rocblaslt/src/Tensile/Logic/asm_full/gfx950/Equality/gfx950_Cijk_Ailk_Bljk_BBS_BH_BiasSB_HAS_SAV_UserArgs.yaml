@@ -119541,7 +119541,7 @@
     UseGeneralizedNLCOneMetadata: false
     UseInstOffsetForGRO: 0
     UsePLRPack: false
-    UseSgprForGRO: 1
+    UseSgprForGRO: 0
     Valid: true
     VectorStore: -1
     VectorWidthA: 2
