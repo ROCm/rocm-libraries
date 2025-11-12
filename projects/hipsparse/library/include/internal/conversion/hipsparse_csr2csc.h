@@ -119,8 +119,6 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *
-*  \par Example
-*  \snippet example_hipsparse_csr2csc.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
@@ -319,9 +317,6 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p csrRowPtr, \p csrColInd or
 *              \p pBufferSizeInBytes pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
-*
-*  \par Example
-*  \snippet example_hipsparse_csr2csc_ex2.cpp doc example
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCsr2cscEx2(hipsparseHandle_t     handle,
