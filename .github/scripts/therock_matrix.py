@@ -54,7 +54,7 @@ project_map = {
     "rocwmma": {
         "cmake_options": "-DTHEROCK_ENABLE_ROCWMMA=ON",
         "project_to_test": "rocwmma",
-    }
+    },
 }
 
 # For certain math components, they are optional during building and testing.
