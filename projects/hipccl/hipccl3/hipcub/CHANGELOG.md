@@ -2,6 +2,12 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB-4.2.0 for ROCm 7.2
+ 
+### Resolved issues
+ 
+* Fixed memory leak issues with some unit tests.
+
 ## hipCUB-4.1.0 for ROCm 7.1
 
 ### Added
