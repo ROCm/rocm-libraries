@@ -93,7 +93,7 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     outputTensorAttr->set_stride(generateStrides(outputDims, layout.strideOrder));
     outputTensorAttr->set_output(true);
 
-    // Validate graph before serializing to ensure properties are inferred
+    // Ensure properties are inferred
     auto validateResult = graph->validate();
     if(validateResult.is_bad())
     {
@@ -193,7 +193,7 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     outputTensorAttr->set_stride(generateStrides(outputDims, layout.strideOrder));
     outputTensorAttr->set_output(true);
 
-    // Validate graph before serializing to ensure properties are inferred
+    // Ensure properties are inferred
     auto validateResult = graph->validate();
     if(validateResult.is_bad())
     {

@@ -57,6 +57,21 @@ void SampleRunner::operator()(const TensorLayout& layout)
     savedMean->set_output(true);
     savedInvVariance->set_output(true);
 
+    HIPDNN_FE_CHECK(graph->validate());
+    std::cout << "Graph validation successful.\n";
+
+    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
+    std::cout << "Operation graph build successful.\n";
+
+    HIPDNN_FE_CHECK(graph->create_execution_plans());
+    std::cout << "Execution plans created successfully.\n";
+
+    HIPDNN_FE_CHECK(graph->check_support());
+    std::cout << "Graph support check successful.\n";
+
+    HIPDNN_FE_CHECK(graph->build_plans());
+    std::cout << "Plans build successful.\n";
+
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
     utilities::Tensor<IntermediateType> scaleTensor(scale->get_dim());
     utilities::Tensor<IntermediateType> biasTensor(bias->get_dim());
@@ -81,21 +96,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
                                        static_cast<IntermediateType>(1.0f));
     momentumTensor.memory().hostData()[0] = 0.1f;
     epsilonTensor.memory().hostData()[0] = utilities::BATCHNORM_DEFAULT_EPSILON;
-
-    HIPDNN_FE_CHECK(graph->validate());
-    std::cout << "Graph validation successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
-    std::cout << "Operation graph build successful.\n";
-
-    HIPDNN_FE_CHECK(graph->create_execution_plans());
-    std::cout << "Execution plans created successfully.\n";
-
-    HIPDNN_FE_CHECK(graph->check_support());
-    std::cout << "Graph support check successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_plans());
-    std::cout << "Plans build successful.\n";
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[x->get_uid()] = xTensor.memory().deviceData();
@@ -132,7 +132,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<IntermediateType> savedInvVarRefTensor(savedInvVariance->get_dim());
 
         // TODO: Uncomment when CPU reference validation is enabled
-        // CpuFpReferenceBatchnorm::fwdTraining<InputType, IntermediateType, IntermediateType, float, InputType>(
+        // CpuFpReferenceBatchnorm::fwdTraining(
         //     xTensor,
         //     scaleTensor,
         //     biasTensor,
