@@ -12,7 +12,7 @@ Documentation for hipSPARSE is available at
 
 ### Optimized
 
-* Improved the user documentation
+* Improved the user documentation.
 
 ### Resolved issues
 
