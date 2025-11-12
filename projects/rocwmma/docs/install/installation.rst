@@ -151,7 +151,7 @@ where ``major`` and ``minor`` are the same as for the ROCm version.
 To download rocWMMA on ROCm version ``x.y``, use this command:
 
 .. tab-set::
-    .. tab-item:: ROCm 7.1.1 and later
+    .. tab-item:: ROCm 7.2.0 and later
 
         .. code-block:: shell
 
