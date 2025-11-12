@@ -27,7 +27,7 @@
 #define C3QA 0.50000000000000000000000000000000f
 #define C3QB 0.86602540378443864676372317075294f
 
-__device__ void FwdRad3B1(float2& R0, float2& R1, float2& R2)
+__forceinline__ __device__ void FwdRad3B1(float2& R0, float2& R1, float2& R2)
 {
 
     float TR0, TI0, TR1, TI1, TR2, TI2;
@@ -48,7 +48,7 @@ __device__ void FwdRad3B1(float2& R0, float2& R1, float2& R2)
     R2.y = TI2;
 }
 
-__device__ void InvRad3B1(float2& R0, float2& R1, float2& R2)
+__forceinline__ __device__ void InvRad3B1(float2& R0, float2& R1, float2& R2)
 {
 
     float TR0, TI0, TR1, TI1, TR2, TI2;
@@ -69,7 +69,8 @@ __device__ void InvRad3B1(float2& R0, float2& R1, float2& R2)
     R2.y = TI2;
 }
 
-__device__ void FwdRad6B1(float2& R0, float2& R1, float2& R2, float2& R3, float2& R4, float2& R5)
+__forceinline__ __device__ void
+FwdRad6B1(float2& R0, float2& R1, float2& R2, float2& R3, float2& R4, float2& R5)
 {
 
     float TR0, TI0, TR1, TI1, TR2, TI2, TR3, TI3, TR4, TI4, TR5, TI5;
@@ -107,7 +108,8 @@ __device__ void FwdRad6B1(float2& R0, float2& R1, float2& R2, float2& R3, float2
     R5.y = TI4 - (-C3QB * TR5 - C3QA * TI5);
 }
 
-__device__ void InvRad6B1(float2& R0, float2& R1, float2& R2, float2& R3, float2& R4, float2& R5)
+__forceinline__ __device__ void
+InvRad6B1(float2& R0, float2& R1, float2& R2, float2& R3, float2& R4, float2& R5)
 {
 
     float TR0, TI0, TR1, TI1, TR2, TI2, TR3, TI3, TR4, TI4, TR5, TI5;
@@ -145,14 +147,14 @@ __device__ void InvRad6B1(float2& R0, float2& R1, float2& R2, float2& R3, float2
     R5.y = TI4 - (C3QB * TR5 - C3QA * TI5);
 }
 
-__device__ void FwdRad2B1(float2& R0, float2& R1)
+__forceinline__ __device__ void FwdRad2B1(float2& R0, float2& R1)
 {
 
     R1 = R0 - R1;
     R0 = 2.0f * R0 - R1;
 }
 
-__device__ void InvRad2B1(float2& R0, float2& R1)
+__forceinline__ __device__ void InvRad2B1(float2& R0, float2& R1)
 {
 
     R1 = R0 - R1;
@@ -161,7 +163,7 @@ __device__ void InvRad2B1(float2& R0, float2& R1)
 
 #define C8Q 0.70710678118654752440084436210485f
 
-__device__ void FwdRad4B1(float2& R0, float2& R2, float2& R1, float2& R3)
+__forceinline__ __device__ void FwdRad4B1(float2& R0, float2& R2, float2& R1, float2& R3)
 {
 
     float2 T;
@@ -181,7 +183,7 @@ __device__ void FwdRad4B1(float2& R0, float2& R2, float2& R1, float2& R3)
     R2 = T;
 }
 
-__device__ void InvRad4B1(float2& R0, float2& R2, float2& R1, float2& R3)
+__forceinline__ __device__ void InvRad4B1(float2& R0, float2& R2, float2& R1, float2& R3)
 {
 
     float2 T;
@@ -201,7 +203,7 @@ __device__ void InvRad4B1(float2& R0, float2& R2, float2& R1, float2& R3)
     R2 = T;
 }
 
-__device__ void FwdRad8B1(
+__forceinline__ __device__ void FwdRad8B1(
     float2& R0, float2& R4, float2& R2, float2& R6, float2& R1, float2& R5, float2& R3, float2& R7)
 {
 
@@ -242,7 +244,7 @@ __device__ void FwdRad8B1(
     R6 = T;
 }
 
-__device__ void InvRad8B1(
+__forceinline__ __device__ void InvRad8B1(
     float2& R0, float2& R4, float2& R2, float2& R6, float2& R1, float2& R5, float2& R3, float2& R7)
 {
 
@@ -299,11 +301,11 @@ static __constant__ float2 twiddles[11] = {
     float2(-8.6602540378443870761060452423407696e-01f, -4.9999999999999994448884876874217298e-01f),
 };
 
-__device__ void FwdPassIN(unsigned int me,
-                          unsigned int inOffset,
-                          unsigned int outOffset,
-                          const float* bufIn,
-                          float2* bufOut)
+__forceinline__ __device__ void FwdPassIN(unsigned int me,
+                                          unsigned int inOffset,
+                                          unsigned int outOffset,
+                                          const float* bufIn,
+                                          float2* bufOut)
 {
     unsigned int met = me % 48;
     float* ldsf      = reinterpret_cast<float*>(bufOut + outOffset);
@@ -333,12 +335,12 @@ __device__ void FwdPassIN(unsigned int me,
     }
 }
 
-__device__ void FwdPassWE(unsigned int batch,
-                          unsigned int me,
-                          unsigned int inOffset,
-                          unsigned int outOffset,
-                          const float* bufIn,
-                          float2* bufOut)
+__forceinline__ __device__ void FwdPassWE(unsigned int batch,
+                                          unsigned int me,
+                                          unsigned int inOffset,
+                                          unsigned int outOffset,
+                                          const float* bufIn,
+                                          float2* bufOut)
 {
     unsigned int met = me % 24;
     float* ldsf      = reinterpret_cast<float*>(bufOut + outOffset);
@@ -388,11 +390,11 @@ __device__ void FwdPassWE(unsigned int batch,
     }
 }
 
-__device__ void FwdPass0(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void FwdPass0(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -415,11 +417,11 @@ __device__ void FwdPass0(unsigned int me,
     bufOut[outOffset + (me * 6 + 5)] = R5;
 }
 
-__device__ void FwdPass1(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void FwdPass1(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -471,11 +473,11 @@ __device__ void FwdPass1(unsigned int me,
     bufOut[outOffset + (3 * me + 2 + 6)] = R5;
 }
 
-__device__ void FwdPass1b(unsigned int me,
-                          unsigned int inOffset,
-                          unsigned int outOffset,
-                          float2 const* bufIn,
-                          float2* bufOut)
+__forceinline__ __device__ void FwdPass1b(unsigned int me,
+                                          unsigned int inOffset,
+                                          unsigned int outOffset,
+                                          float2 const* bufIn,
+                                          float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -509,11 +511,11 @@ __device__ void FwdPass1b(unsigned int me,
     }
 }
 
-__device__ void FwdPass2(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void FwdPass2(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -536,11 +538,11 @@ __device__ void FwdPass2(unsigned int me,
     bufOut[outOffset + (me * 6 + 5) * 7] = R5;
 }
 
-__device__ void FwdPass3(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void FwdPass3(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -592,11 +594,11 @@ __device__ void FwdPass3(unsigned int me,
     bufOut[outOffset + (3 * me + 2 + 6) * 7] = R5;
 }
 
-__device__ void FwdPass4_IN(unsigned int me,
-                            unsigned int inOffset,
-                            unsigned int outOffset,
-                            float2 const* bufIn,
-                            float2* bufOut)
+__forceinline__ __device__ void FwdPass4_IN(unsigned int me,
+                                            unsigned int inOffset,
+                                            unsigned int outOffset,
+                                            float2 const* bufIn,
+                                            float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6;
 
@@ -619,11 +621,11 @@ __device__ void FwdPass4_IN(unsigned int me,
     bufOut[outOffset + ((me % 16) + ((me / 16) + 6 * 12) * (CFF_CHANNELS * CFF_BATCH + 64))] = R6;
 }
 
-__device__ void FwdPass4_WE(unsigned int me,
-                            unsigned int inOffset,
-                            unsigned int outOffset,
-                            float2 const* bufIn,
-                            float2* bufOut)
+__forceinline__ __device__ void FwdPass4_WE(unsigned int me,
+                                            unsigned int inOffset,
+                                            unsigned int outOffset,
+                                            float2 const* bufIn,
+                                            float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6;
 
@@ -789,11 +791,11 @@ extern "C" __global__
     }
 }
 
-__device__ void InvPassA(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         const float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void InvPassA(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         const float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6;
 
@@ -814,11 +816,11 @@ __device__ void InvPassA(unsigned int me,
     bufOut[outOffset + (me + 6 * 192)] = R6;
 }
 
-__device__ void InvPass0(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void InvPass0(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -841,11 +843,11 @@ __device__ void InvPass0(unsigned int me,
     bufOut[outOffset + (me * 6 + 5) * 7] = R5;
 }
 
-__device__ void InvPass1(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void InvPass1(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -897,11 +899,11 @@ __device__ void InvPass1(unsigned int me,
     bufOut[outOffset + (3 * me + 2 + 6) * 7] = R5 * 8.3333333333333329e-02f;
 }
 
-__device__ void InvPass1b(unsigned int me,
-                          unsigned int inOffset,
-                          unsigned int outOffset,
-                          float2 const* bufIn,
-                          float2* bufOut)
+__forceinline__ __device__ void InvPass1b(unsigned int me,
+                                          unsigned int inOffset,
+                                          unsigned int outOffset,
+                                          float2 const* bufIn,
+                                          float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -934,11 +936,11 @@ __device__ void InvPass1b(unsigned int me,
     }
 }
 
-__device__ void InvPass2(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void InvPass2(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -961,11 +963,11 @@ __device__ void InvPass2(unsigned int me,
     bufOut[outOffset + (me * 6 + 5)] = R5;
 }
 
-__device__ void InvPass3(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void InvPass3(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1017,11 +1019,11 @@ __device__ void InvPass3(unsigned int me,
     bufOut[outOffset + (3 * me + 2 + 6)] = R5 * 8.3333333333333329e-02f;
 }
 
-__device__ void InvPassOUT(unsigned int me,
-                           unsigned int inOffset,
-                           unsigned int outOffset,
-                           float2 const* bufIn,
-                           float* bufOut)
+__forceinline__ __device__ void InvPassOUT(unsigned int me,
+                                           unsigned int inOffset,
+                                           unsigned int outOffset,
+                                           float2 const* bufIn,
+                                           float* bufOut)
 {
     float2 R0, R1, R2, R3, R4;
 
@@ -1114,11 +1116,11 @@ static __constant__ float2 twiddles[17] = {
     float2(-9.3969262078590842790504211734514683e-01f, 3.4202014332566865739693184877978638e-01f),
 };
 
-__device__ void FwdPass0(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void FwdPass0(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1141,11 +1143,11 @@ __device__ void FwdPass0(unsigned int me,
     bufOut[outOffset + (me * 6 + 5)] = R5;
 }
 
-__device__ void FwdPass1(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void FwdPass1(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1203,11 +1205,11 @@ __device__ void FwdPass1(unsigned int me,
     bufOut[outOffset + (2 * me + 1 + 12)] = R5;
 }
 
-__device__ void FwdPass1b(unsigned int me,
-                          unsigned int inOffset,
-                          unsigned int outOffset,
-                          float2 const* bufIn,
-                          float2* bufOut)
+__forceinline__ __device__ void FwdPass1b(unsigned int me,
+                                          unsigned int inOffset,
+                                          unsigned int outOffset,
+                                          float2 const* bufIn,
+                                          float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1241,11 +1243,11 @@ __device__ void FwdPass1b(unsigned int me,
     }
 }
 
-__device__ void FwdPass2(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void FwdPass2(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1268,11 +1270,11 @@ __device__ void FwdPass2(unsigned int me,
     bufOut[outOffset + (me * 6 + 5) * 10] = R5;
 }
 
-__device__ void FwdPass3(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void FwdPass3(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1330,11 +1332,11 @@ __device__ void FwdPass3(unsigned int me,
     bufOut[outOffset + (2 * me + 1 + 12) * 10] = R5;
 }
 
-__device__ void FwdPass4(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void FwdPass4(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1356,11 +1358,11 @@ __device__ void FwdPass4(unsigned int me,
     }
 }
 
-__device__ void FwdPassIN(unsigned int me,
-                          unsigned int inOffset,
-                          unsigned int outOffset,
-                          const float* bufIn,
-                          float2* bufOut)
+__forceinline__ __device__ void FwdPassIN(unsigned int me,
+                                          unsigned int inOffset,
+                                          unsigned int outOffset,
+                                          const float* bufIn,
+                                          float2* bufOut)
 {
     float2 R0, R1, R2, R3;
 
@@ -1409,12 +1411,12 @@ __device__ void FwdPassIN(unsigned int me,
     }
 }
 
-__device__ void FwdPassWE(unsigned int batch,
-                          unsigned int me,
-                          unsigned int inOffset,
-                          unsigned int outOffset,
-                          const float* bufIn,
-                          float2* bufOut)
+__forceinline__ __device__ void FwdPassWE(unsigned int batch,
+                                          unsigned int me,
+                                          unsigned int inOffset,
+                                          unsigned int outOffset,
+                                          const float* bufIn,
+                                          float2* bufOut)
 {
     unsigned int met = me % 32;
 
@@ -1474,7 +1476,7 @@ __device__ void FwdPassWE(unsigned int batch,
     }
 }
 
-__device__ void FwdPass(unsigned int me, float2* lds, float2* lwbOut)
+__forceinline__ __device__ void FwdPass(unsigned int me, float2* lds, float2* lwbOut)
 {
     unsigned int met = me % 32;
 
@@ -1730,11 +1732,11 @@ extern "C" __global__
     }
 }
 
-__device__ void InvPassA(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         const float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void InvPassA(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         const float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1756,11 +1758,11 @@ __device__ void InvPassA(unsigned int me,
     }
 }
 
-__device__ void InvPass0(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void InvPass0(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1783,11 +1785,11 @@ __device__ void InvPass0(unsigned int me,
     bufOut[outOffset + (me * 6 + 5) * 10] = R5;
 }
 
-__device__ void InvPass1(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void InvPass1(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1845,11 +1847,11 @@ __device__ void InvPass1(unsigned int me,
     bufOut[outOffset + (2 * me + 1 + 12) * 10] = R5 * 5.5555555555555555e-02f;
 }
 
-__device__ void InvPass1b(unsigned int me,
-                          unsigned int inOffset,
-                          unsigned int outOffset,
-                          float2 const* bufIn,
-                          float2* bufOut)
+__forceinline__ __device__ void InvPass1b(unsigned int me,
+                                          unsigned int inOffset,
+                                          unsigned int outOffset,
+                                          float2 const* bufIn,
+                                          float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1882,11 +1884,11 @@ __device__ void InvPass1b(unsigned int me,
     }
 }
 
-__device__ void InvPass2(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void InvPass2(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1909,11 +1911,11 @@ __device__ void InvPass2(unsigned int me,
     bufOut[outOffset + (me * 6 + 5)] = R5;
 }
 
-__device__ void InvPass3(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void InvPass3(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5;
 
@@ -1971,11 +1973,11 @@ __device__ void InvPass3(unsigned int me,
     bufOut[outOffset + (2 * me + 1 + 12)] = R5 * 5.5555555555555555e-02f;
 }
 
-__device__ void InvPassOUT(unsigned int me,
-                           unsigned int inOffset,
-                           unsigned int outOffset,
-                           float2 const* bufIn,
-                           float* bufOut)
+__forceinline__ __device__ void InvPassOUT(unsigned int me,
+                                           unsigned int inOffset,
+                                           unsigned int outOffset,
+                                           float2 const* bufIn,
+                                           float* bufOut)
 {
     float2 R0, R1, R2, R3;
 
@@ -2119,11 +2121,11 @@ static __constant__ float2 twiddles[31] = {
     float2(-5.5557023301960217764872140833176672e-01f, 8.3146961230254523567140267914510332e-01f),
 };
 
-__device__ void FwdPassIN(unsigned int me,
-                          unsigned int inOffset,
-                          unsigned int outOffset,
-                          const float* bufIn,
-                          float2* bufOut)
+__forceinline__ __device__ void FwdPassIN(unsigned int me,
+                                          unsigned int inOffset,
+                                          unsigned int outOffset,
+                                          const float* bufIn,
+                                          float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -2190,11 +2192,11 @@ __device__ void FwdPassIN(unsigned int me,
     bufOut[outOffset + ((1 + 12 + (me / 32) * 2 + 1) % 17) * 32 + ((2 + me) % 32)] = R7;
 }
 
-__device__ void FwdPassWE(unsigned int me,
-                          unsigned int inOffset,
-                          unsigned int outOffset,
-                          const float* bufIn,
-                          float2* bufOut)
+__forceinline__ __device__ void FwdPassWE(unsigned int me,
+                                          unsigned int inOffset,
+                                          unsigned int outOffset,
+                                          const float* bufIn,
+                                          float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -2254,11 +2256,11 @@ __device__ void FwdPassWE(unsigned int me,
     }
 }
 
-__device__ void FwdPass0(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void FwdPass0(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -2285,11 +2287,11 @@ __device__ void FwdPass0(unsigned int me,
     bufOut[outOffset + (me * 8 + 7)] = R7;
 }
 
-__device__ void FwdPass1(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void FwdPass1(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -2371,11 +2373,11 @@ __device__ void FwdPass1(unsigned int me,
     bufOut[outOffset + (2 * me + 1 + 24)] = R7;
 }
 
-__device__ void FwdPass1b(unsigned int me,
-                          unsigned int inOffset,
-                          unsigned int outOffset,
-                          float2 const* bufIn,
-                          float2* bufOut)
+__forceinline__ __device__ void FwdPass1b(unsigned int me,
+                                          unsigned int inOffset,
+                                          unsigned int outOffset,
+                                          float2 const* bufIn,
+                                          float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -2413,11 +2415,11 @@ __device__ void FwdPass1b(unsigned int me,
     }
 }
 
-__device__ void FwdPass2(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void FwdPass2(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -2444,11 +2446,11 @@ __device__ void FwdPass2(unsigned int me,
     bufOut[outOffset + (me * 8 + 7) * 17] = R7;
 }
 
-__device__ void FwdPass3(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void FwdPass3(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -2530,11 +2532,11 @@ __device__ void FwdPass3(unsigned int me,
     bufOut[outOffset + (2 * me + 1 + 24) * 17] = R7;
 }
 
-__device__ void FwdPass4(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void FwdPass4(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -2889,11 +2891,11 @@ extern "C" __global__
 
 #endif
 
-__device__ void InvPassA(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         const float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void InvPassA(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         const float2 const* bufIn,
+                                         float2* bufOut)
 {
     bufOut[outOffset + (me + 0 * 64)] = bufIn[inOffset + (me + 0 * 64)];
     bufOut[outOffset + (me + 1 * 64)] = bufIn[inOffset + (me + 1 * 64)];
@@ -2910,11 +2912,11 @@ __device__ void InvPassA(unsigned int me,
     }
 }
 
-__device__ void InvPass0(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void InvPass0(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -2941,11 +2943,11 @@ __device__ void InvPass0(unsigned int me,
     bufOut[outOffset + (me * 8 + 7) * 17] = R7;
 }
 
-__device__ void InvPass1(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void InvPass1(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -3027,11 +3029,11 @@ __device__ void InvPass1(unsigned int me,
     bufOut[outOffset + (2 * me + 1 + 24) * 17] = R7 * 3.1250000000000000e-02f;
 }
 
-__device__ void InvPass1b(unsigned int me,
-                          unsigned int inOffset,
-                          unsigned int outOffset,
-                          float2 const* bufIn,
-                          float2* bufOut)
+__forceinline__ __device__ void InvPass1b(unsigned int me,
+                                          unsigned int inOffset,
+                                          unsigned int outOffset,
+                                          float2 const* bufIn,
+                                          float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -3068,11 +3070,11 @@ __device__ void InvPass1b(unsigned int me,
     }
 }
 
-__device__ void InvPass2(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void InvPass2(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -3099,11 +3101,11 @@ __device__ void InvPass2(unsigned int me,
     bufOut[outOffset + (me * 8 + 7)] = R7;
 }
 
-__device__ void InvPass3(unsigned int me,
-                         unsigned int inOffset,
-                         unsigned int outOffset,
-                         float2 const* bufIn,
-                         float2* bufOut)
+__forceinline__ __device__ void InvPass3(unsigned int me,
+                                         unsigned int inOffset,
+                                         unsigned int outOffset,
+                                         float2 const* bufIn,
+                                         float2* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
@@ -3185,11 +3187,11 @@ __device__ void InvPass3(unsigned int me,
     bufOut[outOffset + (2 * me + 1 + 24)] = R7 * 3.1250000000000000e-02f;
 }
 
-__device__ void InvPassOUT(unsigned int me,
-                           unsigned int inOffset,
-                           unsigned int outOffset,
-                           float2 const* bufIn,
-                           float* bufOut)
+__forceinline__ __device__ void InvPassOUT(unsigned int me,
+                                           unsigned int inOffset,
+                                           unsigned int outOffset,
+                                           float2 const* bufIn,
+                                           float* bufOut)
 {
     float2 R0, R1, R2, R3, R4, R5, R6, R7;
 
