@@ -211,7 +211,8 @@ std::vector<GetitemTestCase> GetitemTestConfigs()
         { {16, 4},    {{16}},   {3234, 4},    {0}, {}, 0}, //ssdlite
         { {149, 128}, {{1490}}, {1490, 1128}, {0}, {}, 0}, //llama2_7b
         { {10, 128},  {{10}},   {160, 128},   {0}, {}, 0},
-        { {4260, 4},  {{4300}}, {4300, 4},    {0}, {}, 0}, //fasterrcnn
+        // Disabled to unblock gfx908 Nightlies LWPMIOPEN-1835
+        //{ {4260, 4},  {{4300}}, {4300, 4},    {0}, {}, 0}, //fasterrcnn
         { {4260},     {{4300}}, {4300},       {0}, {}, 0}  //maskrcnn
       };
     // clang-format on
