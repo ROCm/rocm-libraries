@@ -48,76 +48,70 @@ __forceinline__ __device__ void activbwdperactivation(const TI* __restrict__ x,
                                                       const float* __restrict__ saved_mean,
                                                       const float* __restrict__ saved_inv_variance)
 {
-    auto xgid    = blockIdx.x * LOCAL_SIZE_X + threadIdx.x;
-    auto ygid    = blockIdx.y * LOCAL_SIZE_Y + threadIdx.y;
-    auto c_index = H * W * xgid;
+    const int xgid      = blockIdx.x * LOCAL_SIZE_X + threadIdx.x;
+    const int ygid      = blockIdx.y * LOCAL_SIZE_Y + threadIdx.y;
+    const int adj_index = H * W * xgid + ygid;
 
-    // move across the sections of an image in the mini_batch stack
-    for(auto img_offset = 0; img_offset < H * W; img_offset += GRID_SIZE_Y)
+    if(adj_index < CHANNELS * H * W)
     {
-        auto img_index = img_offset + ygid;
-        if(img_index < H * W)
+        const FLOAT_ACCUM mean      = CVT_FP32_2ACCUM(saved_mean[adj_index]);
+        const FLOAT_ACCUM inv_var   = CVT_FP32_2ACCUM(saved_inv_variance[adj_index]);
+        const FLOAT_ACCUM pvt_scale = CVT_FP32_2ACCUM(bn_scale[adj_index]);
+        const FLOAT_ACCUM pvt_bias  = CVT_FP32_2ACCUM(bn_bias[adj_index]);
+        FLOAT_ACCUM pvt_dscale{0};
+        FLOAT_ACCUM pvt_dbias{0};
+        FLOAT_ACCUM dxhat{0};
+        FLOAT_ACCUM dxhathat{0};
+
+        for(int n = 0; n < BATCH_SIZE; ++n)
         {
-            auto adj_index = c_index + img_index; // gamma and beta tensor index
-            auto mean      = CVT_FP32_2ACCUM(saved_mean[adj_index]);
-            auto inv_var   = CVT_FP32_2ACCUM(saved_inv_variance[adj_index]);
-            auto pvt_scale = CVT_FP32_2ACCUM(bn_scale[adj_index]);
-            auto pvt_bias  = CVT_FP32_2ACCUM(bn_bias[adj_index]);
-            FLOAT_ACCUM pvt_dscale{0};
-            FLOAT_ACCUM pvt_dbias{0};
-            FLOAT_ACCUM dxhat{0};
-            FLOAT_ACCUM dxhathat{0};
-
-            for(auto n = 0; n < BATCH_SIZE; ++n)
-            {
-                // per (x-dims) channel load a block of data into LDS
-                auto index            = n * CHANNELS * H * W + adj_index;
-                auto xhat             = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_var;
-                FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
-                FLOAT_ACCUM act_y[1]  = {CVT_FLOAT2ACCUM(y[index])};
-                FLOAT_ACCUM bn_y[1]   = {xhat * pvt_scale + pvt_bias};
-                FLOAT_ACCUM bn_dy[1];
-                ActivationFunction_Diff(bn_dy,
-                                        act_dy,
-                                        bn_y,
-                                        act_y,
-                                        CVT_FLOAT2ACCUM(diff_scale),
-                                        CVT_FLOAT2ACCUM(gamma),
-                                        CVT_FLOAT2ACCUM(beta),
-                                        CVT_FLOAT2ACCUM(alpha));
-                pvt_dbias += bn_dy[0];
-                pvt_dscale = xhat * bn_dy[0] + pvt_dscale;
-                auto tmp   = pvt_scale * bn_dy[0];
-                dxhat += tmp;
-                dxhathat += tmp * xhat;
-            }
-
-            for(auto n = 0; n < BATCH_SIZE; ++n)
-            {
-                auto index            = n * CHANNELS * H * W + adj_index;
-                auto xhat             = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_var;
-                auto tmp              = xhat * dxhathat + dxhat;
-                FLOAT_ACCUM bn_y[1]   = {xhat * pvt_scale + pvt_bias};
-                FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
-                FLOAT_ACCUM act_y[1]  = {CVT_FLOAT2ACCUM(y[index])};
-                FLOAT_ACCUM bn_dy[1];
-                ActivationFunction_Diff(bn_dy,
-                                        act_dy,
-                                        bn_y,
-                                        act_y,
-                                        CVT_FLOAT2ACCUM(diff_scale),
-                                        CVT_FLOAT2ACCUM(gamma),
-                                        CVT_FLOAT2ACCUM(beta),
-                                        CVT_FLOAT2ACCUM(alpha));
-                auto tmp2 = BATCH_SIZE * bn_dy[0] * pvt_scale - tmp;
-                auto tmp3 = inv_var * static_cast<FLOAT_ACCUM>(1.0f / BATCH_SIZE);
-                dx[index] = CVT_ACCUM2FLOAT(tmp2 * tmp3);
-            }
-
-            // Write out data
-            dbias[adj_index]  = CVT_ACCUM2FP32(pvt_dbias);
-            dscale[adj_index] = CVT_ACCUM2FP32(pvt_dscale);
+            // per (x-dims) channel load a block of data into LDS
+            int index             = n * CHANNELS * H * W + adj_index;
+            FLOAT_ACCUM xhat      = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_var;
+            FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
+            FLOAT_ACCUM act_y[1]  = {CVT_FLOAT2ACCUM(y[index])};
+            FLOAT_ACCUM bn_y[1]   = {xhat * pvt_scale + pvt_bias};
+            FLOAT_ACCUM bn_dy[1];
+            ActivationFunction_Diff(bn_dy,
+                                    act_dy,
+                                    bn_y,
+                                    act_y,
+                                    CVT_FLOAT2ACCUM(diff_scale),
+                                    CVT_FLOAT2ACCUM(gamma),
+                                    CVT_FLOAT2ACCUM(beta),
+                                    CVT_FLOAT2ACCUM(alpha));
+            pvt_dbias += bn_dy[0];
+            pvt_dscale      = xhat * bn_dy[0] + pvt_dscale;
+            FLOAT_ACCUM tmp = pvt_scale * bn_dy[0];
+            dxhat += tmp;
+            dxhathat += tmp * xhat;
         }
+
+        for(int n = 0; n < BATCH_SIZE; ++n)
+        {
+            int index             = n * CHANNELS * H * W + adj_index;
+            FLOAT_ACCUM xhat      = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_var;
+            FLOAT_ACCUM tmp       = xhat * dxhathat + dxhat;
+            FLOAT_ACCUM bn_y[1]   = {xhat * pvt_scale + pvt_bias};
+            FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
+            FLOAT_ACCUM act_y[1]  = {CVT_FLOAT2ACCUM(y[index])};
+            FLOAT_ACCUM bn_dy[1];
+            ActivationFunction_Diff(bn_dy,
+                                    act_dy,
+                                    bn_y,
+                                    act_y,
+                                    CVT_FLOAT2ACCUM(diff_scale),
+                                    CVT_FLOAT2ACCUM(gamma),
+                                    CVT_FLOAT2ACCUM(beta),
+                                    CVT_FLOAT2ACCUM(alpha));
+            FLOAT_ACCUM tmp2 = BATCH_SIZE * bn_dy[0] * pvt_scale - tmp;
+            FLOAT_ACCUM tmp3 = inv_var * static_cast<FLOAT_ACCUM>(1.0f / BATCH_SIZE);
+            dx[index]        = CVT_ACCUM2FLOAT(tmp2 * tmp3);
+        }
+
+        // Write out data
+        dbias[adj_index]  = CVT_ACCUM2FP32(pvt_dbias);
+        dscale[adj_index] = CVT_ACCUM2FP32(pvt_dscale);
     }
 }
 
