@@ -7,10 +7,10 @@ Documentation for rocSPARSE is available at
 
 ### Added
 * Added `rocsparse_spmv_set_extra` and `rocsparse_spmv_clear_extra` functions to enable residual computation within SpMV operations. These functions allow setting additional gamma scalars and z vectors for fused computations of the form `y = alpha * op(A) * x + beta * y + sum(gamma_i * z_i)`, enabling efficient residual calculations like `r = b - A * x`.
-* Added sliced ELL format support to `rocsparse_spmv` routine.
-* Added `rocsparse_sptrsv` and `rocsparse_sptrsm` routines for triangular solve 
-* Added `--clients-only` option to the `install.sh` and `rmake.py` scripts to allow building only the clients while using an already installed version of rocSPARSE.
-* Added nnz split algorithm `rocsparse_spmv_alg_csr_nnzsplit` to `rocsparse_spmv`. This algorithm may be superior to the existing adaptive algorithm `rocsparse_spmv_alg_csr_adaptive` when the user only wants to run the computation a small number of times and does not want to pay the analysis cost of the adaptive algorithm.
+* Added sliced ELL format support to the `rocsparse_spmv` routine.
+* Added the `rocsparse_sptrsv` and `rocsparse_sptrsm` routines for triangular solve.
+* Added the `--clients-only` option to the `install.sh` and `rmake.py` scripts to only build the clients for a version of rocSPARSE that is already installed.
+* Added nnz split algorithm `rocsparse_spmv_alg_csr_nnzsplit` to `rocsparse_spmv`. This algorithm might be superior to the existing adaptive algorithm `rocsparse_spmv_alg_csr_adaptive` when running the computation a small number of times because it avoids paying the analysis cost of the adaptive algorithm.
 
 ### Changed
 * Make rocblas required when user requests it when building from source. Previously, we were silently not using rocblas if it could not be found. Users can still opt out of using rocblas when building from source by using the `--no-rocblas` option with `install.sh` or `rmake.py` build scripts.
