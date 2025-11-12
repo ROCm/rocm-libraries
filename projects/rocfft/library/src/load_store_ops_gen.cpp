@@ -90,18 +90,23 @@ Function StoreOps::add_ops(const Function& f) const
     return visitor(f);
 }
 
-std::string load_store_name_suffix(const LoadOps& loadOps, const StoreOps& storeOps)
+std::string load_store_name_suffix(const std::optional<LoadOps>&  loadOps,
+                                   const std::optional<StoreOps>& storeOps)
 {
     std::string suffix;
-    suffix += loadOps.name_suffix();
-    suffix += storeOps.name_suffix();
+    if(loadOps)
+        suffix += loadOps->name_suffix();
+    if(storeOps)
+        suffix += storeOps->name_suffix();
     return suffix;
 }
 
-void make_load_store_ops(Function& f, const LoadOps& loadOps, const StoreOps& storeOps)
+void make_load_store_ops(Function&                      f,
+                         const std::optional<LoadOps>&  loadOps,
+                         const std::optional<StoreOps>& storeOps)
 {
-    if(loadOps.enabled())
-        f = loadOps.add_ops(f);
-    if(storeOps.enabled())
-        f = storeOps.add_ops(f);
+    if(loadOps && loadOps->enabled())
+        f = loadOps->add_ops(f);
+    if(storeOps && storeOps->enabled())
+        f = storeOps->add_ops(f);
 }

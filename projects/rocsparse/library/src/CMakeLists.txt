@@ -128,6 +128,9 @@ set(rocsparse_source
   src/level2/rocsparse_ellmv_impl.cpp
   src/level2/rocsparse_ellmv.cpp
   #
+  src/level2/rocsparse_sellmv_impl.cpp
+  src/level2/rocsparse_sellmv.cpp
+  #
   src/level2/rocsparse_csrsv.cpp
   src/level2/rocsparse_csrsv_analysis_impl.cpp
   src/level2/rocsparse_csrsv_analysis.cpp

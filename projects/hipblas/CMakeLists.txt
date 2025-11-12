@@ -44,9 +44,7 @@ endif()
 
 project( hipblas LANGUAGES CXX )
 
-if (NOT python)
-    set(python "python3") # default for linux
-endif()
+find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
 # Append our library helper cmake path and the cmake path for hip (for convenience)
 # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
@@ -301,6 +299,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hipblas-coverage_*.profraw -o ./coverage-report/hipblas.profdata
     COMMAND ${LLVM_COV} report -object ./library/src/libhipblas.so -instr-profile=./coverage-report/hipblas.profdata
     COMMAND ${LLVM_COV} show -object ./library/src/libhipblas.so -instr-profile=./coverage-report/hipblas.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/libhipblas.so -instr-profile=./coverage-report/hipblas.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 

@@ -97,7 +97,6 @@ if(NOT USE_CUDA)
   FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
 
   foreach(file ${DOCUMENTATION_EXAMPLES})
-      message(STATUS "Found .cpp file: ${file}")
       add_hipsparse_example(${file})
   endforeach()
 endif()
