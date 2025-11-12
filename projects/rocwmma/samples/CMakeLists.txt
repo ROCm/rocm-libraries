@@ -24,65 +24,65 @@
  #
  ###############################################################################
 
- set(ROCWMMA_SAMPLES_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+set(ROCWMMA_SAMPLES_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
- if(ROCWMMA_CODE_COVERAGE)
-     add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
-     add_link_options(-fprofile-instr-generate)
- endif()
- 
- # Custom target to build all rocWMMA samples
- add_custom_target(rocwmma_samples)
- 
- # Regular binaries that don't require any special
- # designation for validation or benchmarking
- function(add_rocwmma_sample TEST_TARGET TEST_SOURCE)
- 
-   list(APPEND TEST_SOURCE ${ARGN})
-   add_executable(${TEST_TARGET} ${TEST_SOURCE})
-   target_link_libraries(${TEST_TARGET} OpenMP::OpenMP_CXX "-L${HIP_CLANG_ROOT}/lib")
-   if(UNIX)
-     target_link_libraries(${TEST_TARGET} "-Wl,-rpath=$ORIGIN/../llvm/lib"  "-fno-rtlib-add-rpath")
-   endif()
-   target_link_libraries(${TEST_TARGET} rocwmma hiprtc::hiprtc)
-   target_include_directories(${TEST_TARGET} PRIVATE
-                              ${CMAKE_CURRENT_SOURCE_DIR}
-                              ${ROCWMMA_SAMPLES_INCLUDE_DIR})
-   add_dependencies(rocwmma_samples ${TEST_TARGET})
- 
-   # Add support to build the target's assembly files
-   if(ROCWMMA_BUILD_ASSEMBLY)
-     foreach(file_name ${TEST_SOURCE})
- 
-       # Replicate the current source tree in the build output/assembly folder
-       file(RELATIVE_PATH relative_file_path "${CMAKE_CURRENT_SOURCE_DIR}" "${file_name}")
-       string(REPLACE "../" "__/" relative_file_string "${relative_file_path}")
-       add_custom_command(TARGET ${TEST_TARGET}
-                          POST_BUILD
-                          COMMAND make ARGS ${relative_file_string}.s
-                          COMMAND ${CMAKE_COMMAND} -E copy
-                            "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${TEST_TARGET}.dir/${relative_file_string}.s"
-                            "${CMAKE_CURRENT_BINARY_DIR}/assembly/${relative_file_string}.s"
-                           WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-     endforeach()
-   endif()
- 
-   rocm_install_targets(
-     TARGETS ${TEST_TARGET}
-     COMPONENT samples
-   )
- endfunction()
- 
- # Create sample targets
- add_rocwmma_sample(simple_sgemm ${CMAKE_CURRENT_SOURCE_DIR}/simple_sgemm.cpp)
- add_rocwmma_sample(perf_sgemm ${CMAKE_CURRENT_SOURCE_DIR}/perf_sgemm.cpp)
- add_rocwmma_sample(simple_hgemm ${CMAKE_CURRENT_SOURCE_DIR}/simple_hgemm.cpp)
- add_rocwmma_sample(perf_hgemm ${CMAKE_CURRENT_SOURCE_DIR}/perf_hgemm.cpp)
- add_rocwmma_sample(simple_dgemm ${CMAKE_CURRENT_SOURCE_DIR}/simple_dgemm.cpp)
- add_rocwmma_sample(perf_dgemm ${CMAKE_CURRENT_SOURCE_DIR}/perf_dgemm.cpp)
- add_rocwmma_sample(simple_sgemv ${CMAKE_CURRENT_SOURCE_DIR}/simple_sgemv.cpp)
- add_rocwmma_sample(simple_dgemv ${CMAKE_CURRENT_SOURCE_DIR}/simple_dgemv.cpp)
- add_rocwmma_sample(simple_dlrm ${CMAKE_CURRENT_SOURCE_DIR}/simple_dlrm.cpp)
- add_rocwmma_sample(hipRTC_gemm ${CMAKE_CURRENT_SOURCE_DIR}/hipRTC_gemm.cpp)
- add_rocwmma_sample(perf_i8gemm ${CMAKE_CURRENT_SOURCE_DIR}/perf_i8gemm.cpp)
- add_rocwmma_sample(simple_gemm_act ${CMAKE_CURRENT_SOURCE_DIR}/simple_gemm_act.cpp)
+if(ROCWMMA_CODE_COVERAGE)
+    add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+    add_link_options(-fprofile-instr-generate)
+endif()
+
+# Custom target to build all rocWMMA samples
+add_custom_target(rocwmma_samples)
+
+# Regular binaries that don't require any special
+# designation for validation or benchmarking
+function(add_rocwmma_sample TEST_TARGET TEST_SOURCE)
+
+  list(APPEND TEST_SOURCE ${ARGN})
+  add_executable(${TEST_TARGET} ${TEST_SOURCE})
+  target_link_libraries(${TEST_TARGET} OpenMP::OpenMP_CXX "-L${HIP_CLANG_ROOT}/lib")
+  if(UNIX)
+    target_link_libraries(${TEST_TARGET} "-Wl,-rpath=$ORIGIN/../llvm/lib"  "-fno-rtlib-add-rpath")
+  endif()
+  target_link_libraries(${TEST_TARGET} rocwmma hiprtc::hiprtc)
+  target_include_directories(${TEST_TARGET} PRIVATE
+                             ${CMAKE_CURRENT_SOURCE_DIR}
+                             ${ROCWMMA_SAMPLES_INCLUDE_DIR})
+  add_dependencies(rocwmma_samples ${TEST_TARGET})
+
+  # Add support to build the target's assembly files
+  if(ROCWMMA_BUILD_ASSEMBLY)
+    foreach(file_name ${TEST_SOURCE})
+
+      # Replicate the current source tree in the build output/assembly folder
+      file(RELATIVE_PATH relative_file_path "${CMAKE_CURRENT_SOURCE_DIR}" "${file_name}")
+      string(REPLACE "../" "__/" relative_file_string "${relative_file_path}")
+      add_custom_command(TARGET ${TEST_TARGET}
+                         POST_BUILD
+                         COMMAND make ARGS ${relative_file_string}.s
+                         COMMAND ${CMAKE_COMMAND} -E copy
+                           "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${TEST_TARGET}.dir/${relative_file_string}.s"
+                           "${CMAKE_CURRENT_BINARY_DIR}/assembly/${relative_file_string}.s"
+                          WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    endforeach()
+  endif()
+
+  rocm_install_targets(
+    TARGETS ${TEST_TARGET}
+    COMPONENT samples
+  )
+endfunction()
+
+# Create sample targets
+add_rocwmma_sample(simple_sgemm ${CMAKE_CURRENT_SOURCE_DIR}/simple_sgemm.cpp)
+add_rocwmma_sample(perf_sgemm ${CMAKE_CURRENT_SOURCE_DIR}/perf_sgemm.cpp)
+add_rocwmma_sample(simple_hgemm ${CMAKE_CURRENT_SOURCE_DIR}/simple_hgemm.cpp)
+add_rocwmma_sample(perf_hgemm ${CMAKE_CURRENT_SOURCE_DIR}/perf_hgemm.cpp)
+add_rocwmma_sample(simple_dgemm ${CMAKE_CURRENT_SOURCE_DIR}/simple_dgemm.cpp)
+add_rocwmma_sample(perf_dgemm ${CMAKE_CURRENT_SOURCE_DIR}/perf_dgemm.cpp)
+add_rocwmma_sample(simple_sgemv ${CMAKE_CURRENT_SOURCE_DIR}/simple_sgemv.cpp)
+add_rocwmma_sample(simple_dgemv ${CMAKE_CURRENT_SOURCE_DIR}/simple_dgemv.cpp)
+add_rocwmma_sample(simple_dlrm ${CMAKE_CURRENT_SOURCE_DIR}/simple_dlrm.cpp)
+add_rocwmma_sample(hipRTC_gemm ${CMAKE_CURRENT_SOURCE_DIR}/hipRTC_gemm.cpp)
+add_rocwmma_sample(perf_i8gemm ${CMAKE_CURRENT_SOURCE_DIR}/perf_i8gemm.cpp)
+add_rocwmma_sample(simple_gemm_act ${CMAKE_CURRENT_SOURCE_DIR}/simple_gemm_act.cpp)
