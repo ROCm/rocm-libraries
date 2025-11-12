@@ -21,7 +21,7 @@ Infrastructure
 
   .. note::
 
-    The rocWMMA repository for ROCm 7.1.0 and earlier is located at `<https://github.com/ROCm/rocWMMA>`_.
+    The rocWMMA repository for ROCm 7.1.1 and earlier is located at `<https://github.com/ROCm/rocWMMA>`_.
 
 - The rocWMMA project is organized and configured using ``CMake``, with ``CMakeLists.txt`` files in the root of each directory.
 - ``clang-format`` is used to format C++ code. ``.githooks/install`` ensures that a clang-format pass will run on each committed file.
