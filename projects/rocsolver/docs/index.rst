@@ -29,7 +29,6 @@ The rocSOLVER repository for ROCm 7.0.2 and earlier is located at `<https://gith
     * :doc:`Apply the memory model <./howto/memory>`
     * :doc:`Use multi-level logging <./howto/logging>`
     * :doc:`Run rocSOLVER clients <./howto/clients>`
-    * :doc:`Contribute to rocSOLVER <./howto/contribute>`
 
   .. grid-item-card:: Examples
 
@@ -50,5 +49,6 @@ The rocSOLVER repository for ROCm 7.0.2 and earlier is located at `<https://gith
     * :doc:`Deprecated components <./reference/deprecated>`
 
 To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
+For information on contributing to the rocSOLVER code base, see :doc:`Contribute to rocSOLVER <./contribute>`.
 
 You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.

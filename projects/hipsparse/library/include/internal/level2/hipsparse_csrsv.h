@@ -43,6 +43,10 @@ extern "C" {
 *  \note \p hipsparseXcsrsv2_zeroPivot is a blocking function. It might influence
 *  performance negatively.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 11.0+) and will be 
+*  removed in CUDA 12.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
 *  handle      handle to the hipsparse library context queue.
 *  @param[in]
@@ -50,10 +54,11 @@ extern "C" {
 *  @param[inout]
 *  position    pointer to zero pivot \f$j\f$, can be in host or device memory.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle \p info or \p position is invalid.
-*  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
-*  \retval     HIPSPARSE_STATUS_ZERO_PIVOT zero pivot has been found.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info or \p position is nullptr.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*  \retval HIPSPARSE_STATUS_ZERO_PIVOT zero pivot has been found.
 */
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")
 HIPSPARSE_EXPORT

@@ -13,6 +13,7 @@ add_executable(
     IntegrationGpuBatchnormBackward.cpp
     IntegrationGpuBatchnormBackwardActivation.cpp
     IntegrationGpuBatchnormForwardInference.cpp
+    IntegrationGpuBatchnormFwdPlusActive.cpp
     IntegrationGpuBatchnormForwardTraining.cpp
     IntegrationGpuConvForward.cpp
     IntegrationGpuConvBackwardData.cpp
@@ -25,13 +26,17 @@ target_compile_options(miopen_plugin_integration_test PRIVATE ${HIPDNN_WARNING_C
 # libhipdnn_backend.so HIPDNN_PLUGIN_ENGINE_SUBDIR is provided by the sdk
 target_compile_definitions(
     miopen_plugin_integration_test
-    PRIVATE PLUGIN_PATH="../lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_legacy_plugin"
+    PRIVATE PLUGIN_PATH="../$<IF:$<PLATFORM_ID:Windows>,bin,lib>/${HIPDNN_PLUGIN_ENGINE_SUBDIR}/miopen_legacy_plugin"
 )
 
 target_link_libraries(
     miopen_plugin_integration_test PUBLIC GTest::gtest hip::host hipdnn_frontend hipdnn_sdk
                                           Threads::Threads
 )
+
+# Ensure that the miopen_legacy_plugin is built before the miopen_plugin_integration_test,
+# as the integration tests depend on the MIOpen legacy plugin
+add_dependencies(miopen_plugin_integration_test miopen_legacy_plugin)
 
 if(BUILD_PLUGIN_AS_DEPENDENCY)
     clang_tidy_check(miopen_plugin_integration_test)
