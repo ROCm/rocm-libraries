@@ -540,6 +540,6 @@ INSTANTIATE_HERK_SYRK_NUMERICS(false, rocblas_bfloat16 const*, rocblas_bfloat16*
 INSTANTIATE_HERK_SYRK_NUMERICS(false, rocblas_bfloat16 const*, float*)
 INSTANTIATE_HERK_SYRK_NUMERICS(false, rocblas_half const*, rocblas_half*)
 INSTANTIATE_HERK_SYRK_NUMERICS(false, rocblas_half const*, float*)
-// INSTANTIATE_HERK_SYRK_NUMERICS(false, float const*, double*)
+INSTANTIATE_HERK_SYRK_NUMERICS(false, float const*, double*)
 
 #undef INSTANTIATE_HERK_SYRK_NUMERICS
