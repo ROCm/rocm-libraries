@@ -8,6 +8,7 @@ Documentation for rocSPARSE is available at
 ### Added
 
 * Added `--clients-only` option to the `install.sh` and `rmake.py` scripts to allow building only the clients while using an already installed version of rocSPARSE.
+* Added `rocsparse_spmv_set_extra` and `rocsparse_spmv_clear_extra` functions to enable residual computation within SpMV operations. These functions allow setting additional gamma scalars and z vectors for fused computations of the form `y = alpha * op(A) * x + beta * y + sum(gamma_i * z_i)`, enabling efficient residual calculations like `r = b - A * x`.
 
 ## rocSPARSE 4.1.0 for ROCm 7.1.0
 
