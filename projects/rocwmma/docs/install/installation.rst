@@ -129,7 +129,7 @@ ROCm version 6.4 or later is required.
 
 .. note::
 
-   The rocWMMA repository for ROCm 7.1.0 and earlier is located at `<https://github.com/ROCm/rocWMMA>`_.
+   The rocWMMA repository for ROCm 7.1.1 and earlier is located at `<https://github.com/ROCm/rocWMMA>`_.
 
 To verify the ROCm version installed on an Ubuntu system, use this command:
 
