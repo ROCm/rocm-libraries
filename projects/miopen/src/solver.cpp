@@ -638,10 +638,6 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
                        ++id,
                        conv::ConvHipImplicitGemm3DGroupBwdXdlops{},
                        miopenConvolutionAlgoImplicitGEMM);
-    RegisterWithSolver(registry,
-                       ++id,
-                       conv::ConvHipImplicitGemm3DGroupBwdWmma{},
-                       miopenConvolutionAlgoImplicitGEMM);
     ++id; // removed batchnorm::BnCKFwdInference
     ++id; // removed batchnorm::BnCKBwdBackward
     ++id; // removed batchnorm::BnCKFwdTraining
@@ -666,8 +662,6 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
                        ++id,
                        conv::ConvHipImplicitGemmGroupBwdXdlops{},
                        miopenConvolutionAlgoImplicitGEMM);
-    RegisterWithSolver(
-        registry, ++id, conv::ConvHipImplicitGemmGroupBwdWmma{}, miopenConvolutionAlgoImplicitGEMM);
     RegisterWithSolver(registry,
                        ++id,
                        conv::ConvHipImplicitGemmGroupWrwXdlops{},
