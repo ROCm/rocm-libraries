@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2023 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,9 +40,7 @@
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 
-// list all relevant environment variables
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS)
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_WMMA)
 
 namespace miopen {
 namespace solver {
@@ -349,9 +347,8 @@ struct CKArgs
 };
 } // namespace
 
-template <Backend backend>
 template <typename DataType>
-void PerformanceConfigHipImplicitGemm3DGroupBwd<backend>::Init(const ProblemDescription& problem)
+void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::Init(const ProblemDescription& problem)
 {
     switch(problem.GetAlphaBetaCase())
     {
@@ -372,9 +369,8 @@ void PerformanceConfigHipImplicitGemm3DGroupBwd<backend>::Init(const ProblemDesc
     kernel_id = valid_kernels[index];
 }
 
-template <Backend backend>
 template <typename DataType>
-bool PerformanceConfigHipImplicitGemm3DGroupBwd<backend>::CheckIsSupportCKArgs(
+bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::CheckIsSupportCKArgs(
     const ProblemDescription& problem) const
 {
     switch(problem.GetAlphaBetaCase())
@@ -391,9 +387,8 @@ bool PerformanceConfigHipImplicitGemm3DGroupBwd<backend>::CheckIsSupportCKArgs(
     }
 }
 
-template <Backend backend>
 template <typename DataType>
-bool ConvHipImplicitGemm3DGroupBwd<backend>::CheckCKApplicability(
+bool ConvHipImplicitGemm3DGroupBwdXdlops::CheckCKApplicability(
     const ProblemDescription& problem) const
 {
     switch(problem.GetAlphaBetaCase())
@@ -406,8 +401,7 @@ bool ConvHipImplicitGemm3DGroupBwd<backend>::CheckCKApplicability(
 }
 #endif
 
-template <Backend backend>
-void PerformanceConfigHipImplicitGemm3DGroupBwd<backend>::HeuristicInit(
+void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
     [[maybe_unused]] const ProblemDescription& problem)
 {
     index     = 0;
@@ -418,12 +412,7 @@ void PerformanceConfigHipImplicitGemm3DGroupBwd<backend>::HeuristicInit(
     {
     case miopenHalf: Init<ck::half_t>(problem); break;
     case miopenFloat: Init<float>(problem); break;
-    case miopenInt8:
-        if constexpr(backend == Backend::Xdlops)
-            Init<int8_t>(problem);
-        else if constexpr(backend == Backend::Wmma)
-            ; // no Int8 support for WmmaBackend
-        break;
+    case miopenInt8: Init<int8_t>(problem); break;
     case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
     case miopenInt64:
     case miopenInt32:
@@ -434,8 +423,7 @@ void PerformanceConfigHipImplicitGemm3DGroupBwd<backend>::HeuristicInit(
 #endif
 }
 
-template <Backend backend>
-bool PerformanceConfigHipImplicitGemm3DGroupBwd<backend>::SetNextValue(
+bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::SetNextValue(
     const ProblemDescription& problem)
 {
     if(valid_kernels.empty())
@@ -454,14 +442,12 @@ bool PerformanceConfigHipImplicitGemm3DGroupBwd<backend>::SetNextValue(
         return false;
 }
 
-template <Backend backend>
-bool PerformanceConfigHipImplicitGemm3DGroupBwd<backend>::IsValidValue() const
+bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::IsValidValue() const
 {
     return index < valid_kernels.size();
 }
 
-template <Backend backend>
-bool PerformanceConfigHipImplicitGemm3DGroupBwd<backend>::IsValid(
+bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::IsValid(
     [[maybe_unused]] const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -469,11 +455,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupBwd<backend>::IsValid(
     {
     case miopenHalf: return CheckIsSupportCKArgs<ck::half_t>(problem);
     case miopenFloat: return CheckIsSupportCKArgs<float>(problem);
-    case miopenInt8:
-        if constexpr(backend == Backend::Xdlops)
-            return CheckIsSupportCKArgs<int8_t>(problem);
-        else if constexpr(backend == Backend::Wmma)
-            break; // no Int8 support for WmmaBackend
+    case miopenInt8: return CheckIsSupportCKArgs<int8_t>(problem);
     case miopenBFloat16: return CheckIsSupportCKArgs<ck::bhalf_t>(problem);
     case miopenInt64:
     case miopenInt32:
@@ -485,65 +467,51 @@ bool PerformanceConfigHipImplicitGemm3DGroupBwd<backend>::IsValid(
     return false;
 }
 
-template <Backend backend>
-bool PerformanceConfigHipImplicitGemm3DGroupBwd<backend>::operator==(
-    const PerformanceConfigHipImplicitGemm3DGroupBwd<backend>& other) const
+bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::operator==(
+    const PerformanceConfigHipImplicitGemm3DGroupBwdXdlops& other) const
 {
     return kernel_id == other.kernel_id;
 }
 
-template <Backend backend>
-PerformanceConfigHipImplicitGemm3DGroupBwd<backend>
-ConvHipImplicitGemm3DGroupBwd<backend>::GetDefaultPerformanceConfig(
+PerformanceConfigHipImplicitGemm3DGroupBwdXdlops
+ConvHipImplicitGemm3DGroupBwdXdlops::GetDefaultPerformanceConfig(
     const ExecutionContext&, const ProblemDescription& problem) const
 {
-    PerformanceConfigHipImplicitGemm3DGroupBwd<backend> pp;
+    PerformanceConfigHipImplicitGemm3DGroupBwdXdlops pp;
     pp.HeuristicInit(problem);
     return pp;
 }
 
-template <Backend backend>
-bool ConvHipImplicitGemm3DGroupBwd<backend>::IsValidPerformanceConfig(
+bool ConvHipImplicitGemm3DGroupBwdXdlops::IsValidPerformanceConfig(
     const ExecutionContext&,
     const ProblemDescription& problem,
-    const PerformanceConfigHipImplicitGemm3DGroupBwd<backend>& config) const
+    const PerformanceConfigHipImplicitGemm3DGroupBwdXdlops& config) const
 {
     return config.IsValid(problem);
 }
 
-template <Backend backend>
 size_t
-ConvHipImplicitGemm3DGroupBwd<backend>::GetWorkspaceSize(const ExecutionContext&,
-                                                         const ProblemDescription& problem) const
+ConvHipImplicitGemm3DGroupBwdXdlops::GetWorkspaceSize(const ExecutionContext&,
+                                                      const ProblemDescription& problem) const
 {
     return GetWorkspaceSizeLayoutTransformConv(problem);
 }
 
-template <Backend backend>
-PerformanceConfigHipImplicitGemm3DGroupBwd<backend>
-ConvHipImplicitGemm3DGroupBwd<backend>::Search(const ExecutionContext& ctx,
-                                               const ProblemDescription& problem,
-                                               const AnyInvokeParams& invoke_ctx) const
+PerformanceConfigHipImplicitGemm3DGroupBwdXdlops
+ConvHipImplicitGemm3DGroupBwdXdlops::Search(const ExecutionContext& ctx,
+                                            const ProblemDescription& problem,
+                                            const AnyInvokeParams& invoke_ctx) const
 {
     return GenericSearch(*this, ctx, problem, invoke_ctx);
 }
 
-template <Backend backend>
-bool ConvHipImplicitGemm3DGroupBwd<backend>::IsApplicable(
+bool ConvHipImplicitGemm3DGroupBwdXdlops::IsApplicable(
     [[maybe_unused]] const ExecutionContext& ctx,
     [[maybe_unused]] const ProblemDescription& problem) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    if constexpr(backend == Backend::Xdlops)
-    {
-        if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS))
-            return false;
-    }
-    else if constexpr(backend == Backend::Wmma)
-    {
-        if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_WMMA))
-            return false;
-    }
+    if(env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS))
+        return false;
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
     if(problem.HasMixedDataTypes())
@@ -559,25 +527,13 @@ bool ConvHipImplicitGemm3DGroupBwd<backend>::IsApplicable(
     // needed because layout transpose kernel does not support non-packed tensors
     if(problem.IsLayoutDefault() && problem.HasNonPackedTensors())
         return false;
-    if constexpr(backend == Backend::Xdlops)
-    {
-        if(!ck_utility::is_ck_whitelist(ctx.GetStream().GetDeviceName()))
-            return false;
-    }
-    else if constexpr(backend == Backend::Wmma)
-    {
-        if(!ck_utility::is_wmma_capable(ctx.GetStream().GetDeviceName()))
-            return false;
-    }
+    if(!ck_utility::is_ck_whitelist(ctx.GetStream().GetDeviceName()))
+        return false;
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
     case miopenFloat: return CheckCKApplicability<float>(problem);
-    case miopenInt8:
-        if constexpr(backend == Backend::Xdlops)
-            return CheckCKApplicability<int8_t>(problem);
-        else if constexpr(backend == Backend::Wmma)
-            break; // no Int8 support for WmmaBackend
+    case miopenInt8: return CheckCKApplicability<int8_t>(problem);
     case miopenBFloat16: return CheckCKApplicability<ck::bhalf_t>(problem);
     case miopenInt64:
     case miopenInt32:
@@ -589,136 +545,70 @@ bool ConvHipImplicitGemm3DGroupBwd<backend>::IsApplicable(
     return false;
 }
 
-template <Backend backend>
-ConvSolution ConvHipImplicitGemm3DGroupBwd<backend>::GetSolution(
+ConvSolution ConvHipImplicitGemm3DGroupBwdXdlops::GetSolution(
     [[maybe_unused]] const ExecutionContext& ctx,
     [[maybe_unused]] const ProblemDescription& problem,
-    [[maybe_unused]] const PerformanceConfigHipImplicitGemm3DGroupBwd<backend>& config) const
+    [[maybe_unused]] const PerformanceConfigHipImplicitGemm3DGroupBwdXdlops& config) const
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    if constexpr(backend == Backend::Xdlops)
-    {
-        return MakeSolutionGroupConvImplicitGemmXdlops(
-            problem,
-            [&](auto data_type_val) {
-                using T = decltype(data_type_val);
-                switch(problem.GetAlphaBetaCase())
-                {
-                case BILINEAR:
-                    return InitInvokerFactoryBwdNCHW<3,
-                                                     false,
-                                                     DeviceOpGBwdBilinearPtrs<T>,
-                                                     CKArgs<T>,
-                                                     miopen::conv::DataInvokeParams>(
-                        ctx, problem, config.kernel_id);
-                case SCALE:
-                    return InitInvokerFactoryBwdNCHW<3,
-                                                     false,
-                                                     DeviceOpGBwdScalePtrs<T>,
-                                                     CKArgs<T>,
-                                                     miopen::conv::DataInvokeParams>(
-                        ctx, problem, config.kernel_id);
-                default:
-                    return InitInvokerFactoryBwdNCHW<3,
-                                                     false,
-                                                     DeviceOpGBwdDefaultPtrs<T>,
-                                                     CKArgs<T>,
-                                                     miopen::conv::DataInvokeParams>(
-                        ctx, problem, config.kernel_id);
-                }
-            },
-            [&](auto data_type_val) {
-                using T = decltype(data_type_val);
-                switch(problem.GetAlphaBetaCase())
-                {
-                case BILINEAR:
-                    return InitInvokerFactoryNHWC<false,
-                                                  DeviceOpGBwdBilinearPtrs<T>,
-                                                  CKArgs<T>,
-                                                  miopen::conv::DataInvokeParams>(
-                        ctx, problem, config.kernel_id);
-                case SCALE:
-                    return InitInvokerFactoryNHWC<false,
-                                                  DeviceOpGBwdScalePtrs<T>,
-                                                  CKArgs<T>,
-                                                  miopen::conv::DataInvokeParams>(
-                        ctx, problem, config.kernel_id);
-                default:
-                    return InitInvokerFactoryNHWC<false,
-                                                  DeviceOpGBwdDefaultPtrs<T>,
-                                                  CKArgs<T>,
-                                                  miopen::conv::DataInvokeParams>(
-                        ctx, problem, config.kernel_id);
-                }
-            });
-    }
-    else if constexpr(backend == Backend::Wmma)
-    {
-        return MakeSolutionGroupConvImplicitGemmWmma(
-            problem,
-            [&](auto data_type_val) {
-                using T = decltype(data_type_val);
-                switch(problem.GetAlphaBetaCase())
-                {
-                case BILINEAR:
-                    return InitInvokerFactoryBwdNCHW<3,
-                                                     false,
-                                                     DeviceOpGBwdBilinearPtrs<T>,
-                                                     CKArgs<T>,
-                                                     miopen::conv::DataInvokeParams>(
-                        ctx, problem, config.kernel_id);
-                case SCALE:
-                    return InitInvokerFactoryBwdNCHW<3,
-                                                     false,
-                                                     DeviceOpGBwdScalePtrs<T>,
-                                                     CKArgs<T>,
-                                                     miopen::conv::DataInvokeParams>(
-                        ctx, problem, config.kernel_id);
-                default:
-                    return InitInvokerFactoryBwdNCHW<3,
-                                                     false,
-                                                     DeviceOpGBwdDefaultPtrs<T>,
-                                                     CKArgs<T>,
-                                                     miopen::conv::DataInvokeParams>(
-                        ctx, problem, config.kernel_id);
-                }
-            },
-            [&](auto data_type_val) {
-                using T = decltype(data_type_val);
-                switch(problem.GetAlphaBetaCase())
-                {
-                case BILINEAR:
-                    return InitInvokerFactoryNHWC<false,
-                                                  DeviceOpGBwdBilinearPtrs<T>,
-                                                  CKArgs<T>,
-                                                  miopen::conv::DataInvokeParams>(
-                        ctx, problem, config.kernel_id);
-                case SCALE:
-                    return InitInvokerFactoryNHWC<false,
-                                                  DeviceOpGBwdScalePtrs<T>,
-                                                  CKArgs<T>,
-                                                  miopen::conv::DataInvokeParams>(
-                        ctx, problem, config.kernel_id);
-                default:
-                    return InitInvokerFactoryNHWC<false,
-                                                  DeviceOpGBwdDefaultPtrs<T>,
-                                                  CKArgs<T>,
-                                                  miopen::conv::DataInvokeParams>(
-                        ctx, problem, config.kernel_id);
-                }
-            });
-    }
+    return MakeSolutionGroupConvImplicitGemmXdlops(
+        problem,
+        [&](auto data_type_val) {
+            using T = decltype(data_type_val);
+            switch(problem.GetAlphaBetaCase())
+            {
+            case BILINEAR:
+                return InitInvokerFactoryBwdNCHW<3,
+                                                 false,
+                                                 DeviceOpGBwdBilinearPtrs<T>,
+                                                 CKArgs<T>,
+                                                 miopen::conv::DataInvokeParams>(
+                    ctx, problem, config.kernel_id);
+            case SCALE:
+                return InitInvokerFactoryBwdNCHW<3,
+                                                 false,
+                                                 DeviceOpGBwdScalePtrs<T>,
+                                                 CKArgs<T>,
+                                                 miopen::conv::DataInvokeParams>(
+                    ctx, problem, config.kernel_id);
+            default:
+                return InitInvokerFactoryBwdNCHW<3,
+                                                 false,
+                                                 DeviceOpGBwdDefaultPtrs<T>,
+                                                 CKArgs<T>,
+                                                 miopen::conv::DataInvokeParams>(
+                    ctx, problem, config.kernel_id);
+            }
+        },
+        [&](auto data_type_val) {
+            using T = decltype(data_type_val);
+            switch(problem.GetAlphaBetaCase())
+            {
+            case BILINEAR:
+                return InitInvokerFactoryNHWC<false,
+                                              DeviceOpGBwdBilinearPtrs<T>,
+                                              CKArgs<T>,
+                                              miopen::conv::DataInvokeParams>(
+                    ctx, problem, config.kernel_id);
+            case SCALE:
+                return InitInvokerFactoryNHWC<false,
+                                              DeviceOpGBwdScalePtrs<T>,
+                                              CKArgs<T>,
+                                              miopen::conv::DataInvokeParams>(
+                    ctx, problem, config.kernel_id);
+            default:
+                return InitInvokerFactoryNHWC<false,
+                                              DeviceOpGBwdDefaultPtrs<T>,
+                                              CKArgs<T>,
+                                              miopen::conv::DataInvokeParams>(
+                    ctx, problem, config.kernel_id);
+            }
+        });
 
 #else
     return {};
 #endif
 }
-
-// explicit template instantiations
-template struct PerformanceConfigHipImplicitGemm3DGroupBwd<Backend::Xdlops>;
-template struct PerformanceConfigHipImplicitGemm3DGroupBwd<Backend::Wmma>;
-template struct ConvHipImplicitGemm3DGroupBwd<Backend::Xdlops>;
-template struct ConvHipImplicitGemm3DGroupBwd<Backend::Wmma>;
 
 } // namespace conv
 } // namespace solver

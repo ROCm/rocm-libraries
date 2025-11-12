@@ -457,13 +457,13 @@ public:
         if constexpr(NDIM == 2u)
         {
             DispatchSolver<miopen::solver::conv::ConvHipImplicitGemmGroupFwdWmma,
-                           miopen::solver::conv::ConvHipImplicitGemmGroupBwdWmma,
+                           miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops, // Placeholder
                            miopen::solver::conv::ConvHipImplicitGemmGroupWrwWmma>();
         }
         else
         {
             DispatchSolver<miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdWmma,
-                           miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdWmma,
+                           miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops, // Placeholder
                            miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwWmma>();
         }
     }
