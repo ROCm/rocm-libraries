@@ -20,9 +20,9 @@ Documentation for rocSPARSE is available at
 * Improved the user documentation.
 
 ### Resolved issues
-* Fix rmake.py build script to properly handle auto and all options when selecting offload targets.
-* Fix building rocsparse with install script on centos9.
-* Fix std::fma casting in host routines to properly deduce types. This could previously cause compilation failures when building from source.
+* Fix the `rmake.py` build script to properly handle `auto` and all options when selecting offload targets.
+* Fix building rocSPARSE with the install script on centOS 9.
+* Fix `std::fma` casting in host routines to properly deduce types. This could have previously caused compilation failures when building from source.
 
 ## rocSPARSE 4.1.0 for ROCm 7.1.0
 
