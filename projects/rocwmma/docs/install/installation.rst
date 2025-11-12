@@ -158,7 +158,7 @@ To download rocWMMA on ROCm version ``x.y``, use this command:
            git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocm-libraries.git
            cd projects/rocwmma
 
-    .. tab-item:: ROCm 7.1.0 and prior
+    .. tab-item:: ROCm 7.1.1 and prior
 
         .. code-block:: shell
 
