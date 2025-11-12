@@ -543,7 +543,7 @@ namespace hipsparse
         case HIPSPARSE_FORMAT_BLOCKED_ELL:
             return CUSPARSE_FORMAT_BLOCKED_ELL;
         case HIPSPARSE_FORMAT_SLICED_ELL:
-            return CUSPARSE_FORMAT_SLICED_ELL;
+            return CUSPARSE_FORMAT_SLICED_ELLPACK; // Called CUSPARSE_FORMAT_SLICED_ELL in the cusparse docs
         default:
             throw "Non existent hipsparseFormat_t";
         }
@@ -614,7 +614,7 @@ namespace hipsparse
             return HIPSPARSE_FORMAT_COO;
         case CUSPARSE_FORMAT_BLOCKED_ELL:
             return HIPSPARSE_FORMAT_BLOCKED_ELL;
-        case CUSPARSE_FORMAT_SLICED_ELL:
+        case CUSPARSE_FORMAT_SLICED_ELLPACK: // Called CUSPARSE_FORMAT_SLICED_ELL in the cusparse docs
             return HIPSPARSE_FORMAT_SLICED_ELL;
         default:
             throw "Non existent cusparseFormat_t";
