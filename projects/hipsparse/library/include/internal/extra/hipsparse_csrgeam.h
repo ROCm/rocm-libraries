@@ -50,17 +50,21 @@ extern "C" {
 *  \note
 *  Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
 *  handle          handle to the hipsparse library context queue.
 *  @param[in]
-*  m               number of rows of the sparse CSR matrix \f$A\f$, \f$B\f$ and \f$C\f$.
+*  m               number of rows of the sparse CSR matrix \f$A\f$, \f$B\f$ and \f$C\f$. Must be non-negative.
 *  @param[in]
-*  n               number of columns of the sparse CSR matrix \f$A\f$, \f$B\f$ and \f$C\f$.
+*  n               number of columns of the sparse CSR matrix \f$A\f$, \f$B\f$ and \f$C\f$. Must be non-negative.
 *  @param[in]
 *  descrA          descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
 *  @param[in]
-*  nnzA            number of non-zero entries of the sparse CSR matrix \f$A\f$.
+*  nnzA            number of non-zero entries of the sparse CSR matrix \f$A\f$. Must be non-negative.
 *  @param[in]
 *  csrRowPtrA      array of \p m+1 elements that point to the start of every row of the
 *                  sparse CSR matrix \f$A\f$.
@@ -71,7 +75,7 @@ extern "C" {
 *  descrB          descriptor of the sparse CSR matrix \f$B\f$. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
 *  @param[in]
-*  nnzB            number of non-zero entries of the sparse CSR matrix \f$B\f$.
+*  nnzB            number of non-zero entries of the sparse CSR matrix \f$B\f$. Must be non-negative.
 *  @param[in]
 *  csrRowPtrB      array of \p m+1 elements that point to the start of every row of the
 *                  sparse CSR matrix \f$B\f$.
@@ -89,11 +93,12 @@ extern "C" {
 *                     matrix \f$C\f$. \p nnzTotalDevHostPtr can be a host or device pointer.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p nnzB, \p descrA,
-*          \p csrRowPtrA, \p csrColIndA, \p descrB, \p csrRowPtrB, \p csrColIndB, \p descrC,
-*          \p csrRowPtrC or \p nnzTotalDevHostPtr is invalid.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
-*          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p descrB or \p descrC is nullptr,
+*          \p m, \p n, \p nnzA or \p nnzB is negative, or \p csrRowPtrA, \p csrColIndA, \p csrRowPtrB, 
+*          \p csrColIndB, \p csrRowPtrC or \p nnzTotalDevHostPtr is nullptr.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
+*          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 */
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
