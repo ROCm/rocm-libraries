@@ -158,6 +158,8 @@ To download rocWMMA on ROCm version ``x.y``, use this command:
            git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocm-libraries.git
            cd projects/rocwmma
 
+        Alternatively, you can use ``sparse-checkout`` to clone only the rocWMMA project from the ``rocm-libraries`` monorepo. For more information, see `Contributing to the ROCm Libraries <https://github.com/ROCm/rocm-libraries/blob/develop/CONTRIBUTING.md#option-b-clone-the-monorepo-with-sparse-checkout>`_.
+
     .. tab-item:: ROCm 7.1.1 and prior
 
         .. code-block:: shell
