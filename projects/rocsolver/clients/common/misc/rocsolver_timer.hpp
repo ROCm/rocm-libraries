@@ -29,6 +29,7 @@
 
 #include "common_host_helpers.hpp"
 #include <hip/hip_runtime.h>
+
 #include <algorithm>
 #include <numeric>
 #include <vector>
