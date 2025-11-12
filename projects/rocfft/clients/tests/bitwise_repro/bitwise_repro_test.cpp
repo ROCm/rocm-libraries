@@ -63,15 +63,15 @@ TEST(bitwise_repro_test, compare_precisions)
     }
     catch(HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_SKIP& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_FAIL& e)
     {
-        GTEST_FAIL() << e.msg;
+        GTEST_FAIL() << e.what();
     }
     SUCCEED();
 }
@@ -108,15 +108,15 @@ TEST(bitwise_repro_test, compare_lengths)
     }
     catch(HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_SKIP& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_FAIL& e)
     {
-        GTEST_FAIL() << e.msg;
+        GTEST_FAIL() << e.what();
     }
     SUCCEED();
 }
@@ -153,15 +153,15 @@ TEST(bitwise_repro_test, compare_transform_types)
     }
     catch(HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_SKIP& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_FAIL& e)
     {
-        GTEST_FAIL() << e.msg;
+        GTEST_FAIL() << e.what();
     }
     SUCCEED();
 }
@@ -201,15 +201,15 @@ TEST_P(bitwise_repro_test, compare_to_reference)
     }
     catch(HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_SKIP& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
     catch(ROCFFT_FAIL& e)
     {
-        GTEST_FAIL() << e.msg;
+        GTEST_FAIL() << e.what();
     }
     SUCCEED();
 }
