@@ -52,14 +52,14 @@ namespace rocRoller
 
             /**
              * @brief Simplify dependencies by removing unnecessary ones.
-         *
-         * For example, if x and y are in the set of dependencies,
-         * and x is `NodeOrdering::LeftFirst` of y, then x can be
-         * removed from the dependencies.
-         *
-         * The set of dependencies is modified in-place.
-         *
-         * All dependencies must have the same body-parent.
+             *
+             * For example, if x and y are in the set of dependencies,
+             * and x is `NodeOrdering::LeftFirst` of y, then x can be
+             * removed from the dependencies.
+             *
+             * The set of dependencies is modified in-place.
+             *
+             * All dependencies must have the same body-parent.
              *
              * @param graph The kernel graph.
              * @param deps The set of dependencies to simplify.

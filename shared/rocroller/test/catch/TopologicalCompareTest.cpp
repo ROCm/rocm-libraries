@@ -52,8 +52,6 @@ namespace TopologicalCompareTest
 
         auto graph = gemm.getKernelGraph();
 
-        auto graphPtr = std::make_shared<rocRoller::KernelGraph::KernelGraph>(graph);
-
         std::string constructionMethod = GENERATE("reference", "pointer");
         DYNAMIC_SECTION("Construction from " << constructionMethod)
         {
@@ -69,11 +67,7 @@ namespace TopologicalCompareTest
 
                         auto visitor = [&](auto const& node) {
                             using T = std::decay_t<decltype(node)>;
-                            if constexpr(COperationWithBody<T>)
-                            {
-                                return false;
-                            }
-                            return true;
+                            return !COperationWithBody<T>;
                         };
 
                         return std::visit(visitor, node);
