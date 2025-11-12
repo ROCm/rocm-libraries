@@ -177,7 +177,7 @@ struct fmt::formatter<hipdnn_sdk::test_utilities::BatchnormFwdInferenceSignature
                 FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(),
-                              "BatchnormFwdInference(x={}, scale={}, mean={}, out={}, compute={})",
+                              "BatchnormFwdInference(x={}, scale={}, mean={}, y={}, compute={})",
                               key.xDataType,
                               key.scaleBiasDataType,
                               key.meanVarianceDataType,

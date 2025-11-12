@@ -181,22 +181,18 @@ public:
             nextRunningVariancePtr = nextRunningVariance.get();
         }
 
-        CpuFpReferenceBatchnorm::fwdTraining<XDataType,
-                                             ScaleBiasDataType,
-                                             MeanVarianceDataType,
-                                             OutputDataType,
-                                             ComputeDataType>(*shallowXTensor,
-                                                             *shallowScaleTensor,
-                                                             *shallowBiasTensor,
-                                                             *shallowYTensor,
-                                                             epsilon,
-                                                             momentumValue,
-                                                             meanPtr,
-                                                             invVariancePtr,
-                                                             prevRunningMeanPtr,
-                                                             prevRunningVariancePtr,
-                                                             nextRunningMeanPtr,
-                                                             nextRunningVariancePtr);
+        CpuFpReferenceBatchnorm::fwdTraining(*shallowXTensor,
+                                             *shallowScaleTensor,
+                                             *shallowBiasTensor,
+                                             *shallowYTensor,
+                                             epsilon,
+                                             momentumValue,
+                                             meanPtr,
+                                             invVariancePtr,
+                                             prevRunningMeanPtr,
+                                             prevRunningVariancePtr,
+                                             nextRunningMeanPtr,
+                                             nextRunningVariancePtr);
     }
 
 private:

@@ -74,11 +74,12 @@ protected:
 
         graph::Graph graphObj;
         graphObj.set_name("BatchnormBackwardActivationTest");
-        graphObj.set_compute_data_type(fe::DataType::FLOAT);
 
         auto dataType = getDataTypeEnumFromType<DataType>();
         auto intermediateDataType = fe::DataType::FLOAT;
-        graphObj.set_intermediate_data_type(intermediateDataType);
+        graphObj.set_intermediate_data_type(intermediateDataType)
+            .set_compute_data_type(fe::DataType::FLOAT)
+            .set_io_data_type(dataType);
 
         auto xAttr = graph::makeTensorAttributes(
             "x", dataType, dims, generateStrides(dims, layout.strideOrder));

@@ -90,19 +90,14 @@ public:
         auto shallowDbiasTensor = createShallowTensor<ScaleBiasDataType>(
             _params.dbiasTensor, variantPack.at(_params.dbiasTensor.uid));
 
-        CpuFpReferenceBatchnorm::backward<DyDataType,
-                                          XDataType,
-                                          ScaleBiasDataType,
-                                          MeanVarianceDataType,
-                                          OutputDataType,
-                                          ComputeDataType>(*shallowDyTensor,
-                                                          *shallowXTensor,
-                                                          *shallowMeanTensor,
-                                                          *shallowInvVarianceTensor,
-                                                          *shallowScaleTensor,
-                                                          *shallowDxTensor,
-                                                          *shallowDscaleTensor,
-                                                          *shallowDbiasTensor);
+        CpuFpReferenceBatchnorm::backward(*shallowDyTensor,
+                                          *shallowXTensor,
+                                          *shallowMeanTensor,
+                                          *shallowInvVarianceTensor,
+                                          *shallowScaleTensor,
+                                          *shallowDxTensor,
+                                          *shallowDscaleTensor,
+                                          *shallowDbiasTensor);
     }
 
 private:

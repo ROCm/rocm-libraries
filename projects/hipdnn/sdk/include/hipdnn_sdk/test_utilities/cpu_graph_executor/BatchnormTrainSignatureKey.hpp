@@ -175,7 +175,7 @@ struct fmt::formatter<hipdnn_sdk::test_utilities::BatchnormTrainSignatureKey>
                 FormatContext& ctx) const
     {
         return fmt::format_to(ctx.out(),
-                              "BatchnormTrain(x={}, scale={}, out={}, compute={})",
+                              "BatchnormTrain(x={}, scale={}, y={}, compute={})",
                               key.xDataType,
                               key.scaleBiasDataType,
                               key.outputDataType,
