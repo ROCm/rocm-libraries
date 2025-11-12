@@ -108,13 +108,9 @@ namespace rocRoller::Scheduling::LDSBankModel
     };
 
     /**
-     * @brief Calculate the data movement cycles for an LDS instruction
+     * @brief Calculate the data cycles for an LDS instruction
      * 
-     * This function encapsulates all the logic for determining how many clock cycles
-     * the data movement portion of an LDS instruction will take, including:
-     * - Dividing base addresses into thread groups based on architecture
-     * - Maximizing threads without conflicts within groups
-     * - Resolving bank conflicts to determine actual cycles
+     * I.e. how long does the instruction take once it is at the front of the LDS queue?
      * 
      * @param instr The LDS instruction
      * @param gfx The GPU architecture
@@ -122,11 +118,9 @@ namespace rocRoller::Scheduling::LDSBankModel
     uint getInstructionDataCycles(const RuntimeLDSInstruction& instr, GPUArchitectureGFX gfx);
 
     /**
-     * @brief Get the number of cycles to issue an instruction
+     * @brief Get the number of cycles to issue an instruction (stalls excluded)
      * 
-     * This function calculates the basic instruction issue cycles:
-     * - 4 cycles for address transfer
-     * - 4 cycles for each data dword element (writes only)
+     * I.e. how long does instruction take to enter the queue (issue) when there's sufficient space in the LDS queue?
      * 
      * @param memoryOp The memory operation (read or write)
      * @param dwords Number of dwords being accessed (1 for b32, 2 for b64, 3 for b96, 4 for b128)
@@ -135,13 +129,7 @@ namespace rocRoller::Scheduling::LDSBankModel
     uint getInstructionIssueCycles(const MemoryOpLDS& memoryOp, uint dwords);
 
     /**
-     * @brief Get the total number of cycles for an LDS instruction
-     * 
-     * This function returns the maximum of:
-     * - Instruction issue cycles (address transfer + data transfer for writes)
-     * - Data movement cycles (bank conflict resolution)
-     * 
-     * The actual instruction execution time is limited by whichever component takes longer.
+     * @brief Get the equilibrium cycles when contineously issuing the same instruction
      * 
      * @param instr The LDS instruction with memory operation details and addresses
      * @param gfx The GPU architecture
