@@ -14,7 +14,7 @@ include(cmake/DownloadProject.cmake)
 include(FetchContent)
 
 # The option of using the SQLite provided by the system, instead of downloading a copy
-option( SQLITE_USE_SYSTEM_PACKAGE "Use SQLite3 from find_package" OFF )
+option( SQLITE_USE_SYSTEM_PACKAGE "Use SQLite3 from find_package" ON )
 
 # This function checks to see if the download branch given by "branch" exists in the repository.
 # It does so using the git ls-remote command.
