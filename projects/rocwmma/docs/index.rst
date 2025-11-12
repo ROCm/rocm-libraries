@@ -16,7 +16,7 @@ The rocWMMA public repository is located at `<https://github.com/ROCm/rocm-libra
 
 .. note::
 
-   The rocWMMA repository for ROCm 7.1.0 and earlier is located at `<https://github.com/ROCm/rocWMMA>`_.
+   The rocWMMA repository for ROCm 7.1.1 and earlier is located at `<https://github.com/ROCm/rocWMMA>`_.
 
 .. grid:: 2
   :gutter: 3
