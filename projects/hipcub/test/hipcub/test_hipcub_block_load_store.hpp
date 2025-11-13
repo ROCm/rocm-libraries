@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <rocprim/iterator/discard_iterator.hpp>
+
 test_suite_type_def(suite_name, name_suffix)
 
 typed_test_suite_def(HipcubBlockLoadStoreTests, name_suffix, load_store_params);
@@ -371,24 +373,19 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreDiscardIterator)
                             input.size() * sizeof(typename decltype(input)::value_type),
                             hipMemcpyHostToDevice));
 
-        // Test with discard output iterator
-        // using OffsetT = typename std::iterator_traits<Type>::difference_type;
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-        // TODO: Here in block load an store, it's not possible to use rocprim::discard_iterator
-        hipcub::DiscardOutputIterator<size_t> discard_itr;
+        // Running kernel for discard case
+        Type* dummy;
+        HIP_CHECK(hipMalloc(&dummy, guarded_elements * sizeof(Type)));
 
-        // Running kernel
-        load_store_guarded_kernel<Type *,
-                                  hipcub::DiscardOutputIterator<size_t>,
+        load_store_guarded_kernel<Type*,
+                                  Type*,
                                   load_method,
                                   store_method,
                                   block_size,
                                   items_per_thread>
-            <<<dim3(grid_size), dim3(block_size)>>>(device_input,
-                                                    discard_itr,
-                                                    discard_itr,
-                                                    guarded_elements);
-        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+            <<<dim3(grid_size), dim3(block_size)>>>(device_input, dummy, dummy, guarded_elements);
+        HIP_CHECK(hipFree(dummy));
+
         // Running kernel
         load_store_guarded_kernel<Type *,
                                   Type *,

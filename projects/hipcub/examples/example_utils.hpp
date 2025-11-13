@@ -34,9 +34,8 @@
 #include <sstream>
 #include <iostream>
 
-#include <hipcub/util_type.hpp>
 #include <hipcub/util_allocator.hpp>
-#include <hipcub/iterator/discard_output_iterator.hpp>
+#include <hipcub/util_type.hpp>
 
 #include _HIPCUB_STD_INCLUDE(functional)
 

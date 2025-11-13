@@ -31,12 +31,12 @@
 
 #include "../../../config.hpp"
 
-#include "../iterator/counting_input_iterator.hpp"
-#include "../iterator/discard_output_iterator.hpp"
 #include "../thread/thread_operators.hpp"
 #include "../util_mdspan.hpp"
 
 #include <rocprim/device/device_transform.hpp> // IWYU pragma: export
+#include <rocprim/iterator/counting_iterator.hpp> // IWYU pragma: export
+#include <rocprim/iterator/discard_iterator.hpp> // IWYU pragma: export
 
 #include <type_traits>
 
@@ -122,10 +122,10 @@ struct DeviceFor
                             hipError_t>
     {
         using T              = typename std::iterator_traits<RandomAccessIteratorT>::value_type;
-        using OutputIterator = typename rocprim::discard_iterator;
+
         detail::bulk::OpWrapper<T, OpT> wrapper_op = {op};
 
-        OutputIterator output;
+        auto output = rocprim::make_discard_iterator();
 
         return rocprim::transform(first,
                                   output,
@@ -265,11 +265,12 @@ HIPCUB_RUNTIME_FUNCTION
     {
         static_assert(std::is_integral<ShapeT>::value, "ShapeT must be an integral type");
         using InputIterator  = typename rocprim::counting_iterator<ShapeT>;
-        using OutputIterator = typename rocprim::discard_iterator;
+
         detail::bulk::OpWrapper<ShapeT, OpT> wrapper_op = {op};
 
         InputIterator  input(ShapeT(0));
-        OutputIterator output;
+
+        auto output = rocprim::make_discard_iterator();
 
         return rocprim::transform(input,
                                   output,
@@ -350,14 +351,13 @@ HIPCUB_RUNTIME_FUNCTION
 
         // rocprim::counting_iterator only holds the index, not the data.
         using InputIterator = typename rocprim::counting_iterator<IndexType>;
-        // We don't actually need the output, so we use rocprim::discard_iterator here as a placeholder.
-        using OutputIterator = typename rocprim::discard_iterator;
 
         // How many times rocprim::transform will iterate.
         constexpr auto ext_size = ::hipcub::extents_size<ext_type>::value;
 
         InputIterator  input(IndexType(0)); // Initialize the input iterator, starting from 0.
-        OutputIterator output;
+
+        auto output = rocprim::make_discard_iterator();
 
         // `ForEachInExtents` only iterates over the extents on device and does not guarantee ordering.
         // We only need to invoke `$op` `$ext_size` times. Therefore, `rocprim::transform` is suitable.

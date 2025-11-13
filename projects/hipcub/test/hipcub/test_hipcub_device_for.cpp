@@ -24,7 +24,6 @@
 
 // required hipcub headers
 #include <hipcub/device/device_for.hpp>
-#include <hipcub/iterator/counting_input_iterator.hpp>
 
 #include <cstddef>
 #include <cstdint>
