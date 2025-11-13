@@ -139,9 +139,9 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
             gpu target_gpu;
             ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
 
-            const target get_target(target_arch, target_gpu);
+            const target current_target(target_arch, target_gpu);
 
-            const auto params = get_config<Selector>(non_trivial_config{}, get_target);
+            const auto params = get_config<Selector>(non_trivial_config{}, current_target);
 
             using scan_state_type
                 = ::rocprim::detail::lookback_scan_state<offset_count_pair_type, use_sleepy_scan>;
@@ -228,7 +228,7 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
             };
 
             ROCPRIM_RETURN_ON_ERROR(
-                execute_launch_plan<non_trivial_config, Selector>(get_target,
+                execute_launch_plan<non_trivial_config, Selector>(current_target,
                                                                   non_trivial_kernel,
                                                                   dim3(grid_size),
                                                                   dim3(block_size),

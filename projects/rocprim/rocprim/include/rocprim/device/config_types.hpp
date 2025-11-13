@@ -256,6 +256,8 @@ constexpr std::tuple<std::string_view, gpu> target_gpu_names[] = {
     std::make_tuple<std::string_view, gpu>("RX 6900", gpu::rx6900),
 };
 
+// TODO: Remove comp_target when adopting C++20 and dropping C++17 support.
+// comp_target exists, because target can not be passed as a template variable before C++20.
 template<gen g_, target_arch i_ = target_arch::unknown, gpu s_ = gpu::generic, rep r_ = rep::amdgcn>
 struct comp_target
 {
@@ -264,6 +266,9 @@ struct comp_target
     static constexpr gpu         s = s_;
     static constexpr rep         r = r_;
 };
+
+// Macro to have a singular place for conversion, limited by C++17.
+#define TARGET_TO_COMP_TARGET(CT) comp_target<(CT).g, (CT).i, (CT).s, (CT).r>
 
 struct target
 {
@@ -426,41 +431,6 @@ struct default_config_selector
 {
     static constexpr unsigned int block_size
         = Config::template architecture_config<Arch>::params.kernel_config.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct histogram_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.histogram_config.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct histogram_global_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.histogram_global_config.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct merge_oddeven_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.merge_oddeven_config.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct merge_mergepath_partition_config_selector
-{
-    static constexpr unsigned int block_size = Config::template architecture_config<Arch>::params
-                                                   .merge_mergepath_partition_config.block_size;
-};
-
-template<typename Config, target_arch Arch>
-struct merge_mergepath_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.merge_mergepath_config.block_size;
 };
 
 template<class Config, target_arch Arch>

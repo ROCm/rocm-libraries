@@ -141,9 +141,9 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
             gpu target_gpu;
             ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
 
-            const target get_target(target_arch, target_gpu);
+            const target current_target(target_arch, target_gpu);
 
-            const auto params = get_config<Selector>(Config{}, get_target);
+            const auto params = get_config<Selector>(Config{}, current_target);
 
             using scan_state_type
                 = reduce_by_key::lookback_scan_state_t<accumulator_type, use_sleepy_scan>;
@@ -275,7 +275,7 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                         ordered_bid);
                 };
                 ROCPRIM_RETURN_ON_ERROR(
-                    execute_launch_plan<Config, Selector>(get_target,
+                    execute_launch_plan<Config, Selector>(current_target,
                                                           kernel,
                                                           dim3(number_of_blocks_launch),
                                                           dim3(block_size),

@@ -79,9 +79,9 @@ hipError_t search_n_impl(void*          temporary_storage,
     gpu target_gpu;
     ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
 
-    const target get_target(target_arch, target_gpu);
+    const target current_target(target_arch, target_gpu);
 
-    const auto         params           = get_config<Selector>(Config{}, get_target);
+    const auto         params           = get_config<Selector>(Config{}, current_target);
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
     const unsigned int items_per_block  = block_size * items_per_thread;
@@ -169,7 +169,7 @@ hipError_t search_n_impl(void*          temporary_storage,
                 }
             }
         };
-        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(get_target,
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
                                                                       search_n_normal_kernel,
                                                                       num_blocks,
                                                                       block_size,
@@ -249,7 +249,7 @@ hipError_t search_n_impl(void*          temporary_storage,
             }
         }
     };
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(get_target,
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
                                                                   search_n_find_heads_kernel,
                                                                   num_blocks_for_find_heads,
                                                                   block_size,
@@ -299,7 +299,7 @@ hipError_t search_n_impl(void*          temporary_storage,
             filtered_heads[atomic_add(tmp_output, 1)] = this_head;
         }
     };
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(get_target,
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
                                                                   search_n_heads_filter_kernel,
                                                                   num_blocks_for_heads_filter,
                                                                   block_size,
@@ -392,7 +392,7 @@ hipError_t search_n_impl(void*          temporary_storage,
             }
         }
     };
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(get_target,
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
                                                                   search_n_discard_heads_kernel,
                                                                   num_blocks_for_discard_heads,
                                                                   block_size,

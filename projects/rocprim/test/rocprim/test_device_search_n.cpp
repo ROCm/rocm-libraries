@@ -913,9 +913,9 @@ TYPED_TEST(RocprimDeviceSearchNTests, NoiseTest_1block)
             rocprim::detail::gpu target_gpu;
             HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
 
-            const rocprim::detail::target get_target(target_arch, target_gpu);
+            const rocprim::detail::target current_target(target_arch, target_gpu);
 
-            const auto         params = rocprim::detail::get_config<Selector>(config{}, get_target);
+            const auto params = rocprim::detail::get_config<Selector>(config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;
@@ -1039,9 +1039,9 @@ TYPED_TEST(RocprimDeviceSearchNTests, NoiseTest_2block)
             rocprim::detail::gpu target_gpu;
             HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
 
-            const rocprim::detail::target get_target(target_arch, target_gpu);
+            const rocprim::detail::target current_target(target_arch, target_gpu);
 
-            const auto         params = rocprim::detail::get_config<Selector>(config{}, get_target);
+            const auto params = rocprim::detail::get_config<Selector>(config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;
@@ -1165,9 +1165,9 @@ TYPED_TEST(RocprimDeviceSearchNTests, NoiseTest_3block)
             rocprim::detail::gpu target_gpu;
             HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
 
-            const rocprim::detail::target get_target(target_arch, target_gpu);
+            const rocprim::detail::target current_target(target_arch, target_gpu);
 
-            const auto         params = rocprim::detail::get_config<Selector>(config{}, get_target);
+            const auto params = rocprim::detail::get_config<Selector>(config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;
@@ -1291,9 +1291,9 @@ TYPED_TEST(RocprimDeviceSearchNTests, MultiResult1)
             rocprim::detail::gpu target_gpu;
             HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
 
-            const rocprim::detail::target get_target(target_arch, target_gpu);
+            const rocprim::detail::target current_target(target_arch, target_gpu);
 
-            const auto         params = rocprim::detail::get_config<Selector>(config{}, get_target);
+            const auto params = rocprim::detail::get_config<Selector>(config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;
@@ -1418,9 +1418,9 @@ TYPED_TEST(RocprimDeviceSearchNTests, MultiResult2)
             rocprim::detail::gpu target_gpu;
             HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
 
-            const rocprim::detail::target get_target(target_arch, target_gpu);
+            const rocprim::detail::target current_target(target_arch, target_gpu);
 
-            const auto         params = rocprim::detail::get_config<Selector>(config{}, get_target);
+            const auto params = rocprim::detail::get_config<Selector>(config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;

@@ -60,9 +60,9 @@ inline hipError_t radix_sort_block_sort(KeysInputIterator    keys_input,
     gpu target_gpu;
     ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
 
-    const target get_target(target_arch, target_gpu);
+    const target current_target(target_arch, target_gpu);
 
-    const auto params = get_config<Selector>(Config{}, get_target);
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     sort_items_per_block                     = params.block_size * params.items_per_thread;
     const unsigned int sort_number_of_blocks = ceiling_div(size, sort_items_per_block);
@@ -102,7 +102,7 @@ inline hipError_t radix_sort_block_sort(KeysInputIterator    keys_input,
 
     ROCPRIM_RETURN_ON_ERROR(
         execute_launch_plan<Config, Selector, radix_sort_block_sort_config_static_selector>(
-            get_target,
+            current_target,
             radix_sort_block_sort_kernel,
             dim3(sort_number_of_blocks),
             dim3(params.block_size),

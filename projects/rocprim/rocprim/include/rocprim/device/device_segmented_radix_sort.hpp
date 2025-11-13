@@ -162,9 +162,9 @@ inline hipError_t segmented_radix_sort_impl(
     gpu target_gpu;
     ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
 
-    const target get_target(target_arch, target_gpu);
+    const target current_target(target_arch, target_gpu);
 
-    const auto params = get_config<Selector>(Config{}, get_target);
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     static constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
     const bool            partitioning_allowed     = params.warp_sort_config.partitioning_allowed;
@@ -357,7 +357,7 @@ inline hipError_t segmented_radix_sort_impl(
             };
 
             ROCPRIM_RETURN_ON_ERROR(
-                execute_launch_plan<Config, Selector>(get_target,
+                execute_launch_plan<Config, Selector>(current_target,
                                                       segmented_sort_large_kernel,
                                                       dim3(large_segment_count),
                                                       dim3(params.kernel_config.block_size),
@@ -398,7 +398,7 @@ inline hipError_t segmented_radix_sort_impl(
                 execute_launch_plan<Config,
                                     Selector,
                                     segmented_radix_sort_warp_sort_medium_config_static_selector>(
-                    get_target,
+                    current_target,
                     segmented_sort_medium_kernel,
                     dim3(medium_segment_grid_size),
                     dim3(params.warp_sort_config.block_size_medium),
@@ -439,7 +439,7 @@ inline hipError_t segmented_radix_sort_impl(
                 execute_launch_plan<Config,
                                     Selector,
                                     segmented_radix_sort_warp_sort_small_config_static_selector>(
-                    get_target,
+                    current_target,
                     segmented_sort_small_kernel,
                     dim3(small_segment_grid_size),
                     dim3(params.warp_sort_config.block_size_small),
@@ -474,7 +474,7 @@ inline hipError_t segmented_radix_sort_impl(
         };
 
         ROCPRIM_RETURN_ON_ERROR(
-            execute_launch_plan<Config, Selector>(get_target,
+            execute_launch_plan<Config, Selector>(current_target,
                                                   segmented_sort_kernel,
                                                   dim3(segments),
                                                   dim3(params.kernel_config.block_size),

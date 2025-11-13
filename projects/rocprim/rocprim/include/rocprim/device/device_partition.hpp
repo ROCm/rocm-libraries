@@ -165,8 +165,8 @@ inline hipError_t partition_impl(void*                       temporary_storage,
             detail::gpu target_gpu;
             ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
 
-            const target       get_target(target_arch, target_gpu);
-            const auto         params           = get_config<selector>(Config{}, get_target);
+            const target       current_target(target_arch, target_gpu);
+            const auto         params           = get_config<selector>(Config{}, current_target);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const auto         items_per_block  = block_size * items_per_thread;
@@ -212,7 +212,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                                                      value_type,
                                                      flag_type,
                                                      scan_state_type,
-                                                     block_id_type>(get_target);
+                                                     block_id_type>(current_target);
             virtual_shared_memory_size *= number_of_blocks;
 
             // temporary storage partition
@@ -338,7 +338,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                                                         predicates...);
                 };
                 ROCPRIM_RETURN_ON_ERROR(
-                    execute_launch_plan<Config, selector>(get_target,
+                    execute_launch_plan<Config, selector>(current_target,
                                                           partition_kernel,
                                                           dim3(current_number_of_blocks),
                                                           dim3(block_size),

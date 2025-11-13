@@ -106,9 +106,9 @@ inline auto scan_impl(void*               temporary_storage,
     rocprim::detail::gpu target_gpu;
     ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
 
-    const target get_target(target_arch, target_gpu);
+    const target current_target(target_arch, target_gpu);
 
-    const auto params = get_config<Selector>(Config{}, get_target);
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -135,7 +135,7 @@ inline auto scan_impl(void*               temporary_storage,
             output,
             scan_op);
     };
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(get_target,
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
                                                                   single_scan_kernel,
                                                                   dim3(1),
                                                                   dim3(block_size),

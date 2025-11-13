@@ -96,20 +96,20 @@ constexpr unsigned int merge_sort_block_size(const unsigned int item_scale)
 
 // Calculate kernel configurations, such that it will not exceed shared memory maximum
 template<class Key, class Value>
-struct merge_sort_block_sort_config_base
+constexpr merge_sort_block_sort_config_params merge_sort_block_sort_config_params_base()
 {
-    static constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
-    static constexpr bool         use_fallback = merge_sort_block_size(item_scale) * 2
-                                             * merge_sort_items_per_thread(item_scale) * item_scale
-                                         <= max_smem_per_block;
+    constexpr unsigned int item_scale   = ::rocprim::max(sizeof(Key), sizeof(Value));
+    constexpr bool         use_fallback = merge_sort_block_size(item_scale) * 2
+                                      * merge_sort_items_per_thread(item_scale) * item_scale
+                                  <= max_smem_per_block;
     // multiply by 2 to ensure block_sort's items_per_block >= block_merge's items_per_block
-    static constexpr unsigned int block_size
-        = use_fallback ? merge_sort_block_size(item_scale) * 2 : 256;
-    static constexpr unsigned int items_per_thread
+    constexpr unsigned int block_size = use_fallback ? merge_sort_block_size(item_scale) * 2 : 256;
+    constexpr unsigned int items_per_thread
         = use_fallback ? merge_sort_items_per_thread(item_scale) : 1;
-    using type                                     = merge_sort_block_sort_config<block_size,
-                                              items_per_thread,
-                                              block_sort_algorithm::stable_merge_sort>;
+
+    return merge_sort_block_sort_config_params{
+        {block_size, items_per_thread}
+    };
 };
 
 // Calculate kernel configurations, such that it will not exceed shared memory maximum
@@ -160,23 +160,21 @@ struct merge_sort_block_merge_config : rocprim::detail::merge_sort_block_merge_c
 };
 
 template<class Key, class Value>
-struct merge_sort_block_merge_config_base
+constexpr merge_sort_block_merge_config_params merge_sort_block_merge_config_params_base()
 {
-    static constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
-    static constexpr bool         use_fallback = merge_sort_block_size(item_scale) * 2
-                                             * merge_sort_items_per_thread(item_scale) * item_scale
-                                         <= max_smem_per_block;
-    static constexpr unsigned int block_size
-        = use_fallback ? merge_sort_block_size(item_scale) : 128;
-    static constexpr unsigned int items_per_thread
+    constexpr unsigned int item_scale   = ::rocprim::max(sizeof(Key), sizeof(Value));
+    constexpr bool         use_fallback = merge_sort_block_size(item_scale) * 2
+                                      * merge_sort_items_per_thread(item_scale) * item_scale
+                                  <= max_smem_per_block;
+    constexpr unsigned int block_size = use_fallback ? merge_sort_block_size(item_scale) : 128;
+    constexpr unsigned int items_per_thread
         = use_fallback ? merge_sort_items_per_thread(item_scale) : 1;
-    using type                                     = merge_sort_block_merge_config<block_size,
-                                               1,
-                                               (1 << 17) + 70000,
-                                               128,
-                                               block_size,
-                                               items_per_thread>;
-};
+    return merge_sort_block_merge_config_params{
+        {block_size, 1, (1 << 17) + 70000},
+        {128, 1},
+        {block_size, items_per_thread}
+    };
+}
 
 /// \brief Default values are provided by \p radix_sort_onesweep_config_base.
 struct radix_sort_onesweep_config_params
@@ -819,7 +817,7 @@ struct histogram_config_params
     unsigned int shared_impl_max_bins   = 0;
     unsigned int shared_impl_histograms = 0;
 
-    kernel_config_params histogram_global_config = {0, 0};
+    kernel_config_params histogram_global_config = histogram_config;
 };
 
 } // namespace detail
@@ -864,13 +862,14 @@ namespace detail
 {
 
 template<class Sample, unsigned int Channels, unsigned int ActiveChannels>
-struct default_histogram_config_base
+constexpr histogram_config_params histogram_config_params_base()
 {
-    static constexpr unsigned int item_scale
-        = ::rocprim::detail::ceiling_div(sizeof(Sample), sizeof(int));
+    constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div(sizeof(Sample), sizeof(int));
 
-    using type
-        = histogram_config<kernel_config<256, ::rocprim::max(8u / Channels / item_scale, 1u)>>;
+    constexpr kernel_config_params kernel_params
+        = {256, ::rocprim::max(8u / Channels / item_scale, 1u)};
+
+    return histogram_config_params{kernel_params, 1024, 2048, 3, kernel_params};
 };
 
 struct adjacent_difference_config_tag
@@ -1549,30 +1548,45 @@ namespace detail
 {
 
 template<class Key, class Value>
-struct default_merge_config_base
+constexpr merge_config_params merge_config_params_base()
 {
-    static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
-        ::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
+    if constexpr(std::is_same_v<Value, empty_type>)
+    {
+        constexpr unsigned int item_scale
+            = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
 
-    using type = merge_config<fallback_block_size<256u,
-                                                  rocprim::max(sizeof(Key), sizeof(Value)),
-                                                  ROCPRIM_WARP_SIZE_64>::value,
-                              ::rocprim::max(1u, 10u / item_scale)>;
-};
+        if constexpr(sizeof(Key) <= 2)
+            return merge_config_params{
+                {256, 11}
+            };
+        else if constexpr(sizeof(Key) <= 4)
+            return merge_config_params{
+                {256, 10}
+            };
+        else if constexpr(sizeof(Key) <= 8)
+            return merge_config_params{
+                {256, 7}
+            };
+        else
+            return merge_config_params{
+                {fallback_block_size<256u, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value,
+                 ::rocprim::max(1u, 10u / item_scale)}
+            };
+    }
+    else
+    {
+        constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
+            ::rocprim::max(sizeof(Key), sizeof(Value)),
+            sizeof(int));
 
-template<class Key>
-struct default_merge_config_base<Key, empty_type>
-{
-    static constexpr unsigned int item_scale
-        = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
-
-    using type = select_type<
-        select_type_case<sizeof(Key) <= 2, merge_config<256, 11>>,
-        select_type_case<sizeof(Key) <= 4, merge_config<256, 10>>,
-        select_type_case<sizeof(Key) <= 8, merge_config<256, 7>>,
-        merge_config<fallback_block_size<256u, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value,
-                     ::rocprim::max(1u, 10u / item_scale)>>;
-};
+        return merge_config_params{
+            {fallback_block_size<256u,
+             ::rocprim::max(sizeof(Key), sizeof(Value)),
+             ROCPRIM_WARP_SIZE_64>::value,
+             ::rocprim::max(1u, 10u / item_scale)}
+        };
+    }
+}
 
 } // namespace detail
 

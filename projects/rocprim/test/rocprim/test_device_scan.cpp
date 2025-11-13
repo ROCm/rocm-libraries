@@ -316,9 +316,9 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
     rocprim::detail::gpu target_gpu;
     HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
 
-    const rocprim::detail::target get_target(target_arch, target_gpu);
+    const rocprim::detail::target current_target(target_arch, target_gpu);
 
-    const auto params = rocprim::detail::get_config<Selector>(Config{}, get_target);
+    const auto params = rocprim::detail::get_config<Selector>(Config{}, current_target);
 
     // For non-associative operations in inclusive scan
     // intermediate results use the type of input iterator, then
@@ -503,7 +503,7 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScan)
                                                ordered_bid);
                     };
                     return rocprim::detail::execute_launch_plan<Config, Selector>(
-                        get_target,
+                        current_target,
                         lookback_scan_kernel,
                         dim3(grid_size),
                         dim3(block_size),
@@ -570,9 +570,9 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScanGetCompleteValue)
     rocprim::detail::gpu target_gpu;
     HIP_CHECK(rocprim::detail::host_target_gpu(stream, target_gpu));
 
-    const rocprim::detail::target get_target(target_arch, target_gpu);
+    const rocprim::detail::target current_target(target_arch, target_gpu);
 
-    const auto params = rocprim::detail::get_config<Selector>(Config{}, get_target);
+    const auto params = rocprim::detail::get_config<Selector>(Config{}, current_target);
 
     // For non-associative operations in inclusive scan
     // intermediate results use the type of input iterator, then
@@ -746,7 +746,7 @@ TYPED_TEST(RocprimDeviceScanTests, LookBackScanGetCompleteValue)
                                            false,
                                            ordered_bid);
                 };
-                return rocprim::detail::execute_launch_plan<Config, Selector>(get_target,
+                return rocprim::detail::execute_launch_plan<Config, Selector>(current_target,
                                                                               lookback_scan_kernel,
                                                                               dim3(grid_size),
                                                                               dim3(block_size),

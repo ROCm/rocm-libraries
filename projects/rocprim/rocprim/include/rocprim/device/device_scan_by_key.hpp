@@ -178,8 +178,8 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
             detail::gpu target_gpu;
             ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
 
-            const target get_target(target_arch, target_gpu);
-            const auto   params = get_config<Selector>(Config{}, get_target);
+            const target current_target(target_arch, target_gpu);
+            const auto   params = get_config<Selector>(Config{}, current_target);
 
             using wrapped_type     = ::rocprim::tuple<AccType, bool>;
             using scan_state_type  = detail::lookback_scan_state<wrapped_type, use_sleepy_scan>;
@@ -340,7 +340,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
                         ordered_bid);
                 };
                 ROCPRIM_RETURN_ON_ERROR(
-                    execute_launch_plan<Config, Selector>(get_target,
+                    execute_launch_plan<Config, Selector>(current_target,
                                                           device_scan_by_key_kernel,
                                                           dim3(scan_blocks),
                                                           dim3(block_size),

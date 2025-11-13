@@ -107,9 +107,9 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
     gpu target_gpu;
     ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
 
-    const target get_target(target_arch, target_gpu);
+    const target current_target(target_arch, target_gpu);
 
-    const radix_sort_onesweep_config_params params = get_config<Selector>(Config{}, get_target);
+    const radix_sort_onesweep_config_params params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int items_per_block
         = params.histogram.block_size * params.histogram.items_per_thread;
@@ -153,7 +153,7 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
 
     ROCPRIM_RETURN_ON_ERROR(
         execute_launch_plan<Config, Selector, radix_sort_onesweep_histogram_config_static_selector>(
-            get_target,
+            current_target,
             onesweep_histograms_kernel,
             dim3(blocks),
             dim3(params.histogram.block_size),
@@ -176,7 +176,7 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
 
     ROCPRIM_RETURN_ON_ERROR(
         execute_launch_plan<Config, Selector, radix_sort_onesweep_histogram_config_static_selector>(
-            get_target,
+            current_target,
             onesweep_scan_histograms_kernel,
             dim3(digit_places), // One block for every digit place.
             dim3(params.histogram.block_size),
@@ -227,9 +227,9 @@ hipError_t radix_sort_onesweep_iteration(
     gpu target_gpu;
     ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
 
-    const target get_target(target_arch, target_gpu);
+    const target current_target(target_arch, target_gpu);
 
-    const radix_sort_onesweep_config_params params = get_config<Selector>(Config{}, get_target);
+    const radix_sort_onesweep_config_params params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int items_per_block = params.sort.block_size * params.sort.items_per_thread;
     const unsigned int current_radix_bits
@@ -312,7 +312,7 @@ hipError_t radix_sort_onesweep_iteration(
             return execute_launch_plan<Config,
                                        Selector,
                                        radix_sort_onesweep_sort_config_static_selector>(
-                get_target,
+                current_target,
                 onesweep_iteration_kernel,
                 dim3(blocks),
                 dim3(params.sort.block_size),
@@ -403,10 +403,10 @@ hipError_t radix_sort_onesweep_impl(
             gpu target_gpu;
             ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
 
-            const target get_target(target_arch, target_gpu);
+            const target current_target(target_arch, target_gpu);
 
             const radix_sort_onesweep_config_params params
-                = get_config<Selector>(Config{}, get_target);
+                = get_config<Selector>(Config{}, current_target);
 
             const unsigned int sort_items_per_block
                 = params.sort.block_size * params.sort.items_per_thread;
