@@ -723,7 +723,7 @@ __host__ void gemm_act_cpu(uint32_t      m,
 #pragma omp parallel for
     for(int i = 0; i < m; ++i)
     {
-#pragma omp parallel for
+#pragma omp for
         for(int j = 0; j < n; ++j)
         {
             ComputeT    accum     = static_cast<ComputeT>(0);
