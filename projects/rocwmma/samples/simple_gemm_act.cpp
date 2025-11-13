@@ -848,7 +848,7 @@ ROCWMMA_HOST void gemm_test(uint32_t m, uint32_t n, uint32_t k)
     auto gridDim  = dim3(rocwmma::ceil_div(m, get<0>(macroTileSize)));
 
     std::cout << "Launching GEMM kernel..." << std::endl;
-    std::cout << "gridDim (" << gridDim.x << " " << gridDim.y << ")" << " blockdim (" << blockDim.x
+    std::cout << "gridDim (" << gridDim.x << " " << gridDim.y << ")" << " blockDim (" << blockDim.x
               << " " << blockDim.y << ")" << std::endl;
 
     // Uses 2 lds blocks for prefetch loop (A and B)
