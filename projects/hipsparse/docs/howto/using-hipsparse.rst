@@ -417,6 +417,33 @@ where
     \text{ell_col_ind}[9] & = \{0, 1, 0, 1, 2, 3, 3, -1, 4\}
   \end{array}
 
+.. _HYB storage format:
+
+HYB storage format
+------------------
+
+The Hybrid (HYB) storage format represents an :math:`m \times n` matrix by:
+
+=========== =========================================================================================
+m           Number of rows (integer).
+n           Number of columns (integer).
+nnz         Number of non-zero elements of the COO part (integer).
+ell_width   Maximum number of non-zero elements per row of the ELL part (integer).
+ell_val     Array of ``m * ell_width`` elements containing the data for the ELL part (floating point).
+ell_col_ind Array of ``m * ell_width`` elements containing the column indices for the ELL part (integer).
+coo_val     Array of ``nnz`` elements containing the data for the COO part (floating point).
+coo_row_ind Array of ``nnz`` elements containing the row indices for the COO part (integer).
+coo_col_ind Array of ``nnz`` elements containing the column indices for the COO part (integer).
+=========== =========================================================================================
+
+The HYB format is a combination of the ELL and COO sparse matrix formats.
+Typically, the regular part of the matrix is stored in
+ELL storage format, and the irregular part of the matrix is stored
+in COO storage format. Three different partitioning schemes can
+be applied when converting a CSR matrix to a matrix in
+HYB storage format. For further details on the partitioning schemes,
+see :ref:`rocsparse_hyb_partition_`.
+
 .. _index_base:
 
 Storage schemes and indexing base
