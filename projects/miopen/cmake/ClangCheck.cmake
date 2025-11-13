@@ -6,7 +6,7 @@ set(CLANG_FORMAT_REGEX ".*\\.\\(cpp\\|hpp\\|h.in\\|hpp.in\\|cpp.in\\|cl\\)")
 
 # Note: The clang-format in /opt/rocm produces different results than the one in /usr/bin.
 # MIOpen formatting is based on the one in /usr/bin so we use that one
-set(CLANG_FORMAT_BINARY /usr/bin/clang-format)
+set(CLANG_FORMAT_BINARY /usr/bin/clang-format-12)
 
 add_custom_target(
     check_format
