@@ -182,19 +182,19 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
 
     auto bnormAttributes = hipdnn_sdk::data_objects::CreateBatchnormAttributes(
         builder,
-        1,                                 // x_tensor_uid
-        3,                                 // scale_tensor_uid
-        4,                                 // bias_tensor_uid
-        5,                                 // epsilon_tensor_uid
-        0,                                 // peer_stats_tensor_uid (no peer statistics)
+        1, // x_tensor_uid
+        3, // scale_tensor_uid
+        4, // bias_tensor_uid
+        5, // epsilon_tensor_uid
+        0, // peer_stats_tensor_uid (no peer statistics)
         flatbuffers::Optional<int64_t>(8), // prev_running_mean_tensor_uid
         flatbuffers::Optional<int64_t>(9), // prev_running_variance_tensor_uid
         flatbuffers::Optional<int64_t>(12), // momentum_tensor_uid
-        2,                                  // y_tensor_uid
-        flatbuffers::nullopt,               // mean_tensor_uid
-        flatbuffers::nullopt,               // inv_variance_tensor_uid
+        2, // y_tensor_uid
+        flatbuffers::nullopt, // mean_tensor_uid
+        flatbuffers::nullopt, // inv_variance_tensor_uid
         flatbuffers::Optional<int64_t>(10), // next_running_mean_tensor_uid
-        flatbuffers::Optional<int64_t>(11)  // next_running_variance_tensor_uid
+        flatbuffers::Optional<int64_t>(11) // next_running_variance_tensor_uid
     );
 
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
