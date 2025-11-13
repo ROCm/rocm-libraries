@@ -185,7 +185,8 @@ BenchmarkProblems:
           - Range: [[160], [256], [1], [1,1,64]]
           - Range: [[160], [256], [1], [32, 64, 256]]
           - Range: [[5120], [8192], [1], [64, 64, 256]]
-        - BiasTypeArgs: ['b']    - # BenchmarkProblemSizeGroup - Standard - All problem
+        - BiasTypeArgs: ['b']    
+    - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
