@@ -208,19 +208,6 @@ END_HIPCUB_NAMESPACE
     #define HipcubLog(msg) ::hipcub::Log(msg, __FILE__, __LINE__)
 #endif
 
-#if __cpp_if_constexpr
-    #define HIPCUB_IF_CONSTEXPR constexpr
-#else
-    #if defined(_MSC_VER) && !defined(__clang__)
-        // MSVC (and not Clang pretending to be MSVC) unconditionally exposes if constexpr,
-        // moreover it triggers warning C4127 (conditional expression is constant) when not using it. nvcc will
-        // be calling cl.exe for host-side codegen.
-        #define HIPCUB_IF_CONSTEXPR constexpr
-    #else
-        #define HIPCUB_IF_CONSTEXPR
-    #endif
-#endif
-
 #ifdef DOXYGEN_SHOULD_SKIP_THIS // Documentation only
 
     /// \def HIPCUB_DEBUG_SYNC

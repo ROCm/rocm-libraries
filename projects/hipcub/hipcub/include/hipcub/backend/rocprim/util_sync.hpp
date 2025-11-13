@@ -41,7 +41,7 @@
         {                                                                                        \
             return _error;                                                                       \
         }                                                                                        \
-        if HIPCUB_IF_CONSTEXPR(HIPCUB_DETAIL_DEBUG_SYNC_VALUE)                                   \
+        if constexpr(HIPCUB_DETAIL_DEBUG_SYNC_VALUE)                                             \
         {                                                                                        \
             std::cout << name << "(" << size << ")";                                             \
             auto __error = hipStreamSynchronize(stream);                                         \

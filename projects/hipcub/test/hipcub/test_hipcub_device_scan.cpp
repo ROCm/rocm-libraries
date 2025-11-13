@@ -188,7 +188,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
             T* d_input;
             U* d_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
-            if HIPCUB_IF_CONSTEXPR(!inplace)
+            if constexpr(!inplace)
             {
                 HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
             }
@@ -211,9 +211,9 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
 
             auto call = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
             {
-                if HIPCUB_IF_CONSTEXPR(std::is_same_v<scan_op_type, hipcub::Sum>)
+                if constexpr(std::is_same_v<scan_op_type, hipcub::Sum>)
                 {
-                    if HIPCUB_IF_CONSTEXPR(inplace)
+                    if constexpr(inplace)
                     {
                         HIP_CHECK(hipcub::DeviceScan::InclusiveSum(d_temp_storage,
                                                                    temp_storage_size_bytes,
@@ -233,7 +233,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
                 }
                 else
                 {
-                    if HIPCUB_IF_CONSTEXPR(inplace)
+                    if constexpr(inplace)
                     {
                         HIP_CHECK(hipcub::DeviceScan::InclusiveScan(d_temp_storage,
                                                                     temp_storage_size_bytes,
@@ -281,7 +281,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
-            if HIPCUB_IF_CONSTEXPR(inplace)
+            if constexpr(inplace)
             {
                 HIP_CHECK(hipMemcpy(output.data(),
                                     d_input,
@@ -385,7 +385,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanInit)
             T* d_input;
             U* d_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
-            if HIPCUB_IF_CONSTEXPR(!inplace)
+            if constexpr(!inplace)
             {
                 HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
             }
@@ -412,7 +412,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanInit)
 
             auto call = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
             {
-                if HIPCUB_IF_CONSTEXPR(inplace)
+                if constexpr(inplace)
                 {
                     HIP_CHECK(hipcub::DeviceScan::InclusiveScanInit(d_temp_storage,
                                                                     temp_storage_size_bytes,
@@ -462,7 +462,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanInit)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
-            if HIPCUB_IF_CONSTEXPR(inplace)
+            if constexpr(inplace)
             {
                 HIP_CHECK(hipMemcpy(output.data(),
                                     d_input,
@@ -749,7 +749,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
             T* d_input;
             U* d_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
-            if HIPCUB_IF_CONSTEXPR(!inplace)
+            if constexpr(!inplace)
             {
                 HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
             }
@@ -782,9 +782,9 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
 
             auto call = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
             {
-                if HIPCUB_IF_CONSTEXPR(std::is_same_v<scan_op_type, hipcub::Sum>)
+                if constexpr(std::is_same_v<scan_op_type, hipcub::Sum>)
                 {
-                    if HIPCUB_IF_CONSTEXPR(inplace)
+                    if constexpr(inplace)
                     {
                         HIP_CHECK(hipcub::DeviceScan::ExclusiveSum(d_temp_storage,
                                                                    temp_storage_size_bytes,
@@ -804,7 +804,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
                 }
                 else
                 {
-                    if HIPCUB_IF_CONSTEXPR(inplace)
+                    if constexpr(inplace)
                     {
                         HIP_CHECK(hipcub::DeviceScan::ExclusiveScan(d_temp_storage,
                                                                     temp_storage_size_bytes,
@@ -854,7 +854,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
-            if HIPCUB_IF_CONSTEXPR(inplace)
+            if constexpr(inplace)
             {
                 HIP_CHECK(hipMemcpy(output.data(),
                                     d_input,

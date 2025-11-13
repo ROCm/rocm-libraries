@@ -111,7 +111,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
             unsigned int* d_selected_count_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_flags, flags.size() * sizeof(F)));
-            if HIPCUB_IF_CONSTEXPR(!inplace)
+            if constexpr(!inplace)
             {
                 HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, input.size() * sizeof(U)));
             }
@@ -135,7 +135,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
 
             auto call = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
             {
-                if HIPCUB_IF_CONSTEXPR(inplace)
+                if constexpr(inplace)
                 {
                     HIP_CHECK(hipcub::DeviceSelect::Flagged(d_temp_storage,
                                                             temp_storage_size_bytes,
@@ -192,7 +192,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
 
             // Check if output values are as expected
             std::vector<U> output(input.size());
-            if HIPCUB_IF_CONSTEXPR(inplace)
+            if constexpr(inplace)
             {
                 HIP_CHECK(hipMemcpy(output.data(),
                                     d_input,
@@ -369,7 +369,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
             U*            d_output;
             unsigned int* d_selected_count_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
-            if HIPCUB_IF_CONSTEXPR(!inplace)
+            if constexpr(!inplace)
             {
                 HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, input.size() * sizeof(U)));
             }
@@ -391,7 +391,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
 
             auto call = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
             {
-                if HIPCUB_IF_CONSTEXPR(inplace)
+                if constexpr(inplace)
                 {
                     HIP_CHECK(hipcub::DeviceSelect::If(d_temp_storage,
                                                        temp_storage_size_bytes,
@@ -448,7 +448,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
 
             // Check if output values are as expected
             std::vector<U> output(input.size());
-            if HIPCUB_IF_CONSTEXPR(inplace)
+            if constexpr(inplace)
             {
                 HIP_CHECK(hipMemcpy(output.data(),
                                     d_input,
@@ -530,7 +530,7 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
             unsigned int* d_selected_count_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_flags, flags.size() * sizeof(F)));
-            if HIPCUB_IF_CONSTEXPR(!inplace)
+            if constexpr(!inplace)
             {
                 HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, input.size() * sizeof(U)));
             }
@@ -554,7 +554,7 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
 
             auto call = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
             {
-                if HIPCUB_IF_CONSTEXPR(inplace)
+                if constexpr(inplace)
                 {
                     HIP_CHECK(hipcub::DeviceSelect::FlaggedIf(d_temp_storage,
                                                               temp_storage_size_bytes,
@@ -613,7 +613,7 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
 
             // Check if output values are as expected
             std::vector<U> output(input.size());
-            if HIPCUB_IF_CONSTEXPR(inplace)
+            if constexpr(inplace)
             {
                 HIP_CHECK(hipMemcpy(output.data(),
                                     d_input,
