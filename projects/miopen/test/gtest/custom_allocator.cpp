@@ -82,11 +82,7 @@ TEST_P(GPU_CustomAllocator_FP32, Test)
             nullptr,
             nullptr);
         miopen::Allocator::ManageDataPtr p = nullptr;
-        EXPECT_THROW(
-            {
-                p = handle.Create(size);
-            },
-            const char*);
+        EXPECT_THROW({ p = handle.Create(size); }, const char*);
         break;
     }
     case AllocatorTestType::TestNullAllocator: {
@@ -98,11 +94,7 @@ TEST_P(GPU_CustomAllocator_FP32, Test)
             nullptr,
             nullptr);
         miopen::Allocator::ManageDataPtr p = nullptr;
-        EXPECT_THROW(
-            {
-                p = handle.Create(size);
-            },
-            std::exception);
+        EXPECT_THROW({ p = handle.Create(size); }, std::exception);
         break;
     }
     case AllocatorTestType::TestDeallocator: {
@@ -145,7 +137,8 @@ TEST_P(GPU_CustomAllocator_FP32, Test)
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_CustomAllocator_FP32, testing::ValuesIn(GetAllocatorTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_CustomAllocator_FP32,
+                         testing::ValuesIn(GetAllocatorTestCases()));
 
 } // namespace
-
