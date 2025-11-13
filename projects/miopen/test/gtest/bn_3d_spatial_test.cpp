@@ -75,7 +75,7 @@ struct verify_forward_train_3d_bn_spatial
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>, tensor<U>, tensor<U>> cpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         double epsilon      = MIO_BN_TEST_EPSILON;
@@ -131,14 +131,14 @@ struct verify_forward_train_3d_bn_spatial
             double newRunMean     = 0.;
             double adjust         = 0.;
 
-#if (MIO_HEIRARCH_SEL == 1)
+#if(MIO_HEIRARCH_SEL == 1)
             std::vector<double> variance_accum_arr(depth * height, 0.0);
             std::vector<double> mean_accum_arr(depth * height, 0.0);
             std::vector<double> dshift_accum_arr(depth * height, 0.0);
             std::vector<double> dscale_accum_arr(depth * height, 0.0);
 #endif
 
-#if (MIO_HEIRARCH_SEL == 0)
+#if(MIO_HEIRARCH_SEL == 0)
             // process the batch per channel
             for(size_t bidx = 0; bidx < n_batch; bidx++)
             { // via mini_batch
@@ -152,9 +152,9 @@ struct verify_forward_train_3d_bn_spatial
                             // iterating through the stack of images in the mini_batch
                             mean_accum += input(bidx, cidx, didx, row, column);
                         } // end for (column)
-                    } // end for (row)
-                } // end for (depth)
-            } // end for (n)
+                    }     // end for (row)
+                }         // end for (depth)
+            }             // end for (n)
 #else
             for(size_t didx = 0; didx < depth; ++didx)
             { // via depth
@@ -173,7 +173,7 @@ struct verify_forward_train_3d_bn_spatial
             elemStd        = 0.;
             variance_accum = 0.;
 
-#if (MIO_HEIRARCH_SEL == 0)
+#if(MIO_HEIRARCH_SEL == 0)
             // #2 calculate the variances
             // sigma^2 = (1/batch_mean) * sum( (x_i - batch_mean)^2 )
             for(size_t bidx = 0; bidx < n_batch; bidx++)
@@ -188,10 +188,10 @@ struct verify_forward_train_3d_bn_spatial
                             out(bidx, cidx, didx, row, column) = elemStd =
                                 (input(bidx, cidx, didx, row, column) - mean_accum); // (x_i - mean)
                             variance_accum += (elemStd * elemStd); // sum{ (x_i - mean)^2 }
-                        } // end for (column)
-                    } // end for (row)
-                } // for (depth)
-            } // end for(n)
+                        }                                          // end for (column)
+                    }                                              // end for (row)
+                }                                                  // for (depth)
+            }                                                      // end for(n)
 
 #else
             for(size_t didx = 0; didx < depth; ++didx) // via depth
@@ -228,7 +228,7 @@ struct verify_forward_train_3d_bn_spatial
                                     (invVar * out(bidx, cidx, didx, row, column)) +
                                 shift(0, cidx, 0, 0, 0);
                         } // for (column)
-                    } // for (row)
+                    }     // for (row)
                 }
             } // end for(n_batchs)
 
@@ -245,7 +245,7 @@ struct verify_forward_train_3d_bn_spatial
                 (1 - expAvgFactor) * runVar(0, cidx, 0, 0, 0) + expAvgFactor * adjust;
         });
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU forward_train_3d_bn_spatial pass time: "
@@ -257,7 +257,7 @@ struct verify_forward_train_3d_bn_spatial
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>, tensor<U>, tensor<U>> gpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         auto&& handle = get_handle();
@@ -351,7 +351,7 @@ struct verify_forward_train_3d_bn_spatial
         runVar.data     = handle.Read<U>(runVar_dev, runVar.data.size());
         out.data        = handle.Read<T>(out_dev, out.data.size());
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_train_3d_bn_spatial pass time: "
@@ -393,7 +393,7 @@ struct verify_forward_infer_3d_bn_spatial_recalc
 
     tensor<T> cpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         double epsilon = MIO_BN_TEST_EPSILON;
@@ -428,8 +428,8 @@ struct verify_forward_infer_3d_bn_spatial_recalc
                             // iterating through the stack of images in the mini_batch
                             mean_accum += input(bidx, cidx, didx, row, column);
                         } // end for (n)
-                    } // end for (column)
-                } // end for (row)
+                    }     // end for (column)
+                }         // end for (row)
             }
             mean_accum /= ndhw;
 
@@ -449,11 +449,11 @@ struct verify_forward_infer_3d_bn_spatial_recalc
                             out(bidx, cidx, didx, row, column) = elemStd =
                                 (input(bidx, cidx, didx, row, column) - mean_accum); // (x_i - mean)
                             variance_accum += (elemStd * elemStd); // sum{ (x_i - mean)^2 }
-                        } // end for(n)
-                    } // end for (column)
-                } // end for (row)
-            } // end for (depth)
-            variance_accum /= ndhw; // (1/N)*sum{ (x_i - mean)^2 }
+                        }                                          // end for(n)
+                    }                                              // end for (column)
+                }                                                  // end for (row)
+            }                                                      // end for (depth)
+            variance_accum /= ndhw;                                // (1/N)*sum{ (x_i - mean)^2 }
 
             // #3 add epsilon for numeric stability, sqr_root, and invert
             invVar = 1.0 / sqrt(variance_accum + epsilon);
@@ -478,12 +478,12 @@ struct verify_forward_infer_3d_bn_spatial_recalc
                             out(bidx, cidx, didx, row, column) =
                                 scale(0, cidx, 0, 0, 0) * inhat + shift(0, cidx, 0, 0, 0);
                         } // end for(n_batchs)
-                    } // for (column)
-                } // for (row)
-            } // for (depth)
+                    }     // for (column)
+                }         // for (row)
+            }             // for (depth)
         });
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU forward_infer_3d_bn_spatial_recalc pass time: "
@@ -495,7 +495,7 @@ struct verify_forward_infer_3d_bn_spatial_recalc
 
     tensor<T> gpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         auto&& handle = get_handle();
@@ -533,7 +533,7 @@ struct verify_forward_infer_3d_bn_spatial_recalc
                                           actDesc);
         out.data = handle.Read<T>(out_dev, out.data.size());
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_infer_3d_bn_spatial_recalc pass time: "
@@ -561,7 +561,7 @@ struct verify_forward_infer_3d_bn_spatial_use_est
 
     tensor<T> cpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         double epsilon = MIO_BN_TEST_EPSILON;
@@ -600,7 +600,7 @@ struct verify_forward_infer_3d_bn_spatial_use_est
             }
         });
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU forward_infer_3d_bn_spatial_use_est pass time: "
@@ -613,7 +613,7 @@ struct verify_forward_infer_3d_bn_spatial_use_est
 
     tensor<T> gpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         auto&& handle = get_handle();
@@ -652,7 +652,7 @@ struct verify_forward_infer_3d_bn_spatial_use_est
                                           epsilon,
                                           actDesc);
         out.data = handle.Read<T>(out_dev, out.data.size());
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_infer_3d_bn_spatial_use_est pass time: "
@@ -681,7 +681,7 @@ struct verify_backward_3d_bn_spatial_recalc
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>> cpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         double epsilon = MIO_BN_TEST_EPSILON;
@@ -719,7 +719,7 @@ struct verify_backward_3d_bn_spatial_recalc
 
             std::vector<double> xhat(n_batch * in_cstride, 0.0);
 
-#if (MIO_HEIRARCH_SEL == 1)
+#if(MIO_HEIRARCH_SEL == 1)
             std::vector<double> variance_accum_arr(depth * height, 0.0);
             std::vector<double> mean_accum_arr(depth * height, 0.0);
             std::vector<double> dshift_accum_arr(depth * height, 0.0);
@@ -727,7 +727,7 @@ struct verify_backward_3d_bn_spatial_recalc
 #endif
 
 // process the batch per channel
-#if (MIO_HEIRARCH_SEL == 0)
+#if(MIO_HEIRARCH_SEL == 0)
             for(size_t didx = 0; didx < depth; ++didx)
             { // via depth
                 for(size_t row = 0; row < height; row++)
@@ -740,8 +740,8 @@ struct verify_backward_3d_bn_spatial_recalc
                             mean += x_input(bidx, cidx, didx, row, column);
                         }
                     } // for (column)
-                } // for (row)
-            } // for (depth)
+                }     // for (row)
+            }         // for (depth)
 #else
             for(size_t didx = 0; didx < depth; ++didx)
             { // via depth
@@ -759,7 +759,7 @@ struct verify_backward_3d_bn_spatial_recalc
 
             elemStd  = 0.;
             variance = 0.;
-#if (MIO_HEIRARCH_SEL == 0)
+#if(MIO_HEIRARCH_SEL == 0)
             for(size_t didx = 0; didx < depth; ++didx)
             { // via depth
                 for(size_t row = 0; row < height; row++)
@@ -773,9 +773,9 @@ struct verify_backward_3d_bn_spatial_recalc
                             // per (x-dims) channel load a block of data into LDS
                             elemStd = x_input(bidx, cidx, didx, row, column) - mean; // (x_i - mean)
                             variance += elemStd * elemStd; // sum{ (x_i - mean)^2 }
-                        } // end for(n)
-                    } // for (column)
-                } // for (row)
+                        }                                  // end for(n)
+                    }                                      // for (column)
+                }                                          // for (row)
             }
 #else
             for(size_t didx = 0; didx < depth; ++didx)
@@ -796,7 +796,7 @@ struct verify_backward_3d_bn_spatial_recalc
 
             dscale(0, cidx, 0, 0, 0) = 0.;
 
-#if (MIO_HEIRARCH_SEL == 0)
+#if(MIO_HEIRARCH_SEL == 0)
             for(size_t didx = 0; didx < depth; ++didx)
             { //
                 for(size_t row = 0; row < height; row++)
@@ -814,8 +814,8 @@ struct verify_backward_3d_bn_spatial_recalc
                             dshift(0, cidx, 0, 0, 0) += dyelem;
                             dscale(0, cidx, 0, 0, 0) += xhat[xhat_index] * dyelem;
                         } // end for(n_batch)
-                    } // for (column)
-                } // for (row)
+                    }     // for (column)
+                }         // for (row)
             }
 #else
             for(size_t didx = 0; didx < depth; ++didx)
@@ -858,12 +858,12 @@ struct verify_backward_3d_bn_spatial_recalc
                             double tmp3 = (scale(0, cidx, 0, 0, 0) * invVar) / ndhw;
                             dx_out(bidx, cidx, didx, row, column) = tmp3 * (tmp2 + tmp1);
                         } // end for(n_batchs)
-                    } // for (column)
-                } // for (row)
+                    }     // for (column)
+                }         // for (row)
             }
         }); // for (channel)
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU backward_3d_bn_spatial_recalc pass time: "
@@ -876,7 +876,7 @@ struct verify_backward_3d_bn_spatial_recalc
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>> gpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         auto&& handle = get_handle();
@@ -942,7 +942,7 @@ struct verify_backward_3d_bn_spatial_recalc
         dscale.data = handle.Read<U>(dscale_dev, dscale.data.size());
         dshift.data = handle.Read<U>(dshift_dev, dshift.data.size());
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU backward_3d_bn_spatial_recalc pass time: "
@@ -980,7 +980,7 @@ struct verify_backward_3d_bn_spatial_use_saved
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>> cpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         size_t n_batch, channels, depth, height, width;
@@ -1015,7 +1015,7 @@ struct verify_backward_3d_bn_spatial_use_saved
 
             std::vector<double> xhat(n_batch * in_cstride, 0.0);
 
-#if (MIO_HEIRARCH_SEL == 1)
+#if(MIO_HEIRARCH_SEL == 1)
             std::vector<double> dshift_accum_arr(height * depth, 0.0);
             std::vector<double> dscale_accum_arr(height * depth, 0.0);
 #endif
@@ -1023,7 +1023,7 @@ struct verify_backward_3d_bn_spatial_use_saved
             // process the batch per channel
             dscale(0, cidx, 0, 0, 0) = 0.;
 
-#if (MIO_HEIRARCH_SEL == 0)
+#if(MIO_HEIRARCH_SEL == 0)
             for(size_t didx = 0; didx < depth; ++didx)
             { // via depth
                 for(size_t row = 0; row < height; row++)
@@ -1041,8 +1041,8 @@ struct verify_backward_3d_bn_spatial_use_saved
                             dshift(0, cidx, 0, 0, 0) += dyelem;
                             dscale(0, cidx, 0, 0, 0) += xhat[xhat_index] * dyelem;
                         } // end for(n_batch)
-                    } // for (column)
-                } // for (row)
+                    }     // for (column)
+                }         // for (row)
             }
 #else
             for(size_t didx = 0; didx < depth; ++didx)
@@ -1086,11 +1086,11 @@ struct verify_backward_3d_bn_spatial_use_saved
                             double tmp3 = (scale(0, cidx, 0, 0, 0) * invVar) / ndhw;
                             dx_out(bidx, cidx, didx, row, column) = tmp3 * (tmp2 + tmp1);
                         } // end for(n_batchs)
-                    } // for (column)
-                } // for (row)
+                    }     // for (column)
+                }         // for (row)
             }
         }); // for (channel)
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU backward_bn spatial_use_saved pass time: "
@@ -1102,7 +1102,7 @@ struct verify_backward_3d_bn_spatial_use_saved
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>> gpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         auto&& handle = get_handle();
@@ -1170,7 +1170,7 @@ struct verify_backward_3d_bn_spatial_use_saved
         dscale.data = handle.Read<U>(dscale_dev, dscale.data.size());
         dshift.data = handle.Read<U>(dshift_dev, dshift.data.size());
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU backward_3d_bn_spatial_use_saved pass time: "
@@ -1230,7 +1230,7 @@ struct Bn3DSpatialTest : public testing::TestWithParam<TestCase>
 
     void Run()
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         const auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         tensor<PREC_TYPE> scale;
@@ -1274,7 +1274,7 @@ struct Bn3DSpatialTest : public testing::TestWithParam<TestCase>
         }
 
 // train
-#if (MIO_BN_SP_TEST_DEBUG == 1)
+#if(MIO_BN_SP_TEST_DEBUG == 1)
         std::cout << "Running forward train spatial with R and S set." << std::endl;
 #endif
         const auto outpair =
@@ -1282,7 +1282,7 @@ struct Bn3DSpatialTest : public testing::TestWithParam<TestCase>
 // returns:  std::make_tuple(out,runMean,runVar,saveMean,saveInvVar);
 
 // inference recalc
-#if (MIO_BN_SP_TEST_DEBUG == 1)
+#if(MIO_BN_SP_TEST_DEBUG == 1)
         std::cout << "Running forward inference spatial recalc." << std::endl;
 #endif
         // tolerance = 80;
@@ -1295,7 +1295,7 @@ struct Bn3DSpatialTest : public testing::TestWithParam<TestCase>
         // inference use estimated running values
         const auto estMean = std::get<1>(outpair.second);
         const auto estVar  = std::get<2>(outpair.second);
-#if (MIO_BN_SP_TEST_DEBUG == 1)
+#if(MIO_BN_SP_TEST_DEBUG == 1)
         std::cout << "Running forward inference spatial with R set." << std::endl;
 #endif
         Verify(verify_forward_infer_3d_bn_spatial_use_est<T, PREC_TYPE>{
@@ -1319,7 +1319,7 @@ struct Bn3DSpatialTest : public testing::TestWithParam<TestCase>
                 }
             }
         }
-#if (MIO_BN_SP_TEST_DEBUG == 2)
+#if(MIO_BN_SP_TEST_DEBUG == 2)
         auto debugvals = Verify(verify_backward_3d_bn_spatial_recalc<T>{input, dy_input, scale});
         auto gpuout    = std::get<0>(debugvals.second);
         auto cpuout    = std::get<0>(debugvals.first);
@@ -1376,7 +1376,7 @@ struct Bn3DSpatialTest : public testing::TestWithParam<TestCase>
                       << "]: " << cpuout(mn, mc, md, mh, mw) << std::endl;
         }
 #else
-#if (MIO_BN_SP_TEST_DEBUG == 1)
+#if(MIO_BN_SP_TEST_DEBUG == 1)
         std::cout << "Running back propagation spatial recalc." << std::endl;
 #endif
         tolerance = 80 * input.desc.GetElementSize();
@@ -1387,7 +1387,7 @@ struct Bn3DSpatialTest : public testing::TestWithParam<TestCase>
         const auto savedMean   = std::get<3>(outpair.second);
         const auto savedInvVar = std::get<4>(outpair.second);
 
-#if (MIO_BN_SP_TEST_DEBUG == 3)
+#if(MIO_BN_SP_TEST_DEBUG == 3)
 
         auto debugvals = Verify(verify_backward_3d_bn_spatial_use_saved<T>{
             input, dy_input, scale, savedMean, savedInvVar});
@@ -1446,14 +1446,14 @@ struct Bn3DSpatialTest : public testing::TestWithParam<TestCase>
                       << "]: " << cpuout(mn, mc, md, mh, mw) << std::endl;
         }
 #else
-#if (MIO_BN_SP_TEST_DEBUG == 1)
+#if(MIO_BN_SP_TEST_DEBUG == 1)
         std::cout << "Running back propagation spatial with S set." << std::endl;
 #endif
         Verify(verify_backward_3d_bn_spatial_use_saved<T, PREC_TYPE>{
             input, dy_input, scale, savedMean, savedInvVar});
 #endif
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         const auto t_end = std::chrono::high_resolution_clock::now();
         std::cout << "Wall clock: full PER_ACTIVATION test pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
