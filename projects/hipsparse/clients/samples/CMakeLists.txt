@@ -94,7 +94,11 @@ endif()
 
 if(NOT USE_CUDA)
   # Build documentation examples
-  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
+  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_CPP documentation_examples/*.cpp)
+  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_C documentation_examples/*.c)
+  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_F90 documentation_examples/*.f90)
+  
+  set(DOCUMENTATION_EXAMPLES ${DOCUMENTATION_EXAMPLES_CPP} ${DOCUMENTATION_EXAMPLES_C} ${DOCUMENTATION_EXAMPLES_F90})
 
   foreach(file ${DOCUMENTATION_EXAMPLES})
       add_hipsparse_example(${file})

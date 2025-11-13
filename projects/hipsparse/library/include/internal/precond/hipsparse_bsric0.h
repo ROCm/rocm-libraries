@@ -350,9 +350,6 @@ hipsparseStatus_t hipsparseZbsric02_analysis(hipsparseHandle_t         handle,
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
- * 
- *  \par Example
- *  \snippet example_hipsparse_bsric02.cpp doc example
  */
 /**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
