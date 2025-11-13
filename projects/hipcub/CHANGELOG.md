@@ -27,6 +27,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 ### Removed
 
 * Removed `DeviceSpmv`, which was removed from CUB after CCCL's 2.8.0 release. Use `hipSPARSE` or `rocSPARSE` libraries instead.
+* Removed `GridBarrier`.
 * Removed `LEGACY_PTX_ARCH`.
 * Removed `hipcub:max` and `hipcub:min`, which were deprecated. Use `hip::std::max` and `hip::std::min` instead.
 * Deprecated `hipcub::Swap`, use `rocprim::swap` instead.
