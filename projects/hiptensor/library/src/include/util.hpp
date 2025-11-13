@@ -26,14 +26,17 @@
 
 #pragma once
 
+#include <algorithm>
+#include <numeric>
+#include <type_traits>
+#include <unordered_map>
+#include <vector>
+
 #include <ck/utility/data_type.hpp>
 #include <ck/utility/tuple.hpp>
 #include <hiptensor/hiptensor.h>
 #include <hiptensor/internal/types.hpp>
 #include <logger.hpp>
-#include <numeric>
-#include <type_traits>
-#include <vector>
 
 namespace hiptensor
 {
@@ -154,6 +157,74 @@ namespace hiptensor
     void convertVectorToCkArray(std::vector<T> const& v, std::array<U, N>& a)
     {
         std::copy_n(v.begin(), N, a.begin());
+    }
+
+    template <typename T>
+    hiptensorStatus_t getSortingIndices(const T*          referenceOrder,
+                                        size_t            referenceSize,
+                                        const T*          elementsToSort,
+                                        size_t            elementsSize,
+                                        std::vector<int>& sortingIndices)
+    {
+        // Create a position map for elements in the reference order
+        std::unordered_map<T, int> elementPosition;
+        for(size_t i = 0; i < referenceSize; ++i)
+        {
+            elementPosition[referenceOrder[i]] = static_cast<int>(i);
+        }
+
+        // Verify all elements in elementsToSort exist in referenceOrder
+        for(size_t i = 0; i < elementsSize; ++i)
+        {
+            if(elementPosition.find(elementsToSort[i]) == elementPosition.end())
+            {
+                return HIPTENSOR_STATUS_INVALID_VALUE;
+            }
+        }
+
+        // Resize the output vector to match input size
+        sortingIndices.resize(elementsSize);
+
+        // Create indices vector [0, 1, 2, ..., elementsSize-1]
+        std::iota(sortingIndices.begin(), sortingIndices.end(), 0);
+
+        // Sort indices based on the order of corresponding elements in referenceOrder
+        std::sort(sortingIndices.begin(),
+                  sortingIndices.end(),
+                  [elementsToSort, &elementPosition](int i, int j) {
+                      return elementPosition[elementsToSort[i]]
+                             < elementPosition[elementsToSort[j]];
+                  });
+
+        return HIPTENSOR_STATUS_SUCCESS;
+    }
+
+    template <typename T>
+    hiptensorStatus_t applySortingIndices(const std::vector<int>& sortingIndices,
+                                          std::vector<T>&         vector)
+    {
+        // Check if sizes match
+        if(sortingIndices.size() != vector.size())
+        {
+            return HIPTENSOR_STATUS_INVALID_VALUE;
+        }
+
+        // Resize output vector
+        std::vector<T> sortedVector = std::vector<T>(vector.size());
+
+        // Apply sorting indices
+        for(size_t i = 0; i < sortingIndices.size(); ++i)
+        {
+            auto index = sortingIndices[i];
+            if(index < 0 || index >= static_cast<int>(vector.size()))
+            {
+                return HIPTENSOR_STATUS_INVALID_VALUE;
+            }
+            sortedVector[i] = vector[index];
+        }
+        vector = sortedVector;
+
+        return HIPTENSOR_STATUS_SUCCESS;
     }
 
     /** @name CK type tuple to hiptensor type tuple transform functions

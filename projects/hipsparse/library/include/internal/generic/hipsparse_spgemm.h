@@ -319,9 +319,6 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t      handle,
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
-*
-*  \par Example (Full example)
-*  \snippet example_hipsparse_spgemm.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

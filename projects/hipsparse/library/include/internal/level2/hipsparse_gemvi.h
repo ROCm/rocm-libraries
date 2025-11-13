@@ -159,9 +159,6 @@ hipsparseStatus_t hipsparseZgemvi_bufferSize(hipsparseHandle_t    handle,
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
  *              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
  *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
- *
- *  \par Example
- *  \snippet example_hipsparse_gemvi.cpp doc example
  */
 /**@{*/
 HIPSPARSE_EXPORT

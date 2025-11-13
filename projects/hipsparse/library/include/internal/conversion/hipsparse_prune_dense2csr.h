@@ -343,9 +343,6 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnz(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p A, \p descr, \p threshold, \p csrVal
 *              \p csrRowPtr, \p csrColInd, \p buffer pointer is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_prune_dense2csr.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
