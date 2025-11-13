@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -2276,70 +2276,27 @@ rocblas_status rocblasCall_trsm_mem(rocblas_side side,
     if constexpr(BATCHED)
     {
         size_t w_x_tmp_size = 0;
-        size_t w_x_tmp_arr_size = 0;
-        size_t w_invA_size = 0;
-        size_t w_invA_arr_size = 0;
         size_t w_x_tmp_size_backup = 0;
 
         istat = rocblas_internal_trsm_batched_workspace_max_size_64<T>(
-            side, m_64, n_64, batch_count_64,
+            side, m_64, n_64, batch_count_64, &w_x_tmp_size, x_temp_arr, invA, invA_arr,
+            &w_x_tmp_size_backup);
 
-            &w_x_tmp_size, &w_x_tmp_arr_size, &w_invA_size, &w_invA_arr_size, &w_x_tmp_size_backup);
-
-        w_x_tmp_size = std::max(w_x_tmp_size, w_x_tmp_size_backup);
-
-        *x_temp = w_x_tmp_size;
-        *x_temp_arr = w_x_tmp_arr_size;
-        *invA = w_invA_size;
-        *invA_arr = w_invA_arr_size;
+        *x_temp = std::max(w_x_tmp_size, w_x_tmp_size_backup);
     }
     else
     {
         size_t w_x_tmp_size = 0;
-        size_t w_invA_size = 0;
         size_t w_x_tmp_size_backup = 0;
 
-        istat = rocblas_internal_trsm_workspace_max_size_64<T>(side, m_64, n_64, batch_count_64,
+        istat = rocblas_internal_trsm_workspace_max_size_64<T>(
+            side, m_64, n_64, batch_count_64, &w_x_tmp_size, invA, &w_x_tmp_size_backup);
 
-                                                               &w_x_tmp_size, &w_invA_size,
-                                                               &w_x_tmp_size_backup);
-
-        w_x_tmp_size = std::max(w_x_tmp_size, w_x_tmp_size_backup);
-
-        *x_temp = w_x_tmp_size;
-        *x_temp_arr = sizeof(T*) * batch_count_64;
-        *invA = w_invA_size;
-        *invA_arr = sizeof(T*) * batch_count_64;
-
-        if(istat != rocblas_status_success)
-        {
-            return (istat);
-        };
-
-        {
-            // ----------------------------------------------
-            // extra check for robustness, should be harmless
-            // ----------------------------------------------
-            int64_t supplied_invA_size = 0;
-
-            size_t w_x_tmp_size = 0;
-            size_t w_x_tmp_arr_size = 0;
-            size_t w_invA_size = 0;
-            size_t w_invA_arr_size = 0;
-            size_t w_x_tmp_size_backup = 0;
-
-            istat = rocblas_internal_trsm_workspace_size_64<T>(
-                side, transA, m_64, n_64, lda_64, ldb_64, batch_count_64, supplied_invA_size,
-
-                &w_x_tmp_size, &w_x_tmp_arr_size, &w_invA_size, &w_invA_arr_size,
-                &w_x_tmp_size_backup);
-
-            *x_temp = std::max(*x_temp, std::max(w_x_tmp_size, w_x_tmp_size_backup));
-            *x_temp_arr = std::max(*x_temp_arr, w_x_tmp_arr_size);
-            *invA = std::max(*invA, w_invA_size);
-            *invA_arr = std::max(*invA_arr, w_invA_arr_size);
-        }
+        *x_temp = std::max(w_x_tmp_size, w_x_tmp_size_backup);
+        *x_temp_arr = 0;
+        *invA_arr = 0;
     }
+
     return (istat);
 }
 
