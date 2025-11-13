@@ -44,20 +44,6 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
-// Should be deprecated once hip::std::swap is available in this scope.
-template<typename T>
-#if defined(__HIP_PLATFORM_NVIDIA__)
-HIPCUB_DEPRECATED_BECAUSE("Use cuda::std::swap")
-#else
-HIPCUB_DEPRECATED_BECAUSE("Use rocprim::swap")
-#endif
-HIPCUB_DEVICE HIPCUB_FORCEINLINE void Swap(T& lhs, T& rhs)
-{
-  T temp = lhs;
-  lhs    = rhs;
-  rhs    = temp;
-}
-
 /**
  * @brief Sorts data using odd-even sort method
  *
