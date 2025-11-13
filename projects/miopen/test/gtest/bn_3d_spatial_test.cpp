@@ -1524,7 +1524,7 @@ private:
     }
 };
 
-using GPU_Bn3DSpatial_FP32  = Bn3DSpatialTest<float>;
+using GPU_Bn3DSpatial_FP32 = Bn3DSpatialTest<float>;
 
 TEST_P(GPU_Bn3DSpatial_FP32, TestFloat32) { this->Run(); }
 
