@@ -32,79 +32,8 @@
 #include <hipcub/block/block_reduce.hpp>
 #include <hipcub/thread/thread_operators.hpp>
 
-#include <hipcub/grid/grid_barrier.hpp>
 #include <hipcub/grid/grid_even_share.hpp>
 #include <hipcub/grid/grid_queue.hpp>
-
-#if defined(__HIP_PLATFORM_NVIDIA__)
-_CCCL_SUPPRESS_DEPRECATED_PUSH
-#else
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-#endif
-__global__
-void KernelGridBarrier(hipcub::GridBarrier global_barrier, int iterations)
-#if defined(__HIP_PLATFORM_NVIDIA__)
-    _CCCL_SUPPRESS_DEPRECATED_POP
-#else
-    HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-#endif
-{
-    for (int i = 0; i < iterations; i++)
-    {
-        global_barrier.Sync();
-    }
-}
-
-TEST(HipcubGridTests, GridBarrier)
-{
-    int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
-    HIP_CHECK(hipSetDevice(device_id));
-
-    constexpr int32_t block_size = 256;
-    // NOTE increasing iterations will cause huge latency for tests
-    constexpr int32_t iterations = 3;
-    int32_t grid_size = -1;
-
-    int32_t sm_count;
-    int32_t max_block_threads;
-    int32_t max_sm_occupancy;
-
-    HIP_CHECK(hipDeviceGetAttribute(&sm_count, hipDeviceAttributeMultiprocessorCount, device_id));
-    HIP_CHECK(hipDeviceGetAttribute(&max_block_threads, hipDeviceAttributeMaxThreadsPerBlock, device_id));
-
-    HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-        &max_sm_occupancy,
-        KernelGridBarrier,
-        HIPCUB_HOST_WARP_THREADS,
-        0));
-
-    int32_t occupancy = std::min((max_block_threads / block_size), max_sm_occupancy);
-
-    if (grid_size == -1)
-    {
-        grid_size = occupancy * sm_count;
-    }
-    else
-    {
-        occupancy = grid_size / sm_count;
-    }
-#if defined(__HIP_PLATFORM_NVIDIA__)
-    _CCCL_SUPPRESS_DEPRECATED_PUSH
-#else
-    HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-#endif
-    hipcub::GridBarrierLifetime global_barrier;
-#if defined(__HIP_PLATFORM_NVIDIA__)
-    _CCCL_SUPPRESS_DEPRECATED_POP
-#else
-    HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-#endif
-    HIP_CHECK(global_barrier.Setup(grid_size));
-
-    KernelGridBarrier<<<grid_size, block_size>>>(global_barrier, iterations);
-    HIP_CHECK(hipGetLastError());
-}
 
 template<
     int32_t BlockSize,
