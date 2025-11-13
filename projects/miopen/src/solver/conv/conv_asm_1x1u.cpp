@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -880,7 +880,7 @@ ConvSolution ConvAsm1x1U::GetSolution(const ExecutionContext& ctx,
 
     if(UseSubsample(problem))
     {
-        KernelInfo ss_kernel_info = GetSampleKernelInfo(problem);
+        const KernelInfo ss_kernel_info = GetSampleKernelInfo(problem);
 
         int N, C, H, W, K, n_groups, out_H, out_W;
         GetCompiledInParameters(ctx, problem, &N, &C, &H, &W, &K, &n_groups, &out_H, &out_W);
@@ -889,7 +889,7 @@ ConvSolution ConvAsm1x1U::GetSolution(const ExecutionContext& ctx,
     }
     else if(UseUpsample(problem))
     {
-        KernelInfo us_kernel_info = GetSampleKernelInfo(problem);
+        const KernelInfo us_kernel_info = GetSampleKernelInfo(problem);
 
         int N, C, H, W, K, n_groups;
         GetCompiledInParameters(ctx, problem, &N, &C, &H, &W, &K, &n_groups);

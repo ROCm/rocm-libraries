@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -800,53 +800,55 @@ ConvSolution ConvAsmBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
     {
         solver::KernelInfo ss_kernel_info = GetSubSampleKernelInfo(problem);
 
-        result.invoker_factory = [N, C, H, W, K, n_groups, ss_kernel_info](
-                                     const std::vector<Kernel>& kernels) {
-            return [=](const Handle& handle, const AnyInvokeParams& primitive_params) {
-                const auto main_kernel = handle.Run(kernels[0]);
-                const auto& invoke_params =
-                    primitive_params.CastTo<miopen::conv::WrWInvokeParams>();
-                const auto& x         = invoke_params.tensors.x;
-                const auto& dy        = invoke_params.tensors.dy;
-                const auto& dw        = invoke_params.tensors.dw;
-                const auto& workSpace = invoke_params.workSpace;
-                auto elapsed          = 0.f;
+        result.invoker_factory =
+            [N, C, H, W, K, n_groups, ss_kernel_info = std::move(ss_kernel_info)](
+                const std::vector<Kernel>& kernels) mutable {
+                return [=, ss_kernel_info = std::move(ss_kernel_info)](
+                           const Handle& handle, const AnyInvokeParams& primitive_params) {
+                    const auto main_kernel = handle.Run(kernels[0]);
+                    const auto& invoke_params =
+                        primitive_params.CastTo<miopen::conv::WrWInvokeParams>();
+                    const auto& x         = invoke_params.tensors.x;
+                    const auto& dy        = invoke_params.tensors.dy;
+                    const auto& dw        = invoke_params.tensors.dw;
+                    const auto& workSpace = invoke_params.workSpace;
+                    auto elapsed          = 0.f;
 
-                if(invoke_params.type != InvokeType::AutoTune)
-                {
-                    auto&& ss_kernels =
-                        handle.GetKernels(ss_kernel_info.kernel_name, ss_kernel_info.comp_options);
-                    if(!ss_kernels.empty())
+                    if(invoke_params.type != InvokeType::AutoTune)
                     {
-                        auto kernel = ss_kernels.front();
-                        kernel(x, workSpace);
+                        auto&& ss_kernels = handle.GetKernels(ss_kernel_info.kernel_name,
+                                                              ss_kernel_info.comp_options);
+                        if(!ss_kernels.empty())
+                        {
+                            auto kernel = ss_kernels.front();
+                            kernel(x, workSpace);
+                        }
+                        else
+                        {
+                            handle.AddKernel(ss_kernel_info.kernel_name,
+                                             ss_kernel_info.comp_options,
+                                             ss_kernel_info.kernel_file,
+                                             ss_kernel_info.kernel_name,
+                                             ss_kernel_info.l_wk,
+                                             ss_kernel_info.g_wk,
+                                             ss_kernel_info.comp_options)(x, workSpace);
+                        }
+                        if(handle.IsProfilingEnabled())
+                            elapsed += handle.GetKernelTime();
                     }
-                    else
-                    {
-                        handle.AddKernel(ss_kernel_info.kernel_name,
-                                         ss_kernel_info.comp_options,
-                                         ss_kernel_info.kernel_file,
-                                         ss_kernel_info.kernel_name,
-                                         ss_kernel_info.l_wk,
-                                         ss_kernel_info.g_wk,
-                                         ss_kernel_info.comp_options)(x, workSpace);
-                    }
+
+                    int unused       = 0;
+                    int* return_addr = nullptr;
+                    main_kernel(
+                        N, C, H, W, K, n_groups, unused, unused, workSpace, dw, dy, return_addr);
                     if(handle.IsProfilingEnabled())
+                    {
                         elapsed += handle.GetKernelTime();
-                }
-
-                int unused       = 0;
-                int* return_addr = nullptr;
-                main_kernel(
-                    N, C, H, W, K, n_groups, unused, unused, workSpace, dw, dy, return_addr);
-                if(handle.IsProfilingEnabled())
-                {
-                    elapsed += handle.GetKernelTime();
-                    handle.ResetKernelTime();
-                    handle.AccumKernelTime(elapsed);
-                }
+                        handle.ResetKernelTime();
+                        handle.AccumKernelTime(elapsed);
+                    }
+                };
             };
-        };
     }
     else
     {

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -474,8 +474,10 @@ ConvSolution ConvOclBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
 
         if(n_passes == 2)
         {
-            result.invoker_factory = [ws_sz, ss_kernel_info](const std::vector<Kernel>& kernels) {
-                return [=](const Handle& handle, const AnyInvokeParams& primitive_params) {
+            result.invoker_factory = [ws_sz, ss_kernel_info = std::move(ss_kernel_info)](
+                                         const std::vector<Kernel>& kernels) mutable {
+                return [=, ss_kernel_info = std::move(ss_kernel_info)](
+                           const Handle& handle, const AnyInvokeParams& primitive_params) {
                     const auto main_kernel = handle.Run(kernels[0]);
                     const auto& invoke_params =
                         primitive_params.CastTo<miopen::conv::WrWInvokeParams>();
