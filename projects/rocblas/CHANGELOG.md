@@ -8,12 +8,12 @@ rocBLAS documentation is available at
 ### Added
 * Level 3 `syrk_ex` function for both C and FORTRAN but without API support for the ILP64 format.
 
+### Optimized
+* Level 2 `tpmv` function.
+
 ### Resolved issues
 * Corrected client memory use counts for the `ROCBLAS_CLIENT_RAM_GB_LIMIT` environment variable.
 * Fix to avoid false Clang static analysis warnings.
-
-### Optimized
-* Level 2 `tpmv` function.
 
 ## rocBLAS 5.1.1 for ROCm 7.1.1
 
