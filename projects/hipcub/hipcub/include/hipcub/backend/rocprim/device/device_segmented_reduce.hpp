@@ -156,7 +156,7 @@ inline hipError_t segmented_arg_minmax(void*          temporary_storage,
 
     std::chrono::high_resolution_clock::time_point start;
 
-    if HIPCUB_IF_CONSTEXPR(HIPCUB_DETAIL_DEBUG_SYNC_VALUE)
+    if constexpr(HIPCUB_DETAIL_DEBUG_SYNC_VALUE)
     {
         start = std::chrono::high_resolution_clock::now();
     }

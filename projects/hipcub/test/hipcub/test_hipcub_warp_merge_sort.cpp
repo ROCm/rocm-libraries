@@ -99,7 +99,7 @@ __device__ auto sort_keys_full_test(Key* keys, Compare compare_op)
     __shared__ typename warp_merge_sort::TempStorage storage[warps_per_block];
 
     warp_merge_sort wsort{storage[warp_id]};
-    if HIPCUB_IF_CONSTEXPR(Stable)
+    if constexpr(Stable)
     {
         wsort.StableSort(thread_keys, compare_op);
     } else
@@ -157,7 +157,7 @@ __device__ auto sort_keys_values_full_test(Key* keys, Value* values, Compare com
     __shared__ typename warp_merge_sort::TempStorage storage[warps_per_block];
 
     warp_merge_sort wsort{storage[warp_id]};
-    if HIPCUB_IF_CONSTEXPR(Stable)
+    if constexpr(Stable)
     {
         wsort.StableSort(thread_keys, thread_values, compare_op);
     } else
@@ -239,7 +239,7 @@ __device__ auto
     hipcub::LoadDirectBlocked(flat_tid, keys + warp_offset, thread_keys, segment_size);
 
     const Key oob_default = sort_last<Compare, Key>::value;
-    if HIPCUB_IF_CONSTEXPR(Stable)
+    if constexpr(Stable)
     {
         wsort.StableSort(thread_keys, compare, segment_size, oob_default);
     } else
@@ -311,7 +311,7 @@ __device__ auto sort_keys_values_segmented_test(Key*                keys,
     hipcub::LoadDirectBlocked(flat_tid, values + warp_offset, thread_values, segment_size);
 
     const Key oob_default = sort_last<Compare, Key>::value;
-    if HIPCUB_IF_CONSTEXPR(Stable)
+    if constexpr(Stable)
     {
         wsort.StableSort(thread_keys, thread_values, compare, segment_size, oob_default);
     } else

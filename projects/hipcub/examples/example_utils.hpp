@@ -591,7 +591,7 @@ void RandomBits(
         memcpy(&key, word_buff, sizeof(K));
 
         K copy = key;
-        if HIPCUB_IF_CONSTEXPR(std::is_floating_point<K>::value)
+        if constexpr(std::is_floating_point<K>::value)
 #ifndef _WIN32
             if(!std::isnan(copy))
 #else
