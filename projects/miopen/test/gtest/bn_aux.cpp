@@ -73,8 +73,8 @@ TEST_P(GPU_BnDerive_FP32, Test)
     std::array<int, 4> lens{};
     miopenDataType_t dt;
 
-    miopenBatchNormMode_t bn_mode = (test_case.mode == BNDeriveMode::Spatial) ? miopenBNSpatial
-                                                                              : miopenBNPerActivation;
+    miopenBatchNormMode_t bn_mode =
+        (test_case.mode == BNDeriveMode::Spatial) ? miopenBNSpatial : miopenBNPerActivation;
 
     miopenDeriveBNTensorDescriptor(derivedTensor, ctensor, bn_mode);
     miopenGetTensorDescriptor(derivedTensor, &dt, lens.data(), nullptr);
