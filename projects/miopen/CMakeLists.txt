@@ -2,7 +2,7 @@
 #
 # MIT License
 #
-# Copyright (c) 2017 Advanced Micro Devices, Inc.
+# Copyright (c) 2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,7 @@
 # SOFTWARE.
 #
 ################################################################################
-cmake_minimum_required( VERSION 3.15 )
+cmake_minimum_required(VERSION 3.15)
 
 if (POLICY CMP0074)
   cmake_policy(SET CMP0074 NEW)
@@ -71,17 +71,18 @@ if(NOT WIN32)
     set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
 endif()
 
-project ( MIOpen C CXX )
+project(MIOpen CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(CTest)
+list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 find_package(Threads REQUIRED)
-find_package(ROCM 0.7.3 REQUIRED PATHS /opt/rocm)
 
+find_package(ROCmCMakeBuildTools)
 include(ROCMInstallTargets)
 include(ROCMPackageConfigHelpers)
 include(ROCMSetupVersion)
@@ -117,7 +118,7 @@ set(MIOPEN_LOG_FUNC_TIME_ENABLE Off CACHE BOOL "")
 set(MIOPEN_ENABLE_SQLITE_BACKOFF On CACHE BOOL "")
 
 option( BUILD_DEV "Build for development only" OFF)
-option(MIOPEN_ENABLE_FIN "Enable the fin driver for MIOpen"  OFF)
+option(MIOPEN_ENABLE_FIN "Enable the fin driver for MIOpen" OFF)
 option(MIOPEN_ENABLE_FIN_INTERFACE "Enable internal interface for the fin" ${MIOPEN_ENABLE_FIN})
 option(MIOPEN_STRIP_SYMBOLS "Strip symbols in release mode" ON)
 
@@ -137,7 +138,6 @@ endif()
 
 rocm_setup_version(VERSION 3.5.1)
 
-list( APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake )
 include(TargetFlags)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -169,20 +169,20 @@ set(MIOPEN_INSTALL_CXX_HEADERS Off CACHE BOOL "Install MIOpen's C++ header inter
 
 set_var_to_condition(MIOPEN_OFFLINE_COMPILER_PATHS_V2_DEFAULT FALSE)
 option(MIOPEN_OFFLINE_COMPILER_PATHS_V2 "Use rocm-core to find offline GPU compiler" ${MIOPEN_OFFLINE_COMPILER_PATHS_V2_DEFAULT})
-message( STATUS "MIOPEN_OFFLINE_COMPILER_PATHS_V2: ${MIOPEN_OFFLINE_COMPILER_PATHS_V2}" )
+message(STATUS "MIOPEN_OFFLINE_COMPILER_PATHS_V2: ${MIOPEN_OFFLINE_COMPILER_PATHS_V2}")
 
 # Embedded Build Configuration
 set(MIOPEN_EMBED_DB "" CACHE STRING "Semi-colon separated list of architecture to embed on-disk DBs in the binary. Example gfx906_60;gfx900_56")
 if(NOT MIOPEN_EMBED_DB STREQUAL "")
-    option(MIOPEN_DISABLE_SYSDB  "Disable sys database access" Off)
+    option(MIOPEN_DISABLE_SYSDB "Disable sys database access" Off)
 else()
-    option(MIOPEN_DISABLE_SYSDB  "Disable sys database access" ${MIOPEN_EMBED_BUILD})
+    option(MIOPEN_DISABLE_SYSDB "Disable sys database access" ${MIOPEN_EMBED_BUILD})
 endif()
 set(MIOPEN_BINCACHE_PATH "" CACHE STRING "URL or path containing binary cache files to embed")
 option(MIOPEN_EMBED_BINCACHE "Embed Binary Cache or KDB" Off)
 option(MIOPEN_EMBED_BUILD "Build with the set of embed flags." Off)
 option(MIOPEN_DISABLE_USERDB "Disable user database access" ${MIOPEN_EMBED_BUILD})
-option(MIOPEN_BUILD_CK "Build own CK libs inline with MIOpen build" OFF)
+option(MIOPEN_BUILD_CK "Build own CK libs inline with MIOpen build" Off)
 
 # MIOPEN_USE_HIP_KERNELS is a Workaround for COMgr issues
 if(MIOPEN_EMBED_BUILD)
@@ -202,20 +202,18 @@ if(MIOPEN_EMBED_BUILD)
     endif()
 endif()
 
-set( MIOPEN_BACKEND ${MIOPEN_DEFAULT_BACKEND} CACHE STRING
-    "Which of MIOpens's backends to use?" )
-set_property( CACHE MIOPEN_BACKEND PROPERTY STRINGS
-    OpenCL HIP HIPOC HIPNOGPU)
-    
+set(MIOPEN_BACKEND ${MIOPEN_DEFAULT_BACKEND} CACHE STRING "Which of MIOpens's backends to use?")
+set_property(CACHE MIOPEN_BACKEND PROPERTY STRINGS OpenCL HIP HIPOC HIPNOGPU)
+
 # On Windows, internal symbols are only exported when BUILD_TESTING=true. As a result, building driver with BUILD_TESTING=false will result in failure.
 set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")) AND ((NOT WIN32) OR BUILD_TESTING))  
 option(MIOPEN_BUILD_DRIVER "Build MIOpenDriver (and use it in tests)" ${MIOPEN_BUILD_DRIVER_DEFAULT})
 message(STATUS "MIOPEN_BUILD_DRIVER: ${MIOPEN_BUILD_DRIVER}" )
 
 # OpenCL 1.2
-if( MIOPEN_BACKEND STREQUAL "OpenCL")
+if(MIOPEN_BACKEND STREQUAL "OpenCL")
     set(MIOPEN_BACKEND_OPENCL 1)
-    find_package( OpenCL REQUIRED )
+    find_package(OpenCL REQUIRED)
     find_program(MIOPEN_HIP_COMPILER clang++
         PATH_SUFFIXES bin
         PATHS
@@ -236,7 +234,7 @@ if( MIOPEN_BACKEND STREQUAL "OpenCL")
     # This is to pass all necessary build flags to HIP compiler
     # for device code compilation. Used within "find_package(hip...".
     # See https://github.com/ROCm-Developer-Tools/HIP/pull/2035#issuecomment-616861118.
-    set (HIP_CXX_COMPILER ${MIOPEN_HIP_COMPILER})
+    set(HIP_CXX_COMPILER ${MIOPEN_HIP_COMPILER})
 endif()
 
 # HIP SDK on Windows does not detect platform correctly, defaulting to "amd"
@@ -335,12 +333,12 @@ message(STATUS "Hip compiler flags: ${HIP_COMPILER_FLAGS}")
 add_compile_definitions($<$<COMPILE_LANGUAGE:CXX>:HIP_COMPILER_FLAGS=${HIP_COMPILER_FLAGS}>)
 
 # HIP
-if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+if(MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
     if(MIOPEN_USE_COMPOSABLEKERNEL)
         if(MIOPEN_BUILD_CK)
             include(cmake/Dependencies.cmake)
 
-            execute_process (
+            execute_process(
                 COMMAND bash -c "grep -P -o '^[ \t]*(?<!#)[ \t]*ROCm\/composable_kernel@[a-fA-F0-9]+' ${CMAKE_SOURCE_DIR}/requirements.txt"
                 OUTPUT_VARIABLE _match
             )
@@ -355,7 +353,7 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
             find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
         endif()
     endif()
-    if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+    if(MIOPEN_BACKEND STREQUAL "HIPNOGPU")
         set(MIOPEN_MODE_NOGPU 1)
     endif()
     set(MIOPEN_BACKEND_HIP 1)
@@ -406,7 +404,7 @@ else()
         message(FATAL_ERROR "HIPRTC cannot be used without HIP backend")
     endif()
 endif()
-message( STATUS "${MIOPEN_BACKEND} backend selected." )
+message(STATUS "${MIOPEN_BACKEND} backend selected.")
 
 # look for and register clang-offload-bundler
 if(MIOPEN_HIP_COMPILER MATCHES ".*clang\\+\\+.*")
@@ -457,9 +455,9 @@ endif()
 
 # Update HIP Runtime Package Dependency
 if(ENABLE_ASAN_PACKAGING)
-  set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan" )
+  set(DEPENDS_HIP_RUNTIME "hip-runtime-amd-asan")
 else()
-  set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
+  set(DEPENDS_HIP_RUNTIME "hip-runtime-amd")
 endif()
 set(MIOPEN_PACKAGE_REQS "${DEPENDS_HIP_RUNTIME}")
 
@@ -493,29 +491,25 @@ if(MIOPEN_USE_HIPRTC)
     message(STATUS "Build with hiprtc ${hiprtc_VERSION} ${hiprtc_DIR}")
 endif()
 
-option(Boost_USE_STATIC_LIBS "Use boost static libraries" ON)
-set(BOOST_COMPONENTS filesystem)
-if(MIOPEN_BUILD_DRIVER)
-    # boost core is a header only component that can't be found by find_package
-    # list(APPEND BOOST_COMPONENTS core)
-endif()
-
+if(MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM)
 # The FindBoost module has been removed since CMake 3.30. Use the Boost 1.83 configuration file instead.
-add_definitions(-DBOOST_ALL_NO_LIB=1)
-find_package(Boost REQUIRED COMPONENTS ${BOOST_COMPONENTS} CONFIG)
+    find_package(Boost REQUIRED COMPONENTS filesystem CONFIG)
+    add_definitions(-DBOOST_ALL_NO_LIB=1)
+    option(Boost_USE_STATIC_LIBS "Use boost static libraries" ON)
+endif()
 
 find_path(HALF_INCLUDE_DIR half/half.hpp)
 message(STATUS "HALF_INCLUDE_DIR: ${HALF_INCLUDE_DIR}")
 
-option( MIOPEN_DEBUG_FIND_DB_CACHING "Use system find-db caching" ON)
+option(MIOPEN_DEBUG_FIND_DB_CACHING "Use system find-db caching" ON)
 
 if(WIN32)
-    set( DATA_INSTALL_DIR bin )
-    set( DATABASE_INSTALL_DIR ${DATA_INSTALL_DIR})
+    set(DATA_INSTALL_DIR bin )
+    set(DATABASE_INSTALL_DIR ${DATA_INSTALL_DIR})
 else()
-    set( MIOPEN_INSTALL_DIR miopen)
-    set( DATA_INSTALL_DIR ${CMAKE_INSTALL_DATADIR}/${MIOPEN_INSTALL_DIR} )
-    set( DATABASE_INSTALL_DIR ${DATA_INSTALL_DIR}/db )
+    set(MIOPEN_INSTALL_DIR miopen)
+    set(DATA_INSTALL_DIR ${CMAKE_INSTALL_DATADIR}/${MIOPEN_INSTALL_DIR})
+    set(DATABASE_INSTALL_DIR ${DATA_INSTALL_DIR}/db)
 endif()
 
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
@@ -838,7 +832,6 @@ enable_cppcheck(
         CPPCHECK=1
         __linux__=1
 )
-
 
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
