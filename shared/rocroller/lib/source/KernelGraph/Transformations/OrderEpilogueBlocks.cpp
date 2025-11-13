@@ -105,9 +105,8 @@ namespace rocRoller
                 graph.control.addElement(Body(), {parent}, {firstScope});
                 auto prevScope = firstScope;
 
-                Log::debug("  Creating scope chain: parent {} -> {} scopes",
-                           parent,
-                           children.size());
+                Log::debug(
+                    "  Creating scope chain: parent {} -> {} scopes", parent, children.size());
 
                 for(auto i = children.begin(); i != children.end(); i++)
                 {
@@ -120,7 +119,7 @@ namespace rocRoller
                         prevScope = nextScope;
                     }
                 }
-             }
+            }
 
             /**
              * @brief Check if a ForLoopOp is or is contained within a RECEIVE loop

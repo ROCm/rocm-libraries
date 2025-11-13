@@ -1245,7 +1245,7 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.k       = gemm.macK * 8;
+        gemm.k = gemm.macK * 8;
 
         std::tie(gemm.streamK, gemm.loadPathA, gemm.loadPathB, gemm.storeLDSD)
             = std::get<1>(GetParam());
