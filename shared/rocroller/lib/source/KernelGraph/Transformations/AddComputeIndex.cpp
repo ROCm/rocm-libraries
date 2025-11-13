@@ -608,8 +608,7 @@ namespace rocRoller::KernelGraph
             auto isReceiveTileLoop = false;
             if(maybeForLoop)
             {
-                auto forLoopOp = kgraph.control.get<ForLoopOp>(maybeForLoop.value());
-                if(forLoopOp->loopName == rocRoller::RECEIVE)
+                if(getForLoopName(kgraph, maybeForLoop.value()) == rocRoller::RECEIVE)
                     isReceiveTileLoop = true;
             }
 

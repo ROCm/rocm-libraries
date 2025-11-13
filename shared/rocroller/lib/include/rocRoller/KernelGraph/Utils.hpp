@@ -71,6 +71,11 @@ namespace rocRoller
         std::string toString(UnrollColouring const&);
 
         /**
+         * @brief Get the name of a ForLoop operation.
+         */
+        std::string getForLoopName(KernelGraph const& graph, int tag);
+
+        /**
          * @brief
          */
         UnrollColouring colourByUnrollValue(KernelGraph const&             kgraph,

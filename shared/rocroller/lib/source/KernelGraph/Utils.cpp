@@ -44,6 +44,12 @@ namespace rocRoller
          * Helpers
          */
 
+        std::string getForLoopName(KernelGraph const& graph, int tag)
+        {
+            auto forLoop = graph.control.get<CG::ForLoopOp>(tag);
+            return forLoop->loopName;
+        }
+
         std::string toString(UnrollColouring const& colouring)
         {
             std::stringstream os;
