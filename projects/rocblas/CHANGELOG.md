@@ -6,7 +6,7 @@ rocBLAS documentation is available at
 ## rocBLAS 5.2.0 for ROCm 7.2
 
 ### Added
-* Level 3 syrk_ex function for both C and FORTRAN but without ILP64 form of API.
+* Level 3 `syrk_ex` function for both C and FORTRAN but without API support for the ILP64 format.
 
 ### Changed
 * Client memory use counts for environment ROCBLAS_CLIENT_RAM_GB_LIMIT were corrected and avoids false clang static analysis warnings.
