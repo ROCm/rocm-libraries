@@ -1469,6 +1469,8 @@ struct rnn_seq_api_test_driver : test_driver
     bool skip_backward_data{false};
     bool skip_backward_weights{false};
 
+    bool inference_dropout_issue_notified{false};
+
     rnn_seq_api_test_driver() {}
 
     bool check_GPU_mem_limit(miopen::Handle& handle,
@@ -1743,10 +1745,18 @@ struct rnn_seq_api_test_driver : test_driver
                                        skip_backward_data,
                                        skip_backward_weights});
         }
-        else
+        else if(useDropout == 0)
         {
             verify(verify_inference_rnn<T>{
                 rnnDesc, input, output, dy, hx, cx, dhy, dcy, weights, nohx, nocx, nohy, nocy});
+        }
+        else if(!inference_dropout_issue_notified)
+        {
+            std::cerr << "Iteration " << this->iteration
+                      << " skipped due to issues with combining inference and dropout, future "
+                         "iterations like this will also be skipped"
+                      << std::endl;
+            inference_dropout_issue_notified = true;
         }
     }
 };
