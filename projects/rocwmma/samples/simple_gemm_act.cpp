@@ -34,7 +34,6 @@
 #include <rocwmma/rocwmma_transforms.hpp>
 
 #include "common.hpp"
-// #include <stdio.h>
 /* Motivation
 *
 * This GEMM kernel implements a high-performance matrix multiplication with SiLU activation function:
