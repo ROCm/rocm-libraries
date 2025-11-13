@@ -1,26 +1,26 @@
 .. meta::
-  :description: rocSPARSE sparse array storage format documentation
-  :keywords: rocSPARSE, ROCm, API, documentation, design, storage format, sparse arrays
+  :description: rocSPARSE sparse matrix storage format documentation
+  :keywords: rocSPARSE, ROCm, API, documentation, design, storage format, sparse matrices
   
 *******************************************
 rocSPARSE storage formats
 *******************************************
 
-A sparse array is an array or matrix in which the majority of the items are zero,
+A sparse matrix is a matrix in which most of the items are zero,
 although there is no strict criteria for the number of non-zero items. The
-*sparsity* of an array refers to the number of non-zero elements divided by the total
+*sparsity* of a matrix refers to the number of non-zero elements divided by the total
 number of elements. For example, if an 8 x 8 matrix with 64 elements has 16 non-zero elements,
 it has a sparsity value of 0.25.
 
-The main reason for storing and processing sparse arrays differently is to take advantage of lower memory
-requirements and potentially faster processing times. It is inefficient to store
-every element of a sparse array in memory because most of the elements are zero.
-Instead, sparse arrays are compressed in storage using
+The main reason for storing and processing sparse matrices differently is to take advantage of lower memory
+requirements and potentially faster processing times. It is inefficient or impractical to store
+every element of a sparse matrix in memory (as a dense matrix) because most of the elements are zero.
+Instead, sparse matrices are compressed in storage using
 multiple vectors that map the individual non-zero values to their position in the
-original array. However, more complex algorithms are required to store the
+original matrix. However, more complex algorithms are required to store the
 values in, and retrieve them from, these compound data structures.
 
-rocSPARSE offers several storage formats for sparse arrays, each with specialized algorithms for
+rocSPARSE offers several storage formats for sparse matrices, each with specialized algorithms for
 matrix storage, retrieval, and manipulation. For additional information about the
 storage formats and their associated algorithms, see the
 `Sparse matrix vector multiplication blog post <https://rocm.blogs.amd.com/high-performance-computing/spmv/part-1/README.html>`_.
@@ -192,8 +192,7 @@ bsr_dim     Dimension of each block (integer).
 =========== ==============================================================================================================================================
 
 The BSR matrix is sorted by column indices within each row.
-If :math:`m` or :math:`n` are not evenly divisible by the block dimension, then zeros are padded to the matrix,
-such that :math:`mb = (m + \text{bsr_dim} - 1) / \text{bsr_dim}` and :math:`nb = (n + \text{bsr_dim} - 1) / \text{bsr_dim}`.
+This matrix is defined as having a number of rows equivalent to :math:`\text{block_dim} \times \text{number_of_row_blocks}`.
 The following :math:`4 \times 3` matrix and corresponding BSR structures,
 with :math:`\text{bsr_dim} = 2`, :math:`mb = 2`, :math:`nb = 2`, and :math:`\text{nnzb} = 4`, use zero-based indexing and column-major storage:
 
@@ -430,32 +429,6 @@ where
     \text{ell_col_ind}[6] & = \{0, 1, 0, 2, 2, -1\}
   \end{array}
 
-.. _HYB storage format:
-
-HYB storage format
-------------------
-
-The Hybrid (HYB) storage format represents an :math:`m \times n` matrix by:
-
-=========== =========================================================================================
-m           Number of rows (integer).
-n           Number of columns (integer).
-nnz         Number of non-zero elements of the COO part (integer).
-ell_width   Maximum number of non-zero elements per row of the ELL part (integer).
-ell_val     Array of ``m * ell_width`` elements containing the data for the ELL part (floating point).
-ell_col_ind Array of ``m * ell_width`` elements containing the column indices for the ELL part (integer).
-coo_val     Array of ``nnz`` elements containing the data for the COO part (floating point).
-coo_row_ind Array of ``nnz`` elements containing the row indices for the COO part (integer).
-coo_col_ind Array of ``nnz`` elements containing the column indices for the COO part (integer).
-=========== =========================================================================================
-
-The HYB format is a combination of the ELL and COO sparse matrix formats.
-Typically, the regular part of the matrix is stored in
-ELL storage format, and the irregular part of the matrix is stored
-in COO storage format. Three different partitioning schemes can
-be applied when converting a CSR matrix to a matrix in
-HYB storage format. For further details on the partitioning schemes,
-see :ref:`rocsparse_hyb_partition_`.
 
 .. _index_base:
 
