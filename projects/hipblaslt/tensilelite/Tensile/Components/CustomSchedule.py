@@ -352,6 +352,48 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
+def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
+    kernel["MfmaInitCVgprs"] = True
+    
+    optSchedule = dict()
+    syncCode = []
+
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    if isNT(kernel) and TLDS == 0:
+        optSchedule = {
+                'SYNC'   : [[0, 21,21, 48, 79,79]],
+                'LRA0'   : [[1, 2,2, 3,3, 4,4, 5,5, 6,6, 7,7, 8,8, 9]],
+                'LRB0'   : [[1, 9, 10,10, 11,11, 12,12, 13,13, 14,14]],
+                'GRIncA' : [[1,1,1, 2,2,2, 3,3,3]],
+                'GRIncB' : [[4,4,4, 5,5,5, 6,6,6]],
+                'GRA'    : [[21,21, 25,25, 29,29, 34,34, 38,38, 42,42, 47,47, 51,51]],
+                'LRSA'   : [[47]],
+                'LRSB'   : [[47]],
+                'GRB'    : [[55,55, 60,60, 64,64, 68,68, 73,73, 77,77]],
+                'LWSA'   : [[77]],
+                'LWSB'   : [[77]],
+                'LRA1'   : [[80, 81,81, 82,82, 83,83, 84,84, 85,85, 86,86, 87,87, 88]],
+                'LRB1'   : [[80, 88, 89,89, 90,90, 91,91, 92,92, 93,93]],
+                'LCC'    : [[95, 95]],
+            }
+
+        syncCode = [
+                SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0"),
+                SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+                SBarrier(comment=""),
+                SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+                SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="wait for previous set of global reads"),
+                SBarrier(comment="")
+            ]
+        
+        nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+    else:
+        return False, None
+
+    numMfma = 96
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+    
 def _get_schedule_256x256x128_8bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
 
