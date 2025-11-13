@@ -463,12 +463,12 @@ ROCWMMA_DEVICE static inline void DoSilu(MfmaFragAcc (&frags_acc)[BLOCKS_X][BLOC
                 {
                     if(data >= 0)
                     {
-                        ActComputeT exp_negx = std::exp(-data);
+                        ActComputeT exp_negx = std::expf(-data);
                         value                = data * (ComputeT(1) / (ComputeT(1) + exp_negx));
                     }
                     else
                     {
-                        ActComputeT exp_x = std::exp(data);
+                        ActComputeT exp_x = std::expf(data);
                         value             = data * (exp_x / (ComputeT(1) + exp_x));
                     }
                 }
