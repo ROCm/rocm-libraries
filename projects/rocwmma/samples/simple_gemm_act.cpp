@@ -781,7 +781,7 @@ ROCWMMA_HOST void gemm_test(uint32_t m, uint32_t n, uint32_t k)
         return;
     }
 
-    if(isGfx9() && (hROCWMMA_M != hROCWMMA_N) || (hROCWMMA_M != 16 && hROCWMMA_M != 32))
+    if(isGfx9() && ((hROCWMMA_M != hROCWMMA_N) || (hROCWMMA_M != 16 && hROCWMMA_M != 32)))
     {
         std::cout << "Unsupported block size!\n";
         return;
