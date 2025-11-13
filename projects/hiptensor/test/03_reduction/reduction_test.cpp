@@ -359,30 +359,12 @@ namespace hiptensor
             int nmodeC = modeC.size();
             int nmodeD = nmodeC;
 
-            // Requirement of lengths and strides of output
-            //
-            // For example, input lengths are [3, 5, 8], output dims are [2, 1]
-            //
-            // CK requires that lengths of output are [5, 8], i.e. lengths of sorted output dims
-            //
-            // Strides of output are generated in this way:
-            //   output dims are [2, 1]
-            //     ==> corresponding lengths are [8(2), 5(1)]
-            //     ==> strides are [5(2), 1(1)]
-            //     ==> sorted strides are [1(1), 5(2)] // sort by dim
-            //
-            //  strides of output are [1, 5]
-            std::vector<int> sortedOutputDims(outputDims.cbegin(), outputDims.cend());
-            std::sort(sortedOutputDims.begin(), sortedOutputDims.end());
-
             std::vector<int64_t> extentA(lengths.cbegin(), lengths.cend());
-            std::vector<int64_t> extentC(sortedOutputDims.cbegin(), sortedOutputDims.cend());
-            std::transform(extentC.cbegin(), extentC.cend(), extentC.begin(), [&lengths](auto dim) {
-                return lengths[dim];
-            });
-            std::vector<int64_t> extentD(extentC);
-
-            auto& options = HiptensorOptions::instance();
+            std::vector<int64_t> extentCD(outputDims.cbegin(), outputDims.cend());
+            std::transform(extentCD.cbegin(),
+                           extentCD.cend(),
+                           extentCD.begin(),
+                           [&lengths](auto dim) { return lengths[dim]; });
 
             std::vector<int64_t> stridesA
                 = memoryLayout == HIPTENSOR_MEMORY_LAYOUT_DEFAULT
@@ -390,36 +372,11 @@ namespace hiptensor
                       : hiptensor::stridesFromLengths(
                             extentA, memoryLayout == HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR);
 
-            std::vector<int64_t> strideD
-                = hiptensor::stridesFromLengths(extentD, options->isColMajorStrides());
-            if(!std::equal(outputDims.cbegin(), outputDims.cend(), sortedOutputDims.cbegin()))
-            {
-                std::unordered_map<int, int64_t> dimToStride;
-                int64_t                          stride = 1;
-
-                if(!options->isColMajorStrides())
-                {
-                    for(auto it = outputDims.crbegin(); it != outputDims.crend(); ++it)
-                    {
-                        dimToStride[*it] = stride;
-                        stride *= lengths[*it];
-                    }
-                }
-                else
-                {
-                    for(auto it = outputDims.cbegin(); it != outputDims.cend(); ++it)
-                    {
-                        dimToStride[*it] = stride;
-                        stride *= lengths[*it];
-                    }
-                }
-
-                std::transform(sortedOutputDims.cbegin(),
-                               sortedOutputDims.cend(),
-                               strideD.begin(),
-                               [&dimToStride](uint64_t dim) { return dimToStride[dim]; });
-            }
-            std::vector<int64_t> strideC = strideD;
+            std::vector<int64_t> stridesCD
+                = memoryLayout == HIPTENSOR_MEMORY_LAYOUT_DEFAULT
+                      ? std::vector<int64_t>{}
+                      : hiptensor::stridesFromLengths(
+                            extentCD, memoryLayout == HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR);
 
             hiptensorStatus_t err;
             hiptensorHandle_t handle;
@@ -438,12 +395,24 @@ namespace hiptensor
                                                 0));
 
             hiptensorTensorDescriptor_t descC = nullptr;
-            CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
-                handle, &descC, nmodeC, extentC.data(), strideC.data(), acDataType, 0));
+            CHECK_HIPTENSOR_ERROR(
+                hiptensorCreateTensorDescriptor(handle,
+                                                &descC,
+                                                nmodeC,
+                                                extentCD.data(),
+                                                stridesCD.data() ? nullptr : stridesCD.data(),
+                                                acDataType,
+                                                0));
 
             hiptensorTensorDescriptor_t descD = nullptr;
-            CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
-                handle, &descD, nmodeD, extentD.data(), strideD.data(), acDataType, 0));
+            CHECK_HIPTENSOR_ERROR(
+                hiptensorCreateTensorDescriptor(handle,
+                                                &descD,
+                                                nmodeD,
+                                                extentCD.data(),
+                                                stridesCD.data() ? nullptr : stridesCD.data(),
+                                                acDataType,
+                                                0));
 
             hiptensorComputeDescriptor_t const descCompute = convertToComputeType(dataTypes[1]);
             hiptensorOperationDescriptor_t     desc;
@@ -519,8 +488,8 @@ namespace hiptensor
                                            hiptensorDataTypeSize(acDataType),
                                            std::multiplies<size_t>());
 
-            size_t sizeCD = std::accumulate(extentC.begin(),
-                                            extentC.end(),
+            size_t sizeCD = std::accumulate(extentCD.begin(),
+                                            extentCD.end(),
                                             hiptensorDataTypeSize(acDataType),
                                             std::multiplies<size_t>());
 
