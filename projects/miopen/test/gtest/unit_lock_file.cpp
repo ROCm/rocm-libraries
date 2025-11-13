@@ -38,8 +38,7 @@ static boost::posix_time::ptime ToPTime(TDuration duration)
 
 TEST(CPU_UnitTestLockFile_NONE, TryLock)
 {
-    miopen::fs::remove_all(miopen::fs::path{"/tmp/config/miopen"});
-    auto lockpath = miopen::LockFilePath(miopen::fs::path{"/tmp/config/miopen/test"});
+    auto lockpath = miopen::LockFilePath(miopen::fs::path{"/tmp/config/miopen/test." + std::to_string(getpid())});
     miopen::fs::path fs_lock_path = lockpath.string() + ".fslock";
     auto lockfile                 = miopen::FSLockFile(lockpath);
     auto unique_handle            = lockfile.get_unique_handle();
@@ -57,8 +56,7 @@ TEST(CPU_UnitTestLockFile_NONE, TryLock)
 
 TEST(CPU_UnitTestLockFile_NONE, TimedLock)
 {
-    miopen::fs::remove_all(miopen::fs::path{"/tmp/config/miopen"});
-    auto lockpath = miopen::LockFilePath(miopen::fs::path{"/tmp/config/miopen/test"});
+    auto lockpath = miopen::LockFilePath(miopen::fs::path{"/tmp/config/miopen/test." + std::to_string(getpid())});
     auto lockfile = miopen::FSLockFile(lockpath);
     EXPECT_TRUE(lockfile.timed_lock(ToPTime(std::chrono::seconds{1})));
     EXPECT_FALSE(lockfile.timed_lock(ToPTime(std::chrono::seconds{1})));
@@ -68,8 +66,7 @@ TEST(CPU_UnitTestLockFile_NONE, TimedLock)
 
 TEST(CPU_UnitTestLockFile_NONE, OrphanLock)
 {
-    miopen::fs::remove_all(miopen::fs::path{"/tmp/config/miopen"});
-    auto lockpath = miopen::LockFilePath(miopen::fs::path{"/tmp/config/miopen/test"});
+    auto lockpath = miopen::LockFilePath(miopen::fs::path{"/tmp/config/miopen/test." + std::to_string(getpid())});
     auto lockfile = miopen::FSLockFile(lockpath);
     miopen::fs::path fs_lock_path = lockpath.string() + ".fslock";
     auto unique_handle            = lockfile.get_unique_handle();
@@ -87,8 +84,7 @@ TEST(CPU_UnitTestLockFile_NONE, OrphanLock)
 
 TEST(CPU_UnitTestLockFile_NONE, LostLockFile)
 {
-    miopen::fs::remove_all(miopen::fs::path{"/tmp/config/miopen"});
-    auto lockpath = miopen::LockFilePath(miopen::fs::path{"/tmp/config/miopen/test"});
+    auto lockpath = miopen::LockFilePath(miopen::fs::path{"/tmp/config/miopen/test." + std::to_string(getpid())});
     auto lockfile = miopen::FSLockFile(lockpath);
     miopen::fs::path fs_lock_path = lockpath.string() + ".fslock";
     auto unique_handle            = lockfile.get_unique_handle();
@@ -102,8 +98,7 @@ TEST(CPU_UnitTestLockFile_NONE, LostLockFile)
 
 TEST(CPU_UnitTestLockFile_NONE, RefreshHold)
 {
-    miopen::fs::remove_all(miopen::fs::path{"/tmp/config/miopen"});
-    auto lockpath = miopen::LockFilePath(miopen::fs::path{"/tmp/config/miopen/test"});
+    auto lockpath = miopen::LockFilePath(miopen::fs::path{"/tmp/config/miopen/test." + std::to_string(getpid())});
     miopen::fs::path fs_lock_path = lockpath.string() + ".fslock";
     auto lockfile                 = miopen::FSLockFile(lockpath);
     auto unique_handle            = lockfile.get_unique_handle();
