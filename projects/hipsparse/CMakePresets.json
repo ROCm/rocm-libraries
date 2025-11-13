@@ -1,0 +1,198 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 23,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default:release",
+      "displayName": "Configure release build with installation to /opt/rocm",
+      "description": "Standard release configuration for ROCm installation",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
+        "CMAKE_C_COMPILER": "/opt/rocm/bin/amdclang",
+      "CMAKE_PREFIX_PATH": "/opt/rocm",
+      "CMAKE_INSTALL_PREFIX": "/opt/rocm",
+      "CMAKE_BUILD_TYPE": "Release",
+      "GPU_TARGETS": "gfx90a"
+      },
+      "environment": {
+        "ROCM_PATH": "/opt/rocm"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "default:release",
+      "displayName": "Release",
+      "description": "Release build configuration",
+      "binaryDir": "${sourceDir}/build/release",
+      "installDir": "${sourceDir}/build/release/install"
+    },
+    {
+      "name": "debug",
+      "inherits": "default:release",
+      "displayName": "Debug",
+      "description": "Debug build configuration",
+      "binaryDir": "${sourceDir}/build/debug",
+      "installDir": "${sourceDir}/build/debug/install",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "relwithdebinfo",
+      "inherits": "default:release",
+      "displayName": "RelWithDebInfo",
+      "description": "Release with debug info configuration",
+      "binaryDir": "${sourceDir}/build/relwithdebinfo",
+      "installDir": "${sourceDir}/build/relwithdebinfo/install",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "release-with-clients",
+      "inherits": "release",
+      "displayName": "Release with Clients",
+      "description": "Release build with all clients enabled",
+      "binaryDir": "${sourceDir}/build/release-with-clients",
+      "installDir": "${sourceDir}/build/release-with-clients/install",
+      "cacheVariables": {
+        "HIPSPARSE_BUILD_TESTING": "ON",
+        "HIPSPARSE_ENABLE_BENCHMARKS": "ON",
+        "HIPSPARSE_ENABLE_SAMPLES": "ON"
+      }
+    },
+    {
+      "name": "debug-with-tests",
+      "inherits": "debug",
+      "displayName": "Debug with Tests",
+      "description": "Debug build with tests enabled",
+      "binaryDir": "${sourceDir}/build/debug-with-tests",
+      "installDir": "${sourceDir}/build/debug-with-tests/install",
+      "cacheVariables": {
+        "HIPSPARSE_BUILD_TESTING": "ON",
+        "HIPSPARSE_ENABLE_SAMPLES": "ON"
+      }
+    },
+    {
+      "name": "coverage",
+      "inherits": "debug",
+      "displayName": "Code Coverage",
+      "description": "Debug build with code coverage enabled",
+      "binaryDir": "${sourceDir}/build/coverage",
+      "installDir": "${sourceDir}/build/coverage/install",
+      "cacheVariables": {
+        "HIPSPARSE_BUILD_TESTING": "ON",
+        "HIPSPARSE_BUILD_COVERAGE": "ON"
+      }
+    },
+    {
+      "name": "asan",
+      "inherits": "debug",
+      "displayName": "Address Sanitizer",
+      "description": "Debug build with address sanitizer enabled",
+      "binaryDir": "${sourceDir}/build/asan",
+      "installDir": "${sourceDir}/build/asan/install",
+      "cacheVariables": {
+        "HIPSPARSE_BUILD_TESTING": "ON",
+        "HIPSPARSE_ENABLE_ASAN": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "displayName": "Release Build",
+      "description": "Build release configuration"
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "displayName": "Debug Build",
+      "description": "Build debug configuration"
+    },
+    {
+      "name": "relwithdebinfo",
+      "configurePreset": "relwithdebinfo",
+      "displayName": "RelWithDebInfo Build",
+      "description": "Build release with debug info"
+    },
+    {
+      "name": "release-with-clients",
+      "configurePreset": "release-with-clients",
+      "displayName": "Release with Clients Build",
+      "description": "Build release with all clients"
+    },
+    {
+      "name": "debug-with-tests",
+      "configurePreset": "debug-with-tests",
+      "displayName": "Debug with Tests Build",
+      "description": "Build debug with tests"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "release-with-clients",
+      "configurePreset": "release-with-clients",
+      "displayName": "Test Release Build",
+      "description": "Run tests for release build",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug-with-tests",
+      "configurePreset": "debug-with-tests",
+      "displayName": "Test Debug Build",
+      "description": "Run tests for debug build",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "release-full",
+      "displayName": "Release Full Workflow",
+      "description": "Configure, build, and test release with clients",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release-with-clients"
+        },
+        {
+          "type": "build",
+          "name": "release-with-clients"
+        },
+        {
+          "type": "test",
+          "name": "release-with-clients"
+        }
+      ]
+    },
+    {
+      "name": "debug-full",
+      "displayName": "Debug Full Workflow",
+      "description": "Configure, build, and test debug",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug-with-tests"
+        },
+        {
+          "type": "build",
+          "name": "debug-with-tests"
+        },
+        {
+          "type": "test",
+          "name": "debug-with-tests"
+        }
+      ]
+    }
+  ]
+}

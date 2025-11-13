@@ -1,0 +1,58 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Create common helper target for all clients
+add_library(hipsparse-clients-common OBJECT)
+
+# Compile features
+target_compile_features(hipsparse-clients-common PRIVATE cxx_std_17)
+
+# Add common sources
+target_sources(hipsparse-clients-common PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/arg_check.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/unit.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_parse_data.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_template_specialization.cpp"
+)
+
+# Common include directories
+target_include_directories(hipsparse-clients-common PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+)
+
+# Additional includes when building clients only
+if(HIPSPARSE_BUILD_CLIENTS_ONLY)
+    target_include_directories(hipsparse-clients-common PRIVATE ${hipsparse_INCLUDE_DIRS}/hipsparse)
+endif()
+
+# Common compile options
+target_compile_options(hipsparse-clients-common PUBLIC
+    -Wno-unused-command-line-argument
+    -Wall
+)
+
+# Link common dependencies
+target_link_libraries(hipsparse-clients-common PUBLIC roc::hipsparse)
+
+if(TARGET Threads::Threads)
+    target_link_libraries(hipsparse-clients-common PUBLIC Threads::Threads)
+endif()
+
+if(TARGET OpenMP::OpenMP_CXX)
+    target_link_libraries(hipsparse-clients-common PUBLIC OpenMP::OpenMP_CXX)
+endif()
+
+# Backend-specific settings
+if(HIPSPARSE_ENABLE_CUDA)
+    target_compile_definitions(hipsparse-clients-common PUBLIC __HIP_PLATFORM_NVIDIA__)
+    target_include_directories(hipsparse-clients-common PUBLIC ${HIP_INCLUDE_DIRS})
+    target_link_libraries(hipsparse-clients-common PUBLIC ${CUDA_LIBRARIES})
+elseif(HIPSPARSE_ENABLE_HIP)
+    target_link_libraries(hipsparse-clients-common PUBLIC hip::host hip::device)
+endif()
+
+# Enable POSITION_INDEPENDENT_CODE for OBJECT library if building shared libs
+if(BUILD_SHARED_LIBS)
+    set_target_properties(hipsparse-clients-common PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
