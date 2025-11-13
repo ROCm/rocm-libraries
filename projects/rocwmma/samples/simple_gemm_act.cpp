@@ -965,6 +965,6 @@ int main()
     if(isGfx9())
         gemm_test(128, 128, 64);
     else
-        std::cout << "This sample Not test on gfx11/gfx12 yet!" << std::endl;
+        std::cout << "This sample not tested on gfx11/gfx12 yet!" << std::endl;
     return 0;
 }
