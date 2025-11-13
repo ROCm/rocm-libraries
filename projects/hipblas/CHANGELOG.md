@@ -5,7 +5,7 @@ Documentation for hipBLAS is available at
 
 ## hipBLAS 3.2.0 for ROCm 7.2
 
-### Changed
+### Resolved issues
 * Client memory use counts for environment HIPBLAS_CLIENT_RAM_GB_LIMIT were corrected and avoids false clang static analysis warnings.
 
 ## hipBLAS 3.1.0 for ROCm 7.1
