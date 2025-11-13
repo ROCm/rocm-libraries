@@ -429,6 +429,7 @@ namespace rocRoller::Client::GEMMClient
             result.agprCount    = assemblyKernel->agpr_count();
             result.ldsBytes     = assemblyKernel->group_segment_fixed_size();
         }
+        std::cout << "vgpr count: " << result.vgprCount << std::endl;
 
         if(benchmarkParams.check)
         {
