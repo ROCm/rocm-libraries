@@ -63,8 +63,10 @@ double complex_planar_prob_factor;
 double callback_prob_factor;
 // Constraints for the hipfftw tests
 size_t      max_length_for_hipfftw_test;
+size_t      max_nbatch_for_hipfftw_test;
 size_t      max_io_gb_for_hipfftw_test;
 size_t      max_num_arg_validation_tests_per_hipfftw_plan_type;
+size_t      max_elementary_stride_for_hipfftw_test;
 std::string hipfftw_token_for_functional_test;
 
 // Transform parameters for manual test:
@@ -318,6 +320,11 @@ int main(int argc, char* argv[])
                    "Maximum length to be considered in hipfftw tests")
         ->default_val(8192)
         ->check(CLI::PositiveNumber);
+    app.add_option("--max_nbatch_for_hipfftw_test",
+                   max_nbatch_for_hipfftw_test,
+                   "Maximum batch size to be considered in hipfftw tests")
+        ->default_val(8192)
+        ->check(CLI::PositiveNumber);
     app.add_option("--max_io_gb_for_hipfftw_test",
                    max_io_gb_for_hipfftw_test,
                    "Maximum size of I/O to be considered in hipfftw tests in GiB")
@@ -329,6 +336,12 @@ int main(int argc, char* argv[])
            max_num_arg_validation_tests_per_hipfftw_plan_type,
            "Maximum number of argument-validation tests per kind of hipfftw plan creation function")
         ->default_val(256)
+        ->check(CLI::PositiveNumber);
+    app.add_option("--max_elementary_stride_for_hipfftw_test",
+                   max_elementary_stride_for_hipfftw_test,
+                   "Maximum (elementary) stride to consider in hipfftw tests for non-packed I/O "
+                   "data layouts")
+        ->default_val(8)
         ->check(CLI::PositiveNumber);
     app.add_option("--hipfftw_token",
                    hipfftw_token_for_functional_test,

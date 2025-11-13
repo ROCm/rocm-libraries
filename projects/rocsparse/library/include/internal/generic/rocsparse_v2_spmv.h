@@ -239,8 +239,97 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
                                    size_t                      buffer_size_in_bytes,
                                    void*                       buffer,
                                    rocsparse_error*            error);
+
+/*! \ingroup generic_module
+ *  \brief Set extra scalar and vector parameters for spmv
+ *
+ *  \details
+ *  \p rocsparse_spmv_set_extra sets a gamma dnvec vector and z vectors
+ *  appended to the spmv computation. The computation will be:
+ *  $y = alpha * op(A) * x + beta * y + \sum_{i=1}^{n} \gamma_i z_i$
+ *  where $n$ is the number of extra terms set by \p num_extras.
+ * 
+ *  This feature can be used to implement residual calculations of the form
+ *  $r = b - A * x$ within the SpMV call by setting $\gamma = 1$ and $z = b$.
+ *
+ *  \par Datatype Requirements
+ *  The following datatype requirements must be satisfied:
+ *  - The \p gamma_vec datatype must match the scalar datatype set via 
+ *    \ref rocsparse_spmv_set_input with \p rocsparse_spmv_input_scalar_datatype
+ *  - All \p z_vecs must have the same datatype as the compute datatype set via
+ *    \ref rocsparse_spmv_set_input with \p rocsparse_spmv_input_compute_datatype
+ *  - The size of \p gamma_vec must equal \p num_extras
+ *  - All \p z_vecs must have the same size (vector length)
+ *  - Both scalar and compute datatypes must be set on the descriptor before calling this function
+ *
+ *  @param[in]
+ *  handle          handle to the rocsparse library context queue.
+ *  @param[inout]
+ *  descr           spmv descriptor.
+ *  @param[in]
+ *  num_extras      number of extra terms (gamma/z pairs).
+ *  @param[in]
+ *  gamma_vec       dense vector descriptor containing gamma scalars. Must have datatype matching
+ *                  the scalar datatype and size equal to \p num_extras.
+ *  @param[in]
+ *  z_vecs          array of dense vector descriptors for z vectors. All vectors must have
+ *                  datatype matching the compute datatype and the same size.
+ *  @param[out]
+ *  p_error         error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_handle the library context was not initialized.
+ *  \retval rocsparse_status_invalid_pointer \p descr, \p gamma_vec, or \p z_vecs is invalid.
+ *  \retval rocsparse_status_invalid_value invalid parameters, including datatype mismatches 
+ *          or missing scalar/compute datatype configuration.
+ *  \retval rocsparse_status_invalid_size size mismatches between \p gamma_vec and \p num_extras,
+ *          or between \p z_vecs elements.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spmv_set_extra(rocsparse_handle             handle,
+                                          rocsparse_spmv_descr         descr,
+                                          int64_t                      num_extras,
+                                          rocsparse_const_dnvec_descr  gamma_vec,
+                                          rocsparse_const_dnvec_descr* z_vecs,
+                                          rocsparse_error*             p_error);
+
+/*! \ingroup generic_module
+ *  \brief Clear extra parameters for spmv
+ *
+ *  \details
+ *  \p rocsparse_spmv_clear_extra clears the extra parameters set by
+ *  rocsparse_spmv_set_extra.
+ *
+ *  @param[in]
+ *  handle          handle to the rocsparse library context queue.
+ *  @param[inout]
+ *  descr           spmv descriptor.
+ *  @param[out]
+ *  p_error         error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_handle the library context was not initialized.
+ *  \retval rocsparse_status_invalid_pointer \p descr is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spmv_clear_extra(rocsparse_handle     handle,
+                                            rocsparse_spmv_descr descr,
+                                            rocsparse_error*     p_error);
+
 #ifdef __cplusplus
 }
+#endif
+
+// Helper functions for accessing pre-extracted arrays (C++ functions)
+#ifdef __cplusplus
+bool rocsparse_spmv_has_device_arrays(void* spmv_descr_ptr);
+
+// Template functions for accessing pre-extracted arrays
+template <typename T>
+T* rocsparse_spmv_get_gamma_device_array(void* spmv_descr_ptr);
+
+template <typename Z>
+const Z** rocsparse_spmv_get_z_array(void* spmv_descr_ptr);
 #endif
 
 #endif
