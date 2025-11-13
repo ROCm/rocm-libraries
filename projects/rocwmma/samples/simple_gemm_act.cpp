@@ -710,12 +710,12 @@ __host__ void gemm_act_cpu(uint32_t      m,
     auto silu = [](ComputeT x) -> ActComputeT {
         if(x >= 0)
         {
-            ActComputeT exp_negx = std::exp(-x);
+            ActComputeT exp_negx = std::expf(-x);
             return x * (ComputeT(1) / (ComputeT(1) + exp_negx));
         }
         else
         {
-            ActComputeT exp_x = std::exp(x);
+            ActComputeT exp_x = std::expf(x);
             return x * (exp_x / (ComputeT(1) + exp_x));
         }
     };
@@ -723,7 +723,7 @@ __host__ void gemm_act_cpu(uint32_t      m,
 #pragma omp parallel for
     for(int i = 0; i < m; ++i)
     {
-#pragma omp for
+#pragma omp parallel for
         for(int j = 0; j < n; ++j)
         {
             ComputeT    accum     = static_cast<ComputeT>(0);
