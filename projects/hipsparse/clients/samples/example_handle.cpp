@@ -28,7 +28,7 @@
     {                                                                       \
         if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
         {                                                                   \
-            fprintf(stderr, "Error: hipsparse error in line %d", __LINE__); \
+            fprintf(stderr, "Error: hipsparse error in line %d\n", __LINE__); \
             return -1;                                                      \
         }                                                                   \
     }
