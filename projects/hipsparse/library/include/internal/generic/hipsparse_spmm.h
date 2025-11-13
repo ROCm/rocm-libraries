@@ -348,9 +348,6 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *               \p externalBuffer pointer is invalid.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType or \p alg is
 *               currently not supported.
-*
-*  \par Example
-*  \snippet example_hipsparse_spmm.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
