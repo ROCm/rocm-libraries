@@ -26,10 +26,6 @@
 
 #pragma once
 
-#ifdef __HIP_PLATFORM_AMD__
-#include <hip/amd_detail/amd_hip_fp16.h>
-#include <hip/amd_detail/amd_hip_bf16.h>
-
 namespace miopen {
 
 //=============================================================================
@@ -79,5 +75,3 @@ __forceinline__ __device__ _Float16 tanh(_Float16 x)
 }
 
 } // namespace miopen
-
-#endif // __HIP_PLATFORM_AMD__
