@@ -162,6 +162,9 @@ private:
                                                      &engineDesc),
                 "Failed to get engine from engine configuration descriptor.");
 
+            // Clean-up engineDesc once we no longer need it within this scope.
+            ScopedHipdnnBackendDescriptor scopedEngineDesc(engineDesc);
+
             RETURN_ON_BACKEND_FAILURE(
                 hipdnnBackend()->backendGetAttribute(engineDesc,
                                                      HIPDNN_ATTR_ENGINE_GLOBAL_INDEX,

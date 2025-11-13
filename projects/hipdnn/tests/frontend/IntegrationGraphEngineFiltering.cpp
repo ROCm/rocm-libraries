@@ -66,26 +66,6 @@ protected:
         Tensor<DataType> yTensor;
     };
 
-    static void SetUpTestSuite()
-    {
-        EXPECT_EQ(hipInit(0), hipSuccess);
-
-        // Load both plugins once for all tests
-        const std::array<const char*, 2> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str(),
-               hipdnn_tests::plugin_constants::testExecuteFailsPluginPath().c_str()};
-
-        EXPECT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-    }
-
-    static void TearDownTestSuite()
-    {
-        // Clear plugin paths after all tests complete
-        hipdnnSetEnginePluginPaths_ext(0, nullptr, HIPDNN_PLUGIN_LOADING_ABSOLUTE);
-    }
-
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
@@ -101,8 +81,18 @@ protected:
 
     static hipdnnHandle_t createHandle()
     {
+        EXPECT_EQ(hipInit(0), hipSuccess);
         int deviceId = 0;
         EXPECT_EQ(hipGetDevice(&deviceId), hipSuccess);
+
+        // Load both plugins once for all tests
+        const std::array<const char*, 2> paths
+            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str(),
+               hipdnn_tests::plugin_constants::testExecuteFailsPluginPath().c_str()};
+
+        EXPECT_EQ(hipdnnSetEnginePluginPaths_ext(
+                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+                  HIPDNN_STATUS_SUCCESS);
 
         hipdnnHandle_t handle = nullptr;
         EXPECT_EQ(hipdnnCreate(&handle), HIPDNN_STATUS_SUCCESS);
