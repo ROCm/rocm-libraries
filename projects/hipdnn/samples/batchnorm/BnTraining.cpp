@@ -35,6 +35,15 @@ void SampleRunner::operator()(const TensorLayout& layout)
         std::cout << " [BATCH_STATS_ONLY mode]...\n";
     }
 
+    if(config.useRunningStats)
+    {
+        std::cerr << "ERROR: Running statistics mode (--full-training) is not currently "
+                     "supported.\n";
+        std::cerr << "Please use --batch-stats-only mode (default) instead.\n";
+        std::cerr << "See docs/OperationSupport.md for more details.\n";
+        return;
+    }
+
     int64_t n = 16; // BATCH SIZE
     int64_t c = 16; // CHANNELS (FEATURES)
     int64_t h = 16; // HEIGHT (SPATIAL DIMENSION)
@@ -150,17 +159,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
     variantPack[y->get_uid()] = yTensor.memory().deviceData();
     variantPack[savedMean->get_uid()] = savedMeanTensor.memory().deviceData();
     variantPack[savedInvVariance->get_uid()] = savedInvVarTensor.memory().deviceData();
-
-    // Conditionally handle running statistics
-    if(config.useRunningStats)
-    {
-        std::cerr << "ERROR: Running statistics mode (--full-training) is not currently "
-                     "supported.\n";
-        std::cerr << "This mode is disabled due to an API mismatch between hipDNN and MIOpen.\n";
-        std::cerr << "Please use --batch-stats-only mode (default) instead.\n";
-        std::cerr << "See docs/OperationSupport.md for more details.\n";
-        exit(EXIT_FAILURE);
-    }
 
     HIPDNN_FE_CHECK(graph->execute(handle, variantPack, nullptr));
 
