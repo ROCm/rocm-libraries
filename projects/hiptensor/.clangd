@@ -1,0 +1,49 @@
+CompileFlags:
+  Add:
+    - -std=c++20
+    - -I/projects/rocm-libraries/projects/hiptensor/library/include
+    - -I/projects/rocm-libraries/projects/hiptensor/library/src/include
+    - -I/opt/rocm/include
+    - -I/opt/rocm/include/ck
+    - -I/opt/rocm/include/ck/utility
+    - -I/opt/rocm/include/ck/tensor_description
+    - -I/opt/rocm/include/ck/tensor
+    - -I/opt/rocm/include/ck/problem_transform
+    - -I/opt/rocm/include/ck/tensor_operation/gpu/device
+    - -I/opt/rocm/include/ck/tensor_operation/gpu/device/impl
+    - -I/opt/rocm/include/ck/tensor_operation/gpu/grid
+    - -I/opt/rocm/include/ck/tensor_operation/gpu/block
+    - -I/opt/rocm/include/ck/tensor_operation/gpu/warp
+    - -I/opt/rocm/include/ck/tensor_operation/gpu/thread
+    - -I/opt/rocm/include/ck/tensor_operation/gpu/element
+    - -I/opt/rocm/include/ck/library/utility
+    - -I/opt/rocm/include/ck/library/tensor_operation_instance
+    - -I/opt/rocm/include/ck/library/tensor_operation_instance/gpu
+    - -I/opt/rocm/include/ck/library/tensor_operation_instance/gpu/quantization
+    - -I/opt/rocm/include/ck/library/tensor_operation_instance/gpu/softmax
+    - -D__HIP_PLATFORM_AMD__=1
+    - -DHIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=1
+    - -DUSE_PROF_API=1
+    - -D__HIP_DEVICE_COMPILE__=0
+    - --rocm-path=/opt/rocm
+    - --rocm-device-lib-path=/opt/rocm/lib
+    - -nogpulib
+  Remove:
+    - -x
+    - hip
+    - -fno-offload-uniform-block
+    - -mllvm
+    - --offload-arch=*
+    - --offload-compress
+
+Diagnostics:
+  Suppress:
+    - drv_no_rocm_device_lib
+  ClangTidy:
+    Remove:
+      - readability-*
+      - google-*
+      - modernize-*
+
+Index:
+  Background: Build

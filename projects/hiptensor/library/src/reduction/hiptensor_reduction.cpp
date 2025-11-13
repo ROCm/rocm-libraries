@@ -23,9 +23,10 @@
  * THE SOFTWARE.
  *
  *******************************************************************************/
-#include <hiptensor/hiptensor.h>
 #include <set>
 #include <unordered_set>
+
+#include <hiptensor/hiptensor.h>
 
 #include "handle.hpp"
 #include "hip_device.hpp"
