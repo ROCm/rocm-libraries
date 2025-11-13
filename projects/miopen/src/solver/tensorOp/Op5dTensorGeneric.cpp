@@ -112,7 +112,8 @@ Op5dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
 
     // determine necessity to use 32-bit indexing
     bool use_i32 = (a_max < 0x7fffffffULL) && (b_max < 0x7fffffffULL) && (c_max < 0x7fffffffULL);
-    use_i32 = use_i32 && aTensorDesc.AllDimsFitIntoInt() && bTensorDesc.AllDimsFitIntoInt() && cTensorDesc.AllDimsFitIntoInt();
+    use_i32      = use_i32 && aTensorDesc.AllDimsFitIntoInt() && bTensorDesc.AllDimsFitIntoInt() &&
+              cTensorDesc.AllDimsFitIntoInt();
 
     // check if total work fits in u32 or not
     auto mul_u64_sat = [](uint64_t a, uint64_t b) -> uint64_t {
@@ -200,74 +201,70 @@ Op5dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
 
     kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
     kernel.kernel_file  = "MIOpenTensorKernelsHip.cpp";
-    kernel.kernel_name = "Op5dTensorGeneric";
+    kernel.kernel_name  = "Op5dTensorGeneric";
 
     using std::begin, std::end;
     kernel.l_wk.insert(end(kernel.l_wk), begin(vld), end(vld));
     kernel.g_wk.insert(end(kernel.g_wk), begin(vgd), end(vgd));
 
-    result.invoker_factory = [data_type,
-                              blens,
-                              clens,
-                              cstrides,
-                              astrides_fix,
-                              bstrides_fix,
-                              mul_u64_sat](const std::vector<Kernel>& kernels) {
-        return [=](const Handle& handle, const AnyInvokeParams& raw_params) {
-            auto kernel = handle.Run(kernels.front());
-            auto params = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
+    result.invoker_factory =
+        [data_type, blens, clens, cstrides, astrides_fix, bstrides_fix, mul_u64_sat](
+            const std::vector<Kernel>& kernels) {
+            return [=](const Handle& handle, const AnyInvokeParams& raw_params) {
+                auto kernel = handle.Run(kernels.front());
+                auto params = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
 
-            visit_float(data_type, [&](auto as_float) {
-                const float alpha0f = *static_cast<const float*>(params.alpha0);
-                const float alpha1f = *static_cast<const float*>(params.alpha1);
-                const float betaf   = *static_cast<const float*>(params.beta);
-                const auto alpha0   = as_float(alpha0f);
-                const auto alpha1   = as_float(alpha1f);
-                const auto beta     = as_float(betaf);
+                visit_float(data_type, [&](auto as_float) {
+                    const float alpha0f = *static_cast<const float*>(params.alpha0);
+                    const float alpha1f = *static_cast<const float*>(params.alpha1);
+                    const float betaf   = *static_cast<const float*>(params.beta);
+                    const auto alpha0   = as_float(alpha0f);
+                    const auto alpha1   = as_float(alpha1f);
+                    const auto beta     = as_float(betaf);
 
-                uint64_t total_work = 1;
-                for(int i = 0; i < 5; ++i)
-                    total_work = mul_u64_sat(total_work, static_cast<uint64_t>(clens[i]));
+                    uint64_t total_work = 1;
+                    for(int i = 0; i < 5; ++i)
+                        total_work = mul_u64_sat(total_work, static_cast<uint64_t>(clens[i]));
 
-                kernel(params.ATensor,
-                        params.BTensor,
-                        params.CTensor,
-                        uint64_t(params.Aoffset),
-                        uint64_t(params.Boffset),
-                        uint64_t(params.Coffset),
-                        uint64_t(blens[0]),
-                        uint64_t(blens[1]),
-                        uint64_t(blens[2]),
-                        uint64_t(blens[3]),
-                        uint64_t(blens[4]),
-                        uint64_t(clens[0]),
-                        uint64_t(clens[1]),
-                        uint64_t(clens[2]),
-                        uint64_t(clens[3]),
-                        uint64_t(clens[4]),
-                        uint64_t(astrides_fix[0]),
-                        uint64_t(astrides_fix[1]),
-                        uint64_t(astrides_fix[2]),
-                        uint64_t(astrides_fix[3]),
-                        uint64_t(astrides_fix[4]),
-                        uint64_t(bstrides_fix[0]),
-                        uint64_t(bstrides_fix[1]),
-                        uint64_t(bstrides_fix[2]),
-                        uint64_t(bstrides_fix[3]),
-                        uint64_t(bstrides_fix[4]),
-                        uint64_t(cstrides[0]),
-                        uint64_t(cstrides[1]),
-                        uint64_t(cstrides[2]),
-                        uint64_t(cstrides[3]),
-                        uint64_t(cstrides[4]),
-                        alpha0,
-                        alpha1,
-                        beta,
-                        total_work,
-                        !float_equal(beta, 0.0f));
-            });
+                    kernel(params.ATensor,
+                           params.BTensor,
+                           params.CTensor,
+                           uint64_t(params.Aoffset),
+                           uint64_t(params.Boffset),
+                           uint64_t(params.Coffset),
+                           uint64_t(blens[0]),
+                           uint64_t(blens[1]),
+                           uint64_t(blens[2]),
+                           uint64_t(blens[3]),
+                           uint64_t(blens[4]),
+                           uint64_t(clens[0]),
+                           uint64_t(clens[1]),
+                           uint64_t(clens[2]),
+                           uint64_t(clens[3]),
+                           uint64_t(clens[4]),
+                           uint64_t(astrides_fix[0]),
+                           uint64_t(astrides_fix[1]),
+                           uint64_t(astrides_fix[2]),
+                           uint64_t(astrides_fix[3]),
+                           uint64_t(astrides_fix[4]),
+                           uint64_t(bstrides_fix[0]),
+                           uint64_t(bstrides_fix[1]),
+                           uint64_t(bstrides_fix[2]),
+                           uint64_t(bstrides_fix[3]),
+                           uint64_t(bstrides_fix[4]),
+                           uint64_t(cstrides[0]),
+                           uint64_t(cstrides[1]),
+                           uint64_t(cstrides[2]),
+                           uint64_t(cstrides[3]),
+                           uint64_t(cstrides[4]),
+                           alpha0,
+                           alpha1,
+                           beta,
+                           total_work,
+                           !float_equal(beta, 0.0f));
+                });
+            };
         };
-    };
     result.construction_params.push_back(kernel);
     return result;
 }

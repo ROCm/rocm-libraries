@@ -877,7 +877,7 @@ extern "C" __global__ void Op5dTensorGeneric(const MIOPEN_TYPE* __restrict__ a,
     for(wide_t i = static_cast<wide_t>(tid); i < static_cast<wide_t>(total_work);
         i += static_cast<wide_t>(tcount))
     {
-        // widen dims once
+           // widen dims once
         const wide_t cw  = static_cast<wide_t>(c_w);
         const wide_t ch  = static_cast<wide_t>(c_h);
         const wide_t cd  = static_cast<wide_t>(c_d);
@@ -996,7 +996,8 @@ extern "C" __global__ void Op5dTensorGenericContiguous(const MIOPEN_TYPE* __rest
 
         if(effective_pack == 1)
         {
-            // narrow path (c_w < 16) -> reduce register pressure by processing single element per thread
+            // narrow path (c_w < 16) -> reduce register pressure by processing single element per
+            // thread
             const size_t idx = static_cast<size_t>(base);
 
             const MIOPEN_TYPE a_val = a_base[idx];
@@ -1007,7 +1008,7 @@ extern "C" __global__ void Op5dTensorGenericContiguous(const MIOPEN_TYPE* __rest
             if(use_beta)
             {
                 const MIOPEN_TYPE c_val = c_base[idx];
-                c_base[idx] = tmp + beta * c_val;
+                c_base[idx]             = tmp + beta * c_val;
             }
             else
             {
@@ -1023,7 +1024,7 @@ extern "C" __global__ void Op5dTensorGenericContiguous(const MIOPEN_TYPE* __rest
             MIOPEN_TYPE c_val[pack_size];
 
             // Load A and B values
-    #pragma unroll
+#pragma unroll
             for(int i = 0; i < pack_size; i++)
             {
                 if(i < remaining)
@@ -1036,7 +1037,7 @@ extern "C" __global__ void Op5dTensorGenericContiguous(const MIOPEN_TYPE* __rest
             // Load C if needed
             if(use_beta)
             {
-    #pragma unroll
+#pragma unroll
                 for(int i = 0; i < pack_size; i++)
                 {
                     if(i < remaining)
@@ -1047,7 +1048,7 @@ extern "C" __global__ void Op5dTensorGenericContiguous(const MIOPEN_TYPE* __rest
             }
 
             // execute tensor op
-    #pragma unroll
+#pragma unroll
             for(int i = 0; i < pack_size; i++)
             {
                 if(i < remaining)
@@ -1058,7 +1059,7 @@ extern "C" __global__ void Op5dTensorGenericContiguous(const MIOPEN_TYPE* __rest
             }
 
             // Store results
-    #pragma unroll
+#pragma unroll
             for(int i = 0; i < pack_size; i++)
             {
                 if(i < remaining)

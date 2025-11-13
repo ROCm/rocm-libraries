@@ -38,20 +38,26 @@ namespace solver {
 
 namespace tensorOp {
 
-bool Op5dTensorGenericContiguous::IsApplicable([[maybe_unused]] const ExecutionContext&,
-                                               const miopen::tensorOp::ProblemDescription& problem) const
+bool Op5dTensorGenericContiguous::IsApplicable(
+    [[maybe_unused]] const ExecutionContext&,
+    const miopen::tensorOp::ProblemDescription& problem) const
 {
     const auto& aTensorDesc = problem.GetATensorDesc();
     const auto& bTensorDesc = problem.GetBTensorDesc();
     const auto& cTensorDesc = problem.GetCTensorDesc();
 
-    if(aTensorDesc.GetLengths().size() != 5) return false;
-    if(aTensorDesc.GetLengths() != bTensorDesc.GetLengths()) return false;
-    if(bTensorDesc.GetLengths() != cTensorDesc.GetLengths()) return false;
+    if(aTensorDesc.GetLengths().size() != 5)
+        return false;
+    if(aTensorDesc.GetLengths() != bTensorDesc.GetLengths())
+        return false;
+    if(bTensorDesc.GetLengths() != cTensorDesc.GetLengths())
+        return false;
 
-    if(!(aTensorDesc.IsContiguous() && bTensorDesc.IsContiguous() && cTensorDesc.IsContiguous())) return false;
+    if(!(aTensorDesc.IsContiguous() && bTensorDesc.IsContiguous() && cTensorDesc.IsContiguous()))
+        return false;
 
-    if(!(aTensorDesc.AllLengthsFitIntoInt() && bTensorDesc.AllLengthsFitIntoInt() && cTensorDesc.AllLengthsFitIntoInt()))
+    if(!(aTensorDesc.AllLengthsFitIntoInt() && bTensorDesc.AllLengthsFitIntoInt() &&
+         cTensorDesc.AllLengthsFitIntoInt()))
         return false;
 
     const auto& cl = cTensorDesc.GetLengths();
@@ -59,11 +65,14 @@ bool Op5dTensorGenericContiguous::IsApplicable([[maybe_unused]] const ExecutionC
     for(int i = 0; i < 5; ++i)
     {
         const uint64_t t = static_cast<uint64_t>(cl[i]);
-        if(t == 0) return false;
-        if(total > (std::numeric_limits<uint64_t>::max() / t)) return false;
+        if(t == 0)
+            return false;
+        if(total > (std::numeric_limits<uint64_t>::max() / t))
+            return false;
         total *= t;
     }
-    if(total > std::numeric_limits<uint32_t>::max()) return false;
+    if(total > std::numeric_limits<uint32_t>::max())
+        return false;
 
     return true;
 }
@@ -82,7 +91,7 @@ Op5dTensorGenericContiguous::GetSolution(const ExecutionContext& context,
     ConvSolution result{miopenStatusSuccess};
 
     const auto& cTensorDesc = problem.GetCTensorDesc();
-    const auto& clens = cTensorDesc.GetLengths();
+    const auto& clens       = cTensorDesc.GetLengths();
 
     KernelBuildParameters build_params;
     GetCommonParams(build_params, problem, false);
@@ -97,19 +106,19 @@ Op5dTensorGenericContiguous::GetSolution(const ExecutionContext& context,
     build_params.Define("PACK_T", k_PACK_T);
 
     const uint64_t total_elems_u64 =
-        static_cast<uint64_t>(clens[0]) *
-        static_cast<uint64_t>(clens[1]) *
-        static_cast<uint64_t>(clens[2]) *
-        static_cast<uint64_t>(clens[3]) *
+        static_cast<uint64_t>(clens[0]) * static_cast<uint64_t>(clens[1]) *
+        static_cast<uint64_t>(clens[2]) * static_cast<uint64_t>(clens[3]) *
         static_cast<uint64_t>(clens[4]);
 
     const size_t total_elems   = static_cast<size_t>(total_elems_u64);
     const size_t total_packets = (total_elems + k_PACK_T - 1) / k_PACK_T;
 
-    size_t local_threads = 256;  // default
-    if(total_packets < 512) local_threads = 128;
-    if(total_packets < 128) local_threads = 64;
-    
+    size_t local_threads = 256; // default
+    if(total_packets < 512)
+        local_threads = 128;
+    if(total_packets < 128)
+        local_threads = 64;
+
     const size_t cu_count   = context.GetStream().GetMaxComputeUnits();
     const size_t need_wg    = (total_packets + local_threads - 1) / local_threads;
     const size_t max_num_wg = std::max<std::size_t>(cu_count * 32, 1);
@@ -128,46 +137,47 @@ Op5dTensorGenericContiguous::GetSolution(const ExecutionContext& context,
     kernel.l_wk         = {vld[0], vld[1], vld[2]};
     kernel.g_wk         = {vgd[0], vgd[1], vgd[2]};
 
-    result.invoker_factory = [data_type, clens, total_elems_u64](const std::vector<Kernel>& kernels) {
-        return [=](const Handle& handle, const AnyInvokeParams& raw_params) {
-            auto kernel = handle.Run(kernels.front());
-            const auto params = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
+    result.invoker_factory =
+        [data_type, clens, total_elems_u64](const std::vector<Kernel>& kernels) {
+            return [=](const Handle& handle, const AnyInvokeParams& raw_params) {
+                auto kernel       = handle.Run(kernels.front());
+                const auto params = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
 
-            const uint64_t total_work = total_elems_u64;
+                const uint64_t total_work = total_elems_u64;
 
-            visit_float(data_type, [&](auto as_float) {
-                const float alpha0f = *static_cast<const float*>(params.alpha0);
-                const float alpha1f = *static_cast<const float*>(params.alpha1);
-                const float betaf   = *static_cast<const float*>(params.beta);
-                const auto alpha0   = as_float(alpha0f);
-                const auto alpha1   = as_float(alpha1f);
-                const auto beta     = as_float(betaf);
+                visit_float(data_type, [&](auto as_float) {
+                    const float alpha0f = *static_cast<const float*>(params.alpha0);
+                    const float alpha1f = *static_cast<const float*>(params.alpha1);
+                    const float betaf   = *static_cast<const float*>(params.beta);
+                    const auto alpha0   = as_float(alpha0f);
+                    const auto alpha1   = as_float(alpha1f);
+                    const auto beta     = as_float(betaf);
 
-                // assuming all forms equality
-                kernel(params.ATensor,
-                       params.BTensor,
-                       params.CTensor,
-                       static_cast<uint64_t>(params.Aoffset),
-                       static_cast<uint64_t>(params.Boffset),
-                       static_cast<uint64_t>(params.Coffset),
-                       uint64_t(clens[0]), // b_n = c_n
-                       uint64_t(clens[1]), // b_c = c_c
-                       uint64_t(clens[2]), // b_d = c_d
-                       uint64_t(clens[3]), // b_h = c_h
-                       uint64_t(clens[4]), // b_w = c_w
-                       uint64_t(clens[0]), // c_n
-                       uint64_t(clens[1]), // c_c
-                       uint64_t(clens[2]), // c_d
-                       uint64_t(clens[3]), // c_h
-                       uint64_t(clens[4]), // c_w
-                       alpha0,
-                       alpha1,
-                       beta,
-                       total_work,
-                       !float_equal(beta, 0.0f));
-                    });
+                    // assuming all forms equality
+                    kernel(params.ATensor,
+                           params.BTensor,
+                           params.CTensor,
+                           static_cast<uint64_t>(params.Aoffset),
+                           static_cast<uint64_t>(params.Boffset),
+                           static_cast<uint64_t>(params.Coffset),
+                           uint64_t(clens[0]), // b_n = c_n
+                           uint64_t(clens[1]), // b_c = c_c
+                           uint64_t(clens[2]), // b_d = c_d
+                           uint64_t(clens[3]), // b_h = c_h
+                           uint64_t(clens[4]), // b_w = c_w
+                           uint64_t(clens[0]), // c_n
+                           uint64_t(clens[1]), // c_c
+                           uint64_t(clens[2]), // c_d
+                           uint64_t(clens[3]), // c_h
+                           uint64_t(clens[4]), // c_w
+                           alpha0,
+                           alpha1,
+                           beta,
+                           total_work,
+                           !float_equal(beta, 0.0f));
+                });
+            };
         };
-    };
 
     result.construction_params.push_back(kernel);
     return result;
