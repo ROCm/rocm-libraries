@@ -78,7 +78,7 @@ struct verify_forward_train_bn_per_activation
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>, tensor<U>, tensor<U>> cpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         double epsilon      = MIO_BN_TEST_EPSILON;
@@ -157,8 +157,8 @@ struct verify_forward_train_bn_per_activation
                         elemStd = (input(bidx, cidx, row, column) -
                                    mean_accum); // (x_i - mean) //this is reused but needs recalc
                         variance_accum += elemStd * elemStd; // sum{ (x_i - mean)^2 }
-                    } // end for(n)
-                    variance_accum /= n; // (1/N)*sum{ (x_i - mean)^2 }
+                    }                                        // end for(n)
+                    variance_accum /= n;                     // (1/N)*sum{ (x_i - mean)^2 }
 
                     // #3 add epsilon for numeric stability, sqr_root, and invert
                     elemInvVar = 1.0 / double(sqrt(variance_accum + epsilon));
@@ -187,10 +187,10 @@ struct verify_forward_train_bn_per_activation
                     saveInvVar(0, cidx, row, column) = elemInvVar;
 
                 } // for (column)
-            } // for (row)
+            }     // for (row)
         });
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU forward_train_bn_per_activation pass time: "
@@ -203,7 +203,7 @@ struct verify_forward_train_bn_per_activation
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>, tensor<U>, tensor<U>> gpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         auto&& handle = get_handle();
@@ -295,7 +295,7 @@ struct verify_forward_train_bn_per_activation
         runVar.data     = handle.Read<U>(runVar_dev, runVar.data.size());
         out.data        = handle.Read<T>(out_dev, out.data.size());
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_train_bn_per_activation pass time: "
@@ -337,7 +337,7 @@ struct verify_forward_infer_bn_per_activation_recalc
 
     tensor<T> cpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         double epsilon = MIO_BN_TEST_EPSILON;
@@ -380,8 +380,8 @@ struct verify_forward_infer_bn_per_activation_recalc
                     {                                                          // via mini_batch
                         elemStd = input(bidx, cidx, row, column) - mean_accum; // (x_i - mean)
                         variance_accum += elemStd * elemStd; // sum{ (x_i - mean)^2 }
-                    } // end for(n)
-                    variance_accum /= n; // (1/N)*sum{ (x_i - mean)^2 }
+                    }                                        // end for(n)
+                    variance_accum /= n;                     // (1/N)*sum{ (x_i - mean)^2 }
 
                     // #3 add epsilon for numeric stability, sqr_root, and invert
                     elemInvVar = 1.0 / double(sqrt(variance_accum + epsilon));
@@ -397,11 +397,11 @@ struct verify_forward_infer_bn_per_activation_recalc
                         out(bidx, cidx, row, column) =
                             scale(0, cidx, row, column) * inhat + shift(0, cidx, row, column);
                     } // end for(n_batchs)
-                } // for (column)
-            } // for (row)
+                }     // for (column)
+            }         // for (row)
         });
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU forward_infer_bn_per_activation_recalc pass time: "
@@ -413,7 +413,7 @@ struct verify_forward_infer_bn_per_activation_recalc
 
     tensor<T> gpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         auto&& handle = get_handle();
@@ -451,7 +451,7 @@ struct verify_forward_infer_bn_per_activation_recalc
                                           actDesc);
         out.data = handle.Read<T>(out_dev, out.data.size());
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_infer_bn_per_activation_recalc pass time: "
@@ -480,7 +480,7 @@ struct verify_forward_infer_bn_per_activation_use_est
 
     tensor<T> cpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         double epsilon = MIO_BN_TEST_EPSILON;
@@ -514,11 +514,11 @@ struct verify_forward_infer_bn_per_activation_use_est
                         out(bidx, cidx, row, column) =
                             scale(0, cidx, row, column) * inhat + shift(0, cidx, row, column);
                     } // end for(n_batchs)
-                } // for (column)
-            } // for (row)
+                }     // for (column)
+            }         // for (row)
         });
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU forward_infer_bn_per_activation_use_est pass time: "
@@ -530,7 +530,7 @@ struct verify_forward_infer_bn_per_activation_use_est
 
     tensor<T> gpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         auto&& handle = get_handle();
@@ -570,7 +570,7 @@ struct verify_forward_infer_bn_per_activation_use_est
                                           actDesc); // TODO: add multi-in
         out.data = handle.Read<T>(out_dev, out.data.size());
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU forward_infer_bn_per_activation_use_est pass time: "
@@ -603,7 +603,7 @@ struct verify_backward_bn_per_activation_use_saved
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>> cpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         std::size_t n_batch, channels, height, width;
@@ -668,11 +668,11 @@ struct verify_backward_bn_per_activation_use_saved
                         double tmp3                     = elemInvVar / (double(n));
                         dx_out(bidx, cidx, row, column) = tmp3 * tmp2;
                     } // end for(n_batchs)
-                } // for (column)
-            } // for (row)
+                }     // for (column)
+            }         // for (row)
         });
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU backward_bn_per_activation_use_saved pass time: "
@@ -684,7 +684,7 @@ struct verify_backward_bn_per_activation_use_saved
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>> gpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         auto&& handle = get_handle();
@@ -744,7 +744,7 @@ struct verify_backward_bn_per_activation_use_saved
         dscale.data = handle.Read<U>(dscale_dev, dscale.data.size());
         dshift.data = handle.Read<U>(dshift_dev, dshift.data.size());
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU backward_bn_per_activation_use_saved pass time: "
@@ -782,7 +782,7 @@ struct verify_backward_bn_per_activation_recalc
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>> cpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         double epsilon = MIO_BN_TEST_EPSILON;
@@ -836,7 +836,7 @@ struct verify_backward_bn_per_activation_recalc
                         // per (x-dims) channel load a block of data into LDS
                         elemStd = x_input(bidx, cidx, row, column) - mean; // (x_i - mean)
                         variance += elemStd * elemStd;                     // sum{ (x_i - mean)^2 }
-                    } // end for(n)
+                    }                                                      // end for(n)
                     variance /= n; // (1/N)*sum{ (x_i - mean)^2 }
 
                     // #3 add epsilon for numeric stability, sqr_root, and invert
@@ -870,10 +870,10 @@ struct verify_backward_bn_per_activation_recalc
                         double tmp3                     = elemInvVar / double(n);
                         dx_out(bidx, cidx, row, column) = tmp3 * tmp2;
                     } // end for(n_batchs)
-                } // for (column)
-            } // for (row)
+                }     // for (column)
+            }         // for (row)
         });
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: CPU backward_bn_per_activation_recalc pass time: "
@@ -885,7 +885,7 @@ struct verify_backward_bn_per_activation_recalc
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>> gpu() const
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         auto&& handle = get_handle();
@@ -943,7 +943,7 @@ struct verify_backward_bn_per_activation_recalc
         dscale.data = handle.Read<U>(dscale_dev, dscale.data.size());
         dshift.data = handle.Read<U>(dshift_dev, dshift.data.size());
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         auto t_end = std::chrono::high_resolution_clock::now();
 
         std::cout << "Wall clock: GPU backward_bn_per_activation_recalc pass time: "
@@ -1001,7 +1001,7 @@ struct BnPeractTest : public testing::TestWithParam<TestCase>
 
     void Run()
     {
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         const auto t_start = std::chrono::high_resolution_clock::now();
 #endif
         tensor<PREC_TYPE> scale;
@@ -1078,7 +1078,7 @@ struct BnPeractTest : public testing::TestWithParam<TestCase>
                 input, dy_input, scale, savedMean, savedInvVar},
             tolerance);
 
-#if (MIO_BN_TIME_EVERYTHING == 1)
+#if(MIO_BN_TIME_EVERYTHING == 1)
         const auto t_end = std::chrono::high_resolution_clock::now();
         std::cout << "Wall clock: full PER_ACTIVATION test pass time: "
                   << std::chrono::duration<double>(t_end - t_start).count() << " seconds."
