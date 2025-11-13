@@ -43,6 +43,23 @@ namespace rocRoller
                 .to<std::vector>();
         }
 
+        std::unordered_map<int, std::vector<int>> getGroupedMultiplyNodes(KernelGraph const& graph)
+        {
+            auto multiplyNodes = graph.control.getNodes().filter([&graph](int idx) {
+                return graph.control.get<ControlGraph::Multiply>(idx).has_value();
+            });
+
+            std::unordered_map<int, std::vector<int>> rv;
+            for(auto node : multiplyNodes)
+            {
+                auto parent = bodyParents(node, graph).take(1).only();
+                AssertFatal(parent.has_value(), ShowValue(node));
+
+                rv[*parent].push_back(node);
+            }
+            return rv;
+        }
+
         struct BestNodeOrder
         {
             BestNodeOrder(KernelGraph const& graph)
@@ -472,6 +489,21 @@ namespace rocRoller
         KernelGraph OrderMultiplyNodes::apply(KernelGraph const& original)
         {
 #if 1
+
+            auto rv                   = original;
+            auto groupedMultiplyNodes = getGroupedMultiplyNodes(rv);
+            for(auto& [parent, nodes] : groupedMultiplyNodes)
+            {
+                std::ranges::sort(nodes, BestNodeOrder(rv));
+                for(size_t idx = 0; idx + 1 < nodes.size(); idx++)
+                {
+                    rv.control.chain<ControlGraph::Sequence>(nodes[idx], nodes[idx + 1]);
+                }
+            }
+
+            return rv;
+
+#elif 0
             auto rv = original;
 
             auto          multiplyNodes = getMultiplyNodes(rv);
