@@ -469,6 +469,14 @@ try
          value<int32_t>(&arg.cold_iters)->default_value(tuningEnv? 1000 : 2),
          "Cold Iterations to run before entering the timing loop")
 
+        ("bench_time",
+         value<float>(&arg.bench_time)->default_value(-1.0f),
+         "Time in milliseconds to run the benchmark. Overrides 'iters' if set")
+
+        ("cold_bench_time",
+         value<float>(&arg.cold_bench_time)->default_value(-1.0f),
+         "Time in milliseconds to warm up. Overrides 'cold_iters' if set")
+
         ("algo_method",
          value<std::string>(&algo_method_str)->default_value("heuristic"),
          "Use different algorithm search API. Options: heuristic, all, index.")
@@ -632,7 +640,7 @@ try
         value<bool>(&arg.dump_matrix)->default_value(false),
         "Dump input and output matrices to a file.")
 
-        ("help,h", "produces this help message")
+        ("help,h", "Produces this help message")
 
         ("version", "Prints the version number");
     // clang-format on

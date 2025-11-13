@@ -55,6 +55,9 @@
 #include <omp.h>
 #include <set>
 
+const int COLD_TEST_ITER=2;
+const int TEST_ITER = 10;
+
 extern "C" __global__ void flush_icache()
 {
     asm __volatile__("s_icache_inv \n\t"
@@ -286,6 +289,44 @@ inline void post_gpu_time(bool         use_gpu_timer,
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
     }
 }
+
+template<typename Call>
+static void get_time_estimate(double &time_appx, Call &call, bool gpu_timer, hipStream_t &stream)
+{
+  hipEvent_t event_gpu_time_start, event_gpu_time_end;
+  CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_start));
+  CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_end));
+  double gpu_time_used;
+  
+  // Warm up
+  int i = 0;
+  for(;i < COLD_TEST_ITER; i++)
+    call(i);
+  
+  pre_gpu_time(gpu_timer, event_gpu_time_start, gpu_time_used, stream);
+  for(;i < COLD_TEST_ITER + TEST_ITER; i++)
+    call(i);
+  post_gpu_time(gpu_timer,
+		event_gpu_time_start,
+		event_gpu_time_end,
+		gpu_time_used,
+		stream);
+  CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_start));
+  CHECK_HIP_ERROR(hipEventDestroy(event_gpu_time_end));
+  
+  time_appx = gpu_time_used / (1000 * TEST_ITER);
+}
+
+static void set_iterations_using_time_estimate(int &hot, int &cold, double time_appx, float hot_time, float cold_time)
+{
+  cold = std::max(1, static_cast<int>(cold_time/time_appx)); 
+  hot = std::max(1, static_cast<int>(hot_time/time_appx)); 
+  hipblaslt_cout << "Setting cold iterations to " << cold << " and "
+		 << "iterations to " << hot << " using estimated latency of "
+		 << time_appx * 1000 << " us" << std::endl;
+}
+
+  
 
 template <typename Tout>
 Tout cast_from_type(void* in, hipDataType type, size_t index)
@@ -1326,6 +1367,8 @@ void testing_matmul_with_bias(const Arguments& arg,
     int32_t gemm_count      = std::max(1, arg.grouped_gemm);
     int64_t rotating        = arg.rotating * 1024 * 1024;
 
+    bool use_duration = (arg.bench_time > 0 || arg.cold_bench_time > 0) ? true : false;
+
     std::vector<int64_t> M(gemm_count), N(gemm_count), K(gemm_count), lda(gemm_count),
         ldb(gemm_count), ldc(gemm_count), ldd(gemm_count), lde(gemm_count);
     std::vector<computeTypeInterface> h_alpha(gemm_count), h_beta(gemm_count);
@@ -1505,7 +1548,9 @@ void testing_matmul_with_bias(const Arguments& arg,
     // Calculating block count
     int32_t max_iters   = max(arg.cold_iters, arg.iters);
     int32_t block_count = max(1, min(max_iters, ceil((float)rotating / totalRotatingSizeNeeded)));
-    if(rotating > 0)
+    if(use_duration && rotating > 0)
+        block_count = max(1, ceil((float)rotating / totalRotatingSizeNeeded));
+    else if(rotating > 0)
     {
         hipblaslt_cout << "Rotating buffer " << rotating / (1024 * 1024) << " MiB. "
                        << "Needed Size: " << totalRotatingSizeNeeded / (1024 * 1024) << " MiB. "
@@ -3623,7 +3668,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
         }
     }
-    else
+    else // if(arg.timing)
     {
         // Get device information
         hipDeviceProp_t deviceProps;
@@ -3644,6 +3689,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                   ? 1
                   : arg.cold_iters;
         int number_hot_calls = arg.iters;
+	float cold_time = arg.cold_bench_time;
+	float hot_time = arg.bench_time;
 
         int    flush_iter      = 100000;
         double flush_time_used = 0;
@@ -3684,6 +3731,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                 EfficiencyMonitor& perf_monitor = getEfficiencyMonitor();
                 if(arg.use_ext)
                 {
+		    auto time_contents = [&](int i){ CHECK_HIPBLASLT_ERROR(gemmVec[i % block_count].run(stream)); };
+		    if(use_duration)
+		    {
+		      double time_appx = 0.0;
+		      get_time_estimate(time_appx, time_contents, arg.use_gpu_timer, stream);
+		      set_iterations_using_time_estimate(number_hot_calls, number_cold_calls, time_appx, hot_time, cold_time);
+		    }
+
                     for(int32_t b = 0; b < block_count; b++)
                     {
                         gemmVec[b].setMaxWorkspaceBytes(workspace_size);
@@ -3697,7 +3752,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
                     for(int i = 0; i < number_cold_calls; i++)
                     {
-                        CHECK_HIPBLASLT_ERROR(gemmVec[i % block_count].run(stream));
+		        time_contents(i);
                         if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
                             copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
                     }
@@ -3726,47 +3781,58 @@ void testing_matmul_with_bias(const Arguments& arg,
 
                     for(int i = 0; i < number_hot_calls; i++)
                     {
-                        CHECK_HIPBLASLT_ERROR(gemmVec[i % block_count].run(stream));
+		        time_contents(i);
                         if(arg.flush)
                             hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
                     }
                 }
-                else
+                else // if(!arg.use_ext)
                 {
+		    auto time_contents = [&](int i){
+                        auto ptr_matmul = matmul[i % block_count][0];
+                        auto ptr_alpha  = arg.scaleAlpha_vector
+                                              ? (dScaleAlphaVec[0].as<char>())
+                                                   + (i % block_count) * size_scaleAlphaVec[0]
+                                              : alpha_in[0];
+
+                        EXPECT_HIPBLAS_STATUS(
+                            hipblasLtMatmul(
+                                handle,
+                                ptr_matmul,
+                                ptr_alpha,
+                                dA[0].as<char>()
+                                    + (i % block_count) * size_dA[0] * realDataTypeSize(TiA),
+                                matA[0],
+                                dB[0].as<char>()
+                                    + (i % block_count) * size_dB[0] * realDataTypeSize(TiB),
+                                matB[0],
+                                &(h_beta[0]),
+                                dC[0].as<char>()
+                                    + (i % block_count) * size_C[0] * realDataTypeSize(To),
+                                matC[0],
+                                (*dDp)[0].as<char>()
+                                    + (i % block_count) * size_D[0] * realDataTypeSize(To),
+                                matD[0],
+                                &heuristicResult[sol].algo,
+                                *dWorkspace,
+                                workspace_size,
+                                stream),
+                            HIPBLAS_STATUS_SUCCESS);
+		    };
+
+		    if(use_duration)
+		    {
+		      double time_appx = 0.0;
+		      get_time_estimate(time_appx, time_contents, arg.use_gpu_timer, stream);
+		      set_iterations_using_time_estimate(number_hot_calls, number_cold_calls, time_appx, hot_time, cold_time);
+		    }
+
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
                     for(int i = 0; i < number_cold_calls; i++)
                     {
-                        auto ptr_matmul = matmul[i % block_count][0];
-                        auto ptr_alpha  = arg.scaleAlpha_vector
-                                              ? (dScaleAlphaVec[0].as<char>())
-                                                   + (i % block_count) * size_scaleAlphaVec[0]
-                                              : alpha_in[0];
-
-                        EXPECT_HIPBLAS_STATUS(
-                            hipblasLtMatmul(
-                                handle,
-                                ptr_matmul,
-                                ptr_alpha,
-                                dA[0].as<char>()
-                                    + (i % block_count) * size_dA[0] * realDataTypeSize(TiA),
-                                matA[0],
-                                dB[0].as<char>()
-                                    + (i % block_count) * size_dB[0] * realDataTypeSize(TiB),
-                                matB[0],
-                                &(h_beta[0]),
-                                dC[0].as<char>()
-                                    + (i % block_count) * size_C[0] * realDataTypeSize(To),
-                                matC[0],
-                                (*dDp)[0].as<char>()
-                                    + (i % block_count) * size_D[0] * realDataTypeSize(To),
-                                matD[0],
-                                &heuristicResult[sol].algo,
-                                *dWorkspace,
-                                workspace_size,
-                                stream),
-                            HIPBLAS_STATUS_SUCCESS);
+		        time_contents(i);
                         if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
                             copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
                     }
@@ -3795,34 +3861,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
                     for(int i = 0; i < number_hot_calls; i++)
                     {
-                        auto ptr_matmul = matmul[i % block_count][0];
-                        auto ptr_alpha  = arg.scaleAlpha_vector
-                                              ? (dScaleAlphaVec[0].as<char>())
-                                                   + (i % block_count) * size_scaleAlphaVec[0]
-                                              : alpha_in[0];
-                        EXPECT_HIPBLAS_STATUS(
-                            hipblasLtMatmul(
-                                handle,
-                                ptr_matmul,
-                                ptr_alpha,
-                                dA[0].as<char>()
-                                    + (i % block_count) * size_dA[0] * realDataTypeSize(TiA),
-                                matA[0],
-                                dB[0].as<char>()
-                                    + (i % block_count) * size_dB[0] * realDataTypeSize(TiB),
-                                matB[0],
-                                &(h_beta[0]),
-                                dC[0].as<char>()
-                                    + (i % block_count) * size_C[0] * realDataTypeSize(To),
-                                matC[0],
-                                (*dDp)[0].as<char>()
-                                    + (i % block_count) * size_D[0] * realDataTypeSize(To),
-                                matD[0],
-                                &heuristicResult[sol].algo,
-                                *dWorkspace,
-                                workspace_size,
-                                stream),
-                            HIPBLAS_STATUS_SUCCESS);
+		        time_contents(i);
                         if(arg.flush)
                             hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
                     }
@@ -3833,8 +3872,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                               gpu_time_used,
                               stream);
                 perf_monitor.stop();
+
+		gpu_time_used /= number_hot_calls;
             }
-            else
+            else // if(do_grouped_gemm)
             {
                 EfficiencyMonitor& perf_monitor = getEfficiencyMonitor();
                 if(arg.use_user_args)
@@ -3857,13 +3898,24 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                   gemm_count * sizeof(hipblaslt_ext::UserArguments),
                                                   hipMemcpyHostToDevice));
                     }
+		    auto time_contents = [&](int i){
+		      CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(
+                            d_userArgsVec[i % block_count], stream));
+		    };
+
+		    if(use_duration)
+		    {
+		      double time_appx = 0.0;
+		      get_time_estimate(time_appx, time_contents, arg.use_gpu_timer, stream);
+		      set_iterations_using_time_estimate(number_hot_calls, number_cold_calls, time_appx, hot_time, cold_time);
+		    }
+
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
                     for(int i = 0; i < number_cold_calls; i++)
                     {
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(
-                            d_userArgsVec[i % block_count], stream));
+		        time_contents(i);
                         if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
                             copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
                     }
@@ -3891,8 +3943,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
 
                     for(int i = 0; i < number_hot_calls; i++)
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(
-                            d_userArgsVec[i % block_count], stream));
+		        time_contents(i);
 
                     post_gpu_time(arg.use_gpu_timer,
                                   event_gpu_time_start,
@@ -3900,8 +3951,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   gpu_time_used,
                                   stream);
                     perf_monitor.stop();
+
+		    gpu_time_used /= number_hot_calls;
                 }
-                else
+                else //if(!arg.use_user_args)
                 {
                     //grouped gemm
                     for(int32_t b = 0; b < block_count; b++)
@@ -3915,12 +3968,23 @@ void testing_matmul_with_bias(const Arguments& arg,
                             stream));
                     }
 
+		    auto time_contents = [&](int i){
+                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(stream));
+		    };
+
+		    if(use_duration)
+		    {
+		      double time_appx = 0.0;
+		      get_time_estimate(time_appx, time_contents, arg.use_gpu_timer, stream);
+		      set_iterations_using_time_estimate(number_hot_calls, number_cold_calls, time_appx, hot_time, cold_time);
+		    }
+
                     if(arg.skip_slow_solution_ratio)
                         pre_gpu_time(
                             arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
                     for(int i = 0; i < number_cold_calls; i++)
                     {
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(stream));
+		        time_contents(i);
                         if(i == 0 && (arg.unit_check || arg.norm_check || arg.allclose_check))
                             copy_gemm_to_host(stream, gemm_count, hD_1, (*dDp));
                     }
@@ -3948,7 +4012,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
 
                     for(int i = 0; i < number_hot_calls; i++)
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(stream));
+		        time_contents(i);
 
                     post_gpu_time(arg.use_gpu_timer,
                                   event_gpu_time_start,
@@ -3956,6 +4020,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   gpu_time_used,
                                   stream);
                     perf_monitor.stop();
+
+		    gpu_time_used /= number_hot_calls;
                 }
             }
 

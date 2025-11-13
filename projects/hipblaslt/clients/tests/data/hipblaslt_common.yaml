@@ -522,6 +522,8 @@ Arguments:
   - batch_count: c_int32
   - iters: c_int32
   - cold_iters: c_int32
+  - bench_time: c_float
+  - cold_bench_time: c_float
   - algo: c_uint32
   - solution_index: c_int32
   - requested_solution_num: c_int32
@@ -648,6 +650,8 @@ Defaults:
   timing: 0
   iters: 10
   cold_iters: 2
+  bench_time: -1.0
+  cold_bench_time: -1.0
   algo: 0
   solution_index: -1
   requested_solution_num: 1
