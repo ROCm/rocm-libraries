@@ -13,7 +13,7 @@ rocBLAS documentation is available at
 * Fix to avoid false Clang static analysis warnings.
 
 ### Optimized
-* Level 2 tpmv function.
+* Level 2 `tpmv` function.
 
 ## rocBLAS 5.1.1 for ROCm 7.1.1
 
