@@ -640,7 +640,7 @@ void test_radix_rank_with_prefix_sum_output()
     constexpr unsigned     end_bit          = start_bit + radix_bits;
     constexpr size_t       items_per_block  = block_size * items_per_thread;
 
-    if constexpr(std::is_same<key_type, unsigned long long>::value)
+    if constexpr(std::is_same_v<key_type, unsigned long long>)
     {
 
         // Given block size not supported

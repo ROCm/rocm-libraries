@@ -137,9 +137,13 @@ inline auto assert_near(const std::vector<T>& result, const std::vector<T>& expe
     }
 }
 
-template<class T, std::enable_if_t<std::is_same<T, test_utils::bfloat16>::value ||
-                                       std::is_same<T, test_utils::half>::value, bool> = true>
-inline void assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
+template<
+    class T,
+    std::enable_if_t<std::is_same_v<T, test_utils::bfloat16> || std::is_same_v<T, test_utils::half>,
+                     bool>
+    = true>
+inline void
+    assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
@@ -176,9 +180,14 @@ inline auto assert_near(const std::vector<custom_test_type<T>>& result, const st
     }
 }
 
-template<class T, std::enable_if_t<std::is_same<T, test_utils::bfloat16>::value ||
-                                       std::is_same<T, test_utils::half>::value, bool> = true>
-inline void assert_near(const std::vector<custom_test_type<T>>& result, const std::vector<custom_test_type<T>>& expected, const float percent)
+template<
+    class T,
+    std::enable_if_t<std::is_same_v<T, test_utils::bfloat16> || std::is_same_v<T, test_utils::half>,
+                     bool>
+    = true>
+inline void assert_near(const std::vector<custom_test_type<T>>& result,
+                        const std::vector<custom_test_type<T>>& expected,
+                        const float                             percent)
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
@@ -209,8 +218,11 @@ inline auto assert_near(const T& result, const T& expected, const float)
     ASSERT_EQ(result, expected);
 }
 
-template<class T, std::enable_if_t<std::is_same<T, test_utils::bfloat16>::value ||
-                                       std::is_same<T, test_utils::half>::value, bool> = true>
+template<
+    class T,
+    std::enable_if_t<std::is_same_v<T, test_utils::bfloat16> || std::is_same_v<T, test_utils::half>,
+                     bool>
+    = true>
 inline void assert_near(const T& result, const T& expected, const float percent)
 {
     if(bit_equal(result, expected)) return; // Check to also regard equality of NaN's, -NaN, +inf, -inf as correct.

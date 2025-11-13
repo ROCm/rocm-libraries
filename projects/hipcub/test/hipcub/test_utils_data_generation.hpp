@@ -333,12 +333,12 @@ void add_special_values(std::vector<T>& source, int seed_value)
 // Actually causes problems with signed/unsigned char on Windows using clang.
 template<typename T>
 struct is_valid_for_int_distribution
-    : std::integral_constant<
-          bool,
-          std::is_same<short, T>::value || std::is_same<unsigned short, T>::value
-              || std::is_same<int, T>::value || std::is_same<unsigned int, T>::value
-              || std::is_same<long, T>::value || std::is_same<unsigned long, T>::value
-              || std::is_same<long long, T>::value || std::is_same<unsigned long long, T>::value>
+    : std::integral_constant<bool,
+                             std::is_same_v<short, T> || std::is_same_v<unsigned short, T>
+                                 || std::is_same_v<int, T> || std::is_same_v<unsigned int, T>
+                                 || std::is_same_v<long, T> || std::is_same_v<unsigned long, T>
+                                 || std::is_same_v<long long, T>
+                                 || std::is_same_v<unsigned long long, T>>
 {};
 
 template<class T>
@@ -360,8 +360,8 @@ inline auto get_random_data(size_t size, T min, T max, int seed_value) ->
 template<class T, class S, class U>
 inline auto get_random_data(size_t size, S min, U max, int seed_value) ->
     typename std::enable_if<!std::is_integral<T>::value && !is_custom_test_type<T>::value
-                                && !std::is_same<T, __int128_t>::value
-                                && !std::is_same<T, __uint128_t>::value,
+                                && !std::is_same_v<T, __int128_t>
+                                && !std::is_same_v<T, __uint128_t>,
                             std::vector<T>>::type
 {
     std::default_random_engine gen(seed_value);
@@ -376,7 +376,7 @@ inline auto get_random_data(size_t size, S min, U max, int seed_value) ->
 
 template<class T, class S, class U>
 inline auto get_random_data(size_t size, S min, U max, int seed_value) ->
-    typename std::enable_if<std::is_same<T, __int128_t>::value, std::vector<T>>::type
+    typename std::enable_if<std::is_same_v<T, __int128_t>, std::vector<T>>::type
 {
     std::default_random_engine             gen(seed_value);
     std::uniform_int_distribution<int64_t> distribution(static_cast<int64_t>(min),
@@ -390,7 +390,7 @@ inline auto get_random_data(size_t size, S min, U max, int seed_value) ->
 
 template<class T, class S, class U>
 inline auto get_random_data(size_t size, S min, U max, int seed_value) ->
-    typename std::enable_if<std::is_same<T, __uint128_t>::value, std::vector<T>>::type
+    typename std::enable_if<std::is_same_v<T, __uint128_t>, std::vector<T>>::type
 {
     std::default_random_engine              gen(seed_value);
     std::uniform_int_distribution<uint64_t> distribution(static_cast<uint64_t>(min),

@@ -75,7 +75,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
     using U = typename TestFixture::output_type;
     using F = typename TestFixture::flag_type;
 
-    constexpr bool inplace = std::is_same<T, U>::value;
+    constexpr bool inplace = std::is_same_v<T, U>;
 
     hipStream_t stream = 0; // default
     if(TestFixture::use_graphs)
@@ -337,7 +337,7 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
 
-    constexpr bool inplace = std::is_same<T, U>::value;
+    constexpr bool inplace = std::is_same_v<T, U>;
 
     hipStream_t stream = 0; // default
     if(TestFixture::use_graphs)
@@ -492,7 +492,7 @@ TYPED_TEST(HipcubDeviceSelectTests, FlaggedIf)
     using U = typename TestFixture::output_type;
     using F = typename TestFixture::flag_type;
 
-    constexpr bool inplace = std::is_same<T, U>::value;
+    constexpr bool inplace = std::is_same_v<T, U>;
 
     hipStream_t stream = 0; // default
     if(TestFixture::use_graphs)

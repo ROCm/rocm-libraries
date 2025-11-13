@@ -221,8 +221,8 @@ template<class Benchmark,
          bool         WithTile,
          unsigned int Trials = 100>
 auto run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
-    -> std::enable_if_t<!std::is_same<Benchmark, subtract_left_partial_tile>::value
-                        && !std::is_same<Benchmark, subtract_right_partial_tile>::value>
+    -> std::enable_if_t<!std::is_same_v<Benchmark, subtract_left_partial_tile>
+                        && !std::is_same_v<Benchmark, subtract_right_partial_tile>>
 {
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto     num_blocks      = (N + items_per_block - 1) / items_per_block;
@@ -271,8 +271,8 @@ template<class Benchmark,
          bool         WithTile,
          unsigned int Trials = 100>
 auto run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
-    -> std::enable_if_t<std::is_same<Benchmark, subtract_left_partial_tile>::value
-                        || std::is_same<Benchmark, subtract_right_partial_tile>::value>
+    -> std::enable_if_t<std::is_same_v<Benchmark, subtract_left_partial_tile>
+                        || std::is_same_v<Benchmark, subtract_right_partial_tile>>
 {
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto     num_blocks      = (N + items_per_block - 1) / items_per_block;
@@ -352,7 +352,7 @@ void add_benchmarks(const std::string&                            name,
                                                        BENCHMARK_TYPE(long long, 256, false),
                                                        BENCHMARK_TYPE(double, 256, false)};
 
-    if(!std::is_same<Benchmark, subtract_right_partial_tile>::value)
+    if(!std::is_same_v<Benchmark, subtract_right_partial_tile>)
     {
         bs.insert(bs.end(),
                   {BENCHMARK_TYPE(int, 256, true),
