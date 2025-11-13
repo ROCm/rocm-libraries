@@ -29,7 +29,6 @@
 
 // hipcub API
 #include <hipcub/device/device_reduce.hpp>
-#include <hipcub/iterator/constant_input_iterator.hpp>
 
 // Params for tests
 template<class InputType, class OutputType = InputType, bool UseGraphs = false>

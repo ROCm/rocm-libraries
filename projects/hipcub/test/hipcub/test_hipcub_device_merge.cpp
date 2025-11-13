@@ -24,7 +24,6 @@
 
 // hipcub API
 #include <hipcub/device/device_merge.hpp>
-#include <hipcub/iterator/counting_input_iterator.hpp>
 
 #include "identity_iterator.hpp"
 #include "test_utils_data_generation.hpp"

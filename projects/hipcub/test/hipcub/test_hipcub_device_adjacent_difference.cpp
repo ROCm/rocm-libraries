@@ -24,9 +24,6 @@
 
 // hipcub API
 #include <hipcub/device/device_adjacent_difference.hpp>
-#include <hipcub/iterator/counting_input_iterator.hpp>
-#include <hipcub/iterator/discard_output_iterator.hpp>
-#include <hipcub/iterator/transform_input_iterator.hpp>
 
 #include "test_utils.hpp"
 #include "test_utils_data_generation.hpp"

@@ -28,7 +28,6 @@
 #include <hipcub/device/device_reduce.hpp>
 #include <hipcub/device/device_scan.hpp>
 #include <hipcub/device/device_segmented_reduce.hpp>
-#include <hipcub/iterator/transform_input_iterator.hpp>
 #include <hipcub/thread/thread_operators.hpp>
 #include <hipcub/util_type.hpp>
 
