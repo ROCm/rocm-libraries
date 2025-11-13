@@ -917,7 +917,7 @@ ROCWMMA_HOST void gemm_test(uint32_t m, uint32_t n, uint32_t k)
 
     std::cout << hTBLOCK_X << ", " << hTBLOCK_Y << ", " << hBLOCKS_X << ", " << hBLOCKS_Y << ", "
               << hROCWMMA_M << ", " << hROCWMMA_N << ", " << hROCWMMA_K << ", " << m << ", " << n
-              << ", " << k << ", " << lda << ", " << ldb << ", " << ", " << ldd << ", "
+              << ", " << k << ", " << lda << ", " << ldb << ", " << ldd << ", "
               << elapsedTimeMs << ", " << gFlops << ", " << tFlopsPerSec << "," << sizeof(InputT)
               << std::endl;
 
