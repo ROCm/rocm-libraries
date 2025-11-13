@@ -42,6 +42,8 @@
 #include <rocprim/detail/various.hpp> // IWYU pragma: export
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 
+#include <type_traits>
+
 BEGIN_HIPCUB_NAMESPACE
 
 /** \brief Twiddling keys for radix sort. */
@@ -92,8 +94,7 @@ struct RadixSortTwiddle
 
         enum
         {
-            HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH FLOAT_KEY = TraitsT::CATEGORY == FLOATING_POINT,
-            HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+            FLOAT_KEY = std::is_floating_point<KeyT>::value,
         };
 
         static __device__ __forceinline__ UnsignedBits ProcessFloatMinusZero(UnsignedBits key)

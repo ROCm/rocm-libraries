@@ -331,20 +331,15 @@ inline std::ostream& operator<<(std::ostream &out, const half_t &x)
  * Traits overloads
  ******************************************************************************/
 
-template <>
-struct hipcub::FpLimits<half_t>
-{
-    static __host__ __device__ __forceinline__ half_t Max() { return half_t::max(); }
-
-    static __host__ __device__ __forceinline__ half_t Lowest() { return half_t::lowest(); }
-};
-
 #if defined(__HIP_PLATFORM_NVIDIA__)
 _CCCL_SUPPRESS_DEPRECATED_PUSH
 #else
 HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
 #endif
-template <> struct hipcub::NumericTraits<half_t> : hipcub::BaseTraits<FLOATING_POINT, true, false, unsigned short, half_t> {};
+template<>
+struct hipcub::NumericTraits<half_t>
+    : hipcub::BaseTraits<hipcub::FLOATING_POINT, unsigned short, half_t>
+{};
 #if defined(__HIP_PLATFORM_NVIDIA__)
 _CCCL_SUPPRESS_DEPRECATED_POP
 #else

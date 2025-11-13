@@ -95,8 +95,8 @@ struct bfloat16_t
     /// Constructor from unsigned long long int
     template<typename T,
              typename = typename std::enable_if<
-                 std::is_same<T, unsigned long long int>::value
-                 && (!std::is_same<std::size_t, unsigned long long int>::value)>::type>
+                 std::is_same_v<T, unsigned long long int>
+                 && (!std::is_same_v<std::size_t, unsigned long long int>)>::type>
     __host__ __device__ __forceinline__ bfloat16_t(T a)
     {
         *this = bfloat16_t(float(a));
@@ -278,20 +278,15 @@ inline std::ostream& operator<<(std::ostream &out, const bfloat16_t &x)
  * Traits overloads
  ******************************************************************************/
 
-template <>
-struct hipcub::FpLimits<bfloat16_t>
-{
-    static __host__ __device__ __forceinline__ bfloat16_t Max() { return bfloat16_t::max(); }
-
-    static __host__ __device__ __forceinline__ bfloat16_t Lowest() { return bfloat16_t::lowest(); }
-};
-
 #if defined(__HIP_PLATFORM_NVIDIA__)
 _CCCL_SUPPRESS_DEPRECATED_PUSH
 #else
 HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
 #endif
-template <> struct hipcub::NumericTraits<bfloat16_t> : hipcub::BaseTraits<FLOATING_POINT, true, false, unsigned short, bfloat16_t> {};
+template<>
+struct hipcub::NumericTraits<bfloat16_t>
+    : hipcub::BaseTraits<hipcub::FLOATING_POINT, unsigned short, bfloat16_t>
+{};
 #if defined(__HIP_PLATFORM_NVIDIA__)
 _CCCL_SUPPRESS_DEPRECATED_POP
 #else
