@@ -32,6 +32,7 @@
 #include <miopen/conv_solution.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/legacy_exhaustive_search.hpp>
+#include <miopen/generic_search.hpp>
 #include <miopen/miopen.h>
 #include <miopen/performance_config.hpp>
 #include <miopen/solver.hpp>
@@ -4502,7 +4503,11 @@ struct ConvHipImplicitGemmGroupFwd
     MIOPEN_INTERNALS_EXPORT PerformanceConfigHipImplicitGemmGroupFwd<backend>
     Search(const ExecutionContext&,
            const miopen::conv::ProblemDescription&,
-           const AnyInvokeParams& invoke_ctx) const override;
+           const AnyInvokeParams& invoke_ctx) const override
+    {
+        throw std::runtime_error(
+            "Search() not implemented for ConvHipImplicitGemmGroupFwd<Backend> base template.");
+    }
     MIOPEN_INTERNALS_EXPORT bool
     IsApplicable(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
@@ -4535,6 +4540,14 @@ struct ConvHipImplicitGemmGroupFwdXdlops final : ConvHipImplicitGemmGroupFwd<Bac
     {
         return GetSolverDbId<ConvHipImplicitGemmGroupFwdXdlops>();
     }
+
+    MIOPEN_INTERNALS_EXPORT PerformanceConfigHipImplicitGemmGroupFwd<Backend::Xdlops>
+    Search(const ExecutionContext& ctx,
+           const miopen::conv::ProblemDescription& problem,
+           const AnyInvokeParams& invoke_ctx) const override
+    {
+        return GenericSearch(*this, ctx, problem, invoke_ctx);
+    }
 };
 
 struct ConvHipImplicitGemmGroupFwdWmma final : ConvHipImplicitGemmGroupFwd<Backend::Wmma>
@@ -4544,6 +4557,14 @@ struct ConvHipImplicitGemmGroupFwdWmma final : ConvHipImplicitGemmGroupFwd<Backe
     const std::string& SolverDbId() const override
     {
         return GetSolverDbId<ConvHipImplicitGemmGroupFwdWmma>();
+    }
+
+    MIOPEN_INTERNALS_EXPORT PerformanceConfigHipImplicitGemmGroupFwd<Backend::Wmma>
+    Search(const ExecutionContext& ctx,
+           const miopen::conv::ProblemDescription& problem,
+           const AnyInvokeParams& invoke_ctx) const override
+    {
+        return GenericSearch(*this, ctx, problem, invoke_ctx);
     }
 };
 
@@ -4625,7 +4646,11 @@ struct ConvHipImplicitGemm3DGroupFwd
     MIOPEN_INTERNALS_EXPORT PerformanceConfigHipImplicitGemm3DGroupFwd<backend>
     Search(const ExecutionContext&,
            const miopen::conv::ProblemDescription&,
-           const AnyInvokeParams& invoke_ctx) const override;
+           const AnyInvokeParams& invoke_ctx) const override
+    {
+        throw std::runtime_error(
+            "Search() not implemented for ConvHipImplicitGemm3DGroupFwd<Backend> base template.");
+    }
     MIOPEN_INTERNALS_EXPORT bool
     IsApplicable(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
@@ -4656,6 +4681,14 @@ struct ConvHipImplicitGemm3DGroupFwdXdlops final : ConvHipImplicitGemm3DGroupFwd
     {
         return GetSolverDbId<ConvHipImplicitGemm3DGroupFwdXdlops>();
     }
+
+    MIOPEN_INTERNALS_EXPORT PerformanceConfigHipImplicitGemm3DGroupFwd<Backend::Xdlops>
+    Search(const ExecutionContext& ctx,
+           const miopen::conv::ProblemDescription& problem,
+           const AnyInvokeParams& invoke_ctx) const override
+    {
+        return GenericSearch(*this, ctx, problem, invoke_ctx);
+    }
 };
 
 struct ConvHipImplicitGemm3DGroupFwdWmma final : ConvHipImplicitGemm3DGroupFwd<Backend::Wmma>
@@ -4665,6 +4698,14 @@ struct ConvHipImplicitGemm3DGroupFwdWmma final : ConvHipImplicitGemm3DGroupFwd<B
     const std::string& SolverDbId() const override
     {
         return GetSolverDbId<ConvHipImplicitGemm3DGroupFwdWmma>();
+    }
+
+    MIOPEN_INTERNALS_EXPORT PerformanceConfigHipImplicitGemm3DGroupFwd<Backend::Wmma>
+    Search(const ExecutionContext& ctx,
+           const miopen::conv::ProblemDescription& problem,
+           const AnyInvokeParams& invoke_ctx) const override
+    {
+        return GenericSearch(*this, ctx, problem, invoke_ctx);
     }
 };
 

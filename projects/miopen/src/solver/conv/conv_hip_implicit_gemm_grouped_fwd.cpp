@@ -29,7 +29,6 @@
 
 #include <miopen/conv/solvers.hpp>
 #include <miopen/env.hpp>
-#include <miopen/generic_search.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
@@ -552,15 +551,6 @@ ConvHipImplicitGemmGroupFwd<backend>::GetWorkspaceSize(const ExecutionContext&,
                                                        const ProblemDescription& problem) const
 {
     return GetWorkspaceSizeLayoutTransformConv(problem);
-}
-
-template <Backend backend>
-PerformanceConfigHipImplicitGemmGroupFwd<backend>
-ConvHipImplicitGemmGroupFwd<backend>::Search(const ExecutionContext& ctx,
-                                             const ProblemDescription& problem,
-                                             const AnyInvokeParams& invoke_ctx) const
-{
-    return GenericSearch(*this, ctx, problem, invoke_ctx);
 }
 
 template <Backend backend>
