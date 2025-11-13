@@ -128,8 +128,5 @@ struct iterate_thread_store<MAX, MAX>
 
 } // namespace detail
 
-template<int COUNT, int MAX>
-using IterateThreadStore HIPCUB_DEPRECATED = detail::iterate_thread_store<COUNT, MAX>;
-
 END_HIPCUB_NAMESPACE
 #endif
