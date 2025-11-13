@@ -224,6 +224,8 @@ hipsparseStatus_t testing_spmv_sell(Arguments argus)
 
     I nslices = (m - 1) / slice_size + 1;
 
+    std::cout << "m: " << m << " n: " << n << " nnz: " << nnz << " nslices: " << nslices << std::endl;
+
     std::vector<I> hsell_slice_offsets;
     std::vector<J> hsell_col_ind;
     std::vector<T> hsell_val;
