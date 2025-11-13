@@ -228,9 +228,8 @@ template<typename Benchmark>
 auto add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     const std::string&                            method_name,
                     hipStream_t                                   stream,
-                    size_t                                        size)
-    -> std::enable_if_t<std::is_same<Benchmark, inclusive_scan>::value
-                        || std::is_same<Benchmark, exclusive_scan>::value>
+                    size_t size) -> std::enable_if_t<std::is_same_v<Benchmark, inclusive_scan>
+                                                     || std::is_same_v<Benchmark, exclusive_scan>>
 {
     using custom_double2    = benchmark_utils::custom_type<double, double>;
     using custom_int_double = benchmark_utils::custom_type<int, double>;
@@ -249,7 +248,7 @@ template<typename Benchmark>
 auto add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     const std::string&                            method_name,
                     hipStream_t                                   stream,
-                    size_t size) -> std::enable_if_t<std::is_same<Benchmark, broadcast>::value>
+                    size_t size) -> std::enable_if_t<std::is_same_v<Benchmark, broadcast>>
 {
     using custom_double2    = benchmark_utils::custom_type<double, double>;
     using custom_int_double = benchmark_utils::custom_type<int, double>;

@@ -146,10 +146,10 @@ TYPED_TEST(HipcubBlockDiscontinuity, FlagHeads)
 
     using type = typename TestFixture::params::type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
-    using stored_flag_type = typename std::conditional<
-        std::is_same<bool, typename TestFixture::params::flag_type>::value,
-        int,
-        typename TestFixture::params::flag_type>::type;
+    using stored_flag_type =
+        typename std::conditional<std::is_same_v<bool, typename TestFixture::params::flag_type>,
+                                  int,
+                                  typename TestFixture::params::flag_type>::type;
     using flag_type                   = typename TestFixture::params::flag_type;
     using flag_op_type                = typename TestFixture::params::flag_op_type;
     constexpr size_t block_size       = TestFixture::params::block_size;
@@ -284,10 +284,10 @@ TYPED_TEST(HipcubBlockDiscontinuity, FlagTails)
 
     using type = typename TestFixture::params::type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
-    using stored_flag_type = typename std::conditional<
-        std::is_same<bool, typename TestFixture::params::flag_type>::value,
-        int,
-        typename TestFixture::params::flag_type>::type;
+    using stored_flag_type =
+        typename std::conditional<std::is_same_v<bool, typename TestFixture::params::flag_type>,
+                                  int,
+                                  typename TestFixture::params::flag_type>::type;
     using flag_type                   = typename TestFixture::params::flag_type;
     using flag_op_type                = typename TestFixture::params::flag_op_type;
     constexpr size_t block_size       = TestFixture::params::block_size;
@@ -451,10 +451,10 @@ TYPED_TEST(HipcubBlockDiscontinuity, FlagHeadsAndTails)
 
     using type = typename TestFixture::params::type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
-    using stored_flag_type = typename std::conditional<
-        std::is_same<bool, typename TestFixture::params::flag_type>::value,
-        int,
-        typename TestFixture::params::flag_type>::type;
+    using stored_flag_type =
+        typename std::conditional<std::is_same_v<bool, typename TestFixture::params::flag_type>,
+                                  int,
+                                  typename TestFixture::params::flag_type>::type;
     using flag_type                   = typename TestFixture::params::flag_type;
     using flag_op_type                = typename TestFixture::params::flag_op_type;
     constexpr size_t block_size       = TestFixture::params::block_size;

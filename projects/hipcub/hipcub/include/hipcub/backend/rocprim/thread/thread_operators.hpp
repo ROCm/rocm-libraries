@@ -559,7 +559,7 @@ namespace detail
 // Non-void value type.
 template<typename IteratorT, typename FallbackT>
 using non_void_value_t =
-    typename std::conditional<std::is_same<IteratorT, void>::value, FallbackT, IteratorT>::type;
+    typename std::conditional<std::is_same_v<IteratorT, void>, FallbackT, IteratorT>::type;
 
 /// Intermediate accumulator type.
 template<typename Invokable, typename InputT, typename InitT = InputT>

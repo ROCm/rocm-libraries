@@ -357,8 +357,7 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
 
 template<class T>
 inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024) ->
-    typename std::enable_if<!is_custom_type<T>::value
-                                && !std::is_same<decltype(max.x), void>::value,
+    typename std::enable_if<!is_custom_type<T>::value && !std::is_same_v<decltype(max.x), void>,
                             std::vector<T>>::type
 {
 
