@@ -2848,7 +2848,7 @@ inline void host_sellmv(hipsparseOperation_t trans,
         // Scale y with beta
         for(J i = 0; i < N; ++i)
         {
-            y[i] *= beta;
+            y[i] = testing_mult(y[i], beta);
         }
 
         // Transposed SpMV
