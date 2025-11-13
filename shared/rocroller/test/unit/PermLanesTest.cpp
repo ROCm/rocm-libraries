@@ -169,24 +169,28 @@ namespace PermLanesTest
                 result.data(), dResult.get(), result.size() * sizeof(uint8_t), hipMemcpyDefault),
             HasHipSuccess(0));
 
-        int nWaves        = 4;
-        int nLanes        = 16;
-        int nSIMDsPerWave = 4;
-        int nSIMDIndex    = waveMN / nLanes;
-        int nSIMDBlock    = nSIMDsPerWave / nSIMDIndex;
-        int nVGPRIndex    = nSIMDIndex;
-        int nVGPRBlock    = nSIMDBlock;
+        int nWaves          = 4;
+        int nLanes          = 16;
+        int nSIMDsPerWave   = 4;
+        int nSIMDIndex      = waveMN / nLanes;
+        int nSIMDBlock      = nSIMDsPerWave / nSIMDIndex;
+        int nVGPRIndex      = std::min(nSIMDIndex, miK);
+        int nVGPRBlock      = waveK / nSIMDBlock / nVGPRIndex;
+        int nSIMDIndexBlock = nVGPRIndex;
+        int nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
 
         // clang-format off
         for(int wave      = 0;      wave < nWaves; wave++)
-        for(int simdIndex = 0; simdIndex < nSIMDIndex; simdIndex++)
+        for(int simdIndexBlock = 0; simdIndexBlock < nSIMDIndexBlock; simdIndexBlock++)
+        for(int simdIndexIndex = 0; simdIndexIndex < nSIMDIndexIndex; simdIndexIndex++)
         for(int lane      = 0;      lane < nLanes; lane++)
         for(int simdBlock = 0; simdBlock < nSIMDBlock; simdBlock++)
         for(int vgprBlock = 0; vgprBlock < nVGPRBlock; vgprBlock++)
         for(int vgprIndex = 0; vgprIndex < nVGPRIndex;    vgprIndex++)
         {
-            auto aIdx = wave * nSIMDIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
-                        + simdIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+            auto aIdx = wave * nSIMDIndexBlock * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdIndexBlock * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
                         + lane * nSIMDBlock * nVGPRBlock * nVGPRIndex
                         + simdBlock * nVGPRBlock * nVGPRIndex
                         + vgprBlock * nVGPRIndex + vgprIndex;
@@ -195,20 +199,30 @@ namespace PermLanesTest
 
             if(waveMN == 64)
             {
-                resultIdx = wave * nSIMDIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
-                        + (vgprBlock * nVGPRIndex + vgprIndex) * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                resultIdx = wave * nSIMDIndexBlock * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + vgprIndex * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
                         + lane * nSIMDBlock * nVGPRBlock * nVGPRIndex
                         + simdBlock * nVGPRBlock * nVGPRIndex
-                        + simdIndex;
+                        + vgprBlock * nVGPRIndex + simdIndexBlock;
             }
-            else if(waveMN == 32)
+            else if(waveMN == 32 && miMN == 16)
             {
-                resultIdx = wave * nSIMDIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
-                        + vgprIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                resultIdx = wave * nSIMDIndexBlock * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + vgprIndex * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
                         + lane * nSIMDBlock * nVGPRBlock * nVGPRIndex
                         + vgprBlock * nVGPRBlock * nVGPRIndex
-                        + simdBlock * nVGPRIndex
-                        + simdIndex;
+                        + simdBlock * nVGPRIndex + simdIndexBlock;
+            }
+            else if(waveMN == 32 && miMN == 32)
+            {
+                resultIdx = wave * nSIMDIndexBlock * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdIndexBlock * nSIMDIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + simdIndexIndex * nLanes * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + lane * nSIMDBlock * nVGPRBlock * nVGPRIndex
+                        + vgprIndex * nVGPRBlock * nVGPRIndex
+                        + simdBlock * nVGPRIndex + vgprBlock;
             }
 
             ASSERT_EQ(a[aIdx], result[resultIdx]);
@@ -219,14 +233,17 @@ namespace PermLanesTest
                                      static_cast<size_t>(nVGPRBlock),
                                      static_cast<size_t>(nSIMDBlock),
                                      static_cast<size_t>(nLanes),
-                                     static_cast<size_t>(nSIMDIndex),
+                                     static_cast<size_t>(nSIMDIndexIndex),
+                                     static_cast<size_t>(nSIMDIndexBlock),
                                      static_cast<size_t>(nWaves)};
 
         TensorDescriptor src(DataType::E8M0, sizes), dst;
         if(waveMN == 64)
-            dst = TensorDescriptor::ShuffledNoPadding(DataType::E8M0, sizes, {4, 1, 2, 3, 0, 5});
-        if(waveMN == 32)
-            dst = TensorDescriptor::ShuffledNoPadding(DataType::E8M0, sizes, {4, 2, 1, 3, 0, 5});
+            dst = TensorDescriptor::ShuffledNoPadding(DataType::E8M0, sizes, {5, 1, 2, 3, 4, 0, 6});
+        if(waveMN == 32 && miMN == 16)
+            dst = TensorDescriptor::ShuffledNoPadding(DataType::E8M0, sizes, {5, 2, 1, 3, 4, 0, 6});
+        if(waveMN == 32 && miMN == 32)
+            dst = TensorDescriptor::ShuffledNoPadding(DataType::E8M0, sizes, {1, 2, 0, 3, 4, 5, 6});
 
         auto a_reordered = shuffleDims(a, dst, src);
         EXPECT_EQ(a_reordered, result);
@@ -250,5 +267,11 @@ namespace PermLanesTest
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes32);
         executePermLanesBlockScale(m_context, 64, 4, 32, 2);
+    }
+
+    TEST_F(PermLanesTest, PermLanesBlockScale32x8MI32x2GPUTest)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes32);
+        executePermLanesBlockScale(m_context, 32, 8, 32, 2);
     }
 }

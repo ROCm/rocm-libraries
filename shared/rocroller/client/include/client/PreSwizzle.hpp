@@ -62,8 +62,8 @@ namespace rocRoller::Client
         size_t nSIMDBlock      = nSIMDsPerWave / nSIMDIndex;
         size_t nVGPRIndex      = std::min(nSIMDIndex, subTileK);
         size_t nVGPRBlock      = tileK / nSIMDBlock / nVGPRIndex;
-        size_t nSIMDIndexIndex = nVGPRIndex;
-        size_t nSIMDIndexBlock = nSIMDIndex / nSIMDIndexIndex;
+        size_t nSIMDIndexBlock = nVGPRIndex;
+        size_t nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
 
         std::vector<size_t> srcSizes = {nVGPRIndex,
                                         nVGPRBlock,
@@ -86,12 +86,12 @@ namespace rocRoller::Client
         if(tileMN == 64)
         {
             dst = TensorDescriptor::ShuffledNoPadding(
-                desc.dataType(), srcSizes, {5, 1, 2, 3, 4, 0, 6, 7});
+                desc.dataType(), srcSizes, {6, 1, 2, 3, 4, 5, 0, 7});
         }
         else if(tileMN == 32 && subTileK == 4)
         {
             dst = TensorDescriptor::ShuffledNoPadding(
-                desc.dataType(), srcSizes, {5, 2, 1, 3, 4, 0, 6, 7});
+                desc.dataType(), srcSizes, {6, 2, 1, 3, 4, 5, 0, 7});
         }
         else if(tileMN == 32 && subTileK == 2)
         {

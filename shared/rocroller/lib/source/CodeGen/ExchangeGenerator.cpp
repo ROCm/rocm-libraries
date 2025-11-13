@@ -68,76 +68,7 @@ namespace rocRoller
                 waveTileExpr = coords.reverse({waveTileTag})[0];
             }
 
-            if(waveMN == 64 && miMN == 16)
-            {
-                Expression::ExpressionPtr vgprBlockExpr, vgprIndexExpr, simdIndexExpr;
-                auto [vgprBlockTag, vgprBlock] = m_graph->getDimension<VGPRBlockNumber>(tag);
-                auto [vgprIndexTag, vgprIndex] = m_graph->getDimension<VGPRBlockIndex>(tag);
-                auto [simdIndexTag, simdIndex] = m_graph->getDimension<Adhoc>(tag, 1);
-
-                {
-                    auto [required, path] = findRequiredCoordinates(
-                        vgprBlockTag, Graph::Direction::Downstream, *m_graph);
-
-                    for(auto r : required)
-                    {
-                        auto expr = std::make_shared<Expression::Expression>(
-                            Expression::DataFlowTag{r, Register::Type::Vector, DataType::UInt32});
-                        coords.setCoordinate(r, expr);
-                    }
-
-                    vgprBlockExpr = coords.reverse({vgprBlockTag})[0];
-                    expectedExpr
-                        = (waveTileExpr / (Expression::literal(waveTileSize) / vgprBlock.size));
-                    AssertFatal(Expression::identical(m_fastArith(vgprBlockExpr),
-                                                      m_fastArith(expectedExpr)),
-                                "Exchange: VGPRBlock must be the slowest running dimension",
-                                ShowValue(m_fastArith(vgprBlockExpr)),
-                                ShowValue(m_fastArith(expectedExpr)));
-                }
-
-                {
-                    auto [required, path] = findRequiredCoordinates(
-                        vgprIndexTag, Graph::Direction::Downstream, *m_graph);
-
-                    for(auto r : required)
-                    {
-                        auto expr = std::make_shared<Expression::Expression>(
-                            Expression::DataFlowTag{r, Register::Type::Vector, DataType::UInt32});
-                        coords.setCoordinate(r, expr);
-                    }
-
-                    vgprIndexExpr = coords.reverse({vgprIndexTag})[0];
-                    expectedExpr
-                        = (waveTileExpr
-                           / (Expression::literal(waveTileSize) / vgprBlock.size / vgprIndex.size)
-                           % vgprIndex.size);
-                    AssertFatal(Expression::identical(m_fastArith(vgprIndexExpr),
-                                                      m_fastArith(expectedExpr)),
-                                "Exchange: VGPRIndex must be the second slowest running dimension",
-                                ShowValue(m_fastArith(vgprIndexExpr)),
-                                ShowValue(m_fastArith(expectedExpr)));
-                }
-
-                {
-                    auto [required, path] = findRequiredCoordinates(
-                        simdIndexTag, Graph::Direction::Downstream, *m_graph);
-
-                    for(auto r : required)
-                    {
-                        auto expr = std::make_shared<Expression::Expression>(
-                            Expression::DataFlowTag{r, Register::Type::Vector, DataType::UInt32});
-                        coords.setCoordinate(r, expr);
-                    }
-
-                    simdIndexExpr = coords.reverse({simdIndexTag})[0];
-                    expectedExpr  = waveTileExpr % simdIndex.size;
-                    AssertFatal(Expression::identical(m_fastArith(simdIndexExpr),
-                                                      m_fastArith(expectedExpr)),
-                                "Exchange: SIMDIndex must be the fastest running dimension");
-                }
-            }
-            else if(waveMN == 64 && miMN == 32)
+            if(waveMN == 64)
             {
                 Expression::ExpressionPtr vgprIndexExpr, simdIndexBlockExpr;
                 auto [vgprIndexTag, vgprIndex] = m_graph->getDimension<VGPRBlockIndex>(tag);

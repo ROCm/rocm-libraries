@@ -305,21 +305,12 @@ namespace rocRoller
             auto       SIMDBlock
                 = graph.coordinates.addElement(Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
 
-            // 64x4_16x4 = 4/1 = 4, 64x4_32x2 = 2/1 = 2, 32x8_16x4 = 4/2 = 2, 32x8_32x2 = 2/2 = 1
-            uint const nSIMDIndexIndex = macTile.miTileSizes.at(2) / nSIMDBlock;
-            // 64x4_16x4 = 1, 64x4_32x2 = 2, 32x8_16x4 = 1, 32x8_32x2 = 2
-            uint const nSIMDIndexBlock = nSIMDIndex / nSIMDIndexIndex;
-            auto       SIMDIndexBlock  = graph.coordinates.addElement(
-                Adhoc("SIMDIndexBlock", literal(nSIMDIndexBlock), nullptr));
-            auto SIMDIndexIndex = graph.coordinates.addElement(
-                Adhoc("SIMDIndexIndex", literal(nSIMDIndexIndex), nullptr));
-            graph.coordinates.addElement(Flatten(), {SIMDIndexBlock, SIMDIndexIndex}, {SIMDIndex});
-
             uint const numElements       = waveTile.elements();
             uint       activeLanesInWave = static_cast<uint>(wavefrontSize);
             uint const numVgpr           = numElements / activeLanesInWave;
-            uint const nVgprIndex        = 2;
-            uint const nVgprBlock        = 4 / nVgprIndex;
+            uint const nVgprIndex
+                = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
+            uint const nVgprBlock = 256 / macTile.subTileSizes.at(0) / nSIMDBlock / nVgprIndex;
             auto       vgprBlock
                 = graph.coordinates.addElement(VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
             auto vgprIndex
@@ -1760,28 +1751,29 @@ namespace rocRoller
                     auto laneInSIMD
                         = graph.coordinates.addElement(Lane(literal(lanesPerSIMD), nullptr));
 
-                    uint const nSIMDIndexIndex = macTile.miTileSizes.at(2) / nSIMDBlock;
-                    uint const nSIMDIndexBlock = nSIMDIndex / nSIMDIndexIndex;
-                    auto       SIMDIndexBlock  = graph.coordinates.addElement(
-                        Adhoc("SIMDIndexBlock", literal(nSIMDIndexBlock), nullptr));
-                    auto SIMDIndexIndex = graph.coordinates.addElement(
-                        Adhoc("SIMDIndexIndex", literal(nSIMDIndexIndex), nullptr));
-
-                    graph.coordinates.addElement(
-                        Flatten(), {SIMDIndexBlock, SIMDIndexIndex}, {SIMDIndex});
-
                     uint const numElements       = waveTile.elements();
                     uint const activeLanesInWave = static_cast<uint>(wavefrontSize);
                     uint const numVgpr           = numElements / activeLanesInWave;
-                    uint const nVgprIndex        = 2;
-                    uint const nVgprBlock        = 4 / nVgprIndex;
-                    auto       vgprBlock         = graph.coordinates.addElement(
+                    uint const nVgprIndex
+                        = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
+                    uint const nVgprBlock
+                        = 256 / macTile.subTileSizes.at(0) / nSIMDBlock / nVgprIndex;
+                    auto vgprBlock = graph.coordinates.addElement(
                         VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
                     auto vgprIndex = graph.coordinates.addElement(
                         VGPRBlockIndex(literal(nVgprIndex), literal(1u)));
                     auto vgpr = graph.coordinates.addElement(VGPR(literal(numVgpr), literal(1u)));
 
                     graph.coordinates.addElement(Flatten(), {vgprBlock, vgprIndex}, {vgpr});
+
+                    uint const nSIMDIndexBlock = nVgprIndex;
+                    uint const nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
+                    auto       SIMDIndexBlock  = graph.coordinates.addElement(
+                        Adhoc("SIMDIndexBlock", literal(nSIMDIndexBlock), nullptr));
+                    auto SIMDIndexIndex = graph.coordinates.addElement(
+                        Adhoc("SIMDIndexIndex", literal(nSIMDIndexIndex), nullptr));
+                    graph.coordinates.addElement(
+                        Flatten(), {SIMDIndexBlock, SIMDIndexIndex}, {SIMDIndex});
 
                     connections.push_back(DC<WaveTile>(waveTileTag));
                     connections.push_back(DC<Adhoc>(SIMDBlock, 0));
@@ -1793,8 +1785,10 @@ namespace rocRoller
                     connections.push_back(DC<VGPRBlockIndex>(vgprIndex));
                     connections.push_back(DC<VGPR>(vgpr));
 
-                    graph.coordinates.addElement(Flatten(), {vgpr, laneInSIMD}, {iWaveX});
-                    graph.coordinates.addElement(Flatten(), {SIMDBlock, SIMDIndex}, {iWaveY});
+                    graph.coordinates.addElement(
+                        Flatten(), {vgprIndex, SIMDIndexIndex, laneInSIMD}, {iWaveX});
+                    graph.coordinates.addElement(
+                        Flatten(), {SIMDBlock, vgprBlock, SIMDIndexBlock}, {iWaveY});
                     graph.coordinates.addElement(Flatten(), {iWaveX, iWaveY}, {waveTileTag});
                 }
                 else
