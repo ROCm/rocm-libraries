@@ -1,7 +1,7 @@
 - {MinimumRequiredVersion: 5.0.0}
 - gfx1152
 - gfx1152
-- [Device 150e]
+- [Device 1114]
 - Activation: true
   ActivationComputeDataType: 6
   ActivationNoGuard: false
