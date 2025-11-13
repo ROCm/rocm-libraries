@@ -41,12 +41,16 @@ extern "C" {
 *  must be stored as a general matrix with a symmetric sparsity pattern, and if the matrix \f$A\f$ is non-symmetric
 *  then the user is responsible to provide the symmetric part \f$\frac{A+A^T}{2}\f$.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be 
+*  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
 *  handle          handle to the hipsparse library context queue.
 *  @param[in]
-*  m               number of rows of sparse matrix \f$A\f$.
+*  m               number of rows of sparse matrix \f$A\f$. Must be non-negative.
 *  @param[in]
-*  nnz             number of non-zero entries of sparse matrix \f$A\f$.
+*  nnz             number of non-zero entries of sparse matrix \f$A\f$. Must be non-negative.
 *  @param[in]
 *  descrA          sparse matrix descriptor.
 *  @param[in]
@@ -70,8 +74,10 @@ extern "C" {
 *  info            structure that holds the information collected during the coloring algorithm.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrValA, \p csrRowPtrA, \p csrColIndA,
-*                                         \p fractionToColor, \p ncolors, \p coloring or \p info pointer is invalid.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p fractionToColor,
+*          \p ncolors, \p coloring or \p info is nullptr, \p m or \p nnz is negative, or
+*          \p csrValA, \p csrRowPtrA or \p csrColIndA is nullptr when \p nnz is greater than zero.
 */
 /**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
