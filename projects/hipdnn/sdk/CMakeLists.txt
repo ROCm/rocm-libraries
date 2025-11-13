@@ -97,8 +97,9 @@ if(WIN32)
 
     # Can't do this to an alias
     get_property(aliased_target_name TARGET spdlog::spdlog_header_only PROPERTY ALIASED_TARGET)
+    message(STATUS "spdlog::spdlog_header_only aliased target name: '${aliased_target_name}'")
 
-    if(aliased_target_name STREQUAL "")
+    if(NOT aliased_target_name)
         set_target_properties(spdlog::spdlog_header_only PROPERTIES INTERFACE_COMPILE_OPTIONS "")
     endif()
 endif()
