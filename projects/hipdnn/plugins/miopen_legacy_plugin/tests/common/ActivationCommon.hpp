@@ -140,7 +140,7 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
 
     // RELU_FWD (standard ReLU)
     cases.emplace_back(PM::RELU_FWD,
-                       std::nullopt, // reluLowerClip
+                       0.0f, // reluLowerClip
                        std::nullopt, // reluUpperClip
                        std::nullopt, // reluLowerClipSlope
                        std::nullopt, // swishBeta
@@ -151,7 +151,7 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
     // ReLU6: upper clip at 6.0 (Clipped ReLU)
     cases.emplace_back(PM::RELU_FWD,
                        std::nullopt, // reluLowerClip
-                       6.0f, // reluUpperClip
+                       0.5f, // reluUpperClip
                        std::nullopt, // reluLowerClipSlope
                        std::nullopt, // swishBeta
                        std::nullopt, // eluAlpha
@@ -160,8 +160,8 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
 
     // CLAMP: both lower and upper clips (e.g., clip to range [0.0, 6.0])
     cases.emplace_back(PM::RELU_FWD,
-                       0.0f, // reluLowerClip
-                       6.0f, // reluUpperClip
+                       0.1f, // reluLowerClip
+                       0.5f, // reluUpperClip
                        std::nullopt, // reluLowerClipSlope
                        std::nullopt, // swishBeta
                        std::nullopt, // eluAlpha

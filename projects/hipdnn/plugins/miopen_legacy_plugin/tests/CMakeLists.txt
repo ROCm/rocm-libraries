@@ -13,6 +13,7 @@ add_executable(
     engines/plans/TestMiopenBatchnormFwdTrainingPlan.cpp
     engines/plans/TestMiopenBatchnormFwdTrainingActivPlan.cpp
     engines/plans/TestMiopenBatchnormFwdTrainingActivPlanBuilder.cpp
+    engines/plans/TestMiopenBatchnormFwdTrainingPlanBuilder.cpp
     engines/plans/TestMiopenBatchnormPlanBuilder.cpp
     engines/plans/TestMiopenConvFwdBiasActivPlan.cpp
     engines/plans/TestMiopenConvFwdBiasActivPlanBuilder.cpp
