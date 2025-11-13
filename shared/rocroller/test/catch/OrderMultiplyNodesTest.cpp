@@ -146,6 +146,12 @@ namespace OrderMultiplyNodesTest
 
             REQUIRE(unorderedPairsBefore > 0);
 
+            {
+                auto check = NoUnorderedMultiplyNodes(graph);
+                CHECK_FALSE(check.satisfied);
+                CHECK_THAT(check.explanation, ContainsSubstring("Unordered multiply nodes found"));
+            }
+
             INFO("Unordered pairs before transformation: " << unorderedPairsBefore);
 
             graph = transform<OrderMultiplyNodes>(graph);
@@ -168,6 +174,12 @@ namespace OrderMultiplyNodesTest
                                       << " are still unordered");
                     }
                 }
+            }
+
+            {
+                auto check = NoUnorderedMultiplyNodes(graph);
+                CHECK(check.satisfied);
+                CHECK(check.explanation == "");
             }
 
             INFO("Unordered pairs after transformation: " << unorderedPairsAfter);
