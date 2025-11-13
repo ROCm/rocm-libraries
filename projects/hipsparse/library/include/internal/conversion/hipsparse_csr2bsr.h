@@ -288,9 +288,6 @@ hipsparseStatus_t hipsparseXcsr2bsrNnz(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p blockDim, \p bsrValC, \p bsrRowPtrC,
 *              \p bsrColIndC, \p csrValA, \p csrRowPtrA or \p csrColIndA pointer is invalid.
-*
-*  \par Example
-*  \snippet example_hipsparse_csr2bsr.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

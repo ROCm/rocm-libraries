@@ -82,9 +82,6 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_ALLOC_FAILED the buffer for the HYB matrix could not be allocated.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
-*
-*  \par Example
-*  \snippet example_hipsparse_csr2hyb.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")

@@ -527,12 +527,6 @@ auto dispatch_target_arch([[maybe_unused]] const target_arch target_arch)
     return Config::template architecture_config<target_arch::unknown>::params;
 }
 
-template<typename Config>
-constexpr auto device_params()
-{
-    return Config::template architecture_config<device_target_arch()>::params;
-}
-
 inline target_arch parse_gcn_arch(const char* arch_name)
 {
     static constexpr auto length = sizeof(hipDeviceProp_t::gcnArchName);
