@@ -57,18 +57,20 @@ void SampleRunner::operator()(const TensorLayout& layout)
     bnAttributes.set_name("bn_training_node");
     bnAttributes.set_epsilon(epsilon);
 
+#if 0
     // Conditionally setup running statistics inputs
     if(config.useRunningStats)
     {
         auto prevRunningMean = createTensor({1, c, 1, 1}, intermediateType);
         auto prevRunningVar = createTensor({1, c, 1, 1}, intermediateType);
 
-        // Momentum is also a pass-by-value scalar
+        // Momentum: use pass-by-value with double (matches MIOpen API)
         auto momentum = std::make_shared<graph::TensorAttributes>();
         momentum->set_value(0.1);
 
         bnAttributes.set_previous_running_stats(prevRunningMean, prevRunningVar, momentum);
     }
+#endif
 
     // API always returns 5 values regardless of whether running stats are used
     auto [y, savedMean, savedInvVariance, nextRunningMean, nextRunningVariance]
@@ -90,6 +92,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         .set_dim({1, c, 1, 1})
         .set_stride(utilities::generateStrides({1, c, 1, 1}));
 
+#if 0
     // Conditionally set running statistics as outputs
     if(config.useRunningStats)
     {
@@ -103,6 +106,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
             .set_dim({1, c, 1, 1})
             .set_stride(utilities::generateStrides({1, c, 1, 1}));
     }
+#endif
 
     // Allocate tensors for batch statistics (always used)
     // Note: epsilon is pass-by-value, no buffer allocation needed
@@ -165,6 +169,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     savedInvVarTensor.memory().markDeviceModified();
 
     auto yHostPtr = yTensor.memory().hostData();
+    auto savedMeanHostPtr = savedMeanTensor.memory().hostData();
+    auto savedInvVarHostPtr = savedInvVarTensor.memory().hostData();
 
     if(config.cpuValidation)
     {
@@ -181,7 +187,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
                                  biasTensor,
                                  yRefTensor,
                                  utilities::BATCHNORM_DEFAULT_EPSILON,
-                                 0.1, // momentum (unused but required parameter)
+                                 0.1, // momentum (not used in BATCH_STATS_ONLY mode but required by API)
                                  &savedMeanRefTensor,
                                  &savedInvVarRefTensor,
                                  nullptr, // prevRunningMean (not used)
@@ -212,6 +218,16 @@ void SampleRunner::operator()(const TensorLayout& layout)
     for(int i = 0; i < 10; ++i)
     {
         std::cout << static_cast<float>(yHostPtr[i]) << " ";
+    }
+    std::cout << "\nFirst 10 saved_mean values: ";
+    for(int i = 0; i < 10; ++i)
+    {
+        std::cout << static_cast<float>(savedMeanHostPtr[i]) << " ";
+    }
+    std::cout << "\nFirst 10 saved_inv_variance values: ";
+    for(int i = 0; i < 10; ++i)
+    {
+        std::cout << static_cast<float>(savedInvVarHostPtr[i]) << " ";
     }
 
     std::cout << "\nBatch normalization training graph execution complete for " << inputType

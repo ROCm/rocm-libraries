@@ -80,8 +80,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     scaleTensor.fillWithRandomValues(static_cast<IntermediateType>(-2.0f),
                                      static_cast<IntermediateType>(2.0f));
     // Saved statistics from forward pass
-    savedMeanTensor.fillWithRandomValues(static_cast<IntermediateType>(-2.0f),
-                                         static_cast<IntermediateType>(2.0f));
+    savedMeanTensor.fillWithRandomValues(static_cast<IntermediateType>(-0.1f),
+                                         static_cast<IntermediateType>(0.1f));
     savedInvVarTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
                                            static_cast<IntermediateType>(2.0f));
 
