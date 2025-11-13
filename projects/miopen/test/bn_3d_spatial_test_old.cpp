@@ -1228,6 +1228,8 @@ struct batch_norm_3d_spatial_driver : test_driver
     {
         std::size_t n, c, d, h, w;
         std::tie(n, c, d, h, w) = miopen::tien<5>(input.desc.GetLengths());
+        this->tolerance =
+            4e-3 / std::numeric_limits<T>::epsilon(); // ck solver has tolerance of 4e-3
 
         // The condition is derived form bn_spatial_test.cpp as they are known failures
         if(n == 1)
@@ -1266,11 +1268,10 @@ struct batch_norm_3d_spatial_driver : test_driver
 #if(MIO_BN_SP_TEST_DEBUG == 1)
         std::cout << "Running forward train spatial with R and S set." << std::endl;
 #endif
-std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_train_3d_bn_spatial]" << std::endl;
         auto outpair =
             verify(verify_forward_train_3d_bn_spatial<T, PREC_TYPE>{input, scale, shift});
 // returns:  std::make_tuple(out,runMean,runVar,saveMean,saveInvVar);
-std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_train_3d_bn_spatial]" << std::endl;
+
 // inference recalc
 #if(MIO_BN_SP_TEST_DEBUG == 1)
         std::cout << "Running forward inference spatial recalc." << std::endl;
@@ -1280,9 +1281,7 @@ std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_train_3d_bn_s
         // std::fill(input.begin(), input.end(), 1);
         // std::fill(scale.begin(), scale.end(), 1);
         // std::fill(shift.begin(), shift.end(), 1);
-        std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_infer_3d_bn_spatial_recalc]" << std::endl;
         verify(verify_forward_infer_3d_bn_spatial_recalc<T, PREC_TYPE>{input, scale, shift});
-        std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_infer_3d_bn_spatial_recalc]" << std::endl;
 
         // inference use estimated running values
         auto estMean = std::get<1>(outpair.second);
@@ -1290,10 +1289,8 @@ std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_train_3d_bn_s
 #if(MIO_BN_SP_TEST_DEBUG == 1)
         std::cout << "Running forward inference spatial with R set." << std::endl;
 #endif
-std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_infer_3d_bn_spatial_use_est]" << std::endl;
         verify(verify_forward_infer_3d_bn_spatial_use_est<T, PREC_TYPE>{
             input, scale, shift, estMean, estVar});
-std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_infer_3d_bn_spatial_use_est]" << std::endl;
 
         // backprop recalc
         auto dy_input = std::get<0>(outpair.second);
@@ -1374,15 +1371,12 @@ std::cout << "TOLERANCE: " << this->tolerance << " [verify_forward_infer_3d_bn_s
         std::cout << "Running back propagation spatial recalc." << std::endl;
 #endif
         this->tolerance = 80 * input.desc.GetElementSize();
-std::cout << "TOLERANCE: " << this->tolerance << " [verify_backward_3d_bn_spatial_recalc]" << std::endl;
         verify(verify_backward_3d_bn_spatial_recalc<T, PREC_TYPE>{input, dy_input, scale});
-std::cout << "TOLERANCE: " << this->tolerance << " [verify_backward_3d_bn_spatial_recalc]" << std::endl;
 #endif
 
         // backprop use saved values
         auto savedMean   = std::get<3>(outpair.second);
         auto savedInvVar = std::get<4>(outpair.second);
-
 #if(MIO_BN_SP_TEST_DEBUG == 3)
 
         auto debugvals = verify(verify_backward_3d_bn_spatial_use_saved<T>{
@@ -1445,10 +1439,8 @@ std::cout << "TOLERANCE: " << this->tolerance << " [verify_backward_3d_bn_spatia
 #if(MIO_BN_SP_TEST_DEBUG == 1)
         std::cout << "Running back propagation spatial with S set." << std::endl;
 #endif
-std::cout << "TOLERANCE: " << this->tolerance << " [verify_backward_3d_bn_spatial_use_saved]" << std::endl;
         verify(verify_backward_3d_bn_spatial_use_saved<T, PREC_TYPE>{
             input, dy_input, scale, savedMean, savedInvVar});
-std::cout << "TOLERANCE: " << this->tolerance << " [verify_backward_3d_bn_spatial_use_saved]" << std::endl;
 #endif
     }
 };
