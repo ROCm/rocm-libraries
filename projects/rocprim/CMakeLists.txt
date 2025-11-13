@@ -264,8 +264,7 @@ endif()
 
 if(BUILD_CODE_COVERAGE)
   target_compile_options(rocprim INTERFACE
-    -g
-    -O0
+    -w
     -fprofile-instr-generate
     -fcoverage-mapping
   )
