@@ -2052,7 +2052,7 @@ void host_csr_to_sell(J                     M,
     for(I i = 0; i < sell_colval_size; i++)
     {
         sell_col_ind[i] = -1;
-        sell_val[i]     = static_cast<T>(0);
+        sell_val[i]     = make_DataType<T>(0);
     }
 
     // Fill columns and rows
