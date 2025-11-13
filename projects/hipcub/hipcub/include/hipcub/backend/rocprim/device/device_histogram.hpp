@@ -67,18 +67,18 @@ HIPCUB_FORCEINLINE bool may_overflow(LevelT  lower_level,
 template<class SampleT, class CommonT>
 struct int_arithmetic_t
 {
-    using type = ::std::conditional_t<
-        sizeof(SampleT) + sizeof(CommonT) <= sizeof(uint32_t),
-        uint32_t,
+    using type
+        = ::std::conditional_t<sizeof(SampleT) + sizeof(CommonT) <= sizeof(uint32_t),
+                               uint32_t,
 #if _CCCL_HAS_INT128()
-        ::std::conditional_t<(::std::is_same<CommonT, __int128_t>::value
-                              || ::std::is_same<CommonT, __uint128_t>::value),
-                             CommonT,
-                             uint64_t>
+                               ::std::conditional_t<(::std::is_same_v<CommonT, __int128_t>
+                                                     || ::std::is_same_v<CommonT, __uint128_t>),
+                                                    CommonT,
+                                                    uint64_t>
 #else
-        uint64_t
+                               uint64_t
 #endif
-        >;
+                               >;
 };
 
 // If potential overflow is detected, returns hipErrorInvalidValue, otherwise hipSuccess.

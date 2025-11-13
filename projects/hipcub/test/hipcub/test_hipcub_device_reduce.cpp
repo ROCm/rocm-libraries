@@ -138,8 +138,8 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
             size_t temp_storage_size_bytes;
             void*  d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            if constexpr(std::is_same<T, test_utils::half>::value
-                         || std::is_same<T, test_utils::bfloat16>::value)
+            if constexpr(std::is_same_v<T, test_utils::half>
+                         || std::is_same_v<T, test_utils::bfloat16>)
             {
                 HIP_CHECK(hipcub::DeviceReduce::Reduce(d_temp_storage,
                                                        temp_storage_size_bytes,
@@ -172,8 +172,8 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
                 gHelper.startStreamCapture(stream);
 
             // Run
-            if constexpr(std::is_same<T, test_utils::half>::value
-                         || std::is_same<T, test_utils::bfloat16>::value)
+            if constexpr(std::is_same_v<T, test_utils::half>
+                         || std::is_same_v<T, test_utils::bfloat16>)
             {
                 HIP_CHECK(hipcub::DeviceReduce::Reduce(d_temp_storage,
                                                        temp_storage_size_bytes,

@@ -1087,7 +1087,7 @@ struct offset_count_device_t
     HIPCUB_DEVICE
     void operator()(OffsetT i)
     {
-        static_assert(std::is_same<T, OffsetT>::value, "T and OffsetT must be the same type");
+        static_assert(std::is_same_v<T, OffsetT>, "T and OffsetT must be the same type");
         atomicAdd(d_count + i, 1);
     }
 };

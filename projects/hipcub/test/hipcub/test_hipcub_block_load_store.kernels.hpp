@@ -152,8 +152,8 @@ __launch_bounds__(BlockSize) __global__
 
     // The output value type
     using OutputT = typename std::conditional<
-        (std::is_same<typename std::iterator_traits<OutputIteratorT>::value_type,
-                      void>::value), // OutputT =  (if output iterator's value type is void) ?
+        (std::is_same_v<typename std::iterator_traits<OutputIteratorT>::value_type,
+                        void>), // OutputT =  (if output iterator's value type is void) ?
         typename std::iterator_traits<InputIteratorT>::value_type, // ... then the input iterator's
         // value type,
         typename std::iterator_traits<OutputIteratorT>::value_type>::

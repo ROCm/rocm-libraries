@@ -84,8 +84,8 @@ struct half_t
     /// Constructor from unsigned long long int
     template<typename T,
              typename = typename std::enable_if<
-                 std::is_same<T, unsigned long long int>::value
-                 && (!std::is_same<std::size_t, unsigned long long int>::value)>::type>
+                 std::is_same_v<T, unsigned long long int>
+                 && (!std::is_same_v<std::size_t, unsigned long long int>)>::type>
     __host__ __device__ __forceinline__ half_t(T a)
     {
         *this = half_t(float(a));

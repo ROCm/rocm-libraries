@@ -222,7 +222,7 @@ std::enable_if_t<is_warp_exchange_test_enabled<Params, Algorithm>> run_warp_exch
         input[i] = test_utils::convert_to_device<T>(i);
     }
     std::vector<T> expected;
-    if(std::is_same<Op, BlockedToStripedOp>::value)
+    if(std::is_same_v<Op, BlockedToStripedOp>)
     {
         expected = input;
         input    = stripe_vector(input, warp_size, items_per_thread);

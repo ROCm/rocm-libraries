@@ -353,8 +353,8 @@ struct DeviceSegmentedReduce
         using OffsetT      = int;
         using T            = typename std::iterator_traits<InputIteratorT>::value_type;
         using O            = typename std::iterator_traits<OutputIteratorT>::value_type;
-        using OutputTupleT = typename std::
-            conditional<std::is_same<O, void>::value, KeyValuePair<OffsetT, T>, O>::type;
+        using OutputTupleT =
+            typename std::conditional<std::is_same_v<O, void>, KeyValuePair<OffsetT, T>, O>::type;
 
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT    = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
@@ -465,8 +465,8 @@ struct DeviceSegmentedReduce
         using OffsetT      = int;
         using T            = typename std::iterator_traits<InputIteratorT>::value_type;
         using O            = typename std::iterator_traits<OutputIteratorT>::value_type;
-        using OutputTupleT = typename std::
-            conditional<std::is_same<O, void>::value, KeyValuePair<OffsetT, T>, O>::type;
+        using OutputTupleT =
+            typename std::conditional<std::is_same_v<O, void>, KeyValuePair<OffsetT, T>, O>::type;
 
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT    = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;

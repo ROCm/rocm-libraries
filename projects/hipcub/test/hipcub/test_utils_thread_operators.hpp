@@ -155,12 +155,13 @@ struct ArgMax
 {
     template<typename OffsetT,
              class T,
-             std::enable_if_t<std::is_same<T, test_utils::half>::value
-                                  || std::is_same<T, test_utils::bfloat16>::value,
+             std::enable_if_t<std::is_same_v<T, test_utils::half>
+                                  || std::is_same_v<T, test_utils::bfloat16>,
                               bool>
              = true>
-    HIPCUB_HOST_DEVICE __forceinline__ hipcub::KeyValuePair<OffsetT, T>
-                                       operator()(const hipcub::KeyValuePair<OffsetT, T>& a,
+    HIPCUB_HOST_DEVICE __forceinline__
+    hipcub::KeyValuePair<OffsetT, T>
+        operator()(const hipcub::KeyValuePair<OffsetT, T>& a,
                    const hipcub::KeyValuePair<OffsetT, T>& b) const
     {
         const hipcub::KeyValuePair<OffsetT, float> native_a(a.key, a.value);
@@ -179,12 +180,13 @@ struct ArgMin
 {
     template<typename OffsetT,
              class T,
-             std::enable_if_t<std::is_same<T, test_utils::half>::value
-                                  || std::is_same<T, test_utils::bfloat16>::value,
+             std::enable_if_t<std::is_same_v<T, test_utils::half>
+                                  || std::is_same_v<T, test_utils::bfloat16>,
                               bool>
              = true>
-    HIPCUB_HOST_DEVICE __forceinline__ hipcub::KeyValuePair<OffsetT, T>
-                                       operator()(const hipcub::KeyValuePair<OffsetT, T>& a,
+    HIPCUB_HOST_DEVICE __forceinline__
+    hipcub::KeyValuePair<OffsetT, T>
+        operator()(const hipcub::KeyValuePair<OffsetT, T>& a,
                    const hipcub::KeyValuePair<OffsetT, T>& b) const
     {
         const hipcub::KeyValuePair<OffsetT, float> native_a(a.key, a.value);

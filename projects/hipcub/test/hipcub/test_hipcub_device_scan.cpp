@@ -79,9 +79,8 @@ using HipcubDeviceScanTestsParams
 template<typename input_type, typename input_op_type>
 struct accum_type
 {
-    static constexpr bool is_low_precision
-        = std::is_same<input_type, test_utils::half>::value
-          || std::is_same<input_type, test_utils::bfloat16>::value;
+    static constexpr bool is_low_precision = std::is_same_v<input_type, test_utils::half>
+                                             || std::is_same_v<input_type, test_utils::bfloat16>;
     static constexpr bool is_add = test_utils::is_add_operator<input_op_type>::value;
     using type = typename std::conditional_t<is_low_precision && is_add, float, input_type>;
 };
@@ -122,7 +121,7 @@ TYPED_TEST(HipcubDeviceScanTests, AccumulatorTypeTest)
     using T = hipcub::detail::accumulator_t<typename TestFixture::scan_op_type,
                                             typename TestFixture::input_type>;
     using U = typename TestFixture::input_type;
-    static_assert(std::is_same<T, U>::value, "accumulator type mismatch");
+    static_assert(std::is_same_v<T, U>, "accumulator type mismatch");
     ASSERT_TRUE(true);
 }
 
@@ -141,7 +140,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
     using is_add_op    = test_utils::is_add_operator<scan_op_type>;
     using acc_type     = typename accum_type<T, scan_op_type>::type;
     using IteratorType     = rocprim::transform_iterator<T*, hipcub::CastOp<acc_type>, acc_type>;
-    constexpr bool inplace = std::is_same<T, U>::value && std::is_same<acc_type, T>::value;
+    constexpr bool inplace = std::is_same_v<T, U> && std::is_same_v<acc_type, T>;
 
     // for non-associative operations in inclusive scan
     // intermediate results use the type of input iterator, then
@@ -212,7 +211,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
 
             auto call = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
             {
-                if HIPCUB_IF_CONSTEXPR(std::is_same<scan_op_type, hipcub::Sum>::value)
+                if HIPCUB_IF_CONSTEXPR(std::is_same_v<scan_op_type, hipcub::Sum>)
                 {
                     if HIPCUB_IF_CONSTEXPR(inplace)
                     {
@@ -333,7 +332,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanInit)
     using is_add_op    = test_utils::is_add_operator<scan_op_type>;
     using acc_type     = typename accum_type<T, scan_op_type>::type;
     using IteratorType     = rocprim::transform_iterator<T*, hipcub::CastOp<acc_type>, acc_type>;
-    constexpr bool inplace = std::is_same<T, U>::value && std::is_same<acc_type, T>::value;
+    constexpr bool inplace = std::is_same_v<T, U> && std::is_same_v<acc_type, T>;
 
     // for non-associative operations in inclusive scan
     // intermediate results use the type of input iterator, then
@@ -596,7 +595,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
             size_t temp_storage_size_bytes{};
             void*  d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            if(std::is_same<scan_op_type, hipcub::Sum>::value)
+            if(std::is_same_v<scan_op_type, hipcub::Sum>)
             {
                 HIP_CHECK(hipcub::DeviceScan::InclusiveSumByKey(d_temp_storage,
                                                                 temp_storage_size_bytes,
@@ -632,7 +631,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
                 gHelper.startStreamCapture(stream);
 
             // Run
-            if(std::is_same<scan_op_type, hipcub::Sum>::value)
+            if(std::is_same_v<scan_op_type, hipcub::Sum>)
             {
                 HIP_CHECK(hipcub::DeviceScan::InclusiveSumByKey(d_temp_storage,
                                                                 temp_storage_size_bytes,
@@ -702,7 +701,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
     using is_add_op    = test_utils::is_add_operator<scan_op_type>;
     using acc_type     = typename accum_type<T, scan_op_type>::type;
     using IteratorType     = rocprim::transform_iterator<T*, hipcub::CastOp<acc_type>, acc_type>;
-    constexpr bool inplace = std::is_same<T, U>::value && std::is_same<acc_type, T>::value;
+    constexpr bool inplace = std::is_same_v<T, U> && std::is_same_v<acc_type, T>;
 
     // for non-associative operations in inclusive scan
     // intermediate results use the type of input iterator, then
@@ -764,7 +763,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
             // Calculate expected results on host
             std::vector<U> expected(input.size());
             const T        initial_value
-                = std::is_same<scan_op_type, hipcub::Sum>::value
+                = std::is_same_v<scan_op_type, hipcub::Sum>
                       ? test_utils::convert_to_device<T>(0)
                       : test_utils::get_random_value<T>(test_utils::convert_to_device<T>(1),
                                                         test_utils::convert_to_device<T>(100),
@@ -783,7 +782,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
 
             auto call = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
             {
-                if HIPCUB_IF_CONSTEXPR(std::is_same<scan_op_type, hipcub::Sum>::value)
+                if HIPCUB_IF_CONSTEXPR(std::is_same_v<scan_op_type, hipcub::Sum>)
                 {
                     if HIPCUB_IF_CONSTEXPR(inplace)
                     {
@@ -958,7 +957,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
                                                  test_utils::convert_to_device<T>(10),
                                                  seed_value);
             T initial_value = initial_value_vector.front();
-            if(std::is_same<scan_op_type, hipcub::Sum>::value)
+            if(std::is_same_v<scan_op_type, hipcub::Sum>)
             {
                 initial_value = test_utils::convert_to_device<T>(0);
             }
@@ -998,7 +997,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
             size_t temp_storage_size_bytes;
             void*  d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            if(std::is_same<scan_op_type, hipcub::Sum>::value)
+            if(std::is_same_v<scan_op_type, hipcub::Sum>)
             {
                 HIP_CHECK(hipcub::DeviceScan::ExclusiveSumByKey(d_temp_storage,
                                                                 temp_storage_size_bytes,
@@ -1035,7 +1034,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
                 gHelper.startStreamCapture(stream);
 
             // Run
-            if(std::is_same<scan_op_type, hipcub::Sum>::value)
+            if(std::is_same_v<scan_op_type, hipcub::Sum>)
             {
                 HIP_CHECK(hipcub::DeviceScan::ExclusiveSumByKey(d_temp_storage,
                                                                 temp_storage_size_bytes,
@@ -1337,12 +1336,11 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
             const auto future_initial_value = hipcub::FutureValue<U>{d_initial_value};
 
             // Check the provided aliases to be correct at compile-time
-            static_assert(
-                std::is_same<typename decltype(future_initial_value)::value_type, U>::value,
-                "The futures value type is expected to be U");
+            static_assert(std::is_same_v<typename decltype(future_initial_value)::value_type, U>,
+                          "The futures value type is expected to be U");
 
             static_assert(
-                std::is_same<typename decltype(future_initial_value)::iterator_type, U*>::value,
+                std::is_same_v<typename decltype(future_initial_value)::iterator_type, U*>,
                 "The futures iterator type is expected to be U*");
 
             // temp storage

@@ -178,35 +178,33 @@ OutputIt host_inclusive_scan_init(
     return host_inclusive_scan_impl<true>(first, last, d_first, op, init_value);
 }
 
-template<class InputIt,
-         class OutputIt,
-         class T,
-         std::enable_if_t<
-             std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                          test_utils::bfloat16>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                                 test_utils::half>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type, float>::value,
-             bool>
-         = true>
+template<
+    class InputIt,
+    class OutputIt,
+    class T,
+    std::enable_if_t<
+        std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::bfloat16>
+            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::half>
+            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, float>,
+        bool>
+    = true>
 OutputIt host_inclusive_scan(InputIt first, InputIt last, OutputIt d_first, test_utils::plus)
 {
     using acc_type = double;
     return host_inclusive_scan_impl(first, last, d_first, test_utils::plus(), acc_type{});
 }
 
-template<class InputIt,
-         class OutputIt,
-         class InitType,
-         class T,
-         std::enable_if_t<
-             std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                          test_utils::bfloat16>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                                 test_utils::half>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type, float>::value,
-             bool>
-         = true>
+template<
+    class InputIt,
+    class OutputIt,
+    class InitType,
+    class T,
+    std::enable_if_t<
+        std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::bfloat16>
+            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::half>
+            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, float>,
+        bool>
+    = true>
 OutputIt host_inclusive_scan_init(
     InputIt first, InputIt last, OutputIt d_first, InitType init_value, test_utils::plus)
 {
@@ -246,18 +244,17 @@ OutputIt host_exclusive_scan(
     return host_exclusive_scan_impl(first, last, initial_value, d_first, op, acc_type{});
 }
 
-template<class InputIt,
-         class T,
-         class OutputIt,
-         class U,
-         std::enable_if_t<
-             std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                          test_utils::bfloat16>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                                 test_utils::half>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type, float>::value,
-             bool>
-         = true>
+template<
+    class InputIt,
+    class T,
+    class OutputIt,
+    class U,
+    std::enable_if_t<
+        std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::bfloat16>
+            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::half>
+            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, float>,
+        bool>
+    = true>
 OutputIt host_exclusive_scan(
     InputIt first, InputIt last, T initial_value, OutputIt d_first, test_utils::plus)
 {
@@ -332,20 +329,19 @@ OutputIt host_exclusive_scan_by_key(InputIt         first,
                                            acc_type{});
 }
 
-template<class InputIt,
-         class KeyIt,
-         class T,
-         class OutputIt,
-         class U,
-         class KeyCompare,
-         std::enable_if_t<
-             std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                          test_utils::bfloat16>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                                 test_utils::half>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type, float>::value,
-             bool>
-         = true>
+template<
+    class InputIt,
+    class KeyIt,
+    class T,
+    class OutputIt,
+    class U,
+    class KeyCompare,
+    std::enable_if_t<
+        std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::bfloat16>
+            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::half>
+            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, float>,
+        bool>
+    = true>
 OutputIt host_exclusive_scan_by_key(InputIt  first,
                                     InputIt  last,
                                     KeyIt    k_first,
@@ -417,19 +413,18 @@ OutputIt host_inclusive_scan_by_key(InputIt         first,
                                            acc_type{});
 }
 
-template<class InputIt,
-         class KeyIt,
-         class OutputIt,
-         class U,
-         class KeyCompare,
-         std::enable_if_t<
-             std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                          test_utils::bfloat16>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type,
-                                 test_utils::half>::value
-                 || std::is_same<typename std::iterator_traits<InputIt>::value_type, float>::value,
-             bool>
-         = true>
+template<
+    class InputIt,
+    class KeyIt,
+    class OutputIt,
+    class U,
+    class KeyCompare,
+    std::enable_if_t<
+        std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::bfloat16>
+            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::half>
+            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, float>,
+        bool>
+    = true>
 OutputIt host_inclusive_scan_by_key(InputIt  first,
                                     InputIt  last,
                                     KeyIt    k_first,

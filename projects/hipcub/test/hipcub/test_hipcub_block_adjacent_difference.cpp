@@ -254,7 +254,7 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractLeft)
 
     using output_type = typename TestFixture::params_subtract::output;
 
-    using stored_type = std::conditional_t<std::is_same<output_type, bool>::value, int, output_type>;
+    using stored_type = std::conditional_t<std::is_same_v<output_type, bool>, int, output_type>;
 
     constexpr size_t block_size = TestFixture::params_subtract::block_size;
     constexpr size_t items_per_thread = TestFixture::params_subtract::items_per_thread;
@@ -356,7 +356,7 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractLeftPartialTile)
 
     using output_type = typename TestFixture::params_subtract::output;
 
-    using stored_type = std::conditional_t<std::is_same<output_type, bool>::value, int, output_type>;
+    using stored_type = std::conditional_t<std::is_same_v<output_type, bool>, int, output_type>;
 
     constexpr size_t block_size = TestFixture::params_subtract::block_size;
     constexpr size_t items_per_thread = TestFixture::params_subtract::items_per_thread;
@@ -478,7 +478,7 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractRight)
 
     using output_type = typename TestFixture::params_subtract::output;
 
-    using stored_type = std::conditional_t<std::is_same<output_type, bool>::value, int, output_type>;
+    using stored_type = std::conditional_t<std::is_same_v<output_type, bool>, int, output_type>;
 
     constexpr size_t block_size = TestFixture::params_subtract::block_size;
     constexpr size_t items_per_thread = TestFixture::params_subtract::items_per_thread;
@@ -580,7 +580,7 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractRightPartialTile)
 
     using output_type = typename TestFixture::params_subtract::output;
 
-    using stored_type = std::conditional_t<std::is_same<output_type, bool>::value, int, output_type>;
+    using stored_type = std::conditional_t<std::is_same_v<output_type, bool>, int, output_type>;
 
     constexpr size_t block_size = TestFixture::params_subtract::block_size;
     constexpr size_t items_per_thread = TestFixture::params_subtract::items_per_thread;
@@ -683,7 +683,7 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractRightPartialTile)
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected,
             is_add_op::value
                 ? _HIPCUB_STD::max(test_utils::precision<type>::value, test_utils::precision<stored_type>::value)
-                : std::is_same<type, stored_type>::value 
+                : std::is_same_v<type, stored_type> 
                     ? 0 
                     : test_utils::precision<stored_type>::value));
         // clang-format on
