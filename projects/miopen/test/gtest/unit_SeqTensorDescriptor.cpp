@@ -26,10 +26,54 @@
 
 #include <gtest/gtest.h>
 #include <miopen/logger.hpp>
+#include <miopen/seq_tensor.hpp>
 
-#include "unit_SeqTensorDescriptor.hpp"
+namespace miopen {
+namespace unit_tests {
 
-namespace {
+struct SeqTensorDescriptorParams
+{
+    SeqTensorDescriptorParams(miopenDataType_t datatype_in, std::vector<size_t>&& lens_in)
+        : datatype(datatype_in), lens(std::move(lens_in))
+    {
+    }
+
+    SeqTensorDescriptorParams(miopenDataType_t datatype_in,
+                              std::vector<size_t>&& lens_in,
+                              bool with_padded_seq_layout)
+        : datatype(datatype_in), lens(std::move(lens_in)), padded_seq_layout(with_padded_seq_layout)
+    {
+    }
+
+    size_t GetNumDims() const { return lens.size(); }
+
+    const std::vector<size_t>& GetLens() const { return lens; }
+
+    miopenDataType_t GetDataType() const { return datatype; }
+
+    SeqTensorDescriptor GetSeqTensorDescriptor() const
+    {
+        std::vector<unsigned int> layout_default(lens.size());
+        std::iota(layout_default.begin(), layout_default.end(), 0);
+        return {datatype, layout_default, lens, padded_seq_layout};
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const SeqTensorDescriptorParams& tp)
+    {
+        os << tp.datatype << ", ";
+        miopen::LogRange(os << "{", tp.lens, ",") << "}, ";
+        os << tp.padded_seq_layout;
+        return os;
+    }
+
+private:
+    miopenDataType_t datatype;
+    std::vector<size_t> lens;
+    bool padded_seq_layout;
+};
+
+} // namespace unit_tests
+} // namespace miopen
 
 struct TestCaseGetMaxCountOfSequence
 {
@@ -76,9 +120,8 @@ struct TestCaseGetTotalSequenceLength
     }
 };
 
-class TestGetMaxCountOfSequence : public ::testing::TestWithParam<TestCaseGetMaxCountOfSequence>
+struct TestGetMaxCountOfSequence : public ::testing::TestWithParam<TestCaseGetMaxCountOfSequence>
 {
-public:
     static auto GetTestCases()
     {
         using TestCase = TestCaseGetMaxCountOfSequence;
@@ -106,9 +149,8 @@ public:
     }
 };
 
-class TestGetMaxSequenceLength : public ::testing::TestWithParam<TestCaseGetMaxSequenceLength>
+struct TestGetMaxSequenceLength : public ::testing::TestWithParam<TestCaseGetMaxSequenceLength>
 {
-public:
     static auto GetTestCases()
     {
         using TestCase = TestCaseGetMaxSequenceLength;
@@ -136,9 +178,8 @@ public:
     }
 };
 
-class TestGetTotalSequenceLength : public ::testing::TestWithParam<TestCaseGetTotalSequenceLength>
+struct TestGetTotalSequenceLength : public ::testing::TestWithParam<TestCaseGetTotalSequenceLength>
 {
-public:
     static auto GetTestCases()
     {
         using TestCase = TestCaseGetTotalSequenceLength;
@@ -166,20 +207,22 @@ public:
     }
 };
 
-} // namespace
+using CPU_TestGetMaxCountOfSequence_FP16  = TestGetMaxCountOfSequence;
+using CPU_TestGetMaxSequenceLength_FP16   = TestGetMaxSequenceLength;
+using CPU_TestGetTotalSequenceLength_FP16 = TestGetTotalSequenceLength;
 
-TEST_P(TestGetMaxCountOfSequence, SeqTensorDescriptor) { this->RunTest(); };
-TEST_P(TestGetMaxSequenceLength, SeqTensorDescriptor) { this->RunTest(); };
-TEST_P(TestGetTotalSequenceLength, SeqTensorDescriptor) { this->RunTest(); };
+TEST_P(CPU_TestGetMaxCountOfSequence_FP16, SeqTensorDescriptor) { this->RunTest(); };
+TEST_P(CPU_TestGetMaxSequenceLength_FP16, SeqTensorDescriptor) { this->RunTest(); };
+TEST_P(CPU_TestGetTotalSequenceLength_FP16, SeqTensorDescriptor) { this->RunTest(); };
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGetMaxCountOfSequence,
+                         CPU_TestGetMaxCountOfSequence_FP16,
                          testing::ValuesIn(TestGetMaxCountOfSequence::GetTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGetMaxSequenceLength,
+                         CPU_TestGetMaxSequenceLength_FP16,
                          testing::ValuesIn(TestGetMaxSequenceLength::GetTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         TestGetTotalSequenceLength,
+                         CPU_TestGetTotalSequenceLength_FP16,
                          testing::ValuesIn(TestGetTotalSequenceLength::GetTestCases()));

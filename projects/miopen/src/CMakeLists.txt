@@ -2,7 +2,7 @@
 #
 # MIT License
 #
-# Copyright (c) 2017 Advanced Micro Devices, Inc.
+# Copyright (c) 2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -38,24 +38,24 @@ endif()
 # 2.  How BF16 kernels (which are kind of mixed-precision now and expected to
 #     remain in the future)  perform final conversion (and rounding) of FP32
 #     to BF16 results. This affects the main functionality of the library.
-option( MIOPEN_USE_RNE_BFLOAT16 "Sets rounding scheme for bfloat16 type" ON )
-option( MIOPEN_FP8_IEEE_EXPONENT_BIAS "Sets the FP8 exponent bias to IEEE" OFF)
-option( MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
+option(MIOPEN_USE_RNE_BFLOAT16 "Sets rounding scheme for bfloat16 type" ON)
+option(MIOPEN_FP8_IEEE_EXPONENT_BIAS "Sets the FP8 exponent bias to IEEE" OFF)
+option(MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
 
-option( MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
+option(MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
 
 configure_file("${PROJECT_SOURCE_DIR}/include/miopen/config.h.in" "${PROJECT_BINARY_DIR}/include/miopen/config.h")
 
 # configure a header file to pass the CMake version settings to the source, and package the header files in the output archive
-configure_file( "${PROJECT_SOURCE_DIR}/include/miopen/version.h.in" "${PROJECT_BINARY_DIR}/include/miopen/version.h" )
+configure_file("${PROJECT_SOURCE_DIR}/include/miopen/version.h.in" "${PROJECT_BINARY_DIR}/include/miopen/version.h")
 
-message( STATUS "MIOpen_VERSION= ${MIOpen_VERSION}" )
+message(STATUS "MIOpen_VERSION= ${MIOpen_VERSION}")
 if(NOT MIOPEN_GENERATOR_IS_MULTI_CONFIG)
-    message( STATUS "CMAKE_BUILD_TYPE= ${CMAKE_BUILD_TYPE}" )
+    message(STATUS "CMAKE_BUILD_TYPE= ${CMAKE_BUILD_TYPE}")
 endif()
 
 # This is incremented when the ABI to the library changes
-set( MIOpen_SOVERSION 1.0 )
+set(MIOpen_SOVERSION 1.0)
 
 function(add_kernels FILE_NAME VAR_PREFIX VAR_SUFFIX KERNEL_FILES)
     set(INIT_KERNELS_LIST)
@@ -386,7 +386,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
     file(GLOB_RECURSE GPU_BATCHED_TRANSPOSE_KERNEL_HIP "kernels/gpu_batched_transpose_kernel/*.cpp")
     file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_INCLUDE "kernels/gpu_general_tensor_reorder_kernel/*.hpp")
     file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE "kernels/gpu_general_tensor_reorder_kernel/*.cpp")
-
 
     set(MIOPEN_KERNEL_INCLUDES
         ${STATIC_COMPOSABLE_KERNEL_INCLUDE}
@@ -759,7 +758,7 @@ if( MIOPEN_BACKEND STREQUAL "OpenCL" )
     )
 endif()
 
-if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
+if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" )
     list(APPEND MIOpen_Source
         hip/hiperrors.cpp
         hip/handlehip.cpp
@@ -768,7 +767,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
         )
 endif()
 
-if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+if( MIOPEN_BACKEND STREQUAL "HIPNOGPU" )
     list(APPEND MIOpen_Source
         hip/hiperrors.cpp
         nogpu/handle.cpp
@@ -777,7 +776,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
         )
 endif()
 
-if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU" )
     set(KERNELS_SRC_BATCH_FACTOR 50 CACHE STRING "Amount of kernel source files to inline to a single object file.")
     set(KERNELS_BATCH_ID 0)
 
@@ -891,7 +890,7 @@ target_include_directories(MIOpen PUBLIC
 )
 
 if(MIOPEN_USE_COMPOSABLEKERNEL)
-    if(MIOPEN_BUILD_CK )
+    if(MIOPEN_BUILD_CK)
         # the aliased target doesnt exist when we build CK inline as part of MIOPEN.  The aliased target only is not
         # global when you build it so we dont have access to it.
         set(MIOPEN_CK_LINK_FLAGS device_conv_operations hip::host)
@@ -942,7 +941,7 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
         target_link_libraries(nlohmann_json INTERFACE nlohmann_json::nlohmann_json)
     endif()
     file(GLOB MODEL_FILES CONFIGURE_DEPENDS kernels/*.model)
-    if(NOT ENABLE_ASAN_PACKAGING )
+    if(NOT ENABLE_ASAN_PACKAGING)
         install(FILES ${MODEL_FILES} DESTINATION ${DATABASE_INSTALL_DIR})
     endif()
     foreach(MODEL_FILE ${MODEL_FILES})
@@ -953,27 +952,27 @@ endif()
 
 ############################################################
 # MIOpen depends on OpenCL
-if( MIOPEN_BACKEND STREQUAL "OpenCL")
-    MESSAGE( STATUS "MIOpen linking OpenCL: ${OPENCL_INCLUDE_DIRS}" )
-    target_include_directories(MIOpen SYSTEM PUBLIC ${OPENCL_INCLUDE_DIRS} )
-    target_link_libraries( MIOpen PUBLIC ${OPENCL_LIBRARIES} )
+if(MIOPEN_BACKEND STREQUAL "OpenCL")
+    message(STATUS "MIOpen linking OpenCL: ${OPENCL_INCLUDE_DIRS}")
+    target_include_directories(MIOpen SYSTEM PUBLIC ${OPENCL_INCLUDE_DIRS})
+    target_link_libraries(MIOpen PUBLIC ${OPENCL_LIBRARIES})
     list(APPEND PACKAGE_DEPENDS PACKAGE OpenCL)
 elseif(MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
-    target_link_libraries( MIOpen PRIVATE hip::device )
-    target_link_libraries( MIOpen INTERFACE hip::host )
+    target_link_libraries(MIOpen PRIVATE hip::device)
+    target_link_libraries(MIOpen INTERFACE hip::host)
     if(MIOPEN_USE_HIPRTC)
         if(WIN32)
-            target_link_libraries( MIOpen PRIVATE hiprtc::hiprtc )
+            target_link_libraries(MIOpen PRIVATE hiprtc::hiprtc)
         else()
-            target_link_libraries( MIOpen PRIVATE hiprtc)
+            target_link_libraries(MIOpen PRIVATE hiprtc)
         endif()
     endif()
     if(ENABLE_HIP_WORKAROUNDS)
         # Workaround hip not setting its usage requirements correctly
-        target_compile_definitions( MIOpen PRIVATE -D__HIP_PLATFORM_AMD__=1 )
+        target_compile_definitions(MIOpen PRIVATE -D__HIP_PLATFORM_AMD__=1)
     endif()
     # This is helpful for the tests
-    target_link_libraries( MIOpen INTERFACE $<BUILD_INTERFACE:hip::device> )
+    target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:hip::device>)
     list(APPEND PACKAGE_DEPENDS PACKAGE hip)
 endif()
 
@@ -1014,10 +1013,11 @@ endif()
 target_link_libraries(MIOpen PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 
-target_internal_library(MIOpen
-    Boost::filesystem
-)
-list(APPEND PACKAGE_STATIC_DEPENDS PACKAGE Boost COMPONENTS filesystem)
+if(MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM)
+    target_internal_library(MIOpen Boost::filesystem)
+    list(APPEND PACKAGE_STATIC_DEPENDS PACKAGE Boost COMPONENTS filesystem)
+endif()
+
 if(NOT WIN32 AND NOT APPLE)
     file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/lib.def "
 MIOPEN_${MIOPEN_BACKEND}_1
