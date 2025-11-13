@@ -728,12 +728,12 @@ __host__ void gemm_act_cpu(uint32_t      m,
         for(int j = 0; j < n; ++j)
         {
             ComputeT    accum     = static_cast<ComputeT>(0);
-            ActComputeT act_value = static_cast<ActComputeT>(accum);
             for(int h = 0; h < k; ++h)
             {
                 accum += static_cast<ComputeT>(a[aIndex(i, h, lda)])
                          * static_cast<ComputeT>(b[bIndex(h, j, ldb)]);
             }
+            ActComputeT act_value = static_cast<ActComputeT>(accum);
 
             if(apply_silu)
             {
