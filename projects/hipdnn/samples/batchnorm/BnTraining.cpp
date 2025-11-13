@@ -23,8 +23,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto inputType = getDataTypeEnumFromType<InputType>();
     auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
 
-    std::cout << "Running batch normalization training graph " << inputType << " [" << layout
-              << "]" << (config.cpuValidation ? " (with CPU validation)" : "");
+    std::cout << "Running batch normalization training graph " << inputType << " [" << layout << "]"
+              << (config.cpuValidation ? " (with CPU validation)" : "");
 
     if(config.useRunningStats)
     {
@@ -182,24 +182,24 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         // BATCH_STATS_ONLY mode validation
         test_utilities::CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::
-            batchnormFwdTraining(xTensor,
-                                 scaleTensor,
-                                 biasTensor,
-                                 yRefTensor,
-                                 utilities::BATCHNORM_DEFAULT_EPSILON,
-                                 0.1, // momentum (not used in BATCH_STATS_ONLY mode but required by API)
-                                 &savedMeanRefTensor,
-                                 &savedInvVarRefTensor,
-                                 nullptr, // prevRunningMean (not used)
-                                 nullptr, // prevRunningVariance (not used)
-                                 nullptr, // nextRunningMean (not used)
-                                 nullptr  // nextRunningVariance (not used)
+            batchnormFwdTraining(
+                xTensor,
+                scaleTensor,
+                biasTensor,
+                yRefTensor,
+                utilities::BATCHNORM_DEFAULT_EPSILON,
+                0.1, // momentum (not used in BATCH_STATS_ONLY mode but required by API)
+                &savedMeanRefTensor,
+                &savedInvVarRefTensor,
+                nullptr, // prevRunningMean (not used)
+                nullptr, // prevRunningVariance (not used)
+                nullptr, // nextRunningMean (not used)
+                nullptr // nextRunningVariance (not used)
             );
 
         auto tolerance = test_utilities::batchnorm::getToleranceTraining<InputType>();
 
-        auto yValidator
-            = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+        auto yValidator = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         auto statsValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
             static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
