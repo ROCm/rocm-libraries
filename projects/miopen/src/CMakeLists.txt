@@ -1013,10 +1013,8 @@ endif()
 target_link_libraries(MIOpen PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 
-if(MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM)
-    target_internal_library(MIOpen Boost::filesystem)
-    list(APPEND PACKAGE_STATIC_DEPENDS PACKAGE Boost COMPONENTS filesystem)
-endif()
+find_package(Boost REQUIRED COMPONENTS filesystem CONFIG)
+target_internal_library(MIOpen Boost::filesystem)
 
 if(NOT WIN32 AND NOT APPLE)
     file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/lib.def "
