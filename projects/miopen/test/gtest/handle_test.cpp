@@ -295,7 +295,6 @@ void test_warnings(kernel_type_t kern_type)
                         "",
                         0,
                         WriteNop(kern_type))
-            // MIOPEN_LOG_E("FAILED: Build of the HIP kernel 'nop_hip.cpp' should produce warnings");
         );
     }
 #else
