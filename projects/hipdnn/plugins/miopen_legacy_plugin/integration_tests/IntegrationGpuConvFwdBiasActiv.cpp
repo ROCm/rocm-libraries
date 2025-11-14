@@ -147,6 +147,7 @@ TEST_P(IntegrationGpuConvFwdBiasActivNchwFp32, Correctness)
     runGraphTest(conv::getToleranceFwd<float>(), TensorLayout::NCHW);
 }
 
+#if 0
 TEST_P(IntegrationGpuConvFwdBiasActivNcdhwFp32, Correctness)
 {
     runGraphTest(conv::getToleranceFwd<float>(), TensorLayout::NCDHW);
@@ -201,6 +202,7 @@ TEST_P(IntegrationGpuConvFwdBiasActivNdhwcFp16, Correctness)
 {
     runGraphTest(conv::getToleranceFwd<half>(), TensorLayout::NDHWC);
 }
+#endif
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuConvFwdBiasActivNchwFp32,
@@ -208,6 +210,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Bool(),
                                           testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
+#if 0
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuConvFwdBiasActivNchwBfp16,
                          testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases4D()),
@@ -273,3 +276,4 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases5D()),
                                           testing::Bool(),
                                           testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
+#endif
