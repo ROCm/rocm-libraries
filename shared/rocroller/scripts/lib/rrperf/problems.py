@@ -187,6 +187,10 @@ class GEMMProblem:
     scaleValue_A: float = 1.0
     scaleValue_B: float = 1.0
 
+    initMode_A: str = "Bounded"
+    initMode_B: str = "Bounded"
+    initMode_C: str = "Bounded"
+
     workgroupMappingDim: int = -1
     workgroupMappingValue: int = -1
 
