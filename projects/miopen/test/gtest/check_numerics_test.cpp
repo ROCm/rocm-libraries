@@ -43,45 +43,45 @@ namespace {
 template <class T>
 void TestNormalValue(T val)
 {
-    auto&& handle = get_handle();
+    auto&& handle      = get_handle();
     constexpr int size = 42;
     miopen::TensorDescriptor desc{miopen_type<T>{}, {size}};
     std::vector<T> data(size, val);
     auto buffer = handle.Write(data);
 
-    EXPECT_FALSE(miopen::checkNumericsImpl(
-        handle, miopen::CheckNumerics::Throw, desc, buffer.get(), true));
-    EXPECT_FALSE(miopen::checkNumericsImpl(
-        handle, miopen::CheckNumerics::Throw, desc, buffer.get(), false));
+    EXPECT_FALSE(
+        miopen::checkNumericsImpl(handle, miopen::CheckNumerics::Throw, desc, buffer.get(), true));
+    EXPECT_FALSE(
+        miopen::checkNumericsImpl(handle, miopen::CheckNumerics::Throw, desc, buffer.get(), false));
 
     EXPECT_FALSE(miopen::checkNumericsImpl(handle,
-                                          miopen::CheckNumerics::Throw |
-                                              miopen::CheckNumerics::ComputeStats,
-                                          desc,
-                                          buffer.get(),
-                                          true));
+                                           miopen::CheckNumerics::Throw |
+                                               miopen::CheckNumerics::ComputeStats,
+                                           desc,
+                                           buffer.get(),
+                                           true));
     EXPECT_FALSE(miopen::checkNumericsImpl(handle,
-                                          miopen::CheckNumerics::Throw |
-                                              miopen::CheckNumerics::ComputeStats,
-                                          desc,
-                                          buffer.get(),
-                                          false));
+                                           miopen::CheckNumerics::Throw |
+                                               miopen::CheckNumerics::ComputeStats,
+                                           desc,
+                                           buffer.get(),
+                                           false));
 }
 
 // Abnormal value tests (NaN, Inf)
 template <class T>
 void TestAbnormalValue(T val)
 {
-    auto&& handle = get_handle();
+    auto&& handle      = get_handle();
     constexpr int size = 42;
     miopen::TensorDescriptor desc{miopen_type<T>{}, {size}};
     std::vector<T> data(size, val);
     auto buffer = handle.Write(data);
 
-    EXPECT_TRUE(miopen::checkNumericsImpl(
-        handle, miopen::CheckNumerics::Warn, desc, buffer.get(), true));
-    EXPECT_TRUE(miopen::checkNumericsImpl(
-        handle, miopen::CheckNumerics::Warn, desc, buffer.get(), false));
+    EXPECT_TRUE(
+        miopen::checkNumericsImpl(handle, miopen::CheckNumerics::Warn, desc, buffer.get(), true));
+    EXPECT_TRUE(
+        miopen::checkNumericsImpl(handle, miopen::CheckNumerics::Warn, desc, buffer.get(), false));
 
     EXPECT_THROW(
         {
@@ -96,37 +96,37 @@ void TestAbnormalValue(T val)
         },
         std::exception);
 
-    EXPECT_TRUE(miopen::checkNumericsImpl(handle,
-                                         miopen::CheckNumerics::Warn |
-                                             miopen::CheckNumerics::ComputeStats,
-                                         desc,
-                                         buffer.get(),
-                                         true));
-    EXPECT_TRUE(miopen::checkNumericsImpl(handle,
-                                         miopen::CheckNumerics::Warn |
-                                             miopen::CheckNumerics::ComputeStats,
-                                         desc,
-                                         buffer.get(),
-                                         false));
+    EXPECT_TRUE(
+        miopen::checkNumericsImpl(handle,
+                                  miopen::CheckNumerics::Warn | miopen::CheckNumerics::ComputeStats,
+                                  desc,
+                                  buffer.get(),
+                                  true));
+    EXPECT_TRUE(
+        miopen::checkNumericsImpl(handle,
+                                  miopen::CheckNumerics::Warn | miopen::CheckNumerics::ComputeStats,
+                                  desc,
+                                  buffer.get(),
+                                  false));
 
     EXPECT_THROW(
         {
             miopen::checkNumericsImpl(handle,
-                                     miopen::CheckNumerics::Throw |
-                                         miopen::CheckNumerics::ComputeStats,
-                                     desc,
-                                     buffer.get(),
-                                     true);
+                                      miopen::CheckNumerics::Throw |
+                                          miopen::CheckNumerics::ComputeStats,
+                                      desc,
+                                      buffer.get(),
+                                      true);
         },
         std::exception);
     EXPECT_THROW(
         {
             miopen::checkNumericsImpl(handle,
-                                     miopen::CheckNumerics::Throw |
-                                         miopen::CheckNumerics::ComputeStats,
-                                     desc,
-                                     buffer.get(),
-                                     false);
+                                      miopen::CheckNumerics::Throw |
+                                          miopen::CheckNumerics::ComputeStats,
+                                      desc,
+                                      buffer.get(),
+                                      false);
         },
         std::exception);
 }
@@ -136,26 +136,44 @@ TEST(CheckNumerics, NormalZero_FP32) { TestNormalValue<float>(0.0f); }
 
 TEST(CheckNumerics, NormalOne_FP32) { TestNormalValue<float>(1.0f); }
 
-TEST(CheckNumerics, AbnormalNaN_FP32) { TestAbnormalValue<float>(std::numeric_limits<float>::quiet_NaN()); }
+TEST(CheckNumerics, AbnormalNaN_FP32)
+{
+    TestAbnormalValue<float>(std::numeric_limits<float>::quiet_NaN());
+}
 
-TEST(CheckNumerics, AbnormalInf_FP32) { TestAbnormalValue<float>(std::numeric_limits<float>::infinity()); }
+TEST(CheckNumerics, AbnormalInf_FP32)
+{
+    TestAbnormalValue<float>(std::numeric_limits<float>::infinity());
+}
 
 // Half tests
 TEST(CheckNumerics, NormalZero_FP16) { TestNormalValue<half_float::half>(half_float::half(0.0f)); }
 
 TEST(CheckNumerics, NormalOne_FP16) { TestNormalValue<half_float::half>(half_float::half(1.0f)); }
 
-TEST(CheckNumerics, AbnormalNaN_FP16) { TestAbnormalValue<half_float::half>(std::numeric_limits<half_float::half>::quiet_NaN()); }
+TEST(CheckNumerics, AbnormalNaN_FP16)
+{
+    TestAbnormalValue<half_float::half>(std::numeric_limits<half_float::half>::quiet_NaN());
+}
 
-TEST(CheckNumerics, AbnormalInf_FP16) { TestAbnormalValue<half_float::half>(std::numeric_limits<half_float::half>::infinity()); }
+TEST(CheckNumerics, AbnormalInf_FP16)
+{
+    TestAbnormalValue<half_float::half>(std::numeric_limits<half_float::half>::infinity());
+}
 
 // BF16 tests
 TEST(CheckNumerics, NormalZero_BF16) { TestNormalValue<bfloat16>(bfloat16(0.0f)); }
 
 TEST(CheckNumerics, NormalOne_BF16) { TestNormalValue<bfloat16>(bfloat16(1.0f)); }
 
-TEST(CheckNumerics, AbnormalNaN_BF16) { TestAbnormalValue<bfloat16>(std::numeric_limits<bfloat16>::quiet_NaN()); }
+TEST(CheckNumerics, AbnormalNaN_BF16)
+{
+    TestAbnormalValue<bfloat16>(std::numeric_limits<bfloat16>::quiet_NaN());
+}
 
-TEST(CheckNumerics, AbnormalInf_BF16) { TestAbnormalValue<bfloat16>(std::numeric_limits<bfloat16>::infinity()); }
+TEST(CheckNumerics, AbnormalInf_BF16)
+{
+    TestAbnormalValue<bfloat16>(std::numeric_limits<bfloat16>::infinity());
+}
 
 } // namespace
