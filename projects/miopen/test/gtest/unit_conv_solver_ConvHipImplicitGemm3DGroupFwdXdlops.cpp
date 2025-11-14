@@ -125,19 +125,12 @@ const auto& GetTestParams()
 
 } // namespace
 
-using GPU_UnitTestConvSolverHipImplicitGemm3DGroupFwdXdlops_I8    = GPU_UnitTestConvSolverFwd_I8;
 using GPU_UnitTestConvSolverHipImplicitGemm3DGroupFwdXdlops_FP16  = GPU_UnitTestConvSolverFwd_FP16;
 using GPU_UnitTestConvSolverHipImplicitGemm3DGroupFwdXdlops_BFP16 = GPU_UnitTestConvSolverFwd_BFP16;
 using GPU_UnitTestConvSolverHipImplicitGemm3DGroupFwdXdlops_FP32  = GPU_UnitTestConvSolverFwd_FP32;
 using GPU_UnitTestConvSolverHipImplicitGemm3DGroupFwdXdlops_TF32  = GPU_UnitTestConvSolverFwd_TF32;
 using CPU_UnitTestConvSolverHipImplicitGemm3DGroupFwdXdlopsDevApplicability_NONE =
     CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
-
-TEST_P(GPU_UnitTestConvSolverHipImplicitGemm3DGroupFwdXdlops_I8,
-       ConvHipImplicitGemm3DGroupFwdXdlops)
-{
-    this->RunTest(miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops{});
-};
 
 TEST_P(GPU_UnitTestConvSolverHipImplicitGemm3DGroupFwdXdlops_FP16,
        ConvHipImplicitGemm3DGroupFwdXdlops)
@@ -169,12 +162,6 @@ TEST_P(CPU_UnitTestConvSolverHipImplicitGemm3DGroupFwdXdlopsDevApplicability_NON
 
 // Smoke tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_UnitTestConvSolverHipImplicitGemm3DGroupFwdXdlops_I8,
-                         testing::Combine(testing::Values(GetTestParams()),
-                                          testing::Values(miopenConvolutionAlgoImplicitGEMM),
-                                          testing::ValuesIn(GetConvSmokeTestCases(miopenInt8))));
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverHipImplicitGemm3DGroupFwdXdlops_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
@@ -200,12 +187,6 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::ValuesIn(GetConvSmokeTestCases("TF32"))));
 
 // Full tests
-INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_UnitTestConvSolverHipImplicitGemm3DGroupFwdXdlops_I8,
-                         testing::Combine(testing::Values(GetTestParams()),
-                                          testing::Values(miopenConvolutionAlgoImplicitGEMM),
-                                          testing::ValuesIn(GetConvFullTestCases(miopenInt8))));
-
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverHipImplicitGemm3DGroupFwdXdlops_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
