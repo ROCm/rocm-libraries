@@ -138,6 +138,7 @@ Datatypes:
         rocsparse_format_ell: 4
         rocsparse_format_bell: 5
         rocsparse_format_bsr: 6
+        rocsparse_format_sell: 7
   - rocsparse_itilu0_alg:
       bases: [c_int ]
       attr:
@@ -162,6 +163,7 @@ Datatypes:
         rocsparse_spmv_alg_bsr: 6
         rocsparse_spmv_alg_csr_lrb: 7
         rocsparse_spmv_alg_csr_nnzsplit: 8
+        rocsparse_spmv_alg_sell: 9
   - rocsparse_spsv_alg:
       bases: [c_int ]
       attr:
@@ -412,7 +414,8 @@ All rocsparse_format: &all_rocsparse_format
          rocsparse_format_csc,
          rocsparse_format_ell,
          rocsparse_format_bell,
-         rocsparse_format_bsr]
+         rocsparse_format_bsr,
+         rocsparse_format_sell]
 
 All rocsparse_itilu0_alg: &all_rocsparse_itilu0_alg
         [rocsparse_itilu0_alg_default,
@@ -433,7 +436,8 @@ All rocsparse_spmv_alg: &all_rocsparse_spmv_alg
          rocsparse_spmv_alg_coo_atomic,
          rocsparse_spmv_alg_bsr,
          rocsparse_spmv_alg_csr_lrb,
-         rocsparse_spmv_alg_csr_nnzsplit]
+         rocsparse_spmv_alg_csr_nnzsplit,
+         rocsparse_spmv_alg_sell]
 
 All rocsparse_spmv_alg_csr: &all_rocsparse_spmv_alg_csr
         [rocsparse_spmv_alg_csr_adaptive,
@@ -505,6 +509,7 @@ Arguments:
   - col_block_dimA: rocsparse_int
   - row_block_dimB: rocsparse_int
   - col_block_dimB: rocsparse_int
+  - sell_slice_size: rocsparse_int
   - dimx: rocsparse_int
   - dimy: rocsparse_int
   - dimz: rocsparse_int
@@ -654,6 +659,7 @@ Defaults:
   col_block_dimA: 2
   row_block_dimB: 2
   col_block_dimB: 2
+  sell_slice_size: 2
   dimx: 1
   dimy: 1
   dimz: 1

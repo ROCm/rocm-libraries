@@ -178,7 +178,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         action="store_true",
         default=False,
         help="Do not remove the temporary build directory (may required hundreds of GBs of space)",
-    ),
+    )
     argParser.add_argument(
         "--logic-filter",
         dest="LogicFilter",
