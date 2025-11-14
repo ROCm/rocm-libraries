@@ -117,7 +117,11 @@ namespace rocRoller::KernelGraph
                     else if(rel == NodeOrdering::LeftInBodyOfRight
                             || rel == NodeOrdering::RightInBodyOfLeft)
                     {
-                        Throw<FatalError>("No body relationships should be here!");
+                        AssertFatal(false,
+                                    "Unexpected body relationship between",
+                                    ShowValue(*iterA),
+                                    ShowValue(*iterB),
+                                    ShowValue(rel));
                     }
                     else
                     {

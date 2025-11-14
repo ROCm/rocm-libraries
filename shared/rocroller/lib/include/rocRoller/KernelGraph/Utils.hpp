@@ -259,6 +259,7 @@ namespace rocRoller
          *
          * @param op Operation to replace.
          * @param newOp Replacement.
+         * @param includeBody If true, transfer Body edges.
          *
          * Does not delete the original operation.
          */

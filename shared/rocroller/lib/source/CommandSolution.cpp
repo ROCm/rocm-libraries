@@ -410,8 +410,9 @@ namespace rocRoller
             transforms.push_back(std::make_shared<KernelGraph::FuseLoops>());
         }
         transforms.push_back(std::make_shared<KernelGraph::RemoveDuplicates>());
-        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::OrderEpilogueBlocks>());
+        // TODO: Investigate why Simplify cannot be called BEFORE RemoveDuplicates and OrderEpilogueBlocks
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::CleanLoops>());
         transforms.push_back(
             std::make_shared<KernelGraph::SwizzleScale>(m_commandParameters, m_context));

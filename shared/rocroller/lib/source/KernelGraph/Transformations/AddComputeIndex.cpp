@@ -34,7 +34,9 @@
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddComputeIndex.hpp>
+#include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
+#include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller::KernelGraph
 {
@@ -497,6 +499,340 @@ namespace rocRoller::KernelGraph
         return {chain.front(), chain.back(), connections, update};
     }
 
+    namespace
+    {
+        /**
+         * @brief Find the corresponding KLoopTail for a given KLoop.
+         *
+         * KLoop and KLoopTail can be related in two ways:
+         * 1. UnrollLoops.cpp: KLoopTail is downstream of KLoop via Sequence path
+         * 2. AddPrefetch/commit: Both are children of the same ancestor Scope
+         *
+         * @param kgraph
+         * @param kLoop The KLoop tag
+         * @return The corresponding KLoopTail tag, or std::nullopt if none exists
+         */
+        std::optional<int> FindCorrespondingKLoopTail(KernelGraph const& kgraph, int kLoop)
+        {
+            // Strategy 1: Search downstream via Sequence edges (UnrollLoops case)
+            // The KLoopTail is connected via: KLoop --Sequence--> ... --Sequence/Body--> KLoopTail
+            for(auto node : kgraph.control.depthFirstVisit(kLoop, Graph::Direction::Downstream))
+            {
+                auto maybeForLoop = kgraph.control.get<ForLoopOp>(node);
+                if(maybeForLoop && maybeForLoop->loopName == rocRoller::KLOOPTAIL)
+                    return node;
+            }
+
+            // Strategy 2: Search for siblings under common parent Scope (AddPrefetch/commit case)
+            // Find parent Scopes of kLoop
+            for(auto ancestor : kgraph.control.breadthFirstVisit(kLoop, Graph::Direction::Upstream))
+            {
+                if(!kgraph.control.get<Scope>(ancestor))
+                    continue;
+
+                // Search all descendants of this Scope for a KLoopTail
+                for(auto descendant :
+                    kgraph.control.depthFirstVisit(ancestor, Graph::Direction::Downstream))
+                {
+                    if(descendant == kLoop)
+                        continue;
+
+                    auto maybeForLoop = kgraph.control.get<ForLoopOp>(descendant);
+                    if(maybeForLoop && maybeForLoop->loopName == rocRoller::KLOOPTAIL)
+                    {
+                        // Verify they share this common ancestor
+                        auto kLoopAncestors
+                            = kgraph.control.breadthFirstVisit(kLoop, Graph::Direction::Upstream)
+                                  .to<std::set>();
+                        if(kLoopAncestors.contains(ancestor))
+                            return descendant;
+                    }
+                }
+            }
+
+            return std::nullopt;
+        }
+
+        /**
+         * @brief Find the corresponding KLoop for a given KLoopTail.
+         *
+         * KLoop and KLoopTail can be related in two ways:
+         * 1. UnrollLoops.cpp: KLoopTail is downstream of KLoop via Sequence path
+         * 2. AddPrefetch/commit: Both are children of the same ancestor Scope
+         *
+         * @param kgraph
+         * @param kLoopTail The KLoopTail tag
+         * @return The corresponding KLoop tag, or std::nullopt if none exists
+         */
+        std::optional<int> FindCorrespondingKLoop(KernelGraph const& kgraph, int kLoopTail)
+        {
+            // Strategy 1: Search upstream via Sequence edges (UnrollLoops case)
+            // The KLoop is connected via: KLoop --Sequence--> ... --Sequence/Body--> KLoopTail
+            for(auto node : kgraph.control.breadthFirstVisit(kLoopTail, Graph::Direction::Upstream))
+            {
+                auto maybeForLoop = kgraph.control.get<ForLoopOp>(node);
+                if(maybeForLoop && maybeForLoop->loopName == rocRoller::KLOOP)
+                    return node;
+            }
+
+            // Strategy 2: Search for siblings under common parent Scope (AddPrefetch/commit case)
+            // Find parent Scopes of kLoopTail
+            for(auto ancestor :
+                kgraph.control.breadthFirstVisit(kLoopTail, Graph::Direction::Upstream))
+            {
+                if(!kgraph.control.get<Scope>(ancestor))
+                    continue;
+
+                // Search all descendants of this Scope for a KLoop
+                for(auto descendant :
+                    kgraph.control.depthFirstVisit(ancestor, Graph::Direction::Downstream))
+                {
+                    if(descendant == kLoopTail)
+                        continue;
+
+                    auto maybeForLoop = kgraph.control.get<ForLoopOp>(descendant);
+                    if(maybeForLoop && maybeForLoop->loopName == rocRoller::KLOOP)
+                    {
+                        // Verify they share this common ancestor
+                        auto kLoopTailAncestors
+                            = kgraph.control
+                                  .breadthFirstVisit(kLoopTail, Graph::Direction::Upstream)
+                                  .to<std::set>();
+                        if(kLoopTailAncestors.contains(ancestor))
+                            return descendant;
+                    }
+                }
+            }
+
+            return std::nullopt;
+        }
+
+        /**
+         * @brief Find the closest common ancestor Scope between two nodes.
+         *
+         * Uses breadthFirstVisit to traverse from both nodes upstream to find their
+         * first common ancestor that is a Scope node in the control graph.
+         *
+         * @param kgraph
+         * @param nodeA
+         * @param nodeB
+         * @return The tag of the common ancestor Scope, or std::nullopt if none exists
+         */
+        std::optional<int> FindCommonAncestorScope(KernelGraph const& kgraph, int nodeA, int nodeB)
+        {
+            // Collect all ancestors of nodeA using breadthFirstVisit
+            auto ancestorsA = kgraph.control.breadthFirstVisit(nodeA, Graph::Direction::Upstream)
+                                  .to<std::set>();
+
+            // Traverse from nodeB and find first common ancestor that is a Scope
+            for(auto node : kgraph.control.breadthFirstVisit(nodeB, Graph::Direction::Upstream))
+            {
+                if(ancestorsA.contains(node) && kgraph.control.get<Scope>(node))
+                    return node;
+            }
+
+            return std::nullopt;
+        }
+
+        /**
+         * @brief Find the immediate child of ancestor on the path to target.
+         *
+         * Uses breadthFirstVisit to traverse upstream from target to ancestor.
+         *
+         * @param kgraph
+         * @param target The target node to start from
+         * @param ancestor The ancestor node to reach
+         * @return The child edge of ancestor on the path to target, or std::nullopt if no path found
+         */
+        std::optional<int> FindChildOnPath(KernelGraph const& kgraph, int target, int ancestor)
+        {
+            std::unordered_map<int, int> parentMap;
+            parentMap[target] = -1;
+
+            for(auto current : kgraph.control.breadthFirstVisit(target, Graph::Direction::Upstream))
+            {
+                if(current == ancestor)
+                    return parentMap[ancestor];
+
+                auto loc = kgraph.control.getLocation(current);
+                for(auto edge : loc.incoming)
+                {
+                    auto parents = kgraph.control.getNeighbours<Graph::Direction::Upstream>(edge);
+                    for(auto parent : parents)
+                    {
+                        if(!parentMap.contains(parent))
+                        {
+                            parentMap[parent] = current;
+                        }
+                    }
+                }
+            }
+
+            return std::nullopt;
+        }
+
+        /**
+         * @brief Find and delete the edge from parent to child.
+         *
+         * Asserts if the edge is not found.
+         *
+         * @param kgraph
+         * @param parent
+         * @param child
+         */
+        void FindAndDeleteEdge(KernelGraph& kgraph, int parent, int child)
+        {
+            auto parentLoc = kgraph.control.getLocation(parent);
+            for(auto edge : parentLoc.outgoing)
+            {
+                auto children = kgraph.control.getNeighbours<Graph::Direction::Downstream>(edge);
+                for(auto c : children)
+                {
+                    if(c == child)
+                    {
+                        kgraph.control.deleteElement(edge);
+                        return;
+                    }
+                }
+            }
+            AssertFatal(false,
+                        "Could not find edge from parent to child",
+                        ShowValue(parent),
+                        ShowValue(child));
+        }
+
+        /**
+         * @brief Identify KLoop/KLoopTail pairs that can share compute index chains.
+         *
+         * Finds KLoop/KLoopTail pairs with matching target/coords and marks the KLoopTail
+         * specs to be skipped during chain creation, since they will share the KLoop's chain.
+         *
+         * This function assumes:
+         * - Each KLoop has at most one corresponding KLoopTail with matching target/coords
+         * - All specs have valid location nodes that can be queried for ForLoopOp
+         *
+         * @param kgraph
+         * @param chains Map of chain specifications to candidates
+         * @return A pair containing:
+         *         - Set of KLoopTail specs to skip during chain creation
+         *         - Map from KLoop specs to their KLoopTail candidates for sharing
+         */
+        std::pair<std::set<ComputeIndexChainSpecification>,
+                  std::map<ComputeIndexChainSpecification, std::vector<int>>>
+            IdentifySharedKLoopKLoopTailChains(
+                KernelGraph const&                                                kgraph,
+                std::map<ComputeIndexChainSpecification, std::vector<int>> const& chains)
+        {
+            std::set<ComputeIndexChainSpecification>                   specsToSkip;
+            std::map<ComputeIndexChainSpecification, std::vector<int>> kLoopToKLoopTailCandidates;
+
+            // Find all KLoop specs and check if they have corresponding KLoopTail specs
+            for(auto const& [spec, candidates] : chains)
+            {
+                auto maybeForLoop = kgraph.control.get<ForLoopOp>(spec.location);
+                if(!maybeForLoop || maybeForLoop->loopName != rocRoller::KLOOP)
+                    continue;
+
+                // Use helper function to find the corresponding KLoopTail in the graph
+                auto maybeKLoopTail = FindCorrespondingKLoopTail(kgraph, spec.location);
+                if(!maybeKLoopTail)
+                    continue;
+
+                // Look for a spec with this KLoopTail location and matching target/coords
+                for(auto const& [otherSpec, otherCandidates] : chains)
+                {
+                    if(otherSpec.location != *maybeKLoopTail)
+                        continue;
+
+                    auto maybeOtherForLoop = kgraph.control.get<ForLoopOp>(otherSpec.location);
+                    if(!maybeOtherForLoop || maybeOtherForLoop->loopName != rocRoller::KLOOPTAIL)
+                        continue;
+
+                    // Check if they share the same target and coordinates
+                    if(otherSpec.target == spec.target && otherSpec.coords == spec.coords)
+                    {
+                        Log::debug("Skipping KLoopTail chain creation (duplicate of KLoop): "
+                                   "target={}, KLoop={}, KLoopTail={}",
+                                   spec.target,
+                                   spec.location,
+                                   otherSpec.location);
+
+                        specsToSkip.insert(otherSpec);
+                        kLoopToKLoopTailCandidates[spec] = otherCandidates;
+                        break; // Found the matching KLoopTail spec
+                    }
+                }
+            }
+
+            return {specsToSkip, kLoopToKLoopTailCandidates};
+        }
+
+        /**
+         * @brief Reconnect KLoopTail subtrees to execute sequentially after their corresponding KLoops.
+         *
+         * Uses helper functions to identify corresponding pairs, supporting multiple
+         * independent KLoop/KLoopTail pairs (e.g., in StreamK scenarios).
+         *
+         * This function assumes (all asserted):
+         * - Every KLoopTail in the graph has a corresponding KLoop
+         * - Every KLoop/KLoopTail pair has a common ancestor Scope
+         * - A valid path exists from the common ancestor to the KLoopTail
+         * - An edge exists from ancestor to the child on the path
+         *
+         * @param kgraph
+         */
+        void ReconnectKLoopTailsAfterKLoops(KernelGraph& kgraph)
+        {
+            // Find all KLoopTail ForLoopOps
+            auto kernel = *kgraph.control.roots().begin();
+            auto kLoopTails
+                = kgraph.control
+                      .findNodes(
+                          kernel,
+                          [&](int tag) -> bool {
+                              auto maybeForLoop = kgraph.control.get<ForLoopOp>(tag);
+                              return maybeForLoop && maybeForLoop->loopName == rocRoller::KLOOPTAIL;
+                          },
+                          GD::Downstream)
+                      .to<std::vector>();
+
+            // For each KLoopTail, find its corresponding KLoop and reconnect
+            for(auto kLoopTail : kLoopTails)
+            {
+                // Use helper function to find the corresponding KLoop
+                auto maybeKLoop = FindCorrespondingKLoop(kgraph, kLoopTail);
+                AssertFatal(maybeKLoop,
+                            "Could not find corresponding KLoop for KLoopTail",
+                            ShowValue(kLoopTail));
+                int kLoop = *maybeKLoop;
+
+                // Find common ancestor Scope
+                auto commonAncestor = FindCommonAncestorScope(kgraph, kLoop, kLoopTail);
+                AssertFatal(commonAncestor,
+                            "Could not find common ancestor Scope for KLoop and KLoopTail",
+                            ShowValue(kLoop),
+                            ShowValue(kLoopTail));
+
+                // Find immediate child of ancestor on path to KLoopTail
+                auto childOnPath = FindChildOnPath(kgraph, kLoopTail, *commonAncestor);
+                AssertFatal(childOnPath,
+                            "Could not find child on path from ancestor to KLoopTail",
+                            ShowValue(kLoopTail),
+                            ShowValue(*commonAncestor));
+
+                // Disconnect the child from the common ancestor
+                FindAndDeleteEdge(kgraph, *commonAncestor, *childOnPath);
+
+                // Connect the child as a Sequence child of KLoop
+                kgraph.control.addElement(Sequence(), {kLoop}, {*childOnPath});
+                Log::debug("Reconnected KLoopTail {} to KLoop {} via common ancestor {}",
+                           kLoopTail,
+                           kLoop,
+                           *commonAncestor);
+            }
+        }
+    } // anonymous namespace
+
     /**
      * @brief Add ComputeIndex operations.
      *
@@ -672,8 +1008,8 @@ namespace rocRoller::KernelGraph
             if(hasUnroll)
             {
                 log->debug("  staged as: hasUnroll");
-
                 auto kernel = *kgraph.control.roots().begin();
+
                 stageChain(kgraph,
                            target,
                            candidate,
@@ -710,8 +1046,20 @@ namespace rocRoller::KernelGraph
             std::map<int, int> scopes;
             BufferMap          bufferMap;
 
+            removeRedundantSequenceEdges(kgraph);
+            auto [specsToSkip, kLoopToKLoopTailCandidates]
+                = IdentifySharedKLoopKLoopTailChains(kgraph, m_chains);
+
             for(auto const& [spec, candidates] : m_chains)
             {
+                // Skip KLoopTail specs that will share KLoop's chain
+                if(specsToSkip.contains(spec))
+                    continue;
+
+                AssertFatal(
+                    !candidates.empty(),
+                    "ComputeIndexChainSpecification must have at least one candidate operation");
+
                 ExpressionPtr step = Expression::literal(1u);
                 if(spec.forLoop > 0)
                 {
@@ -719,11 +1067,22 @@ namespace rocRoller::KernelGraph
                     step            = simplify(rhs);
                 }
 
+                // Check if this is KLoopTail and log why it's being created (not deduplicated)
+                auto maybeForLoop = kgraph.control.get<ForLoopOp>(spec.location);
+                if(maybeForLoop && maybeForLoop->loopName == rocRoller::KLOOPTAIL)
+                {
+                    Log::debug("Creating KLoopTail chain: target={}, location={} (unique coords "
+                               "not shared with KLoop)",
+                               spec.target,
+                               spec.location);
+                }
+
                 // Use first candidate to compute indexes
-                rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::AddComputeIndex()::commit({}) isStorePartOfGlobalToLDSOp({})",
-                    candidates[0],
-                    spec.isStorePartOfGlobalToLDSOp);
+                Log::debug("KernelGraph::AddComputeIndex()::commit({}) "
+                           "isStorePartOfGlobalToLDSOp({}) location {}",
+                           candidates[0],
+                           spec.isStorePartOfGlobalToLDSOp,
+                           spec.location);
 
                 auto chain = addComputeIndex(kgraph, candidates[0], step, spec, bufferMap);
 
@@ -740,15 +1099,17 @@ namespace rocRoller::KernelGraph
                         // is within the scope.
                         if(!scopes.contains(spec.location))
                         {
-                            scopes[spec.location] = replaceWith(
-                                kgraph, spec.location, kgraph.control.addElement(Scope()), false);
+                            auto scopeNode = kgraph.control.addElement(Scope());
+                            scopes[spec.location]
+                                = replaceWith(kgraph, spec.location, scopeNode, false);
                         }
+
                         auto scope = scopes[spec.location];
                         if(m_serializeComputeIndex)
                         {
-                            auto isScope = kgraph.control.get<Scope>(scope).has_value();
-                            kgraph.control.addElement(isScope ? ControlEdge(Body())
-                                                              : ControlEdge(Sequence()),
+                            kgraph.control.addElement(kgraph.control.get<Scope>(scope).has_value()
+                                                          ? ControlEdge(Body())
+                                                          : ControlEdge(Sequence()),
                                                       {scope},
                                                       {chain.top});
                             kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
@@ -785,6 +1146,10 @@ namespace rocRoller::KernelGraph
                 // Attach increment to associate ForLoop
                 if(chain.update > 0)
                 {
+                    AssertFatal(spec.forLoop > 0,
+                                "Chain has an update operation but no associated ForLoop",
+                                ShowValue(chain.update),
+                                ShowValue(spec.forLoop));
                     kgraph.control.addElement(ForLoopIncrement(), {spec.forLoop}, {chain.update});
                 }
 
@@ -796,7 +1161,23 @@ namespace rocRoller::KernelGraph
                         kgraph.mapper.connect(candidate, dc.coordinate, dc.connectionSpec);
                     }
                 }
+
+                // If this is a KLoop chain, also connect the KLoopTail candidates
+                if(kLoopToKLoopTailCandidates.contains(spec))
+                {
+                    auto const& kLoopTailCandidates = kLoopToKLoopTailCandidates.at(spec);
+                    for(auto candidate : kLoopTailCandidates)
+                    {
+                        for(auto const& dc : chain.connections)
+                        {
+                            kgraph.mapper.connect(candidate, dc.coordinate, dc.connectionSpec);
+                        }
+                    }
+                }
             }
+
+            ReconnectKLoopTailsAfterKLoops(kgraph);
+            removeRedundantSequenceEdges(kgraph);
 
             return kgraph;
         }
