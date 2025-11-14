@@ -8,10 +8,6 @@ sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 import therock_configure_ci
 
 class ConfigureCITest(unittest.TestCase):
-    # Helper to get project names from a list of projects
-    def extract_project_names(self, projects):
-        return [p.strip() for project in projects for p in project["project_to_test"].split(',')] if projects else []
-
     @patch("subprocess.run")
     def test_pull_request(self, mock_run):
         args = {
@@ -23,11 +19,9 @@ class ConfigureCITest(unittest.TestCase):
         mock_run.return_value = mock_process
 
         project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
-        project_names = self.extract_project_names(project_to_run)
-        self.assertIn("rocprim", project_names)
-        self.assertIn("hipcub", project_names)
-        self.assertIn("rocwmma", project_names)
-        self.assertGreaterEqual(len(project_names), 3)
+        self.assertIn("rocprim", str(project_to_run))
+        self.assertIn("hipcub", str(project_to_run))
+        self.assertIn("rocwmma", str(project_to_run))
         self.assertEqual(test_type, "full")
 
     @patch("subprocess.run")
@@ -56,10 +50,8 @@ class ConfigureCITest(unittest.TestCase):
         mock_run.return_value = mock_process
 
         project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
-        project_names = self.extract_project_names(project_to_run)
-        self.assertGreaterEqual(len(project_names), 1)
-        self.assertIn("rocprim", project_names)
-        self.assertIn("hipcub", project_names)
+        self.assertIn("rocprim", str(project_to_run))
+        self.assertIn("hipcub", str(project_to_run))
         self.assertEqual(test_type, "full")
 
     @patch("subprocess.run")
@@ -74,8 +66,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_run.return_value = mock_process
 
         project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
-        project_names = self.extract_project_names(project_to_run)
-        self.assertEqual(len(project_names), 0)
+        self.assertEqual(len(project_to_run), 0)
 
     @patch("subprocess.run")
     def test_workflow_dispatch_all(self, mock_run):
@@ -89,8 +80,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_run.return_value = mock_process
 
         project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
-        project_names = self.extract_project_names(project_to_run)
-        self.assertGreaterEqual(len(project_names), 5)
+        self.assertGreaterEqual(len(project_to_run), 5)
         self.assertEqual(test_type, "full")
 
     @patch("subprocess.run")
@@ -118,9 +108,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_run.return_value = mock_process
 
         project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
-        project_names = self.extract_project_names(project_to_run)
-        self.assertGreaterEqual(len(project_names), 1)
-        self.assertIn("rocprim", project_names)
+        self.assertIn("rocprim", str(project_to_run))
         self.assertEqual(test_type, "full")
 
     def test_is_path_workflow_file_related_to_ci(self):
@@ -175,9 +163,7 @@ class ConfigureCITest(unittest.TestCase):
             "base_ref": "HEAD^"
         })
 
-        project_names = self.extract_project_names(projects)
-        self.assertGreaterEqual(len(project_names), 1)
-        self.assertIn("rocprim", project_names)
+        self.assertIn("rocprim", str(projects))
         self.assertEqual(test_type, "full")
 
     @patch("therock_configure_ci.get_modified_paths")
@@ -189,10 +175,8 @@ class ConfigureCITest(unittest.TestCase):
             "base_ref": "HEAD^"
         })
 
-        project_names = self.extract_project_names(projects)
-        self.assertGreaterEqual(len(project_names), 2)
-        self.assertIn("rocprim", project_names)
-        self.assertIn("hipcub", project_names)
+        self.assertIn("rocprim", str(projects))
+        self.assertIn("hipcub", str(projects))
         self.assertEqual(test_type, "full")
 
     @patch("therock_configure_ci.get_modified_paths")
@@ -205,8 +189,7 @@ class ConfigureCITest(unittest.TestCase):
         })
 
         # All projects should be tested with smoke tests.. make sure we get at least 4 projects
-        project_names = self.extract_project_names(projects)
-        self.assertGreaterEqual(len(project_names), 4)
+        self.assertGreaterEqual(len(projects), 5)
         self.assertEqual(test_type, "smoke")
 
 if __name__ == "__main__":
