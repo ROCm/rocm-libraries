@@ -150,6 +150,11 @@ namespace rocRoller
 
     inline int AssemblyKernel::group_segment_fixed_size() const
     {
+        auto ctx = m_context.lock();
+        if (ctx) {
+            return ctx->ldsAllocator()->fixedSize();
+        }
+        AssertFatal(m_group_segment_fixed_size.has_value(), "Context is null");
         return m_context.lock()->ldsAllocator()->maxUsed();
     }
 
@@ -174,17 +179,32 @@ namespace rocRoller
 
     inline int AssemblyKernel::sgpr_count() const
     {
-        return m_context.lock()->allocator(Register::Type::Scalar)->useCount();
+        auto ctx = m_context.lock();
+        if (ctx) {
+            return ctx->allocator(Register::Type::Scalar)->useCount();
+        }
+        AssertFatal(m_sgprCount.has_value(), "Context is null");
+        return m_sgprCount.value();
     }
 
     inline int AssemblyKernel::vgpr_count() const
     {
-        return m_context.lock()->allocator(Register::Type::Vector)->useCount();
+        auto ctx = m_context.lock();
+        if (ctx) {
+            return ctx->allocator(Register::Type::Vector)->useCount();
+        }
+        AssertFatal(m_vgprCount.has_value(), "Context is null");
+        return m_vgprCount.value();
     }
 
     inline int AssemblyKernel::agpr_count() const
     {
-        return m_context.lock()->allocator(Register::Type::Accumulator)->useCount();
+        auto ctx = m_context.lock();
+        if (ctx) {
+            return ctx->allocator(Register::Type::Accumulator)->useCount();
+        }
+        AssertFatal(m_agprCount.has_value(), "Context is null");
+        return m_agprCount.value();
     }
 
     inline int AssemblyKernel::accum_offset() const

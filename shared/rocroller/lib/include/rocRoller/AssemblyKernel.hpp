@@ -230,6 +230,12 @@ namespace rocRoller
 
         KernelGraph::KernelGraphPtr m_kernelGraph;
         CommandPtr                  m_command;
+
+        // In case context is not available
+        std::optional<int> m_sgprCount;
+        std::optional<int> m_vgprCount;
+        std::optional<int> m_agprCount;
+        std::optional<int> m_group_segment_fixed_size;
     };
 
     struct AssemblyKernels
