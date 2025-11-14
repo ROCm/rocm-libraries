@@ -154,6 +154,16 @@ class TensorDataMoverLoad(TensorDataMover):
     def getLdsAddrSgprName(self, group0: int | str) -> str:
         return f"{group0}+1"
 
+    def setPadding(self, group1: int | str, ldsBlockSizePerPad: int, ldsPadSize: int) -> Module:
+        mod = Module()
+        if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
+          mod.addComment("TDM set padding")
+          pad_interval = self.calPadInterval(ldsBlockSizePerPad)
+          pad_amount = self.calPadAmount(ldsPadSize)
+          value = hex((1 << 20) | (pad_interval << 22) | (pad_amount << 25))
+          mod.add(SOrB32(sgpr(f"{group1}+0"), sgpr(f"{group1}+0"), value, f"set padding {ldsPadSize} per block {ldsBlockSizePerPad}"))
+        return mod
+
     def setGlobalAddr(self, group0: int | str, sgprGlobalAddr: int | str) -> Module:
         mod = Module()
         mod.addComment("TDM set global addr")
@@ -248,3 +258,15 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(SMovB32(sgpr(f"{group2}+3"), sgpr(sgprNumIters)))
         mod.add(SLShiftLeftB32(sgpr(f"{group2}+3"), hex(16), sgpr(f"{group2}+3")))
         return mod
+
+    @staticmethod
+    def calPadInterval(ldsBlockSizePerPad: int) -> int:
+        ldsBlockDwordsPerPad = ldsBlockSizePerPad // 4 # bytes to dwords
+        assert ldsBlockDwordsPerPad > 0
+        return int(log2(ldsBlockDwordsPerPad)) - 1
+
+    @staticmethod
+    def calPadAmount(ldsPadSize: int) -> int:
+        ldsPadDwords =  ldsPadSize // 4 # bytes to dwords
+        assert ldsPadDwords > 0
+        return ldsPadDwords - 1

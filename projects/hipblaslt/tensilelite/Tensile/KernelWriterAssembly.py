@@ -16571,6 +16571,8 @@ class KernelWriterAssembly(KernelWriter):
     numWaves: int = prod(kernel["MIWaveGroup"])
     wavelen: int = kernel["WavefrontSize"]
     ldsConstOffset: int = kernel[f"LdsOffset{tc}"]
+    ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
+    ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
 
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
     mod.add(comp.setDataType(dtype, descSgprName(1)))
@@ -16581,13 +16583,18 @@ class KernelWriterAssembly(KernelWriter):
       waveOffsetSgprIdx: int = tmpSgprRes.idx
       mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen"))
-      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe), "woffset = wId * mt // numWaves * bpe * du"))
+      if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe) + round(mt // numWaves * du * bpe) // ldsBlockSizePerPad * ldsPadSize, \
+                "woffset = wId * (mt // numWaves * du * bpe+  mt // numWaves * du * bpe // ldsBlockSizePerPad * ldsPadSize)"))
+      else:
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWaves * du * bpe), "woffset = wId * (mt // numWaves * du * bpe)"))
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 
     #TODO: refactor, currently special handling for FP4 along K-dim
     sizeShifter = 1 if dtype.isFloat4() else 0
     mod.add(comp.setIterationEnabled(descSgprName(1), False))
+    mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
     mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), self, sizeShifter))
     mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(ti), self))
     mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, self, sizeShifter))
@@ -16627,6 +16634,8 @@ class KernelWriterAssembly(KernelWriter):
     assert numComp & (numComp - 1) == 0
     wavelen: int = kernel["WavefrontSize"]
     ldsConstOffset: int = kernel[f"LdsOffset{tc}"]
+    ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
+    ldsPadSize: int = int(kernel[f"LdsPad{tc}"] * bpe)
 
     mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
     mod.add(comp.setDataType(dtype, descSgprName(1)))
@@ -16637,7 +16646,12 @@ class KernelWriterAssembly(KernelWriter):
       waveOffsetSgprIdx: int = tmpSgprRes.idx
       mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen*numComp)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen // numComp"))
-      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * du * bpe), "woffset = wId * mt // numComp * bpe * du"))
+      if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * du * bpe) + round(mt // numComp * du * bpe) // ldsBlockSizePerPad * ldsPadSize, \
+                "woffset = wId * (mt // numComp * du * bpe + mt // numComp * du * bpe // ldsBlockSizePerPad * ldsPadSize)"))
+      else:
+        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * du * bpe), "woffset = wId * (mt // numComp * du * bpe)"))
+
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 
@@ -16646,6 +16660,7 @@ class KernelWriterAssembly(KernelWriter):
     sizeShifter += ceil(log2(duScale))
 
     mod.add(comp.setIterationEnabled(descSgprName(1), False))
+    mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
     mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), self, sizeShifter))
     mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(ti), self))
 

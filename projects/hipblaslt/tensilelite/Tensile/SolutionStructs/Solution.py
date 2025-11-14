@@ -46,6 +46,8 @@ from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.Toolchain.Component import Assembler
 from Tensile.Components.CustomSchedule import hasCustomSchedule
 
+from ..Component import TensorDataMover
+from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import reject, roundupRatio, pvar
 
 def _getExpectedTypes(validParams):
@@ -2256,25 +2258,49 @@ class Solution(collections.abc.Mapping):
         if state["DirectToVgprB"]:
           ldsPadB = 0
 
-        ldsPadMXSA = 0 if (state["LdsPadMXSA"] == -1) else state["LdsPadMXSA"]
-        ldsPadMXSB = 0 if (state["LdsPadMXSB"] == -1) else state["LdsPadMXSB"]
+        ldsPadMXSA = 4 * 2 if (state["LdsPadMXSA"] == -1) else state["LdsPadMXSA"]
+        ldsPadMXSB = 4 * 2 if (state["LdsPadMXSB"] == -1) else state["LdsPadMXSB"]
+
+        if state["TDMInst"]:
+          pads = {"A": ldsPadA * state["ProblemType"]["MacDataTypeA"].numBytes(), "B": ldsPadB * state["ProblemType"]["MacDataTypeB"].numBytes(), "MXSA": ldsPadMXSA, "MXSB": ldsPadMXSB}
+          for tc, val in pads.items():
+            if val == 0: continue
+            if TensorDataMoverLoad.calPadAmount(val) > 127:
+              reject(state, printRejectionReason, f"pad_amount=(ldsPad//4-1)={pad_amount} should be smaller than or equal to 127 for ldsPad{tc}={val}")
 
         return ldsPadA, ldsPadB, ldsPadM, ldsPadMXSA, ldsPadMXSB
 
+      def checkLdsBlockSizePerPadForTDM(ldsBlockSizePerPadA: int, ldsBlockSizePerPadB: int, ldsBlockSizePerPadMXSA: int, ldsBlockSizePerPadMXSB: int):
+        if state["TDMInst"]:
+          pads = {"A": ldsBlockSizePerPadA, "B": ldsBlockSizePerPadB, "MXSA": ldsBlockSizePerPadMXSA, "MXSB": ldsBlockSizePerPadMXSB}
+          for tc, val in pads.items():
+            if val == 0: continue
+            pad_interval = TensorDataMoverLoad.calPadInterval(val)
+            if pad_interval > 7:
+              reject(state, printRejectionReason, f"pad_interval=(log2(LdsBlockSizePerPad//4)-1)={pad_interval} should be smaller than or equal to 7 for ldsBlockSizePerPad{tc}={val}")
+
+      def calcMXSLdsBlockSizePerPad(tc: str, lrvw: int) -> int:
+        LdsBlockSizePerPad = state["LdsBlockSizePerPad%s"%tc]
+        bpe = 1 # MX scale size
+        multiple = 256 if isa[:2] == (12, 5) else 128
+        if LdsBlockSizePerPad == -1:
+          vw = state["VectorWidthA"] if "A" in tc else state["VectorWidthB"]
+          LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * bpe * vw), multiple)
+        return LdsBlockSizePerPad
 
       def calcLdsBlockSizePerPad(tc: str, lrvw: int) -> int:
         if "MXS" in tc:
-            return 0 if (state["LdsBlockSizePerPad%s"%tc] == -1) else state["LdsBlockSizePerPad%s"%tc]
-
+          return calcMXSLdsBlockSizePerPad(tc, lrvw)
         mt = state["MacroTile0"] if ("A" in tc) else state["MacroTile1"]
         LdsBlockSizePerPad = state["LdsBlockSizePerPad%s"%tc]
         tmpBpe = state["ProblemType"]["DataType%s"%tc].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataType%s"%tc].numBytes()
+        multiple = 256 if isa[:2] == (12, 5) else 128
         if LdsBlockSizePerPad == -1:
           if state["EnableMatrixInstruction"] and tmpBpe != 0.75:
             if state["UnrollMajorLDS%s"%tc]:
-              LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * tmpBpe), 128)
-              if state["_DepthU%s"%tc] * tmpBpe * state["VectorWidth%s"%tc] > 128:
-                LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * tmpBpe * state["VectorWidth%s"%tc]), 128)
+              LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * tmpBpe), multiple)
+              if state["_DepthU%s"%tc] * tmpBpe * state["VectorWidth%s"%tc] > multiple:
+                LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * tmpBpe * state["VectorWidth%s"%tc]), multiple)
             else:
               if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
                 LdsBlockSizePerPad = int(mt * tmpBpe * lrvw)
@@ -2434,6 +2460,7 @@ class Solution(collections.abc.Mapping):
             ldsBlockSizePerPadB = 0 if padB == 0 else ldsBlockSizePerPadB
             ldsBlockSizePerPadMXSA = 0 if padMXSA == 0 else ldsBlockSizePerPadMXSA
             ldsBlockSizePerPadMXSB = 0 if padMXSB == 0 else ldsBlockSizePerPadMXSB
+            checkLdsBlockSizePerPadForTDM(ldsBlockSizePerPadA, ldsBlockSizePerPadB, ldsBlockSizePerPadMXSA, ldsBlockSizePerPadMXSB)
             (ldsNumBytesA, ldsNumBytesAlignedA) = calcLdsNumBytesAB("A", padA, ldsBlockSizePerPadA)
             (ldsNumBytesB, ldsNumBytesAlignedB) = calcLdsNumBytesAB("B", padB, ldsBlockSizePerPadB)
             (ldsNumBytesMXSA, ldsNumBytesAlignedMXSA) = calcLdsNumBytesAB("MXSA", padMXSA, ldsBlockSizePerPadMXSA) if state["ProblemType"]["MXBlockA"] else 0, 0
@@ -3315,6 +3342,7 @@ class Solution(collections.abc.Mapping):
     state["LdsBlockSizePerPadB"] = calcLdsBlockSizePerPad("B", state["LocalReadVectorWidthB"])
     state["LdsBlockSizePerPadMXSA"] = calcLdsBlockSizePerPad("MXSA", state["LocalReadVectorWidthMXS"]) if state["ProblemType"]["MXBlockA"] else 0
     state["LdsBlockSizePerPadMXSB"] = calcLdsBlockSizePerPad("MXSB", state["LocalReadVectorWidthMXS"]) if state["ProblemType"]["MXBlockB"] else 0
+    checkLdsBlockSizePerPadForTDM(state["LdsBlockSizePerPadA"], state["LdsBlockSizePerPadB"], state["LdsBlockSizePerPadMXSA"], state["LdsBlockSizePerPadMXSB"])
 
     if state["LdsBlockSizePerPadMetadata"] == -1:
       state["LdsBlockSizePerPadMetadata"] = state["LdsBlockSizePerPadA"]
