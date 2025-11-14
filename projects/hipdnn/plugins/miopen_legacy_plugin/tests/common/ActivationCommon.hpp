@@ -176,15 +176,16 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
     // but does NOT support:
     //   - miopenActivationLEAKYRELU (ReLU with lower clip slope)
     // See: MIOpen's BnFwdTrainingSpatial::IsApplicable() for details.
-    //
-    // cases.emplace_back(PM::RELU_FWD,
-    //                    std::nullopt, // reluLowerClip
-    //                    std::nullopt, // reluUpperClip
-    //                    0.01f, // reluLowerClipSlope
-    //                    std::nullopt, // swishBeta
-    //                    std::nullopt, // eluAlpha
-    //                    std::nullopt // softplusBeta
-    // );
+#if 0
+    cases.emplace_back(PM::RELU_FWD,
+                       std::nullopt, // reluLowerClip
+                       std::nullopt, // reluUpperClip
+                       0.01f, // reluLowerClipSlope
+                       std::nullopt, // swishBeta
+                       std::nullopt, // eluAlpha
+                       std::nullopt // softplusBeta
+    );
+#endif
 
     return cases;
 }

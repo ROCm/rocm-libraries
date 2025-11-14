@@ -41,51 +41,13 @@ bool isNodeActivFwd(const hipdnn_sdk::data_objects::PointwiseAttributes& attr)
     return true;
 }
 
-void checkTensorVirtuality1Node(
+#if 0 // TODO: Enable when MIOpen API supports separate input/output buffers for running statistics \
+    // MIOpen currently requires single IN/OUT buffers for running statistics, but hipDNN graph     \
+    // API uses separate prev/next buffers. This validation will be needed when MIOpen is updated.
+void checkRunningStatisticsTensorVirtuality(
     const hipdnn_sdk::data_objects::BatchnormAttributes& bnAttr,
     const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
 {
-    // Check for virtual tensors - 1-node case (solo batchnorm training)
-    const auto& bnTensorX = miopen_utils::findTensorAttributes(tensorMap, bnAttr.x_tensor_uid());
-    const auto& bnTensorScale
-        = miopen_utils::findTensorAttributes(tensorMap, bnAttr.scale_tensor_uid());
-    const auto& bnTensorBias
-        = miopen_utils::findTensorAttributes(tensorMap, bnAttr.bias_tensor_uid());
-    const auto& bnTensorY = miopen_utils::findTensorAttributes(tensorMap, bnAttr.y_tensor_uid());
-
-    if(bnTensorX.virtual_() || bnTensorScale.virtual_() || bnTensorBias.virtual_()
-       || bnTensorY.virtual_())
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm training tensors must be non-virtual for 1-node graph");
-    }
-
-    // Optional mean/variance tensors must be non-virtual if present
-    if(bnAttr.mean_tensor_uid().has_value())
-    {
-        const auto& bnTensorMean
-            = miopen_utils::findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
-        if(bnTensorMean.virtual_())
-        {
-            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "Batchnorm mean tensor must be non-virtual");
-        }
-    }
-
-    if(bnAttr.inv_variance_tensor_uid().has_value())
-    {
-        const auto& bnTensorInvVar = miopen_utils::findTensorAttributes(
-            tensorMap, bnAttr.inv_variance_tensor_uid().value());
-        if(bnTensorInvVar.virtual_())
-        {
-            throw hipdnn_plugin::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Batchnorm inv_variance tensor must be non-virtual");
-        }
-    }
-
-#if 0 // TODO: Enable running statistics validation when MIOpen API supports separate input/output buffers
     // Optional running statistics tensors must be non-virtual if present
     if(bnAttr.prev_running_mean_tensor_uid().has_value())
     {
@@ -134,6 +96,55 @@ void checkTensorVirtuality1Node(
                 "Batchnorm next_running_variance tensor must be non-virtual");
         }
     }
+}
+#endif
+
+void checkTensorVirtuality1Node(
+    const hipdnn_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+{
+    // Check for virtual tensors - 1-node case (solo batchnorm training)
+    const auto& bnTensorX = miopen_utils::findTensorAttributes(tensorMap, bnAttr.x_tensor_uid());
+    const auto& bnTensorScale
+        = miopen_utils::findTensorAttributes(tensorMap, bnAttr.scale_tensor_uid());
+    const auto& bnTensorBias
+        = miopen_utils::findTensorAttributes(tensorMap, bnAttr.bias_tensor_uid());
+    const auto& bnTensorY = miopen_utils::findTensorAttributes(tensorMap, bnAttr.y_tensor_uid());
+
+    if(bnTensorX.virtual_() || bnTensorScale.virtual_() || bnTensorBias.virtual_()
+       || bnTensorY.virtual_())
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm training tensors must be non-virtual for 1-node graph");
+    }
+
+    // Optional mean/variance tensors must be non-virtual if present
+    if(bnAttr.mean_tensor_uid().has_value())
+    {
+        const auto& bnTensorMean
+            = miopen_utils::findTensorAttributes(tensorMap, bnAttr.mean_tensor_uid().value());
+        if(bnTensorMean.virtual_())
+        {
+            throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Batchnorm mean tensor must be non-virtual");
+        }
+    }
+
+    if(bnAttr.inv_variance_tensor_uid().has_value())
+    {
+        const auto& bnTensorInvVar = miopen_utils::findTensorAttributes(
+            tensorMap, bnAttr.inv_variance_tensor_uid().value());
+        if(bnTensorInvVar.virtual_())
+        {
+            throw hipdnn_plugin::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "Batchnorm inv_variance tensor must be non-virtual");
+        }
+    }
+
+#if 0 // TODO: Enable when MIOpen API supports separate input/output buffers for running statistics
+    checkRunningStatisticsTensorVirtuality(bnAttr, tensorMap);
 #endif
 }
 
@@ -182,55 +193,8 @@ void checkTensorVirtuality2Node(
         }
     }
 
-#if 0 // TODO: Enable running statistics validation when MIOpen API supports separate input/output buffers
-    // Optional running statistics tensors must be non-virtual if present
-    if(bnAttr.prev_running_mean_tensor_uid().has_value())
-    {
-        const auto& bnTensorAttrPrevRunningMean = miopen_utils::findTensorAttributes(
-            tensorMap, bnAttr.prev_running_mean_tensor_uid().value());
-        if(bnTensorAttrPrevRunningMean.virtual_())
-        {
-            throw hipdnn_plugin::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Batchnorm prev_running_mean tensor must be non-virtual");
-        }
-    }
-
-    if(bnAttr.prev_running_variance_tensor_uid().has_value())
-    {
-        const auto& bnTensorAttrPrevRunningVar = miopen_utils::findTensorAttributes(
-            tensorMap, bnAttr.prev_running_variance_tensor_uid().value());
-        if(bnTensorAttrPrevRunningVar.virtual_())
-        {
-            throw hipdnn_plugin::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Batchnorm prev_running_variance tensor must be non-virtual");
-        }
-    }
-
-    if(bnAttr.next_running_mean_tensor_uid().has_value())
-    {
-        const auto& bnTensorAttrNextRunningMean = miopen_utils::findTensorAttributes(
-            tensorMap, bnAttr.next_running_mean_tensor_uid().value());
-        if(bnTensorAttrNextRunningMean.virtual_())
-        {
-            throw hipdnn_plugin::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Batchnorm next_running_mean tensor must be non-virtual");
-        }
-    }
-
-    if(bnAttr.next_running_variance_tensor_uid().has_value())
-    {
-        const auto& bnTensorAttrNextRunningVar = miopen_utils::findTensorAttributes(
-            tensorMap, bnAttr.next_running_variance_tensor_uid().value());
-        if(bnTensorAttrNextRunningVar.virtual_())
-        {
-            throw hipdnn_plugin::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Batchnorm next_running_variance tensor must be non-virtual");
-        }
-    }
+#if 0 // TODO: Enable when MIOpen API supports separate input/output buffers for running statistics
+    checkRunningStatisticsTensorVirtuality(bnAttr, tensorMap);
 #endif
 
     const auto& actTensorIn0
@@ -263,13 +227,7 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
 
         const auto& bnAttr = node.attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
 
-#if 0 // TODO: Remove this block when MIOpen API supports separate input/output buffers for running statistics \
-    // Running statistics will be supported - no rejection needed
-#else
-        // Until MIOpen is updated, reject graphs with running statistics
-        // API mismatch: hipDNN graph API uses separate prev/next buffers for running statistics,
-        // but MIOpen requires single IN/OUT buffers. This cannot be correctly bridged without
-        // either updating MIOpen API or implementing buffer copy operations.
+        // TODO: Remove when MIOpen supports separate input/output buffers for running statistics
         if(bnAttr.prev_running_mean_tensor_uid().has_value()
            || bnAttr.prev_running_variance_tensor_uid().has_value()
            || bnAttr.momentum_tensor_uid().has_value()
@@ -280,7 +238,6 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
                             "statistics - MIOpen API update required");
             return false;
         }
-#endif
 
         try
         {
@@ -323,13 +280,7 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
             return false;
         }
 
-#if 0 // TODO: Remove this block when MIOpen API supports separate input/output buffers for running statistics \
-    // Running statistics will be supported - no rejection needed
-#else
-        // Until MIOpen is updated, reject graphs with running statistics
-        // API mismatch: hipDNN graph API uses separate prev/next buffers for running statistics,
-        // but MIOpen requires single IN/OUT buffers. This cannot be correctly bridged without
-        // either updating MIOpen API or implementing buffer copy operations.
+        // TODO: Remove when MIOpen supports separate input/output buffers for running statistics
         if(bnAttr.prev_running_mean_tensor_uid().has_value()
            || bnAttr.prev_running_variance_tensor_uid().has_value()
            || bnAttr.momentum_tensor_uid().has_value()
@@ -340,7 +291,6 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
                             "statistics - MIOpen API update required");
             return false;
         }
-#endif
 
         try
         {

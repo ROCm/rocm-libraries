@@ -298,7 +298,7 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
                     if(status != miopenStatusSuccess)
                     {
                         HIPDNN_LOG_ERROR("miopenDestroyActivationDescriptor failed in "
-                                         "BatchnormFwdTrainingPlan destructor");
+                                         "BatchnormFwdTrainingPlan::execute");
                     }
                 });
 
