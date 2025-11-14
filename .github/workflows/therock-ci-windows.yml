@@ -17,7 +17,8 @@ jobs:
   therock-build-windows:
     name: Build
     runs-on: azure-windows-scale-rocm
-    if: always()
+    # Skip hipDNN build on Windows since it's not supported yet https://github.com/ROCm/TheRock/issues/1822
+    if: ${{ !contains(inputs.project_to_test, 'hipdnn') }}
     outputs:
       AMDGPU_FAMILIES: ${{ env.AMDGPU_FAMILIES }}
     permissions:
@@ -164,7 +165,8 @@ jobs:
   therock-test-windows:
     name: "Test"
     needs: [therock-build-windows]
-    if: always()
+    # Skip hipDNN tests on Windows since it's not supported yet https://github.com/ROCm/TheRock/issues/1822
+    if: ${{ !contains(inputs.project_to_test, 'hipdnn') }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       project_to_test: ${{ inputs.project_to_test }}
