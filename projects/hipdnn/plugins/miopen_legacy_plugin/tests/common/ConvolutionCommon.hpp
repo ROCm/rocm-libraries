@@ -153,7 +153,7 @@ inline std::vector<ConvTestCase> getConvTestCases5D()
         // Stride = 2
         {{1, 16, 16, 16, 16}, {1, 16, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}, seed},
         // Dilation = 2
-        //{{1, 16, 16, 16, 16}, {1, 16, 3, 3, 3}, {2, 2, 2}, {2, 2, 2}, {1, 1, 1}, {2, 2, 2}, seed},
+        {{1, 16, 16, 16, 16}, {1, 16, 3, 3, 3}, {2, 2, 2}, {2, 2, 2}, {1, 1, 1}, {2, 2, 2}, seed},
         // Batched convolution
         {{8, 16, 16, 16, 16}, {1, 16, 1, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, seed},
         // Non-square
@@ -161,7 +161,7 @@ inline std::vector<ConvTestCase> getConvTestCases5D()
         // Grouped convolution - 2 groups
         {{1, 16, 16, 16, 16}, {2, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, seed},
         // Grouped convolution - 2 batches, 4 groups, stride, padding, dilation
-        //{{2, 32, 16, 16, 16}, {4, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {2, 2, 2}, {2, 2, 2}, seed},
+        {{2, 32, 16, 16, 16}, {4, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {2, 2, 2}, {2, 2, 2}, seed},
     };
 }
 
