@@ -1037,11 +1037,19 @@ namespace rocRoller
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, Concatenate const& expr)
             {
-                auto                    destResultType = resultType(expr);
-                std::vector<ResultType> operandResultTypes;
+                auto             destResultType = resultType(expr);
+                std::vector<int> operandRegisterCount;
                 std::ranges::transform(expr.operands,
-                                       std::back_inserter(operandResultTypes),
-                                       [](auto const& operand) { return resultType(operand); });
+                                       std::back_inserter(operandRegisterCount),
+                                       [](auto const& operand) -> int {
+                                           if(auto const* reg
+                                              = std::get_if<Register::ValuePtr>(operand.get()))
+                                           {
+                                               return (*reg)->registerCount();
+                                           }
+                                           ResultType resType = resultType(operand);
+                                           return DataTypeInfo::Get(resType.varType).registerCount;
+                                       });
 
                 if(dest == nullptr)
                 {
@@ -1063,8 +1071,8 @@ namespace rocRoller
                 for(size_t i = 0; i < expr.operands.size(); ++i)
                 {
                     auto const& operand           = expr.operands[i];
-                    auto const& operandResultType = operandResultTypes[i];
-                    auto        length = DataTypeInfo::Get(operandResultType.varType).registerCount;
+                    auto const& registerCount = operandRegisterCount[i];
+                    auto        length = registerCount;
 
                     auto operandDest
                         = dest->subset(iota<int>(offset, offset + length).to<std::vector>());

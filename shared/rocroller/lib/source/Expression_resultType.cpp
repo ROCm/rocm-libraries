@@ -354,8 +354,12 @@ namespace rocRoller
                     }
 
                     registerType = Register::PromoteType(registerType, operandRegisterType);
+                    int operandRegisterCount = DataTypeInfo::Get(operandVariableType).registerCount;
+                    if (auto const *reg = std::get_if<Register::ValuePtr>(operand.get()))
+                        operandRegisterCount = (*reg)->registerCount();
+
                     actualNumRegister
-                        = actualNumRegister + DataTypeInfo::Get(operandVariableType).registerCount;
+                        = actualNumRegister + operandRegisterCount;
                 }
 
                 AssertFatal(expectedNumRegister == actualNumRegister,
