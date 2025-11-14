@@ -1,88 +1,29 @@
 .. meta::
-  :description: rocSPARSE usage guide and documentation
-  :keywords: rocSPARSE, ROCm, API, documentation, usage guide, device management, stream management, storage format, pointer mode
+  :description: rocSPARSE sparse matrix storage format documentation
+  :keywords: rocSPARSE, ROCm, API, documentation, design, storage format, sparse matrices
+  
+*******************************************
+rocSPARSE storage formats
+*******************************************
 
-.. _hipsparse-docs:
+A sparse matrix is a matrix in which most of the items are zero,
+although there is no strict criteria for the number of non-zero items. The
+*sparsity* of a matrix refers to the number of non-zero elements divided by the total
+number of elements. For example, if an 8 x 8 matrix with 64 elements has 16 non-zero elements,
+it has a sparsity value of 0.25.
 
-********************************************************************
-Using hipSPARSE
-********************************************************************
+The main reason for storing and processing sparse matrices differently is to take advantage of lower memory
+requirements and potentially faster processing times. It is inefficient or impractical to store
+every element of a sparse matrix in memory (as a dense matrix) because most of the elements are zero.
+Instead, sparse matrices are compressed in storage using
+multiple vectors that map the individual non-zero values to their position in the
+original matrix. However, more complex algorithms are required to store the
+values in, and retrieve them from, these compound data structures.
 
-This topic discusses how to use hipSPARSE, including a discussion of device and stream
-management, storage formats, and pointer mode.
-
-HIP device management
-=====================
-
-Before starting a HIP kernel, you can call :cpp:func:`hipSetDevice` to set a device.
-The system uses the default device if you don't call the function. Unless you explicitly
-call :cpp:func:`hipSetDevice` to specify another device, HIP kernels are always launched on device ``0``.
-This HIP (and CUDA) device management approach is not specific to the hipSPARSE library.
-hipSPARSE honors this approach and assumes you have already set the preferred device before a hipSPARSE routine call.
-
-After you set the device, you can create a handle with :ref:`hipsparse_create_handle_`.
-Subsequent hipSPARSE routines take this handle as an input parameter.
-hipSPARSE only queries the specified device (using :cpp:func:`hipGetDevice`).
-You are responsible for providing a valid device to hipSPARSE and ensuring device safety.
-If it's not a valid device, hipSPARSE returns an error message.
-
-To change to another device, you must destroy the current handle using :ref:`hipsparse_destroy_handle_`,
-then create another handle using :ref:`hipsparse_create_handle_`, specifying another device.
-
-.. note::
-
-   :cpp:func:`hipSetDevice` and :cpp:func:`hipGetDevice` are not part of the hipSPARSE API.
-   They are part of the `HIP runtime API for device management <https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/group___device.html>`_.
-
-HIP stream management
-=====================
-
-HIP kernels are always launched in a queue (also known as a stream). If you don't explicitly specify a stream,
-the system provides and maintains a default stream, which you cannot create or destroy.
-However, you can freely create new streams (using :cpp:func:`hipStreamCreate`) and bind them to the
-hipSPARSE handle using :ref:`hipsparse_set_stream_`. The hipSPARSE routines invoke HIP kernels.
-A hipSPARSE handle is always associated with a stream, which hipSPARSE passes to the kernels inside the routine.
-One hipSPARSE routine only takes one stream in a single invocation.
-If you create a stream, you are responsible for destroying it.
-See the `HIP stream management API <https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/group___stream.html>`_ for more information.
-
-Asynchronous execution
-======================
-
-Except for functions that allocate memory themselves, preventing asynchronicity,
-all hipSPARSE library functions are non-blocking and execute asynchronously with respect to the host,
-unless otherwise stated. These functions might return before the actual computation has finished.
-To force synchronization, use either :cpp:func:`hipDeviceSynchronize` or :cpp:func:`hipStreamSynchronize`.
-This ensures that all previously executed hipSPARSE functions on the device or stream have been completed.
-
-Multiple streams and multiple devices
-=====================================
-
-If a system has multiple HIP devices, you can run multiple hipSPARSE handles concurrently.
-However, you cannot run a single hipSPARSE handle on different discrete devices
-because each handle is associated with a particular device. A new handle must be created for each additional device.
-
-Interface examples
-=====================================
-
-The hipSPARSE interface is compatible with the :doc:`rocSPARSE <rocsparse:index>` and NVIDIA CUDA cuSPARSE-v2 APIs.
-Porting a CUDA application that calls the CUDA cuSPARSE API to an application that calls the hipSPARSE API
-is relatively straightforward. For example, the hipSPARSE SCSRMV API interface is as follows:
-
-.. code-block:: cpp
-
-   hipsparseStatus_t
-   hipsparseScsrmv(hipsparseHandle_t handle,
-                  hipsparseOperation_t transA,
-                  int m, int n, int nnz, const float *alpha,
-                  const hipsparseMatDescr_t descrA,
-                  const float *csrValA,
-                  const int *csrRowPtrA, const int *csrColIndA,
-                  const float *x, const float *beta,
-                  float *y);
-
-hipSPARSE assumes matrix ``A`` and vectors ``x`` and ``y`` are allocated in the GPU memory space and filled with data.
-You are responsible for copying data to and from the host and device memory.
+rocSPARSE offers several storage formats for sparse matrices, each with specialized algorithms for
+matrix storage, retrieval, and manipulation. For additional information about the
+storage formats and their associated algorithms, see the
+`Sparse matrix vector multiplication blog post <https://rocm.blogs.amd.com/high-performance-computing/spmv/part-1/README.html>`_.
 
 Storage formats
 ===============
@@ -90,8 +31,7 @@ Storage formats
 This section describes the supported matrix storage formats.
 
 .. note::
-
-   The different storage formats support indexing with a base of 0 or 1, as described in :ref:`index_base`.
+    The different storage formats support indexing from a base of 0 or 1 as described in :ref:`index_base`.
 
 COO storage format
 ------------------
@@ -107,10 +47,9 @@ coo_row_ind Array of ``nnz`` elements containing the row indices (integer).
 coo_col_ind Array of ``nnz`` elements containing the column indices (integer).
 =========== ==================================================================
 
-The COO matrix is expected to be sorted by row indices and column indices per row.
-Furthermore, each pair of indices should appear only once.
-Consider the following :math:`3 \times 5` matrix and the corresponding COO structures,
-with :math:`m = 3, n = 5` and :math:`\text{nnz} = 8` using zero-based indexing:
+The COO matrix is sorted by row indices and column indices per row. Furthermore, each pair of indices should appear only once.
+The following :math:`3 \times 5` matrix and corresponding COO structures,
+with :math:`m = 3`, :math:`n = 5`, and :math:`\text{nnz} = 8`, use zero-based indexing:
 
 .. math::
 
@@ -143,10 +82,10 @@ coo_val     Array of ``nnz`` elements containing the data (floating point).
 coo_ind     Array of ``2 * nnz`` elements containing alternating row and column indices (integer).
 ======= ==========================================================================================
 
-The COO (AoS) matrix is expected to be sorted by row indices and column indices per row.
-Furthermore, each pair of indices should appear only once.
-Consider the following :math:`3 \times 5` matrix and the corresponding COO (AoS) structures,
-with :math:`m = 3, n = 5` and :math:`\text{nnz} = 8` using zero-based indexing:
+The COO (AoS) matrix is sorted by row indices and column indices per row.
+Each pair of indices should appear only once.
+The following :math:`3 \times 5` matrix and corresponding COO (AoS) structures,
+with :math:`m = 3`, :math:`n = 5`, and :math:`\text{nnz} = 8`, use zero-based indexing:
 
 .. math::
 
@@ -179,10 +118,9 @@ csr_row_ptr Array of ``m+1`` elements that point to the start of every row (inte
 csr_col_ind Array of ``nnz`` elements containing the column indices (integer).
 =========== =========================================================================
 
-The CSR matrix is expected to be sorted by column indices within each row.
-Furthermore, each pair of indices should appear only once.
-Consider the following :math:`3 \times 5` matrix and the corresponding CSR structures,
-with :math:`m = 3, n = 5` and :math:`\text{nnz} = 8` using one-based indexing:
+The CSR matrix is sorted by column indices within each row. Each pair of indices should appear only once.
+The following :math:`3 \times 5` matrix and corresponding CSR structures,
+with :math:`m = 3`, :math:`n = 5`, and :math:`\text{nnz} = 8`, use one-based indexing:
 
 .. math::
 
@@ -216,10 +154,9 @@ csc_col_ptr Array of ``n+1`` elements that point to the start of every column (i
 csc_row_ind Array of ``nnz`` elements containing the row indices (integer).
 =========== =========================================================================
 
-The CSC matrix is expected to be sorted by row indices within each column.
-Furthermore, each pair of indices should appear only once.
-Consider the following :math:`3 \times 5` matrix and the corresponding CSC structures,
-with :math:`m = 3, n = 5` and :math:`\text{nnz} = 8` using one-based indexing:
+The CSC matrix is sorted by row indices within each column. Each pair of indices should appear only once.
+The following :math:`3 \times 5` matrix and corresponding CSC structures,
+with :math:`m = 3`, :math:`n = 5`, and :math:`\text{nnz} = 8`, use one-based indexing:
 
 .. math::
 
@@ -256,8 +193,8 @@ bsr_dim     Dimension of each block (integer).
 
 The BSR matrix is sorted by column indices within each row.
 This matrix is defined as having a number of rows equivalent to :math:`\text{block_dim} \times \text{number_of_row_blocks}`.
-Consider the following :math:`4 \times 3` matrix and the corresponding BSR structures,
-with :math:`\text{bsr_dim} = 2, mb = 2, nb = 2` and :math:`\text{nnzb} = 4` using zero-based indexing and column-major storage:
+The following :math:`4 \times 3` matrix and corresponding BSR structures,
+with :math:`\text{bsr_dim} = 2`, :math:`mb = 2`, :math:`nb = 2`, and :math:`\text{nnzb} = 4`, use zero-based indexing and column-major storage:
 
 .. math::
 
@@ -324,14 +261,14 @@ bsr_row_dim Row dimension of each block (integer).
 bsr_col_dim Column dimension of each block (integer).
 =========== ======================================================================================================================================================
 
-The GEBSR matrix is expected to be sorted by column indices within each row.
+The GEBSR matrix is sorted by column indices within each row.
 If :math:`m` is not evenly divisible by the row block dimension or :math:`n` is not evenly
 divisible by the column block dimension, then zeros are padded to the matrix,
 such that :math:`mb = (m + \text{bsr_row_dim} - 1) / \text{bsr_row_dim}` and
-:math:`nb = (n + \text{bsr_col_dim} - 1) / \text{bsr_col_dim}`. Consider the following :math:`4 \times 5` matrix
-and the corresponding GEBSR structures,
-with :math:`\text{bsr_row_dim} = 2`, :math:`\text{bsr_col_dim} = 3`, :math:`mb = 2`, :math:`nb = 2`, and :math:`\text{nnzb} = 4`
-using zero-based indexing and column-major storage:
+:math:`nb = (n + \text{bsr_col_dim} - 1) / \text{bsr_col_dim}`. The following :math:`4 \times 5` matrix
+and corresponding GEBSR structures,
+with :math:`\text{bsr_row_dim} = 2`, :math:`\text{bsr_col_dim} = 3`, :math:`mb = 2`, :math:`nb = 2`,
+and :math:`\text{nnzb} = 4`, use zero-based indexing and column-major storage:
 
 .. math::
 
@@ -390,15 +327,15 @@ The Ellpack-Itpack (ELL) storage format represents an :math:`m \times n` matrix 
 =========== ================================================================================
 m           Number of rows (integer).
 n           Number of columns (integer).
-ell_width   Maximum number of non-zero elements per row (integer)
+ell_width   Maximum number of non-zero elements per row (integer).
 ell_val     Array of ``m * ell_width`` elements containing the data (floating point).
 ell_col_ind Array of ``m * ell_width`` elements containing the column indices (integer).
 =========== ================================================================================
 
-The ELL matrix is assumed to be stored in column-major format.
-Rows with less than ``ell_width`` non-zero elements are padded with zeros (``ell_val``) and :math:`-1` (``ell_col_ind``).
-Consider the following :math:`3 \times 5` matrix and the corresponding ELL structures,
-with :math:`m = 3, n = 5`, and :math:`\text{ell_width} = 3` using zero-based indexing:
+The ELL matrix is assumed to be stored in column-major format. Rows with less
+than ``ell_width`` non-zero elements are padded with zeros (``ell_val``) and :math:`-1` (``ell_col_ind``).
+The following :math:`3 \times 5` matrix and corresponding ELL structures,
+with :math:`m = 3`, :math:`n = 5`, and :math:`\text{ell_width} = 3`, use zero-based indexing:
 
 .. math::
 
@@ -415,6 +352,81 @@ where
   \begin{array}{ll}
     \text{ell_val}[9] & = \{1.0, 4.0, 6.0, 2.0, 5.0, 7.0, 3.0, 0.0, 8.0\} \\
     \text{ell_col_ind}[9] & = \{0, 1, 0, 1, 2, 3, 3, -1, 4\}
+  \end{array}
+
+Blocked ELL storage format
+--------------------------
+
+The Blocked Ellpack (ELL) storage format represents an :math:`(mb \cdot \text{block_dim}) \times (nb \cdot \text{block_dim})` matrix by:
+
+=========== ================================================================================
+mb          Number of block rows (integer).
+nb          Number of block columns (integer).
+ell_width   Maximum number of non-zero block elements per row (integer).
+ell_val     Array of ``mb * ell_width * block_dim * block_dim`` elements containing the data (floating point).
+ell_col_ind Array of ``mb * ell_width`` elements containing the column indices (integer).
+block_dim   Dimension of each block (integer).
+=========== ================================================================================
+
+The Blocked ELL is similar to the ELL format except that column entries now indicate the location of two dimensional blocks of size
+``block_dim * block_dim`` instead of single matrix entries. The block values can be stored in either row or column ordering.
+Rows with less than ``ell_width`` non-zero blocks are padded with zero blocks (``ell_val``) and :math:`-1` (``ell_col_ind``).
+The following :math:`6 \times 6` matrix and corresponding Blocked ELL structures,
+with :math:`mb = 3`, :math:`nb = 3`, :math:`block_dim = 2`, and :math:`\text{ell_width} = 2`, use zero-based indexing and row ordering for the blocks:
+
+.. math::
+
+  A = \begin{pmatrix}
+        1.0 & 2.0 & 0.0 & 0.0 & 3.0 & 1.0 \\
+        2.0 & 4.0 & 0.0 & 0.0 & 4.0 & 3.0 \\
+        0.0 & 0.0 & 6.0 & 4.0 & 7.0 & 8.0 \\
+        0.0 & 0.0 & 4.0 & 5.0 & 3.0 & 2.0 \\
+        1.0 & 2.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+        2.0 & 1.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+      \end{pmatrix}
+
+with the blocks :math:`A_{ij}`
+
+.. math::
+
+  A_{00} = \begin{pmatrix}
+             1.0 & 2.0 \\
+             2.0 & 4.0 \\
+           \end{pmatrix},
+  A_{02} = \begin{pmatrix}
+             3.0 & 1.0 \\
+             4.0 & 3.0 \\
+           \end{pmatrix},
+  A_{11} = \begin{pmatrix}
+             6.0 & 4.0 \\
+             4.0 & 5.0 \\
+           \end{pmatrix},
+  A_{12} = \begin{pmatrix}
+             7.0 & 8.0 \\
+             3.0 & 2.0 \\
+           \end{pmatrix},
+  A_{21} = \begin{pmatrix}
+             1.0 & 2.0 \\
+             2.0 & 1.0 \\
+           \end{pmatrix}
+
+such that
+
+.. math::
+
+  A = \begin{pmatrix}
+        A_{00} & 0      & A_{02} \\
+        0      & A_{11} & A_{12} \\
+        A_{21} & 0      & 0      \\
+      \end{pmatrix}
+
+where
+
+.. math::
+
+  \begin{array}{ll}
+    \text{ell_val}[20] & = \{1.0, 2.0, 2.0, 4.0, 6.0, 4.0, 4.0, 5.0, 1.0, 2.0, 2.0, 1.0, 3.0, 1.0, 4.0, 3.0, 7.0, 8.0, 3.0, 2.0, 0.0, 0.0, 0.0, 0.0\} \\
+    \text{ell_col_ind}[6] & = \{0, 1, 0, 2, 2, -1\}
   \end{array}
 
 .. _HYB storage format:
@@ -449,38 +461,11 @@ see :ref:`rocsparse_hyb_partition_`.
 Storage schemes and indexing base
 =================================
 
-hipSPARSE supports 0-based and 1-based indexing.
-The index base is selected by the :cpp:enum:`hipsparseIndexBase_t` type, which is either passed
-as a standalone parameter or as part of the :cpp:type:`hipsparseMatDescr_t` type.
+rocSPARSE supports zero-based and one-based indexing.
+The index base is selected by the :cpp:enum:`rocsparse_index_base` type,
+which is either passed as a standalone parameter or as part of the :cpp:type:`rocsparse_mat_descr` type.
 
 Dense vectors are represented with a 1D array, stored linearly in memory.
-Sparse vectors are represented by a 1D data array stored linearly in memory that holds all non-zero elements
-and a 1D indexing array stored linearly in memory that holds the positions of the corresponding non-zero elements.
-
-Pointer mode
-============
-
-The auxiliary functions :cpp:func:`hipsparseSetPointerMode` and :cpp:func:`hipsparseGetPointerMode` are
-used to set and get the value of the state variable :cpp:enum:`hipsparsePointerMode_t`.
-If :cpp:enum:`hipsparsePointerMode_t` is equal to :cpp:enumerator:`HIPSPARSE_POINTER_MODE_HOST`,
-then scalar parameters must be allocated on the host.
-If :cpp:enum:`hipsparsePointerMode_t` is equal to :cpp:enumerator:`HIPSPARSE_POINTER_MODE_DEVICE`,
-then scalar parameters must be allocated on the device.
-
-There are two types of scalar parameter:
-
-#. Scaling parameters, such as ``alpha`` and ``beta``, that are used, for example, in :cpp:func:`hipsparseScsrmv` and :cpp:func:`hipsparseSbsrmv`
-#. Scalar results from functions such as :cpp:func:`hipsparseSdoti` or :cpp:func:`hipsparseCdotci`
-
-For scalar parameters such as ``alpha`` and ``beta``, memory can be allocated on the host heap or stack
-when :cpp:enum:`hipsparsePointerMode_t` is equal to :cpp:enumerator:`HIPSPARSE_POINTER_MODE_HOST`.
-The kernel launch is asynchronous, and if the scalar parameter is on the heap, it can be freed after
-the return from the kernel launch.
-When :cpp:enum:`hipsparsePointerMode_t` is equal to :cpp:enumerator:`HIPSPARSE_POINTER_MODE_DEVICE`,
-the scalar parameter must not be changed until the kernel completes.
-
-For scalar results, when :cpp:enum:`hipsparsePointerMode_t` is equal to :cpp:enumerator:`HIPSPARSE_POINTER_MODE_HOST`,
-the function blocks the CPU until the GPU has copied the result back to the host.
-When :cpp:enum:`hipsparsePointerMode_t` is equal to :cpp:enumerator:`HIPSPARSE_POINTER_MODE_DEVICE`,
-the function returns after the asynchronous launch.
-Similar to the vector and matrix results, the scalar result is only available when the kernel has completed execution.
+Sparse vectors are represented by a 1D data array that holds all non-zero elements
+and a 1D indexing array that holds the positions of the corresponding non-zero elements,
+both stored linearly in memory.
