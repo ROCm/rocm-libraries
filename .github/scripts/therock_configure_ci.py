@@ -125,7 +125,7 @@ def retrieve_projects(args):
     # For pushes and pull_requests, we only want to test changed projects
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
-    
+
     # by default, we select full tests
     test_type = "full"
 
