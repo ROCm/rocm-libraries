@@ -86,7 +86,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     utilities::Tensor<InputType> xTensor(xAttr->get_dim(), layout);
     utilities::Tensor<InputType> wTensor(wAttr->get_dim(), layout);
-    utilities::Tensor<InputType> yTensor(yAttr->get_dim(), layout);
     utilities::Tensor<InputType> pointwiseOutTensor(pointwiseOutAttr->get_dim(), layout);
 
     xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
@@ -161,6 +160,6 @@ int main(int argc, char* argv[])
     run(SampleRunner{handle, config});
 
     HIPDNN_CHECK(backend->destroy(handle));
-    std::cout << "All fused Conv fwd + Activation.\n";
+    std::cout << "All fused Conv fwd + Activation samples completed successfully.\n";
     return 0;
 }

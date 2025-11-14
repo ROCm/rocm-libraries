@@ -24,6 +24,6 @@ add_hipdnn_sample(fused_bn_inference_drelu_bn_backward batchnorm/FusedBnInfDRelu
 
 add_hipdnn_sample(conv_dgrad convolution/ConvDgrad.cpp)
 add_hipdnn_sample(conv_fprop convolution/ConvFprop.cpp)
-#disabled until the solver is enabled in MIOpenContainer, its disabled due to missing integraton tests
+#disabled until the solver is enabled in MIOpenContainer, its disabled due to missing integration tests
 #add_hipdnn_sample(fused_conv_fprop_activ convolution/FusedConvFpropActiv.cpp)
 add_hipdnn_sample(conv_wgrad convolution/ConvWgrad.cpp)

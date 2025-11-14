@@ -239,7 +239,7 @@ Inputs: x (input tensor), w (filter weights)
           ↓
      conv_y = convolution_forward(x, w, stride, padding, dilation)
           ↓ (virtual tensor)
-     y = activation_forward(conv_y, mode=RELU)
+     y = activation_forward(conv_y, mode=RELU, lower_clip=0.2, upper_clip=0.7)
           ↓
 Output: y (activated convolution result)
 ```
