@@ -87,7 +87,13 @@ else()
     message(STATUS "Building miopen legacy plugin as a dependency")
 endif()
 
-set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR "${CMAKE_BINARY_DIR}/lib/${HIPDNN_PLUGIN_ENGINE_SUBDIR}")
+if(WIN32)
+    set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "bin")
+else()
+    set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "lib")
+endif()
+
+set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR "${CMAKE_BINARY_DIR}/${HIPDNN_PLUGIN_ENGINE_ROOTDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}")
 
 message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
 message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
@@ -114,6 +120,7 @@ add_library(miopen_legacy_plugin_private
     MiopenConvDescriptor.cpp
     MiopenUtils.cpp
     MiopenTensor.cpp
+    MiopenLegacyPlugin.cpp
 )
 target_compile_definitions(miopen_legacy_plugin_private PRIVATE 
     COMPONENT_NAME="miopen_legacy_plugin"
@@ -130,7 +137,7 @@ if(BUILD_PLUGIN_AS_DEPENDENCY)
 endif()
 
 add_library(miopen_legacy_plugin SHARED
-    MiopenLegacyPlugin.cpp
+    MiopenLegacyPluginPublic.cpp
 )
 target_compile_definitions(miopen_legacy_plugin PRIVATE 
     COMPONENT_NAME="miopen_legacy_plugin"
@@ -141,6 +148,8 @@ target_compile_options(miopen_legacy_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPT
 set_target_properties(miopen_legacy_plugin PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
+    ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
     INSTALL_RPATH "${ROCM_PATH}/lib"
     INSTALL_RPATH_USE_LINK_PATH TRUE
     BUILD_WITH_INSTALL_RPATH TRUE
