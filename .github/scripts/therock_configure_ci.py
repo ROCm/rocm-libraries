@@ -28,12 +28,15 @@ SKIPPABLE_PATH_PATTERNS = [
     "docs/*",
     ".gitignore",
     "*.md",
+    "*.rst",
     "projects/*/docs/*",
     "projects/*/.gitignore",
     "projects/*/*.md",
+    "projects/*/*.rst",
     "shared/*/docs/*",
     "shared/*/.gitignore",
     "shared/*/*.md",
+    "shared/*/*.rst",
 ]
 
 
