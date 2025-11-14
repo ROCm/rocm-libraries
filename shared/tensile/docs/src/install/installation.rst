@@ -76,7 +76,7 @@ Option 2: Install with git
 
 .. code-block:: bash
 
-  git clone git@github.com:ROCm/rocm-libraries.git && cd Tensile
+  git clone git@github.com:ROCm/rocm-libraries.git && cd cd rocm-libraries/shared/tensile
   pip3 install .
 
 You can now run Tensile's Python applications.
