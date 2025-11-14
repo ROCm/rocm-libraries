@@ -501,7 +501,7 @@ struct Uninitialized
  * This enum is deprecated, please use <rocprim/type_traits> instead. Or if you have
  * libhipcxx, please use the type_traits system in libhipcxx.
  */
-enum HIPCUB_DEPRECATED_BECAUSE("Use <rocprim/type_traits> instead.") Category
+enum Category
 {
     NOT_A_NUMBER,
     SIGNED_INTEGER,
@@ -547,8 +547,8 @@ struct BaseTraits<UNSIGNED_INTEGER, true, false, _UnsignedBits, T>
 
     enum
     {
-        PRIMITIVE HIPCUB_DEPRECATED_BECAUSE("Use <rocprim/type_traits> instead.") = true,
-        nullptr_TYPE                                                              = false,
+        PRIMITIVE         HIPCUB_DEPRECATED_BECAUSE("Use <rocprim/type_traits> instead.") = true,
+        HIPCUB_DEPRECATED nullptr_TYPE                                                    = false,
     };
 
     using key_codec = decltype(::rocprim::traits::get<T>().template radix_key_codec<false>());
