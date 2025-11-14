@@ -263,9 +263,9 @@ namespace rocRoller
 
         struct BitfieldCombine : Binary
         {
-            unsigned srcOffset = 0u;
-            unsigned dstOffset = 0u;
-            unsigned width     = 0u;
+            uint32_t srcOffset = 0u;
+            uint32_t dstOffset = 0u;
+            uint32_t width     = 0u;
 
             // if srcIsZero sets to true, that means bits outside [srcOffset:srcOffset+width-1] are 0
             std::optional<bool> srcIsZero = std::nullopt;
@@ -681,9 +681,9 @@ namespace rocRoller
 
         ExpressionPtr bfc(ExpressionPtr       src,
                           ExpressionPtr       dst,
-                          unsigned            srcOffset,
-                          unsigned            dstOffset,
-                          unsigned            width,
+                          uint32_t            srcOffset,
+                          uint32_t            dstOffset,
+                          uint32_t            width,
                           std::optional<bool> srcIsZero = std::nullopt,
                           std::optional<bool> dstIsZero = std::nullopt);
 

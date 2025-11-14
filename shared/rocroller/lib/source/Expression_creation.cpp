@@ -132,9 +132,9 @@ namespace rocRoller
 
         ExpressionPtr bfc(ExpressionPtr       src,
                           ExpressionPtr       dst,
-                          unsigned            srcOffset,
-                          unsigned            dstOffset,
-                          unsigned            width,
+                          uint32_t            srcOffset,
+                          uint32_t            dstOffset,
+                          uint32_t            width,
                           std::optional<bool> srcIsZero,
                           std::optional<bool> dstIsZero)
         {
