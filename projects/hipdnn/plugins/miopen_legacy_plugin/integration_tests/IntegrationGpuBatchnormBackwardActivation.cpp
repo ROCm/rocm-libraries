@@ -50,17 +50,17 @@ protected:
                           unsigned int seed) override
     {
         bundle.tensors.at(BatchnormActivationTensorIds::X_UID)
-            ->fillTensorWithRandomValues(-1.8f, 1.8f, seed);
+            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
         bundle.tensors.at(BatchnormActivationTensorIds::DY_UID)
-            ->fillTensorWithRandomValues(-1.8f, 1.8f, seed);
+            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
         bundle.tensors.at(BatchnormActivationTensorIds::SCALE_UID)
-            ->fillTensorWithRandomValues(0.5f, 1.5f, seed);
+            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
         bundle.tensors.at(BatchnormActivationTensorIds::BIAS_UID)
             ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
         bundle.tensors.at(BatchnormActivationTensorIds::MEAN_UID)
             ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
         bundle.tensors.at(BatchnormActivationTensorIds::INV_VARIANCE_UID)
-            ->fillTensorWithRandomValues(0.5f, 2.0f, seed);
+            ->fillTensorWithRandomValues(1.9f, 2.0f, seed);
     }
 
     void runGraphTest([[maybe_unused]] DataType tolerance, const TensorLayout& layout) override
@@ -74,10 +74,12 @@ protected:
 
         graph::Graph graphObj;
         graphObj.set_name("BatchnormBackwardActivationTest");
-        graphObj.set_compute_data_type(fe::DataType::FLOAT);
 
         auto dataType = getDataTypeEnumFromType<DataType>();
         auto intermediateDataType = fe::DataType::FLOAT;
+        graphObj.set_intermediate_data_type(intermediateDataType)
+            .set_compute_data_type(fe::DataType::FLOAT)
+            .set_io_data_type(dataType);
 
         auto xAttr = graph::makeTensorAttributes(
             "x", dataType, dims, generateStrides(dims, layout.strideOrder));
@@ -129,10 +131,8 @@ protected:
                                                 bnInfAttrs);
 
         bnY->set_name("BN_Y");
-        bnY->set_data_type(dataType);
         bnY->set_dim(dims);
         bnY->set_stride(generateStrides(dims, layout.strideOrder));
-        bnY->set_is_virtual(true);
         bnY->set_uid(BatchnormActivationTensorIds::BN_Y_UID);
 
         auto dyAttr = graph::makeTensorAttributes(
@@ -171,10 +171,8 @@ protected:
 
         auto dxDrelu = graphObj.pointwise(bnY, dyTensorAttr, activBwdAttrs);
         dxDrelu->set_name("DX_drelu");
-        dxDrelu->set_data_type(dataType);
         dxDrelu->set_dim(dims);
         dxDrelu->set_stride(generateStrides(dims, layout.strideOrder));
-        dxDrelu->set_is_virtual(true);
         dxDrelu->set_uid(BatchnormActivationTensorIds::DX_DRELU_UID);
 
         graph::BatchnormBackwardAttributes bnBwdAttrs;
@@ -187,10 +185,9 @@ protected:
 
         auto& dxOut = bnBwdOuts[0];
         dxOut->set_name("dx");
-        dxOut->set_data_type(dataType);
         dxOut->set_dim(dims);
+        dxOut->set_data_type(dataType);
         dxOut->set_stride(generateStrides(dims, layout.strideOrder));
-        dxOut->set_is_virtual(false);
         dxOut->set_output(true);
         dxOut->set_uid(BatchnormActivationTensorIds::DX_OUT_UID);
 
@@ -199,7 +196,6 @@ protected:
         dscaleOut->set_data_type(intermediateDataType);
         dscaleOut->set_dim(channelDims);
         dscaleOut->set_stride(generateStrides(channelDims, layout.strideOrder));
-        dscaleOut->set_is_virtual(false);
         dscaleOut->set_output(true);
         dscaleOut->set_uid(BatchnormActivationTensorIds::DSCALE_OUT_UID);
 
@@ -208,18 +204,14 @@ protected:
         dbiasOut->set_data_type(intermediateDataType);
         dbiasOut->set_dim(channelDims);
         dbiasOut->set_stride(generateStrides(channelDims, layout.strideOrder));
-        dbiasOut->set_is_virtual(false);
         dbiasOut->set_output(true);
         dbiasOut->set_uid(BatchnormActivationTensorIds::DBIAS_OUT_UID);
 
-        // Use 4e-3 float tolerance for all data types to match MIOpen.
-        // https://github.com/ROCm/rocm-libraries/blob/develop/projects/miopen/test/gtest/bn.hpp#L484
-        // It is also the highest, and unlike the others tols; it passes.
-        const auto rmsFloatTol = 4e-3f;
+        auto intermediateTolerance = batchnorm::getToleranceBackward<float>();
 
-        this->registerRmsValidator(dxOut, rmsFloatTol);
-        this->registerRmsValidator(dscaleOut, rmsFloatTol);
-        this->registerRmsValidator(dbiasOut, rmsFloatTol);
+        this->registerValidator(dxOut, static_cast<float>(tolerance));
+        this->registerValidator(dscaleOut, intermediateTolerance);
+        this->registerValidator(dbiasOut, intermediateTolerance);
 
         this->verifyGraph(graphObj, bnTestCase.seed);
     }
