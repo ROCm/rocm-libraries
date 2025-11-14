@@ -148,6 +148,8 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
         // MIOpen's fusion API does not calculate the workspace size correctly.
         // To work around this issue, the convolution find mode is temporarily set to "normal"
         // to ensure the maximum workspace size is obtained among all available solvers.
+        // This is not a proper workaround, as MIOpen still returns the workspace size
+        // for incorrect solvers regardless.
         miopenConvolutionFindMode_t oldFindMode;
         THROW_ON_MIOPEN_FAILURE(miopenGetConvolutionFindMode(_params.conv().convDescriptor(), &oldFindMode));
         THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionFindMode(_params.conv().convDescriptor(), miopenConvolutionFindModeNormal));
