@@ -118,7 +118,7 @@ protected:
 
         this->registerValidator(yTensorAttr, tolerance);
 
-        this->verifyGraph(graphObj, convTestCase.seed);
+        ASSERT_NO_FATAL_FAILURE(this->verifyGraph(graphObj, convTestCase.seed));
     }
 };
 
