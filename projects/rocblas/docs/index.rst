@@ -39,7 +39,6 @@ The rocBLAS public repository is located at
 
     * :doc:`Program with rocBLAS <./how-to/Programmers_Guide>`
     * :doc:`Use logging with rocBLAS <./how-to/logging-in-rocblas>`
-    * :doc:`Contribute to rocBLAS <./how-to/Contributors_Guide>`
 
   .. grid-item-card:: Examples
 
@@ -52,5 +51,6 @@ The rocBLAS public repository is located at
     * :ref:`api-reference-guide`
 
 To contribute to the documentation, see `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
+For information on contributing to the rocBLAS code base, see :doc:`Contribute to rocBLAS <./contribute>`.
 
 You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.

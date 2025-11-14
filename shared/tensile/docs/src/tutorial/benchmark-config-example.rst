@@ -110,7 +110,7 @@ Here is a list of ``GlobalParameters`` used in the config.yaml file:
 - ``DataInitType[AB,C]``: Initializes validation data with 0 = 0's, 1 = 1's, 2 = serial, and 3 = random.
 - ``KernelTime``: Ensures using kernel time reported by runtime instead of time reported by APIs using CPU clocks, to compare kernel performance.
 
-To see the exhaustive list of global parameters and their defaults, see `Common.py <https://github.com/ROCm/Tensile/blob/develop/Tensile/Common.py>`_.
+To see the exhaustive list of global parameters and their defaults, see `Common.py <https://github.com/ROCm/rocm-libraries/blob/develop/shared/tensile/Tensile/Common.py>`_.
 
 Problem type parameters
 ========================
