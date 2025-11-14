@@ -355,10 +355,7 @@ namespace rocRoller
         transforms.push_back(
             std::make_shared<KernelGraph::LowerTensorContraction>(m_commandParameters, m_context));
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
-        if(!m_commandParameters->streamK)
-        {
-            transforms.push_back(std::make_shared<KernelGraph::ConstantPropagation>());
-        }
+        transforms.push_back(std::make_shared<KernelGraph::ConstantPropagation>());
         transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
 
         if(m_commandParameters->workgroupMappingDim.has_value())

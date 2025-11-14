@@ -1118,7 +1118,7 @@ namespace GEMMDriverTest
         for(auto twoTile : {true, false})
         {
             gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
-            basicGEMM<float>(gemm);
+            basicGEMM<float>(gemm, false, false, 1, true);
         }
     }
 
