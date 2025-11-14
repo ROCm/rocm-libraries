@@ -41,7 +41,7 @@ namespace hip_rocprim
 {
 
 template <typename DerivedPolicy, typename Pointer1, typename Pointer2>
-inline THRUST_HOST_DEVICE void iter_swap(thrust::hip::execution_policy<DerivedPolicy>&, Pointer1 a, Pointer2 b)
+inline THRUST_HOST_DEVICE void iter_swap(thrust::system::hip::execution_policy<DerivedPolicy>&, Pointer1 a, Pointer2 b)
 {
   // XXX war nvbugs/881631
   struct war_nvbugs_881631

@@ -92,9 +92,9 @@ inline hipError_t hipHostMalloc(void** ptr, std::size_t bytes)
 
 using device_memory_resource = detail::hip_memory_resource<hipMalloc, hipFree, thrust::hip_rocprim::pointer<void>>;
 using managed_memory_resource =
-  detail::hip_memory_resource<detail::hipMallocManaged, hipFree, thrust::hip::universal_pointer<void>>;
+  detail::hip_memory_resource<detail::hipMallocManaged, hipFree, thrust::system::hip::universal_pointer<void>>;
 using pinned_memory_resource =
-  detail::hip_memory_resource<hipHostMalloc, hipHostFree, thrust::hip::universal_pointer<void>>;
+  detail::hip_memory_resource<hipHostMalloc, hipHostFree, thrust::system::hip::universal_pointer<void>>;
 
 } // namespace detail
 //! \endcond

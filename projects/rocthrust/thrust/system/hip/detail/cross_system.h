@@ -150,56 +150,56 @@ constexpr THRUST_HOST_DEVICE auto is_device_to_device_copy(ExecutionPolicy const
 
 // Device to host.
 template <class Sys1, class Sys2>
-THRUST_HOST_DEVICE auto select_device_system(thrust::hip::execution_policy<Sys1>& sys1, thrust::execution_policy<Sys2>&)
+THRUST_HOST_DEVICE auto select_device_system(thrust::system::hip::execution_policy<Sys1>& sys1, thrust::execution_policy<Sys2>&)
   THRUST_DECLTYPE_RETURNS(sys1)
 
   // Device to host.
   template <class Sys1, class Sys2>
-  THRUST_HOST_DEVICE auto select_device_system(thrust::hip::execution_policy<Sys1> const& sys1,
+  THRUST_HOST_DEVICE auto select_device_system(thrust::system::hip::execution_policy<Sys1> const& sys1,
                                                thrust::execution_policy<Sys2> const&) THRUST_DECLTYPE_RETURNS(sys1)
 
   // Host to device.
   template <class Sys1, class Sys2>
   THRUST_HOST_DEVICE auto select_device_system(thrust::execution_policy<Sys1>&,
-                                               thrust::hip::execution_policy<Sys2>& sys2) THRUST_DECLTYPE_RETURNS(sys2)
+                                               thrust::system::hip::execution_policy<Sys2>& sys2) THRUST_DECLTYPE_RETURNS(sys2)
 
   // Host to device.
   template <class Sys1, class Sys2>
   THRUST_HOST_DEVICE auto select_device_system(thrust::execution_policy<Sys1> const&,
-                                               thrust::hip::execution_policy<Sys2> const& sys2)
+                                               thrust::system::hip::execution_policy<Sys2> const& sys2)
     THRUST_DECLTYPE_RETURNS(sys2)
 
   // Device to device.
   template <class Sys1, class Sys2>
-  THRUST_HOST_DEVICE auto select_device_system(thrust::hip::execution_policy<Sys1>& sys1,
-                                               thrust::hip::execution_policy<Sys2>&) THRUST_DECLTYPE_RETURNS(sys1)
+  THRUST_HOST_DEVICE auto select_device_system(thrust::system::hip::execution_policy<Sys1>& sys1,
+                                               thrust::system::hip::execution_policy<Sys2>&) THRUST_DECLTYPE_RETURNS(sys1)
 
   // Device to device.
   template <class Sys1, class Sys2>
-  THRUST_HOST_DEVICE auto select_device_system(thrust::hip::execution_policy<Sys1> const& sys1,
-                                               thrust::hip::execution_policy<Sys2> const&) THRUST_DECLTYPE_RETURNS(sys1)
+  THRUST_HOST_DEVICE auto select_device_system(thrust::system::hip::execution_policy<Sys1> const& sys1,
+                                               thrust::system::hip::execution_policy<Sys2> const&) THRUST_DECLTYPE_RETURNS(sys1)
 
   /////////////////////////////////////////////////////////////////////////////
 
   // Device to host.
   template <class Sys1, class Sys2>
-  THRUST_HOST_DEVICE auto select_host_system(thrust::hip::execution_policy<Sys1>&, thrust::execution_policy<Sys2>& sys2)
+  THRUST_HOST_DEVICE auto select_host_system(thrust::system::hip::execution_policy<Sys1>&, thrust::execution_policy<Sys2>& sys2)
     THRUST_DECLTYPE_RETURNS(sys2)
 
   // Device to host.
   template <class Sys1, class Sys2>
-  THRUST_HOST_DEVICE auto select_host_system(thrust::hip::execution_policy<Sys1> const&,
+  THRUST_HOST_DEVICE auto select_host_system(thrust::system::hip::execution_policy<Sys1> const&,
                                              thrust::execution_policy<Sys2> const& sys2) THRUST_DECLTYPE_RETURNS(sys2)
 
   // Host to device.
   template <class Sys1, class Sys2>
-  THRUST_HOST_DEVICE auto select_host_system(thrust::execution_policy<Sys1>& sys1, thrust::hip::execution_policy<Sys2>&)
+  THRUST_HOST_DEVICE auto select_host_system(thrust::execution_policy<Sys1>& sys1, thrust::system::hip::execution_policy<Sys2>&)
     THRUST_DECLTYPE_RETURNS(sys1)
 
   // Host to device.
   template <class Sys1, class Sys2>
   THRUST_HOST_DEVICE auto select_host_system(thrust::execution_policy<Sys1> const& sys1,
-                                             thrust::hip::execution_policy<Sys2> const&) THRUST_DECLTYPE_RETURNS(sys1)
+                                             thrust::system::hip::execution_policy<Sys2> const&) THRUST_DECLTYPE_RETURNS(sys1)
 
   // Device to device.
   template <class Sys1, class Sys2>

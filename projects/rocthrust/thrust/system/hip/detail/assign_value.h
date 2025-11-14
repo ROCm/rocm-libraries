@@ -41,19 +41,19 @@ namespace hip_rocprim
 
 template <typename DerivedPolicy, typename Pointer1, typename Pointer2>
 inline THRUST_HOST_DEVICE void
-assign_value(thrust::hip::execution_policy<DerivedPolicy>& exec, Pointer1 dst, Pointer2 src)
+assign_value(thrust::system::hip::execution_policy<DerivedPolicy>& exec, Pointer1 dst, Pointer2 src)
 {
   // XXX war nvbugs/881631
   struct war_nvbugs_881631
   {
     THRUST_HOST inline static void
-    host_path(thrust::hip::execution_policy<DerivedPolicy>& exec, Pointer1 dst, Pointer2 src)
+    host_path(thrust::system::hip::execution_policy<DerivedPolicy>& exec, Pointer1 dst, Pointer2 src)
     {
       hip_rocprim::copy(exec, src, src + 1, dst);
     }
 
     THRUST_DEVICE inline static void
-    device_path(thrust::hip::execution_policy<DerivedPolicy>&, Pointer1 dst, Pointer2 src)
+    device_path(thrust::system::hip::execution_policy<DerivedPolicy>&, Pointer1 dst, Pointer2 src)
     {
       *thrust::raw_pointer_cast(dst) = *thrust::raw_pointer_cast(src);
     }
@@ -82,7 +82,7 @@ inline THRUST_HOST_DEVICE void assign_value(cross_system<System1, System2>& syst
     {
       // XXX forward the true hip::execution_policy inside systems here
       //     instead of materializing a tag
-      thrust::hip::tag hip_tag;
+      thrust::system::hip::tag hip_tag;
       thrust::hip_rocprim::assign_value(hip_tag, dst, src);
     }
   };
