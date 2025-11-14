@@ -1339,6 +1339,7 @@ def fp4_target_d2lds_mi16x16x128_pf4x1_both():
     yield from fp4_target_d2lds_mi16x16x128_st32x8_pf4x1()
     yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
 
+
 def does_this_fail():
     yield GEMMRun(
         M=4096,
