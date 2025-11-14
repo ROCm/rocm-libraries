@@ -152,10 +152,10 @@ namespace rocRoller
     {
         auto ctx = m_context.lock();
         if (ctx) {
-            return ctx->ldsAllocator()->fixedSize();
+            return ctx->ldsAllocator()->maxUsed();
         }
         AssertFatal(m_group_segment_fixed_size.has_value(), "Context is null");
-        return m_context.lock()->ldsAllocator()->maxUsed();
+        return m_group_segment_fixed_size.value();
     }
 
     inline int AssemblyKernel::private_segment_fixed_size() const
