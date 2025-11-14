@@ -1,5 +1,8 @@
 # Generic Ownership (broadest rules first)
 **/next-cmake/                                      @ROCm/rocm-math-lib-build-infra
+./CMakeLists.txt                                    @ROCm/rocm-math-lib-build-infra
+./CMakePresets.json                                 @ROCm/rocm-math-lib-build-infra
+/cmake/
 
 # CI ownership
 /.azuredevops/                                      @ROCm/external-ci
@@ -18,19 +21,23 @@
 /projects/hipblas-common/                           @ROCm/hipblas-common-reviewers
 /projects/hipblaslt/                                @ROCm/hipblaslt-reviewers
 /projects/hipcub/                                   @ROCm/prims-rands-reviewers
+/projects/hipdnn/                                   @ROCm/hipdnn-reviewers
 /projects/hipfft/                                   @ROCm/fft-reviewers
 /projects/hiprand/                                  @ROCm/prims-rands-reviewers
-/projects/hipsolver/                                @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
-/projects/hipsparse/                                @ntrost57 @YvanMokwinski @jsandham
+/projects/hipsolver/                                @ROCm/solvers-reviewers
+/projects/hipsparse/                                @ROCm/sparses-reviewers
 /projects/hipsparselt/                              @ROCm/hipsparselt-reviewers
+/projects/hiptensor/                                @ROCm/hiptensor-reviewers
 /projects/miopen/                                   @ROCm/miopen-reviewers
 /projects/rocblas/                                  @ROCm/rocblas-reviewers
 /projects/rocfft/                                   @ROCm/fft-reviewers
 /projects/rocprim/                                  @ROCm/prims-rands-reviewers
 /projects/rocrand/                                  @ROCm/prims-rands-reviewers
-/projects/rocsolver/                                @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
-/projects/rocsparse/                                @ntrost57 @YvanMokwinski @jsandham @kliegeois
+/projects/rocsolver/                                @ROCm/solvers-reviewers
+/projects/rocsparse/                                @ROCm/sparses-reviewers
 /projects/rocthrust/                                @ROCm/prims-rands-reviewers
+/projects/rocwmma/                                  @ROCm/rocwmma-reviewers
+/shared/origami/                                    @ROCm/origami-reviewers
 /shared/mxdatagenerator/                            @ROCm/rocroller-developers
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
@@ -42,17 +49,20 @@
 /projects/hipblaslt/**/*.cmake                      @ROCm/rocm-math-lib-build-infra
 /projects/hipblaslt/**/CMakeLists.txt               @ROCm/rocm-math-lib-build-infra
 
-/projects/rocblas/**/*.cmake                        @ROCm/rocm-math-lib-build-infra
-/projects/rocblas/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra
+/projects/hipsparselt/**/*.cmake                    @ROCm/rocm-math-lib-build-infra @ROCm/hipsparselt-reviewers
+/projects/hipsparselt/**/CMakeLists.txt             @ROCm/rocm-math-lib-build-infra @ROCm/hipsparselt-reviewers
 
-/projects/hipsparselt/**/*.cmake                    @ROCm/rocm-math-lib-build-infra
-/projects/hipsparselt/**/CMakeLists.txt             @ROCm/rocm-math-lib-build-infra
-
-/shared/rocroller/**/*.cmake                        @ROCm/rocm-math-lib-build-infra
-/shared/rocroller/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra
+/projects/rocblas/**/*.cmake                        @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
+/projects/rocblas/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
 
 /shared/mxdatagenerator/**/*.cmake                  @ROCm/rocm-math-lib-build-infra
 /shared/mxdatagenerator/**/CMakeLists.txt           @ROCm/rocm-math-lib-build-infra
+
+/shared/origami/**/*.cmake                          @ROCm/rocm-math-lib-build-infra
+/shared/origami/**/CMakeLists.txt                   @ROCm/rocm-math-lib-build-infra
+
+/shared/rocroller/**/*.cmake                        @ROCm/rocm-math-lib-build-infra
+/shared/rocroller/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra
 
 /shared/tensile/**/*.cmake                          @ROCm/rocm-math-lib-build-infra
 /shared/tensile/**/CMakeLists.txt                   @ROCm/rocm-math-lib-build-infra
@@ -69,6 +79,16 @@
 /projects/hipblas-common/**/.readthedocs.yaml       @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
 /projects/hipblas-common/docs/                      @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
 /projects/hipblas-common/library/include/           @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
+
+/projects/hiptensor/**/*.md                         @ROCm/hiptensor-reviewers @ROCm/rocm-documentation
+/projects/hiptensor/**/*.rst                        @ROCm/hiptensor-reviewers @ROCm/rocm-documentation
+/projects/hiptensor/library/include/*               @ROCm/hiptensor-reviewers @ROCm/rocm-documentation
+/projects/hiptensor/docs/                           @ROCm/hiptensor-reviewers @ROCm/rocm-documentation
+
+/projects/rocwmma/**/*.md                           @ROCm/rocwmma-reviewers @ROCm/rocm-documentation
+/projects/rocwmma/**/*.rst                          @ROCm/rocwmma-reviewers @ROCm/rocm-documentation
+/projects/rocwmma/library/include/*                 @ROCm/rocwmma-reviewers @ROCm/rocm-documentation
+/projects/rocwmma/docs/                             @ROCm/rocwmma-reviewers @ROCm/rocm-documentation
 
 /projects/hipblaslt/**/*.md                         @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
 /projects/hipblaslt/**/*.rst                        @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
@@ -92,6 +112,18 @@
 /projects/hiprand/**/.readthedocs.yaml              @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
 /projects/hiprand/docs/                             @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
 /projects/hiprand/library/include/                  @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+
+/projects/hipsolver/**/*.md                         @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/hipsolver/**/*.rst                        @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/hipsolver/**/.readthedocs.yaml            @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/hipsolver/docs/                           @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/hipsolver/library/include/                @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+
+/projects/hipsparse/**/*.md                         @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/hipsparse/**/*.rst                        @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/hipsparse/**/.readthedocs.yaml            @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/hipsparse/docs/                           @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/hipsparse/library/include/                @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
 
 /projects/hipsparselt/**/*.md                       @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
 /projects/hipsparselt/**/*.rst                      @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
@@ -126,6 +158,18 @@
 /projects/rocrand/**/.readthedocs.yaml              @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
 /projects/rocrand/docs/                             @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
 /projects/rocrand/library/include/                  @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+
+/projects/rocsolver/**/*.md                         @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/rocsolver/**/*.rst                        @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/rocsolver/**/.readthedocs.yaml            @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/rocsolver/docs/                           @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+/projects/rocsolver/library/include/                @ROCm/solvers-reviewers @ROCm/solvers-docs-reviewers
+
+/projects/rocsparse/**/*.md                         @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/rocsparse/**/*.rst                        @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/rocsparse/**/.readthedocs.yaml            @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/rocsparse/docs/                           @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
+/projects/rocsparse/library/include/                @ROCm/sparses-reviewers @ROCm/sparses-docs-reviewers
 
 /projects/rocthrust/**/*.md                         @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 /projects/rocthrust/**/*.rst                        @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers

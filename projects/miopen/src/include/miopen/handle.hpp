@@ -180,10 +180,6 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     std::string GetDeviceName() const;
     virtual const TargetProperties& GetTargetProperties() const;
 
-private:
-    std::string GetDeviceNameImpl() const;
-
-public:
     std::ostream& Print(std::ostream& os) const;
     void Copy(ConstData_t src, Data_t dest, std::size_t size) const;
 
@@ -263,14 +259,7 @@ public:
     {
         invokers.Register({config, solver}, invoker);
         if(algo.has_value())
-            SetAsFound1_0(config, *algo, solver);
-    }
-
-    void SetAsFound1_0(const NetworkConfig& config,
-                       const AlgorithmName& algo,
-                       const std::string& solver) const
-    {
-        invokers.SetAsFound1_0(config, algo, solver);
+            invokers.SetAsFound1_0(config, *algo, solver);
     }
 
     std::optional<Invoker> GetInvoker(const NetworkConfig& config,
@@ -300,6 +289,9 @@ public:
         return invokers.GetFound1_0SolverId(config, algo);
     }
 
+    miopenTuningPolicy_t GetTuningPolicy() const { return tuning_policy; }
+    void SetTuningPolicy(miopenTuningPolicy_t new_val) { tuning_policy = new_val; };
+
 #if MIOPEN_USE_ROCBLAS
     const rocblas_handle_ptr& rhandle() const;
 #endif
@@ -308,6 +300,8 @@ public:
 #endif
 
 private:
+    std::string GetDeviceNameImpl() const;
+
 #if MIOPEN_USE_ROCBLAS
     rocblas_handle_ptr CreateRocblasHandle(miopenAcceleratorQueue_t streamID) const;
 #endif
@@ -316,6 +310,7 @@ private:
 #endif
 
     mutable InvokerCache invokers;
+    miopenTuningPolicy_t tuning_policy = miopenTuningPolicyNone;
 };
 
 inline std::ostream& operator<<(std::ostream& os, const Handle& handle) { return handle.Print(os); }

@@ -107,6 +107,7 @@ set(rocblas_no_tensile_test_source
     blas3/geam_gtest.cpp
     blas_ex/gemmt_gtest.cpp
     blas_ex/geam_ex_gtest.cpp
+    blas_ex/syrk_ex_gtest.cpp
   )
 
 # Keep ${rocblas_tensile_test_source} first, so that multiheaded tests are the
@@ -164,7 +165,7 @@ set_target_properties( rocblas-test PROPERTIES
 file(GLOB yaml_files "${CMAKE_CURRENT_SOURCE_DIR}/*.yaml")
 set( ROCBLAS_TEST_DATA "${PROJECT_BINARY_DIR}/staging/rocblas_gtest.data")
 add_custom_command( OUTPUT "${ROCBLAS_TEST_DATA}"
-                    COMMAND ${python} ../common/rocblas_gentest.py -I ../include rocblas_gtest.yaml -o "${ROCBLAS_TEST_DATA}"
+                    COMMAND ${Python3_EXECUTABLE} ../common/rocblas_gentest.py -I ../include rocblas_gtest.yaml -o "${ROCBLAS_TEST_DATA}"
                     DEPENDS ../common/rocblas_gentest.py ../include/rocblas_common.yaml ${yaml_files}
                     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
 add_custom_target( rocblas-test-data DEPENDS "${ROCBLAS_TEST_DATA}" )

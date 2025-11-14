@@ -75,7 +75,7 @@
   UseScaleCD: false
 - - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertFree0ElementMultiple: 1
     AssertFree1ElementMultiple: 1
@@ -263,7 +263,7 @@
     _staggerStrideShift: 0
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertFree0ElementMultiple: 1
     AssertFree1ElementMultiple: 1
@@ -299,7 +299,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_AI_SAV_MT32x32x32_MI16x16x1_SN_LDSB0_AFC1_GRVWB4_GSU1_LPA16_LPB16_MIWT1_1_PGR2_PLR1_WG32_8_1
+    KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_AI_SAV_MT32x32x32_MI16x16x1_SN_LDSB0_AFC0_GRVWB4_GSU1_LPA16_LPB16_MIWT1_1_PGR2_PLR1_WG32_8_1
     LSCA: 32
     LSCB: 32
     LSPA: 8
@@ -393,7 +393,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 1
-    SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_AI_SAV_MT32x32x32_MI16x16x1_SN_LDSB0_AFC1_GRVWB4_GSU1_LPA16_LPB16_MIWT1_1_PGR2_PLR1_WG32_8_1
+    SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_AI_SAV_MT32x32x32_MI16x16x1_SN_LDSB0_AFC0_GRVWB4_GSU1_LPA16_LPB16_MIWT1_1_PGR2_PLR1_WG32_8_1
     SourceSwap: 1
     StaggerU: 32
     StaggerUMapping: 0
@@ -444,7 +444,7 @@
     _staggerStrideShift: 3
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertFree0ElementMultiple: 1
     AssertFree1ElementMultiple: 1
@@ -480,7 +480,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_AI_SAV_MT64x64x64_MI32x32x1_SN_LDSB0_AFC1_GRVWB16_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG64_4_1
+    KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_AI_SAV_MT64x64x64_MI32x32x1_SN_LDSB0_AFC0_GRVWB16_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG64_4_1
     LSCA: 64
     LSCB: 64
     LSPA: 4
@@ -574,7 +574,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 2
-    SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_AI_SAV_MT64x64x64_MI32x32x1_SN_LDSB0_AFC1_GRVWB16_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG64_4_1
+    SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_AI_SAV_MT64x64x64_MI32x32x1_SN_LDSB0_AFC0_GRVWB16_GSU1_LPA0_LPB0_MIWT1_1_PGR2_PLR1_WG64_4_1
     SourceSwap: 1
     StaggerU: 32
     StaggerUMapping: 0
@@ -987,7 +987,7 @@
     _staggerStrideShift: 3
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: true
+    ActivationFuncCall: false
     ActivationFused: true
     AssertFree0ElementMultiple: 1
     AssertFree1ElementMultiple: 1
@@ -1023,7 +1023,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_AI_SAV_MT128x128x32_MI32x32x1_SN_LDSB1_AFC1_GRVWB16_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
+    KernelNameMin: Cijk_Ailk_Bljk_I8II_BH_AI_SAV_MT128x128x32_MI32x32x1_SN_LDSB1_AFC0_GRVWB16_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
     LSCA: 128
     LSCB: 32
     LSPA: 2
@@ -1117,7 +1117,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 5
-    SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_AI_SAV_MT128x128x32_MI32x32x1_SN_LDSB1_AFC1_GRVWB16_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
+    SolutionNameMin: Cijk_Ailk_Bljk_I8II_BH_AI_SAV_MT128x128x32_MI32x32x1_SN_LDSB1_AFC0_GRVWB16_GSU1_LPA0_LPB0_MIWT2_2_PGR2_PLR1_WG64_4_1
     SourceSwap: 1
     StaggerU: 32
     StaggerUMapping: 0

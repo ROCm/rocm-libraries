@@ -1,5 +1,5 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1103, skip-gfx1150, skip-gfx1151] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1032, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1103, skip-gfx1150, skip-gfx1151] # not supported by arch
 
 GlobalParameters:
   NumElementsToValidate: -1
@@ -66,7 +66,7 @@ BenchmarkProblems:
           - Range: [ [504], [504], [1], [2024, 16, 2040] ]
           - Range: [ [504], [504], [1], [200] ]
           - Range: [ [504], [504], [1], [192] ]
-  
+
   ########################################
   # HHS TN - DTVA + DTL + min load width for TailLoop
   ########################################
@@ -123,7 +123,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Range: [ [511], [511], [1], [2023, 24, 2047] ]
-  
+
   ########################################
   # HHS TT - DTVA + DTL + max load width for TailLoop
   ########################################
@@ -179,7 +179,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Range: [ [504], [504], [1], [2024, 16, 2040] ]
-  
+
   ########################################
   # HHS TT - DTVA + DTL + min load width for TailLoop + VFLRP
   ########################################
@@ -242,7 +242,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Range: [ [511], [511], [1], [2023, 24, 2047] ]
-  
+
   ########################################
   # HHS TN - DTVB (+ DTL) + max load width for TailLoop
   ########################################
@@ -295,7 +295,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Range: [ [504], [504], [1], [2024, 16, 2040] ]
-  
+
   ########################################
   # HHS TN - DTVB (+ DTL) + min load width for TailLoop
   ########################################
@@ -352,7 +352,7 @@ BenchmarkProblems:
   #     BenchmarkFinalParameters:
   #       - ProblemSizes:
   #         - Range: [ [511], [511], [1], [2023, 24, 2047] ]
-  
+
   ########################################
   # HHS NN - DTVB (+ DTL) + max load width for TailLoop + VFLRP
   ########################################
@@ -733,4 +733,3 @@ BenchmarkProblems:
           - Range: [ [504], [504], [1], [2024, 16, 2040] ] # step 8
           - Range: [ [504], [504], [1], [200] ]
           - Range: [ [504], [504], [1], [192] ]
-

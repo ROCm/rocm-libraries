@@ -32,9 +32,9 @@ extern "C" {
 /*! \ingroup precond_module
  *  \details
  *  \p hipsparseXbsric02_zeroPivot returns \ref HIPSPARSE_STATUS_ZERO_PIVOT, if either a
- *  structural or numerical zero has been found during \ref hipsparseSbsric02_analysis 
- *  "hipsparseXbsric02_analysis()" or \ref hipsparseSbsric02 "hipsparseXbsric02()" computation. 
- *  The first zero pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position, using same index 
+ *  structural or numerical zero has been found during \ref hipsparseSbsric02_analysis
+ *  "hipsparseXbsric02_analysis()" or \ref hipsparseSbsric02 "hipsparseXbsric02()" computation.
+ *  The first zero pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position, using same index
  *  base as the BSR matrix.
  *
  *  \p position can be in host or device memory. If no zero pivot has been found,
@@ -48,6 +48,10 @@ extern "C" {
  *  \note \p hipsparseXbsric02_zeroPivot is a blocking function. It might influence
  *  performance negatively.
  *
+ *  \deprecated
+ *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be 
+ *  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
+ *
  *  @param[in]
  *  handle      handle to the hipsparse library context queue.
  *  @param[in]
@@ -55,11 +59,11 @@ extern "C" {
  *  @param[inout]
  *  position    pointer to zero pivot \f$j\f$, can be in host or device memory.
  *
- *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info or \p position pointer is
- *              invalid.
- *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
- *  \retval     HIPSPARSE_STATUS_ZERO_PIVOT zero pivot has been found.
+ *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+ *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info or \p position is nullptr.
+ *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+ *  \retval HIPSPARSE_STATUS_ZERO_PIVOT zero pivot has been found.
  */
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT
@@ -71,19 +75,19 @@ hipsparseStatus_t
 /*! \ingroup precond_module
  *  \details
  *  \p hipsparseXbsric02_bufferSize returns the size of the temporary storage buffer
- *  in bytes that is required by \ref hipsparseSbsric02_analysis "hipsparseXbsric02_analysis()" 
- *  and \ref hipsparseSbsric02 "hipsparseXbsric02()". The temporary storage buffer must be 
- *  allocated by the user. 
+ *  in bytes that is required by \ref hipsparseSbsric02_analysis "hipsparseXbsric02_analysis()"
+ *  and \ref hipsparseSbsric02 "hipsparseXbsric02()". The temporary storage buffer must be
+ *  allocated by the user.
  *
  *  @param[in]
  *  handle             handle to the hipsparse library context queue.
  *  @param[in]
- *  dirA               direction that specifies whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW 
+ *  dirA               direction that specifies whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW
  *                     or by \ref HIPSPARSE_DIRECTION_COLUMN.
  *  @param[in]
- *  mb                 number of block rows in the sparse BSR matrix.
+ *  mb                 number of block rows in the sparse BSR matrix. Must be non-negative.
  *  @param[in]
- *  nnzb               number of non-zero block entries of the sparse BSR matrix.
+ *  nnzb               number of non-zero block entries of the sparse BSR matrix. Must be non-negative.
  *  @param[in]
  *  descrA             descriptor of the sparse BSR matrix.
  *  @param[in]
@@ -94,7 +98,7 @@ hipsparseStatus_t
  *  @param[in]
  *  bsrColIndA         array of \p nnzb elements containing the block column indices of the sparse BSR matrix.
  *  @param[in]
- *  blockDim           the block dimension of the BSR matrix. Between 1 and m where \p m=mb*blockDim.
+ *  blockDim           the block dimension of the BSR matrix. Must be positive. Between 1 and m where \p m=mb*blockDim.
  *  @param[out]
  *  info               structure that holds the information collected during the analysis step.
  *  @param[out]
@@ -104,13 +108,13 @@ hipsparseStatus_t
  *                     hipsparseSbsric02(), hipsparseDbsric02(), hipsparseCbsric02()
  *                     and hipsparseZbsric02().
  *
- *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA, 
- *              \p bsrValA, \p bsrRowPtrA, \p bsrColIndA, \p info or \p pBufferSizeInBytes pointer 
- *              is invalid.
- *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
- *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
- *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+ *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+ *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p bsrValA, \p bsrRowPtrA,
+ *          \p bsrColIndA, \p info or \p pBufferSizeInBytes is nullptr, \p mb or \p nnzb is negative,
+ *          or \p blockDim is invalid.
+ *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+ *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
  */
 /**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
@@ -171,8 +175,8 @@ hipsparseStatus_t hipsparseZbsric02_bufferSize(hipsparseHandle_t         handle,
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
  *  \details
- *  \p hipsparseXbsric02_analysis performs the analysis step for \ref hipsparseSbsric02 
- *  "hipsparseXbsric02()". It is expected that this function will be executed only once 
+ *  \p hipsparseXbsric02_analysis performs the analysis step for \ref hipsparseSbsric02
+ *  "hipsparseXbsric02()". It is expected that this function will be executed only once
  *  for a given matrix and particular operation type.
  *
  *  \note
@@ -210,7 +214,7 @@ hipsparseStatus_t hipsparseZbsric02_bufferSize(hipsparseHandle_t         handle,
  *  pBuffer     temporary storage buffer allocated by the user.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA, 
+ *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
  *              \p bsrValA, \p bsrRowPtrA, \p bsrColIndA, \p info or \p pBuffer pointer is invalid.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
@@ -288,21 +292,21 @@ hipsparseStatus_t hipsparseZbsric02_analysis(hipsparseHandle_t         handle,
  *    A \approx LL^T
  *  \f]
  *
- *  Computing the above incomplete Cholesky factorization requires three steps to complete. First, 
- *  the user determines the size of the required temporary storage buffer by calling 
- *  \ref hipsparseSbsric02_bufferSize "hipsparseXbsric02_bufferSize()". Once this buffer size has been determined, 
- *  the user allocates the buffer and passes it to \ref hipsparseSbsric02_analysis "hipsparseXbsric02_analysis()". 
- *  This will perform analysis on the sparsity pattern of the matrix. Finally, the user calls \p hipsparseXbsric02 
- *  to perform the actual factorization. The calculation of the buffer size and the analysis of the sparse matrix 
- *  only need to be performed once for a given sparsity pattern while the factorization can be repeatedly applied 
- *  to multiple matrices having the same sparsity pattern. Once all calls to \p hipsparseXbsric02 are complete, 
+ *  Computing the above incomplete Cholesky factorization requires three steps to complete. First,
+ *  the user determines the size of the required temporary storage buffer by calling
+ *  \ref hipsparseSbsric02_bufferSize "hipsparseXbsric02_bufferSize()". Once this buffer size has been determined,
+ *  the user allocates the buffer and passes it to \ref hipsparseSbsric02_analysis "hipsparseXbsric02_analysis()".
+ *  This will perform analysis on the sparsity pattern of the matrix. Finally, the user calls \p hipsparseXbsric02
+ *  to perform the actual factorization. The calculation of the buffer size and the analysis of the sparse matrix
+ *  only need to be performed once for a given sparsity pattern while the factorization can be repeatedly applied
+ *  to multiple matrices having the same sparsity pattern. Once all calls to \p hipsparseXbsric02 are complete,
  *  the temporary buffer can be deallocated.
  *
  *  \p hipsparseXbsric02 requires a user allocated temporary buffer. Its size is returned
- *  by \ref hipsparseSbsric02_bufferSize "hipsparseXbsric02_bufferSize()". Furthermore, 
- *  analysis meta data is required. It can be obtained by \ref hipsparseSbsric02_analysis 
- *  "hipsparseXbsric02_analysis()". \p hipsparseXbsric02 reports the first zero pivot 
- *  (either numerical or structural zero). The zero pivot status can be obtained by calling 
+ *  by \ref hipsparseSbsric02_bufferSize "hipsparseXbsric02_bufferSize()". Furthermore,
+ *  analysis meta data is required. It can be obtained by \ref hipsparseSbsric02_analysis
+ *  "hipsparseXbsric02_analysis()". \p hipsparseXbsric02 reports the first zero pivot
+ *  (either numerical or structural zero). The zero pivot status can be obtained by calling
  *  \ref hipsparseXbsric02_zeroPivot().
  *
  *  \p hipsparseXbsric02 reports the first zero pivot (either numerical or structural zero).
@@ -340,7 +344,7 @@ hipsparseStatus_t hipsparseZbsric02_analysis(hipsparseHandle_t         handle,
  *  pBuffer     temporary storage buffer allocated by the user.
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
- *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA, 
+ *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nnzb, \p blockDim, \p descrA,
  *              \p bsrValA, \p bsrRowPtrA, or \p bsrColIndA pointer is invalid.
  *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
  *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.

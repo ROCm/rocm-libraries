@@ -247,6 +247,7 @@ set( rocfft_source
   tree_node_real.cpp
   fuse_shim.cpp
   assignment_policy.cpp
+  callback_map.cpp
   node_factory.cpp
   enum_printer.cpp
   rtc_exports.cpp
@@ -402,9 +403,12 @@ add_library( rocfft
 rocfft_add_coverage_flags( rocfft )
 
 # rocFFT contains default implementations of callback functions that
-# need to be built as relocatable device code
-target_compile_options( rocfft PRIVATE -fgpu-rdc )
-target_link_options( rocfft PRIVATE -fgpu-rdc )
+# need to be built as relocatable device code (causes failure at link
+# stage on Windows)
+if (NOT WIN32)
+  target_compile_options( rocfft PRIVATE -fgpu-rdc )
+  target_link_options( rocfft PRIVATE -fgpu-rdc )
+endif()
 
 if( ROCFFT_MPI_ENABLE )
   target_compile_definitions(rocfft PRIVATE ROCFFT_MPI_ENABLE)

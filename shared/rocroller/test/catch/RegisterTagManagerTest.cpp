@@ -386,11 +386,6 @@ SCENARIO("RegisterTagManager initialize adds alias edges.", "[codegen][kernel-gr
 
     GIVEN("A kernel graph with no alias edges")
     {
-        {
-            std::ofstream file("vecadd.dot");
-            file << kgraph.toDOT() << std::endl;
-        }
-
         THEN("initialize() will not register any aliases.")
         {
             manager.initialize(kgraph);

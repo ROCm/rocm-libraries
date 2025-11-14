@@ -32,6 +32,7 @@
 #include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/Serialization/Base.hpp>
+#include <rocRoller/Serialization/Containers.hpp>
 #include <rocRoller/Serialization/Enum.hpp>
 #include <rocRoller/Serialization/HasTraits.hpp>
 #include <rocRoller/Serialization/Variant.hpp>
@@ -53,6 +54,8 @@ namespace rocRoller
         {
             static const bool flow = true;
         };
+
+        ROCROLLER_SERIALIZE_VECTOR(false, Expression::ExpressionPtr);
 
         template <Expression::CBinary TExp, typename IO, typename Context>
         struct MappingTraits<TExp, IO, Context>
@@ -108,6 +111,36 @@ namespace rocRoller
             }
 
             static void mapping(IO& io, Expression::Convert& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<Expression::BitfieldCombine, IO, Context>
+        {
+            static const bool flow = true;
+            using iot              = IOTraits<IO>;
+
+            static void mapping(IO& io, Expression::BitfieldCombine& exp, Context& ctx)
+            {
+                iot::mapRequired(io, "lhs", exp.lhs, ctx);
+                iot::mapRequired(io, "rhs", exp.rhs, ctx);
+
+                iot::mapRequired(io, "srcOffset", exp.srcOffset);
+                iot::mapRequired(io, "dstOffset", exp.dstOffset);
+                iot::mapRequired(io, "width", exp.width);
+
+                if(exp.srcIsZero.has_value())
+                    iot::mapRequired(io, "srcIsZero", exp.srcIsZero.value());
+                if(exp.dstIsZero.has_value())
+                    iot::mapRequired(io, "dstIsZero", exp.dstIsZero.value());
+            }
+
+            static void mapping(IO& io, Expression::BitfieldCombine& val)
             {
                 AssertFatal((std::same_as<EmptyContext, Context>));
 
@@ -184,6 +217,45 @@ namespace rocRoller
             }
         };
 
+        template <Expression::CNary Expr, typename IO, typename Context>
+        struct MappingTraits<Expr, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, Expr& exp, Context& ctx)
+            {
+                iot::mapRequired(io, "operands", exp.operands, ctx);
+            }
+
+            static void mapping(IO& io, Expr& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<Expression::Concatenate, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, Expression::Concatenate& exp, Context& ctx)
+            {
+                iot::mapRequired(io, "operands", exp.operands, ctx);
+                iot::mapRequired(io, "dataType", exp.destinationType);
+            }
+
+            static void mapping(IO& io, Expression::Concatenate& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
         static_assert(CNamedVariant<CommandArgumentValue>);
         template <typename IO, typename Context>
         struct MappingTraits<CommandArgumentValue, IO, Context>
@@ -227,6 +299,29 @@ namespace rocRoller
             }
 
             static void mapping(IO& io, CommandArgumentValue& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<Buffer, IO, Context>
+        {
+            static const bool flow = false;
+            using iot              = IOTraits<IO>;
+
+            static void mapping(IO& io, Buffer& buffer, Context& ctx)
+            {
+                iot::mapRequired(io, "desc0", buffer.desc0);
+                iot::mapRequired(io, "desc1", buffer.desc1);
+                iot::mapRequired(io, "desc2", buffer.desc2);
+                iot::mapRequired(io, "desc3", buffer.desc3);
+            }
+
+            static void mapping(IO& io, Buffer& val)
             {
                 AssertFatal((std::same_as<EmptyContext, Context>));
 

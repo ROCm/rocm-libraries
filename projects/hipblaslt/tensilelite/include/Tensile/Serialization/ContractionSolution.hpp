@@ -126,6 +126,8 @@ namespace TensileLite
                 iot::mapRequired(io, "PrefetchGlobalRead", s.PrefetchGlobalRead);
                 iot::mapRequired(io, "MathClocksUnrolledLoop", s.MathClocksUnrolledLoop);
                 iot::mapRequired(io, "synchronizerSizePerWG", s.synchronizerSizePerWG);
+                iot::mapRequired(io, "nonTemporalA", s.nonTemporalA);
+                iot::mapRequired(io, "nonTemporalB", s.nonTemporalB);
             }
 
             const static bool flow = false;
@@ -142,6 +144,7 @@ namespace TensileLite
                 iot::mapRequired(io, "wgm", s.wgm);
                 iot::mapRequired(io, "staggerU", s.staggerU);
                 iot::mapRequired(io, "useUniversalArgs", s.useUniversalArgs);
+                iot::mapRequired(io, "useSFC", s.useSFC);
             }
 
             const static bool flow = false;

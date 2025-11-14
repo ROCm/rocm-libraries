@@ -28,6 +28,85 @@ This uses Git’s partial clone feature (`--filter=blob:none`) to reduce how muc
 With the source tree as of June 19th, 2025, the clone command lasted 4 seconds in one test run.
 The checkout command of the two projects lasted less than 90 seconds.
 
+## Working with the Superbuild
+
+To issue a full ROCm libraries superbuild for all projects and targets:
+
+```bash
+# configure
+cmake -B build -S .
+# build
+cmake --build build
+# install
+cmake --install build
+```
+
+Since, by default, CMake installs into `/usr/local` (on Linux) and ` C:\Program Files\CMake` (on Windows), and the canonical ROCm libraries path (`/opt/rocm`) is not in CMake's search path, it is recommended to set the prefix path and install prefix when configuring without a [toolchain file](#superbuild-toolchain-files).
+
+```bash
+# configure
+cmake -B build -S . -D CMAKE_INSTALL_PREFIX=/opt/rocm -D CMAKE_PREFIX_PATH=/opt/rocm
+```
+
+To simplify the configure and build commands for various build contexts, presets are provided in [CMakePresets.json](../CMakePresets.json). To view available presets:
+
+```bash
+# show configure presets
+cmake --list-presets=configure
+
+# show build presets
+cmake --list-presets=build
+```
+
+For example, to issue a superbuild for all projects and targets:
+
+```bash
+# configure
+cmake --preset release:all
+# build
+cmake --build --preset default
+```
+
+Alternatively, to build only [rocroller](https://github.com/ROCm/rocm-libraries/tree/develop/shared/rocroller):
+
+```bash
+# configure
+cmake --preset rocroller
+# build
+cmake --build --preset default
+```
+
+> [!TIP]
+> By default, the configure presets will generate build artifacts to the `build` directory; override this by setting `-B <build-dir>`.
+> In addition, all configure presets use the `linux-amdclang.cmake` toolchain; override this by setting `-D CMAKE_TOOLCHAIN_FILE=<toolchain-file>`.
+> Otherwise, none of the configure or build presets make assumptions about additional flags.
+> For example, to speed up the build, add `-j`/`--parallel`, or to debug the build, add `--verbose`.
+
+If you wish to have granular control over the build, use `-D ROCM_LIBS_ENABLE_COMPONENTS="list;of;components"` to selectively enable the desired projects and dependencies. For example, to build rocroller without its preset:
+
+```bash
+# configure
+cmake -B build -S . -D ROCM_LIBS_ENABLE_COMPONENTS="mxdatagenerator;rocroller"
+# build
+cmake --build build
+```
+
+### Superbuild Toolchain Files
+
+Toolchain files are located at [cmake/toolchains](https://github.com/ROCm/rocm-libraries/tree/develop/cmake/toolchains). These files establish paths to the AMD compilers and other toolchains components. To use a toolchain file when issuing a superbuild, use:
+
+```bash
+# configure
+cmake -B build -S . -D CMAKE_TOOLCHAIN_FILE=./cmake/toolchains/<toolchain-file>
+```
+
+Or, with an existing preset:
+
+```bash
+# configure
+cmake --preset release:all -D CMAKE_TOOLCHAIN_FILE=./cmake/toolchains/<toolchain-file>
+```
+
 ## Working on Multiple Projects
 
 If your work involves changing projects or introducing new projects, you can update your sparse-checkout environment:

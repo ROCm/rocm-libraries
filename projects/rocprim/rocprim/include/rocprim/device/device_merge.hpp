@@ -23,6 +23,7 @@
 
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <type_traits>
 
 #include "../common.hpp"
@@ -41,28 +42,35 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Config,
-         class IndexIterator,
-         class KeysInputIterator1,
-         class KeysInputIterator2,
-         class BinaryFunction>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
-    partition_kernel(IndexIterator      index,
-                     KeysInputIterator1 keys_input1,
-                     KeysInputIterator2 keys_input2,
-                     const size_t       input1_size,
-                     const size_t       input2_size,
-                     const unsigned int spacing,
-                     BinaryFunction     compare_function)
+template<typename Config, typename Key, typename Value>
+inline size_t get_merge_vsmem_size_per_block(detail::target_arch arch)
 {
-    partition_kernel_impl(
-        index, keys_input1, keys_input2, input1_size, input2_size,
-        spacing, compare_function
-    );
+    std::optional<size_t> vsmem_per_block;
+    for_each_arch(
+        [&](auto arch_tag)
+        {
+            constexpr target_arch Arch = decltype(arch_tag)::value;
+            if(Arch != arch || vsmem_per_block)
+                return;
+            using ArchConfig           = typename Config::template architecture_config<Arch>;
+            using merge_kernel_impl_t  = merge_kernel_impl_<ArchConfig, Key, Value>;
+            using merge_vsmem_helper_t = detail::vsmem_helper_impl<merge_kernel_impl_t>;
+
+            vsmem_per_block = merge_vsmem_helper_t::vsmem_per_block;
+        });
+
+    if(!vsmem_per_block)
+    {
+        using ArchConfig = typename Config::template architecture_config<target_arch::unknown>;
+        using merge_kernel_impl_t  = merge_kernel_impl_<ArchConfig, Key, Value>;
+        using merge_vsmem_helper_t = detail::vsmem_helper_impl<merge_kernel_impl_t>;
+
+        vsmem_per_block = merge_vsmem_helper_t::vsmem_per_block;
+    }
+    return vsmem_per_block.value();
 }
 
 template<class Config,
-         class IndexIterator,
          class KeysInputIterator1,
          class KeysInputIterator2,
          class KeysOutputIterator,
@@ -70,97 +78,22 @@ template<class Config,
          class ValuesInputIterator2,
          class ValuesOutputIterator,
          class BinaryFunction>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
-    merge_kernel(IndexIterator        index,
-                 KeysInputIterator1   keys_input1,
-                 KeysInputIterator2   keys_input2,
-                 KeysOutputIterator   keys_output,
-                 ValuesInputIterator1 values_input1,
-                 ValuesInputIterator2 values_input2,
-                 ValuesOutputIterator values_output,
-                 const size_t         input1_size,
-                 const size_t         input2_size,
-                 BinaryFunction       compare_function,
-                 detail::vsmem_t      vsmem)
+inline hipError_t merge_impl(void*                temporary_storage,
+                             size_t&              storage_size,
+                             KeysInputIterator1   keys_input1,
+                             KeysInputIterator2   keys_input2,
+                             KeysOutputIterator   keys_output,
+                             ValuesInputIterator1 values_input1,
+                             ValuesInputIterator2 values_input2,
+                             ValuesOutputIterator values_output,
+                             const size_t         input1_size,
+                             const size_t         input2_size,
+                             BinaryFunction       compare_function,
+                             const hipStream_t    stream,
+                             bool                 debug_synchronous)
+
 {
     using key_type   = typename std::iterator_traits<KeysInputIterator1>::value_type;
-    using value_type = typename std::iterator_traits<ValuesInputIterator1>::value_type;
-
-    using merge_kernel_impl_t = merge_kernel_impl_<Config, key_type, value_type>;
-
-    using VSmemHelperT = detail::vsmem_helper_impl<merge_kernel_impl_t>;
-    ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
-    // Get temporary storage
-    typename merge_kernel_impl_t::storage_type& storage
-        = VSmemHelperT::get_temp_storage(static_temp_storage, vsmem);
-
-    merge_kernel_impl_t().merge(index,
-                                keys_input1,
-                                keys_input2,
-                                keys_output,
-                                values_input1,
-                                values_input2,
-                                values_output,
-                                input1_size,
-                                input2_size,
-                                compare_function,
-                                storage);
-}
-
-// Templated helper that instantiates merge_kernel_impl_ for an Arch,
-// and puts its vsmem_per_block in the vsmem_size_out member variable.
-template<class Config, class Key, class Value>
-struct merge_vsmem_size_visitor
-{
-    size_t& vsmem_size_out;
-
-    template<target_arch Arch>
-    inline hipError_t operator()() const
-    {
-        using forced_conf_t = force_arch_config<Arch, Config, merge_config_params>;
-
-        using merge_kernel_impl_t = merge_kernel_impl_<forced_conf_t, Key, Value>;
-
-        vsmem_size_out = vsmem_helper_impl<merge_kernel_impl_t>::vsmem_per_block;
-
-        return hipSuccess;
-    }
-};
-
-template<class Config, class Key, class Value>
-inline hipError_t get_merge_vsmem_size_per_block(target_arch target_arch, size_t& vsmem_size)
-{
-    return generic_dispatch_target_arch(target_arch,
-                                        merge_vsmem_size_visitor<Config, Key, Value>{vsmem_size});
-}
-
-template<
-    class Config,
-    class KeysInputIterator1,
-    class KeysInputIterator2,
-    class KeysOutputIterator,
-    class ValuesInputIterator1,
-    class ValuesInputIterator2,
-    class ValuesOutputIterator,
-    class BinaryFunction
->
-inline
-hipError_t merge_impl(void * temporary_storage,
-                      size_t& storage_size,
-                      KeysInputIterator1 keys_input1,
-                      KeysInputIterator2 keys_input2,
-                      KeysOutputIterator keys_output,
-                      ValuesInputIterator1 values_input1,
-                      ValuesInputIterator2 values_input2,
-                      ValuesOutputIterator values_output,
-                      const size_t input1_size,
-                      const size_t input2_size,
-                      BinaryFunction compare_function,
-                      const hipStream_t stream,
-                      bool debug_synchronous)
-
-{
-    using key_type = typename std::iterator_traits<KeysInputIterator1>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator1>::value_type;
 
     using config = wrapped_merge_config<Config, key_type, value_type>;
@@ -171,7 +104,7 @@ hipError_t merge_impl(void * temporary_storage,
     {
         return result;
     }
-    const merge_config_params params = detail::dispatch_target_arch<config>(target_arch);
+    const merge_config_params params = detail::dispatch_target_arch<config, false>(target_arch);
 
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int half_block       = block_size / 2;
@@ -181,14 +114,9 @@ hipError_t merge_impl(void * temporary_storage,
     const unsigned int number_of_blocks
         = ((input1_size + input2_size) + items_per_block - 1) / items_per_block;
 
-    size_t vsmem_size;
-    result = get_merge_vsmem_size_per_block<config, key_type, value_type>(target_arch, vsmem_size);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-
-    vsmem_size *= number_of_blocks;
+    size_t virtual_shared_memory_size
+        = get_merge_vsmem_size_per_block<config, key_type, value_type>(target_arch)
+          * number_of_blocks;
 
     unsigned int* index = nullptr;
     void*         vsmem = nullptr;
@@ -199,7 +127,9 @@ hipError_t merge_impl(void * temporary_storage,
         detail::temp_storage::make_linear_partition(
             detail::temp_storage::ptr_aligned_array(&index, number_of_blocks + 1),
             // vsmem
-            detail::temp_storage::make_partition(&vsmem, vsmem_size, cache_line_size)));
+            detail::temp_storage::make_partition(&vsmem,
+                                                 virtual_shared_memory_size,
+                                                 cache_line_size)));
 
     if(partition_result != hipSuccess || temporary_storage == nullptr)
     {
@@ -223,38 +153,78 @@ hipError_t merge_impl(void * temporary_storage,
 
     const unsigned int partition_blocks = ((number_of_blocks + 1) + half_block - 1) / half_block;
 
-    if(debug_synchronous) start = std::chrono::steady_clock::now();
-    detail::partition_kernel<config>
-        <<<dim3(partition_blocks), dim3(half_block), 0, stream>>>(index,
-                                                                  keys_input1,
-                                                                  keys_input2,
-                                                                  input1_size,
-                                                                  input2_size,
-                                                                  items_per_block,
-                                                                  compare_function);
+    if(debug_synchronous)
+    {
+        start = std::chrono::steady_clock::now();
+    }
+
+    auto partition_kernel = [=](auto)
+    {
+        partition_kernel_impl<unsigned int*,
+                              KeysInputIterator1,
+                              KeysInputIterator2,
+                              BinaryFunction>(index,
+                                              keys_input1,
+                                              keys_input2,
+                                              input1_size,
+                                              input2_size,
+                                              items_per_block,
+                                              compare_function);
+    };
+
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                        partition_kernel,
+                                                        partition_blocks,
+                                                        half_block,
+                                                        0,
+                                                        stream));
+
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", input1_size, start);
 
-    if(debug_synchronous) start = std::chrono::steady_clock::now();
-    detail::merge_kernel<config>
-        <<<dim3(number_of_blocks), dim3(block_size), 0, stream>>>(index,
-                                                                  keys_input1,
-                                                                  keys_input2,
-                                                                  keys_output,
-                                                                  values_input1,
-                                                                  values_input2,
-                                                                  values_output,
-                                                                  input1_size,
-                                                                  input2_size,
-                                                                  compare_function,
-                                                                  detail::vsmem_t{vsmem});
+    if(debug_synchronous)
+    {
+        start = std::chrono::steady_clock::now();
+    }
+
+    auto merge_kernel = [=, vsm = detail::vsmem_t{vsmem}](auto arch_config) mutable
+    {
+        using key_type   = typename std::iterator_traits<KeysInputIterator1>::value_type;
+        using value_type = typename std::iterator_traits<ValuesInputIterator1>::value_type;
+
+        using merge_kernel_impl_t = merge_kernel_impl_<decltype(arch_config), key_type, value_type>;
+
+        using VSmemHelperT = detail::vsmem_helper_impl<merge_kernel_impl_t>;
+        ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
+        // Get temporary storage
+        typename merge_kernel_impl_t::storage_type& storage
+            = VSmemHelperT::get_temp_storage(static_temp_storage, vsm);
+
+        merge_kernel_impl_t().merge(index,
+                                    keys_input1,
+                                    keys_input2,
+                                    keys_output,
+                                    values_input1,
+                                    values_input2,
+                                    values_output,
+                                    input1_size,
+                                    input2_size,
+                                    compare_function,
+                                    storage);
+    };
+
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                        merge_kernel,
+                                                        dim3(number_of_blocks),
+                                                        dim3(block_size),
+                                                        0,
+                                                        stream));
+
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("merge_kernel", input1_size, start);
 
     return hipSuccess;
 }
 
-
-
-} // end of detail namespace
+} // namespace detail
 
 /// \brief Parallel merge primitive for device level.
 ///
@@ -330,33 +300,37 @@ hipError_t merge_impl(void * temporary_storage,
 /// // output: [0, 0, 1, 1, 2, 2, 3, 3]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class InputIterator1,
-    class InputIterator2,
-    class OutputIterator,
-    class BinaryFunction = ::rocprim::less<typename std::iterator_traits<InputIterator1>::value_type>
->
-inline
-hipError_t merge(void * temporary_storage,
-                 size_t& storage_size,
-                 InputIterator1 input1,
-                 InputIterator2 input2,
-                 OutputIterator output,
-                 const size_t input1_size,
-                 const size_t input2_size,
-                 BinaryFunction compare_function = BinaryFunction(),
-                 const hipStream_t stream = 0,
-                 bool debug_synchronous = false)
+template<class Config = default_config,
+         class InputIterator1,
+         class InputIterator2,
+         class OutputIterator,
+         class BinaryFunction
+         = ::rocprim::less<typename std::iterator_traits<InputIterator1>::value_type>>
+inline hipError_t merge(void*             temporary_storage,
+                        size_t&           storage_size,
+                        InputIterator1    input1,
+                        InputIterator2    input2,
+                        OutputIterator    output,
+                        const size_t      input1_size,
+                        const size_t      input2_size,
+                        BinaryFunction    compare_function  = BinaryFunction(),
+                        const hipStream_t stream            = 0,
+                        bool              debug_synchronous = false)
 {
-    empty_type * values = nullptr;
-    return detail::merge_impl<Config>(
-        temporary_storage, storage_size,
-        input1, input2, output,
-        values, values, values,
-        input1_size, input2_size, compare_function,
-        stream, debug_synchronous
-    );
+    empty_type* values = nullptr;
+    return detail::merge_impl<Config>(temporary_storage,
+                                      storage_size,
+                                      input1,
+                                      input2,
+                                      output,
+                                      values,
+                                      values,
+                                      values,
+                                      input1_size,
+                                      input2_size,
+                                      compare_function,
+                                      stream,
+                                      debug_synchronous);
 }
 
 /// \brief Parallel merge primitive for device level.
@@ -451,38 +425,42 @@ hipError_t merge(void * temporary_storage,
 /// // values_output: [10, 20, 11, 21, 12, 22, 13, 23]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class KeysInputIterator1,
-    class KeysInputIterator2,
-    class KeysOutputIterator,
-    class ValuesInputIterator1,
-    class ValuesInputIterator2,
-    class ValuesOutputIterator,
-    class BinaryFunction = ::rocprim::less<typename std::iterator_traits<KeysInputIterator1>::value_type>
->
-inline
-hipError_t merge(void * temporary_storage,
-                 size_t& storage_size,
-                 KeysInputIterator1 keys_input1,
-                 KeysInputIterator2 keys_input2,
-                 KeysOutputIterator keys_output,
-                 ValuesInputIterator1 values_input1,
-                 ValuesInputIterator2 values_input2,
-                 ValuesOutputIterator values_output,
-                 const size_t input1_size,
-                 const size_t input2_size,
-                 BinaryFunction compare_function = BinaryFunction(),
-                 const hipStream_t stream = 0,
-                 bool debug_synchronous = false)
+template<class Config = default_config,
+         class KeysInputIterator1,
+         class KeysInputIterator2,
+         class KeysOutputIterator,
+         class ValuesInputIterator1,
+         class ValuesInputIterator2,
+         class ValuesOutputIterator,
+         class BinaryFunction
+         = ::rocprim::less<typename std::iterator_traits<KeysInputIterator1>::value_type>>
+inline hipError_t merge(void*                temporary_storage,
+                        size_t&              storage_size,
+                        KeysInputIterator1   keys_input1,
+                        KeysInputIterator2   keys_input2,
+                        KeysOutputIterator   keys_output,
+                        ValuesInputIterator1 values_input1,
+                        ValuesInputIterator2 values_input2,
+                        ValuesOutputIterator values_output,
+                        const size_t         input1_size,
+                        const size_t         input2_size,
+                        BinaryFunction       compare_function  = BinaryFunction(),
+                        const hipStream_t    stream            = 0,
+                        bool                 debug_synchronous = false)
 {
-    return detail::merge_impl<Config>(
-        temporary_storage, storage_size,
-        keys_input1, keys_input2, keys_output,
-        values_input1, values_input2, values_output,
-        input1_size, input2_size, compare_function,
-        stream, debug_synchronous
-    );
+    return detail::merge_impl<Config>(temporary_storage,
+                                      storage_size,
+                                      keys_input1,
+                                      keys_input2,
+                                      keys_output,
+                                      values_input1,
+                                      values_input2,
+                                      values_output,
+                                      input1_size,
+                                      input2_size,
+                                      compare_function,
+                                      stream,
+                                      debug_synchronous);
 }
 
 /// @}

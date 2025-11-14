@@ -201,7 +201,8 @@ def writeBenchmarkFiles(
         debugConfig: DebugConfig,
         deviceId: int,
         gfxName: str,
-        isaInfoMap: Dict[IsaVersion, IsaInfo]
+        isaInfoMap: Dict[IsaVersion, IsaInfo],
+        probSolMap: dict
     ):
     """Write all the files needed for a given benchmarking step"""
 
@@ -248,6 +249,7 @@ def writeBenchmarkFiles(
                             kernelWriterAssembly,
                             debugConfig.splitGSU,
                             cmdLineArchs,
+                            disableAsmComments=globalParameters["DisableAsmComments"],
                             errorTolerant=True,
                             generateSourcesAndExit=globalParameters["GenerateSourcesAndExit"], # put in debug config
                             compress=False,
@@ -297,11 +299,11 @@ def writeBenchmarkFiles(
         idealProblemSizes = ProblemSizes(problemType, idealSizes)
         writeClientConfig(True, solutions, idealProblemSizes, biasTypeArgs, \
                           factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
-                          newLibrary, codeObjectFiles, True, deviceId, gfxName)
+                          newLibrary, codeObjectFiles, True, deviceId, gfxName, probSolMap=probSolMap)
     else:
         writeClientConfig(True, solutions, problemSizes, biasTypeArgs, \
                           factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
-                          newLibrary, codeObjectFiles, False, deviceId, gfxName)
+                          newLibrary, codeObjectFiles, False, deviceId, gfxName, probSolMap=probSolMap)
 
     if len(solutions) == 0:
         printExit("write solutions and kernels results 0 valid soultion.")
@@ -313,7 +315,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                          asmToolchain: AssemblyToolchain, srcToolchain: SourceToolchain, cCompiler: str,
                          buildTmpPath: Path, benchmarkProblemsPath: Path,
                          debugConfig: DebugConfig, deviceId: int,
-                         gfxName: str, isaInfoMap: Dict[str, IsaInfo]
+                         gfxName: str, isaInfoMap: Dict[str, IsaInfo], probSolMap: dict
     ):
     """Run the benchmarking for a single entry in the BenchmarkProblems of a Tensile config"""
     benchmarkTestFails = 0
@@ -428,7 +430,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                     benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
                     benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
                     benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
-                    sourcePath, debugConfig, deviceId, gfxName, isaInfoMap)
+                    sourcePath, debugConfig, deviceId, gfxName, isaInfoMap, probSolMap)
             # ^ this mutates solutions
 
             # write cache data
@@ -463,7 +465,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
                                  benchmarkStep.factorDimArgs, benchmarkStep.activationArgs,
                                  benchmarkStep.icacheFlushArgs, conProblemType,
                                  stepBaseDir, codeObjectFiles, resultsFileName,
-                                 outFile, deviceId)
+                                 outFile, deviceId, probSolMap=probSolMap)
 
         # I think the size portion of this yaml could be removed,
         # but for now it's needed, so we update it even in the cache case
@@ -503,7 +505,8 @@ def main(
     debugConfig: DebugConfig,
     deviceId: int,
     gfxName: str,
-    isaInfoMap: Dict[str, IsaInfo]
+    isaInfoMap: Dict[str, IsaInfo],
+    probSolMap: dict
 ):
     """Entry point for the "BenchmarkProblems" section of a Tensile config yaml"""
     getClientExecutablePath()
@@ -556,7 +559,8 @@ def main(
                             debugConfig,
                             deviceId,
                             gfxName,
-                            isaInfoMap
+                            isaInfoMap,
+                            probSolMap
                         )
                 totalTestFails += benchmarkErrors
 

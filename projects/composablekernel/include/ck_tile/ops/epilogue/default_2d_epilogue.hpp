@@ -25,10 +25,11 @@ struct Default2DEpilogueProblem
     static constexpr bool kPadN                            = kPadN_;
     static constexpr bool UseRawStore                      = UseRawStore_;
     static constexpr memory_operation_enum MemoryOperation = MemoryOperation_;
+    static constexpr index_t NumDTensor                    = 0;
 };
 
-template <typename ADataType_,
-          typename BDataType_,
+template <typename AsDataType_,
+          typename BsDataType_,
           typename DsDataType_,
           typename AccDataType_,
           typename ODataType_,
@@ -52,12 +53,12 @@ struct DefaultGemm2DEpilogueProblem : public Default2DEpilogueProblem<AccDataTyp
                                                                       UseRawStore_,
                                                                       MemoryOperation_>
 {
-    using ADataType                        = remove_cvref_t<ADataType_>;
-    using BDataType                        = remove_cvref_t<BDataType_>;
+    using AsDataType                       = remove_cvref_t<AsDataType_>;
+    using BsDataType                       = remove_cvref_t<BsDataType_>;
     using CLayout                          = remove_cvref_t<CLayout_>;
     using DsDataType                       = remove_cvref_t<DsDataType_>;
-    using DsLayout                         = remove_cvref_t<DsLayout_>;
     using CDElementwise                    = remove_cvref_t<CDElementwise_>;
+    using DsLayout                         = remove_cvref_t<DsLayout_>;
     static constexpr index_t kMPerBlock    = kM_;
     static constexpr index_t kNPerBlock    = kN_;
     static constexpr index_t kMPerXdl      = kMPerXdl_;
@@ -77,7 +78,6 @@ struct Default2DEpilogue
     using Problem                     = remove_cvref_t<Problem_>;
     using AccDataType                 = remove_cvref_t<typename Problem::AccDataType>;
     using ODataType                   = remove_cvref_t<typename Problem::ODataType>;
-    using CDElementwise               = remove_cvref_t<typename Problem::CDElementwise>;
     static constexpr bool kPadM       = Problem::kPadM;
     static constexpr bool kPadN       = Problem::kPadN;
     static constexpr bool UseRawStore = Problem::UseRawStore;
@@ -91,15 +91,29 @@ struct Default2DEpilogue
     CK_TILE_DEVICE auto operator()(ODramWindowTmp& o_dram_window_tmp,
                                    const OAccTile& o_acc_tile,
                                    const DsDramWindows& ds_dram_windows,
-                                   void* = nullptr)
+                                   void* = nullptr) const
     {
+        constexpr bool is_partition_index =
+            std::is_convertible_v<decltype(ds_dram_windows),
+                                  decltype(get_partition_index(
+                                      o_acc_tile.get_tile_distribution()))>;
+
         const auto storeOrUpdateTile = [&](const auto& o_tile) {
             // TODO: this is ugly
             if constexpr(UseRawStore && (kPadM || kPadN))
             {
                 if constexpr(MemoryOperation == memory_operation_enum::set)
                 {
-                    store_tile_raw(o_dram_window_tmp, cast_tile<ODataType>(o_tile));
+                    if constexpr(is_partition_index)
+                    {
+                        store_tile_raw(o_dram_window_tmp,
+                                       cast_tile<ODataType>(o_tile),
+                                       /*partition_index=*/ds_dram_windows);
+                    }
+                    else
+                    {
+                        store_tile_raw(o_dram_window_tmp, cast_tile<ODataType>(o_tile));
+                    }
                 }
                 else
                 {
@@ -111,16 +125,35 @@ struct Default2DEpilogue
             {
                 if constexpr(MemoryOperation == memory_operation_enum::set)
                 {
-                    store_tile(o_dram_window_tmp, cast_tile<ODataType>(o_tile));
+                    if constexpr(is_partition_index)
+                    {
+                        store_tile(o_dram_window_tmp,
+                                   cast_tile<ODataType>(o_tile),
+                                   /*partition_index=*/ds_dram_windows);
+                    }
+                    else
+                    {
+                        store_tile(o_dram_window_tmp, cast_tile<ODataType>(o_tile));
+                    }
                 }
                 else
                 {
-                    update_tile(o_dram_window_tmp, cast_tile<ODataType>(o_tile));
+                    if constexpr(is_partition_index)
+                    {
+                        update_tile(o_dram_window_tmp,
+                                    cast_tile<ODataType>(o_tile),
+                                    /*partition_index=*/ds_dram_windows);
+                    }
+                    else
+                    {
+                        update_tile(o_dram_window_tmp, cast_tile<ODataType>(o_tile));
+                    }
                 }
             }
         };
 
-        if constexpr(Problem::NumDTensor >= 1)
+        if constexpr(!std::is_same_v<DsDramWindows, std::nullptr_t> && !is_partition_index &&
+                     Problem::NumDTensor >= 1)
         {
             using elementwise_result_t = decltype(load_tile(
                 make_tile_window(ds_dram_windows[number<0>{}].get_bottom_tensor_view(),
@@ -157,14 +190,28 @@ struct Default2DEpilogue
 template <typename Problem_, typename Policy_ = void>
 struct DefaultGemm2DEpilogue : public Default2DEpilogue<Problem_, Policy_>
 {
-    using Problem     = remove_cvref_t<Problem_>;
-    using ADataType   = remove_cvref_t<typename Problem::ADataType>;
-    using BDataType   = remove_cvref_t<typename Problem::BDataType>;
-    using AccDataType = remove_cvref_t<typename Problem::AccDataType>;
-    using ODataType   = remove_cvref_t<typename Problem::ODataType>;
+    using Problem                          = remove_cvref_t<Problem_>;
+    using AsDataType                       = remove_cvref_t<typename Problem::AsDataType>;
+    using BsDataType                       = remove_cvref_t<typename Problem::BsDataType>;
+    using AccDataType                      = remove_cvref_t<typename Problem::AccDataType>;
+    using ODataType                        = remove_cvref_t<typename Problem::ODataType>;
+    static constexpr bool ADataTypeIsTuple = is_detected<is_tuple, AsDataType>::value;
+    static constexpr bool BDataTypeIsTuple = is_detected<is_tuple, BsDataType>::value;
+
+    using AsDataTypeTuple = std::conditional_t<ADataTypeIsTuple,
+                                               remove_cvref_t<AsDataType>,
+                                               remove_cvref_t<tuple<AsDataType>>>;
+
+    using BsDataTypeTuple = std::conditional_t<BDataTypeIsTuple,
+                                               remove_cvref_t<BsDataType>,
+                                               remove_cvref_t<tuple<BsDataType>>>;
+
+    using ADataType = remove_cvref_t<std::tuple_element_t<number<0>{}, AsDataTypeTuple>>;
+    using BDataType = remove_cvref_t<std::tuple_element_t<number<0>{}, BsDataTypeTuple>>;
     // Used for weight-only quantization kernel, B would be dequantized to the same data type as A
     using BTypeToUse =
         std::conditional_t<std::is_same_v<BDataType, pk_int4_t>, ADataType, BDataType>;
+
     using DsDataType                       = remove_cvref_t<typename Problem::DsDataType>;
     using DsLayout                         = remove_cvref_t<typename Problem::DsLayout>;
     using CDElementwise                    = remove_cvref_t<typename Problem::CDElementwise>;

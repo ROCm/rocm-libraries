@@ -54,8 +54,8 @@ def run_bench(benchExecutable,
         print('hipblaslt-perf: ' + ' '.join(cmd))
 
     startingToken = "["
-    csvKeys = ''
-    benchResultsList = []
+    csvKeys = []
+    benchResultsList = [] # a list with each elem is a {}
     capturingValues = False
     isAPIOverhead = False
 
@@ -133,26 +133,35 @@ def run_sh_cmd(cmdLine,
     cmd = [str(x) for x in cmd]
     logging.info('running: ' + ' '.join(cmd))
     if verbose:
-        print('running: ' + ' '.join(cmd))
+        print('\n---------------\nrunning: ' + ' '.join(cmd))
 
+    newProbToken = "Is supported"
     startingToken = "["
     solNameToken = "--Solution name:"
+    solIndexToken = "--Solution index:"
+    winnerToken = "Winner:"
     csvKeys = []
-    benchResultsList = {}
+    benchResultsList = [] # a list with each elem is a {}
     capturingValues = False
+    isOfflineTuning = False
 
     async def run_command(*args, timeout=None):
 
         process = await asyncio.create_subprocess_exec(
             *args, stdout=asyncio.subprocess.PIPE)
 
-        nonlocal startingToken
         nonlocal csvKeys
         nonlocal benchResultsList
         nonlocal capturingValues
+        nonlocal isOfflineTuning
 
+        singleValueLine = ""
         singleValuesList = []
         solutionName = "N/A"
+        solutionIdx = "-1"
+        winner = "0"
+        supportedSols = 1
+        printWinner = False
 
         while True:
             try:
@@ -173,33 +182,96 @@ def run_sh_cmd(cmdLine,
 
                 # capturing values right after capturing keys
                 if capturingValues:
+                    singleValueLine = line
                     singleValuesList = line.split(',')
-                    # default is empty if --print_kernel_info is not in the bench cmd
+                    # by default, solution info is empty if --print_kernel_info is not in the bench cmd
                     solutionName = "N/A"
+                    solutionIdx = "-1"
                     capturingValues = False
                     continue
 
-                if line.startswith(startingToken):
+                # beginning of a new bench
+                if line.startswith(newProbToken):
+                    # When we are encountering the next problem:
+                    # if we still have bench result line haven't been printed,
+                    # (in a single hipblaslt-bench, this means it is called with --yaml containing multi-sizes)
+                    # then we need to print the un-printed result line before we go to next new problem.
+                    # Then reset the result line to empty indicating a new problem.
+                    # Need to add a winner field in CSV result.
+                    if len(singleValueLine) > 0:
+                        # show on screen
+                        print(f"{singleValueLine}"+f",{solutionIdx}"+f",{solutionName}")
+                        singleValueLine = ""
+                        # add to csv
+                        singleValuesList.extend([winner,solutionIdx,solutionName])
+                        dd_output = defaultdict(str, zip(csvKeys, singleValuesList))
+                        benchResultsList += [dd_output]
+                        csvKeys = [] # may not be neccessary
+
+                    # The line should be: "Is supported X / Total solutions: Y"
+                    splitLine = line.split(' ')
+                    supportedSols = int(splitLine[2])
+                    isOfflineTuning = (supportedSols > 1) # when X > 1
+                    print(f'\nBench New Problem:')
+                    if isOfflineTuning:
+                        print(f'[Offline Tuning]:')
+                    else:
+                        print(f'[Bench Only One Solution]:')
+
+                elif line.startswith(startingToken):
+                    # show on screen if we have any un-printed bench result:
+                    # The previous "if line.startswith(newProbToken):" happens when we see a new problem
+                    # And this happends when --reqeusted_solution > 1,
+                    # so for one problem, we run many solutions, and each solution result starts with [SSN]
+                    # When we see a new solution start, we print the previous un-printed result if we have any.
+                    if len(singleValueLine) > 0:
+                        print(f"{singleValueLine}"+f",{solutionIdx}"+f",{solutionName}")
+                        singleValueLine = ""
+                        csvKeys = [] # may not be neccessary
+
+                    if printWinner:
+                        print(f'\n{winnerToken}')
+                        printWinner = False
+
                     line = line.replace('hipblaslt-Gflops', 'gflops')
                     line = line.replace('hipblaslt-GB/s', 'GB/s')
                     splitLine = line.split(':')
-                    # SSN = splitLine[0] # should be [0]
-                    keys = splitLine[1] + str(",solution-name")
-                    csvKeys = keys.split(',')
-                    # print(f'\n{keys}')
-                    # print(f'\n{csvKeys}')
-                    capturingValues = True # Next line must be values
+                    SSN = splitLine[0] # should be [supported-sol-SSN] ([0], [1], [2],...etc, NOT sol-index)
+                    # shown on screen, for each solution, there is NO so-called "winner" included
+                    header = SSN + ":" + splitLine[1] + ",solution-idx,solution-name"
+                    print(f'\n{header}')
+
+                    # construct the header of csv: need to export "winner" field
+                    # (value is always "0" if not offline tuning)
+                    csvKeys = str(splitLine[1] + ",winner-idx,solution-idx,solution-name").split(',')
+                    # print(f'\n{csvKeys}') # debugging
+                    capturingValues = True # Next line must be bench result values
+                    winner = SSN.strip('[').strip(']') # always keep the last SSN until next problem
                 else:
-                    # if is "--Solution name:" (--print_kernel_info), then we capture this
+                    # if is "--Solution name:" or "--Solution index:" (--print_kernel_info),
+                    # then we capture this, otherwise they will be "N/A" and "-1"
                     if line.startswith(solNameToken):
                         splitLine = line.split(':')
                         solutionName = splitLine[1].strip()
+                    elif line.startswith(solIndexToken):
+                        splitLine = line.split(':')
+                        solutionIdx = splitLine[1].strip()
+                    elif line.startswith(winnerToken):
+                        printWinner = True
                     # simply ignore irrelative msg
                     else:
                         continue
 
-        singleValuesList.append(solutionName)
-        benchResultsList = defaultdict(str, zip(csvKeys, singleValuesList))
+        # the last one bench result (since we won't see newProbToken nor startingToken anymore,
+        # so we must print the last bench result here)
+        if len(singleValueLine) > 0:
+            # show on screen
+            print(f"{singleValueLine}"+f",{solutionIdx}"+f",{solutionName}")
+            singleValueLine = ""
+            # add to csv
+            singleValuesList.extend([winner,solutionIdx,solutionName])
+            dd_output = defaultdict(str, zip(csvKeys, singleValuesList))
+            benchResultsList += [dd_output]
 
         return await process.wait()  # Wait for the child process to exit
 

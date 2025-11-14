@@ -27,79 +27,46 @@
 #include "rocsparse_utility.hpp"
 
 /********************************************************************************
- * \brief rocsparse_csritsv_info is a structure holding the rocsparse csritsv
- * info data gathered during csritsv_buffer_size. It must be initialized using
- * the create_csritsv_info() routine. It should be destroyed at the
- * end using destroy_csritsv_info().
- *******************************************************************************/
-rocsparse_status rocsparse::create_csritsv_info(rocsparse_csritsv_info* info)
-{
-    ROCSPARSE_ROUTINE_TRACE;
-
-    if(info == nullptr)
-    {
-        return rocsparse_status_invalid_pointer;
-    }
-    else
-    {
-        // Allocate
-        try
-        {
-            *info = new _rocsparse_csritsv_info;
-        }
-        catch(const rocsparse_status& status)
-        {
-            return status;
-        }
-        return rocsparse_status_success;
-    }
-}
-
-/********************************************************************************
  * \brief Copy csritsv info.
  *******************************************************************************/
-rocsparse_status rocsparse::copy_csritsv_info(rocsparse_csritsv_info       dest,
-                                              const rocsparse_csritsv_info src)
+void _rocsparse_csritsv_info::copy(const _rocsparse_csritsv_info* that, hipStream_t stream)
 {
     ROCSPARSE_ROUTINE_TRACE;
-
-    if(dest == nullptr || src == nullptr || dest == src)
+    //
+    // this == nullptr
+    //
+    if(that == nullptr || this == that)
     {
-        return rocsparse_status_invalid_pointer;
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
     }
-    dest->is_submatrix      = src->is_submatrix;
-    dest->ptr_end_size      = src->ptr_end_size;
-    dest->ptr_end_indextype = src->ptr_end_indextype;
-    dest->ptr_end           = src->ptr_end;
-    return rocsparse_status_success;
+    this->is_submatrix      = that->is_submatrix;
+    this->ptr_end_size      = that->ptr_end_size;
+    this->ptr_end_indextype = that->ptr_end_indextype;
+    this->ptr_end           = that->ptr_end;
+    this->rocsparse::pivot_info_t::copy_pivot_info_async(that, stream);
+    THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
 }
 
 /********************************************************************************
  * \brief Destroy csritsv info.
  *******************************************************************************/
-rocsparse_status rocsparse::destroy_csritsv_info(rocsparse_csritsv_info info)
+_rocsparse_csritsv_info::~_rocsparse_csritsv_info()
 {
     ROCSPARSE_ROUTINE_TRACE;
+    if(this->ptr_end != nullptr && this->is_submatrix)
+    {
+        // Due to the changes in the hipFree introduced in HIP 7.0
+        // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
+        // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
+        // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
+        // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
+        WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
 
-    if(info == nullptr)
-    {
-        return rocsparse_status_success;
+        WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->ptr_end));
+        this->ptr_end = nullptr;
     }
-
-    if(info->ptr_end != nullptr && info->is_submatrix)
+    if(this->m_csrmv_info)
     {
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(info->ptr_end));
-        info->ptr_end = nullptr;
+        delete this->m_csrmv_info;
     }
-
-    // Destruct
-    try
-    {
-        delete info;
-    }
-    catch(const rocsparse_status& status)
-    {
-        return status;
-    }
-    return rocsparse_status_success;
 }

@@ -45,6 +45,7 @@ def getKeyNoInternalArgs(state, splitGSU: bool):
   state_copy["StaggerUMapping"] = "M"
   state_copy["GlobalSplitUCoalesced"] = "M"
   state_copy["GlobalSplitUWorkGroupMappingRoundRobin"] = "M"
+  state_copy["SFCWGM"] = "M"
   return state_copy
 
 
@@ -105,7 +106,6 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     if splitGSU:
       state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
 
-
   requiredParametersTemp = set(requiredParameters.union(["GlobalSplitU"]))
 
   if ignoreInternalArgs:
@@ -133,8 +133,14 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   else:
     requiredParametersTemp.add("ThreadTile")
 
+  if state["UseCustomMainLoopSchedule"]:
+    components.append('CMS')
+
   components.append('SN')
   for key in sorted(state.keys()):
+    # Skip SFA tag if using default wgm algo
+    if key == "SpaceFillingAlgo" and len(state[key]) == 0:
+      continue
     if key[0] != '_' and key != "CustomKernelName" and key in requiredParametersTemp:
         components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
 
@@ -176,4 +182,3 @@ def getSolutionNameMin(solution, splitGSU: bool):
 
 def getSolutionNameFull(state, splitGSU: bool):
   return _getName(state, getRequiredParametersFull(), splitGSU, False)
-

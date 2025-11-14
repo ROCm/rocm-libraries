@@ -30,10 +30,16 @@
 
 using rocprim::detail::target_arch;
 
-__global__ void write_target_arch(target_arch* dest_arch)
+__global__
+void write_target_arch([[maybe_unused]] target_arch host_arch, int* __restrict__ result)
 {
+#if !defined(ROCPRIM_TARGET_SPIRV)
     static constexpr auto arch = rocprim::detail::device_target_arch();
-    *dest_arch                 = arch;
+
+    *result = arch == host_arch;
+#else
+    *result = -1;
+#endif
 }
 
 // If this compile then
@@ -70,20 +76,34 @@ TEST(RocprimConfigDispatchTests, HostMatchesDevice)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    const hipStream_t stream = 0;
+    // Test with both the default stream (0) and in hipStreamLegacy,
+    // since they take different code paths through rocprim::detail::get_device_from_stream.
+    for (const hipStream_t stream : {static_cast<hipStream_t>(hipStreamDefault), hipStreamLegacy})
+    {
+        target_arch host_arch;
+        HIP_CHECK(rocprim::detail::host_target_arch(stream, host_arch));
 
-    target_arch host_arch;
-    HIP_CHECK(rocprim::detail::host_target_arch(stream, host_arch));
+        int* result_ptr = nullptr;
+        HIP_CHECK(common::hipMallocHelper(&result_ptr, sizeof(result_ptr)));
 
-    common::device_ptr<target_arch> device_arch_ptr(1);
+        hipLaunchKernelGGL(write_target_arch, dim3(1), dim3(1), 0, stream, host_arch, result_ptr);
+        HIP_CHECK(hipGetLastError());
 
-    hipLaunchKernelGGL(write_target_arch, dim3(1), dim3(1), 0, stream, device_arch_ptr.get());
-    HIP_CHECK(hipGetLastError());
+        int result = -1;
+        HIP_CHECK(hipMemcpy(&result, result_ptr, sizeof(result), hipMemcpyDeviceToHost));
 
-    const auto device_arch = device_arch_ptr.load_value_at(0);
+        if(result != -1)
+        {
+            ASSERT_NE(host_arch, target_arch::invalid);
+            ASSERT_EQ(result, 1);
+        }
+        else
+        {
+            GTEST_SKIP() << "SPIR-V build: result is null; skipping arch match assertion.";
+        }
 
-    ASSERT_NE(host_arch, target_arch::invalid);
-    ASSERT_EQ(host_arch, device_arch);
+        HIP_CHECK(hipFree(result_ptr));
+    }
 }
 
 TEST(RocprimConfigDispatchTests, ParseCommonArches)
@@ -123,7 +143,7 @@ TEST(RocprimConfigDispatchTests, DeviceIdFromStream)
     ASSERT_EQ(result, device_id);
 
     // hipStreamLegacy support was added in ROCm 6.2.0
-#if (HIP_VERSION_MAJOR >= 6 && HIP_VERSION_MINOR >= 2)
+#if (HIP_VERSION_MAJOR > 6 || (HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR >= 2))
     HIP_CHECK(get_device_from_stream(hipStreamLegacy, result));
     ASSERT_EQ(result, device_id);
 #endif

@@ -27,11 +27,13 @@
 extern int    verbose;
 extern size_t ramgb;
 extern size_t vramgb;
+extern int    ngpus;
 
 extern size_t n_random_tests;
 
 extern size_t random_seed;
 extern double test_prob;
+extern double unittest_prob;
 extern double emulation_prob;
 extern double complex_interleaved_prob_factor;
 extern double real_prob_factor;

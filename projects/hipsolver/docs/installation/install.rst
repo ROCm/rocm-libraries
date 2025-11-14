@@ -20,16 +20,11 @@ Run the following command to install hipSOLVER using the package manager.
 
    sudo apt update && sudo apt install hipsolver
 
-.. note::
-
-   Updates for each release are listed in the ``CHANGELOG.md`` file under the releases section of the
-   `hipSOLVER GitHub page <https://github.com/ROCm/hipSOLVER>`_.
-
-
 Build and install the library using a script (Ubuntu only)
 ==========================================================
 
-The root directory of the `hipSOLVER GitHub repository <https://github.com/ROCm/hipSOLVER>`_ includes the ``install.sh`` bash
+The root directory of the `hipSOLVER project <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsolver>`_
+in the `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries>`_ includes the ``install.sh`` bash
 script for building and installing hipSOLVER on Ubuntu with a single command.
 The script does not accept many options and hardcodes most configuration attributes,
 but it's a great way to get started quickly and serves as an example of how to build and install hipSOLVER.
@@ -37,11 +32,19 @@ A more extensive set of options can be specified by invoking ``cmake`` directly.
 A few commands in the script require ``sudo`` access,
 so it might prompt you for a password.
 
+.. note::
+
+   To build hipSOLVER for ROCm 7.0.2 and earlier, use the hipSOLVER repository at `<https://github.com/ROCm/hipSOLVER>`_.
+   For more information, see the documentation associated with the release you want to build.
+
 Here are some typical examples of using the script:
+
+.. note::
+
+   Run these commands from the ``rocm-libraries/projects/hipsolver`` directory.
 
 *  ``./install.sh -id``: Build the library and dependencies and install them (the ``-d`` flag only needs to be passed once on a system).
 *  ``./install.sh -ic``: Build library and clients (tests, benchmarks, and samples) and install them.
-*  ``./install.sh --cuda``: Build the library on a NVIDIA CUDA-enabled machine, with CUDA cuSOLVER as the backend.
 
 To list more options, use the ``-h`` (help) option of the install script.
 
@@ -72,15 +75,11 @@ which is the default location.
 Library dependencies
 ---------------------
 
-The hipSOLVER library has two separate sets of dependencies, depending on the backend being used.
-
-The NVIDIA CUDA backend has a dependency on cuSOLVER.
-
 The ROCm (rocSOLVER) backend has the following dependencies:
 
-*  `rocSOLVER <https://github.com/ROCm/rocSOLVER>`_
-*  `rocBLAS <https://github.com/ROCm/rocBLAS>`_
-*  `rocSPARSE <https://github.com/ROCm/rocSPARSE>`_ (optional)
+*  `rocSOLVER <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsolver>`_
+*  `rocBLAS <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_
+*  `rocSPARSE <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse>`_ (optional)
 *  `SuiteSparse <https://github.com/DrTimothyAldenDavis/SuiteSparse>`_:
    ``CHOLMOD`` and ``SuiteSparse_config`` modules (optional)
 
@@ -114,8 +113,8 @@ These clients introduce the following dependencies:
 
 *  `LAPACK <https://github.com/Reference-LAPACK/lapack-release>`_ (Adds a dependency on a Fortran compiler)
 *  `GoogleTest <https://github.com/google/googletest>`_
-*  `hipBLAS <https://github.com/ROCm/hipBLAS>`_ (Optional)
-*  `hipSPARSE <https://github.com/ROCm/hipSPARSE>`_ (Optional, but required with the default settings)
+*  `hipBLAS <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas>`_ (Optional)
+*  `hipSPARSE <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse>`_ (Optional, but required with the default settings)
 
 Many distributions do not provide a GoogleTest package with precompiled libraries,
 and the LAPACK packages do not have the necessary CMake configuration files to

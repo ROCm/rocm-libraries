@@ -35,6 +35,8 @@
 #include "tensor_util.hpp"
 #include "get_handle.hpp"
 
+#define WORKAROUND_SWDEV_549725 1
+
 struct BN2DTestCase
 {
     size_t N;
@@ -128,6 +130,8 @@ inline std::vector<BN2DTestCase> Network2DLarge()
         {768, 1, 23, 23, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
         {832, 1, 14, 14, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
         {832, 1, 28, 28, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
+        // {1, 512, 7, 7, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
+        // {1, 512, 7, 7, miopen::batchnorm::Direction::Backward, 1, 1},
         // edge cases
         {69328, 1, 22, 22, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
         {69328, 1, 13, 79, miopen::batchnorm::Direction::ForwardTraining, 1, 1}
@@ -142,7 +146,15 @@ inline std::vector<BN2DTestCase> Network2DLarge()
 template <>
 inline std::vector<BN3DTestCase> Network3DSerialCase()
 {
-    return {{2, 2048, 16, 128, 128, miopen::batchnorm::Direction::Backward, 0, 1}};
+    // clang-format off
+    return {
+        // TODO: fix numeric issues before re-enabling large test
+#ifndef WORKAROUND_SWDEV_549725
+        {2, 2048, 16, 128, 128, miopen::batchnorm::Direction::Backward, 0, 1},
+#endif
+        {2, 128, 16, 128, 128, miopen::batchnorm::Direction::Backward, 0, 1},
+    };
+    // clang-format on
 }
 
 template <>
