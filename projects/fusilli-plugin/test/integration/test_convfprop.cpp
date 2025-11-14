@@ -154,7 +154,7 @@ TEST_P(ConvFpropIntegrationTest, Basic1x1Convolution) {
 
   // Check results.
   CpuFpReferenceValidation<float> validator(1e-6f, 1e-6f);
-  EXPECT_TRUE(validator.allClose(expectedOutput.memory(), yTensor.memory()));
+  EXPECT_TRUE(validator.allClose(expectedOutput, yTensor));
 
   // Clean up.
   if (params.shouldSetStream) {

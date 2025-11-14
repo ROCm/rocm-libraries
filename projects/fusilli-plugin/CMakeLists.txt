@@ -32,6 +32,7 @@ set(HIP_PLATFORM "amd")
 find_package(hip REQUIRED)
 find_package(IREERuntime CONFIG REQUIRED)
 find_package(hipdnn_sdk CONFIG REQUIRED)
+find_package(hipdnn_frontend CONFIG REQUIRED)
 find_package(Fusilli CONFIG REQUIRED)
 
 # GTest is still fetched since TheRock doesn't provide it

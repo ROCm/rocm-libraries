@@ -26,7 +26,6 @@
 #include <unistd.h>
 #include <vector>
 
-#include "fusilli/attributes/tensor_attributes.h"
 #include "graph_import.h"
 #include "hipdnn_engine_plugin_execution_context.h"
 #include "utils.h"
