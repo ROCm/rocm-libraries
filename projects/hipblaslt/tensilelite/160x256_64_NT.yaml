@@ -1,0 +1,91 @@
+TestParameters:
+  marks: [skip-gfx1100, skip-gfx1101, skip-gfx1102] # not supported yet
+
+GlobalParameters:
+  SleepPercent: 50
+  NumElementsToValidate: -1
+  NumWarmups: 20
+  EnqueuesPerSync: 1000
+  DataInitTypeA: 12 #12
+  DataInitTypeB: 13 #13
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  NewClient: 2
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  RotatingBufferSize: 512
+  KeepBuildTmp: True
+  #GenerateSourcesAndExit: True
+  ForceGenerateKernel: 1
+
+BenchmarkProblems:
+  ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+
+      UseBias: 1
+      BiasDataTypeList: [s,b]
+      UseScaleAlphaVec: 1
+      Activation: true
+      ActivationType: hipblaslt_all
+      ActivationFuncCall: true
+      #ActivationHPA: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16,32, 1,  1, 5, 8,  2,2 ]           
+        - PrefetchGlobalRead: [2] 
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [0]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8] 
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [-1] 
+        - LdsPadB: [-1] 
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - NonTemporalA: [0]
+        - NonTemporalB: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [True]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2560, 4096, 1, 8192]
+        - BiasTypeArgs: ['b']
+
+
+#LibraryLogic: 
+#      ScheduleName: "gfx950"
+#      DeviceNames: ["Device 0049"]
+#      ArchitectureName: "gfx950"
