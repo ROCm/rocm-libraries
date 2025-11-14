@@ -183,6 +183,7 @@ private:
         result = graph.get_workspace_size(workspaceSize);
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
         ASSERT_GE(workspaceSize, 0) << result.err_msg;
+        std::cerr << "111111111 workspace size: " << workspaceSize << '\n'; // TODO REMOVE
         Workspace workspace(static_cast<size_t>(workspaceSize));
 
         auto variantPack = bundle.toDeviceVariantPack();
