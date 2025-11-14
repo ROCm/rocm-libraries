@@ -337,6 +337,8 @@ inline hipError_t reduce_impl(void*               temporary_storage,
 /// In this example a device-level min-reduction operation is performed on an array of
 /// integer values (<tt>short</tt>s are reduced into <tt>int</tt>s) using custom operator.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_reduce.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
