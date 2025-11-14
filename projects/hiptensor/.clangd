@@ -21,6 +21,8 @@ CompileFlags:
     - -I/opt/rocm/include/ck/library/tensor_operation_instance/gpu
     - -I/opt/rocm/include/ck/library/tensor_operation_instance/gpu/quantization
     - -I/opt/rocm/include/ck/library/tensor_operation_instance/gpu/softmax
+    - -isystem
+    - /opt/rocm/include
     - -D__HIP_PLATFORM_AMD__=1
     - -DHIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=1
     - -DUSE_PROF_API=1
@@ -28,6 +30,9 @@ CompileFlags:
     - --rocm-path=/opt/rocm
     - --rocm-device-lib-path=/opt/rocm/lib
     - -nogpulib
+    - -ferror-limit=0
+    - -Wno-inconsistent-missing-override
+    - -Wno-redundant-decls
   Remove:
     - -x
     - hip
@@ -39,6 +44,10 @@ CompileFlags:
 Diagnostics:
   Suppress:
     - drv_no_rocm_device_lib
+    - constexpr_redecl
+    - function_redefinition
+    - inconsistent_missing_override
+    - redundant_decls
   ClangTidy:
     Remove:
       - readability-*
