@@ -33,45 +33,40 @@ class NotLocalFullTileElementsVALU(NotLocalFullTileElements):
     This function creates the writeElement mapping for full tiles
     (ie non-edge cases)
     """
-    def __call__(self, writer, kernel, edge):
-        elements        = []
-        vectorwidth = 0
+    def __call__(self, writer, kernel):
+        elements     = []
+        vectorwidths = []
+        vectorwidth  = kernel["VectorWidthA"] if kernel["_VectorStore"] else 1
+        vectorwidth  = min(vectorwidth, writer.maxGwvw(kernel))
 
-        if edge:
-            vectorwidth = kernel["VectorWidthA"] if kernel["_VectorStore"] else 1
-            vectorwidth = min(vectorwidth, writer.maxGwvw(kernel), kernel["AssertFree0ElementMultiple"])
-            assert(kernel["VectorWidthA"] % vectorwidth == 0)
-        else:
-            vectorwidth = kernel["VectorWidthA"] if kernel["_VectorStore"] else 1
-            vectorwidth = min(vectorwidth, writer.maxGwvw(kernel))
+        while vectorwidth > 0:
+            elements_temp = []
+            # Full tile loop:
+            for tt1 in range(0, kernel["ThreadTile1"]//kernel["VectorWidthA"]):
+                for vc1 in range(0, kernel["VectorWidthA"]):
+                    for tt0 in range(0, kernel["ThreadTile0"]//kernel["VectorWidthA"]):
+                        for vc0 in range(0, kernel["VectorWidthA"], vectorwidth): # note step by fullVw
+                            element = (tt1, tt0, vc1, vc0)
+                            elements_temp.append(element)
+            vectorwidths.append(vectorwidth)
+            elements.append(elements_temp)
+            vectorwidth = int(vectorwidth / 2) # decrease vectorwidth by half
 
-        # Full tile loop:
-        for tt1 in range(0, kernel["ThreadTile1"]//kernel["VectorWidthA"]):
-            for vc1 in range(0, kernel["VectorWidthA"]):
-                for tt0 in range(0, kernel["ThreadTile0"]//kernel["VectorWidthA"]):
-                    for vc0 in range(0, kernel["VectorWidthA"], vectorwidth): # note step by fullVw
-                        element = (tt1, tt0, vc1, vc0)
-                        elements.append(element)
-
-        return (vectorwidth, elements, vectorwidth, elements)
+        return (vectorwidths, elements, vectorwidths, elements)
 
 class NotLocalFullTileElementsMFMA(NotLocalFullTileElements):
     kernel = {"EnableMatrixInstruction": True}
 
-    def getElements(self, writer, kernel, edge):
+    def getElements(self, writer, kernel):
         # When singleBuffer/atomic is enabled. We will have 2 different type of store.
         # One is GSU=1 normal store and another is GSU>1 atomic store.
         # storeVectorWidth indicates the atomic store vectorWidth.
         # storeVectorWidth_1 indicates the normal store vectorWidth.
         # For non-atomic cases, these two are the same.
-        elements        = []
-        storeVectorWidth = 0
-        if edge:
-            storeVectorWidth = kernel["StoreVectorWidth"] if kernel["_VectorStore"] else 1
-            storeVectorWidth = min(storeVectorWidth, writer.maxGwvw(kernel), kernel["AssertFree0ElementMultiple"])
-        else:
-            storeVectorWidth = kernel["StoreVectorWidth"] if kernel["_VectorStore"] else 1
-            storeVectorWidth = min(storeVectorWidth, writer.maxGwvw(kernel))
+        elements          = []
+        storeVectorWidths = []
+        storeVectorWidth  = kernel["StoreVectorWidth"] if kernel["_VectorStore"] else 1
+        storeVectorWidth  = min(storeVectorWidth, writer.maxGwvw(kernel))
 
         # handle mfma 4x4 instruction
         matrixInstM  = kernel["MatrixInstM"] * kernel["MatrixInstBM"] if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstM"]
@@ -90,29 +85,34 @@ class NotLocalFullTileElementsMFMA(NotLocalFullTileElements):
         vectorWidth0 = kernel["VectorWidthA"]        if kernel["SourceSwap"] else kernel["VectorWidthA"] * kernel["MIOutputVectorWidth"]
         vectorWidth1 = kernel["VectorWidthB"] * kernel["MIOutputVectorWidth"] if kernel["SourceSwap"] else kernel["VectorWidthB"]
 
-        for tt1 in range(0, ceil(totalTT1//vectorWidth1)):
-            for vc1 in range(0, vectorWidth1):
-                for tt0 in range(0, ceil(totalTT0//vectorWidth0)):
-                    for vc0 in range(0, vectorWidth0, storeVectorWidth): # note step by storeVectorWidth
-                        element = (tt1, tt0, vc1, vc0)
-                        elements.append(element)
+        while storeVectorWidth > 0:
+            elements_temp = []
+            for tt1 in range(0, ceil(totalTT1//vectorWidth1)):
+                for vc1 in range(0, vectorWidth1):
+                    for tt0 in range(0, ceil(totalTT0//vectorWidth0)):
+                        for vc0 in range(0, vectorWidth0, storeVectorWidth): # note step by storeVectorWidth
+                            element = (tt1, tt0, vc1, vc0)
+                            elements_temp.append(element)
+            storeVectorWidths.append(storeVectorWidth)
+            elements.append(elements_temp)
+            storeVectorWidth = int(storeVectorWidth / 2) # decrease storeVectorWidth by half
 
-        return (storeVectorWidth, elements)
+        return (storeVectorWidths, elements)
 
     """
     Partition thread-tile into writeElements for store code
     This function creates the writeElement mapping for full tiles
     (ie non-edge cases)
     """
-    def __call__(self, writer, kernel, edge):
+    def __call__(self, writer, kernel):
         if kernel["GlobalSplitU"] == 0:
-            (storeVectorWidth, elements) = self.getElements(writer, kernel, edge)
-            return (storeVectorWidth, elements, storeVectorWidth, elements)
+            (storeVectorWidths, elements) = self.getElements(writer, kernel)
+            return (storeVectorWidths, elements, storeVectorWidths, elements)
         else:
             gsuBackup = kernel["GlobalSplitU"]
             kernel["GlobalSplitU"] = 2
-            (storeVectorWidth, elements) = self.getElements(writer, kernel, edge)
+            (storeVectorWidths, elements) = self.getElements(writer, kernel)
             kernel["GlobalSplitU"] = 1
-            (storeVectorWidth_1, elements_1) = self.getElements(writer, kernel, edge)
+            (storeVectorWidths_1, elements_1) = self.getElements(writer, kernel)
             kernel["GlobalSplitU"] = gsuBackup
-            return (storeVectorWidth, elements, storeVectorWidth_1, elements_1)
+            return (storeVectorWidths, elements, storeVectorWidths_1, elements_1)
