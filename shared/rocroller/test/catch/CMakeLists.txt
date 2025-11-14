@@ -84,6 +84,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/TestContext.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestContextTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestKernels.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TopologicalCompareTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TransposeLoadsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/UnrollLoopsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/UtilsTest.cpp"
@@ -92,7 +93,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/WidenAddrExprTo64bitTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WorkgroupRemapXCCTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/mxDataGeneratorTest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/RotatingBufferTest.cpp" 
+        "${CMAKE_CURRENT_SOURCE_DIR}/RotatingBufferTest.cpp"
 )
 
 target_include_directories(rocroller-tests-catch PRIVATE
