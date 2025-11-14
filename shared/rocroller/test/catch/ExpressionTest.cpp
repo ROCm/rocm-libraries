@@ -321,6 +321,56 @@ namespace ExpressionTest
          s_bfe_u32 s0, v7, 1048576 //    expr.offset = 0
          )";
 
+        {
+            auto rb = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt64, 1);
+            rb->setName("rb");
+            rb->allocateNow();
+
+            auto b = rb->expression();
+
+            auto expr10 = bfe(DataType::UInt32, a, 0, 32); // redundant full register
+            auto expr11 = bfe(DataType::UInt32, b, 0, 32); // full register from Uint64 (2 registers)
+            auto expr12 = bfe(DataType::UInt32, b, 32, 32); // full register from Uint64 (2 registers)
+            auto expr13 = bfe(DataType::UInt64, b, 0, 64); // redundant full register from UInt64
+            auto expr14 = bfe(DataType::Int32, b, 0, 32); // full register from Uint64 (2 registers)
+
+            auto dest10 = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt32, 1);
+            auto dest11 = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt32, 1);
+            auto dest12 = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt32, 1);
+            auto dest13 = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt64, 1);
+            auto dest14 = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::Int32, 1);
+
+            context.get()->schedule(Expression::generate(dest10, expr10, context.get()));
+            context.get()->schedule(Expression::generate(dest11, expr11, context.get()));
+            context.get()->schedule(Expression::generate(dest12, expr12, context.get()));
+            context.get()->schedule(Expression::generate(dest13, expr13, context.get()));
+            context.get()->schedule(Expression::generate(dest14, expr14, context.get()));
+        }
+
+        expected += R"(
+            // expr10 - full register extraction should optimize away
+            v_mov_b32 v7, v0
+
+            // expr11 - extracting first register from UInt64 to UInt32
+            v_mov_b32 v12, v10
+
+            // expr12 - extracting second register from UInt64 to UInt32
+            v_mov_b32 v13, v11
+
+            // expr13 - full register extraction from UInt64 to UInt64
+            v_mov_b32 v14, v10
+            v_mov_b32 v15, v11
+
+            // expr14 - extracting first register from UInt64 to Int32
+            v_mov_b32 v16, v10
+        )";
+
         CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
     }
 
