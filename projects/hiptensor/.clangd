@@ -3,6 +3,9 @@ CompileFlags:
     - -std=c++20
     - -I/projects/rocm-libraries/projects/hiptensor/library/include
     - -I/projects/rocm-libraries/projects/hiptensor/library/src/include
+    - -I/projects/rocm-libraries/projects/hiptensor/test/01_contraction
+    - -I/projects/rocm-libraries/projects/hiptensor/test/02_elementwise
+    - -I/projects/rocm-libraries/projects/hiptensor/test/03_reduction
     - -I/opt/rocm/include
     - -I/opt/rocm/include/ck
     - -I/opt/rocm/include/ck/utility
@@ -27,6 +30,15 @@ CompileFlags:
     - -DHIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=1
     - -DUSE_PROF_API=1
     - -D__HIP_DEVICE_COMPILE__=0
+    - -D__HIPCC_RTC__=0
+    - -DCK_CODE_GEN_RTC=0
+    - -DCK_WORKAROUND_SWDEV_383542=0
+    - -D__HOST_DEVICE__=
+    - -D__device__=
+    - -D__host__=
+    - -D__forceinline__=inline
+    - -D__CLANG_HIP_RUNTIME_WRAPPER_INCLUDED__=1
+    - -D__CLANGD__=1
     - --rocm-path=/opt/rocm
     - --rocm-device-lib-path=/opt/rocm/lib
     - -nogpulib
