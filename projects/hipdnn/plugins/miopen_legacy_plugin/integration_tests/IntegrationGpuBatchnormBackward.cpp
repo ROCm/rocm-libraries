@@ -223,9 +223,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormBackwardNhwcFp32,
                          testing::ValuesIn(getBnBwdFullTestCases()));
 
-// MIOpen segfaults for this case, re-enable when fix is released:
-// https://github.com/ROCm/rocm-libraries/pull/1197
-TEST_P(IntegrationGpuBatchnormBackwardNhwcBfp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardNhwcBfp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NHWC);
 }
@@ -238,9 +236,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormBackwardNhwcBfp16,
                          testing::ValuesIn(getBnBwdFullTestCases()));
 
-// MIOpen segfaults for this case, re-enable when fix is released:
-// https://github.com/ROCm/rocm-libraries/pull/1197
-TEST_P(IntegrationGpuBatchnormBackwardNhwcFp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardNhwcFp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NHWC);
 }
@@ -289,8 +285,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormBackwardNdhwcFp32,
                          testing::ValuesIn(getBnBwd3dTestCases()));
 
-// MIOpen may have issues with NDHWC layout for certain data types
-TEST_P(IntegrationGpuBatchnormBackwardNdhwcBfp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardNdhwcBfp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NDHWC);
 }
@@ -299,8 +294,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormBackwardNdhwcBfp16,
                          testing::ValuesIn(getBnBwd3dTestCases()));
 
-// MIOpen may have issues with NDHWC layout for certain data types
-TEST_P(IntegrationGpuBatchnormBackwardNdhwcFp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardNdhwcFp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NDHWC);
 }

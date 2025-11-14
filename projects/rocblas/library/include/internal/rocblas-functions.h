@@ -23524,6 +23524,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_trsm_strided_batched_ex(rocblas_handle    
     | bf16_r | f32_r  |      f32_r     |
     | f16_r  | f16_r  |      f32_r     |
     | f16_r  | f32_r  |      f32_r     |
+    | f32_r  | f32_r  |      f64_r     |
+    | f32_r  | f64_r  |      f64_r     |
     ------------------------------------
 
     @param[in]
@@ -25132,12 +25134,12 @@ ROCBLAS_EXPORT rocblas_status rocblas_get_device_memory_size(rocblas_handle hand
     size            size of allocated device memory
  ******************************************************************************/
 ROCBLAS_DEPRECATED_MSG("rocblas_set_device_memory_size will be removed in a future release and "
-                       "supported modes will be rocblas_managed & user_owned [Do not use]")
+                       "supported modes will be rocblas_managed & user_owned")
 ROCBLAS_EXPORT rocblas_status rocblas_set_device_memory_size(rocblas_handle handle, size_t size);
 
 /*! \brief
     \details
-    Allows user to set the device memory for the handle to use as a workspace (user-owned scheme).
+    Sets the device workspace for the handle to use.
 
     Any previously allocated device memory managed by the handle is freed.
 
@@ -25167,7 +25169,7 @@ ROCBLAS_EXPORT bool rocblas_is_managing_device_memory(rocblas_handle handle);
     handle          rocblas handle
  ******************************************************************************/
 ROCBLAS_DEPRECATED_MSG("rocblas_is_user_managing_device_memory will be removed in a future release "
-                       "and supported modes will be rocblas_managed and user_owned [Do not use]")
+                       "and supported modes will be rocblas_managed and user_owned")
 ROCBLAS_EXPORT bool rocblas_is_user_managing_device_memory(rocblas_handle handle);
 
 /*! \brief

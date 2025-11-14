@@ -34,7 +34,7 @@ endif()
 # Custom target to build all rocWMMA samples
 add_custom_target(rocwmma_samples)
 
-# Regular gtests that don't require any special
+# Regular binaries that don't require any special
 # designation for validation or benchmarking
 function(add_rocwmma_sample TEST_TARGET TEST_SOURCE)
 
