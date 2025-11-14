@@ -224,7 +224,9 @@ hipsparseStatus_t testing_spmv_sell(Arguments argus)
 
     I nslices = (m - 1) / slice_size + 1;
 
-    std::cout << "m: " << m << " n: " << n << " nnz: " << nnz << " nslices: " << nslices << std::endl;
+    std::cout << "m: " << m << " n: " << n << " nnz: " << nnz << " nslices: " << nslices << " slice_size: " << slice_size << std::endl;
+    std::cout << "typeI: " << typeI << " typeJ: " << typeJ << " typeT: " << typeT << std::endl;
+    std::cout << "transA: " << transA << " idx_base: "  << idx_base << " alg: " << alg << " filename: " << filename << std::endl;
 
     std::vector<I> hsell_slice_offsets;
     std::vector<J> hsell_col_ind;
@@ -289,6 +291,8 @@ hipsparseStatus_t testing_spmv_sell(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_alpha, &h_alpha, sizeof(T), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
+    std::cout << "AAAA" << std::endl;
+
     // Create matrices
     hipsparseSpMatDescr_t A;
     CHECK_HIPSPARSE_ERROR(hipsparseCreateSlicedEll(&A,
@@ -305,24 +309,29 @@ hipsparseStatus_t testing_spmv_sell(Arguments argus)
                                                    idx_base,
                                                    typeT));
 
+    std::cout << "BBBB" << std::endl;
     // Create dense vectors
     hipsparseDnVecDescr_t x, y1, y2;
     CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&x, n, dx, typeT));
     CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y1, m, dy_1, typeT));
     CHECK_HIPSPARSE_ERROR(hipsparseCreateDnVec(&y2, m, dy_2, typeT));
 
+    std::cout << "CCCC" << std::endl;
     // Query SpMV buffer
     size_t bufferSize;
     CHECK_HIPSPARSE_ERROR(hipsparseSpMV_bufferSize(
         handle, transA, &h_alpha, A, x, &h_beta, y1, typeT, alg, &bufferSize));
 
+    std::cout << "DDDD" << std::endl;
     void* buffer;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
 
+    std::cout << "EEEE" << std::endl;
     // Preprocess (optional)
     CHECK_HIPSPARSE_ERROR(
         hipsparseSpMV_preprocess(handle, transA, &h_alpha, A, x, &h_beta, y1, typeT, alg, buffer));
 
+    std::cout << "FFFF" << std::endl;
     if(argus.unit_check)
     {
         // HIPSPARSE pointer mode host
@@ -330,15 +339,18 @@ hipsparseStatus_t testing_spmv_sell(Arguments argus)
         CHECK_HIPSPARSE_ERROR(
             hipsparseSpMV(handle, transA, &h_alpha, A, x, &h_beta, y1, typeT, alg, buffer));
 
+        std::cout << "GGGG" << std::endl;
         // HIPSPARSE pointer mode device
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
         CHECK_HIPSPARSE_ERROR(
             hipsparseSpMV(handle, transA, d_alpha, A, x, d_beta, y2, typeT, alg, buffer));
 
+        std::cout << "HHHH" << std::endl;
         // copy output from device to CPU
         CHECK_HIP_ERROR(hipMemcpy(hy_1.data(), dy_1, sizeof(T) * m, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * m, hipMemcpyDeviceToHost));
 
+        std::cout << "IIII" << std::endl;
         host_sellmv(transA,
                     m,
                     n,
@@ -354,8 +366,11 @@ hipsparseStatus_t testing_spmv_sell(Arguments argus)
                     hy_gold.data(),
                     idx_base);
 
+                std::cout << "JJJJ" << std::endl;
         unit_check_near(1, m, 1, hy_gold.data(), hy_1.data());
+        std::cout << "KKKK" << std::endl;
         unit_check_near(1, m, 1, hy_gold.data(), hy_2.data());
+        std::cout << "LLLL" << std::endl;
     }
 
     if(argus.timing)
@@ -417,6 +432,7 @@ hipsparseStatus_t testing_spmv_sell(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(x));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
+    std::cout << "MMMM" << std::endl;
 #endif
 
     return HIPSPARSE_STATUS_SUCCESS;
