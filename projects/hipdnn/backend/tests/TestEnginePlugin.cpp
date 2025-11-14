@@ -26,7 +26,7 @@ public:
     }
 };
 
-TEST(TestGpuEnginePluginManager, DISABLED_LoadPluginsAndExecuteOpGraph)
+TEST(TestGpuEnginePluginManager, LoadPluginsAndExecuteOpGraph)
 {
     SKIP_IF_NO_DEVICES();
 
