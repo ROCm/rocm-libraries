@@ -24,35 +24,33 @@ int main()
 {
     // Host input
     const size_t       N       = 8;
-    std::vector<short> h_input = {1, 2, 3, 4, 5, 6, 7, 8};
+    std::vector<short> h_input{1, 2, 3, 4, 5, 6, 7, 8};
 
     // Expected inclusive sum (in int)
-    std::vector<int> expected = {1, 3, 6, 10, 15, 21, 28, 36};
+    std::vector<int> expected{1, 3, 6, 10, 15, 21, 28, 36};
 
     common::device_ptr<short> d_input(h_input);
     common::device_ptr<int>   d_output(N);
 
-    // Get required temporary storage size
-    void*  d_temp_storage     = nullptr;
     size_t temp_storage_bytes = 0;
+    common::device_ptr<void> d_temp_storage;
 
-    HIP_CHECK(rocprim::inclusive_scan(d_temp_storage,
-                                      temp_storage_bytes,
-                                      d_input.get(),
-                                      d_output.get(),
-                                      N,
-                                      rocprim::plus<int>()));
+    const auto launch = [&] {
+        return rocprim::inclusive_scan(
+            d_temp_storage.get(),
+            temp_storage_bytes,
+            d_input.get(),
+            d_output.get(),
+            N,
+            rocprim::plus<int>());
+    };
 
-    // Allocate temporary storage
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+    // First launch: query temp storage size
+    HIP_CHECK(launch());
+    d_temp_storage.resize(temp_storage_bytes);
 
-    // Actual inclusive scan
-    HIP_CHECK(rocprim::inclusive_scan(d_temp_storage,
-                                      temp_storage_bytes,
-                                      d_input.get(),
-                                      d_output.get(),
-                                      N,
-                                      rocprim::plus<int>()));
+    // Second launch: actual inclusive scan
+    HIP_CHECK(launch());
 
     // Verify on host
     const auto h_result = d_output.load();
@@ -63,9 +61,6 @@ int main()
         passed = passed && (h_result[i] == expected[i]);
     }
     ASSERT_TRUE(passed);
-
-    // Cleanup
-    HIP_CHECK(hipFree(d_temp_storage));
 
     return 0;
 }

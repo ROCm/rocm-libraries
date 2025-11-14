@@ -23,7 +23,7 @@
 int main()
 {
     // Host input
-    std::vector<int> h_input = {1, 2, 3, 4, 5, 6, 7, 8};
+    std::vector<int> h_input{1, 2, 3, 4, 5, 6, 7, 8};
     const size_t size = h_input.size();
 
     common::device_ptr<int>    d_input(h_input);
@@ -37,35 +37,29 @@ int main()
         return (a % 2) == 0;
     };
 
-    // Query temp storage size
-    void*  d_temp_storage     = nullptr;
     size_t temp_storage_bytes = 0;
+    common::device_ptr<void> d_temp_storage;
 
-    HIP_CHECK(rocprim::partition_two_way(
-        d_temp_storage,
-        temp_storage_bytes,
-        d_input.get(),
-        d_selected.get(),
-        d_rejected.get(),
-        d_selected_count.get(),
-        size,
-        predicate
-    ));
+    const auto launch = [&]
+    {
+        return rocprim::partition_two_way(
+            d_temp_storage.get(),
+            temp_storage_bytes,
+            d_input.get(),
+            d_selected.get(),
+            d_rejected.get(),
+            d_selected_count.get(),
+            size,
+            predicate
+        );
+    };
 
-    // Allocate temp storage
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+    // First launch: query temp storage size
+    HIP_CHECK(launch());
+    d_temp_storage.resize(temp_storage_bytes);
 
-    // Actual partition
-    HIP_CHECK(rocprim::partition_two_way(
-        d_temp_storage,
-        temp_storage_bytes,
-        d_input.get(),
-        d_selected.get(),
-        d_rejected.get(),
-        d_selected_count.get(),
-        size,
-        predicate
-    ));
+    // Second launch: actual partition
+    HIP_CHECK(launch());
 
     const auto h_selected       = d_selected.load();
     const auto h_rejected       = d_rejected.load();
@@ -75,8 +69,8 @@ int main()
     // selected: [2,4,6,8]
     // rejected: [1,3,5,7]
     // count   : 4
-    std::vector<int> expected_selected = {2,4,6,8};
-    std::vector<int> expected_rejected = {1,3,5,7};
+    std::vector<int> expected_selected{2,4,6,8};
+    std::vector<int> expected_rejected{1,3,5,7};
     const size_t     expected_count    = 4;
 
     bool passed = (h_selected_count[0] == expected_count);
@@ -86,9 +80,6 @@ int main()
         passed = passed && (h_rejected[i] == expected_rejected[i]);
     }
     ASSERT_TRUE(passed);
-
-    // Cleanup
-    HIP_CHECK(hipFree(d_temp_storage));
 
     return 0;
 }

@@ -23,9 +23,9 @@
 int main()
 {
     // Host input: 8 elements, segmented as [0,2), [2,4), [4,8)
-    std::vector<short> h_input = {4, 7, 6, 2, 5, 1, 3, 8};
+    std::vector<short> h_input{4, 7, 6, 2, 5, 1, 3, 8};
     std::vector<int>   h_output(h_input.size(), 0);
-    std::vector<int>   h_offsets    = {0, 2, 4, 8};
+    std::vector<int>   h_offsets{0, 2, 4, 8};
     const int          num_segments = 3;
 
     common::device_ptr<short> d_input(h_input);
@@ -34,30 +34,28 @@ int main()
 
     auto min_op = [](auto a, auto b) { return a < b ? a : b; };
 
-    // Query temp storage
-    void*  d_temp_storage     = nullptr;
+    // Temporary storage handled via device_ptr
     size_t temp_storage_bytes = 0;
-    HIP_CHECK(rocprim::segmented_inclusive_scan(d_temp_storage,
-                                                temp_storage_bytes,
-                                                d_input.get(),
-                                                d_output.get(),
-                                                num_segments,
-                                                d_offsets.get(),
-                                                d_offsets.get() + 1,
-                                                min_op));
+    common::device_ptr<void> d_temp_storage;
 
-    // Allocate temp storage
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+    const auto launch = [&] {
+        return rocprim::segmented_inclusive_scan(
+            d_temp_storage.get(),
+            temp_storage_bytes,
+            d_input.get(),
+            d_output.get(),
+            num_segments,
+            d_offsets.get(),
+            d_offsets.get() + 1,
+            min_op);
+    };
 
-    // Actual segmented inclusive scan
-    HIP_CHECK(rocprim::segmented_inclusive_scan(d_temp_storage,
-                                                temp_storage_bytes,
-                                                d_input.get(),
-                                                d_output.get(),
-                                                num_segments,
-                                                d_offsets.get(),
-                                                d_offsets.get() + 1,
-                                                min_op));
+    // First launch: query temp storage size
+    HIP_CHECK(launch());
+    d_temp_storage.resize(temp_storage_bytes);
+
+    // Second launch: actual segmented inclusive scan
+    HIP_CHECK(launch());
 
     const auto       result   = d_output.load();
     std::vector<int> expected = {4, 4, 6, 2, 5, 1, 1, 1};
@@ -69,6 +67,5 @@ int main()
     }
     ASSERT_TRUE(passed);
 
-    HIP_CHECK(hipFree(d_temp_storage));
     return 0;
 }

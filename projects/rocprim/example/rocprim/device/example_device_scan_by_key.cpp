@@ -23,8 +23,8 @@
 int main()
 {
     // Keys: same keys will be scanned together
-    std::vector<int>   h_keys   = {1, 1, 2, 2, 3, 3, 3, 5};
-    std::vector<short> h_values = {1, 2, 3, 4, 5, 6, 7, 8};
+    std::vector<int>   h_keys{1, 1, 2, 2, 3, 3, 3, 5};
+    std::vector<short> h_values{1, 2, 3, 4, 5, 6, 7, 8};
     const size_t       size     = h_keys.size(); // 8
 
     // Expected result of inclusive scan-by-key with plus<int>:
@@ -32,39 +32,33 @@ int main()
     // key=2: 3, 3+4=7
     // key=3: 5, 5+6=11, 11+7=18
     // key=5: 8
-    std::vector<int> expected = {1, 3, 3, 7, 5, 11, 18, 8};
+    std::vector<int> expected{1, 3, 3, 7, 5, 11, 18, 8};
 
-    // Device buffers
     common::device_ptr<int>   d_keys(h_keys);
     common::device_ptr<short> d_values(h_values);
     common::device_ptr<int>   d_output(size);
 
-    // Temp storage query
-    void*  d_temp_storage     = nullptr;
     size_t temp_storage_bytes = 0;
+    common::device_ptr<void> d_temp_storage;
 
-    // Get required temporary storage size
-    HIP_CHECK(rocprim::inclusive_scan_by_key(d_temp_storage,
-                                             temp_storage_bytes,
-                                             d_keys.get(),
-                                             d_values.get(),
-                                             d_output.get(),
-                                             size,
-                                             rocprim::plus<int>(),
-                                             rocprim::equal_to<int>()));
+    const auto launch = [&] {
+        return rocprim::inclusive_scan_by_key(
+            d_temp_storage.get(),
+            temp_storage_bytes,
+            d_keys.get(),
+            d_values.get(),
+            d_output.get(),
+            size,
+            rocprim::plus<int>(),
+            rocprim::equal_to<int>());
+    };
 
-    // Allocate temporary storage
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+    // First launch: query required temp storage size
+    HIP_CHECK(launch());
+    d_temp_storage.resize(temp_storage_bytes);
 
-    // Actual scan-by-key
-    HIP_CHECK(rocprim::inclusive_scan_by_key(d_temp_storage,
-                                             temp_storage_bytes,
-                                             d_keys.get(),
-                                             d_values.get(),
-                                             d_output.get(),
-                                             size,
-                                             rocprim::plus<int>(),
-                                             rocprim::equal_to<int>()));
+    // Second launch: actual scan-by-key
+    HIP_CHECK(launch());
 
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -76,8 +70,6 @@ int main()
         passed = passed && (result[i] == expected[i]);
     }
     ASSERT_TRUE(passed);
-
-    HIP_CHECK(hipFree(d_temp_storage));
 
     return 0;
 }

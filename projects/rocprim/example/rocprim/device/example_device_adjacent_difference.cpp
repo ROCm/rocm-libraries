@@ -23,39 +23,37 @@
 int main()
 {
     // Host input
-    std::vector<int>  input = {1, 2, 3, 4, 5, 6, 7, 8};
-    const std::size_t size  = input.size();
+    std::vector<int>  input{1, 2, 3, 4, 5, 6, 7, 8};
+    const std::size_t size = input.size();
 
     common::device_ptr<int> d_input(input);
     common::device_ptr<int> d_output(size);
 
     auto subtract_op = [](auto a, auto b) { return a - b; };
 
-    // Query temporary storage
-    void*  d_temp_storage     = nullptr;
-    size_t temp_storage_bytes = 0;
+    std::size_t              temp_storage_bytes = 0;
+    common::device_ptr<void> d_temp_storage;
 
-    HIP_CHECK(rocprim::adjacent_difference(d_temp_storage,
-                                           temp_storage_bytes,
-                                           d_input.get(),
-                                           d_output.get(),
-                                           size,
-                                           subtract_op));
+    const auto launch = [&] {
+        return rocprim::adjacent_difference(
+            d_temp_storage.get(),
+            temp_storage_bytes,
+            d_input.get(),
+            d_output.get(),
+            size,
+            subtract_op);
+    };
 
-    // Allocate temporary storage
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+    // First launch: query temp storage size
+    HIP_CHECK(launch());
+    d_temp_storage.resize(temp_storage_bytes);
 
-    // Actual adjacent difference
-    HIP_CHECK(rocprim::adjacent_difference(d_temp_storage,
-                                           temp_storage_bytes,
-                                           d_input.get(),
-                                           d_output.get(),
-                                           size,
-                                           subtract_op));
+    // Second launch: actual adjacent_difference
+    HIP_CHECK(launch());
     HIP_CHECK(hipDeviceSynchronize());
 
     const auto       output   = d_output.load();
-    std::vector<int> expected = {1, 1, 1, 1, 1, 1, 1, 1};
+    std::vector<int> expected{1, 1, 1, 1, 1, 1, 1, 1};
 
     bool passed = true;
     for(std::size_t i = 0; i < size; ++i)
@@ -64,6 +62,5 @@ int main()
     }
     ASSERT_TRUE(passed);
 
-    HIP_CHECK(hipFree(d_temp_storage));
     return 0;
 }

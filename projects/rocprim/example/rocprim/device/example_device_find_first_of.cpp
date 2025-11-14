@@ -22,50 +22,42 @@
 
 int main()
 {
-    std::vector<int> h_input = {6, 3, 5, 4, 1, 8, 2, 7};
-    std::vector<int> h_keys  = {10, 5, 100};
+    std::vector<int> h_input{6, 3, 5, 4, 1, 8, 2, 7};
+    std::vector<int> h_keys{10, 5, 100};
 
-    const size_t size      = h_input.size(); // 8
-    const size_t keys_size = h_keys.size(); // 3
+    const size_t size      = h_input.size();  // 8
+    const size_t keys_size = h_keys.size();   // 3
 
-    // Device buffers (using the helper from example_utils.hpp)
     common::device_ptr<int> d_input(h_input);
     common::device_ptr<int> d_keys(h_keys);
 
     // Output is just one index (the found position)
     common::device_ptr<unsigned int> d_output(1);
 
-    // Get temporary storage size
-    void*  d_temp_storage    = nullptr;
     size_t temp_storage_size = 0;
+    common::device_ptr<void> d_temp_storage;
 
-    // First call: pointer = nullptr, get storage size
-    HIP_CHECK(rocprim::find_first_of(d_temp_storage,
-                                     temp_storage_size,
-                                     d_input.get(),
-                                     d_keys.get(),
-                                     d_output.get(),
-                                     size,
-                                     keys_size,
-                                     rocprim::equal_to<int>{}, // comparator
-                                     0, // stream
-                                     false // debug
-                                     ));
+    const auto launch = [&] {
+        return rocprim::find_first_of(
+            d_temp_storage.get(),
+            temp_storage_size,
+            d_input.get(),
+            d_keys.get(),
+            d_output.get(),
+            size,
+            keys_size,
+            rocprim::equal_to<int>{}, // comparator
+            0,                        // stream
+            false                     // debug
+        );
+    };
 
-    // Allocate much temporary storage on device
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size));
+    // First call: query temp storage size
+    HIP_CHECK(launch());
+    d_temp_storage.resize(temp_storage_size);
 
-    // Real call
-    HIP_CHECK(rocprim::find_first_of(d_temp_storage,
-                                     temp_storage_size,
-                                     d_input.get(),
-                                     d_keys.get(),
-                                     d_output.get(),
-                                     size,
-                                     keys_size,
-                                     rocprim::equal_to<int>{},
-                                     0,
-                                     false));
+    // Second call: actual computation
+    HIP_CHECK(launch());
 
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -74,11 +66,7 @@ int main()
 
     // Expected index is 2 (input[2] == 5 which is in keys)
     unsigned int expected = 2u;
-
     ASSERT_TRUE(h_output[0] == expected);
-
-    // Clean up temp storage
-    HIP_CHECK(hipFree(d_temp_storage));
 
     return 0;
 }

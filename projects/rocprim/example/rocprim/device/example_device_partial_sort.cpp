@@ -26,43 +26,38 @@ int main()
     const size_t middle     = 4;
 
     // Host input
-    std::vector<unsigned int> h_input = {6, 3, 5, 4, 1, 8, 2, 7};
+    std::vector<unsigned int> h_input{6, 3, 5, 4, 1, 8, 2, 7};
     std::vector<unsigned int> h_output(input_size, 9u);
 
-    // Device buffers
     common::device_ptr<unsigned int> d_input(h_input);
     common::device_ptr<unsigned int> d_output(h_output);
 
-    // Get temp storage size
-    void*  d_temp_storage    = nullptr;
-    size_t temp_storage_size = 0;
+    size_t                    temp_storage_size = 0;
+    common::device_ptr<void>  d_temp_storage;
+
+    const auto launch = [&] {
+        return rocprim::partial_sort_copy(
+            d_temp_storage.get(),
+            temp_storage_size,
+            d_input.get(),
+            d_output.get(),
+            middle,
+            input_size);
+    };
 
     // Query required storage
-    HIP_CHECK(rocprim::partial_sort_copy(d_temp_storage,
-                                         temp_storage_size,
-                                         d_input.get(),
-                                         d_output.get(),
-                                         middle,
-                                         input_size));
-
-    // Allocate temp storage
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size));
+    HIP_CHECK(launch());
+    d_temp_storage.resize(temp_storage_size);
 
     // Run partial_sort_copy on device
-    HIP_CHECK(rocprim::partial_sort_copy(d_temp_storage,
-                                         temp_storage_size,
-                                         d_input.get(),
-                                         d_output.get(),
-                                         middle,
-                                         input_size));
-
+    HIP_CHECK(launch());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Copy back result
     const auto result = d_output.load();
 
-    // Expected: first 4 smallest elements sorted: 1,2,3,4
-    std::vector<unsigned int> expected_first = {1, 2, 3, 4};
+    // Expected: first 4 smallest elements sorted: 1, 2, 3, 4
+    std::vector<unsigned int> expected_first{1, 2, 3, 4};
     bool                      passed         = true;
     for(size_t i = 0; i < middle; i++)
     {
@@ -70,6 +65,5 @@ int main()
     }
     ASSERT_TRUE(passed);
 
-    HIP_CHECK(hipFree(d_temp_storage));
     return 0;
 }

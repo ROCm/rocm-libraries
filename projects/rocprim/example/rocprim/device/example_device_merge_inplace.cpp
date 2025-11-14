@@ -23,39 +23,36 @@
 int main()
 {
     // Host input: two sorted halves
-    // left  = [1,3,5,7]
-    // right = [0,2,4,6]
-    std::vector<int> h_data = {1, 3, 5, 7, 0, 2, 4, 6};
+    // left  = [1, 3, 5, 7]
+    // right = [0, 2, 4, 6]
+    std::vector<int> h_data{1, 3, 5, 7, 0, 2, 4, 6};
     const size_t left_size  = 4;
     const size_t right_size = 4;
 
     common::device_ptr<int> d_data(h_data);
 
-    // Query temp storage
-    void*  d_temp_storage     = nullptr;
     size_t temp_storage_bytes = 0;
-    HIP_CHECK(rocprim::merge_inplace(
-        d_temp_storage,
-        temp_storage_bytes,
-        d_data.get(),
-        left_size,
-        right_size
-    ));
+    common::device_ptr<void> d_temp_storage;
 
-    // Allocate temp storage
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+    const auto launch = [&] {
+        return rocprim::merge_inplace(
+            d_temp_storage.get(),
+            temp_storage_bytes,
+            d_data.get(),
+            left_size,
+            right_size
+        );
+    };
 
-    // Actual in-place merge on device
-    HIP_CHECK(rocprim::merge_inplace(
-        d_temp_storage,
-        temp_storage_bytes,
-        d_data.get(),
-        left_size,
-        right_size
-    ));
+    // First launch: query temp storage size
+    HIP_CHECK(launch());
+    d_temp_storage.resize(temp_storage_bytes);
+
+    // Second launch: actual in-place merge on device
+    HIP_CHECK(launch());
 
     const auto h_out = d_data.load();
-    std::vector<int> expected = {0,1,2,3,4,5,6,7};
+    std::vector<int> expected{0, 1, 2, 3, 4, 5, 6, 7};
 
     bool passed = true;
     for (size_t i = 0; i < expected.size(); ++i)
@@ -63,9 +60,6 @@ int main()
         passed = passed && (h_out[i] == expected[i]);
     }
     ASSERT_TRUE(passed);
-
-    // Cleanup
-    HIP_CHECK(hipFree(d_temp_storage));
 
     return 0;
 }

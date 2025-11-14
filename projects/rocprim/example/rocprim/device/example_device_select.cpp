@@ -22,42 +22,38 @@
 
 int main()
 {
-    std::vector<int>  h_input    = {1, 2, 3, 4, 5, 6, 7, 8};
-    std::vector<char> h_flags    = {0, 1, 1, 0, 0, 1, 0, 1}; // select 2,3,6,8
+    std::vector<int>  h_input{1, 2, 3, 4, 5, 6, 7, 8};
+    std::vector<char> h_flags{0, 1, 1, 0, 0, 1, 0, 1}; // select 2,3,6,8
     const size_t      input_size = h_input.size();
 
-    // Device buffers
     common::device_ptr<int>    d_input(h_input);
     common::device_ptr<char>   d_flags(h_flags);
     common::device_ptr<int>    d_output(input_size); // max possible = input_size
-    common::device_ptr<size_t> d_count(1); // number of selected items
+    common::device_ptr<size_t> d_count(1);           // number of selected items
 
-    // Query temp storage size
-    size_t temp_bytes = 0;
-    void*  d_temp     = nullptr;
-    HIP_CHECK(rocprim::select(d_temp,
-                              temp_bytes,
-                              d_input.get(),
-                              d_flags.get(),
-                              d_output.get(),
-                              d_count.get(),
-                              input_size));
+    size_t                    temp_bytes = 0;
+    common::device_ptr<void>  d_temp;
 
-    // Allocate temp storage
-    HIP_CHECK(hipMalloc(&d_temp, temp_bytes));
+    const auto launch = [&] {
+        return rocprim::select(d_temp.get(),
+                               temp_bytes,
+                               d_input.get(),
+                               d_flags.get(),
+                               d_output.get(),
+                               d_count.get(),
+                               input_size);
+    };
 
-    // Run selection
-    HIP_CHECK(rocprim::select(d_temp,
-                              temp_bytes,
-                              d_input.get(),
-                              d_flags.get(),
-                              d_output.get(),
-                              d_count.get(),
-                              input_size));
+    // First launch: query temp storage size
+    HIP_CHECK(launch());
+    d_temp.resize(temp_bytes);
+
+    // Second launch: actual selection
+    HIP_CHECK(launch());
 
     // Copy back results
-    const auto   h_out    = d_output.load(); // length == input_size (only first count are valid)
-    const auto   h_count  = d_count.load(); // vector<size_t> of size 1
+    const auto   h_out    = d_output.load();  // length == input_size (only first count are valid)
+    const auto   h_count  = d_count.load();   // vector<size_t> of size 1
     const size_t selected = h_count[0];
 
     // Expected selected: [2, 3, 6, 8], count = 4
@@ -69,7 +65,5 @@ int main()
     }
     ASSERT_TRUE(pass);
 
-    // Cleanup temp storage
-    HIP_CHECK(hipFree(d_temp));
     return 0;
 }

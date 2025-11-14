@@ -23,61 +23,50 @@
 int main()
 {
     // Host inputs (both sorted)
-    std::vector<int> h_input1 = {0, 2, 4, 6};
-    std::vector<int> h_input2 = {1, 3, 5, 7};
+    std::vector<int> h_input1{0, 2, 4, 6};
+    std::vector<int> h_input2{1, 3, 5, 7};
 
     const unsigned int size1 = static_cast<unsigned int>(h_input1.size());
     const unsigned int size2 = static_cast<unsigned int>(h_input2.size());
     const unsigned int total = size1 + size2;
 
-    // Device buffers
     common::device_ptr<int> d_input1(h_input1);
     common::device_ptr<int> d_input2(h_input2);
     common::device_ptr<int> d_output(total);
 
-    // Temp storage ptr + size
-    void*  d_temp_storage    = nullptr;
-    size_t temp_storage_size = 0;
+    size_t                    temp_storage_size = 0;
+    common::device_ptr<void>  d_temp_storage;
 
-    // Query temp storage size (explicit template to avoid overload ambiguity)
-    hipError_t err = rocprim::merge<rocprim::default_config,
-                                    int*, // InputIterator1
-                                    int*, // InputIterator2
-                                    int*, // OutputIterator
-                                    rocprim::less<int>>(d_temp_storage,
-                                                        temp_storage_size,
-                                                        d_input1.get(),
-                                                        d_input2.get(),
-                                                        d_output.get(),
-                                                        size1,
-                                                        size2,
-                                                        rocprim::less<int>(),
-                                                        0,
-                                                        false);
-    HIP_CHECK(err);
+    // Lambda for merge (query + actual)
+    const auto launch = [&] {
+        return rocprim::merge<rocprim::default_config,
+                              int*, // InputIterator1
+                              int*, // InputIterator2
+                              int*, // OutputIterator
+                              rocprim::less<int>>(d_temp_storage.get(),
+                                                  temp_storage_size,
+                                                  d_input1.get(),
+                                                  d_input2.get(),
+                                                  d_output.get(),
+                                                  size1,
+                                                  size2,
+                                                  rocprim::less<int>(),
+                                                  0,
+                                                  false);
+    };
 
-    // Allocate temp storage
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size));
+    // Query temp storage size
+    HIP_CHECK(launch());
+    d_temp_storage.resize(temp_storage_size);
 
     // Actual merge
-    err = rocprim::merge<rocprim::default_config, int*, int*, int*, rocprim::less<int>>(
-        d_temp_storage,
-        temp_storage_size,
-        d_input1.get(),
-        d_input2.get(),
-        d_output.get(),
-        size1,
-        size2,
-        rocprim::less<int>(),
-        0,
-        false);
-    HIP_CHECK(err);
+    HIP_CHECK(launch());
 
     HIP_CHECK(hipDeviceSynchronize());
 
     // Verify (minimal)
     const auto       h_output = d_output.load();
-    std::vector<int> expected = {0, 1, 2, 3, 4, 5, 6, 7};
+    std::vector<int> expected{0, 1, 2, 3, 4, 5, 6, 7};
 
     bool passed = true;
     for(unsigned int i = 0; i < total; i++)
@@ -86,6 +75,5 @@ int main()
     }
     ASSERT_TRUE(passed);
 
-    HIP_CHECK(hipFree(d_temp_storage));
     return 0;
 }

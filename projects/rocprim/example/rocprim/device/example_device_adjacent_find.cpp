@@ -22,47 +22,44 @@
 
 int main()
 {
-    // Host side data
-    // input:  [6, 3, 5, 4, 1, 8, 2, 5, 4, 1]
-    // key:    [5, 4, 1]
-    // answer: last occurrence of key in input starts at index 7
-    std::vector<unsigned int> h_input{6, 3, 5, 4, 1, 8, 2, 5, 4, 1};
-    std::vector<unsigned int> h_key{5, 4, 1};
-    const size_t              size     = h_input.size();
-    const size_t              key_size = h_key.size();
+    // Host input:
+    // Pairs: (8,7)->no, (7,5)->yes, so answer should be index 1
+    std::vector<int> h_input{8, 7, 5, 4, 3, 2, 1, 0};
+    const std::size_t size = h_input.size();
 
-    // Device buffers
-    common::device_ptr<unsigned int> d_input(h_input);
-    common::device_ptr<unsigned int> d_key(h_key);
-    common::device_ptr<unsigned int> d_output(1); // single index
+    common::device_ptr<int> d_input(h_input);
+    common::device_ptr<std::size_t> d_output(1);
 
-    size_t temp_storage_bytes = 0;
+    // Custom predicate
+    auto diff_is_two = [](auto a, auto b) {
+        return (a - b) == 2;
+    };
+
+    std::size_t temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
     const auto launch = [&] {
-        return rocprim::find_end(
+        return rocprim::adjacent_find(
             d_temp_storage.get(),
             temp_storage_bytes,
             d_input.get(),
-            d_key.get(),
             d_output.get(),
             size,
-            key_size);
+            diff_is_two);
     };
 
     // First launch: query temp storage size
     HIP_CHECK(launch());
     d_temp_storage.resize(temp_storage_bytes);
 
-    // Second launch: actual find_end
+    // Second launch: actual device adjacent_find
     HIP_CHECK(launch());
 
-    std::vector<unsigned int> h_result = d_output.load();
+    const auto h_out = d_output.load();
 
-    // Expected start index of last occurrence
-    unsigned int expected = 7u;
-    ASSERT_TRUE(h_result[0] == expected);
+    // Expected: the first matching pair is (7,5), i.e. index 1
+    std::size_t expected = 1;
+    ASSERT_TRUE(h_out[0] == expected);
 
     return 0;
 }
-

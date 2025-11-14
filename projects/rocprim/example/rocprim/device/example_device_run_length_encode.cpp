@@ -23,7 +23,7 @@
 int main()
 {
     // Host input: 1,1,1,2,10,10,10,88
-    std::vector<int> h_input    = {1, 1, 1, 2, 10, 10, 10, 88};
+    std::vector<int> h_input{1, 1, 1, 2, 10, 10, 10, 88};
     const size_t     input_size = h_input.size(); // 8
 
     common::device_ptr<int> d_input(h_input);
@@ -31,29 +31,26 @@ int main()
     common::device_ptr<int> d_counts(4);
     common::device_ptr<int> d_runs_count(1);
 
-    void*  d_temp_storage     = nullptr;
-    size_t temp_storage_bytes = 0;
+    size_t                    temp_storage_bytes = 0;
+    common::device_ptr<void>  d_temp_storage;
 
-    // Get required temp storage size
-    HIP_CHECK(rocprim::run_length_encode(d_temp_storage,
-                                         temp_storage_bytes,
-                                         d_input.get(),
-                                         input_size,
-                                         d_unique.get(),
-                                         d_counts.get(),
-                                         d_runs_count.get()));
+    const auto launch = [&] {
+        return rocprim::run_length_encode(
+            d_temp_storage.get(),
+            temp_storage_bytes,
+            d_input.get(),
+            input_size,
+            d_unique.get(),
+            d_counts.get(),
+            d_runs_count.get());
+    };
 
-    // Allocate temp storage
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+    // First launch: get temp storage size
+    HIP_CHECK(launch());
+    d_temp_storage.resize(temp_storage_bytes);
 
-    // Actual RLE
-    HIP_CHECK(rocprim::run_length_encode(d_temp_storage,
-                                         temp_storage_bytes,
-                                         d_input.get(),
-                                         input_size,
-                                         d_unique.get(),
-                                         d_counts.get(),
-                                         d_runs_count.get()));
+    // Second launch: actual RLE
+    HIP_CHECK(launch());
 
     // Copy back results
     const auto h_unique     = d_unique.load();
@@ -64,8 +61,8 @@ int main()
     // unique: [1, 2, 10, 88]
     // counts: [3, 1,  3,  1]
     // runs:   4
-    std::vector<int> expected_unique = {1, 2, 10, 88};
-    std::vector<int> expected_counts = {3, 1, 3, 1};
+    std::vector<int> expected_unique{1, 2, 10, 88};
+    std::vector<int> expected_counts{3, 1, 3, 1};
     int              expected_runs   = 4;
 
     bool passed = true;
@@ -78,9 +75,6 @@ int main()
         passed = passed && (h_counts[i] == expected_counts[i]);
     }
     ASSERT_TRUE(passed);
-
-    // cleanup
-    HIP_CHECK(hipFree(d_temp_storage));
 
     return 0;
 }

@@ -24,7 +24,7 @@ int main()
 {
     // Host-side data
     // unsorted: 0.6, 0.3, 0.65, 0.4, 0.2, 0.08, 1, 0.7
-    std::vector<float> h_input = {0.6f, 0.3f, 0.65f, 0.4f, 0.2f, 0.08f, 1.0f, 0.7f};
+    std::vector<float> h_input{0.6f, 0.3f, 0.65f, 0.4f, 0.2f, 0.08f, 1.0f, 0.7f};
     const size_t size = h_input.size();
 
     common::device_ptr<float> d_input(h_input);
@@ -32,27 +32,24 @@ int main()
 
     rocprim::double_buffer<float> keys(d_input.get(), d_tmp.get());
 
-    // Query temporary storage size
-    void*  d_temp_storage     = nullptr;
     size_t temp_storage_bytes = 0;
+    common::device_ptr<void> d_temp_storage;
 
-    HIP_CHECK(rocprim::radix_sort_keys(
-        d_temp_storage,
-        temp_storage_bytes,
-        keys,
-        size
-    ));
+    const auto launch = [&] {
+        return rocprim::radix_sort_keys(
+            d_temp_storage.get(),
+            temp_storage_bytes,
+            keys,
+            size
+        );
+    };
 
-    // Allocate temporary storage
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+    // Query temporary storage size
+    HIP_CHECK(launch());
+    d_temp_storage.resize(temp_storage_bytes);
 
     // Actual device radix sort
-    HIP_CHECK(rocprim::radix_sort_keys(
-        d_temp_storage,
-        temp_storage_bytes,
-        keys,
-        size
-    ));
+    HIP_CHECK(launch());
     HIP_CHECK(hipDeviceSynchronize());
 
     std::vector<float> h_result(size);
@@ -64,7 +61,7 @@ int main()
 
     // Expected ascending:
     // 0.08, 0.2, 0.3, 0.4, 0.6, 0.65, 0.7, 1
-    std::vector<float> expected = {
+    std::vector<float> expected{
         0.08f, 0.2f, 0.3f, 0.4f, 0.6f, 0.65f, 0.7f, 1.0f
     };
 
@@ -74,9 +71,6 @@ int main()
         passed = passed && (h_result[i] = expected[i]);
     }
     ASSERT_TRUE(passed);
-
-    // Cleanup
-    HIP_CHECK(hipFree(d_temp_storage));
 
     return 0;
 }

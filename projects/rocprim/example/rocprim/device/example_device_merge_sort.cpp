@@ -23,40 +23,39 @@
 int main()
 {
     // Host input
-    std::vector<float> h_input = {0.6f, 0.3f, 0.65f, 0.4f, 0.2f, 0.08f, 1.0f, 0.7f};
+    std::vector<float> h_input{0.6f, 0.3f, 0.65f, 0.4f, 0.2f, 0.08f, 1.0f, 0.7f};
     const size_t size = h_input.size();
 
     common::device_ptr<float> d_input(h_input);
     common::device_ptr<float> d_output(size);
 
-    // Query temporary storage
-    void*  d_temp_storage     = nullptr;
+    // Temporary storage
     size_t temp_storage_bytes = 0;
+    common::device_ptr<void> d_temp_storage;
 
-    HIP_CHECK(rocprim::merge_sort(
-        d_temp_storage,
-        temp_storage_bytes,
-        d_input.get(),
-        d_output.get(),
-        size,
-        rocprim::less<float>()
-    ));
+    const auto launch = [&]()
+    {
+        return rocprim::merge_sort(
+            d_temp_storage.get(),
+            temp_storage_bytes,
+            d_input.get(),
+            d_output.get(),
+            size,
+            rocprim::less<float>()
+        );
+    };
 
-    // Allocate temporary storage
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+    // First call: query required temporary storage size
+    HIP_CHECK(launch());
 
-    // Actual merge sort
-    HIP_CHECK(rocprim::merge_sort(
-        d_temp_storage,
-        temp_storage_bytes,
-        d_input.get(),
-        d_output.get(),
-        size,
-        rocprim::less<float>()
-    ));
+    // Allocate temporary storage on device
+    d_temp_storage.resize(temp_storage_bytes);
+
+    // Second call: perform the actual merge sort
+    HIP_CHECK(launch());
 
     const auto h_output = d_output.load();
-    std::vector<float> expected = {0.08f, 0.2f, 0.3f, 0.4f, 0.6f, 0.65f, 0.7f, 1.0f};
+    std::vector<float> expected{0.08f, 0.2f, 0.3f, 0.4f, 0.6f, 0.65f, 0.7f, 1.0f};
 
     bool passed = true;
     for(size_t i = 0; i < size; ++i)
@@ -64,9 +63,6 @@ int main()
         passed = passed && (h_output[i] == expected[i]);
     }
     ASSERT_TRUE(passed);
-
-    // Cleanup
-    HIP_CHECK(hipFree(d_temp_storage));
 
     return 0;
 }

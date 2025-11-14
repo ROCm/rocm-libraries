@@ -35,7 +35,6 @@ int main()
     const unsigned int segments  = 3;
     const int init_value         = 9;
 
-    // Device buffers
     common::device_ptr<short> d_input(h_input);
     common::device_ptr<int>   d_offsets(h_offsets);
     common::device_ptr<int>   d_output(segments); // 3 results
@@ -45,40 +44,37 @@ int main()
         return a < b ? a : b;
     };
 
-    // Get temp storage size
-    void*  d_temp_storage     = nullptr;
-    size_t temp_storage_bytes = 0;
-    HIP_CHECK(rocprim::segmented_reduce(
-        d_temp_storage,
-        temp_storage_bytes,
-        d_input.get(),
-        d_output.get(),
-        segments,
-        d_offsets.get(),
-        d_offsets.get() + 1,
-        min_op,
-        init_value
-    ));
+    std::size_t temp_storage_bytes = 0;
+    common::device_ptr<void> d_temp_storage;
 
-    // Allocate temp storage
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+    const auto launch = [&] {
+        return rocprim::segmented_reduce(
+            d_temp_storage.get(),
+            temp_storage_bytes,
+            d_input.get(),
+            d_output.get(),
+            segments,
+            d_offsets.get(),
+            d_offsets.get() + 1,
+            min_op,
+            init_value
+        );
+    };
 
-    // Actual segmented reduce
-    HIP_CHECK(rocprim::segmented_reduce(
-        d_temp_storage,
-        temp_storage_bytes,
-        d_input.get(),
-        d_output.get(),
-        segments,
-        d_offsets.get(),
-        d_offsets.get() + 1,
-        min_op,
-        init_value
-    ));
+    // First call: query temp storage size
+    HIP_CHECK(launch());
+    d_temp_storage.resize(temp_storage_bytes);
+
+    // Second call: actual segmented reduce
+    HIP_CHECK(launch());
 
     // Check result
     std::vector<int> h_result(segments);
-    HIP_CHECK(hipMemcpy(h_result.data(), d_output.get(), segments * sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(
+        h_result.data(),
+        d_output.get(),
+        segments * sizeof(int),
+        hipMemcpyDeviceToHost));
 
     std::vector<int> expected = {4, 6, 1};
     bool passed = true;
@@ -87,9 +83,6 @@ int main()
         passed = passed && (h_result[i] == expected[i]);
     }
     ASSERT_TRUE(passed);
-
-    // Cleanup
-    HIP_CHECK(hipFree(d_temp_storage));
 
     return 0;
 }

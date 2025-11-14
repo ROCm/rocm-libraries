@@ -22,47 +22,60 @@
 
 int main()
 {
-    // Host side data
-    // input:  [6, 3, 5, 4, 1, 8, 2, 5, 4, 1]
-    // key:    [5, 4, 1]
-    // answer: last occurrence of key in input starts at index 7
-    std::vector<unsigned int> h_input{6, 3, 5, 4, 1, 8, 2, 5, 4, 1};
-    std::vector<unsigned int> h_key{5, 4, 1};
-    const size_t              size     = h_input.size();
-    const size_t              key_size = h_key.size();
+    // Host input
+    const unsigned int size = 8;
+    std::vector<float> h_samples{-10.0f, 0.3f, 9.5f, 8.1f, 1.5f, 1.9f, 100.0f, 5.1f};
 
-    // Device buffers
-    common::device_ptr<unsigned int> d_input(h_input);
-    common::device_ptr<unsigned int> d_key(h_key);
-    common::device_ptr<unsigned int> d_output(1); // single index
+    // 5 bins => levels = 6, range [0, 10)
+    const unsigned int levels     = 6;
+    const float        lower_lvl  = 0.0f;
+    const float        upper_lvl  = 10.0f;
 
-    size_t temp_storage_bytes = 0;
+    // Histogram has (levels - 1) elements
+    std::vector<int> h_hist(levels - 1, 0);
+
+    common::device_ptr<float> d_samples(h_samples);
+    common::device_ptr<int>   d_hist(h_hist);
+
+    std::size_t temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
     const auto launch = [&] {
-        return rocprim::find_end(
+        return rocprim::histogram_even(
             d_temp_storage.get(),
             temp_storage_bytes,
-            d_input.get(),
-            d_key.get(),
-            d_output.get(),
+            d_samples.get(),
             size,
-            key_size);
+            d_hist.get(),
+            levels,
+            lower_lvl,
+            upper_lvl
+        );
     };
 
-    // First launch: query temp storage size
+    // Query required temporary storage size
     HIP_CHECK(launch());
     d_temp_storage.resize(temp_storage_bytes);
 
-    // Second launch: actual find_end
+    // Actual histogram computation
     HIP_CHECK(launch());
 
-    std::vector<unsigned int> h_result = d_output.load();
+    const auto result = d_hist.load();
 
-    // Expected start index of last occurrence
-    unsigned int expected = 7u;
-    ASSERT_TRUE(h_result[0] == expected);
+    // Expected bins for range [0,10) split into 5 even bins:
+    // bins: [0,2), [2,4), [4,6), [6,8), [8,10)
+    // samples inside: 0.3,1.5,1.9 -> bin0
+    //                 5.1         -> bin2
+    //                 9.5, 8.1    -> bin4
+    // so: [3, 0, 1, 0, 2]
+    std::vector<int> expected{3, 0, 1, 0, 2};
+
+    bool passed = true;
+    for (size_t i = 0; i < expected.size(); ++i)
+    {
+        passed = passed && (result[i] == expected[i]);
+    }
+    ASSERT_TRUE(passed);
 
     return 0;
 }
-

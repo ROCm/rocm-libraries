@@ -22,47 +22,38 @@
 
 int main()
 {
-    // Host side data
-    // input:  [6, 3, 5, 4, 1, 8, 2, 5, 4, 1]
-    // key:    [5, 4, 1]
-    // answer: last occurrence of key in input starts at index 7
-    std::vector<unsigned int> h_input{6, 3, 5, 4, 1, 8, 2, 5, 4, 1};
-    std::vector<unsigned int> h_key{5, 4, 1};
-    const size_t              size     = h_input.size();
-    const size_t              key_size = h_key.size();
+    // Host input
+    const size_t N = 8;
+    std::vector<short> h_input{1, 2, 3, 4, 5, 6, 7, 8};
+    std::vector<int>   h_expected{6, 7, 8, 9, 10, 11, 12, 13};
 
-    // Device buffers
-    common::device_ptr<unsigned int> d_input(h_input);
-    common::device_ptr<unsigned int> d_key(h_key);
-    common::device_ptr<unsigned int> d_output(1); // single index
+    common::device_ptr<short> d_input(h_input);
+    common::device_ptr<int>   d_output(N);
 
-    size_t temp_storage_bytes = 0;
-    common::device_ptr<void> d_temp_storage;
-
-    const auto launch = [&] {
-        return rocprim::find_end(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_input.get(),
-            d_key.get(),
-            d_output.get(),
-            size,
-            key_size);
+    // Unary transform functor: y = x + 5
+    auto transform_op =
+    [] __host__ __device__ (short x) -> int
+    {
+        return static_cast<int>(x) + 5;
     };
 
-    // First launch: query temp storage size
-    HIP_CHECK(launch());
-    d_temp_storage.resize(temp_storage_bytes);
+    // Launch transform on device
+    HIP_CHECK(
+        rocprim::transform(
+            d_input.get(),
+            d_output.get(),
+            N,
+            transform_op
+        )
+    );
 
-    // Second launch: actual find_end
-    HIP_CHECK(launch());
-
-    std::vector<unsigned int> h_result = d_output.load();
-
-    // Expected start index of last occurrence
-    unsigned int expected = 7u;
-    ASSERT_TRUE(h_result[0] == expected);
+    const auto h_result = d_output.load();
+    bool passed = true;
+    for(size_t i = 0; i < N; ++i)
+    {
+        passed = passed && (h_result[i] == h_expected[i]);
+    }
+    ASSERT_TRUE(passed);
 
     return 0;
 }
-

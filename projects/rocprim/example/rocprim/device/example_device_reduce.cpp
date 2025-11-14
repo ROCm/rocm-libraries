@@ -23,59 +23,47 @@
 int main()
 {
     // Host input
-    std::vector<short> h_input = {4, 7, 6, 2, 5, 1, 3, 8};
+    std::vector<short> h_input{4, 7, 6, 2, 5, 1, 3, 8};
     const unsigned int input_size = static_cast<unsigned int>(h_input.size());
     int start_value = 9; // min(start_value, all elements) -> should end up as 1
 
-    // Device buffers
     common::device_ptr<short> d_input(h_input);
     common::device_ptr<int>   d_output(1); // single result
-    // init output to something else just to be sure
-    int zero = 0;
-    HIP_CHECK(hipMemcpy(d_output.get(), &zero, sizeof(int), hipMemcpyHostToDevice));
 
     // Custom reduce op (min)
     auto min_op = [] __device__ (int a, int b) -> int {
         return a < b ? a : b;
     };
 
-    // Get temp storage size
-    void*  d_temp_storage     = nullptr;
-    size_t temp_storage_bytes = 0;
-    HIP_CHECK(rocprim::reduce(
-        d_temp_storage,
-        temp_storage_bytes,
-        d_input.get(),
-        d_output.get(),
-        start_value,
-        input_size,
-        min_op
-    ));
+    std::size_t temp_storage_bytes = 0;
+    common::device_ptr<void> d_temp_storage;
 
-    // Allocate temp storage
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+    const auto launch = [&] {
+        return rocprim::reduce(
+            d_temp_storage.get(),
+            temp_storage_bytes,
+            d_input.get(),
+            d_output.get(),
+            start_value,
+            input_size,
+            min_op
+        );
+    };
 
-    // Actual reduce
-    HIP_CHECK(rocprim::reduce(
-        d_temp_storage,
-        temp_storage_bytes,
-        d_input.get(),
-        d_output.get(),
-        start_value,
-        input_size,
-        min_op
-    ));
+    // First launch: get temp storage size
+    HIP_CHECK(launch());
+    d_temp_storage.resize(temp_storage_bytes);
+
+    // Second launch: actual reduce
+    HIP_CHECK(launch());
 
     // Check result
     int h_result = 0;
     HIP_CHECK(hipMemcpy(&h_result, d_output.get(), sizeof(int), hipMemcpyDeviceToHost));
 
-    // expected: min(9, 4, 7, 6, 2, 5, 1, 3, 8) = 1
+    // Expected: min(9, 4, 7, 6, 2, 5, 1, 3, 8) = 1
     int expected = 1;
     ASSERT_TRUE(h_result == expected);
-
-    // Cleanup
-    HIP_CHECK(hipFree(d_temp_storage));
 
     return 0;
 }

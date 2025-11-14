@@ -22,47 +22,37 @@
 
 int main()
 {
-    // Host side data
-    // input:  [6, 3, 5, 4, 1, 8, 2, 5, 4, 1]
-    // key:    [5, 4, 1]
-    // answer: last occurrence of key in input starts at index 7
-    std::vector<unsigned int> h_input{6, 3, 5, 4, 1, 8, 2, 5, 4, 1};
-    std::vector<unsigned int> h_key{5, 4, 1};
-    const size_t              size     = h_input.size();
-    const size_t              key_size = h_key.size();
+    // Host input
+    std::vector<unsigned int> h_keys{6, 3, 5, 4, 1, 8, 2, 7};
+    const size_t input_size = h_keys.size();
+    const size_t nth = 4;                    // after nth_element, keys[4] should be 5
 
-    // Device buffers
-    common::device_ptr<unsigned int> d_input(h_input);
-    common::device_ptr<unsigned int> d_key(h_key);
-    common::device_ptr<unsigned int> d_output(1); // single index
+    common::device_ptr<unsigned int> d_keys(h_keys);
 
     size_t temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
     const auto launch = [&] {
-        return rocprim::find_end(
+        return rocprim::nth_element(
             d_temp_storage.get(),
             temp_storage_bytes,
-            d_input.get(),
-            d_key.get(),
-            d_output.get(),
-            size,
-            key_size);
+            d_keys.get(),
+            nth,
+            input_size
+        );
     };
 
-    // First launch: query temp storage size
+    // First call: query temp storage size
     HIP_CHECK(launch());
     d_temp_storage.resize(temp_storage_bytes);
 
-    // Second launch: actual find_end
+    // Second call: actual nth_element
     HIP_CHECK(launch());
 
-    std::vector<unsigned int> h_result = d_output.load();
+    const auto result = d_keys.load();
 
-    // Expected start index of last occurrence
-    unsigned int expected = 7u;
-    ASSERT_TRUE(h_result[0] == expected);
+    // Sorted would be [1, 2, 3, 4, 5, 6, 7, 8], so index 4 must be 5
+    ASSERT_TRUE(result[nth] == 5);
 
     return 0;
 }
-
