@@ -85,6 +85,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/TestContext.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestContextTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestKernels.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TopologicalCompareTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TransposeLoadsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/UnrollLoopsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/UtilsTest.cpp"

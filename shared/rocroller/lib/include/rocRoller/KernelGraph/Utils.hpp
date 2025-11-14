@@ -38,15 +38,27 @@ namespace rocRoller
     namespace KernelGraph
     {
 
+        /**
+         * A functor that compares two nodes in a control graph in topological
+         * order. This is provided as a convenience to use with std::sort and
+         * other STL algorithms. This object does not own the graph, so the graph
+         * must be valid for the lifetime of the functor.
+         */
         class TopologicalCompare
         {
         public:
             TopologicalCompare() = delete;
-            TopologicalCompare(KernelGraphPtr graph)
+
+            explicit TopologicalCompare(KernelGraph const* graph)
                 : m_graph(graph)
             {
                 AssertFatal(graph);
             };
+
+            explicit TopologicalCompare(KernelGraph const& graph)
+                : TopologicalCompare(&graph)
+            {
+            }
 
             bool operator()(int a, int b) const
             {
@@ -55,7 +67,7 @@ namespace rocRoller
             }
 
         private:
-            KernelGraphPtr m_graph;
+            KernelGraph const* m_graph;
         };
 
         // Return value of colourByUnrollValue.  A colour-mapping is...
