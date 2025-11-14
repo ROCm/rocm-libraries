@@ -196,7 +196,6 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
             const auto activ_alpha = activ_invoker.activAlpha;
             const auto activ_beta  = activ_invoker.activBeta;
             const auto activ_gamma = activ_invoker.activGamma;
-            const auto mode        = bn_problem.GetMode();
             std::vector<OpKernelArg> kern_args;
             kern_args.push_back(bn_invoke.x);
             kern_args.push_back(activ_invoker.y);
@@ -222,8 +221,6 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
             kern_args.push_back(bn_invoke.resBnBiasDiff);
             kern_args.push_back(bn_invoke.savedMean);
             kern_args.push_back(bn_invoke.savedInvVariance);
-            if(mode == miopenBNSpatial)
-                kern_args.push_back(static_cast<float>(1.0f / (n * h * w)));
             kernel(kern_args);
         };
     };

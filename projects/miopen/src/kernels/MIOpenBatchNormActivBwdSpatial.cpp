@@ -83,8 +83,7 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
                                                 float* __restrict__ dscale,
                                                 float* __restrict__ dbias,
                                                 const float* __restrict__ saved_mean,
-                                                const float* __restrict__ saved_inv_variance,
-                                                const float INHW)
+                                                const float* __restrict__ saved_inv_variance)
 {
     using TI4 = TYPE4<TI>;
 
@@ -185,12 +184,12 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
         if constexpr(MIOPEN_USE_AMDGCN)
         {
             miopen::reduction::gcn_reduce2<FLOAT_ACCUM, LDS_SIZE>(
-                ds, db, CVT_FP32_2ACCUM(1.0), lcl_data_x2, lcl_data_y2, lid);
+                ds, db, CVT_FP32_2ACCUM(1.0f), lcl_data_x2, lcl_data_y2, lid);
         }
         else
         {
             miopen::reduction::lds_reduce2<FLOAT_ACCUM, LDS_SIZE>(
-                ds, db, CVT_FP32_2ACCUM(1.0), lcl_data_x2, lcl_data_y2, lid);
+                ds, db, CVT_FP32_2ACCUM(1.0f), lcl_data_x2, lcl_data_y2, lid);
         }
 
         if(lid < SEGMENT)
@@ -203,7 +202,7 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
                 index     = nidx * CHANNELS * H * W + chwid;
                 tmp1      = BATCH_SIZE * H * W * dy_values[n] - db;
                 tmp2      = -batch_values[n] * ds;
-                tmp3      = p_scale * inv_variance * CVT_FP32_2ACCUM(INHW);
+                tmp3      = p_scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (BATCH_SIZE * H * W));
                 dx[index] = CVT_ACCUM2FLOAT(tmp3 * (tmp2 + tmp1));
             }
             nidx  = SNHW + lidihw;
@@ -212,7 +211,7 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
             {
                 tmp1      = BATCH_SIZE * H * W * dy_values[NLOOPM] - db;
                 tmp2      = -batch_values[NLOOPM] * ds;
-                tmp3      = p_scale * inv_variance * CVT_FP32_2ACCUM(INHW);
+                tmp3      = p_scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (BATCH_SIZE * H * W));
                 dx[index] = CVT_ACCUM2FLOAT(tmp3 * (tmp2 + tmp1));
             }
         }
@@ -398,16 +397,16 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
         if constexpr(MIOPEN_USE_AMDGCN)
         {
             miopen::reduction::gcn_reduce2<FLOAT_ACCUM, LDS_SIZE>(
-                ds, db, CVT_FP32_2ACCUM(1.0), lcl_data_x2, lcl_data_y2, lid);
+                ds, db, CVT_FP32_2ACCUM(1.0f), lcl_data_x2, lcl_data_y2, lid);
         }
         else
         {
             miopen::reduction::lds_reduce2<FLOAT_ACCUM, LDS_SIZE>(
-                ds, db, CVT_FP32_2ACCUM(1.0), lcl_data_x2, lcl_data_y2, lid);
+                ds, db, CVT_FP32_2ACCUM(1.0f), lcl_data_x2, lcl_data_y2, lid);
         }
 
         p_scale = lscale;
-        tmp3    = p_scale * inv_variance * CVT_FP32_2ACCUM(INHW);
+        tmp3    = p_scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (BATCH_SIZE * H * W));
         __syncthreads();
         if(lid == 0)
         {
@@ -545,12 +544,12 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
         if constexpr(MIOPEN_USE_AMDGCN)
         {
             miopen::reduction::gcn_reduce2<FLOAT_ACCUM, LDS_SIZE>(
-                ds, db, CVT_FP32_2ACCUM(1.0), lcl_data_x2, lcl_data_y2, lid);
+                ds, db, CVT_FP32_2ACCUM(1.0f), lcl_data_x2, lcl_data_y2, lid);
         }
         else
         {
             miopen::reduction::lds_reduce2<FLOAT_ACCUM, LDS_SIZE>(
-                ds, db, CVT_FP32_2ACCUM(1.0), lcl_data_x2, lcl_data_y2, lid);
+                ds, db, CVT_FP32_2ACCUM(1.0f), lcl_data_x2, lcl_data_y2, lid);
         }
         __syncthreads();
 
@@ -589,7 +588,7 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
                     tmp1 = BATCH_SIZE * H * W * bn_dy[0] - db;
                     tmp2 = -xhat * ds;
                 }
-                tmp3      = p_scale * inv_variance * CVT_FP32_2ACCUM(INHW);
+                tmp3      = p_scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (BATCH_SIZE * H * W));
                 dx[index] = CVT_ACCUM2FLOAT(tmp3 * (tmp2 + tmp1));
             }
         }
@@ -615,8 +614,7 @@ extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) //
                          float* __restrict__ dscale,
                          float* __restrict__ dbias,
                          const float* __restrict__ saved_mean,
-                         const float* __restrict__ saved_inv_variance,
-                         const float INHW)
+                         const float* __restrict__ saved_inv_variance)
 {
     activbwdspatial<INPUT_TYPE, OUTPUT_TYPE>(x,
                                              y,
@@ -631,6 +629,5 @@ extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) //
                                              dscale,
                                              dbias,
                                              saved_mean,
-                                             saved_inv_variance,
-                                             INHW);
+                                             saved_inv_variance);
 }

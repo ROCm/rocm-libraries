@@ -48,9 +48,8 @@ __forceinline__ __device__ void activbwdperactivation(const TI* __restrict__ x,
                                                       const float* __restrict__ saved_mean,
                                                       const float* __restrict__ saved_inv_variance)
 {
-    const int xgid      = blockIdx.x * LOCAL_SIZE_X + threadIdx.x;
     const int ygid      = blockIdx.y * LOCAL_SIZE_Y + threadIdx.y;
-    const int adj_index = H * W * xgid + ygid;
+    const int adj_index = H * W * blockIdx.x + ygid;
 
     if(adj_index < CHANNELS * H * W)
     {
@@ -81,7 +80,7 @@ __forceinline__ __device__ void activbwdperactivation(const TI* __restrict__ x,
                                     CVT_FLOAT2ACCUM(beta),
                                     CVT_FLOAT2ACCUM(alpha));
             pvt_dbias += bn_dy[0];
-            pvt_dscale      = xhat * bn_dy[0] + pvt_dscale;
+            pvt_dscale += xhat * bn_dy[0];
             FLOAT_ACCUM tmp = pvt_scale * bn_dy[0];
             dxhat += tmp;
             dxhathat += tmp * xhat;
