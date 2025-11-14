@@ -62,6 +62,13 @@ struct GPU_CustomAllocator_FP32 : public ::testing::TestWithParam<AllocatorTestC
         buffer        = handle.Create(size);
     }
 
+    void TearDown() override
+    {
+        // Reset allocator to default after each test
+        auto&& handle = get_handle();
+        handle.SetAllocator(nullptr, nullptr, nullptr);
+    }
+
     miopen::Allocator::ManageDataPtr buffer;
     static constexpr int size = 42;
 };
