@@ -140,7 +140,7 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
         return {};
     }
 
-    // Attempt to determine between N...C layouts and N...W layouts.
+    // Attempt to determine between NC...W layouts (NCHW/NCDHW) and N...WC layouts (NHWC/NDHWC).
     auto posFirstMax = static_cast<size_t>(std::distance(strides.begin(), std::max_element(strides.begin(), strides.end())));
     auto posFirstMin = static_cast<size_t>(std::distance(strides.begin(), std::min_element(strides.begin(), strides.end())));
 
