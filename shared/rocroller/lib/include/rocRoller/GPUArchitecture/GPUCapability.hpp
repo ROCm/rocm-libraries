@@ -149,6 +149,8 @@ namespace rocRoller
             UnalignedSGPRs,
 
             MaxLdsSize,
+            LdsBankWidthBits,
+            LdsBankCount,
 
             HasNaNoo,
 

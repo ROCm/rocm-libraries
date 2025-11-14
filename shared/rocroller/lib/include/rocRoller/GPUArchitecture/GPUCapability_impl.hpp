@@ -167,6 +167,8 @@ namespace rocRoller
             {"UnalignedSGPRs", Value::UnalignedSGPRs},
 
             {"MaxLdsSize", Value::MaxLdsSize},
+            {"LdsBankWidthBits", Value::LdsBankWidthBits},
+            {"LdsBankCount", Value::LdsBankCount},
 
             {"HasNaNoo", Value::HasNaNoo},
 

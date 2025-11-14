@@ -328,6 +328,12 @@ namespace GPUArchitectureGenerator
             else
                 AddCapability(isaVersion, rocRoller::GPUCapability::MaxLdsSize, 1 << 16);
 
+            AddCapability(isaVersion, rocRoller::GPUCapability::LdsBankWidthBits, 32);
+            if(isaVersion.toString().starts_with("gfx95"))
+                AddCapability(isaVersion, rocRoller::GPUCapability::LdsBankCount, 32);
+            else
+                AddCapability(isaVersion, rocRoller::GPUCapability::LdsBankCount, 64);
+
             if(isaVersion.toString().starts_with("gfx95"))
             {
                 AddCapability(
