@@ -67,7 +67,7 @@ inline void initializeCallbackLogging(const std::string& componentName,
     }
 }
 
-// Converts a vector of numbers to a string "[1,2,3...]".
+// Converts a vector of numbers to a string "[1, 2, 3...]".
 template <typename T>
 std::enable_if_t<std::is_arithmetic_v<T>, std::string> // Restrict template to numeric types
 vectorToString(const std::vector<T>& vec)
