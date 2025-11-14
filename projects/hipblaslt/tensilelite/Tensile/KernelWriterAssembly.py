@@ -1587,6 +1587,13 @@ class KernelWriterAssembly(KernelWriter):
     # FIXME: Here does not support UseBatch: False
     if "WorkGroup2" in self.sgprs:
       with self.allocTmpSgpr(2) as tmpSgpr:
+        # init workgroup id from ttmp
+        if self.states.archCaps["WorkGroupIdFromTTM"]:
+          module.addComment1("Init workgroup id from ttmp")
+          module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9"))
+          module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7"))
+          module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7"))
+
         module.addComment1("remap wg from 1D(idxWG012) to 3D(wg2,wg1,wg0)")
         module.addComment0("wg2 = idxWG012 * smallMagicNumber(1/(numWG0*numWG1))")
         tmpVgpr     = self.vgprPool.checkOut(2)

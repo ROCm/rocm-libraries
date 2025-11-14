@@ -100,6 +100,14 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
 
+- name: matmul_large
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  matrix_size: *large_matrix_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range
+
 - name: matmul_batch_medium
   category: pre_checkin
   function:

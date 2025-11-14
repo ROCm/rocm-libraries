@@ -48,6 +48,17 @@ Definitions:
     - { M: 16, N: 16, K: 16, lda: 16, ldb: 16, ldc: 16, ldd: 16 }
     - { M: 128, N: 128, K: 64, lda: 128, ldb: 128, ldc: 128, ldd: 128 }
 
+  - &large_matrix_size_range
+    - { M: 16385, N: 3, K: 3 }
+    - { M: 524289, N: 3, K: 3 }
+    - { M: 2097153, N: 3, K: 3 }
+    - { M: 3, N: 16385, K: 3 }
+    - { M: 3, N: 524289, K: 3 }
+    - { M: 3, N: 2097153, K: 3 }
+    - { M: 3, N: 3, K: 16385 }
+    - { M: 3, N: 3, K: 524289 }
+    - { M: 3, N: 3, K: 2097153 }
+
   - &smoke_matrix_size_range
     - { M: 8, N: 8, K: 8, lda: 8, ldb: 8, ldc: 8, ldd: 8 }
     - { M: 16, N: 16, K: 16, lda: 16, ldb: 16, ldc: 16, ldd: 16 }
