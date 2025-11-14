@@ -101,6 +101,7 @@ namespace rocRoller
                     AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to index list");
                     
                     auto& value = SequenceTraits<T, ComgrNodeInput>::element(*this, obj, i);
+                    input(elNode, value);
                     amd_comgr_destroy_metadata(elNode);
                 }
             }
