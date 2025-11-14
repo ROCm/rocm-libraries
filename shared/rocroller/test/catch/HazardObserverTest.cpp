@@ -31,6 +31,7 @@
 #include "CustomSections.hpp"
 #include "TestContext.hpp"
 #include "TestKernels.hpp"
+#include "rocRoller/Scheduling/Observers/WaitState/VALUTransWrite94x.hpp"
 
 #include <common/SourceMatcher.hpp>
 #include <common/TestValues.hpp>
@@ -94,9 +95,9 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(arch.isRDNAGPU())
+            if(!arch.isCDNAGPU())
             {
-                SKIP("RDNA not supported yet");
+                SKIP("This test is only supported on CDNA");
             }
 
             SECTION("v_readlane (2nd op) read as laneselect")
@@ -315,11 +316,6 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(arch.isRDNAGPU())
-            {
-                SKIP("RDNA not supported yet");
-            }
-
             SECTION("Has hazard with 2nd op (non-trans) accessing the same register")
             {
                 auto context = TestContext::ForTarget(arch);
@@ -331,20 +327,20 @@ namespace HazardObserverTest
                         "v_mul_f32", {v[0]}, {Register::Value::Literal(0x4f7ffffe), v[0]}, {}, ""),
                     Instruction("s_endpgm", {}, {}, {}, "")};
 
-                if(arch.isCDNA1GPU() || arch.isCDNA2GPU())
+                auto observer = Scheduling::VALUTransWrite94x();
+                if(observer.required(arch))
+                {
+                    peekAndSchedule(context, insts[0]);
+                    peekAndSchedule(context, insts[1], 1);
+
+                    CHECK_THAT(context.output(), ContainsSubstring("s_nop 0"));
+                }
+                else
                 {
                     peekAndSchedule(context, insts[0]);
                     peekAndSchedule(context, insts[1]);
 
                     CHECK_THAT(context.output(), !(ContainsSubstring("s_nop")));
-                }
-                else
-                {
-                    // NOPs are required on 94X arch
-                    peekAndSchedule(context, insts[0]);
-                    peekAndSchedule(context, insts[1], 1);
-
-                    CHECK_THAT(context.output(), ContainsSubstring("s_nop 0"));
                 }
             }
 
