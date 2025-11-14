@@ -107,7 +107,7 @@ namespace Tensile
         case LazyLoadingInit::gfx1035:
             return "TensileLibrary_*_gfx1035";
         case LazyLoadingInit::gfx1036:
-            return "TensileLibrary_*_gfx1036";    
+            return "TensileLibrary_*_gfx1036";
         case LazyLoadingInit::gfx1100:
             return "TensileLibrary_*_gfx1100";
         case LazyLoadingInit::gfx1101:
