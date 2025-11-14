@@ -7,6 +7,9 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvFwdBiasActivPlan.hpp"
 
+// MIOpen's fusion API does not calculate the workspace size correctly
+#define WORKAROUND_LWPMIOPEN_1815 1
+
 namespace miopen_legacy_plugin
 {
 
@@ -141,11 +144,23 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
 
     if(getWsSize)
     {
+#if WORKAROUND_LWPMIOPEN_1815
+        // MIOpen's fusion API does not calculate the workspace size correctly.
+        // To work around this issue, the convolution find mode is temporarily set to "normal"
+        // to ensure the maximum workspace size is obtained among all available solvers.
+        miopenConvolutionFindMode_t oldFindMode;
+        THROW_ON_MIOPEN_FAILURE(miopenGetConvolutionFindMode(_params.conv().convDescriptor(), &oldFindMode));
+        THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionFindMode(_params.conv().convDescriptor(), miopenConvolutionFindModeNormal));
+#endif
         THROW_ON_MIOPEN_FAILURE(miopenFusionPlanGetWorkSpaceSize(
             handle.miopenHandle,
             fusePlanDesc,
             &_workspaceSize,
             static_cast<miopenConvFwdAlgorithm_t>(-1))); // Algo is not used in MIOpen
+#if WORKAROUND_LWPMIOPEN_1815
+        // Restore the original convolution find mode
+        THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionFindMode(_params.conv().convDescriptor(), oldFindMode));
+#endif
     }
 }
 
