@@ -58,11 +58,10 @@ struct CheckNumericsTestCase
 template <class T>
 std::vector<CheckNumericsTestCase<T>> GetCheckNumericsTestCases()
 {
-    return {
-        {CheckNumericsTestType::NormalZero, T(0.0f)},
-        {CheckNumericsTestType::NormalOne, T(1.0f)},
-        {CheckNumericsTestType::AbnormalNaN, std::numeric_limits<T>::quiet_NaN()},
-        {CheckNumericsTestType::AbnormalInf, std::numeric_limits<T>::infinity()}};
+    return {{CheckNumericsTestType::NormalZero, T(0.0f)},
+            {CheckNumericsTestType::NormalOne, T(1.0f)},
+            {CheckNumericsTestType::AbnormalNaN, std::numeric_limits<T>::quiet_NaN()},
+            {CheckNumericsTestType::AbnormalInf, std::numeric_limits<T>::infinity()}};
 }
 
 template <class T>
@@ -73,44 +72,44 @@ struct GPU_CheckNumerics : public ::testing::TestWithParam<CheckNumericsTestCase
 template <class T>
 void RunNormalValueTest(T val)
 {
-    auto&& handle = get_handle();
+    auto&& handle      = get_handle();
     constexpr int size = 42;
     miopen::TensorDescriptor desc{miopen_type<T>{}, {size}};
     std::vector<T> data(size, val);
     auto buffer = handle.Write(data);
 
-    EXPECT_FALSE(miopen::checkNumericsImpl(
-        handle, miopen::CheckNumerics::Throw, desc, buffer.get(), true));
-    EXPECT_FALSE(miopen::checkNumericsImpl(
-        handle, miopen::CheckNumerics::Throw, desc, buffer.get(), false));
+    EXPECT_FALSE(
+        miopen::checkNumericsImpl(handle, miopen::CheckNumerics::Throw, desc, buffer.get(), true));
+    EXPECT_FALSE(
+        miopen::checkNumericsImpl(handle, miopen::CheckNumerics::Throw, desc, buffer.get(), false));
 
     EXPECT_FALSE(miopen::checkNumericsImpl(handle,
-                                          miopen::CheckNumerics::Throw |
-                                              miopen::CheckNumerics::ComputeStats,
-                                          desc,
-                                          buffer.get(),
-                                          true));
+                                           miopen::CheckNumerics::Throw |
+                                               miopen::CheckNumerics::ComputeStats,
+                                           desc,
+                                           buffer.get(),
+                                           true));
     EXPECT_FALSE(miopen::checkNumericsImpl(handle,
-                                          miopen::CheckNumerics::Throw |
-                                              miopen::CheckNumerics::ComputeStats,
-                                          desc,
-                                          buffer.get(),
-                                          false));
+                                           miopen::CheckNumerics::Throw |
+                                               miopen::CheckNumerics::ComputeStats,
+                                           desc,
+                                           buffer.get(),
+                                           false));
 }
 
 template <class T>
 void RunAbnormalValueTest(T val)
 {
-    auto&& handle = get_handle();
+    auto&& handle      = get_handle();
     constexpr int size = 42;
     miopen::TensorDescriptor desc{miopen_type<T>{}, {size}};
     std::vector<T> data(size, val);
     auto buffer = handle.Write(data);
 
-    EXPECT_TRUE(miopen::checkNumericsImpl(
-        handle, miopen::CheckNumerics::Warn, desc, buffer.get(), true));
-    EXPECT_TRUE(miopen::checkNumericsImpl(
-        handle, miopen::CheckNumerics::Warn, desc, buffer.get(), false));
+    EXPECT_TRUE(
+        miopen::checkNumericsImpl(handle, miopen::CheckNumerics::Warn, desc, buffer.get(), true));
+    EXPECT_TRUE(
+        miopen::checkNumericsImpl(handle, miopen::CheckNumerics::Warn, desc, buffer.get(), false));
 
     EXPECT_THROW(
         {
@@ -125,37 +124,37 @@ void RunAbnormalValueTest(T val)
         },
         std::exception);
 
-    EXPECT_TRUE(miopen::checkNumericsImpl(handle,
-                                         miopen::CheckNumerics::Warn |
-                                             miopen::CheckNumerics::ComputeStats,
-                                         desc,
-                                         buffer.get(),
-                                         true));
-    EXPECT_TRUE(miopen::checkNumericsImpl(handle,
-                                         miopen::CheckNumerics::Warn |
-                                             miopen::CheckNumerics::ComputeStats,
-                                         desc,
-                                         buffer.get(),
-                                         false));
+    EXPECT_TRUE(
+        miopen::checkNumericsImpl(handle,
+                                  miopen::CheckNumerics::Warn | miopen::CheckNumerics::ComputeStats,
+                                  desc,
+                                  buffer.get(),
+                                  true));
+    EXPECT_TRUE(
+        miopen::checkNumericsImpl(handle,
+                                  miopen::CheckNumerics::Warn | miopen::CheckNumerics::ComputeStats,
+                                  desc,
+                                  buffer.get(),
+                                  false));
 
     EXPECT_THROW(
         {
             miopen::checkNumericsImpl(handle,
-                                     miopen::CheckNumerics::Throw |
-                                         miopen::CheckNumerics::ComputeStats,
-                                     desc,
-                                     buffer.get(),
-                                     true);
+                                      miopen::CheckNumerics::Throw |
+                                          miopen::CheckNumerics::ComputeStats,
+                                      desc,
+                                      buffer.get(),
+                                      true);
         },
         std::exception);
     EXPECT_THROW(
         {
             miopen::checkNumericsImpl(handle,
-                                     miopen::CheckNumerics::Throw |
-                                         miopen::CheckNumerics::ComputeStats,
-                                     desc,
-                                     buffer.get(),
-                                     false);
+                                      miopen::CheckNumerics::Throw |
+                                          miopen::CheckNumerics::ComputeStats,
+                                      desc,
+                                      buffer.get(),
+                                      false);
         },
         std::exception);
 }
@@ -177,7 +176,9 @@ TEST_P(GPU_CheckNumerics_FP32, Test)
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_CheckNumerics_FP32, testing::ValuesIn(GetCheckNumericsTestCases<float>()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_CheckNumerics_FP32,
+                         testing::ValuesIn(GetCheckNumericsTestCases<float>()));
 
 // FP16 tests
 using GPU_CheckNumerics_FP16 = GPU_CheckNumerics<half_float::half>;
@@ -196,7 +197,9 @@ TEST_P(GPU_CheckNumerics_FP16, Test)
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_CheckNumerics_FP16, testing::ValuesIn(GetCheckNumericsTestCases<half_float::half>()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_CheckNumerics_FP16,
+                         testing::ValuesIn(GetCheckNumericsTestCases<half_float::half>()));
 
 // BF16 tests
 using GPU_CheckNumerics_BFP16 = GPU_CheckNumerics<bfloat16>;
@@ -215,6 +218,8 @@ TEST_P(GPU_CheckNumerics_BFP16, Test)
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_CheckNumerics_BFP16, testing::ValuesIn(GetCheckNumericsTestCases<bfloat16>()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_CheckNumerics_BFP16,
+                         testing::ValuesIn(GetCheckNumericsTestCases<bfloat16>()));
 
 } // namespace
