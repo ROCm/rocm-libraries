@@ -222,7 +222,31 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetApplicableEngineIds(
   }
 
   // Check for single conv_fprop node graph
+  HIPDNN_LOG_INFO("Creating GraphWrapper: opGraph ptr={:p}, size={}",
+                  static_cast<const void*>(opGraph->ptr), opGraph->size);
+
+  // Log buffer header for debugging
+  if (opGraph->ptr != nullptr && opGraph->size >= 16) {
+    const uint8_t* bytes = static_cast<const uint8_t*>(opGraph->ptr);
+    HIPDNN_LOG_INFO("Buffer header (first 16 bytes): "
+                    "{:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} "
+                    "{:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}",
+                    bytes[0], bytes[1], bytes[2], bytes[3],
+                    bytes[4], bytes[5], bytes[6], bytes[7],
+                    bytes[8], bytes[9], bytes[10], bytes[11],
+                    bytes[12], bytes[13], bytes[14], bytes[15]);
+  }
+
   GraphWrapper opGraphWrapper(opGraph->ptr, opGraph->size);
+
+  // Validate flatbuffer verification succeeded
+  if (!opGraphWrapper.isValid()) {
+    HIPDNN_LOG_INFO("Graph validation failed - flatbuffer verification error. "
+                    "Buffer ptr={:p}, size={}.",
+                    static_cast<const void*>(opGraph->ptr), opGraph->size);
+    return HIPDNN_PLUGIN_STATUS_SUCCESS;
+  }
+
   if (opGraphWrapper.nodeCount() != 1) {
     HIPDNN_LOG_INFO("Fusilli plan builder is (currently) only applicable only "
                     "for single node conv_fprop graphs.",
