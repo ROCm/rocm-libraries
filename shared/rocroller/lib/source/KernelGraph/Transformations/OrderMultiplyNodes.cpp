@@ -48,7 +48,7 @@ namespace rocRoller
                 for(auto node : multiplyNodes)
                 {
                     auto parent = bodyParents(node, graph).take(1).only();
-                    AssertFatal(parent.has_value(), ShowValue(node));
+                    AssertFatal(parent.has_value(), "Node has no body parent", ShowValue(node));
 
                     rv[*parent].push_back(node);
                 }
@@ -75,7 +75,9 @@ namespace rocRoller
                     return false;
 
                 AssertFatal(existingOrder == ControlGraph::NodeOrdering::Undefined,
-                            "These nodes should not contain each other.");
+                            "These nodes should not contain each other",
+                            ShowValue(a),
+                            ShowValue(b));
 
                 return std::nullopt;
             }
