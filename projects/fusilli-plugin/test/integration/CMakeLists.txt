@@ -27,5 +27,8 @@ target_compile_definitions(fusilli_plugin_integration_tests PRIVATE
 )
 # Register with CTest
 gtest_discover_tests(fusilli_plugin_integration_tests
-    PROPERTIES ENVIRONMENT "HIPDNN_LOG_LEVEL=info"
+    PROPERTIES
+      ENVIRONMENT "HIPDNN_LOG_LEVEL=info"
+      ENVIRONMENT "FUSILLI_LOG_INFO=1"
+      ENVIRONMENT "FUSILLI_LOG_FILE=stdout"
 )

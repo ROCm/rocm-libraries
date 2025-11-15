@@ -441,6 +441,28 @@ hipdnnPluginStatus_t hipdnnEnginePluginDestroyExecutionContext(
   return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
 
+hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
+    hipdnnEnginePluginHandle_t handle,
+    hipdnnEnginePluginExecutionContext_t executionContext,
+    size_t *workspaceSize) {
+  LOG_API_ENTRY("handle={:p}, executionContext={:p}, workspaceSize={:p}",
+                static_cast<void *>(handle),
+                static_cast<void *>(executionContext),
+                static_cast<void *>(workspaceSize));
+  FUSILLI_PLUGIN_CHECK_NULL(handle);
+  FUSILLI_PLUGIN_CHECK_NULL(executionContext);
+  FUSILLI_PLUGIN_CHECK_NULL(workspaceSize);
+
+  // TODO(#2309): for now we're focusing on kernels that don't require scratch
+  // buffer space. Eventually we will need to teach IREE to report what scratch
+  // buffer space required, and how to use a passed in pre-allocated scratch
+  // space rather than a runtime allocated scratch space.
+  *workspaceSize = 0;
+
+  LOG_API_SUCCESS_AUTO("workspaceSize={}", *workspaceSize);
+  return HIPDNN_PLUGIN_STATUS_SUCCESS;
+}
+
 hipdnnPluginStatus_t hipdnnEnginePluginExecuteOpGraph(
     hipdnnEnginePluginHandle_t handle,
     hipdnnEnginePluginExecutionContext_t executionContext, void *workspace,
