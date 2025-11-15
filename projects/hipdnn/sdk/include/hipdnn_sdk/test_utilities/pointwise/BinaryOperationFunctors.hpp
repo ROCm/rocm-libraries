@@ -83,17 +83,13 @@ struct ParameterizedReluBackward
         auto dyCompute = static_cast<ComputeType>(dy);
 
         ComputeType localGradient;
-        if(xCompute < lowerClip)
+        if(xCompute > lowerClip && xCompute <= upperClip)
         {
-            localGradient = lowerSlope;
-        }
-        else if(xCompute > upperClip)
-        {
-            localGradient = ComputeType{0};
+            localGradient = ComputeType{1};
         }
         else
         {
-            localGradient = ComputeType{1};
+            localGradient = ComputeType{0};
         }
 
         return dyCompute * localGradient;
