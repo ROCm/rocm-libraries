@@ -172,7 +172,7 @@ namespace rocRoller
 
                 AssertFatal(!nodesThatWriteThoseCoordinatesBeforeTheNode.empty());
 
-                auto comp = [&](int a, int b) {
+                auto reverseTopologicalCompare = [&](int a, int b) {
                     return a != b
                            && m_graph.control.compareNodes(UpdateCache, a, b)
                                   == ControlGraph::NodeOrdering::RightFirst;
@@ -180,7 +180,7 @@ namespace rocRoller
 
                 std::sort(nodesThatWriteThoseCoordinatesBeforeTheNode.begin(),
                           nodesThatWriteThoseCoordinatesBeforeTheNode.end(),
-                          comp);
+                          reverseTopologicalCompare);
 
                 m_reversedTagDependencies[node]
                     = std::move(nodesThatWriteThoseCoordinatesBeforeTheNode);
