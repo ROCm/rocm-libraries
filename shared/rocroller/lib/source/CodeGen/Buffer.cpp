@@ -24,100 +24,10 @@
  *
  *******************************************************************************/
 
-#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/Buffer.hpp>
-#include <rocRoller/CodeGen/CopyGenerator.hpp>
-#include <rocRoller/Context.hpp>
 
 namespace rocRoller
 {
-    /*
-     * Creates buffer descriptor object from existing SGPRs
-     */
-
-    BufferDescriptor::BufferDescriptor(Register::ValuePtr srd, ContextPtr context)
-    {
-        m_bufferResourceDescriptor = srd;
-        m_context                  = context;
-    }
-
-    /*
-     * Creates buffer descriptor object from context, no existing SGPRs
-     * Requires the use of the BufferDescriptor::setup()
-     */
-    BufferDescriptor::BufferDescriptor(ContextPtr context)
-    {
-        VariableType bufferPointer{DataType::None, PointerType::Buffer};
-        m_bufferResourceDescriptor
-            = std::make_shared<Register::Value>(context, Register::Type::Scalar, bufferPointer, 1);
-        m_context = context;
-    }
-
-    Generator<Instruction> BufferDescriptor::setup()
-    {
-        co_yield m_context->copier()->copy(
-            m_bufferResourceDescriptor->subset({2}), Register::Value::Literal(2147483548), "");
-        co_yield setDefaultOpts();
-    }
-
-    uint32_t BufferDescriptor::getDefaultOptionsValue(ContextPtr ctx)
-    {
-        if(ctx->targetArchitecture().HasCapability(GPUCapability::HasBufferOutOfBoundsCheckOption))
-        {
-            // Bits 29:28 are for Out-of-Bounds check.
-            //   0 - index >= NumRecords || offset + payload > stride, used for structured buffers.
-            //   1 - index >= NumRecords, used for raw buffers (RR default)
-            //   2 - NumRecords == 0, empty buffers
-            //
-            // Bits 17:12 are for data format.
-            //   5 - 8_UINT. Currently, everything is buffer-loaded in terms of bytes.
-            // TODO: Add GFX12 buffer descriptor when other formats and/or features are needed.
-            return (1u << 28) | (5u << 12);
-        }
-        // 0x00020000
-        return (4u << 15);
-    }
-
-    Generator<Instruction> BufferDescriptor::setDefaultOpts()
-    {
-        uint32_t opts = getDefaultOptionsValue(m_context);
-        co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({3}),
-                                           Register::Value::Literal(opts),
-                                           "default options");
-    }
-
-    Generator<Instruction> BufferDescriptor::incrementBasePointer(Register::ValuePtr value)
-    {
-        co_yield generateOp<Expression::Add>(m_bufferResourceDescriptor->subset({0, 1}),
-                                             m_bufferResourceDescriptor->subset({0, 1}),
-                                             value);
-    }
-
-    Generator<Instruction> BufferDescriptor::setBasePointer(Register::ValuePtr value)
-    {
-        co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({0, 1}), value, "");
-    }
-
-    Generator<Instruction> BufferDescriptor::setSize(Register::ValuePtr value)
-    {
-        co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({2}), value, "");
-    }
-
-    Generator<Instruction> BufferDescriptor::setOptions(Register::ValuePtr value)
-    {
-        co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({3}), value, "");
-    }
-
-    Register::ValuePtr BufferDescriptor::allRegisters() const
-    {
-        return m_bufferResourceDescriptor;
-    }
-
-    Register::ValuePtr BufferDescriptor::descriptorOptions() const
-    {
-        return m_bufferResourceDescriptor->subset({3});
-    }
-
     namespace buffDescriptor
     {
         ExpressionPtr getDefaultOptions(ContextPtr ctx)

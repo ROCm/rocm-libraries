@@ -26,20 +26,12 @@
 
 #pragma once
 
-#include <functional>
-#include <memory>
-
-#include <rocRoller/CodeGen/Instruction.hpp>
-
-#include <rocRoller/Context.hpp>
-#include <rocRoller/Utilities/Comparison.hpp>
-#include <rocRoller/Utilities/Component.hpp>
-#include <rocRoller/Utilities/Generator.hpp>
+#include <rocRoller/Expression.hpp>
 
 namespace rocRoller
 {
-    namespace buffDescriptor {
-
+    namespace buffDescriptor
+    {
         using namespace Expression;
 
         ExpressionPtr setDefaults(ExpressionPtr bufferExpr, ContextPtr ctx);
@@ -52,26 +44,4 @@ namespace rocRoller
         ExpressionPtr setOptions(ExpressionPtr bufferExpr, ExpressionPtr optsExpr);
         ExpressionPtr getOptions(ExpressionPtr bufferExpr);
     }
-
-    class BufferDescriptor
-    {
-    public:
-        BufferDescriptor(Register::ValuePtr srd, ContextPtr context);
-        BufferDescriptor(ContextPtr context);
-        Generator<Instruction> setup();
-        Generator<Instruction> setDefaultOpts();
-        Generator<Instruction> incrementBasePointer(Register::ValuePtr value);
-        Generator<Instruction> setBasePointer(Register::ValuePtr value);
-        Generator<Instruction> setSize(Register::ValuePtr value);
-        Generator<Instruction> setOptions(Register::ValuePtr value);
-
-        Register::ValuePtr allRegisters() const;
-        Register::ValuePtr descriptorOptions() const;
-
-        static uint32_t getDefaultOptionsValue(ContextPtr ctx);
-
-    private:
-        Register::ValuePtr m_bufferResourceDescriptor;
-        ContextPtr         m_context;
-    };
 }

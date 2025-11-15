@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include "rocRoller/InstructionValues/Register_fwd.hpp"
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
@@ -256,7 +257,7 @@ namespace rocRoller
                                         Register::ValuePtr                addr2,
                                         Register::ValuePtr                offset2,
                                         std::string const                 comment,
-                                        std::shared_ptr<BufferDescriptor> buffDesc,
+                                        Register::ValuePtr buffDesc,
                                         BufferInstructionOptions          buffOpts)
     {
         AssertFatal(dest && dest->regType() == Register::Type::Vector
