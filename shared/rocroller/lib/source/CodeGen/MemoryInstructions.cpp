@@ -24,7 +24,6 @@
  *
  *******************************************************************************/
 
-#include "rocRoller/InstructionValues/Register_fwd.hpp"
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
