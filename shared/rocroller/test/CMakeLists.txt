@@ -73,28 +73,11 @@ if(ROCROLLER_ENABLE_ASAN)
 endif()
 
 if(ROCROLLER_ENABLE_GEMM_CLIENT_TESTS)
-    if(NOT ROCROLLER_ENABLE_LLD)
-        # There are a few tests that require ReadELF functionality
-        # which is disabled by default and on a deprecation path.
-        # The tests that fail are missing the amdhsa.version key
-        # and as such hit a fatal error that emits the following
-        #     Key   key = amdhsa.version
-        #      not found: {}
-        # If observed, the test will be marked as skipped rather
-        # than failing.
-        if(ROCROLLER_ENABLE_LLVM)
-            set(rocroller_skip_regex "FatalError\\(hsa_version.size\\(\\) == 2\\)")
-        else()
-            set(rocroller_skip_regex "key = amdhsa.version")
-        endif()
-    endif()
     find_package(Pytest REQUIRED) # requires pip install -r requirements.txt
     pytest_discover_tests(
         GEMMClientTests
         WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/client"
         ENVIRONMENT "ROCROLLER_BUILD_DIR=${PROJECT_BINARY_DIR}" "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0"
-        PROPERTIES
-            SKIP_REGULAR_EXPRESSION ${rocroller_skip_regex}
     )
 endif()
 
