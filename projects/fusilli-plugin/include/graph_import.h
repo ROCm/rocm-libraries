@@ -95,11 +95,11 @@ private:
     // Import graph level properties.
     fusilliGraph.setName(hipDnnGraph.name()->str())
         .setIODataType(
-            FUSILLI_TRY(hipDnnDataTypeToFusilliDataType(hipDnnGraph.io_type())))
+            FUSILLI_TRY(hipDnnDataTypeToFusilliDataType(hipDnnGraph.io_data_type())))
         .setIntermediateDataType(FUSILLI_TRY(
-            hipDnnDataTypeToFusilliDataType(hipDnnGraph.intermediate_type())))
+            hipDnnDataTypeToFusilliDataType(hipDnnGraph.intermediate_data_type())))
         .setComputeDataType(FUSILLI_TRY(
-            hipDnnDataTypeToFusilliDataType(hipDnnGraph.compute_type())));
+            hipDnnDataTypeToFusilliDataType(hipDnnGraph.compute_data_type())));
 
     return importNodes();
   }

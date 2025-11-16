@@ -211,6 +211,7 @@ createValidConvFwdGraph(int64_t xUID = 0, int64_t wUID = 1, int64_t yUID = 2,
   std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
   auto node = CreateNodeDirect(
       builder, "conv_fwd",
+      dataType,
       hipdnn_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes,
       convAttributes.Union());
   nodes.push_back(node);
