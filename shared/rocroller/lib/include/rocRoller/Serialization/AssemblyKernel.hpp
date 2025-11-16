@@ -135,9 +135,9 @@ namespace rocRoller
                 {
                     AssertFatal(workgroupSize.size() == 3);
                     kern.m_workgroupSize = {workgroupSize[0], workgroupSize[1], workgroupSize[2]};
-                    kern.m_sgprCount = sgpr_count;
-                    kern.m_vgprCount = vgpr_count;
-                    kern.m_agprCount = agpr_count;
+                    kern.m_sgprCount     = sgpr_count;
+                    kern.m_vgprCount     = vgpr_count;
+                    kern.m_agprCount     = agpr_count;
                     kern.m_group_segment_fixed_size = group_segment_fixed_size;
                 }
                 iot::mapRequired(io, ".kernel_dimensions", kern.m_kernelDimensions);

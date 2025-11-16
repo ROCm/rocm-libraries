@@ -29,8 +29,8 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 
 #include <rocRoller/Serialization/AssemblyKernel.hpp>
-#include <rocRoller/Serialization/YAML.hpp>
 #include <rocRoller/Serialization/ELF.hpp>
+#include <rocRoller/Serialization/YAML.hpp>
 
 namespace rocRoller
 {

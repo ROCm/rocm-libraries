@@ -26,9 +26,9 @@
 
 #pragma once
 
+#include <amd_comgr/amd_comgr.h>
 #include <istream>
 #include <string>
-#include <amd_comgr/amd_comgr.h>
 
 namespace rocRoller
 {

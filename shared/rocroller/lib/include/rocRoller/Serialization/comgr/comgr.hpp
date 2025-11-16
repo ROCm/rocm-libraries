@@ -24,7 +24,6 @@
  *
  *******************************************************************************/
 
-
 #pragma once
 
 #include <rocRoller/Serialization/Base.hpp>
@@ -37,8 +36,8 @@
 #include <cstddef>
 #include <sstream>
 #include <string>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 namespace rocRoller
 {
@@ -47,7 +46,7 @@ namespace rocRoller
         struct ComgrNodeInput
         {
             amd_comgr_metadata_node_t node;
-            void* context;
+            void*                     context;
 
             ComgrNodeInput(amd_comgr_metadata_node_t n, void* c = nullptr)
                 : node(n)
@@ -59,9 +58,11 @@ namespace rocRoller
             void mapRequired(const char* key, T& obj)
             {
                 amd_comgr_metadata_node_t value;
-                auto status = amd_comgr_metadata_lookup(node, key, &value);
-                AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, 
-                    "Key ", ShowValue(key), " not found in comgr metadata");
+                auto                      status = amd_comgr_metadata_lookup(node, key, &value);
+                AssertFatal(status == AMD_COMGR_STATUS_SUCCESS,
+                            "Key ",
+                            ShowValue(key),
+                            " not found in comgr metadata");
                 input(value, obj);
                 amd_comgr_destroy_metadata(value);
             }
@@ -70,20 +71,20 @@ namespace rocRoller
             void mapOptional(const char* key, T& obj)
             {
                 amd_comgr_metadata_node_t value;
-                auto status = amd_comgr_metadata_lookup(node, key, &value);
+                auto                      status = amd_comgr_metadata_lookup(node, key, &value);
                 if(status == AMD_COMGR_STATUS_SUCCESS)
                 {
-                    input(value,obj);
+                    input(value, obj);
                     amd_comgr_destroy_metadata(value);
                 }
             }
 
             template <typename T>
-            requires(CMappedType<T, ComgrNodeInput> || EmptyMappedType<T, ComgrNodeInput>)
-            void input(amd_comgr_metadata_node_t& n, T& obj)
+            requires(CMappedType<T, ComgrNodeInput> || EmptyMappedType<T, ComgrNodeInput>) void input(
+                amd_comgr_metadata_node_t& n, T& obj)
             {
                 ComgrNodeInput subInput(n, context);
-                EmptyContext ctx;
+                EmptyContext   ctx;
                 MappingTraits<T, ComgrNodeInput>::mapping(subInput, obj, ctx);
             }
 
@@ -91,7 +92,7 @@ namespace rocRoller
             void input(amd_comgr_metadata_node_t& n, T& obj)
             {
                 size_t count;
-                auto status = amd_comgr_get_metadata_list_size(n, &count);
+                auto   status = amd_comgr_get_metadata_list_size(n, &count);
                 AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to get list size");
 
                 for(size_t i = 0; i < count; i++)
@@ -99,7 +100,7 @@ namespace rocRoller
                     amd_comgr_metadata_node_t elNode;
                     status = amd_comgr_index_list_metadata(n, i, &elNode);
                     AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to index list");
-                    
+
                     auto& value = SequenceTraits<T, ComgrNodeInput>::element(*this, obj, i);
                     input(elNode, value);
                     amd_comgr_destroy_metadata(elNode);
@@ -115,22 +116,21 @@ namespace rocRoller
             template <CustomMappingType<ComgrNodeInput> T>
             void input(amd_comgr_metadata_node_t& n, T& obj)
             {
-                auto callback = [] (amd_comgr_metadata_node_t key, 
-                                    amd_comgr_metadata_node_t value, 
-                                    void* user_data
-                                )-> amd_comgr_status_t
-                {
-                    auto* pair = static_cast<std::pair<ComgrNodeInput*, T*>*>(user_data);
+                auto callback = [](amd_comgr_metadata_node_t key,
+                                   amd_comgr_metadata_node_t value,
+                                   void*                     user_data) -> amd_comgr_status_t {
+                    auto*  pair = static_cast<std::pair<ComgrNodeInput*, T*>*>(user_data);
                     size_t size;
                     amd_comgr_get_metadata_string(key, &size, nullptr); // Get size
                     std::string keyStr(size - 1, '\0');
                     amd_comgr_get_metadata_string(key, &size, keyStr.data()); // Get string
-                    
-                    CustomMappingTraits<T, ComgrNodeInput>::inputOne(*pair->first, keyStr, *pair->second);
+
+                    CustomMappingTraits<T, ComgrNodeInput>::inputOne(
+                        *pair->first, keyStr, *pair->second);
                     return AMD_COMGR_STATUS_SUCCESS;
                 };
 
-                ComgrNodeInput subInput(n, context);
+                ComgrNodeInput                 subInput(n, context);
                 std::pair<ComgrNodeInput*, T*> userData(&subInput, &obj);
                 amd_comgr_iterate_map_metadata(n, callback, &userData);
             }
@@ -154,10 +154,10 @@ namespace rocRoller
             {
                 amd_comgr_metadata_kind_t kind;
                 amd_comgr_get_metadata_kind(n, &kind);
-                if (kind == AMD_COMGR_METADATA_KIND_STRING)
+                if(kind == AMD_COMGR_METADATA_KIND_STRING)
                 {
-                    size_t size;
-                    auto status = amd_comgr_get_metadata_string(n, &size, nullptr);
+                    size_t      size;
+                    auto        status = amd_comgr_get_metadata_string(n, &size, nullptr);
                     std::string str(size - 1, '\0');
                     status = amd_comgr_get_metadata_string(n, &size, str.data());
                 }
@@ -165,12 +165,13 @@ namespace rocRoller
         };
 
         template <>
-        inline void ComgrNodeInput::comgrNodeInputHelper(amd_comgr_metadata_node_t& n, std::string& val)
+        inline void ComgrNodeInput::comgrNodeInputHelper(amd_comgr_metadata_node_t& n,
+                                                         std::string&               val)
         {
             size_t size;
-            auto status = amd_comgr_get_metadata_string(n, &size, nullptr);
+            auto   status = amd_comgr_get_metadata_string(n, &size, nullptr);
             AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to get string size");
-            
+
             val.resize(size - 1);
             status = amd_comgr_get_metadata_string(n, &size, val.data());
             AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to get string");
@@ -185,7 +186,8 @@ namespace rocRoller
         }
 
         template <>
-        inline void ComgrNodeInput::comgrNodeInputHelper(amd_comgr_metadata_node_t& n, unsigned int& val)
+        inline void ComgrNodeInput::comgrNodeInputHelper(amd_comgr_metadata_node_t& n,
+                                                         unsigned int&              val)
         {
             std::string str;
             comgrNodeInputHelper(n, str);
@@ -205,7 +207,7 @@ namespace rocRoller
         {
             amd_comgr_metadata_kind_t kind;
             amd_comgr_get_metadata_kind(n, &kind);
-            
+
             if(kind == AMD_COMGR_METADATA_KIND_STRING)
             {
                 std::string str;
@@ -219,7 +221,7 @@ namespace rocRoller
             }
             else
             {
-                AssertFatal(false, "Unsupported metadata kind for boolean");
+                AssertFatal(false, "Unsupported boolean metadata");
             }
         }
 
@@ -232,7 +234,8 @@ namespace rocRoller
         }
 
         template <>
-        inline void ComgrNodeInput::comgrNodeInputHelper(amd_comgr_metadata_node_t& n, BFloat16& val)
+        inline void ComgrNodeInput::comgrNodeInputHelper(amd_comgr_metadata_node_t& n,
+                                                         BFloat16&                  val)
         {
             float floatVal;
             comgrNodeInputHelper(n, floatVal);
@@ -340,7 +343,7 @@ namespace rocRoller
             static void enumCase(IO& io, T& member, const char* key, T value)
             {
                 size_t size;
-                auto status = amd_comgr_get_metadata_string(io.node, &size, nullptr);
+                auto   status = amd_comgr_get_metadata_string(io.node, &size, nullptr);
                 if(status == AMD_COMGR_STATUS_SUCCESS)
                 {
                     std::string str(size - 1, '\0');

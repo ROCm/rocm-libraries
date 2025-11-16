@@ -637,8 +637,8 @@ namespace rocRoller
         m_executableKernel->loadKernelFromCodeObjectFile(
             fileName, kernelName, m_context->targetArchitecture().target());
 
-        auto kernels = AssemblyKernels::fromELF(fileName).kernels;
-        auto kernel = kernels.at(0);
+        auto kernels   = AssemblyKernels::fromELF(fileName).kernels;
+        auto kernel    = kernels.at(0);
         auto kernelPtr = std::make_shared<AssemblyKernel>(kernel);
         m_context->setKernel(kernelPtr);
         return kernelPtr;

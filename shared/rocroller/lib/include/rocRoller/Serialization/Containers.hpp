@@ -206,7 +206,7 @@ namespace rocRoller
             }
         };
 
-    ROCROLLER_SERIALIZE_VECTOR(true, int);
-    ROCROLLER_SERIALIZE_VECTOR(true, unsigned int);
+        ROCROLLER_SERIALIZE_VECTOR(true, int);
+        ROCROLLER_SERIALIZE_VECTOR(true, unsigned int);
     } // namespace Serialization
 } // namespace rocRoller

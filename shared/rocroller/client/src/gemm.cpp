@@ -290,7 +290,8 @@ namespace rocRoller::Client::GEMMClient
 
         commandKernel->loadKernel();
 
-        auto commandArgs = gemm->commandArguments(command, problemParams, runParams); // Breaking here
+        auto commandArgs
+            = gemm->commandArguments(command, problemParams, runParams); // Breaking here
 
         auto [aTag, bTag, cTag, dTag] = gemm->getABCDTags();
 
@@ -823,14 +824,16 @@ namespace rocRoller::Client::GEMMClient
         {
             std::cout << "Loading kernel from: " << io.loadCOPath << std::endl;
 
-            try {
-                auto elfKernels = AssemblyKernels::fromELF(io.loadCOPath).kernels;
+            try
+            {
+                auto elfKernels    = AssemblyKernels::fromELF(io.loadCOPath).kernels;
                 auto kernelFromELF = elfKernels.at(0);
-                auto metadataYaml = kernelFromELF.amdgpu_metadata_yaml();
+                auto metadataYaml  = kernelFromELF.amdgpu_metadata_yaml();
                 std::cout << metadataYaml << std::endl;
                 std::cout << *kernelFromELF.command() << std::endl;
             }
-            catch (const std::exception& e) {
+            catch(const std::exception& e)
+            {
                 std::cerr << "Error loading ELF file: " << e.what() << std::endl;
                 return ReturnCodes::GenerateFailure;
             }
