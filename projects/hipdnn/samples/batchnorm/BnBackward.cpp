@@ -46,44 +46,9 @@ void SampleRunner::operator()(const TensorLayout& layout)
     bnBwdAttributes.set_saved_mean_and_inv_variance(savedMean, savedInvVariance);
 
     auto [dx, dscale, dbias] = graph->batchnorm_backward(dy, x, scale, bnBwdAttributes);
-
-    // Configure output tensor attributes (matching integration test pattern)
-    dx->set_output(true)
-        .set_data_type(inputType)
-        .set_dim({n, c, h, w})
-        .set_stride(utilities::generateStrides({n, c, h, w}, layout.strideOrder));
-
-    dscale->set_output(true)
-        .set_data_type(intermediateType)
-        .set_dim({1, c, 1, 1})
-        .set_stride(utilities::generateStrides({1, c, 1, 1}));
-
-    dbias->set_output(true)
-        .set_data_type(intermediateType)
-        .set_dim({1, c, 1, 1})
-        .set_stride(utilities::generateStrides({1, c, 1, 1}));
-
-    utilities::Tensor<InputType> dyTensor(dy->get_dim(), layout);
-    utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
-    utilities::Tensor<IntermediateType> scaleTensor(scale->get_dim());
-    utilities::Tensor<IntermediateType> savedMeanTensor(savedMean->get_dim());
-    utilities::Tensor<IntermediateType> savedInvVarTensor(savedInvVariance->get_dim());
-    utilities::Tensor<InputType> dxTensor(dx->get_dim(), layout);
-    utilities::Tensor<IntermediateType> dscaleTensor(dscale->get_dim());
-    utilities::Tensor<IntermediateType> dbiasTensor(dbias->get_dim());
-
-    // Initialize tensors with ranges matching integration tests
-    // Input gradients and activations: -1.0 to 1.0
-    dyTensor.fillWithRandomValues(static_cast<InputType>(-1.0f), static_cast<InputType>(1.0f));
-    xTensor.fillWithRandomValues(static_cast<InputType>(-1.0f), static_cast<InputType>(1.0f));
-    // Scale: -2.0 to 2.0 (matches MIOpen expectations)
-    scaleTensor.fillWithRandomValues(static_cast<IntermediateType>(-2.0f),
-                                     static_cast<IntermediateType>(2.0f));
-    // Saved statistics from forward pass
-    savedMeanTensor.fillWithRandomValues(static_cast<IntermediateType>(-0.1f),
-                                         static_cast<IntermediateType>(0.1f));
-    savedInvVarTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
-                                           static_cast<IntermediateType>(2.0f));
+    dx->set_output(true);
+    dscale->set_output(true);
+    dbias->set_output(true);
 
     HIPDNN_FE_CHECK(graph->validate());
     std::cout << "Graph validation successful.\n";
@@ -99,6 +64,24 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     HIPDNN_FE_CHECK(graph->build_plans());
     std::cout << "Plans build successful.\n";
+
+    utilities::Tensor<InputType> dyTensor(dy->get_dim(), layout);
+    utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
+    utilities::Tensor<IntermediateType> scaleTensor(scale->get_dim());
+    utilities::Tensor<IntermediateType> savedMeanTensor(savedMean->get_dim());
+    utilities::Tensor<IntermediateType> savedInvVarTensor(savedInvVariance->get_dim());
+    utilities::Tensor<InputType> dxTensor(dx->get_dim(), layout);
+    utilities::Tensor<IntermediateType> dscaleTensor(dscale->get_dim());
+    utilities::Tensor<IntermediateType> dbiasTensor(dbias->get_dim());
+
+    dyTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
+    xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
+    scaleTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
+                                     static_cast<IntermediateType>(1.0f));
+    savedMeanTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
+                                         static_cast<IntermediateType>(1.0f));
+    savedInvVarTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
+                                           static_cast<IntermediateType>(1.0f));
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[dy->get_uid()] = dyTensor.memory().deviceData();
@@ -128,15 +111,14 @@ void SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<IntermediateType> dscaleRefTensor(dscale->get_dim());
         utilities::Tensor<IntermediateType> dbiasRefTensor(dbias->get_dim());
 
-        test_utilities::CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::batchnormBwd(
-            dyTensor,
-            xTensor,
-            savedMeanTensor,
-            savedInvVarTensor,
-            scaleTensor,
-            dxRefTensor,
-            dscaleRefTensor,
-            dbiasRefTensor);
+        test_utilities::CpuFpReferenceBatchnorm::backward(dyTensor,
+                                                          xTensor,
+                                                          savedMeanTensor,
+                                                          savedInvVarTensor,
+                                                          scaleTensor,
+                                                          dxRefTensor,
+                                                          dscaleRefTensor,
+                                                          dbiasRefTensor);
 
         auto tolerance = test_utilities::batchnorm::getToleranceBackward<InputType>();
 

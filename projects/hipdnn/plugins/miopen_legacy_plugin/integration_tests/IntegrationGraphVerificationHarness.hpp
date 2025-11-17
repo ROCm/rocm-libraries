@@ -11,6 +11,7 @@
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/VectorLoggingUtils.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 #include <hipdnn_sdk/utilities/Workspace.hpp>
@@ -81,6 +82,8 @@ protected:
         ASSERT_GE(outputTensorIds.size(), 1)
             << "At least one output tensor id must be specified for validation.";
 
+        HIPDNN_LOG_INFO("Validating {} output tensors", outputTensorIds);
+
         for(const auto& tensorId : outputTensorIds)
         {
             auto& cpuTensor = cpuBundle.tensors.at(tensorId);
@@ -91,6 +94,12 @@ protected:
             // that the data there is now valid so that it knows to copy from device to host when requested
             // by the validation step.
             gpuTensor->markDeviceModified();
+
+            if(_tensorIdToValidatorMap.find(tensorId) == _tensorIdToValidatorMap.end())
+            {
+                FAIL() << "No validator registered for tensor with id: " << tensorId
+                       << ", name: " << getOutputTensorName(tensorId);
+            }
 
             bool valid = _tensorIdToValidatorMap.at(tensorId)->allClose(*cpuTensor, *gpuTensor);
             ASSERT_TRUE(valid) << "Mismatch found in tensor with id: " << tensorId

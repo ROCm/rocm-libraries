@@ -56,8 +56,8 @@ inline void printSampleHelp(const std::string& sampleName)
     std::cout << "Usage: " << sampleName << " [OPTIONS]\n"
               << "Options:\n"
               << "  --verify-cpu, -vc           Enable CPU reference validation\n"
-              << "  --batch-stats-only          Use batch statistics only (no running stats)\n"
-              << "  --full-training             Use full training with running statistics\n"
+              << "  --batch-stats-only          Use batch statistics only (no running stats) [BN training only]\n"
+              << "  --full-training             Use full training with running statistics [BN training only]\n"
               << "  --help, -h                  Show this help message\n"
               << std::endl;
 }
@@ -103,8 +103,8 @@ inline Config parseCommandLineArgs(int argc, char* argv[])
 template <typename F>
 void run(F&& f)
 {
-    f.template operator()<float, float>(TensorLayout::NCHW);
     f.template operator()<half, float>(TensorLayout::NCHW);
+    f.template operator()<float, float>(TensorLayout::NCHW);
     f.template operator()<hip_bfloat16, float>(TensorLayout::NCHW);
     f.template operator()<float, float>(TensorLayout::NHWC);
     f.template operator()<half, float>(TensorLayout::NHWC);

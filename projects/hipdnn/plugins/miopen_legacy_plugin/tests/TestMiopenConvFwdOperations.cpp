@@ -123,12 +123,13 @@ protected:
             static_cast<DataType>(-1.0f), static_cast<DataType>(1.0f), testCase.seed);
         Tensor<DataType> yTensorCpu(yTensor.dims(), _layout);
 
-        CpuFpReferenceConvolutionImpl<DataType, float>::convFwdInference(xTensorCpu,
-                                                                         wTensorCpu,
-                                                                         yTensorCpu,
-                                                                         testCase.convStride,
-                                                                         testCase.convDilation,
-                                                                         testCase.convPrePadding);
+        CpuFpReferenceConvolution::fprop<DataType, DataType, DataType, float>(
+            xTensorCpu,
+            wTensorCpu,
+            yTensorCpu,
+            testCase.convStride,
+            testCase.convDilation,
+            testCase.convPrePadding);
 
         CpuFpReferenceValidation<DataType> cpuRefValidationInput(tolerance, tolerance);
 

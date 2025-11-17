@@ -164,7 +164,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     // Compute reference result manually: (conv(X, W) + 5.0) * 2.0
     // Step 1: Perform convolution
     Tensor<float> tempConvOutput(yDims, TensorLayout::NHWC);
-    CpuFpReferenceConvolutionImpl<float, float>::convFwdInference(
+    CpuFpReferenceConvolution::fprop<float, float, float, float>(
         refXTensor, refWTensor, tempConvOutput, strides, dilation, padding);
 
     // Step 2: Add constant (5.0) to convolution result

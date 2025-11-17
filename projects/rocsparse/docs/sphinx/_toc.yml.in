@@ -14,6 +14,8 @@ subtrees:
   entries:
   - file: conceptual/rocsparse-design
     title: rocSPARSE design
+  - file: conceptual/storage-formats-sparse
+    title: Storage formats
 
 - caption: How to
   entries:
