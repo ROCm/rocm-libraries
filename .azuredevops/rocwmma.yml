@@ -28,10 +28,10 @@ trigger:
     include:
     - projects/rocwmma
     exclude:
-    - projects/rocwmma/.githooks
-    - projects/rocwmma/.github
-    - projects/rocwmma/.jenkins
-    - projects/rocwmma/docs
+    - projects/rocwmma/.githooks/**
+    - projects/rocwmma/.github/**
+    - projects/rocwmma/.jenkins/**
+    - projects/rocwmma/docs/**
     - 'projects/rocwmma/.*.y*ml'
     - 'projects/rocwmma/*.md'
 
