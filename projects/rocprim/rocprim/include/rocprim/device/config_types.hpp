@@ -596,7 +596,8 @@ template<class Config,
          class Kernel,
          class Target,
          template<class, class, class>
-         class LaunchSelector>
+         class LaunchSelector,
+         bool PassTarget = false>
 ROCPRIM_KERNEL __launch_bounds__((LaunchSelector<Config, Selector, Target>::block_size))
 void trampoline_kernel(Kernel kernel)
 {
@@ -609,7 +610,14 @@ void trampoline_kernel(Kernel kernel)
     if constexpr(Target::i == device_arch_target.i)
 #endif
     {
-        kernel(ArchConfig{});
+        if constexpr(PassTarget)
+        {
+            kernel(ArchConfig{}, Target{});
+        }
+        else
+        {
+            kernel(ArchConfig{});
+        }
     }
 #if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
     else
@@ -622,6 +630,7 @@ void trampoline_kernel(Kernel kernel)
 template<class Config,
          class ConfigSelector,
          template<class, class, class> class LaunchSelector = default_config_static_selector,
+         bool PassTarget                                    = false,
          class Kernel>
 auto make_launch_plan(target target_current, Kernel kernel) -> launch_plan<Kernel>
 {
@@ -641,7 +650,8 @@ auto make_launch_plan(target target_current, Kernel kernel) -> launch_plan<Kerne
                                                  ConfigSelector,
                                                  Kernel,
                                                  decltype(t),
-                                                 LaunchSelector>;
+                                                 LaunchSelector,
+                                                 PassTarget>;
             }
         });
 
@@ -668,11 +678,13 @@ hipError_t execute_launch_plan(target_arch arch,
 template<class Config,
          class ConfigSelector,
          template<class, class, class> class LaunchSelector = default_config_static_selector,
+         bool PassTarget                                    = false,
          class Kernel>
 hipError_t execute_launch_plan(
     target t, Kernel kernel, dim3 grid_size, dim3 block_size, size_t shmem, hipStream_t stream)
 {
-    const auto launch_plan = make_launch_plan<Config, ConfigSelector, LaunchSelector>(t, kernel);
+    const auto launch_plan
+        = make_launch_plan<Config, ConfigSelector, LaunchSelector, PassTarget>(t, kernel);
     launch_plan.launch(grid_size, block_size, shmem, stream);
     return hipGetLastError();
 }
