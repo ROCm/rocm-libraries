@@ -256,7 +256,7 @@ RunParameterPredictionModel<ck::bhalf_t, bool (*)(int, int)>(
     std::function<std::vector<std::string>(const ProblemDescription&)>,
     std::string,
     bool (*&&)(int, int));
-#endif
+#endif // MIOPEN_USE_COMPOSABLEKERNEL
 
 // helper function to get a dummy execution context for when we do not have a real context
 const miopen::ExecutionContext& GetDummyCtx()

@@ -37,10 +37,10 @@
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
 
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
 namespace miopen {
 namespace solver {
 namespace conv {
-#if MIOPEN_ENABLE_AI_KERNEL_TUNING
 const miopen::ExecutionContext& GetDummyCtx();
 
 MIOPEN_INTERNALS_EXPORT std::map<std::string, float>
