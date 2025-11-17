@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,10 +24,6 @@
  *
  *******************************************************************************/
 
-/**
- * Scratch space operation.
- */
-
 #pragma once
 
 #include <rocRoller/Operations/Operation.hpp>
@@ -45,12 +41,11 @@ namespace rocRoller
         {
         public:
             Scratch() = delete;
-
             /**
              * @param tag Operation tag for this scratch space
              * @param policy Scratch space policy (guarantees about content)
             */
-            explicit Scratch(OperationTag tag, ScratchPolicy policy);
+            explicit Scratch(OperationTag tag, ScratchPolicy policy = ScratchPolicy::None);
 
             OperationTag  getTag() const;
             ScratchPolicy policy() const;

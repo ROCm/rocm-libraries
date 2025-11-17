@@ -72,7 +72,6 @@ namespace rocRoller
                         ArgumentType::Value,
                         DataDirection::ReadWrite,
                         rocRoller::SCRATCH);
-
                     return command;
                 }
 

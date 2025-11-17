@@ -85,6 +85,14 @@ namespace ScratchOperationTest
             CHECK(scratch.policy() == ScratchPolicy::ZeroedBeforeAndAfter);
         }
 
+        SECTION("Constructor with only tag defaults policy to None")
+        {
+            auto    tag = OperationTag();
+            Scratch scratch(tag);
+            CHECK(scratch.policy() == ScratchPolicy::None);
+            CHECK(scratch.getTag() == tag);
+        }
+
         SECTION("Create Scratch with None policy and tag")
         {
             auto    tag = OperationTag();
