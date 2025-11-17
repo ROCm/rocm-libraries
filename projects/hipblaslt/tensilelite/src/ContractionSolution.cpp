@@ -34,9 +34,6 @@
 #include <Tensile/Utils.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
-#include <origami/streamk.hpp>
-#include <origami/utils.hpp>
-
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -49,8 +46,6 @@
 
 namespace TensileLite
 {
-    using ReductionType = origami::streamk::reduction_type;
-
     enum class KERNELARGTYPE
     {
         NORMAL   = 0,
@@ -599,7 +594,7 @@ namespace TensileLite
         }
         else if(problemType.stridedBatched)
         {
-            if(sizeMapping.streamK > 0 && sk.reduction == ReductionType::Parallel)
+            if(sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel)
             {
                 args.template append<void const*>("ws_d", (uint8_t*)inputs.ws + workspaceOffsetInByte);
                 args.template append<void const*>("ws_c", (uint8_t*)inputs.ws + workspaceOffsetInByte);
@@ -640,7 +635,7 @@ namespace TensileLite
 
             // StreamK workspace + flags
             args.template append<void const*>("ws", inputs.ws);
-            if(sk.reduction == ReductionType::Parallel)
+            if(sk.reduction == origami::reduction_t::parallel)
                 args.template append<void*>("Flags", nullptr);
             else
                 args.template append<void*>("Flags", inputs.Synchronizer);
@@ -741,7 +736,7 @@ namespace TensileLite
               }
             else if(sizeMapping.streamK >= 2) // Two-tile SK
               {
-                if(sk.reduction == ReductionType::Parallel)
+                if(sk.reduction == origami::reduction_t::parallel)
                   {
                     uint32_t skSplit = sk.grid / tiles; // skTiles is skSplit in parallel reduction path
                     uint32_t skItersPerWG = itersPerTile / skSplit;
@@ -989,20 +984,28 @@ namespace TensileLite
                 auto sizes = problem.problemSizes();
                 if(sizes.size() >= 4)
                 {
-                    auto wgm_pred = origami::select_best_wgm(*(hipAMDGPU->analyticalHardware),
-                                                            sizes[0],
-                                                            sizes[1],
-                                                            sizes[3],
-                                                            sizes[2],
-                                                            sizeMapping.macroTile.x,
-                                                            sizeMapping.macroTile.y,
-                                                            sizeMapping.depthU,
-                                                            sizeMapping.nonTemporalA,
-                                                            sizeMapping.nonTemporalB,
-                                                            skgrid,
-                                                            false);
-                    defaultWGMXCC = std::get<0>(wgm_pred);
-                    defaultWGM    = std::get<1>(wgm_pred);
+                    origami::problem_t origami_problem = {
+                            .size = {.m = sizes[0], 
+                                     .n = sizes[1], 
+                                     .k = sizes[3]},
+                            .batch = sizes[2],
+                        };
+                    origami::config_t origami_config = {
+                    .mt = {
+                        static_cast<size_t>(sizeMapping.macroTile.x), 
+                        static_cast<size_t>(sizeMapping.macroTile.y), 
+                        static_cast<size_t>(sizeMapping.depthU)
+                        },
+                        .non_temporal_a = sizeMapping.nonTemporalA,
+                        .non_temporal_b = sizeMapping.nonTemporalB,
+                    };
+                    auto bestWGM = origami::select_workgroup_mapping(origami_problem,
+                                                                         *(hipAMDGPU->analyticalHardware),
+                                                                         origami_config,
+                                                                         skgrid,
+                                                                         false);
+                    defaultWGMXCC = bestWGM.first;
+                    defaultWGM = bestWGM.second;
 
                     // Add to cache only if dynamically calculated.
                     paramsCache.add(std::make_pair(defaultWGM, defaultWGMXCC), problem);
@@ -2596,7 +2599,7 @@ namespace TensileLite
             auto tiles = problem.getNumTiles(sizeMapping, 1);
             sk.grid = getSKGrid(problem, hardware, tiles, sk.reduction);
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
-            if(sk.grid > 0 && (sk.reduction == ReductionType::Parallel || (tiles % sk.grid != 0 && !streamKDP)))
+            if(sk.grid > 0 && (sk.reduction == origami::reduction_t::parallel || (tiles % sk.grid != 0 && !streamKDP)))
             {
                 // Check ideal amount of workspace for optimal performance
                 size_t idealWorkspace = partialTileSize(sk.grid);
@@ -2604,7 +2607,7 @@ namespace TensileLite
                 // Performance will likely be lower, but the kernel can run if workspace is unavailable
                 if(idealWorkspace > problem.workspaceSize())
                 {
-                    sk.reduction = ReductionType::Tree;
+                    sk.reduction = origami::reduction_t::tree;
                     sk.grid = tiles;
                 }
             }
@@ -2615,7 +2618,7 @@ namespace TensileLite
         else
             rv.push_back(generateSingleCall<false>(problem, inputs, hardware, sk));
 
-        if(((sizeMapping.globalAccumulation != 3) && gsu > 1 && sizeMapping.globalAccumulation) || sk.reduction == ReductionType::Parallel)
+        if(((sizeMapping.globalAccumulation != 3) && gsu > 1 && sizeMapping.globalAccumulation) || sk.reduction == origami::reduction_t::parallel)
         {
             if(debug)
                 rv.push_back(generateOutputConversionCall<true>(problem, inputs, sk, autoGsuVal));
@@ -2992,10 +2995,10 @@ namespace TensileLite
             auto       tiles     = problem.getNumTiles(sizeMapping, 1);
             if(tiles > 0) // Grouped GEMM reports 0 tiles
             {
-                ReductionType reductionStrat = getSKReduction(problem, hardware);
+                auto reductionStrat = getSKReduction(problem, hardware);
                 size_t skGrid = getSKGrid(problem, hardware, tiles, reductionStrat);
                 // Get space required for partial tiles=
-                if(reductionStrat == ReductionType::Parallel)
+                if(reductionStrat == origami::reduction_t::parallel)
                 {
                     size_t splitk = skGrid / tiles;
                     size_t idealWorkspace = requiredWorkspaceSizeGsu(problem, hardware, splitk);
@@ -3123,53 +3126,9 @@ namespace TensileLite
         return 0;
     }
 
-    origami::data_type_t datatypeToAnalyticalDatatype(rocisa::DataType type)
+    origami::reduction_t ContractionSolution::getSKReduction(Problem const& problem, Hardware const& hardware) const
     {
-        switch(type)
-        {
-            case rocisa::DataType::Float:
-                return origami::data_type_t::Float;
-            case rocisa::DataType::Double:
-                return origami::data_type_t::Double;
-            case rocisa::DataType::Half:
-                return origami::data_type_t::Half;
-            case rocisa::DataType::Int8x4:
-                return origami::data_type_t::Int8x4;
-            case rocisa::DataType::Int32:
-                return origami::data_type_t::Int32;
-            case rocisa::DataType::BFloat16:
-                return origami::data_type_t::BFloat16;
-            case rocisa::DataType::Int8:
-                return origami::data_type_t::Int8;
-            case rocisa::DataType::Int64:
-                return origami::data_type_t::Int64;
-            case rocisa::DataType::XFloat32:
-                return origami::data_type_t::XFloat32;
-            case rocisa::DataType::Float8_fnuz:
-                return origami::data_type_t::Float8_fnuz;
-            case rocisa::DataType::BFloat8_fnuz:
-                return origami::data_type_t::BFloat8_fnuz;
-            case rocisa::DataType::Float8BFloat8_fnuz:
-                return origami::data_type_t::Float8BFloat8_fnuz;
-            case rocisa::DataType::BFloat8Float8_fnuz:
-                return origami::data_type_t::BFloat8Float8_fnuz;
-            case rocisa::DataType::Float8:
-                return origami::data_type_t::Float8;
-            case rocisa::DataType::BFloat8:
-                return origami::data_type_t::BFloat8;
-            case rocisa::DataType::Float8BFloat8:
-                return origami::data_type_t::Float8BFloat8;
-            case rocisa::DataType::BFloat8Float8:
-                return origami::data_type_t::BFloat8Float8;
-
-            default:
-                return origami::data_type_t::None;
-        }
-    }
-
-    ReductionType ContractionSolution::getSKReduction(Problem const& problem, Hardware const& hardware) const
-    {
-        ReductionType reductionStrat = ReductionType::Tree;
+        auto reductionStrat = origami::reduction_t::tree;
 
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
         assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
@@ -3177,7 +3136,7 @@ namespace TensileLite
         if(!sizeMapping.customKernelName.empty())
         {
             // Custom kernel currently only supports single-kernel reduction
-            reductionStrat = ReductionType::Tree;
+            reductionStrat = origami::reduction_t::tree;
         }
         else if(pAMDGPU->skDynamicGrid > 0)
         {
@@ -3201,19 +3160,25 @@ namespace TensileLite
             {
                 batch *= problem.batchSize(i);
             }
-            origami::data_type_t miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
-            reductionStrat = origami::streamk::select_reduction(
-                x,
-                y,
-                z,
-                batch,
-                sizeMapping.macroTile.x,
-                sizeMapping.macroTile.y,
-                sizeMapping.depthU,
+            origami::problem_t origami_problem = {
+                .size = {x, y, z},
+                .batch = batch,
+            };
+            origami::config_t origami_config = {
+                .mt = {
+                    static_cast<size_t>(sizeMapping.macroTile.x), 
+                    static_cast<size_t>(sizeMapping.macroTile.y), 
+                    static_cast<size_t>(sizeMapping.depthU)
+                },
+            };
+
+             reductionStrat = origami::streamk::select_reduction(
+                origami_problem,
                 *(hipAMDGPU->analyticalHardware),
-                pAMDGPU->skDynamicGrid);
+                origami_config,
+                static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid));
         }
 
         return reductionStrat;
@@ -3222,7 +3187,7 @@ namespace TensileLite
     size_t ContractionSolution::getSKGrid(Problem const&  problem,
                                           Hardware const& hardware,
                                           size_t          tiles,
-                                          ReductionType& reductionStrat) const
+                                          origami::reduction_t reductionStrat) const
     {
         size_t skGrid = tiles; // Fallback
         const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
@@ -3265,33 +3230,37 @@ namespace TensileLite
             {
                 batch *= problem.batchSize(i);
             }
-            origami::data_type_t miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
-            skGrid = origami::streamk::select_grid(x,
-                                                   y,
-                                                   z,
-                                                   batch,
-                                                   problem.transA(),
-                                                   problem.transB(),
-                                                   problem.a().elementBytes() * 8,
-                                                   problem.b().elementBytes() * 8,
-                                                   problem.c().elementBytes() * 8,
-                                                   miDataType,
-                                                   problem.workspaceSize(),
-                                                   sizeMapping.macroTile.x,
-                                                   sizeMapping.macroTile.y,
-                                                   sizeMapping.depthU,
-                                                   sizeMapping.matrixInstruction[0],
-                                                   sizeMapping.matrixInstruction[1],
-                                                   sizeMapping.matrixInstruction[2],
-                                                   sizeMapping.workGroupMapping,
-                                                   sizeMapping.workspaceSizePerElemC,
-                                                   sizeMapping.CUOccupancy,
-                                                   *(hipAMDGPU->analyticalHardware),
-                                                   pAMDGPU->skDynamicGrid,
-                                                   reductionStrat,
-                                                   pAMDGPU->skMaxCUs);
+            origami::problem_t origami_problem = {
+                .size = {x, y, z},
+                .batch = batch,
+                .a_dtype = static_cast<origami::data_type_t>(problem.alphaType()),
+                .b_dtype = static_cast<origami::data_type_t>(problem.betaType()),
+                .mi_dtype = static_cast<origami::data_type_t>(problem.computeInputType()),
+            };
+            origami::config_t origami_config = {
+                .mt = {
+                    static_cast<size_t>(sizeMapping.macroTile.x), 
+                    static_cast<size_t>(sizeMapping.macroTile.y), 
+                    static_cast<size_t>(sizeMapping.depthU)
+                },
+                .mi = {
+                    static_cast<size_t>(sizeMapping.matrixInstruction[0]), 
+                    static_cast<size_t>(sizeMapping.matrixInstruction[1]), 
+                    static_cast<size_t>(sizeMapping.matrixInstruction[2])
+                },
+                .occupancy = static_cast<size_t>(sizeMapping.CUOccupancy),
+                .workgroup_mapping = sizeMapping.workGroupMapping,
+                .workspace_size = problem.workspaceSize(),
+                .workspace_size_per_elem_c = sizeMapping.workspaceSizePerElemC,
+                .reduction_strategy = reductionStrat,
+            };
+            skGrid = origami::streamk::select_grid_size(origami_problem,
+                                                        *(hipAMDGPU->analyticalHardware),
+                                                        origami_config,
+                                                        static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid),
+                                                        pAMDGPU->skMaxCUs);
         }
         // Limit the CUs Stream-K is launched on either max or the specified,
         // whichever is minimum.

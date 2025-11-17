@@ -29,7 +29,7 @@
 #include "runtime_args_selection.hpp"
 #include "solution_selection.hpp"
 
-#include <origami/utils.hpp>
+#include "origami/origami.hpp"
 
 const int MAX_BITS_WORKGROUPTILE_M     = 8;
 const int MAX_BITS_WORKGROUPTILE_N     = 8;
@@ -94,7 +94,7 @@ constexpr int preferredUnrolling(rocRoller::DataType typeA, rocRoller::DataType 
 
 template <rocRoller::DataType typeA, rocRoller::DataType typeB>
 constexpr auto generateTileList() {
-    std::array<origami::tile_tuple, possibleTileSizes.size()> tileList{};
+    std::array<origami::config_t, possibleTileSizes.size()> tileList{};
 
     for (size_t i = 0; i < possibleTileSizes.size(); ++i) {
         const auto& wgt = possibleTileSizes[i];
@@ -107,26 +107,32 @@ constexpr auto generateTileList() {
 
         int unroll = preferredUnrolling(typeA, typeB, wgt);
 
-        int non_temporal_a = 0;
-        int non_temporal_b = 0;
+        origami::config_t origami_config = {
+            .mt = {
+                static_cast<size_t>(wgt.m), 
+                static_cast<size_t>(wgt.n), 
+                static_cast<size_t>(wgtk * unroll)
+            },
+            .mi = {
+                static_cast<size_t>(MI.m),
+                static_cast<size_t>(MI.n),
+                static_cast<size_t>(MI.k)
+            },
+            .occupancy = 1,
+            .cache_hints_a = 0,
+            .cache_hints_b = 0,
+        };
 
-        tileList[i] = std::make_tuple(
-            wgt.m, wgt.n, wgtk * unroll,
-            MI.m, MI.n, MI.k,
-            1, // occupancy
-            DEFAULT_WGM,
-            non_temporal_a,
-            non_temporal_b
-        );
+        tileList[i] = origami_config;
     }
 
     return tileList;
 }
 
-using TileListGeneratorFn = std::vector<origami::tile_tuple>(*)();
+using TileListGeneratorFn = std::vector<origami::config_t>(*)();
 
 template <rocRoller::DataType A, rocRoller::DataType B>
-std::vector<origami::tile_tuple> generateTileListWrapper() {
+std::vector<origami::config_t> generateTileListWrapper() {
     constexpr auto arr = generateTileList<A, B>();
     return {arr.begin(), arr.end()};
 }
@@ -155,7 +161,7 @@ const std::map<std::pair<rocRoller::DataType, rocRoller::DataType>, TileListGene
     INSTANTIATE_TILE_LIST_FOR(FP6)
 };
 
-std::vector<origami::tile_tuple> getTileListForKernelType(KernelType kernelType)
+std::vector<origami::config_t> getTileListForKernelType(KernelType kernelType)
 {
     auto key = std::make_pair(kernelType.typeA, kernelType.typeB);
     auto it = tileListGenerators.find(key);
@@ -181,43 +187,42 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 {
     std::vector<SolutionIndexParameters> params;
 
-    std::vector<origami::tile_tuple> tile_list = getTileListForKernelType(kernelType);
+    std::vector<origami::config_t> origami_config_list = getTileListForKernelType(kernelType);
 
     size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(kernelType.typeA).elementBits;
     size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(kernelType.typeB).elementBits;
-    size_t elementSizeC_bits = rocRoller::DataTypeInfo::Get(kernelType.typeC).elementBits;
-
-    origami::data_type_t dataType;
-    if (elementSizeA_bits < elementSizeB_bits)
-        dataType = rocroller_type_to_analytical_type(kernelType.typeB);
-    else
-        dataType = rocroller_type_to_analytical_type(kernelType.typeA);
 
     const origami::hardware_t analaytical_hardware = origami::hardware_t::get_hardware_for_device(0);
 
-    int WGM = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
+    origami::problem_t origami_problem = {
+        .size = {prob.m, prob.n, prob.k},
+        .batch = prob.batch_count,
+        .a_transpose = (prob.trans_a == hipblasOperation_t::HIPBLAS_OP_T) ? origami::transpose_t::T : origami::transpose_t::N,
+        .b_transpose = (prob.trans_b == hipblasOperation_t::HIPBLAS_OP_T) ? origami::transpose_t::T : origami::transpose_t::N,
+        .a_dtype = rocroller_type_to_analytical_type(kernelType.typeA),
+        .b_dtype = rocroller_type_to_analytical_type(kernelType.typeB),
+        .mi_dtype = rocroller_type_to_analytical_type(elementSizeA_bits < elementSizeB_bits ? kernelType.typeB : kernelType.typeA),
+        .a_mx_block_size = kernelType.scaleABlockRowSize * kernelType.scaleABlockColSize,
+        .b_mx_block_size = kernelType.scaleBBlockRowSize * kernelType.scaleBBlockColSize,
+    };
 
-    auto selected_tiles = origami::select_best_macro_tile_size(
-        prob.m,
-        prob.n,
-        prob.k,
-        prob.batch_count,
-        prob.trans_a == hipblasOperation_t::HIPBLAS_OP_T,
-        prob.trans_b == hipblasOperation_t::HIPBLAS_OP_T,
+    int wgm = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
+    for (auto& config : origami_config_list) {
+        config.workgroup_mapping = wgm;
+    }
+
+    auto prediction_result = origami::rank_configs(
+        origami_problem,
         analaytical_hardware,
-        tile_list,
-        elementSizeA_bits,
-        elementSizeB_bits,
-        elementSizeC_bits,
-        dataType,
-        kernelType.scaleABlockRowSize * kernelType.scaleABlockColSize, //Handle A vs B block size.
-        0.8,
-        false,
-        WGM);
+        origami_config_list
+    );
 
-    for(auto const& selected_tile : selected_tiles)
+    for(auto const& result : prediction_result)
     {
-        WorkGroupTileSize wgt{(int)std::get<1>(selected_tile), (int)std::get<2>(selected_tile), (int)std::get<3>(selected_tile)};
+        auto mt_m = static_cast<int>(result.config.mt.m);
+        auto mt_n = static_cast<int>(result.config.mt.n);
+        auto mt_k = static_cast<int>(result.config.mt.k);
+        WorkGroupTileSize wgt{mt_m, mt_n, mt_k};
         int unrollAmount = preferredUnrolling(kernelType.typeA, kernelType.typeB, wgt);
         wgt.k /= unrollAmount;
 

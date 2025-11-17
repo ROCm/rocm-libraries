@@ -24,6 +24,7 @@ option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ${ORIGAMI_STANDALONE}
 option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
 option(ORIGAMI_BUILD_TESTING "Enable Python binding tests." OFF)
 option(ORIGAMI_ENABLE_INSTALL "Configure origami installation" ON)
+option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
 
 find_package(hip REQUIRED)
 
@@ -45,6 +46,8 @@ target_compile_features(origami PUBLIC cxx_std_17)
 add_library(origami-headers INTERFACE)
 add_library(roc::origami-headers ALIAS origami-headers)
 
+target_compile_features(origami-headers INTERFACE cxx_std_17)
+
 target_include_directories(origami-headers
     INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -54,8 +57,10 @@ target_sources(origami-headers
     INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/hardware.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/utils.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/math.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/origami.hpp>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/streamk.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/types.hpp>
 )
 
 target_link_libraries(origami PUBLIC roc::origami-headers)
@@ -63,7 +68,7 @@ target_link_libraries(origami PUBLIC roc::origami-headers)
 target_sources(origami
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/gemm.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/utils.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/origami.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/streamk.cpp"
 )
 
@@ -119,10 +124,6 @@ if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
             COMPONENT tests
         )
         
-        rocm_install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/origami_gtest.yaml"
-            DESTINATION "${CMAKE_INSTALL_BINDIR}"
-            COMPONENT tests
-        )
     endif()
 
     rocm_install(

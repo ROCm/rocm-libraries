@@ -72,43 +72,46 @@ def main():
     if args.print:
         hardware.print()
 
-    reduction = origami.select_reduction(
-        args.m,
-        args.n,
-        args.k,
-        args.batch,
-        args.mt_m,
-        args.mt_n,
-        args.mt_k,
-        hardware,
-        args.dynamic_grid_version
-    )
+    # Create problem description
+    problem = origami.problem_t()
+    problem.size = origami.dim3_t(args.m, args.n, args.k)
+    problem.batch = args.batch
+    problem.transpose_a = args.trans_a
+    problem.transpose_b = args.trans_b
+    problem.a_dtype = origami.string_to_datatype(args.type_a)
+    problem.b_dtype = origami.string_to_datatype(args.type_b)
+    problem.d_dtype = origami.string_to_datatype(args.type_d)
+    problem.c_dtype = problem.d_dtype
+    problem.mi_dtype = origami.string_to_datatype(args.type_compute)
+    problem.mx_block_size = 0
 
-    winner_grid = origami.select_grid(
-        args.m,
-        args.n,
-        args.k,
-        args.batch,
-        args.trans_a,
-        args.trans_b,
-        origami.datatype_to_bits(origami.string_to_datatype(args.type_a)),
-        origami.datatype_to_bits(origami.string_to_datatype(args.type_b)),
-        origami.datatype_to_bits(origami.string_to_datatype(args.type_d)),
-        origami.string_to_datatype(args.type_compute),
-        args.workspace_size,
-        args.mt_m,
-        args.mt_n,
-        args.mt_k,
-        args.mi_m,  # MI_M
-        args.mi_n,  # MI_N
-        args.mi_k,  # MI_K
-        args.wgm,
-        origami.datatype_to_bits(origami.string_to_datatype(args.type_acc)) // 8,
-        args.occupancy,
-        hardware,
-        args.dynamic_grid_version,
-        reduction
-    )
+    # Create config
+    config = origami.config_t()
+    config.mt = origami.dim3_t(args.mt_m, args.mt_n, args.mt_k)
+    config.mi = origami.dim3_t(args.mi_m, args.mi_n, args.mi_k)
+    config.occupancy = args.occupancy
+    config.workgroup_mapping = args.wgm
+
+    # Select reduction strategy  
+    grid_algorithm = origami.grid_selection_t.analytical  # default to analytical
+    if args.dynamic_grid_version == 0:
+        grid_algorithm = origami.grid_selection_t.number_of_cus
+    elif args.dynamic_grid_version == 1:
+        grid_algorithm = origami.grid_selection_t.min_resources
+    elif args.dynamic_grid_version == 2:
+        grid_algorithm = origami.grid_selection_t.energy_aware
+    elif args.dynamic_grid_version == 3:
+        grid_algorithm = origami.grid_selection_t.reduction_cost_aware
+    elif args.dynamic_grid_version == 4:
+        grid_algorithm = origami.grid_selection_t.data_parallel
+    elif args.dynamic_grid_version == 5:
+        grid_algorithm = origami.grid_selection_t.analytical
+    elif args.dynamic_grid_version == 6:
+        grid_algorithm = origami.grid_selection_t.k_split_aware
+
+    reduction = origami.select_reduction(problem, hardware, config, grid_algorithm)
+
+    winner_grid = origami.select_grid(problem, hardware, config, grid_algorithm, hardware.N_CU)
 
     print(f"Best reduction algo : {reduction}")
     print(f"Best grid : {winner_grid}")

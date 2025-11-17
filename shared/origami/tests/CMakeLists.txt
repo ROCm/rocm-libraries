@@ -1,14 +1,27 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-find_package(GTest REQUIRED)
-find_package(Boost REQUIRED COMPONENTS filesystem)
+find_package(Catch2 3 QUIET CONFIG)
+if(NOT Catch2_FOUND)
+    if(ORIGAMI_ENABLE_FETCH)
+        include(FetchContent)
+        FetchContent_Declare(
+            Catch2
+            GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+            GIT_TAG devel
+        )
+        FetchContent_MakeAvailable(Catch2)
+    else()
+        message(FATAL_ERROR "Failed to find Catch2")
+    endif()
+endif()
 
 add_executable(origami-tests)
 
 target_sources(origami-tests
     PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/origami_gtest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_gemm.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_origami.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/test_tile_ordering_issue.cpp"
         # "${CMAKE_CURRENT_SOURCE_DIR}/test_variance_issue.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/test_negative_occupancy.cpp"
@@ -19,21 +32,12 @@ target_include_directories(origami-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/origami_gtest.yaml"
-    "${CMAKE_CURRENT_BINARY_DIR}/origami_gtest.yaml"
-    COPYONLY
-)
-
 target_link_libraries(origami-tests
     PRIVATE
         roc::origami
-        Boost::filesystem
-        GTest::gtest
-        GTest::gtest_main
+        Catch2::Catch2WithMain
 )
 
-gtest_discover_tests(origami-tests 
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} 
-    TIMEOUT 60
-)
+include(CTest)
+include(Catch)
+catch_discover_tests(origami-tests)

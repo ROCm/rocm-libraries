@@ -4,75 +4,57 @@
 #pragma once
 
 #include "origami/hardware.hpp"
+#include "origami/types.hpp"
+
 #include <vector>
 
-namespace origami
-{
-    namespace streamk
-    {
-        enum class reduction_type
-        {
-            // BasicReduction,
-            Tree,
-            Parallel,
-            // AtomicReduction,
-            Count,
-            None = Count
-        };
+namespace origami {
+namespace streamk {
+/**
+ * @brief Number of output tiles.
+ *
+ * @param mt_m Tile size in M-dimension.
+ * @param mt_n Tile size in N-dimension.
+ * @param m Matrix's m-dimension.
+ * @param n Matrix's n-dimension.
+ * @param batch Number of batches.
+ * @return size_t Total number of output tiles.
+ */
+std::size_t compute_number_of_output_tiles(std::size_t mt_m,
+                                           std::size_t mt_n,
+                                           std::size_t m,
+                                           std::size_t n,
+                                           std::size_t batch);
 
-        inline reduction_type int_to_reduction_type(int rt)
-        {
-            return (reduction_type)rt;
-        }
+/**
+ * @brief Select the best reduction strategy for StreamK.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param algorithm Grid selection algorithm
+ * @return reduction_t Selected reduction strategy
+ */
+reduction_t select_reduction(const problem_t& problem,
+                             const hardware_t& hardware,
+                             const config_t& config,
+                             grid_selection_t algorithm);
 
-        size_t get_workspace(
-            size_t x,
-            size_t y,
-            size_t mt_m,
-            size_t mt_n,
-            size_t bpe_c,
-            size_t grid,
-            size_t tiles,
-            reduction_type reduction);
+/**
+ * @brief Based on the provided kernel config, select the best grid dimension.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param grid_selection_t grid selection algorithm (@see origami::grid_selection_t)
+ * @param biggest_allowable_split
+ * @return size_t Dimensions of the grid launched.
+ */
+size_t select_grid_size(const problem_t& problem,
+                        const hardware_t& hardware,
+                        const config_t& config,
+                        grid_selection_t algorithm,
+                        size_t max_cus);
 
-        reduction_type select_reduction(
-            size_t x,
-            size_t y,
-            size_t z,
-            size_t batch,
-            size_t mt_m,
-            size_t mt_n,
-            size_t mt_k,
-            const hardware_t& analytical_hardware,
-            int dynamic_grid_version);
-
-        const char* rtype_to_string(streamk::reduction_type r);
-
-        size_t select_grid(size_t x,
-                           size_t y,
-                           size_t z,
-                           size_t batch,
-                           bool            trans_a,
-                           bool            trans_b,
-                           size_t          element_size_A,
-                           size_t          element_size_B,
-                           size_t          element_size_out,
-                           data_type_t     mi_datatype,
-                           size_t          workspace_size,
-                           size_t          mt_m,
-                           size_t          mt_n,
-                           size_t          mt_k,
-                           size_t          mi_m,
-                           size_t          mi_n,
-                           size_t          mi_k,
-                           int             workgroup_mapping,
-                           size_t          workspace_size_per_elem_c,
-                           int             occupancy,
-                           const hardware_t& analytical_hardware,
-                           int dynamic_grid_version,
-                           reduction_type reduction_strategy,
-                           size_t max_cus = 0);
-                           // max workspace
-
-    } // namespace streamk
-}
+}  // namespace streamk
+}  // namespace origami

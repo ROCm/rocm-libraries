@@ -42,7 +42,8 @@
 #include <Tensile/Task.hpp>
 #include <Tensile/Utils.hpp>
 
-#include <origami/streamk.hpp>
+#include "origami/origami.hpp"
+#include "origami/streamk.hpp"
 
 #define TENSILE_COMMON_KERNEL_ARGS_SIZE 16
 
@@ -166,7 +167,7 @@ namespace TensileLite
 
     struct StreamKSettings
     {
-        origami::streamk::reduction_type reduction = origami::streamk::reduction_type::Tree;
+        origami::reduction_t reduction = origami::reduction_t::tree;
         size_t grid = 0;
     };
 
@@ -217,6 +218,11 @@ namespace TensileLite
             return kernelName;
         }
         virtual bool isFallbackForHW(Hardware const&) const;
+
+        bool isStreamK() const
+        {
+            return sizeMapping.streamK > 0;
+        }
 
         //! Estimates based on problem size, solution tile, and  machine hardware
         //! charz:
@@ -271,6 +277,19 @@ namespace TensileLite
             StaticPerformanceModel staticModel;
         };
 
+        struct TAMetricProblemScore
+        {
+            Granularities granularites;
+
+            int CUs = 0;
+
+            double summationPerformance = 0.0;
+
+            double M;
+            double N;
+            double K;
+        };
+
         bool checkInternalArgumentsSupport(ContractionProblem const& problem,
                                            std::ostream&             stream,
                                            bool                      debug = false) const;
@@ -290,8 +309,8 @@ namespace TensileLite
         void calculateGrid(dim3& workGroupSize,
                            dim3& numWorkGroups,
                            ContractionSolution::Problem const& problem) const;
-        origami::streamk::reduction_type getSKReduction(Problem const& problem, Hardware const& hardware) const;
-        size_t getSKGrid(Problem const& problem, Hardware const& hardware, size_t tiles, origami::streamk::reduction_type& reductionStrat) const;
+        origami::reduction_t getSKReduction(Problem const& problem, Hardware const& hardware) const;
+        size_t getSKGrid(Problem const& problem, Hardware const& hardware, size_t tiles, origami::reduction_t reductionStrat) const;
         size_t partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);
@@ -308,6 +327,19 @@ namespace TensileLite
                                                       double NumCUs,
                                                       double totalGranularity,
                                                       int    globalSplitU) const;
+        
+        TAMetricProblemScore computeProblemScore(
+            Hardware const& hardware, double M, double N, double K, double NumBatches) const;
+
+        double computeTileAwareMetric(TAMetricProblemScore pp,
+                                      TAMetricProblemScore ppReference) const;
+
+        double computeTAMScore(Problem const&  problem,
+                               Hardware const& hardware,
+                               double          model_M,
+                               double          model_N,
+                               double          model_K,
+                               double          model_NumBatches) const;
 
         /**
          * Calculate the projected performance based on granularity loss.
