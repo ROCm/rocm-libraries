@@ -137,10 +137,12 @@ inline std::vector<ConvTestCase> getConvTestCases4D(bool addDilationTests = true
     if(addDilationTests)
     {
         // Dilation = 2
-        testCases.emplace_back({{1, 16, 16, 16}, {1, 16, 3, 3}, {2, 2}, {2, 2}, {1, 1}, {2, 2}, seed});
+        testCases.emplace_back(ConvTestCase{{1, 16, 16, 16}, {1, 16, 3, 3}, {2, 2}, {2, 2}, {1, 1}, {2, 2}, seed});
         // Grouped convolution - 2 batches, 4 groups, stride, padding, dilation
-        testCases.emplace_back({{2, 32, 16, 16}, {4, 8, 3, 3}, {1, 1}, {1, 1}, {2, 2}, {2, 2}, seed});
+        testCases.emplace_back(ConvTestCase{{2, 32, 16, 16}, {4, 8, 3, 3}, {1, 1}, {1, 1}, {2, 2}, {2, 2}, seed});
     }
+
+    return testCases;
 }
 #else
 inline std::vector<ConvTestCase> getConvTestCases4D()
