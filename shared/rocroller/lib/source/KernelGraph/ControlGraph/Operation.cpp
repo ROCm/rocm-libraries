@@ -31,6 +31,11 @@
 
 namespace rocRoller::KernelGraph::ControlGraph
 {
+    static_assert(!COperationWithBody<Assign>);
+    static_assert(!COperationWithBody<Multiply>);
+    static_assert(COperationWithBody<ForLoopOp>);
+    static_assert(COperationWithBody<Kernel>);
+
     VariableType getVariableType(Operation const& op)
     {
         auto visitor = [](auto const& op) -> VariableType {

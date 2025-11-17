@@ -669,6 +669,17 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForBatchnormWithR
     EXPECT_FALSE(applicable);
 }
 
+TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueForBatchnormWithoutRunningStatistics)
+{
+    // Create a batchnorm training graph WITHOUT running statistics
+    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
+    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+
+    bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
+
+    EXPECT_TRUE(applicable);
+}
+
 TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanThrowsForMalformedBackwardAttributes)
 {
     // Create a graph with batchnorm backward node but malformed attributes

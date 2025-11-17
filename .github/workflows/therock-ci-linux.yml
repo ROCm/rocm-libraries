@@ -36,7 +36,7 @@ jobs:
 
       # We only want to build MIOpen HEAD against CK HEAD, not applicable for other projects
       - name: Checkout composable_kernel repository
-        if: ${{ contains(inputs.project_to_test, 'miopen') }}
+        if: ${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen_plugin') }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/composable_kernel"
@@ -47,7 +47,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 0ae0df6719a6e2096d221d6a61326d8494fa050b # 2025-11-07 commit
+          ref: d24cccc1820fa5469b88c0f14e36a14349d38cac # 2025-11-12 commit
 
       - name: Install python deps
         run: |
@@ -127,7 +127,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 # v5.0.0
         with:
           aws-region: us-east-2
-          role-to-assume: arn:aws:iam::692859939525:role/therock-artifacts-external
+          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
 
       - name: Post Build Upload
         if: always()
