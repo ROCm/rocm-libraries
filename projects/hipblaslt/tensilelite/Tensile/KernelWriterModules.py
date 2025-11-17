@@ -32,7 +32,7 @@ from Tensile.Common.DataType import DataType
 def tdmWait(states, kernel, tPA, tPB, tensorcnt: int, comment: str) -> Module:
   #TODO: refactor this
   skipGR = tensorcnt > -1
-  vmcnt = 0 if skipGR else -1
+  vlcnt = 0 if skipGR else -1
   mod = Module()
   if skipGR:
     #TODO: remove
@@ -45,7 +45,7 @@ def tdmWait(states, kernel, tPA, tPB, tensorcnt: int, comment: str) -> Module:
     # if tensorcnt > -1:
     #   numGR += tensorcnt * (numMXSA + numMXSB + numM)
     # vmcnt += numGR
-    mod.add(SWaitCnt(vlcnt=vmcnt))
+    mod.add(SWaitCnt(vlcnt=vlcnt))
   mod.add(SWaitTensorcnt(tensorcnt=tensorcnt, comment=comment))
   return mod
 

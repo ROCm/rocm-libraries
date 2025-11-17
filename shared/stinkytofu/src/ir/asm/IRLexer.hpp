@@ -28,7 +28,7 @@
 
 namespace stinkytofu
 {
-    /// Token kinds for the IR lexer.
+    /// Token kinds for the IR lexer (MLIR-style format).
     enum class TokenKind
     {
         // Structural tokens
@@ -37,26 +37,21 @@ namespace stinkytofu
         Colon, // ':'
         LeftBracket, // '['
         RightBracket, // ']'
+        LeftParen, // '('
+        RightParen, // ')'
+        LeftBrace, // '{'
+        RightBrace, // '}'
         Comma, // ','
+        Equal, // '='
+
+        // String literals
+        QuotedString, // "Stinkytofu.operation"
 
         // Literals
-        Identifier, // Instruction names, register types, labels
+        Identifier, // register types, labels, identifiers
         IntegerLiteral, // Integer constants
         HexLiteral, // Hexadecimal constants (0x...)
-
-        // Register and operand markers
-        VReg, // v[...]
-        SReg, // s[...]
-        AccReg, // acc[...]
-        SccReg, // SCC[...]
-        BarrierReg, // BARRIER[...]
-        DSWriteReg, // DS_WRITE[...]
-
-        // Special identifiers
-        Dest, // "Dest:"
-        Src, // "Src :"
-        IssueCycles, // "issueCycles:"
-        LatencyCycles, // "latencyCycles:"
+        FloatLiteral, // Floating point constants
 
         // Invalid token
         Unknown
@@ -147,6 +142,10 @@ namespace stinkytofu
         /// Get the next token without consuming it.
         const Token& peek() const;
 
+        /// Get the token at offset positions ahead without consuming.
+        /// For example, peekAhead(1) returns the token after peek().
+        const Token& peekAhead(size_t offset = 1) const;
+
         /// Get the next token and advance.
         const Token& consume();
 
@@ -193,14 +192,14 @@ namespace stinkytofu
         /// Get current character without advancing.
         char peekChar() const;
 
+        /// Get character at offset ahead without advancing.
+        char peekAheadChar(size_t offset = 1) const;
+
         /// Get current character and advance.
         char consumeChar();
 
         /// Check if at end of buffer.
         bool isAtBufferEnd() const;
-
-        /// Get token kind for a keyword or identifier.
-        TokenKind getIdentifierKind(std::string_view text);
     };
 
 } // namespace stinkytofu

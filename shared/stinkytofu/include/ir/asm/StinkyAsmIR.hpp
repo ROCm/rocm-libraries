@@ -161,6 +161,12 @@ namespace stinkytofu
             // DS write register is a special register, it is not a physical register.
             return StinkyRegister("DS_WRITE", 0, 1);
         }
+
+        static StinkyRegister getTensorLoadRegister()
+        {
+            // Tensor load register is a special register, it is not a physical register.
+            return StinkyRegister("TENSOR_LOAD", 0, 1);
+        }
     };
 
     // Represents a single assembly instruction.
@@ -204,6 +210,11 @@ namespace stinkytofu
         uint16_t getUnifiedOpcode() const
         {
             return hwInstDesc->unifiedOpcode;
+        }
+
+        const HwInstDesc* getHwInstDesc() const
+        {
+            return hwInstDesc;
         }
 
         bool is(InstFlag flag) const
@@ -283,6 +294,13 @@ namespace stinkytofu
             irlist->insert(pos, stinkyInst);
             return stinkyInst;
         }
+
+        // Create a StinkyInstruction with GFX::LABEL opcode.
+        // Note this is a temporary workaround for the fact that stinkytofu
+        // doesn't support basicblocks concept.
+        //
+        // TODO: Remove this once basicblocks concept is supported.
+        StinkyInstruction* createStinkyLabel(IRList::iterator pos, const std::string& label);
 
         void erase(StinkyInstruction* stinkyInst);
 
@@ -373,6 +391,11 @@ namespace stinkytofu
         return isSMemStore(inst) || isFLATStore(inst) || isMUBUFStore(inst) || isGLOBALStore(inst);
     }
 
+    inline bool isTensorLoad(const StinkyInstruction& inst)
+    {
+        return inst.is(InstFlag::IF_TENSORLoadToLds);
+    }
+
     inline bool isDSRead(const StinkyInstruction& inst)
     {
         return inst.is(InstFlag::IF_DSRead);
@@ -406,6 +429,16 @@ namespace stinkytofu
     inline bool isSMFMA(const StinkyInstruction& inst)
     {
         return inst.is(InstFlag::IF_SMFMA);
+    }
+
+    inline bool isWMMA(const StinkyInstruction& inst)
+    {
+        return inst.is(InstFlag::IF_WMMA);
+    }
+
+    inline bool isSWMMA(const StinkyInstruction& inst)
+    {
+        return inst.is(InstFlag::IF_SWMMA);
     }
 
     inline bool isHasSideEffect(const StinkyInstruction& inst)

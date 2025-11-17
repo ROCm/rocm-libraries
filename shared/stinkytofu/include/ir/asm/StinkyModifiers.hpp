@@ -23,6 +23,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace stinkytofu
@@ -42,6 +43,8 @@ namespace stinkytofu
             EXEC,
             VCC,
             SWAITCNT_DATA,
+            SWAITTENSORCNT_DATA,
+            LABEL_NAME,
         };
 
         Modifier(Type type)
@@ -293,6 +296,27 @@ namespace stinkytofu
         int8_t kmcnt;
     };
 
+    struct LabelData : public Modifier
+    {
+        LabelData(const Modifier::Type& type, const std::string& label)
+            : Modifier(type)
+            , label(label)
+        {
+        }
+        std::string label;
+    };
+
+    struct SWaitTensorCntData : public Modifier
+    {
+        SWaitTensorCntData(int8_t tlcnt = -1)
+            : Modifier(Type::SWAITTENSORCNT_DATA)
+            , tlcnt(tlcnt)
+        {
+        }
+
+        int8_t tlcnt;
+    };
+
     // clang-format off
     // Helper template for type mapping
     template<typename T> constexpr Modifier::Type getModifierType();
@@ -307,6 +331,8 @@ namespace stinkytofu
     template<> constexpr Modifier::Type getModifierType<EXEC>() { return Modifier::Type::EXEC; }
     template<> constexpr Modifier::Type getModifierType<VCC>() { return Modifier::Type::VCC; }
     template<> constexpr Modifier::Type getModifierType<SWaitCntData>() { return Modifier::Type::SWAITCNT_DATA; }
+    template<> constexpr Modifier::Type getModifierType<SWaitTensorCntData>() { return Modifier::Type::SWAITTENSORCNT_DATA; }
+    template<> constexpr Modifier::Type getModifierType<LabelData>() { return Modifier::Type::LABEL_NAME; }
     // clang-format on
 
 } // namespace stinkytofu

@@ -105,18 +105,21 @@ namespace stinkytofu
         std::vector<StinkyRegister> srcRegs;
         int                         issueCycles;
         int                         latencyCycles;
+        bool                        isLabel; // true if this represents a label
 
-        ParsedInstruction(const std::string& opcode)
+        ParsedInstruction(const std::string& opcode, bool label = false)
             : opcodeStr(opcode)
             , issueCycles(0)
             , latencyCycles(0)
+            , isLabel(label)
         {
         }
 
-        ParsedInstruction(std::string&& opcode)
+        ParsedInstruction(std::string&& opcode, bool label = false)
             : opcodeStr(std::move(opcode))
             , issueCycles(0)
             , latencyCycles(0)
+            , isLabel(label)
         {
         }
     };

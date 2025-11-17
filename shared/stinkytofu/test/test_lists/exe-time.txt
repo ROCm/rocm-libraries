@@ -1,0 +1,31 @@
+# Execution Time Test List
+# Format: [arch1][arch2]...[+modifier1][+modifier2]...
+#
+# Section headers define which architectures and modifiers apply to following tests.
+# All tests below a header inherit those settings until the next header.
+#
+# Architectures: [gfx942], [gfx950], etc.
+# Modifiers:
+#   [+sia3] - Use ScheduleIterAlg: [3] instead of default [1]
+#   [+sparse] - Enable sparse matrix support
+#
+# Lines starting with # are comments
+# Empty lines are ignored
+
+# Tests for both gfx942 and gfx950 with both default and SIA3 variants
+# This creates 4 test runs: gfx942 default, gfx942-sia3, gfx950 default, gfx950-sia3
+[gfx942][gfx950][+sia3]
+mfma.yaml
+
+[gfx1250][+sia3]
+gfx1250*
+
+# Tests only for gfx950 with SIA3 variant
+# Uncomment and add tests:
+# [gfx950][+sia3]
+# advanced_test.yaml
+
+# Tests only for gfx942 (default only)
+# Uncomment and add tests:
+# [gfx942]
+# legacy_test.yaml

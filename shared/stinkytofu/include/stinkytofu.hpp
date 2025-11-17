@@ -75,6 +75,8 @@ namespace stinkytofu
 
         virtual void dump(std::ostream& out) const = 0;
 
+        void dump();
+
         IRType getType() const
         {
             return irType;
@@ -82,6 +84,13 @@ namespace stinkytofu
 
     private:
         const IRType irType;
+    };
+
+    struct IRListProperties
+    {
+        bool                          containsLoop = false;
+        IntrusiveListIterator<IRBase> loopBegin;
+        IntrusiveListIterator<IRBase> loopEnd;
     };
 
     using IRList = IntrusiveList<IRBase>;
@@ -210,6 +219,7 @@ namespace stinkytofu
         AnalysisManager  analysisMgr;
         StinkyKernelInfo kernel;
         StinkyOptInfo    optInfo;
+        IRListProperties properties;
 
         std::unordered_map<IRBuilder::ID, std::unique_ptr<IRBuilder>> irBuilders;
 
@@ -257,6 +267,20 @@ namespace stinkytofu
         const StinkyOptInfo& getOptInfo() const
         {
             return optInfo;
+        }
+
+        void setLoopProperties(bool                          containsLoop,
+                               IntrusiveListIterator<IRBase> loopBegin,
+                               IntrusiveListIterator<IRBase> loopEnd)
+        {
+            properties.containsLoop = containsLoop;
+            properties.loopBegin    = loopBegin;
+            properties.loopEnd      = loopEnd;
+        }
+
+        const IRListProperties& getProperties() const
+        {
+            return properties;
         }
 
         template <class IRBuilderType, class... Args>

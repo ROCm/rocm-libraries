@@ -34,11 +34,12 @@ using namespace stinkytofu;
 namespace
 {
     //----------------------------------------------------------------------
-    // IRParser declaration
+    // IRParser declaration (MLIR-style format)
     //----------------------------------------------------------------------
 
-    /// Parser for the StinkyTofu IR text format.
-    /// Constructs ParsedInstruction objects from the token stream.
+    /// Parser for the StinkyTofu MLIR-style IR text format.
+    /// Format: destRegs = "Stinkytofu.mnemonic"(srcRegs) { attributes }
+    /// Or labels: label_name:
     class IRParser
     {
     private:
@@ -69,35 +70,36 @@ namespace
 
     private:
         //------------------------------------------------------------------
-        // Parsing methods
+        // Parsing methods (MLIR-style)
         //------------------------------------------------------------------
 
-        /// Parse a single instruction block.
+        /// Parse a single instruction line.
+        /// Format: [destRegs =] "Stinkytofu.mnemonic"(srcRegs) { attributes }
         std::unique_ptr<ParsedInstruction> parseInstruction();
 
-        /// Parse the instruction opcode line and return it as a string.
-        std::optional<std::string> parseOpcode();
+        /// Parse label (identifier followed by colon).
+        /// Format: label_name:
+        std::unique_ptr<ParsedInstruction> parseLabel();
 
-        /// Parse the "Dest:" line with destination registers.
-        bool parseDestLine(ParsedInstruction& inst);
+        /// Parse destination registers (comma-separated).
+        /// Format: v[14:17], s[0]
+        bool parseDestRegisters(ParsedInstruction& inst);
 
-        /// Parse the "Src :" line with source registers.
-        bool parseSrcLine(ParsedInstruction& inst);
+        /// Parse the operation name in quotes.
+        /// Format: "Stinkytofu.ds_load_b128"
+        std::optional<std::string> parseOperation();
 
-        /// Parse the "issueCycles:" line.
-        bool parseIssueCycles(ParsedInstruction& inst);
+        /// Parse source operands in parentheses.
+        /// Format: (v[12], BARRIER[0])
+        bool parseOperands(ParsedInstruction& inst);
 
-        /// Parse the "latencyCycles:" line.
-        bool parseLatencyCycles(ParsedInstruction& inst);
+        /// Parse attributes in braces.
+        /// Format: { issueCycles = 4, latencyCycles = 56 }
+        bool parseAttributes(ParsedInstruction& inst);
 
-        /// Parse a register operand (e.g., v[10:11], s[56], acc[0:3]).
+        /// Parse a single register reference.
+        /// Formats: v[14:17], s[0], acc[0:15], BARRIER[0], SCC[0], DS_WRITE[0], 0x1, 42, 3.14
         std::optional<StinkyRegister> parseRegister();
-
-        /// Parse a register with bracket notation like v[10:11].
-        std::optional<StinkyRegister> parseRegisterWithBrackets(const std::string& regType);
-
-        /// Parse a literal value (integer, hex, or string).
-        std::optional<StinkyRegister> parseLiteral();
 
         //------------------------------------------------------------------
         // Utility methods
@@ -167,6 +169,20 @@ namespace
 
         while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof)
         {
+            // Check if this is a label (identifier followed by colon)
+            // Peek ahead to verify BEFORE consuming tokens
+            if(peek().kind == TokenKind::Identifier && lexer.peekAhead(1).kind == TokenKind::Colon)
+            {
+                // This is definitely a label
+                auto label = parseLabel();
+                if(label)
+                {
+                    instructions.push_back(std::move(label));
+                    skipNewlines();
+                    continue;
+                }
+            }
+
             auto inst = parseInstruction();
             if(inst)
             {
@@ -174,23 +190,15 @@ namespace
             }
             else
             {
-                // Error occurred, try to recover by skipping to next instruction
-                // Skip until we find a newline followed by an identifier
-                while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof)
+                // Error occurred, try to recover by skipping to next line
+                while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof
+                      && peek().kind != TokenKind::Newline)
                 {
-                    if(peek().kind == TokenKind::Newline)
-                    {
-                        consume();
-                        skipNewlines();
-                        if(peek().kind == TokenKind::Identifier)
-                        {
-                            break; // Found potential next instruction
-                        }
-                    }
-                    else
-                    {
-                        consume();
-                    }
+                    consume();
+                }
+                if(peek().kind == TokenKind::Newline)
+                {
+                    consume();
                 }
             }
 
@@ -210,404 +218,388 @@ namespace
 
     std::unique_ptr<ParsedInstruction> IRParser::parseInstruction()
     {
-        // Parse the opcode (instruction name)
-        auto opcodeOpt = parseOpcode();
+        // MLIR-style format: [destRegs =] "Stinkytofu.mnemonic"(srcRegs) { attributes }
+
+        auto inst = std::make_unique<ParsedInstruction>("");
+
+        // Check if we have destination registers (followed by '=')
+        // Look ahead to see if there's an '=' coming
+        bool hasDest = false;
+        if(peek().kind == TokenKind::Identifier)
+        {
+            // Could be: DEST[0] = "..." or just "..."
+            // We need to look for '=' before '('
+            // Simple approach: parse dest registers if we see identifier/bracket patterns
+            hasDest = true; // Tentatively
+        }
+
+        if(hasDest)
+        {
+            // Try to parse destination registers
+            if(!parseDestRegisters(*inst))
+            {
+                // If it fails, check if we're at the operation already
+                if(peek().kind != TokenKind::QuotedString)
+                {
+                    return nullptr;
+                }
+                // Otherwise clear the error and continue (no dest registers)
+                inst->destRegs.clear();
+            }
+
+            // If we successfully parsed dest regs, expect '='
+            if(!inst->destRegs.empty())
+            {
+                if(!expect(TokenKind::Equal, "Expected '=' after destination registers"))
+                {
+                    return nullptr;
+                }
+            }
+        }
+
+        // Parse the operation name in quotes: "Stinkytofu.mnemonic"
+        auto opcodeOpt = parseOperation();
         if(!opcodeOpt)
         {
+            emitError("Expected quoted operation name");
             return nullptr;
         }
+        inst->opcodeStr = std::move(*opcodeOpt);
 
-        auto inst = std::make_unique<ParsedInstruction>(std::move(*opcodeOpt));
-
-        // Expect a newline after the opcode
-        if(!expect(TokenKind::Newline, "Expected newline after instruction opcode"))
+        // Parse source operands in parentheses: (v[10], s[48])
+        if(!parseOperands(*inst))
         {
-            return nullptr;
+            // Operands are optional, continue
         }
 
-        skipNewlines();
-
-        // Parse the instruction fields
-        // Expected format:
-        //   Dest: <registers>
-        //   Src : <registers>
-        //   issueCycles: <number>
-        //   latencyCycles: <number>
-
-        bool parsedDest          = false;
-        bool parsedSrc           = false;
-        bool parsedIssueCycles   = false;
-        bool parsedLatencyCycles = false;
-
-        while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof)
+        // Parse attributes in braces: { issueCycles = 4, latencyCycles = 56 }
+        if(!parseAttributes(*inst))
         {
-            // Check if we've reached the next instruction
-            if(peek().kind == TokenKind::Identifier && peek().column <= 2)
-            {
-                // This looks like a new instruction (no leading spaces)
-                break;
-            }
-
-            if(peek().kind == TokenKind::Dest)
-            {
-                if(!parseDestLine(*inst))
-                {
-                    return nullptr;
-                }
-                parsedDest = true;
-            }
-            else if(peek().kind == TokenKind::Src)
-            {
-                if(!parseSrcLine(*inst))
-                {
-                    return nullptr;
-                }
-                parsedSrc = true;
-            }
-            else if(peek().kind == TokenKind::IssueCycles)
-            {
-                if(!parseIssueCycles(*inst))
-                {
-                    return nullptr;
-                }
-                parsedIssueCycles = true;
-            }
-            else if(peek().kind == TokenKind::LatencyCycles)
-            {
-                if(!parseLatencyCycles(*inst))
-                {
-                    return nullptr;
-                }
-                parsedLatencyCycles = true;
-            }
-            else if(peek().kind == TokenKind::Newline)
-            {
-                consume();
-            }
-            else
-            {
-                // Unknown field, skip this line
-                emitWarning("Unknown instruction field, skipping", peek().line, peek().column);
-                while(!lexer.isAtEnd() && peek().kind != TokenKind::Newline
-                      && peek().kind != TokenKind::Eof)
-                {
-                    consume();
-                }
-                if(peek().kind == TokenKind::Newline)
-                {
-                    consume();
-                }
-            }
-        }
-
-        // Validate that we parsed the required fields
-        if(!parsedIssueCycles)
-        {
-            emitError("Instruction missing issueCycles field", inst->destRegs.empty() ? 0 : 1, 0);
-        }
-        if(!parsedLatencyCycles)
-        {
-            emitError("Instruction missing latencyCycles field", inst->destRegs.empty() ? 0 : 1, 0);
+            // Attributes are optional, but emit warning if missing
+            emitWarning("Instruction missing attributes (issueCycles, latencyCycles)",
+                        peek().line,
+                        peek().column);
         }
 
         return inst;
     }
 
-    std::optional<std::string> IRParser::parseOpcode()
+    std::unique_ptr<ParsedInstruction> IRParser::parseLabel()
     {
+        // Format: label_name:
+        // Should only be called after verifying the pattern in parse()
         if(peek().kind != TokenKind::Identifier)
         {
-            emitError("Expected instruction opcode");
+            return nullptr;
+        }
+
+        const Token& labelTok = consume();
+
+        // Must be followed by colon (should always be true if called correctly)
+        if(peek().kind != TokenKind::Colon)
+        {
+            // This should not happen if parse() verified the pattern correctly
+            return nullptr;
+        }
+
+        consume(); // consume the colon
+
+        // Create a special ParsedInstruction to represent a label
+        // Store label name without the colon, set isLabel flag to true
+        auto inst = std::make_unique<ParsedInstruction>(std::string(labelTok.text), true);
+        return inst;
+    }
+
+    bool IRParser::parseDestRegisters(ParsedInstruction& inst)
+    {
+        // Parse comma-separated destination registers before '='
+        // Format: v[14:17], s[0], DS_WRITE[0]
+
+        while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof)
+        {
+            // Check if we hit the '=' sign (end of dest list)
+            if(peek().kind == TokenKind::Equal)
+            {
+                break;
+            }
+
+            auto regOpt = parseRegister();
+            if(!regOpt)
+            {
+                // Not a valid register, might be end of dest list or error
+                break;
+            }
+
+            inst.destRegs.push_back(*regOpt);
+
+            // Check for comma (more regs coming) or '=' (done)
+            if(peek().kind == TokenKind::Comma)
+            {
+                consume();
+                continue;
+            }
+            else if(peek().kind == TokenKind::Equal)
+            {
+                break;
+            }
+            else
+            {
+                emitError("Expected ',' or '=' after destination register");
+                return false;
+            }
+        }
+
+        return !inst.destRegs.empty();
+    }
+
+    std::optional<std::string> IRParser::parseOperation()
+    {
+        // Parse quoted operation name: "Stinkytofu.ds_load_b128" or "ds_load_b128"
+        if(peek().kind != TokenKind::QuotedString)
+        {
+            emitError("Expected quoted operation name");
             return std::nullopt;
         }
 
-        const Token& tok       = consume();
-        std::string  opcodeStr = std::string(tok.text);
+        const Token& tok = consume();
+        std::string  opStr(tok.text);
 
-        // Simply return the opcode string without validation
-        return opcodeStr;
+        // Remove quotes from the string
+        if(opStr.length() >= 2 && opStr.front() == '"' && opStr.back() == '"')
+        {
+            opStr = opStr.substr(1, opStr.length() - 2);
+        }
+
+        // Split by dot '.' if present: "ir_namespace.ds_load_b128" -> namespace="ir_namespace", opStr="ds_load_b128"
+        size_t dotPos = opStr.find('.');
+        if(dotPos != std::string::npos)
+        {
+            // TODO: inst.irNamespace = opStr.substr(0, dotPos);
+            opStr = opStr.substr(dotPos + 1);
+        }
+
+        return opStr;
     }
 
-    bool IRParser::parseDestLine(ParsedInstruction& inst)
+    bool IRParser::parseOperands(ParsedInstruction& inst)
     {
-        // Consume "Dest"
-        consume();
+        // Parse source operands in parentheses: (v[10], s[48], BARRIER[0])
+        if(peek().kind != TokenKind::LeftParen)
+        {
+            // Operands are optional in some cases
+            return false;
+        }
 
-        // Expect ":"
-        if(!expect(TokenKind::Colon, "Expected ':' after 'Dest'"))
+        consume(); // consume '('
+
+        // Parse comma-separated operands
+        while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof)
+        {
+            // Check for end of operand list
+            if(peek().kind == TokenKind::RightParen)
+            {
+                consume();
+                return true;
+            }
+
+            auto regOpt = parseRegister();
+            if(!regOpt)
+            {
+                emitError("Expected register or literal in operand list");
+                return false;
+            }
+
+            inst.srcRegs.push_back(*regOpt);
+
+            // Check for comma or end of list
+            if(peek().kind == TokenKind::Comma)
+            {
+                consume();
+                continue;
+            }
+            else if(peek().kind == TokenKind::RightParen)
+            {
+                consume();
+                return true;
+            }
+            else
+            {
+                emitError("Expected ',' or ')' after operand");
+                return false;
+            }
+        }
+
+        emitError("Unexpected end of file in operand list");
+        return false;
+    }
+
+    bool IRParser::parseAttributes(ParsedInstruction& inst)
+    {
+        // Parse attributes in braces: { issueCycles = 4, latencyCycles = 56 }
+        if(peek().kind != TokenKind::LeftBrace)
         {
             return false;
         }
 
-        // Parse destination registers (can be multiple, possibly on multiple lines)
+        consume(); // consume '{'
+
+        bool parsedIssueCycles   = false;
+        bool parsedLatencyCycles = false;
+
+        // Parse comma-separated attributes
         while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof)
         {
-            // Check if next token is a field keyword (new field starting)
-            if(peek().kind == TokenKind::Src || peek().kind == TokenKind::IssueCycles
-               || peek().kind == TokenKind::LatencyCycles)
-            {
-                break;
-            }
-
-            // Skip newlines but check if we should continue
-            if(peek().kind == TokenKind::Newline)
+            // Check for end of attributes
+            if(peek().kind == TokenKind::RightBrace)
             {
                 consume();
-                // Check if the next non-newline token starts a new field or instruction
-                // If column is <= 2, it's likely a new instruction
-                if(!lexer.isAtEnd() && peek().kind != TokenKind::Newline)
+                return parsedIssueCycles && parsedLatencyCycles;
+            }
+
+            // Parse attribute name
+            if(peek().kind != TokenKind::Identifier)
+            {
+                emitError("Expected attribute name");
+                return false;
+            }
+
+            const Token& attrName = consume();
+            std::string  attrStr(attrName.text);
+
+            // Expect '='
+            if(!expect(TokenKind::Equal, "Expected '=' after attribute name"))
+            {
+                return false;
+            }
+
+            // Parse attribute value (integer or float)
+            if(peek().kind == TokenKind::IntegerLiteral)
+            {
+                const Token& valueTok = consume();
+                int          value    = std::stoi(std::string(valueTok.text));
+
+                if(attrStr == "issueCycles")
                 {
-                    if(peek().kind == TokenKind::Src || peek().kind == TokenKind::IssueCycles
-                       || peek().kind == TokenKind::LatencyCycles || peek().kind == TokenKind::Dest
-                       || (peek().kind == TokenKind::Identifier && peek().column <= 2))
-                    {
-                        break;
-                    }
+                    inst.issueCycles  = value;
+                    parsedIssueCycles = true;
                 }
-                continue;
-            }
-
-            auto regOpt = parseRegister();
-            if(regOpt)
-            {
-                inst.destRegs.push_back(*regOpt);
-            }
-            else
-            {
-                // Could be end of dest line, check next token
-                break;
-            }
-        }
-
-        return true;
-    }
-
-    bool IRParser::parseSrcLine(ParsedInstruction& inst)
-    {
-        // Consume "Src"
-        consume();
-
-        // Expect ":"
-        if(!expect(TokenKind::Colon, "Expected ':' after 'Src'"))
-        {
-            return false;
-        }
-
-        // Parse source registers/literals (can be multiple, possibly on multiple lines)
-        while(!lexer.isAtEnd() && peek().kind != TokenKind::Eof)
-        {
-            // Check if this looks like the next field
-            if(peek().kind == TokenKind::IssueCycles || peek().kind == TokenKind::LatencyCycles
-               || peek().kind == TokenKind::Dest)
-            {
-                break;
-            }
-
-            // Skip newlines but check if we should continue
-            if(peek().kind == TokenKind::Newline)
-            {
-                consume();
-                // Check if the next non-newline token starts a new field or instruction
-                if(!lexer.isAtEnd() && peek().kind != TokenKind::Newline)
+                else if(attrStr == "latencyCycles")
                 {
-                    if(peek().kind == TokenKind::IssueCycles
-                       || peek().kind == TokenKind::LatencyCycles || peek().kind == TokenKind::Dest
-                       || (peek().kind == TokenKind::Identifier && peek().column <= 2))
-                    {
-                        break;
-                    }
-                }
-                continue;
-            }
-
-            auto regOpt = parseRegister();
-            if(regOpt)
-            {
-                inst.srcRegs.push_back(*regOpt);
-            }
-            else
-            {
-                // This could be a literal or identifier, try to parse as such
-                auto litOpt = parseLiteral();
-                if(litOpt)
-                {
-                    inst.srcRegs.push_back(*litOpt);
+                    inst.latencyCycles  = value;
+                    parsedLatencyCycles = true;
                 }
                 else
                 {
-                    // Unknown token, skip it
-                    consume();
+                    emitWarning("Unknown attribute: " + attrStr, attrName.line, attrName.column);
                 }
+            }
+            else if(peek().kind == TokenKind::FloatLiteral)
+            {
+                const Token& valueTok = consume();
+                // For now, just store as integer (truncate)
+                double value = std::stod(std::string(valueTok.text));
+
+                if(attrStr == "issueCycles")
+                {
+                    inst.issueCycles  = static_cast<int>(value);
+                    parsedIssueCycles = true;
+                }
+                else if(attrStr == "latencyCycles")
+                {
+                    inst.latencyCycles  = static_cast<int>(value);
+                    parsedLatencyCycles = true;
+                }
+                else
+                {
+                    emitWarning("Unknown attribute: " + attrStr, attrName.line, attrName.column);
+                }
+            }
+            else
+            {
+                emitError("Expected integer or float value for attribute");
+                return false;
+            }
+
+            // Check for comma or end of attributes
+            if(peek().kind == TokenKind::Comma)
+            {
+                consume();
+                continue;
+            }
+            else if(peek().kind == TokenKind::RightBrace)
+            {
+                continue; // Will be consumed in next iteration
+            }
+            else
+            {
+                emitError("Expected ',' or '}' after attribute value");
+                return false;
             }
         }
 
-        return true;
-    }
-
-    bool IRParser::parseIssueCycles(ParsedInstruction& inst)
-    {
-        // Consume "issueCycles"
-        consume();
-
-        // Expect ":"
-        if(!expect(TokenKind::Colon, "Expected ':' after 'issueCycles'"))
-        {
-            return false;
-        }
-
-        // Expect an integer
-        if(peek().kind != TokenKind::IntegerLiteral)
-        {
-            emitError("Expected integer value for issueCycles");
-            return false;
-        }
-
-        const Token& tok = consume();
-        inst.issueCycles = std::stoi(std::string(tok.text));
-
-        // Expect newline
-        if(peek().kind == TokenKind::Newline)
-        {
-            consume();
-        }
-
-        return true;
-    }
-
-    bool IRParser::parseLatencyCycles(ParsedInstruction& inst)
-    {
-        // Consume "latencyCycles"
-        consume();
-
-        // Expect ":"
-        if(!expect(TokenKind::Colon, "Expected ':' after 'latencyCycles'"))
-        {
-            return false;
-        }
-
-        // Expect an integer
-        if(peek().kind != TokenKind::IntegerLiteral)
-        {
-            emitError("Expected integer value for latencyCycles");
-            return false;
-        }
-
-        const Token& tok   = consume();
-        inst.latencyCycles = std::stoi(std::string(tok.text));
-
-        // Expect newline
-        if(peek().kind == TokenKind::Newline)
-        {
-            consume();
-        }
-
-        return true;
+        emitError("Unexpected end of file in attribute list");
+        return false;
     }
 
     std::optional<StinkyRegister> IRParser::parseRegister()
     {
+        // Parse MLIR-style register references:
+        // v[10], v[14:17], s[0], acc[0:15], BARRIER[0], SCC[0], DS_WRITE[0]
+        // Also literals: 0x1, 42, 3.14
+
         TokenKind kind = peek().kind;
 
-        switch(kind)
+        // Handle integer literals
+        if(kind == TokenKind::IntegerLiteral)
         {
-        case TokenKind::VReg:
-        case TokenKind::SReg:
-        case TokenKind::AccReg:
-        case TokenKind::SccReg:
-        case TokenKind::BarrierReg:
-        case TokenKind::DSWriteReg:
+            const Token& tok = consume();
+            int          val = std::stoi(std::string(tok.text));
+            return StinkyRegister(val);
+        }
+
+        // Handle hex literals
+        if(kind == TokenKind::HexLiteral)
         {
             const Token& tok = consume();
             std::string  text(tok.text);
-
-            // Extract register type prefix and bracket contents
-            // Format: regType[idx] or regType[start:end]
-            size_t bracketPos = text.find('[');
-            if(bracketPos == std::string::npos)
-            {
-                emitError("Invalid register format", tok.line, tok.column);
-                return std::nullopt;
-            }
-
-            std::string regType = text.substr(0, bracketPos);
-
-            // Extract content between brackets
-            size_t closeBracket = text.find(']', bracketPos);
-            if(closeBracket == std::string::npos)
-            {
-                emitError("Missing closing bracket in register", tok.line, tok.column);
-                return std::nullopt;
-            }
-
-            std::string bracketContent = text.substr(bracketPos + 1, closeBracket - bracketPos - 1);
-
-            // Parse the bracket content (either "idx" or "start:end")
-            size_t colonPos = bracketContent.find(':');
-            int    startIdx, endIdx;
-
-            if(colonPos != std::string::npos)
-            {
-                // Range format: start:end
-                std::string startStr = bracketContent.substr(0, colonPos);
-                std::string endStr   = bracketContent.substr(colonPos + 1);
-
-                // Validate and parse start index
-                if(startStr.empty() || !std::all_of(startStr.begin(), startStr.end(), ::isdigit))
-                {
-                    emitError("Invalid register start index", tok.line, tok.column);
-                    return std::nullopt;
-                }
-                startIdx = std::stoi(startStr);
-
-                // Validate and parse end index
-                if(endStr.empty() || !std::all_of(endStr.begin(), endStr.end(), ::isdigit))
-                {
-                    emitError("Invalid register end index", tok.line, tok.column);
-                    return std::nullopt;
-                }
-                endIdx = std::stoi(endStr);
-            }
-            else
-            {
-                // Single register
-                if(bracketContent.empty()
-                   || !std::all_of(bracketContent.begin(), bracketContent.end(), ::isdigit))
-                {
-                    emitError("Invalid register index", tok.line, tok.column);
-                    return std::nullopt;
-                }
-                startIdx = std::stoi(bracketContent);
-                endIdx   = startIdx;
-            }
-
-            int regNum = endIdx - startIdx + 1;
-            if(regNum <= 0)
-            {
-                emitError("Invalid register range", tok.line, tok.column);
-                return std::nullopt;
-            }
-
-            return StinkyRegister(regType, startIdx, regNum);
+            int          val = std::stoi(text, nullptr, 16);
+            return StinkyRegister(val);
         }
 
-        case TokenKind::Identifier:
+        // Handle float literals
+        if(kind == TokenKind::FloatLiteral)
         {
-            // Not a register
-            return std::nullopt;
+            const Token& tok = consume();
+            // For now, convert to integer (truncate)
+            double val = std::stod(std::string(tok.text));
+            return StinkyRegister(static_cast<int>(val));
         }
 
-        default:
-            return std::nullopt;
-        }
-    }
-
-    std::optional<StinkyRegister> IRParser::parseRegisterWithBrackets(const std::string& regType)
-    {
-        // Expect '['
-        if(!expect(TokenKind::LeftBracket, "Expected '[' after register type"))
+        // Must be an identifier (register type like 'v', 's', 'acc', 'BARRIER', etc.)
+        if(kind != TokenKind::Identifier)
         {
             return std::nullopt;
         }
+
+        const Token& regTypeTok = consume();
+        std::string  regType(regTypeTok.text);
+
+        // Check for format: v12 (no brackets)
+        if(peek().kind == TokenKind::IntegerLiteral)
+        {
+            const Token& idxTok = consume();
+            int          idx    = std::stoi(std::string(idxTok.text));
+            return StinkyRegister(regType, idx, 1); // Single element
+        }
+
+        // Check for format: v[12] or v[10:13]
+        if(peek().kind != TokenKind::LeftBracket)
+        {
+            // Not a register, might be a plain identifier
+            return StinkyRegister(regType); // Store as string
+        }
+
+        consume(); // consume '['
 
         // Parse start index
         if(peek().kind != TokenKind::IntegerLiteral)
@@ -618,8 +610,7 @@ namespace
 
         const Token& startTok = consume();
         int          startIdx = std::stoi(std::string(startTok.text));
-
-        int endIdx = startIdx;
+        int          endIdx   = startIdx;
 
         // Check for range notation [start:end]
         if(peek().kind == TokenKind::Colon)
@@ -637,10 +628,12 @@ namespace
         }
 
         // Expect ']'
-        if(!expect(TokenKind::RightBracket, "Expected ']' after register index"))
+        if(peek().kind != TokenKind::RightBracket)
         {
+            emitError("Expected ']' after register index");
             return std::nullopt;
         }
+        consume();
 
         // Calculate register count
         int regNum = endIdx - startIdx + 1;
@@ -651,32 +644,6 @@ namespace
         }
 
         return StinkyRegister(regType, startIdx, regNum);
-    }
-
-    std::optional<StinkyRegister> IRParser::parseLiteral()
-    {
-        if(peek().kind == TokenKind::IntegerLiteral)
-        {
-            const Token& tok = consume();
-            int          val = std::stoi(std::string(tok.text));
-            return StinkyRegister(val);
-        }
-        else if(peek().kind == TokenKind::HexLiteral)
-        {
-            const Token& tok = consume();
-            std::string  text(tok.text);
-            // Parse hex literal (starts with 0x)
-            int val = std::stoi(text, nullptr, 16);
-            return StinkyRegister(val);
-        }
-        else if(peek().kind == TokenKind::Identifier)
-        {
-            const Token& tok = consume();
-            std::string  text(tok.text);
-            return StinkyRegister(text);
-        }
-
-        return std::nullopt;
     }
 
     bool IRParser::expect(TokenKind kind, const std::string& message)

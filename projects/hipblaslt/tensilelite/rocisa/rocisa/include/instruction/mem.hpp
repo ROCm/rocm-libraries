@@ -3082,6 +3082,21 @@ namespace rocisa
             return {group0, group1};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            if(group2 && group3)
+            {
+                return {group0, group1, group2, group3};
+            }
+
+            return {group0, group1};
+        }
+
         std::string getArgStr() const
         {
             std::stringstream ss;

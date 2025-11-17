@@ -79,6 +79,18 @@ namespace stinkytofu
         return eofToken;
     }
 
+    const Token& IRLexer::peekAhead(size_t offset) const
+    {
+        size_t lookAheadIndex = currentTokenIndex + offset;
+        if(lookAheadIndex < tokens.size())
+        {
+            return tokens[lookAheadIndex];
+        }
+        // Return EOF if past the end
+        static Token eofToken(TokenKind::Eof, "", 0, 0);
+        return eofToken;
+    }
+
     const Token& IRLexer::consume()
     {
         if(currentTokenIndex < tokens.size())
@@ -137,8 +149,49 @@ namespace stinkytofu
             return Token(
                 TokenKind::RightBracket, std::string_view(tokenStart, 1), tokenLine, tokenColumn);
 
+        case '(':
+            return Token(
+                TokenKind::LeftParen, std::string_view(tokenStart, 1), tokenLine, tokenColumn);
+
+        case ')':
+            return Token(
+                TokenKind::RightParen, std::string_view(tokenStart, 1), tokenLine, tokenColumn);
+
+        case '{':
+            return Token(
+                TokenKind::LeftBrace, std::string_view(tokenStart, 1), tokenLine, tokenColumn);
+
+        case '}':
+            return Token(
+                TokenKind::RightBrace, std::string_view(tokenStart, 1), tokenLine, tokenColumn);
+
         case ',':
             return Token(TokenKind::Comma, std::string_view(tokenStart, 1), tokenLine, tokenColumn);
+
+        case '=':
+            return Token(TokenKind::Equal, std::string_view(tokenStart, 1), tokenLine, tokenColumn);
+
+        case '"':
+            // Quoted string
+            while(peekChar() != '"' && !isAtBufferEnd())
+            {
+                if(peekChar() == '\\')
+                {
+                    consumeChar(); // consume backslash
+                    if(!isAtBufferEnd())
+                        consumeChar(); // consume escaped char
+                }
+                else
+                {
+                    consumeChar();
+                }
+            }
+            if(peekChar() == '"')
+                consumeChar(); // consume closing quote
+            return Token(TokenKind::QuotedString,
+                         std::string_view(tokenStart, curPtr - tokenStart),
+                         tokenLine,
+                         tokenColumn);
 
         case '0':
             // Check for hex literal
@@ -171,6 +224,19 @@ namespace stinkytofu
             {
                 consumeChar();
             }
+            // Check for decimal point (float)
+            if(peekChar() == '.')
+            {
+                consumeChar(); // consume '.'
+                while(isDigit(peekChar()))
+                {
+                    consumeChar();
+                }
+                return Token(TokenKind::FloatLiteral,
+                             std::string_view(tokenStart, curPtr - tokenStart),
+                             tokenLine,
+                             tokenColumn);
+            }
             return Token(TokenKind::IntegerLiteral,
                          std::string_view(tokenStart, curPtr - tokenStart),
                          tokenLine,
@@ -184,6 +250,19 @@ namespace stinkytofu
                 {
                     consumeChar();
                 }
+                // Check for decimal point (float)
+                if(peekChar() == '.')
+                {
+                    consumeChar(); // consume '.'
+                    while(isDigit(peekChar()))
+                    {
+                        consumeChar();
+                    }
+                    return Token(TokenKind::FloatLiteral,
+                                 std::string_view(tokenStart, curPtr - tokenStart),
+                                 tokenLine,
+                                 tokenColumn);
+                }
                 return Token(TokenKind::IntegerLiteral,
                              std::string_view(tokenStart, curPtr - tokenStart),
                              tokenLine,
@@ -196,8 +275,25 @@ namespace stinkytofu
             }
             {
                 std::string_view text(tokenStart, curPtr - tokenStart);
-                return Token(getIdentifierKind(text), text, tokenLine, tokenColumn);
+                return Token(TokenKind::Identifier, text, tokenLine, tokenColumn);
             }
+
+        case '/':
+            // Check for C-style comment: //
+            if(peekChar() == '/')
+            {
+                // This is a comment, skip until end of line
+                consumeChar(); // consume second '/'
+                while(!isAtBufferEnd() && peekChar() != '\n' && peekChar() != '\r')
+                {
+                    consumeChar();
+                }
+                // Recursively call lexToken to get the next real token
+                return lexToken();
+            }
+            // Not a comment, just a forward slash (unknown token)
+            return Token(
+                TokenKind::Unknown, std::string_view(tokenStart, 1), tokenLine, tokenColumn);
 
         default:
             if(isIdentifierStart(c))
@@ -209,57 +305,7 @@ namespace stinkytofu
                 }
 
                 std::string_view text(tokenStart, curPtr - tokenStart);
-
-                // Special case: Check for "Invalid Register" (two-word literal with single space)
-                if(text == "Invalid" && peekChar() == ' ')
-                {
-                    // Look ahead to see if next word is "Register" with exactly one space
-                    const char* tempPtr = curPtr + 1; // Skip the single space
-
-                    // Check if there's exactly one space followed by "Register"
-                    if(tempPtr < bufferEnd && *tempPtr != ' ' && bufferEnd - tempPtr >= 8
-                       && std::strncmp(tempPtr, "Register", 8) == 0
-                       && (tempPtr + 8 >= bufferEnd || !isIdentifierContinue(*(tempPtr + 8))))
-                    {
-                        // Consume " Register" (one space + "Register")
-                        consumeChar(); // consume the single space
-                        for(int i = 0; i < 8; i++)
-                        {
-                            consumeChar();
-                        }
-
-                        text = std::string_view(tokenStart, curPtr - tokenStart);
-                        return Token(TokenKind::Identifier, text, tokenLine, tokenColumn);
-                    }
-                }
-
-                // Check if this is a register type followed by '['
-                // If so, consume the entire register pattern including brackets
-                TokenKind kind = getIdentifierKind(text);
-                if(kind == TokenKind::Identifier && peekChar() == '[')
-                {
-                    // Check if this looks like a register prefix
-                    if(text == "v" || text == "s" || text == "acc" || text == "SCC"
-                       || text == "BARRIER" || text == "DS_WRITE")
-                    {
-                        // Consume the bracket and contents
-                        consumeChar(); // '['
-                        while(!isAtBufferEnd() && peekChar() != ']' && peekChar() != '\n')
-                        {
-                            consumeChar();
-                        }
-                        if(peekChar() == ']')
-                        {
-                            consumeChar(); // ']'
-                        }
-
-                        // Re-evaluate the complete text
-                        text = std::string_view(tokenStart, curPtr - tokenStart);
-                        kind = getIdentifierKind(text);
-                    }
-                }
-
-                return Token(kind, text, tokenLine, tokenColumn);
+                return Token(TokenKind::Identifier, text, tokenLine, tokenColumn);
             }
 
             // Unknown character
@@ -276,6 +322,18 @@ namespace stinkytofu
             if(c == ' ' || c == '\t')
             {
                 consumeChar();
+            }
+            // Handle C-style comments: //
+            else if(c == '/' && peekAheadChar() == '/')
+            {
+                // Skip until end of line
+                consumeChar(); // consume first '/'
+                consumeChar(); // consume second '/'
+                while(!isAtBufferEnd() && peekChar() != '\n' && peekChar() != '\r')
+                {
+                    consumeChar();
+                }
+                // Don't consume the newline - let it be processed normally
             }
             else
             {
@@ -337,6 +395,14 @@ namespace stinkytofu
         return *curPtr;
     }
 
+    char IRLexer::peekAheadChar(size_t offset) const
+    {
+        const char* lookAhead = curPtr + offset;
+        if(lookAhead >= bufferEnd)
+            return '\0';
+        return *lookAhead;
+    }
+
     char IRLexer::consumeChar()
     {
         if(isAtBufferEnd())
@@ -349,52 +415,6 @@ namespace stinkytofu
     bool IRLexer::isAtBufferEnd() const
     {
         return curPtr >= bufferEnd;
-    }
-
-    TokenKind IRLexer::getIdentifierKind(std::string_view text)
-    {
-        // Check for special keywords
-        if(text == "Dest")
-            return TokenKind::Dest;
-        if(text == "Src")
-            return TokenKind::Src;
-        if(text == "issueCycles")
-            return TokenKind::IssueCycles;
-        if(text == "latencyCycles")
-            return TokenKind::LatencyCycles;
-
-        // Check for register patterns (now with brackets included)
-        if(text.size() >= 3) // Minimum: "v[0]"
-        {
-            // Single letter register types
-            if(text[0] == 'v' && text[1] == '[')
-                return TokenKind::VReg;
-            if(text[0] == 's' && text[1] == '[')
-                return TokenKind::SReg;
-
-            // Multi-character register types
-            if(text.size() >= 5) // Minimum: "acc[0]"
-            {
-                if(text.substr(0, 3) == "acc" && text[3] == '[')
-                    return TokenKind::AccReg;
-                if(text.substr(0, 3) == "SCC" && text[3] == '[')
-                    return TokenKind::SccReg;
-            }
-
-            if(text.size() >= 9) // Minimum: "BARRIER[0]"
-            {
-                if(text.substr(0, 7) == "BARRIER" && text[7] == '[')
-                    return TokenKind::BarrierReg;
-            }
-
-            if(text.size() >= 10) // Minimum: "DS_WRITE[0]"
-            {
-                if(text.substr(0, 8) == "DS_WRITE" && text[8] == '[')
-                    return TokenKind::DSWriteReg;
-            }
-        }
-
-        return TokenKind::Identifier;
     }
 
 } // namespace stinkytofu

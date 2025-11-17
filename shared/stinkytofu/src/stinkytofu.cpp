@@ -27,10 +27,16 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "ir/asm/StinkyAsmPrinter.hpp"
 #include "stinkytofu.hpp"
 
 namespace stinkytofu
 {
+    void IRBase::dump()
+    {
+        dump(std::cerr);
+    }
+
     AnalysisManager::~AnalysisManager()
     {
         for(auto& entry : analysisPasses)
@@ -151,8 +157,8 @@ namespace stinkytofu
     //----------------------------------------------------------------------
     static void dumpStinkyInstList(const IRList& irlist, std::ostream& out)
     {
-        for(const IRBase& ir : irlist)
-            ir.dump(out);
+        const auto irlistString = toString(irlist);
+        out << irlistString;
 
         out.flush();
     }

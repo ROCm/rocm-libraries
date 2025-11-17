@@ -1,0 +1,27 @@
+# Debug Verification Test List
+# Format: [arch1][arch2]...[+modifier1][+modifier2]...
+#
+# Section headers define which architectures and modifiers apply to following tests.
+# All tests below a header inherit those settings until the next header.
+#
+# Architectures: [gfx942], [gfx950], etc.
+# Modifiers:
+#   [+sia3] - Use ScheduleIterAlg: [3] instead of default [1]
+#
+# Note: Debug verification tests use debug builds and verify correctness.
+# These tests share the same YAML files as exe-time tests.
+#
+# Lines starting with # are comments
+# Empty lines are ignored
+
+# Debug verification for both architectures with both default and SIA3 variants
+# This creates 4 test runs: gfx942 default, gfx942-sia3, gfx950 default, gfx950-sia3
+[gfx942][gfx950][+sia3]
+mfma.yaml
+
+[gfx1250][+sia3]
+gfx1250_mfma.yaml
+
+# Add more critical tests here as needed
+# [gfx950][+sia3]
+# critical_test.yaml

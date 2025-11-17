@@ -73,9 +73,9 @@ stinkytofu::StinkyOptInfo getStinkyOptInfo()
 /**
  * Set default kernel configuration for the PassManager.
  */
-void setKernelConfig(stinkytofu::PassManager& passManager)
+void setKernelConfig(stinkytofu::PassManager& passManager, const std::array<int, 3>& arch)
 {
-    passManager.setKernelConfig({9, 4, 2} /* arch */,
+    passManager.setKernelConfig(arch /* arch */,
                                 0 /* ta0 */,
                                 0 /* tb0 */,
                                 0 /* tm0 */,

@@ -24,6 +24,7 @@ set(STINKYTOFU_SOURCE_FILES
     ir/asm/StinkyUnrollInsertWaitCntPass.cpp
     ir/asm/ScheduleFirstLRsPass.cpp
     ir/asm/StinkyAsmIR.cpp
+    ir/asm/StinkyAsmPrinter.cpp
     ir/asm/IRLexer.cpp
     ir/asm/IRParser.cpp
 )

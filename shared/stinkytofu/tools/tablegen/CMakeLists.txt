@@ -24,13 +24,16 @@ get_filename_component(TABLEGEN_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/../.." A
 set(TABLEGEN_GENERATED_FILES
     "${TABLEGEN_OUTPUT_DIR}/hardware/gfx942Isa.inc"
     "${TABLEGEN_OUTPUT_DIR}/hardware/gfx950Isa.inc"
+    "${TABLEGEN_OUTPUT_DIR}/hardware/gfx1250Isa.inc"
     "${TABLEGEN_OUTPUT_DIR}/ir/rocisa/Rocisagfx942Mappings.inc"
     "${TABLEGEN_OUTPUT_DIR}/ir/rocisa/Rocisagfx950Mappings.inc"
+    "${TABLEGEN_OUTPUT_DIR}/ir/rocisa/Rocisagfx1250Mappings.inc"
 )
 
 set(HARDWARE_YAML_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/data/gfx942.yaml"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/data/gfx950.yaml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../hardware/data/gfx1250.yaml"
 )
 
 # Custom command to run tablegen and generate .inc files

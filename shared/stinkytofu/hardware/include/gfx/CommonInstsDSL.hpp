@@ -94,6 +94,14 @@ namespace stinkytofu
         }
     };
 
+    struct TensorLoadToLds : GfxInstDef
+    {
+        TensorLoadToLds()
+        {
+            hwInstDesc.flags.set(IF_TENSORLoadToLds);
+        }
+    };
+
     struct SMemLoad : GfxInstDef
     {
         SMemLoad()
@@ -166,6 +174,14 @@ namespace stinkytofu
         }
     };
 
+    struct WaitTensorCntInst : GfxInstDef
+    {
+        WaitTensorCntInst()
+        {
+            hwInstDesc.flags.set(IF_WaitTensorCnt);
+        }
+    };
+
     struct HasSideEffectInst : GfxInstDef
     {
         HasSideEffectInst()
@@ -204,6 +220,36 @@ namespace stinkytofu
         }
     };
 
+    struct WMMA : GfxInstDef
+    {
+        int M = 0, N = 0, K = 0, B = 0;
+
+        std::string outTy, inTy;
+
+        bool sparse = false;
+
+        WMMA(int                m,
+             int                n,
+             int                k,
+             int                b,
+             const std::string& outT,
+             const std::string& inT,
+             bool               sparse)
+            : M(m)
+            , N(n)
+            , K(k)
+            , B(b)
+            , outTy(outT)
+            , inTy(inT)
+            , sparse(sparse)
+        {
+            if(sparse)
+                hwInstDesc.flags.set(IF_SWMMA);
+            else
+                hwInstDesc.flags.set(IF_WMMA);
+        }
+    };
+
     // The following instruction types are placeholders for future use.
     struct SALU : GfxInstDef
     {
@@ -231,6 +277,9 @@ namespace stinkytofu
 
     // MFMA/SMFMAC latency formula
     uint16_t computeCdna3MfmaLatency(const MFMA& a);
+
+    // WMMA/SWMMA latency formula
+    uint16_t computeCdna5WmmaLatency(const WMMA& a);
 
     // MFMA/SMFMAC generation helper
     // Generate MFMA or SMFMAC instruction with proper file/line tracking
@@ -264,7 +313,30 @@ namespace stinkytofu
         return mfmaInst;
     }
 
+    inline WMMA* genWmmaImpl(
+        GpuArch& registry, const MatInstDesc& s, bool sparse, const char* file, size_t line)
+    {
+        std::string wmmaName;
+        if(!sparse)
+            wmmaName = "v_wmma_";
+        else
+            wmmaName = "v_swmma_";
+
+        wmmaName = wmmaName + s.outTy + "_" + std::to_string(s.M) + "x" + std::to_string(s.N) + "x"
+                   + std::to_string(s.K) + +"_" + s.inTy;
+
+        WMMA* wmmaInst = defT<WMMA>(
+            wmmaName, registry, file, line, s.M, s.N, s.K, s.B, s.outTy, s.inTy, sparse);
+
+        // TODO
+        wmmaInst->hwInstDesc.latency
+            = computeCdna5WmmaLatency(*wmmaInst); // Placeholder latency value
+
+        return wmmaInst;
+    }
+
 // Macro wrapper to capture __FILE__ and __LINE__ from call site
 #define GEN_MFMA(registry, desc, sparse) genMfmaImpl(registry, desc, sparse, __FILE__, __LINE__)
+#define GEN_WMMA(registry, desc, sparse) genWmmaImpl(registry, desc, sparse, __FILE__, __LINE__)
 
 } // namespace stinkytofu
