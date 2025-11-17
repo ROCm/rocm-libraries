@@ -57,6 +57,21 @@ void SampleRunner::operator()(const TensorLayout& layout)
     savedMean->set_output(true);
     savedInvVariance->set_output(true);
 
+    HIPDNN_FE_CHECK(graph->validate());
+    std::cout << "Graph validation successful.\n";
+
+    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
+    std::cout << "Operation graph build successful.\n";
+
+    HIPDNN_FE_CHECK(graph->create_execution_plans());
+    std::cout << "Execution plans created successfully.\n";
+
+    HIPDNN_FE_CHECK(graph->check_support());
+    std::cout << "Graph support check successful.\n";
+
+    HIPDNN_FE_CHECK(graph->build_plans());
+    std::cout << "Plans build successful.\n";
+
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
     utilities::Tensor<IntermediateType> scaleTensor(scale->get_dim());
     utilities::Tensor<IntermediateType> biasTensor(bias->get_dim());
@@ -81,21 +96,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
                                        static_cast<IntermediateType>(1.0f));
     momentumTensor.memory().hostData()[0] = 0.1f;
     epsilonTensor.memory().hostData()[0] = utilities::BATCHNORM_DEFAULT_EPSILON;
-
-    HIPDNN_FE_CHECK(graph->validate());
-    std::cout << "Graph validation successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
-    std::cout << "Operation graph build successful.\n";
-
-    HIPDNN_FE_CHECK(graph->create_execution_plans());
-    std::cout << "Execution plans created successfully.\n";
-
-    HIPDNN_FE_CHECK(graph->check_support());
-    std::cout << "Graph support check successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_plans());
-    std::cout << "Plans build successful.\n";
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[x->get_uid()] = xTensor.memory().deviceData();
@@ -131,19 +131,20 @@ void SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<IntermediateType> savedMeanRefTensor(savedMean->get_dim());
         utilities::Tensor<IntermediateType> savedInvVarRefTensor(savedInvVariance->get_dim());
 
-        // TODO: Uncomment when CPU reference implemented
-        // CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::batchnorm_fwd_training(x_tensor,
-        //                                scale_tensor,
-        //                                bias_tensor,
-        //                                prev_mean_tensor,
-        //                                prev_var_tensor,
-        //                                momentum_tensor,
-        //                                epsilon_tensor,
-        //                                y_ref_tensor,
-        //                                next_mean_ref_tensor,
-        //                                next_var_ref_tensor,
-        //                                saved_mean_ref_tensor,
-        //                                saved_inv_var_ref_tensor);
+        // TODO: Uncomment when CPU reference validation is enabled
+        // CpuFpReferenceBatchnorm::fwdTraining(
+        //     xTensor,
+        //     scaleTensor,
+        //     biasTensor,
+        //     yRefTensor,
+        //     epsilonTensor.memory().hostData()[0],
+        //     momentumTensor.memory().hostData()[0],
+        //     &savedMeanRefTensor,
+        //     &savedInvVarRefTensor,
+        //     &prevMeanTensor,
+        //     &prevVarTensor,
+        //     &nextMeanRefTensor,
+        //     &nextVarRefTensor);
 
         // auto tolerance = test_utilities::batchnorm::getToleranceTraining<InputType>();
         //
