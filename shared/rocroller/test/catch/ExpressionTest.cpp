@@ -330,8 +330,10 @@ namespace ExpressionTest
             auto b = rb->expression();
 
             auto expr10 = bfe(DataType::UInt32, a, 0, 32); // redundant full register
-            auto expr11 = bfe(DataType::UInt32, b, 0, 32); // full register from Uint64 (2 registers)
-            auto expr12 = bfe(DataType::UInt32, b, 32, 32); // full register from Uint64 (2 registers)
+            auto expr11
+                = bfe(DataType::UInt32, b, 0, 32); // full register from Uint64 (2 registers)
+            auto expr12
+                = bfe(DataType::UInt32, b, 32, 32); // full register from Uint64 (2 registers)
             auto expr13 = bfe(DataType::UInt64, b, 0, 64); // redundant full register from UInt64
             auto expr14 = bfe(DataType::Int32, b, 0, 32); // full register from Uint64 (2 registers)
 

@@ -1070,9 +1070,9 @@ namespace rocRoller
                 unsigned offset = 0;
                 for(size_t i = 0; i < expr.operands.size(); ++i)
                 {
-                    auto const& operand           = expr.operands[i];
+                    auto const& operand       = expr.operands[i];
                     auto const& registerCount = operandRegisterCount[i];
-                    auto        length = registerCount;
+                    auto        length        = registerCount;
 
                     auto operandDest
                         = dest->subset(iota<int>(offset, offset + length).to<std::vector>());

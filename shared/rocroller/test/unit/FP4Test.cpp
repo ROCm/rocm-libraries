@@ -92,7 +92,8 @@ namespace rocRollerTest
                 bufferExpr = buffDescriptor::setDefaults(bufferExpr, m_context);
                 bufferExpr = buffDescriptor::setBasePointer(bufferExpr, s_a->expression());
                 bufferExpr = buffDescriptor::setSize(bufferExpr, Expression::literal(N));
-                bufferExpr = buffDescriptor::incrementBasePointer(bufferExpr, Expression::literal(131072)); //0x00020000
+                bufferExpr = buffDescriptor::incrementBasePointer(
+                    bufferExpr, Expression::literal(131072)); //0x00020000
 
                 auto bufferRegs = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
@@ -101,10 +102,12 @@ namespace rocRollerTest
 
                 auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
-                co_yield m_context->mem()->loadBuffer(v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
+                co_yield m_context->mem()->loadBuffer(
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
                 bufferExpr = buffDescriptor::setBasePointer(bufferExpr, s_result->expression());
                 co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
-                co_yield m_context->mem()->storeBuffer(v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
+                co_yield m_context->mem()->storeBuffer(
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
             };
 
             m_context->schedule(kb());

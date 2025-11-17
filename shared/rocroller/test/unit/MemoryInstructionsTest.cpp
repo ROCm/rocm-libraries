@@ -435,9 +435,11 @@ namespace MemoryInstructionsTest
 
                 Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
                 bufferExpr = buffDescriptor::setDefaults(bufferExpr, m_context);
-                bufferExpr = buffDescriptor::setBasePointer(bufferExpr, Expression::literal(0x00000000));
+                bufferExpr
+                    = buffDescriptor::setBasePointer(bufferExpr, Expression::literal(0x00000000));
                 bufferExpr = buffDescriptor::setSize(bufferExpr, Expression::literal(0x00000001));
-                bufferExpr = buffDescriptor::incrementBasePointer(bufferExpr, Expression::literal(0x00000001));
+                bufferExpr = buffDescriptor::incrementBasePointer(bufferExpr,
+                                                                  Expression::literal(0x00000001));
 
                 auto sRD = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
@@ -447,7 +449,8 @@ namespace MemoryInstructionsTest
                 co_yield m_context->mem()->storeGlobal(v_result, v_a, 0, 16);
 
                 auto optsExpr = buffDescriptor::getOptions(bufferExpr);
-                auto dOpt = Register::Value::Placeholder(m_context, Register::Type::Scalar, {DataType::Raw32}, 1);
+                auto dOpt     = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, {DataType::Raw32}, 1);
                 co_yield Expression::generate(dOpt, optsExpr, m_context);
 
                 co_yield m_context->copier()->copy(v_a->subset({3}), dOpt, "Move Value");
@@ -487,9 +490,9 @@ namespace MemoryInstructionsTest
                                   hipMemcpyDefault),
                         HasHipSuccess(0));
 
-            auto defaultOptions = buffDescriptor::getDefaultOptions(m_context);
-            CommandArgumentValue optionsValue = Expression::evaluate(defaultOptions);
-            uint32_t opts = std::get<uint32_t>(optionsValue);
+            auto                 defaultOptions = buffDescriptor::getDefaultOptions(m_context);
+            CommandArgumentValue optionsValue   = Expression::evaluate(defaultOptions);
+            uint32_t             opts           = std::get<uint32_t>(optionsValue);
 
             EXPECT_EQ(result[0], 0x00000001);
             EXPECT_EQ(result[1], 0x00000000);
@@ -510,7 +513,7 @@ namespace MemoryInstructionsTest
 
         void genBufferTest()
         {
-            int  N             = numBytesParam();
+            int N = numBytesParam();
 
             auto k = m_context->kernel();
 
@@ -1307,11 +1310,13 @@ namespace MemoryInstructionsTest
 
                 auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
-                co_yield m_context->mem()->loadBuffer(v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
+                co_yield m_context->mem()->loadBuffer(
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
                 bufferExpr = buffDescriptor::setBasePointer(bufferExpr, s_result->expression());
                 co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
                 bufferExpr = bufferRegs->expression();
-                co_yield m_context->mem()->storeBuffer(v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
+                co_yield m_context->mem()->storeBuffer(
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
 
                 co_yield m_context->mem()->loadBuffer(
                     v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N, true);
@@ -1474,7 +1479,8 @@ namespace MemoryInstructionsTest
             bufferExpr = buffDescriptor::setDefaults(bufferExpr, m_context);
             bufferExpr = buffDescriptor::setBasePointer(bufferExpr, s_a->expression());
             bufferExpr = buffDescriptor::setSize(bufferExpr, Expression::literal(N));
-            bufferExpr = buffDescriptor::setOptions(bufferExpr, Expression::literal(131072)); //0x00020000
+            bufferExpr
+                = buffDescriptor::setOptions(bufferExpr, Expression::literal(131072)); //0x00020000
 
             auto bufferRegs = Register::Value::Placeholder(
                 m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);

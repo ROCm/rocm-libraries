@@ -134,7 +134,7 @@ namespace rocRoller
                     lhs = logicalShiftR(lhs, literal(expr.srcOffset - expr.dstOffset));
 
                 ExpressionPtr ret = lhs | rhs;
-                if (resultVariableType(ret) != exprType)
+                if(resultVariableType(ret) != exprType)
                     ret = convert(exprType.dataType, ret);
 
                 setComment(ret, expr.comment);

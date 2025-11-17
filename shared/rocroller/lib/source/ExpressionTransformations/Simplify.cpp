@@ -782,7 +782,6 @@ namespace rocRoller
                 if(cpy.offset == 0 && cpy.width == resultVariableType(cpy.arg).getElementSize() * 8)
                     return call(convert(cpy.outputDataType, cpy.arg));
 
-
                 cpy.arg = call(cpy.arg);
                 return std::make_shared<Expression>(cpy);
             }

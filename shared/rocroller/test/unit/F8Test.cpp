@@ -322,7 +322,7 @@ namespace rocRollerTest
             auto bufferRegs = Register::Value::Placeholder(
                 m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
             co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
-            bufferExpr = bufferRegs->expression();
+            bufferExpr       = bufferRegs->expression();
             auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
             auto vgprSerial = m_context->kernel()->workitemIndex()[0];
@@ -335,7 +335,8 @@ namespace rocRollerTest
             bufferExpr = buffDescriptor::setBasePointer(bufferExpr, s_result->expression());
             co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
 
-            co_yield m_context->mem()->storeBuffer(v_temp, vgprSerial, 0, bufferRegs, bufInstOpts, N);
+            co_yield m_context->mem()->storeBuffer(
+                v_temp, vgprSerial, 0, bufferRegs, bufInstOpts, N);
         };
 
         m_context->schedule(kb());

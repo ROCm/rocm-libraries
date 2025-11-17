@@ -34,7 +34,8 @@ namespace rocRoller
         {
             AssertFatal(ctx, "Context cannot be null.");
 
-            if(ctx->targetArchitecture().HasCapability(GPUCapability::HasBufferOutOfBoundsCheckOption))
+            if(ctx->targetArchitecture().HasCapability(
+                   GPUCapability::HasBufferOutOfBoundsCheckOption))
             {
                 // Bits 29:28 are for Out-of-Bounds check.
                 //   0 - index >= NumRecords || offset + payload > stride, used for structured buffers.
