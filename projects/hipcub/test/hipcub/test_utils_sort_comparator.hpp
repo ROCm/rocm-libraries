@@ -65,11 +65,13 @@ auto to_bits(const Key key)
     using unsigned_bits_type = typename hipcub::NumericTraits<Key>::UnsignedBits;
 
     unsigned_bits_type bit_key;
-    memcpy(&bit_key, &key, sizeof(Key));
+    std::memcpy(&bit_key, &key, sizeof(unsigned_bits_type));
 
     // Remove signed zero, this case is supposed to be treated the same as
     // unsigned zero in hipcub sorting algorithms.
-    constexpr unsigned_bits_type minus_zero = unsigned_bits_type{1} << (8 * sizeof(Key) - 1);
+    constexpr unsigned_bits_type minus_zero = unsigned_bits_type{1}
+                                              << (8 * sizeof(unsigned_bits_type) - 1);
+
     // Positive and negative zero should compare the same.
     if(bit_key == minus_zero)
     {
@@ -90,7 +92,7 @@ auto to_bits(const Key key)
 template<unsigned int StartBit,
          unsigned int EndBit,
          class Key,
-         std::enable_if_t<is_custom_test_type<Key>::value, int> = 0>
+         std::enable_if_t<is_custom_test_type<std::decay_t<Key>>::value, int> = 0>
 auto to_bits(const Key& key)
 {
     using inner_t            = typename inner_type<Key>::type;
@@ -102,8 +104,8 @@ auto to_bits(const Key& key)
                            uint32_t,
                            std::conditional_t<sizeof(inner_t) == 4, uint64_t, void>>>;
 
-    auto bit_key_upper = static_cast<unsigned_bits_type>(to_bits<0, sizeof(key.x) * 8>(key.x));
-    auto bit_key_lower = static_cast<unsigned_bits_type>(to_bits<0, sizeof(key.y) * 8>(key.y));
+    auto bit_key_upper = static_cast<unsigned_bits_type>(to_bits<0, sizeof(inner_t) * 8>(key.x));
+    auto bit_key_lower = static_cast<unsigned_bits_type>(to_bits<0, sizeof(inner_t) * 8>(key.y));
 
     // Flip sign bit to properly order signed types
     if(std::is_signed<inner_t>::value)
@@ -120,6 +122,53 @@ auto to_bits(const Key& key)
 
     // The last call to to_bits mask the result to the specified bit range
     return to_bits<StartBit, EndBit>(bit_key);
+}
+
+template<unsigned int StartBit, unsigned int EndBit>
+auto to_bits(const hip_bfloat16& key)
+{
+    float f = static_cast<float>(key);
+    return to_bits<StartBit, EndBit>(f);
+}
+
+template<unsigned int StartBit, unsigned int EndBit>
+auto to_bits(const __half& key)
+{
+    float f = static_cast<float>(key);
+    return to_bits<StartBit, EndBit>(f);
+}
+
+template<unsigned int StartBit, unsigned int EndBit>
+auto to_bits(const __int128 key)
+{
+    using U = unsigned __int128;
+    U bits  = static_cast<U>(key);
+    bits ^= (U(1) << 127);
+    constexpr unsigned width = EndBit - StartBit;
+    if constexpr(width == 128)
+    {
+        return bits;
+    }
+    else
+    {
+        const U mask = (static_cast<U>(1) << width) - 1;
+        return (bits >> StartBit) & mask;
+    }
+}
+
+template<unsigned int StartBit, unsigned int EndBit>
+auto to_bits(const unsigned __int128 key)
+{
+    constexpr unsigned width = EndBit - StartBit;
+    if constexpr(width == 128)
+    {
+        return key;
+    }
+    else
+    {
+        const unsigned __int128 mask = (static_cast<unsigned __int128>(1) << width) - 1;
+        return (key >> StartBit) & mask;
+    }
 }
 
 } // namespace detail
