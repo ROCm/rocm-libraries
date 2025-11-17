@@ -1,3 +1,6 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 # Attempt (best effort) to return a list of user specified parameters cmake was invoked with
 # NOTE: Even if the user specifies CMAKE_INSTALL_PREFIX on the command line, the parameter is
 # not returned because it does not have the matching helpstring

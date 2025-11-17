@@ -56,3 +56,31 @@ endif()
 if(BUILD_SHARED_LIBS)
     set_target_properties(hipsparse-clients-common PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
+
+# Lightweight OBJECT library for samples only (contains only utility.cpp)
+add_library(hipsparse-samples-common OBJECT)
+
+target_compile_features(hipsparse-samples-common PUBLIC cxx_std_17)
+
+target_sources(hipsparse-samples-common PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp"
+)
+
+target_include_directories(hipsparse-samples-common PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+)
+
+target_link_libraries(hipsparse-samples-common PUBLIC roc::hipsparse)
+
+if(HIPSPARSE_ENABLE_CUDA)
+    target_compile_definitions(hipsparse-samples-common PUBLIC __HIP_PLATFORM_NVIDIA__)
+    target_include_directories(hipsparse-samples-common PUBLIC ${HIP_INCLUDE_DIRS})
+    target_link_libraries(hipsparse-samples-common PUBLIC ${CUDA_LIBRARIES})
+elseif(HIPSPARSE_ENABLE_HIP)
+    target_link_libraries(hipsparse-samples-common PUBLIC hip::host)
+endif()
+
+# Enable POSITION_INDEPENDENT_CODE for OBJECT library if building shared libs
+if(BUILD_SHARED_LIBS)
+    set_target_properties(hipsparse-samples-common PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()

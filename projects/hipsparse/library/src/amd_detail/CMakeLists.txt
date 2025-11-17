@@ -1,8 +1,13 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+# Auxiliary function sources
+target_sources(hipsparse PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_auxiliary.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_generic_auxiliary.cpp"
+)
+
 # Add AMD backend sources organized by category
-add_subdirectory(auxiliary)
 add_subdirectory(level1)
 add_subdirectory(level2)
 add_subdirectory(level3)
