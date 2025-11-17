@@ -3,6 +3,7 @@
 #pragma once
 
 #include <hipdnn_sdk/logging/Logger.hpp>
+#include <hipdnn_sdk/utilities/StringUtil.hpp>
 #include <algorithm>
 #include <numeric>
 #include <ranges>
@@ -140,7 +141,7 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
         return {};
     }
 
-    // Attempt to determine between NC...W layouts (NCHW/NCDHW) and N...WC layouts (NHWC/NDHWC).
+    // Attempt to determine between N...C layouts and N...W layouts.
     auto posFirstMax = static_cast<size_t>(std::distance(strides.begin(), std::max_element(strides.begin(), strides.end())));
     auto posFirstMin = static_cast<size_t>(std::distance(strides.begin(), std::min_element(strides.begin(), strides.end())));
 
@@ -161,7 +162,7 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
         }
     }
 
-    // Sort indices by their corresponding stride values (descending; aligns with N...W layout)
+    // Sort indices by their corresponding stride values (descending; aligns with NC...W layout)
     std::stable_sort(indices.begin(),
                      indices.end(),
                      [&stridesAreUnique, &strides](size_t a, size_t b) mutable {
@@ -181,8 +182,7 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
     if(!stridesAreUnique)
     {
         HIPDNN_LOG_WARN("extractStrideOrder(): Stride lengths {} are not unique, the deduced stride order {} may not be correct",
-                        hipdnn::logging::vectorToString(strides),
-                        hipdnn::logging::vectorToString(strideOrder));
+                        vecToString(strides), vecToString(strideOrder));
     }
 
     return strideOrder;
