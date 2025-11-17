@@ -2,7 +2,6 @@
 // SPDX-License-Identifier:  MIT
 
 #include <string>
-#include <unordered_set>
 
 #include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/plugin/PluginException.hpp>
@@ -20,11 +19,14 @@ namespace
 
 bool isNodeActivFwd(const hipdnn_sdk::data_objects::PointwiseAttributes& attr)
 {
-    using PM = hipdnn_sdk::data_objects::PointwiseMode;
-    static const std::unordered_set<PM> s_supportedActivations = {PM::RELU_FWD, PM::IDENTITY};
+    using PointwiseMode = hipdnn_sdk::data_objects::PointwiseMode;
 
-    if(s_supportedActivations.count(attr.operation()) == 0)
+    // Check if operation is supported for batchnorm fusion
+    switch(attr.operation())
     {
+    case PointwiseMode::RELU_FWD:
+        break; // Continue to parameter validation
+    default:
         return false;
     }
 
@@ -33,12 +35,61 @@ bool isNodeActivFwd(const hipdnn_sdk::data_objects::PointwiseAttributes& attr)
     // - Clipped ReLU (relu_upper_clip only)
     // - CLAMP (relu_lower_clip + relu_upper_clip)
     // But does NOT support Leaky ReLU (relu_lower_clip_slope)
-    if(attr.relu_lower_clip_slope())
+    return !attr.relu_lower_clip_slope();
+}
+
+const hipdnn_sdk::data_objects::BatchnormAttributes&
+    checkBatchnormNode(const hipdnn_plugin::INodeWrapper& node)
+{
+    if(node.attributesType() != hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes)
     {
-        return false; // Leaky ReLU not supported
+        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                   "First node must be batchnorm");
     }
 
-    return true;
+    const auto& bnAttr = node.attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
+
+    // TODO: Remove when MIOpen supports separate input/output buffers for running statistics
+    if(bnAttr.prev_running_mean_tensor_uid().has_value()
+       || bnAttr.prev_running_variance_tensor_uid().has_value()
+       || bnAttr.momentum_tensor_uid().has_value()
+       || bnAttr.next_running_mean_tensor_uid().has_value()
+       || bnAttr.next_running_variance_tensor_uid().has_value())
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm fwd training plan builder does not support running statistics - MIOpen API "
+            "update required");
+    }
+
+    return bnAttr;
+}
+
+const hipdnn_sdk::data_objects::PointwiseAttributes&
+    checkActivationNode(const hipdnn_plugin::INodeWrapper& node,
+                        const hipdnn_sdk::data_objects::BatchnormAttributes& bnAttr)
+{
+    if(node.attributesType() != hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes)
+    {
+        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                   "Second node must be pointwise");
+    }
+
+    const auto& activAttr = node.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
+
+    if(!isNodeActivFwd(activAttr))
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported activation mode for batchnorm fusion");
+    }
+
+    if(activAttr.in_0_tensor_uid() != bnAttr.y_tensor_uid())
+    {
+        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                   "Activation input must match batchnorm output");
+    }
+
+    return activAttr;
 }
 
 #if 0 // TODO: Enable when MIOpen API supports separate input/output buffers for running statistics \
@@ -216,97 +267,35 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     const hipdnn_plugin::IGraph& opGraph) const
 {
-    if(opGraph.nodeCount() == 1)
+    if(opGraph.nodeCount() != 1 && opGraph.nodeCount() != 2)
     {
-        // Solo batchnorm training
-        const auto& node = opGraph.getNodeWrapper(0);
-        if(node.attributesType() != hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes)
-        {
-            return false;
-        }
+        return false;
+    }
 
-        const auto& bnAttr = node.attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
+    try
+    {
+        // Common batchnorm validation
+        const auto& bnAttr = checkBatchnormNode(opGraph.getNodeWrapper(0));
 
-        // TODO: Remove when MIOpen supports separate input/output buffers for running statistics
-        if(bnAttr.prev_running_mean_tensor_uid().has_value()
-           || bnAttr.prev_running_variance_tensor_uid().has_value()
-           || bnAttr.momentum_tensor_uid().has_value()
-           || bnAttr.next_running_mean_tensor_uid().has_value()
-           || bnAttr.next_running_variance_tensor_uid().has_value())
+        if(opGraph.nodeCount() == 1)
         {
-            HIPDNN_LOG_INFO("Batchnorm fwd training plan builder does not support running "
-                            "statistics - MIOpen API update required");
-            return false;
-        }
-
-        try
-        {
+            // Solo batchnorm training
             checkTensorVirtuality1Node(bnAttr, opGraph.getTensorMap());
             return true;
         }
-        catch(const hipdnn_plugin::HipdnnPluginException& e)
-        {
-            HIPDNN_LOG_INFO(e.what());
-            return false;
-        }
+
+        // nodeCount == 2: Batchnorm training + activation fusion
+        const auto& activAttr = checkActivationNode(opGraph.getNodeWrapper(1), bnAttr);
+        checkTensorVirtuality2Node(bnAttr, activAttr, opGraph.getTensorMap());
+        // Validate params can be created successfully
+        BatchnormFwdTrainingParams params(bnAttr, activAttr, opGraph.getTensorMap());
+        return true;
     }
-    else if(opGraph.nodeCount() == 2)
+    catch(const hipdnn_plugin::HipdnnPluginException& e)
     {
-        // Batchnorm training + activation fusion
-        const auto& node0 = opGraph.getNodeWrapper(0);
-        const auto& node1 = opGraph.getNodeWrapper(1);
-
-        if(node0.attributesType() != hipdnn_sdk::data_objects::NodeAttributes::BatchnormAttributes
-           || node1.attributesType()
-                  != hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes)
-        {
-            return false;
-        }
-
-        const auto& bnAttr = node0.attributesAs<hipdnn_sdk::data_objects::BatchnormAttributes>();
-        const auto& activAttr = node1.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
-
-        // Check if activation is supported
-        if(!isNodeActivFwd(activAttr))
-        {
-            HIPDNN_LOG_INFO("Unsupported activation mode for batchnorm fusion");
-            return false;
-        }
-
-        // Validate that activation input matches batchnorm output
-        if(activAttr.in_0_tensor_uid() != bnAttr.y_tensor_uid())
-        {
-            HIPDNN_LOG_INFO("Activation input must match batchnorm output");
-            return false;
-        }
-
-        // TODO: Remove when MIOpen supports separate input/output buffers for running statistics
-        if(bnAttr.prev_running_mean_tensor_uid().has_value()
-           || bnAttr.prev_running_variance_tensor_uid().has_value()
-           || bnAttr.momentum_tensor_uid().has_value()
-           || bnAttr.next_running_mean_tensor_uid().has_value()
-           || bnAttr.next_running_variance_tensor_uid().has_value())
-        {
-            HIPDNN_LOG_INFO("Batchnorm fwd training plan builder does not support running "
-                            "statistics - MIOpen API update required");
-            return false;
-        }
-
-        try
-        {
-            checkTensorVirtuality2Node(bnAttr, activAttr, opGraph.getTensorMap());
-            // Validate params can be created successfully
-            BatchnormFwdTrainingParams params(bnAttr, activAttr, opGraph.getTensorMap());
-            return true;
-        }
-        catch(const hipdnn_plugin::HipdnnPluginException& e)
-        {
-            HIPDNN_LOG_INFO(e.what());
-            return false;
-        }
+        HIPDNN_LOG_INFO(e.what());
+        return false;
     }
-
-    return false;
 }
 
 size_t MiopenBatchnormFwdTrainingPlanBuilder::getWorkspaceSize(
