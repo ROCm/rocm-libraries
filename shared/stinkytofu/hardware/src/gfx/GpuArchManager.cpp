@@ -67,6 +67,9 @@ namespace stinkytofu
 
         std::sort(allOpcodes.begin(), allOpcodes.end());
 
+        // The pseudo opcodes for all architectures.
+        allOpcodes.push_back("LABEL");
+
         // Add invalid unified opcode to the end of the list.
         allOpcodes.push_back("INVALID");
 
@@ -88,6 +91,7 @@ namespace stinkytofu
     {
         manager.addArch("gfx942", defineGfx942Insts, hardwareDir);
         manager.addArch("gfx950", defineGfx950Insts, hardwareDir);
+        manager.addArch("gfx1250", defineGfx1250Insts, hardwareDir);
 
         manager.enumAllOpcodes();
 

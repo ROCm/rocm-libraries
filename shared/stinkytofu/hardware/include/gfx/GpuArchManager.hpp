@@ -96,5 +96,6 @@ namespace stinkytofu
 
     void defineGfx942Insts(GpuArch& registry);
     void defineGfx950Insts(GpuArch& registry);
+    void defineGfx1250Insts(GpuArch& registry);
 
 } // namespace stinkytofu

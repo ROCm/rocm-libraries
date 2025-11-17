@@ -47,7 +47,7 @@ namespace
                     }
                 }
             }
-            if(isMFMA(inst))
+            if(isMFMA(inst) || isWMMA(inst))
             {
                 cycles += inst.latencyCycles;
             }
@@ -63,7 +63,7 @@ namespace
     //
     // In the end, the instructions will be reordered in the IRList
     // to reflect the scheduling order.
-    void scheduleFirstLocalReadWithLatency(IRList& insts)
+    void scheduleFirstLocalReadWithLatency(IRList& insts, PassContext& passCtx)
     {
         if(insts.empty())
             return;
@@ -71,14 +71,27 @@ namespace
         std::vector<StinkyInstruction*> scheduled;
         scheduled.reserve(insts.size());
 
-        IRList::iterator regionEnd = insts.begin();
+        IntrusiveListIterator<IRBase> beginIt = insts.begin();
+        IntrusiveListIterator<IRBase> endIt   = insts.end();
+        if(passCtx.getProperties().containsLoop)
+        {
+            beginIt = passCtx.getProperties().loopBegin;
+            endIt   = passCtx.getProperties().loopEnd;
+            for(IRList::iterator it = insts.begin(); it != beginIt; ++it)
+            {
+                StinkyInstruction& inst = getStinkyInst(it);
+                scheduled.push_back(&inst);
+            }
+        }
+
+        IRList::iterator regionEnd = beginIt;
 
         // 1. Find the first barrier
         // Count the number of MFMAs and LRs.
         auto                           numMFMA = 0;
         auto                           numLR   = 0;
         std::queue<StinkyInstruction*> scheLR;
-        for(IRList::iterator it = insts.begin(); it != insts.end(); ++it)
+        for(IRList::iterator it = beginIt; it != endIt; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
             if(isBarrier(inst))
@@ -92,7 +105,7 @@ namespace
                 numLR++;
                 scheLR.push(&inst);
             }
-            if(isMFMA(inst))
+            if(isMFMA(inst) || isWMMA(inst))
             {
                 numMFMA++;
             }
@@ -116,14 +129,14 @@ namespace
                 scheLR.pop();
             }
         }
-        for(IRList::iterator it = insts.begin(); it != regionEnd; ++it)
+        for(IRList::iterator it = beginIt; it != regionEnd; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
             if(isDSRead(inst))
             {
                 //skip
             }
-            if(isMFMA(inst))
+            if(isMFMA(inst) || isWMMA(inst))
             {
                 scheduled.push_back(&inst);
                 for(auto i = 0; i < numLRPerMFMA; i++)
@@ -185,7 +198,7 @@ namespace
 
         void run(IRList& irlist, PassContext& passCtx) override
         {
-            scheduleFirstLocalReadWithLatency(irlist);
+            scheduleFirstLocalReadWithLatency(irlist, passCtx);
             return;
         }
     };

@@ -1,0 +1,32 @@
+# Code Generation Time Test List
+# Format: [arch1][arch2]...[+modifier1][+modifier2]...
+#
+# Section headers define which architectures and modifiers apply to following tests.
+# All tests below a header inherit those settings until the next header.
+#
+# Architectures: [gfx942], [gfx950], etc.
+# Modifiers:
+#   [+sia3] - Use ScheduleIterAlg: [3] instead of default [1]
+#
+# Note: Code generation tests automatically get patched with:
+#   - NumElementsToValidate: 0
+#   - NumWarmups: 0
+#   - KernelTime: False
+#   - PythonProfile: True
+#   (and other codegen-specific settings)
+#
+# Lines starting with # are comments
+# Empty lines are ignored
+
+# Code generation profiling for both architectures with SIA3 variant
+# This creates 2 test runs: gfx942-sia3, gfx950-sia3
+[gfx942][gfx950][+sia3]
+mfma.yaml
+
+[gfx1250][+sia3]
+gfx1250_mfma.yaml
+
+
+# Add more tests here as needed
+# [gfx950][+sia3]
+# complex_kernel.yaml

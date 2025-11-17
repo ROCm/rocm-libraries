@@ -71,6 +71,13 @@ namespace
 
             for(const auto& inst : parsedInstructions)
             {
+                // Check if label
+                if(inst->isLabel)
+                {
+                    irBuilder.createStinkyLabel(insts.end(), inst->opcodeStr);
+                    continue;
+                }
+
                 auto              opcode     = getMnemonicToIsaOpcode(inst->opcodeStr, arch);
                 const HwInstDesc* hwInstDesc = getMCIDByIsaOp(opcode, arch);
                 if(hwInstDesc == nullptr)
@@ -96,6 +103,31 @@ namespace
                     if(inst->latencyCycles > 0)
                     {
                         stinkyInst->latencyCycles = inst->latencyCycles;
+                    }
+                }
+            }
+
+            // FIXME: Workaround to detect loops in the IR. Just like in ToStinkyAsmPass.
+            std::vector<IntrusiveListIterator<IRBase>> loopLabels;
+            for(auto it = insts.begin(); it != insts.end(); ++it)
+            {
+                StinkyInstruction* inst = cast<StinkyInstruction>(it.getNodePtr());
+                if(inst->getUnifiedOpcode() == GFX::LABEL)
+                {
+                    loopLabels.push_back(it);
+                }
+                else if(isBranch(*inst))
+                {
+                    auto branchLabel = inst->srcRegs.front();
+                    for(auto targetLabel : loopLabels)
+                    {
+                        StinkyInstruction* label
+                            = cast<StinkyInstruction>(targetLabel.getNodePtr());
+                        if(branchLabel.getLiteralString() == label->getModifier<LabelData>()->label)
+                        {
+                            passCtx.setLoopProperties(true, targetLabel, it);
+                            break;
+                        }
                     }
                 }
             }
@@ -161,11 +193,11 @@ int main(int argc, char** argv)
     {
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
         std::cerr << "Options:\n";
+        std::cerr << "  --arch <arch>    Target architecture (gfx942, gfx950, gfx1250)\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --help           Show this help message\n\n";
         std::cerr << "Example:\n";
-        std::cerr << "  " << argv[0]
-                  << " input.txt --StinkyDAGSchedulerPass --ScheduleFirstLRsPass\n";
+        std::cerr << "  " << argv[0] << " --arch gfx942 input.txt --StinkyDAGSchedulerPass\n";
         return 1;
     }
 
@@ -181,13 +213,53 @@ int main(int argc, char** argv)
         std::cerr << "stinkytofu-opt - StinkyTofu IR optimizer\n\n";
         std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
         std::cerr << "Options:\n";
+        std::cerr << "  --arch <arch>    Target architecture (gfx942, gfx950, gfx1250)\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --help           Show this help message\n\n";
         printAvailablePasses();
         return 0;
     }
 
-    std::string filename = argv[1];
+    // Parse architecture option
+    std::array<int, 3> arch         = {9, 4, 2}; // default gfx942
+    int                irFileIdx    = 1;
+    int                passStartIdx = 2;
+
+    if(firstArg == "--arch")
+    {
+        if(argc < 4)
+        {
+            std::cerr << "Error: --arch requires an architecture argument\n";
+            std::cerr << "Supported architectures: gfx942, gfx950, gfx1250\n";
+            return 1;
+        }
+
+        std::string archStr = argv[2];
+        if(archStr == "gfx942")
+        {
+            arch = {9, 4, 2};
+        }
+        else if(archStr == "gfx950")
+        {
+            arch = {9, 5, 0};
+        }
+        else if(archStr == "gfx1250")
+        {
+            arch = {12, 5, 0};
+        }
+        else
+        {
+            std::cerr << "Error: Unsupported architecture '" << archStr << "'\n";
+            std::cerr << "Supported architectures: gfx942, gfx950, gfx1250\n";
+            return 1;
+        }
+
+        irFileIdx    = 3;
+        passStartIdx = 4;
+        std::cout << "Target architecture: " << archStr << "\n";
+    }
+
+    std::string filename = argv[irFileIdx];
 
     auto                      debugConfig = getPassManagerDebugConfig();
     stinkytofu::StinkyOptInfo optInfo     = getStinkyOptInfo();
@@ -196,13 +268,13 @@ int main(int argc, char** argv)
 
     passManager.setDebugConfig(std::move(debugConfig));
     passManager.setOptConfig(optInfo);
-    setKernelConfig(passManager);
+    setKernelConfig(passManager, arch);
 
-    // Add deserialization pass first to load the IR
+    // Add deserialization pass first to load the IR with the specified architecture
     passManager.addPass(std::make_unique<DeserializeStinkytofuIRPass>(filename));
 
     // Parse and add user-specified passes from command line
-    std::vector<std::string> requestedPasses = parsePassNames(argc, argv, 2);
+    std::vector<std::string> requestedPasses = parsePassNames(argc, argv, passStartIdx);
 
     if(!requestedPasses.empty())
     {

@@ -190,6 +190,15 @@ namespace
             StinkyInstruction* lastBarrierInst = nullptr;
             for(Item* item : flatItems.getFlatItems())
             {
+                if(dynamic_cast<Label*>(item))
+                {
+                    rocisa::Label* rocLabel = dynamic_cast<Label*>(item);
+                    auto label = irBuilder.createStinkyLabel(insts.end(), rocLabel->getLabelName());
+
+                    mapping.addMapping(label, rocLabel);
+                    continue;
+                }
+
                 Instruction* inst = dynamic_cast<Instruction*>(item);
                 if((inst == nullptr) || (ignoreWaitCnt && isWaitCntInstruction(*inst)))
                 {
@@ -232,7 +241,7 @@ namespace
                 for(const InstructionInput& src : inst->getSrcParams())
                 {
                     StinkyRegister reg = getStinkyRegister(src);
-                    if(uniqueSrcRegs.find(reg) == uniqueSrcRegs.end())
+                    if(reg.isValid() && uniqueSrcRegs.find(reg) == uniqueSrcRegs.end())
                     {
                         uniqueSrcRegs.insert(reg);
                         stinkyInst->srcRegs.push_back(reg);
@@ -249,15 +258,21 @@ namespace
                     stinkyInst->destRegs.push_back(StinkyRegister::getSCCRegister());
                 }
 
+                if(isBranch(*stinkyInst))
+                {
+                    stinkyInst->addModifier<LabelData>(
+                        LabelData{Modifier::Type::LABEL_NAME,
+                                  dynamic_cast<BranchInstruction*>(inst)->labelName});
+                }
+
                 // should read from passCtx->getKernelInfo() to see if it's gemm loop
                 // It's gemm specialized barrier handling
                 if(passCtx.getOptInfo().unrollGemmMovableBarrier)
                 {
                     if(dynamic_cast<const SBarrier*>(inst))
                     {
-                        lastBarrierInst = stinkyInst;
-                        StinkyInstruction* prev
-                            = dynamic_cast<StinkyInstruction*>(stinkyInst->getPrev());
+                        lastBarrierInst         = stinkyInst;
+                        StinkyInstruction* prev = cast<StinkyInstruction>(stinkyInst->getPrev());
                         stinkyInst->destRegs.push_back(StinkyRegister::getBarrierRegister());
                         while(prev != nullptr)
                         {
@@ -270,6 +285,12 @@ namespace
                                     stinkyInst->srcRegs.push_back(prev->destRegs[0]);
                                     prev->srcRegs.push_back(stinkyInst->destRegs[0]);
                                 }
+                            }
+                            else if(isTensorLoad(*prev))
+                            {
+                                prev->destRegs.push_back(StinkyRegister::getTensorLoadRegister());
+                                stinkyInst->srcRegs.push_back(prev->destRegs[0]);
+                                prev->srcRegs.push_back(stinkyInst->destRegs[0]);
                             }
                             else if(isDSRead(*prev))
                             {
@@ -288,20 +309,26 @@ namespace
                                 break;
                             }
 
-                            prev = dynamic_cast<StinkyInstruction*>(prev->getPrev());
+                            if(prev->getPrev() == nullptr)
+                            {
+                                prev = nullptr;
+                                break;
+                            }
+                            prev = cast<StinkyInstruction>(prev->getPrev());
                         }
                     }
                 }
             }
 
-            if(lastBarrierInst == nullptr)
+            if(lastBarrierInst == nullptr || lastBarrierInst->getNext() == nullptr)
             {
                 return;
             }
 
-            auto next = dynamic_cast<StinkyInstruction*>(lastBarrierInst->getNext());
-            while(next != nullptr)
+            IRBase* nextIR = lastBarrierInst->getNext();
+            while(nextIR != nullptr)
             {
+                StinkyInstruction* next = cast<StinkyInstruction>(nextIR);
                 if(isBarrier(*next))
                 {
                     break;
@@ -319,7 +346,35 @@ namespace
                 {
                     next->srcRegs.push_back(StinkyRegister::getBarrierRegister());
                 }
-                next = dynamic_cast<StinkyInstruction*>(next->getNext());
+                nextIR = next->getNext();
+            }
+
+            // Check if the input IRList contains a loop.
+            std::vector<IntrusiveListIterator<IRBase>> loopLabels;
+            for(auto it = insts.begin(); it != insts.end(); ++it)
+            {
+                StinkyInstruction* inst = cast<StinkyInstruction>(it.getNodePtr());
+                if(inst->getUnifiedOpcode() == GFX::LABEL)
+                {
+                    loopLabels.push_back(it);
+                }
+                else if(isBranch(*inst))
+                {
+                    auto branchTarget = inst->getModifier<LabelData>();
+                    if(branchTarget)
+                    {
+                        for(auto targetLabel : loopLabels)
+                        {
+                            StinkyInstruction* label
+                                = cast<StinkyInstruction>(targetLabel.getNodePtr());
+                            if(branchTarget->label == label->getModifier<LabelData>()->label)
+                            {
+                                passCtx.setLoopProperties(true, targetLabel, it);
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
     };

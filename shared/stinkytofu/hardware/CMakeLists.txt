@@ -4,6 +4,7 @@
 set(GFX_SOURCES
     Gfx942.cpp
     Gfx950.cpp
+    Gfx1250.cpp
     GpuArchManager.cpp
     InstDefDSL.cpp
 )

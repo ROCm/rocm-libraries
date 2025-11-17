@@ -27,6 +27,7 @@
 #include <iostream> // TODO: don't use iostream.
 
 #include "ir/asm/StinkyAsmIR.hpp"
+#include "ir/asm/StinkyAsmPrinter.hpp"
 
 namespace stinkytofu
 {
@@ -36,34 +37,8 @@ namespace stinkytofu
     void StinkyRegister::dump(std::ostream& out, const std::string& prefix) const
     {
         out << prefix;
-        switch(dataType)
-        {
-        case Type::Register:
-            if(regNum == 1)
-            {
-                out << regType << "[" << regIdx << "]";
-            }
-            else
-            {
-                out << regType << "[" << regIdx << ":" << regIdx + regNum - 1 << "]";
-            }
-            break;
-        case Type::LiteralInt:
-            out << getLiteralInt();
-            break;
-        case Type::LiteralDouble:
-            out << getLiteralDouble();
-            break;
-        case Type::LiteralString:
-            out << getLiteralString();
-            break;
-        case Type::Invalid:
-            out << "Invalid Register";
-            break;
-        default:
-            assert(false && "Unknown StinkyRegister type");
-            break;
-        };
+        RegisterPrinter printer(out);
+        printer.print(*this);
     }
 
     //----------------------------------------------------------------------
@@ -78,50 +53,27 @@ namespace stinkytofu
                                  bool               printDetails,
                                  const std::string& prefix) const
     {
-        out << prefix << hwInstDesc->mnemonic << "\n";
-
-        if(!printDetails)
-            return;
-
-        out << prefix << "  Dest:";
-        for(unsigned i = 0; i < destRegs.size(); ++i)
-        {
-            out << " ";
-            destRegs[i].dump(out);
-            if(i < destRegs.size() - 1)
-            {
-                out << "\n" << prefix << "        ";
-            }
-        }
-        out << "\n";
-
-        out << prefix << "  Src :";
-        for(unsigned i = 0; i < srcRegs.size(); ++i)
-        {
-            out << " ";
-            srcRegs[i].dump(out);
-            if(i < srcRegs.size() - 1)
-            {
-                out << "\n" << prefix << "       ";
-            }
-        }
-        out << "\n";
-
-        out << prefix << "  issueCycles:";
-        out << " ";
-        out << issueCycles;
-        out << "\n";
-
-        out << prefix << "  latencyCycles:";
-        out << " ";
-        out << latencyCycles;
-        out << "\n\n";
+        AsmPrinter printer(out);
+        if(!prefix.empty())
+            out << prefix;
+        printer.print(*this);
     }
 
     //----------------------------------------------------------------------
     // StinkyInstIRBuilder implementation
     //----------------------------------------------------------------------
     IRBuilder::ID StinkyInstIRBuilder::ID = &StinkyInstIRBuilder::ID;
+
+    StinkyInstruction* StinkyInstIRBuilder::createStinkyLabel(IRList::iterator   pos,
+                                                              const std::string& label)
+    {
+        static const HwInstDesc labelMCID{
+            GFX::LABEL, GFX::LABEL, 0, 0, "LABEL", makeFlagSet({InstFlag::IF_HasSideEffect})};
+
+        StinkyInstruction* labelInst = createStinkyInstBefore(pos, &labelMCID);
+        labelInst->addModifier<LabelData>(LabelData{Modifier::Type::LABEL_NAME, label});
+        return labelInst;
+    }
 
     void StinkyInstIRBuilder::erase(StinkyInstruction* stinkyInst)
     {
@@ -134,6 +86,9 @@ namespace stinkytofu
 
 #define GET_ISAINFO_UOP_MAPPINGS
 #include "hardware/gfx950Isa.inc"
+
+#define GET_ISAINFO_UOP_MAPPINGS
+#include "hardware/gfx1250Isa.inc"
 
     static const HwInstDesc* getMCIDTable(GfxArchID arch)
     {
@@ -149,6 +104,12 @@ namespace stinkytofu
         {
 #define GET_ISAINFO_HWINSTDESC_TABLE
 #include "hardware/gfx950Isa.inc"
+            return MCIDTable;
+        }
+        case GfxArchID::gfx1250:
+        {
+#define GET_ISAINFO_HWINSTDESC_TABLE
+#include "hardware/gfx1250Isa.inc"
             return MCIDTable;
         }
         default:
@@ -171,6 +132,11 @@ namespace stinkytofu
         case GfxArchID::gfx950:
         {
             isaOpcode = getgfx950Opcode(unifiedOpcode);
+            break;
+        }
+        case GfxArchID::gfx1250:
+        {
+            isaOpcode = getgfx1250Opcode(unifiedOpcode);
             break;
         }
         default:
@@ -219,6 +185,12 @@ namespace stinkytofu
         {
 #define GET_ISAINFO_MNEMONIC_TO_OPCODE_MAPPINGS
 #include "hardware/gfx950Isa.inc"
+            return get(MnemonicToIsaOpcodeMap, mnemonic);
+        }
+        case GfxArchID::gfx1250:
+        {
+#define GET_ISAINFO_MNEMONIC_TO_OPCODE_MAPPINGS
+#include "hardware/gfx1250Isa.inc"
             return get(MnemonicToIsaOpcodeMap, mnemonic);
         }
         default:

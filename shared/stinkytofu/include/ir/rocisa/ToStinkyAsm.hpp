@@ -28,6 +28,7 @@ namespace rocisa
 {
     struct Item;
     struct Instruction;
+    struct Label;
     struct Module;
 };
 
@@ -81,6 +82,7 @@ namespace stinkytofu
     class RocisaStinkyMapping : public AnalysisPass
     {
         std::unordered_map<StinkyInstruction*, rocisa::Instruction*> stinkyToRocisaMap;
+        std::unordered_map<StinkyInstruction*, rocisa::Label*>       stinkyToRocisaLabelMap;
 
     public:
         static Pass::ID ID;
@@ -113,6 +115,21 @@ namespace stinkytofu
         {
             auto it = stinkyToRocisaMap.find(stinkyInst);
             if(it != stinkyToRocisaMap.end())
+                return it->second;
+            return nullptr;
+        }
+
+        void addMapping(StinkyInstruction* stinkyInst, rocisa::Label* rocLabel)
+        {
+            assert(stinkyToRocisaLabelMap.find(stinkyInst) == stinkyToRocisaLabelMap.end()
+                   && "StinkyInstruction already mapped.");
+            stinkyToRocisaLabelMap[stinkyInst] = rocLabel;
+        }
+
+        rocisa::Label* getRocisaLabel(StinkyInstruction* stinkyInst) const
+        {
+            auto it = stinkyToRocisaLabelMap.find(stinkyInst);
+            if(it != stinkyToRocisaLabelMap.end())
                 return it->second;
             return nullptr;
         }

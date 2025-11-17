@@ -1914,7 +1914,7 @@ class Solution(collections.abc.Mapping):
         state["UseDirect32XEmulation"] = False
 
     # backup UsePLRPack from yaml before calling hasCustomSchedule
-    backup_UsePLRPack = state["UsePLRPack"] 
+    backup_UsePLRPack = state["UsePLRPack"]
     # Check if CMS is available for this solution
     if state["UseCustomMainLoopSchedule"] in [-1, 1]:
       # initialize CMS related config parameters (for CMS only)
@@ -2302,7 +2302,7 @@ class Solution(collections.abc.Mapping):
           vw = state["VectorWidthA"] if "A" in tc else state["VectorWidthB"]
           LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthU%s"%tc] * bpe * vw), multiple)
         return LdsBlockSizePerPad
-      
+
       def getLdsBpe(tc: str) -> float:
         return state["ProblemType"]["DataType%s"%tc].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataType%s"%tc].numBytes()
 
@@ -4221,7 +4221,7 @@ class Solution(collections.abc.Mapping):
               not state["ClusterLocalRead"] and \
               not state["InnerUnroll"] >= state["LocalReadVectorWidth"] // state["MIInputPerThread"]:
             reject(state, printRejectionReason, "wider localRead only support ClusterLocalRead or (InnerUnroll > WiderLocalReadxN)")
-                    
+
 
     if state["GlobalReadPerMfma"] > 1 and state["PrefetchGlobalRead"] >= 2:
       reject(state, printRejectionReason, "GlobalReadPerMfma need to be 1 if PGR>=2")

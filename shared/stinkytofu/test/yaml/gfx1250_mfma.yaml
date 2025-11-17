@@ -1,0 +1,75 @@
+GlobalParameters:
+  NumElementsToValidate: -1
+  KernelTime: True
+  NewClient: 2
+  BoundsCheck: False
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4 # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  PruneSparseMode: 0
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  PrintWinnersOnly: True
+  MinKForGSU: 1
+  Architecture: gfx1250
+  CpuThreads: 1
+  PrintLevel: 2
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
+
+BenchmarkProblems:
+  #######################################
+  # TN - standard
+  #######################################
+  - - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1, 1, 1, 2, 2]
+        - DepthU: [64]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [0]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [1]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [1]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [-1]
+        - 1LDSBuffer: [-1]
+        - DirectToVgprSparseMetadata: [0]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - DirectToVgprA: [False]
+        - WavefrontSize: [32]
+        - AssertFree0ElementMultiple: [16]
+        - AssertFree1ElementMultiple: [16]
+        - AssertSummationElementMultiple: [32]
+
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [32, 32, 1, 256]

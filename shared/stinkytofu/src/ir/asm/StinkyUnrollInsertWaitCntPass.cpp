@@ -60,14 +60,14 @@ namespace
 
 #ifndef NDEBUG
             // There should be no existing s_waitcnt in the instruction list.
-            while(it != insts.end())
-            {
-                StinkyInstruction& inst = getStinkyInst(it);
-                assert(isWaitCnt(inst) == false
-                       && "Internal Error: All s_waitcnt should have been removed in conversion to "
-                          "StinkyInstructions.");
-                ++it;
-            }
+            // while(it != insts.end())
+            // {
+            //     StinkyInstruction& inst = getStinkyInst(it);
+            //     assert(isWaitCnt(inst) == false
+            //            && "Internal Error: All s_waitcnt should have been removed in conversion to "
+            //               "StinkyInstructions.");
+            //     ++it;
+            // }
 #endif
             // Add a s_waitcnt local wait before each s_barrier
             it = insts.begin();
@@ -76,10 +76,43 @@ namespace
                 StinkyInstruction& inst = getStinkyInst(it);
                 if(isBarrier(inst))
                 {
+                    bool foundTensorLoad = false;
+                    bool foundDSStore    = false;
+                    if(it != insts.begin())
+                    {
+                        IRList::iterator prevIt = it;
+                        do
+                        {
+                            --prevIt;
+                            StinkyInstruction& prevInst = getStinkyInst(prevIt);
+                            if(isTensorLoad(prevInst))
+                            {
+                                foundTensorLoad = true;
+                            }
+                            if(isDSWrite(prevInst))
+                            {
+                                foundDSStore = true;
+                            }
+                            // Stop scanning if another barrier is encountered.
+                            if(isBarrier(prevInst))
+                            {
+                                break;
+                            }
+                        } while(prevIt != insts.begin());
+                    }
+                    if(foundTensorLoad)
+                    {
+                        StinkyInstruction* waitInst = irBuilder.createStinkyInstBefore(
+                            it, getMCIDByUOp(GFX::s_wait_tensorcnt, arch));
+                        SWaitTensorCntData waitTensorCnt(0);
+                        waitInst->addModifier<SWaitTensorCntData>(waitTensorCnt);
+                    }
+
+                    int dscnt = foundDSStore ? 0 : -1;
                     // Insert a waitcnt before the barrier.
                     StinkyInstruction* barrier
                         = irBuilder.createStinkyInstBefore(it, getMCIDByUOp(GFX::s_waitcnt, arch));
-                    SWaitCntData waitCnt(-1, -1, 0, 0, -1);
+                    SWaitCntData waitCnt(-1, -1, 0, dscnt, -1);
                     barrier->addModifier<SWaitCntData>(waitCnt);
                 }
                 ++it;
@@ -104,11 +137,12 @@ namespace
 
                         IRList::iterator nextIt = it;
                         ++nextIt;
-                        if(nextIt == insts.end())
+                        if(passCtx.getProperties().containsLoop
+                           && nextIt == passCtx.getProperties().loopEnd)
                         {
-                            nextIt = insts.begin();
+                            nextIt = passCtx.getProperties().loopBegin;
                         }
-                        while(nextIt != it)
+                        while(nextIt != it && nextIt != insts.end())
                         {
                             bool               found    = false;
                             StinkyInstruction& nextInst = getStinkyInst(nextIt);
@@ -228,10 +262,11 @@ namespace
                                 break;
                             // Move to the next instruction.
                             ++nextIt;
-                            if(nextIt == insts.end())
+                            if(passCtx.getProperties().containsLoop
+                               && nextIt == passCtx.getProperties().loopEnd)
                             {
                                 // Reached the end of the instruction list.
-                                nextIt = insts.begin();
+                                nextIt = passCtx.getProperties().loopBegin;
                             }
                         }
                     }

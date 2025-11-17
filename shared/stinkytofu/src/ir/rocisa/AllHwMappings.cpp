@@ -67,6 +67,68 @@ namespace stinkytofu
         return {stinkyInst};
     }
 
+    std::vector<StinkyInstruction*>
+        lowerRocisaWaitCnt(rocisa::Instruction& inst, StinkyInstIRBuilder& irBuilder, IRList& insts)
+    {
+        SWaitCntData waitCntData;
+        if(rocisa::_SWaitCnt* waitCntInst = dynamic_cast<rocisa::_SWaitCnt*>(&inst))
+        {
+            waitCntData.dlcnt = waitCntInst->getLgkmcnt();
+            waitCntData.vlcnt = waitCntInst->getVmcnt();
+        }
+        else if(rocisa::_SWaitLoadcnt* waitCntInst = dynamic_cast<rocisa::_SWaitLoadcnt*>(&inst))
+        {
+            if(const int* dlcnt = std::get_if<int>(&waitCntInst->getParams().front()))
+            {
+                waitCntData.dlcnt = *dlcnt;
+            }
+        }
+        else if(const rocisa::_SWaitDscnt* waitCntInst
+                = dynamic_cast<const rocisa::_SWaitDscnt*>(&inst))
+        {
+            if(const int* dscnt = std::get_if<int>(&waitCntInst->getParams().front()))
+            {
+                waitCntData.dscnt = *dscnt;
+            }
+        }
+        else
+        {
+            assert(false && "Internal error: WaitCntInstruction expected");
+        }
+
+        StinkyInstruction* stinkyInst = irBuilder.createStinkyInstBefore(
+            insts.end(), getMCIDByUOp(GFX::s_waitcnt, irBuilder.arch));
+
+        stinkyInst->addModifier<SWaitCntData>(waitCntData);
+
+        return {stinkyInst};
+    }
+
+    std::vector<StinkyInstruction*> lowerRocisaWaitTensorcnt(rocisa::Instruction& inst,
+                                                             StinkyInstIRBuilder& irBuilder,
+                                                             IRList&              insts)
+    {
+        SWaitTensorCntData waitTensorCntData;
+        if(rocisa::SWaitTensorcnt* waitTensorCntInst = dynamic_cast<rocisa::SWaitTensorcnt*>(&inst))
+        {
+            if(const int* tensorcnt = std::get_if<int>(&waitTensorCntInst->getSrcParams().front()))
+            {
+                waitTensorCntData.tlcnt = *tensorcnt;
+            }
+        }
+        else
+        {
+            assert(false && "Internal error: WaitTensorCntInstruction expected");
+        }
+
+        StinkyInstruction* stinkyInst = irBuilder.createStinkyInstBefore(
+            insts.end(), getMCIDByUOp(GFX::s_wait_tensorcnt, irBuilder.arch));
+
+        stinkyInst->addModifier<SWaitTensorCntData>(waitTensorCntData);
+
+        return {stinkyInst};
+    }
+
     struct HwInstDescConversionMapping
     {
         const std::unordered_map<std::type_index, ConvertHwInstToRocisaFunc>* convHwInstToRocisaFMap
@@ -87,6 +149,12 @@ namespace stinkytofu
         {
 #define GET_ROCISA_HW_MAPPING_TABLE
 #include "ir/rocisa/Rocisagfx950Mappings.inc"
+            return &rocisaToHwInstMap;
+        }
+        case GfxArchID::gfx1250:
+        {
+#define GET_ROCISA_HW_MAPPING_TABLE
+#include "ir/rocisa/Rocisagfx1250Mappings.inc"
             return &rocisaToHwInstMap;
         }
         default:
@@ -110,6 +178,12 @@ namespace stinkytofu
         {
 #define GET_ROCISA_TO_HW_CONVERSION_TABLE
 #include "ir/rocisa/Rocisagfx950Mappings.inc"
+            return &convertRocisaToHwInstFunc;
+        }
+        case GfxArchID::gfx1250:
+        {
+#define GET_ROCISA_TO_HW_CONVERSION_TABLE
+#include "ir/rocisa/Rocisagfx1250Mappings.inc"
             return &convertRocisaToHwInstFunc;
         }
         default:

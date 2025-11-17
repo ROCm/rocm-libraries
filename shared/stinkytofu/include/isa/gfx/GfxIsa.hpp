@@ -30,14 +30,15 @@ namespace stinkytofu
 {
     enum class GfxArchID : uint32_t
     {
-        gfx942 = 942,
-        gfx950 = 950,
+        gfx942  = 942,
+        gfx950  = 950,
+        gfx1250 = 1250,
     };
 
     inline GfxArchID getGfxArchID(uint32_t major, uint32_t minor, uint32_t stepping)
     {
         uint32_t arch = major * 100 + minor * 10 + stepping;
-        assert(arch == 942 || arch == 950);
+        assert(arch == 942 || arch == 950 || arch == 1250 && "Unsupported GfxArchID");
         return static_cast<GfxArchID>(arch);
     }
 

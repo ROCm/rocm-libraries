@@ -151,6 +151,9 @@ namespace stinkytofu
         success &= genRocisaMappings(
             manager, "gfx950", outdir, getGfx950RocisaSimpleMappings(), getGfx950Conversion());
 
+        success &= genRocisaMappings(
+            manager, "gfx1250", outdir, getGfx1250RocisaSimpleMappings(), getGfx1250Conversion());
+
         return success;
     }
 } // namespace stinkytofu

@@ -38,6 +38,9 @@ namespace rocisa
             removeDuplicatedFunction(kernel->body);
         }
 
+        const char* stinkytofuDumpEnv = std::getenv("STINKYTOFU_DUMP");
+        bool        stinkytofuDump    = stinkytofuDumpEnv ? true : false;
+
         compositeToInstruction(kernel->body);
         // Convert text variables to registers
         convertTextVariablesToRegisters(kernel->body);
@@ -50,17 +53,23 @@ namespace rocisa
                 if(auto module = std::dynamic_pointer_cast<Module>(item))
                 {
                     auto stinkySchedule = [&kernelInfo, &option](std::shared_ptr<Module> module,
-                                                                 const std::string&      pathPrefix)
-                    {
-                        std::unique_ptr<stinkytofu::PassManagerDebugConfig> debugConfig
-                            = std::make_unique<stinkytofu::PassManagerDebugConfig>();
+                                                                 const std::string&      pathPrefix,
+                                                                 bool withPGR        = false,
+                                                                 bool stinkytofuDump = false) {
+                        std::unique_ptr<stinkytofu::PassManagerDebugConfig> debugConfig;
 
-                        debugConfig->setPrintBeforeAll(true);
-                        debugConfig->setPrintAfterAll(true);
-                        debugConfig->setDumpToFileInBefore(pathPrefix + "before.txt");
-                        debugConfig->setDumpToFileInAfter(pathPrefix + "after.txt");
-                        stinkytofu::PassManagerDebugConfig::addDebugOnly("StinkyDAGSchedulerPass");
-                        stinkytofu::PassManagerDebugConfig::addDebugOnly("StinkyAsmToRocisaPass");
+                        if(stinkytofuDump)
+                        {
+                            debugConfig = std::make_unique<stinkytofu::PassManagerDebugConfig>();
+                            debugConfig->setPrintBeforeAll(true);
+                            debugConfig->setPrintAfterAll(true);
+                            debugConfig->setDumpToFileInBefore(pathPrefix + "before.txt");
+                            debugConfig->setDumpToFileInAfter(pathPrefix + "after.txt");
+                            stinkytofu::PassManagerDebugConfig::addDebugOnly(
+                                "StinkyDAGSchedulerPass");
+                            stinkytofu::PassManagerDebugConfig::addDebugOnly(
+                                "StinkyAsmToRocisaPass");
+                        }
 
                         stinkytofu::StinkyOptInfo optInfo;
                         optInfo.unrollGemmMovableBarrier = true;
@@ -77,7 +86,11 @@ namespace rocisa
                                                     option.NumGRM,
                                                     option.WavefrontSize,
                                                     option.numWaves);
-                        passManager.setDebugConfig(std::move(debugConfig));
+
+                        if(debugConfig)
+                        {
+                            passManager.setDebugConfig(std::move(debugConfig));
+                        }
                         passManager.setOptConfig(optInfo);
 
                         passManager.registerAnalysisPass(
@@ -87,7 +100,6 @@ namespace rocisa
 
                         passManager.addPass(
                             stinkytofu::createRocisaToStinkyAsmPass(true /*ignore waitCnt*/));
-                        passManager.addPass(stinkytofu::createStinkyClusterDSReadPass());
                         passManager.addPass(stinkytofu::createStinkyDAGSchedulerPass());
                         passManager.addPass(stinkytofu::createScheduleLastLRsPass());
                         passManager.addPass(stinkytofu::createStinkyUnrollInsertWaitCntPass());
@@ -95,9 +107,9 @@ namespace rocisa
                         passManager.run();
                     };
                     // Convert the module to stinkytofu instructions
-                    if(module->name == "loopBody")
+                    if(module->name == "loopWithPrefetch")
                     {
-                        stinkySchedule(module, "loopBody-");
+                        stinkySchedule(module, "loopBody-", true, stinkytofuDump);
                     }
                     else if(module->name == "noLoadLoop")
                     {
@@ -107,7 +119,7 @@ namespace rocisa
                             {
                                 if(subModule->name == "noLoadLoopBody")
                                 {
-                                    stinkySchedule(subModule, "noLoadLoop-");
+                                    stinkySchedule(subModule, "noLoadLoop-", false, stinkytofuDump);
                                 }
                             }
                         }

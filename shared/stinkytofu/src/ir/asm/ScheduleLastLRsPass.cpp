@@ -29,11 +29,14 @@ namespace
 {
     using namespace stinkytofu;
 
-    static int
-        getLRDistance(IRList& insts, IRList::iterator regStart, std::vector<StinkyRegister>& lrDst)
+    static int getLRDistance(IRList&                      insts,
+                             IRList::iterator             regStart,
+                             IRList::iterator             instsBegin,
+                             IRList::iterator             instsEnd,
+                             std::vector<StinkyRegister>& lrDst)
     {
         int cycles = 0;
-        for(IRList::iterator it = regStart; it != insts.end(); ++it)
+        for(IRList::iterator it = regStart; it != instsEnd; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
             for(const StinkyRegister& reg : inst.srcRegs)
@@ -47,7 +50,7 @@ namespace
                     }
                 }
             }
-            if(isMFMA(inst))
+            if(isMFMA(inst) || isWMMA(inst))
             {
                 cycles += inst.latencyCycles;
             }
@@ -57,7 +60,7 @@ namespace
             }
         }
 
-        for(IRList::iterator it = insts.begin(); it != regStart; ++it)
+        for(IRList::iterator it = instsBegin; it != regStart; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
             for(StinkyRegister& reg : inst.srcRegs)
@@ -71,7 +74,7 @@ namespace
                     }
                 }
             }
-            if(isMFMA(inst))
+            if(isMFMA(inst) || isWMMA(inst))
             {
                 cycles += inst.latencyCycles;
             }
@@ -87,7 +90,7 @@ namespace
     //
     // In the end, the instructions will be reordered in the IRList
     // to reflect the scheduling order.
-    void scheduleFinalLocalReadWithLatency(IRList& insts)
+    void scheduleFinalLocalReadWithLatency(IRList& insts, PassContext& passCtx)
     {
         if(insts.empty())
             return;
@@ -95,10 +98,31 @@ namespace
         std::vector<StinkyInstruction*> scheduled;
         scheduled.reserve(insts.size());
 
-        IRList::iterator regionStart = insts.begin();
+        IntrusiveListIterator<IRBase> beginIt = insts.begin();
+        IntrusiveListIterator<IRBase> endIt   = insts.end();
+        if(passCtx.getProperties().containsLoop)
+        {
+            beginIt = passCtx.getProperties().loopBegin;
+            endIt   = passCtx.getProperties().loopEnd;
+            for(IRList::iterator it = insts.begin(); it != beginIt; ++it)
+            {
+                StinkyInstruction& inst = getStinkyInst(it);
+                scheduled.push_back(&inst);
+            }
+        }
+
+        IRList::iterator regionStart = beginIt;
 
         // 1. Find the last barrier
-        for(IRList::reverse_iterator rit = insts.rbegin(); rit != insts.rend(); ++rit)
+        IRList::reverse_iterator revStartIt = insts.rbegin(), revEndIt = insts.rend();
+
+        if(passCtx.getProperties().containsLoop)
+        {
+            revStartIt = IRList::reverse_iterator(endIt.getNodePtr(), &insts);
+            revEndIt   = IRList::reverse_iterator(beginIt.getNodePtr(), &insts);
+        }
+
+        for(auto rit = revStartIt; rit != revEndIt; ++rit)
         {
             StinkyInstruction& inst = getStinkyInst(rit);
             if(isBarrier(inst))
@@ -109,7 +133,7 @@ namespace
             }
         }
         // 2. Push the instructions before the barrier.
-        for(IRList::iterator it = insts.begin(); it != regionStart; ++it)
+        for(IRList::iterator it = beginIt; it != regionStart; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
             scheduled.push_back(&inst);
@@ -130,13 +154,13 @@ namespace
             }
         };
 
-        for(IRList::iterator it = regionStart; it != insts.end(); ++it)
+        for(IRList::iterator it = regionStart; it != endIt; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
             if(isDSRead(inst))
             {
                 numLR++;
-                auto dist = getLRDistance(insts, it, inst.destRegs);
+                auto dist = getLRDistance(insts, it, beginIt, endIt, inst.destRegs);
                 if(dist < inst.latencyCycles)
                 {
                     // issue asap
@@ -148,7 +172,7 @@ namespace
                     scheLR.push(&inst);
                 }
             }
-            else if(isMFMA(inst))
+            else if(isMFMA(inst) || isWMMA(inst))
             {
                 numMFMA++;
                 scheduled.push_back(&inst);
@@ -171,6 +195,15 @@ namespace
         }
 
         scheduleRemainingLRs();
+
+        if(endIt != insts.end())
+        {
+            for(IRList::iterator it = endIt; it != insts.end(); ++it)
+            {
+                StinkyInstruction& inst = getStinkyInst(it);
+                scheduled.push_back(&inst);
+            }
+        }
 
         assert(scheduled.size() == insts.size()
                && "Scheduled instructions size must match original instructions size");
@@ -200,7 +233,7 @@ namespace
 
         void run(IRList& irlist, PassContext& passCtx) override
         {
-            scheduleFinalLocalReadWithLatency(irlist);
+            scheduleFinalLocalReadWithLatency(irlist, passCtx);
             return;
         }
     };

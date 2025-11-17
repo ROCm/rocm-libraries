@@ -20,13 +20,8 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-
-#include <cmath>
-#include <iostream> // TODO: don't use iostream.
-#include <map> // FIXME: Use unordered_map if StinkyRegister::regType is not std::string
-#include <queue>
-
-#include "ir/asm/StinkyAsmIR.hpp"
+#include "ir/asm/dag/CDNA3.hpp"
+#include "ir/asm/dag/CDNA5.hpp"
 
 #define DEBUG_TYPE "StinkyDAGSchedulerPass"
 
@@ -34,527 +29,10 @@ namespace
 {
     using namespace stinkytofu;
 
-    // Build a use-def chain for the instructions in the given IRList.
-    //
-    // This will link each instruction's sources to their most recent definitions
-    // and each instruction's users to the instructions that use its results.
-    //
-    // It assumes the instructions are in top-down order.
-    //
-    // The use-def chain is built based on the source and destination registers of each instruction.
-    // It also handles the case where multiple consecutive registers are used (e.g., regIdx 0, 1, 2, 3).
-    //
-    // The use-def chain is stored in the `sources` and `users` vectors of each StinkyInstruction.
-    //   * `sources` contains the instructions that define the registers used by this instruction,
-    //   * `users` contains the instructions that use the results of this instruction.
-    static void buildUseDefChain(IRList& insts)
-    {
-        struct RegisterKey
-        {
-            std::string_view type;
-            unsigned         regIdx;
-            bool             operator==(const RegisterKey& o) const noexcept
-            {
-                return regIdx == o.regIdx && type == o.type;
-            }
-        };
-
-        struct RegisterKeyHash
-        {
-            size_t operator()(const RegisterKey& k) const noexcept
-            {
-                size_t h1 = std::hash<std::string_view>{}(k.type);
-                size_t h2 = std::hash<unsigned>{}(k.regIdx);
-                return h1 ^ (h2 + 0x9e3779b97f4a7c15ULL + (h1 << 6) + (h1 >> 2));
-            }
-        };
-
-        std::unordered_map<RegisterKey, StinkyInstruction*, RegisterKeyHash> lastDef;
-
-        // Build use-def chains for each instruction in top-down order.
-        for(IRBase& ir : insts)
-        {
-            StinkyInstruction& inst = static_cast<StinkyInstruction&>(ir);
-            // Link uses (sources) to their most recent defs.
-            if(inst.srcRegs.size() > 0)
-            {
-                std::unordered_set<StinkyInstruction*> added;
-                for(StinkyRegister& reg : inst.srcRegs)
-                {
-                    if(!reg.isRegister())
-                        continue;
-
-                    const std::string_view t = reg.regType;
-
-                    // TODO: Currently we assume regNum <= 4 (DWords) consecutive registers.
-                    //       So it is acceptable to iterate over them.
-                    //       If regNum > 4, maybe we want to use a different approach.
-                    for(int off = 0; off < reg.regNum; ++off)
-                    {
-                        auto itDef = lastDef.find(RegisterKey{t, reg.regIdx + off});
-                        if(itDef != lastDef.end())
-                        {
-                            StinkyInstruction* def = itDef->second;
-                            if(added.insert(def).second)
-                            {
-                                def->users.push_back(&inst);
-                                inst.sources.push_back(def);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Record current def (destination) as the latest writer for its lanes.
-            for(StinkyRegister& reg : inst.destRegs)
-            {
-                const std::string_view t = reg.regType;
-                for(int off = 0; off < reg.regNum; ++off)
-                {
-                    // Update the last definition for this register.
-                    lastDef[RegisterKey{t, reg.regIdx + off}] = &inst;
-                }
-            }
-        }
-    }
-
-    struct DAGNode
-    {
-        StinkyInstruction* inst;
-        unsigned           inDegree;
-        unsigned           id;
-
-        DAGNode(StinkyInstruction* inst, unsigned id)
-            : inst(inst)
-            , inDegree(0)
-            , id(id)
-        {
-        }
-    };
-
-    // comparator: return true if a should come *after* b.
-    struct CompareByDAGid
-    {
-        bool operator()(const DAGNode* a, const DAGNode* b) const
-        {
-            return a->id > b->id; // smaller id has higher priority
-        }
-    };
-
-    using DAGNodeList = std::vector<DAGNode>;
-
-    static void dumpUseDefChain(const IRList& insts)
-    {
-        std::cerr << "*** Use-Def Chain Dump: ***\n";
-        for(const IRBase& ir : insts)
-        {
-            const StinkyInstruction& inst = *cast<StinkyInstruction>(&ir);
-
-            std::cerr << "Instruction:\n";
-            inst.dump(std::cerr, true, "  ");
-
-            for(const StinkyInstruction* src : inst.sources)
-            {
-                std::cerr << "    Source:\n";
-                src->dump(std::cerr, true, "      ");
-                std::cerr << "\n";
-            }
-
-            for(const StinkyInstruction* user : inst.users)
-            {
-                std::cerr << "    User:\n";
-                user->dump(std::cerr, true, "      ");
-                std::cerr << "\n";
-            }
-        }
-        std::cerr << "\n\n";
-    }
-
-    static void dumpDAGGraph(const std::vector<std::unordered_set<unsigned>>& dagGraph,
-                             const DAGNodeList&                               dagNodes)
-    {
-        std::cerr << "*** DAG Graph Dump: ***\n";
-        for(unsigned i = 0; i < dagGraph.size(); ++i)
-        {
-            std::cerr << "Node " << i << ": ";
-            dagNodes[i].inst->dump(std::cerr, false);
-            std::cerr << "  successors: ";
-            for(unsigned succId : dagGraph[i])
-            {
-                std::cerr << succId << " ";
-            }
-            std::cerr << "\n";
-        }
-        std::cerr << "\n\n";
-    }
-
-    static void
-        addEdgeById(DAGNode* from, DAGNode* to, std::vector<std::unordered_set<unsigned>>& dagGraph)
-    {
-        // Don't add duplicate edges, or self-loops.
-        if(from->id == to->id || dagGraph[from->id].count(to->id) > 0)
-            return;
-
-        // Add edge from 'from' to 'to'
-        dagGraph[from->id].insert(to->id);
-        to->inDegree++;
-    }
-
-    class ReadyQueue
-    {
-    public:
-        explicit ReadyQueue(const PassContext& passCtx)
-            : passCtx_(passCtx)
-        {
-        }
-
-        const PassContext& getPassContext() const
-        {
-            return passCtx_;
-        }
-
-        virtual ~ReadyQueue() = default;
-
-        // Pick one node from the ready queue based on some strategy.
-        virtual DAGNode* pickOne() = 0;
-
-        // Push a node into the ready queue which is ready to be scheduled
-        // (i.e. all its deps are satisfied).
-        virtual void push(DAGNode* node) = 0;
-
-        virtual bool empty() const = 0;
-
-        // Hook for derived classes to do something when the first group of instructions are ready to issue.
-        virtual void onInit(IRList::iterator regionStart, IRList::iterator regionEnd) {}
-
-        // Hook for derived classes to do something when the first group of instructions are ready to issue.
-        virtual void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd) {}
-
-    private:
-        // reference to const PassContext (object content immutable)
-        const PassContext& passCtx_;
-    };
-
-    using DAGidPriorityQueue = std::priority_queue<DAGNode*, std::vector<DAGNode*>, CompareByDAGid>;
-
-    class ReadyQueueByDAGid : public ReadyQueue
-    {
-        DAGidPriorityQueue queue;
-
-    public:
-        explicit ReadyQueueByDAGid(const PassContext& passCtx)
-            : ReadyQueue(passCtx)
-        {
-        }
-
-        DAGNode* pickOne() override;
-
-        void push(DAGNode* node) override
-        {
-            queue.push(node);
-        }
-
-        bool empty() const override
-        {
-            return queue.empty();
-        }
-    };
-
-    DAGNode* ReadyQueueByDAGid::pickOne()
-    {
-        assert(!queue.empty() && "Ready queue must not be empty");
-        DAGNode* node = queue.top();
-        queue.pop();
-        return node;
-    }
-
-    class CDNA3ReadyQueue : public ReadyQueue
-    {
-        struct MFMAIssueConfig
-        {
-            int latency               = 0; // original mfma latency
-            int avgIssueInterval      = 0; // average issue interval for mfma
-            int totalIssuedCycles     = 0; // total issued cycles in the region
-            int totalMfmaIssuedCycles = 0; // total mfma issued cycles in the region
-            int issuedCount           = 0; // total mfma issued count in the region
-        };
-        DAGidPriorityQueue mfmaQueue;
-        DAGidPriorityQueue globalReadQueue;
-        DAGidPriorityQueue otherQueue;
-        DAGidPriorityQueue barrierQueue;
-
-        bool isInit = false;
-
-        int globalReadCounter = 0; // tracking global read count during MFMA
-        int globalReadPerMFMA = 1; // global read issue count per MFMA
-
-        int mfmaCounter = 0;
-        // For mfma latency tracking per register
-        std::map<int, int> mfmaRegisterLatencyCounters;
-
-        MFMAIssueConfig mfmaIssueConfig;
-
-        void     updateMFMALatencyCounters(DAGNode* node);
-        bool     isMFMALatencyFree();
-        DAGNode* pickOneFromMFMA();
-        void     MFMAIssueUpdate(DAGNode* node);
-
-    public:
-        explicit CDNA3ReadyQueue(const PassContext& passCtx)
-            : ReadyQueue(passCtx)
-        {
-        }
-
-        DAGNode* pickOne() override;
-        void     push(DAGNode* node) override;
-        bool     empty() const override;
-
-        void onInit(IRList::iterator regionStart, IRList::iterator regionEnd) override;
-
-        void onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd) override;
-    };
-
-    void CDNA3ReadyQueue::updateMFMALatencyCounters(DAGNode* node)
-    {
-        // decrement the latency counters
-        for(auto& [reg, counter] : mfmaRegisterLatencyCounters)
-        {
-            if(counter > 0)
-                counter -= node->inst->issueCycles;
-        }
-    }
-
-    bool CDNA3ReadyQueue::isMFMALatencyFree()
-    {
-        DAGNode* node = mfmaQueue.top();
-        for(const StinkyRegister& dstReg : node->inst->srcRegs)
-        {
-            if(!dstReg.isRegister())
-                continue;
-
-            for(unsigned off = 0; off < dstReg.regNum; ++off)
-            {
-                auto it = mfmaRegisterLatencyCounters.find(dstReg.regIdx + off);
-                if(it != mfmaRegisterLatencyCounters.end() && it->second > 0)
-                {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    DAGNode* CDNA3ReadyQueue::pickOneFromMFMA()
-    {
-        assert(!mfmaQueue.empty() && "The MFMA queue must not be empty");
-        DAGNode* node = mfmaQueue.top();
-        mfmaQueue.pop();
-        // Use the original latency to avoid mfma issued continuously
-        auto rest
-            = (int)((mfmaIssueConfig.totalIssuedCycles - mfmaIssueConfig.totalMfmaIssuedCycles)
-                    / mfmaIssueConfig.issuedCount);
-        if(mfmaIssueConfig.issuedCount <= 0
-           || (mfmaIssueConfig.issuedCount > 0 && rest < node->inst->latencyCycles))
-        {
-            // interleave mfma with other instructions if possible
-            // mfma inst1 mfma inst2 mfma inst3
-            if(node->inst->latencyCycles >= mfmaIssueConfig.avgIssueInterval)
-            {
-                mfmaCounter = std::max(rest, 1);
-            }
-            else
-            {
-                mfmaCounter = node->inst->latencyCycles;
-            }
-        }
-        else
-        {
-            mfmaCounter = mfmaIssueConfig.avgIssueInterval;
-        }
-        mfmaIssueConfig.issuedCount--;
-        mfmaIssueConfig.totalMfmaIssuedCycles -= node->inst->issueCycles;
-        MFMAIssueUpdate(node);
-        updateMFMALatencyCounters(node);
-        globalReadCounter = 0;
-        return node;
-    }
-
-    void CDNA3ReadyQueue::MFMAIssueUpdate(DAGNode* node)
-    {
-        // Use issue for all instructions
-        mfmaCounter -= node->inst->issueCycles;
-        mfmaIssueConfig.totalIssuedCycles -= node->inst->issueCycles;
-    }
-
-    DAGNode* CDNA3ReadyQueue::pickOne()
-    {
-        // Priority 1: Try to schedule MFMA if counter allows
-        // TODO: Need to check if ds_read completes are done for the MFMA
-        // mfmaRegisterLatencyCounters
-        if(!mfmaQueue.empty() && mfmaCounter <= 0 && isMFMALatencyFree())
-        {
-            return pickOneFromMFMA();
-        }
-
-        // Priority 2: Schedule other instructions
-        if(!globalReadQueue.empty())
-        {
-            if(globalReadCounter < globalReadPerMFMA || otherQueue.empty())
-            {
-                DAGNode* globalRead = globalReadQueue.top();
-                globalReadQueue.pop();
-                MFMAIssueUpdate(globalRead);
-                updateMFMALatencyCounters(globalRead);
-                globalReadCounter++;
-                return globalRead;
-            }
-        }
-
-        if(!otherQueue.empty())
-        {
-            DAGNode* node = otherQueue.top();
-            otherQueue.pop();
-            MFMAIssueUpdate(node);
-            // If ds read, add its latency to the counter to mfmaRegisterLatencyCounters
-            // Ignore global read for now
-            if(isDSRead(*node->inst))
-            {
-                for(const StinkyRegister& dstReg : node->inst->destRegs)
-                {
-                    if(!dstReg.isRegister())
-                        continue;
-
-                    for(unsigned off = 0; off < dstReg.regNum; ++off)
-                    {
-                        mfmaRegisterLatencyCounters[dstReg.regIdx + off]
-                            = node->inst->latencyCycles;
-                    }
-                }
-            }
-            updateMFMALatencyCounters(node);
-
-            return node;
-        }
-
-        // Priority 3: Schedule barriers when their dependencies are satisfied
-        if(!barrierQueue.empty())
-        {
-            DAGNode* barrier = barrierQueue.top();
-            barrierQueue.pop();
-            MFMAIssueUpdate(barrier);
-            updateMFMALatencyCounters(barrier);
-            return barrier;
-        }
-
-        return pickOneFromMFMA();
-    }
-
-    void CDNA3ReadyQueue::push(DAGNode* node)
-    {
-        if(isMFMA(*node->inst))
-        {
-            mfmaQueue.push(node);
-            return;
-        }
-
-        if(getPassContext().getOptInfo().distributeGlobalRead && isGlobalMemLoad(*node->inst))
-        {
-            globalReadQueue.push(node);
-            return;
-        }
-
-        if(isBarrier(*node->inst))
-        {
-            barrierQueue.push(node);
-            return;
-        }
-
-        otherQueue.push(node);
-    }
-
-    bool CDNA3ReadyQueue::empty() const
-    {
-        return mfmaQueue.empty() && globalReadQueue.empty() && otherQueue.empty()
-               && barrierQueue.empty();
-    }
-
-    void CDNA3ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regionEnd)
-    {
-        // For for loop only optimization
-        if(getPassContext().getOptInfo().unrollGemm == false)
-            return;
-
-        mfmaIssueConfig.latency = 0;
-        for(IRList::iterator it = regionStart; it != regionEnd; ++it)
-        {
-            StinkyInstruction& inst = getStinkyInst(it);
-            if(isMFMA(inst) || isSMFMA(inst))
-            {
-                mfmaIssueConfig.latency = inst.latencyCycles;
-                break;
-            }
-        }
-
-        isInit = false;
-    }
-
-    void CDNA3ReadyQueue::onInitRegion(IRList::iterator regionStart, IRList::iterator regionEnd)
-    {
-        // For for loop only optimization
-        if(getPassContext().getOptInfo().unrollGemm == false)
-            return;
-
-        mfmaIssueConfig.totalIssuedCycles     = 0;
-        mfmaIssueConfig.totalMfmaIssuedCycles = 0;
-        mfmaIssueConfig.issuedCount           = 0;
-        int totalDSLatency                    = 0;
-        // Get total issued cycles and total ds latency in the region
-        for(IRList::iterator it = regionStart; it != regionEnd; ++it)
-        {
-            StinkyInstruction& inst = getStinkyInst(it);
-
-            mfmaIssueConfig.totalIssuedCycles += inst.issueCycles;
-
-            if(isDSRead(inst))
-            {
-                totalDSLatency += inst.latencyCycles;
-            }
-
-            if(isMFMA(inst) || isSMFMA(inst))
-            {
-                mfmaIssueConfig.issuedCount += 1;
-                mfmaIssueConfig.totalMfmaIssuedCycles += inst.issueCycles;
-            }
-        }
-        // Get possible longest average latency
-        // The total issued cycles and total ds latency are in parallel
-        // So we take the larger one to calculate average latency
-        auto totalAvgLatency
-            = (int)std::ceil((float)std::max(mfmaIssueConfig.totalIssuedCycles, totalDSLatency)
-                             / mfmaIssueConfig.issuedCount);
-        // Use the larger one as the mfma average counter
-        // If mfma original latency is larger, then we don't have
-        // to split the non-mfma instructions between mfma instructions
-        if(totalAvgLatency > mfmaIssueConfig.latency)
-        {
-            mfmaIssueConfig.avgIssueInterval = totalAvgLatency;
-        }
-        else
-        {
-            mfmaIssueConfig.avgIssueInterval = mfmaIssueConfig.latency;
-        }
-
-        // Only init in the beginning of the loop
-        if(!isInit)
-        {
-            mfmaCounter = mfmaIssueConfig.avgIssueInterval;
-            isInit      = true;
-        }
-    }
-
     // Check if instruction is a movable side effect (like s_barrier)
     static bool isMovableSideEffect(const StinkyInstruction& inst)
     {
+        // This is a barrier and has manually defined dependencies.
         return isBarrier(inst) && !inst.destRegs.empty();
     }
 
@@ -718,7 +196,8 @@ namespace
             //
             // dynamic_cast<const LocalWriteInstruction*>(op) ||
             //
-            isGlobalMemStore(inst) || isBranch(inst) || isBarrier(inst) || isWaitCnt(inst))
+            isGlobalMemStore(inst) || isBranch(inst) || isBarrier(inst) || isWaitCnt(inst)
+            || isHasSideEffect(inst))
         {
             return true;
         }
@@ -741,11 +220,25 @@ namespace
         std::vector<StinkyInstruction*> scheduled;
         scheduled.reserve(insts.size());
 
-        readyQueue.onInit(insts.begin(), insts.end());
+        // TODO: Only optimize loop for now
+        IntrusiveListIterator<IRBase> beginIt = insts.begin();
+        IntrusiveListIterator<IRBase> endIt   = insts.end();
+        if(readyQueue.getPassContext().getProperties().containsLoop)
+        {
+            beginIt = readyQueue.getPassContext().getProperties().loopBegin;
+            endIt   = readyQueue.getPassContext().getProperties().loopEnd;
+            for(IRList::iterator it = insts.begin(); it != beginIt; ++it)
+            {
+                StinkyInstruction& inst = getStinkyInst(it);
+                scheduled.push_back(&inst);
+            }
+        }
 
-        IRList::iterator regionStart = insts.begin();
+        readyQueue.onInit(beginIt, endIt);
 
-        for(IRList::iterator it = insts.begin(); it != insts.end(); ++it)
+        IRList::iterator regionStart = beginIt;
+
+        for(IRList::iterator it = beginIt; it != endIt; ++it)
         {
             StinkyInstruction& inst = getStinkyInst(it);
             // Only break regions on non-movable side effects
@@ -764,7 +257,17 @@ namespace
             }
         }
         // Flush the last region if it has not been flushed yet.
-        scheduleRegionWithMovableSideEffects(regionStart, insts.end(), scheduled, readyQueue);
+        scheduleRegionWithMovableSideEffects(regionStart, endIt, scheduled, readyQueue);
+
+        // TODO: Only optimize loop for now
+        if(endIt != insts.end())
+        {
+            for(IRList::iterator it = endIt; it != insts.end(); ++it)
+            {
+                StinkyInstruction& inst = getStinkyInst(it);
+                scheduled.push_back(&inst);
+            }
+        }
 
         assert(scheduled.size() == insts.size()
                && "Scheduled instructions size must match original instructions size");
@@ -779,7 +282,12 @@ namespace
 
     std::unique_ptr<ReadyQueue> chooseReadyQueue(const PassContext& passCtx)
     {
-        if(passCtx.getKernelInfo().arch[0] >= 9)
+        if(passCtx.getKernelInfo().arch[0] == 12 && passCtx.getKernelInfo().arch[1] == 5)
+        {
+            PASS_DEBUG(std::cerr << "Using CDNA5ReadyQueue for scheduling\n");
+            return std::make_unique<CDNA5ReadyQueue>(passCtx);
+        }
+        else if(passCtx.getKernelInfo().arch[0] >= 9)
         {
             PASS_DEBUG(std::cerr << "Using CDNA3ReadyQueue for scheduling\n");
             return std::make_unique<CDNA3ReadyQueue>(passCtx);

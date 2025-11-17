@@ -55,14 +55,21 @@ namespace
             StinkyInstIRBuilder& irBuilder
                 = passCtx.getOrCreateIRBuilder<StinkyInstIRBuilder>(insts, arch);
 
+            IntrusiveListIterator<IRBase> begin = insts.begin();
+            IntrusiveListIterator<IRBase> end   = insts.end();
+            if(passCtx.getProperties().containsLoop)
+            {
+                begin = passCtx.getProperties().loopBegin;
+                end   = passCtx.getProperties().loopEnd;
+            }
             // Add a dummy barrier at the beginning to handle ds_read at the start.
-            StinkyInstruction* dummyBarrier = irBuilder.createStinkyInstBefore(
-                insts.begin(), getMCIDByUOp(GFX::s_barrier, arch));
+            StinkyInstruction* dummyBarrier
+                = irBuilder.createStinkyInstBefore(begin, getMCIDByUOp(GFX::s_barrier, arch));
 
             // The barrier/ fence comes first, then the ds_read.
             // We memorize the position of the last barrier/ fence.
-            IRList::iterator                lastBarrierIt = insts.end();
-            IRList::iterator                currBarrierIt = insts.begin();
+            IRList::iterator                lastBarrierIt = end;
+            IRList::iterator                currBarrierIt = begin;
             std::vector<StinkyInstruction*> dsReadGroup;
             // Plan moves first to avoid modifying the list while iterating.
             struct MoveBatch
@@ -72,13 +79,13 @@ namespace
             };
             std::vector<MoveBatch> moveBatches;
 
-            for(auto it = insts.begin(); it != insts.end(); ++it)
+            for(auto it = begin; it != end; ++it)
             {
                 StinkyInstruction& inst = getStinkyInst(it);
                 if(isBarrier(inst) || isBranch(inst))
                 {
                     lastBarrierIt = currBarrierIt;
-                    if(currBarrierIt != insts.end() && !dsReadGroup.empty())
+                    if(currBarrierIt != end && !dsReadGroup.empty())
                     {
                         MoveBatch batch;
                         batch.barrier = &getStinkyInst(currBarrierIt);

@@ -1494,6 +1494,16 @@ namespace rocisa
             return {count};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {count};
+        }
+
         std::string toString() const override
         {
             std::string resultStr = "";
@@ -1623,6 +1633,16 @@ namespace rocisa
         }
 
         std::vector<InstructionInput> getParams() const override
+        {
+            return {simm16};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
         {
             return {simm16};
         }
@@ -1761,6 +1781,16 @@ namespace rocisa
                 }
             }
             return formatWithComment("s_waitcnt " + waitStr);
+        }
+
+        int getLgkmcnt() const
+        {
+            return lgkmcnt;
+        }
+
+        int getVmcnt() const
+        {
+            return vmcnt;
         }
 
     private:
@@ -2161,12 +2191,21 @@ namespace rocisa
             return {tensorcnt};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {tensorcnt};
+        }
+
         std::string toString() const override
         {
             return formatWithComment("s_wait_tensorcnt " + std::to_string(tensorcnt));
         }
 
-    private:
         int tensorcnt;
     };
 
