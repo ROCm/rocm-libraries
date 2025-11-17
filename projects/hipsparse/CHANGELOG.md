@@ -7,6 +7,7 @@ Documentation for hipSPARSE is available at
 
 ### Added
 
+* Added sliced ELL format support to the `hipsparseSpMV` routine.
 * Added `--clients-only` option to the `install.sh` and `rmake.py` scripts to allow building only the clients while using an already installed version of hipSPARSE.
 
 ### Optimized
