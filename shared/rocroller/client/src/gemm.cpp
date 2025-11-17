@@ -291,7 +291,7 @@ namespace rocRoller::Client::GEMMClient
         commandKernel->loadKernel();
 
         auto commandArgs
-            = gemm->commandArguments(command, problemParams, runParams); // Breaking here
+            = gemm->commandArguments(command, problemParams, runParams);
 
         auto [aTag, bTag, cTag, dTag] = gemm->getABCDTags();
 
