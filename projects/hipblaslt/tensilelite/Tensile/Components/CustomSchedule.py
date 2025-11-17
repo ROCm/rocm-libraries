@@ -36,15 +36,20 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
 from rocisa.instruction import SAddU32, SAddCU32, SCmpEQU32, SCSelectB32, SSubBU32
 from Tensile.Common import IsaVersion
 
+from copy import deepcopy
+
 class ScheduleInfo:
     numCodePaths: int
     numMfma: int
-    def __init__(self, numCodePaths, numMfma, optSchedule, syncCode, mfmaReorder = []):
+    def __init__(self, numCodePaths, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder = []):
         self.numCodePaths = numCodePaths
         self.numMfma = numMfma
         self.optSchedule = optSchedule
         self.syncCode = syncCode
+        self.nglshift = nglshift # vmcnt shift for noglobalload loop
+        self.nllshift = nllshift # vmcnt shift for nolocalload loop
         self.mfmaReorder = mfmaReorder
+
 
 def removeComments(module):
     retModule = Module()
@@ -193,14 +198,38 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             if len(ToSched[k]) > 1:
                 needIfMacro = True
 
+        def nllvmcntHandling(inst, shift0, shift1):
+            if isinstance(inst, SWaitCnt) and inst.vlcnt != -1:
+                macro.add(ValueIf("\\useGR == 1 && \\usePLR == 1")) # in main loop
+                macro.addComment0("vmcnt used in main loop")
+                macro.add(inst)
+                macro.add(ValueElseIf("\\useGR == 0 && \\usePLR == 1")) # in NGL
+                macro.addComment0("vmcnt used in ngl, applying %u shift"%shift0)
+                instModified = deepcopy(inst)
+                instModified.vlcnt = max(0, instModified.vlcnt - shift0)
+                macro.add(instModified)
+                macro.add(ValueElseIf("\\useGR == 0 && \\usePLR == 0")) # in NLL
+                macro.addComment0("vmcnt used in nll, applying %u shift"%shift1)
+                instModified = deepcopy(inst)
+                instModified.vlcnt = max(0, instModified.vlcnt - shift1)
+                macro.add(instModified)
+                macro.add(ValueEndif())
+            else:
+                macro.add(inst)
+
         def scheduleInst1(instList, macroGuard=""):
             if len(instList) == 1:
                 if instList[0] != None:
-                    if macroGuard != "":
-                        macro.add(ValueIf(macroGuard))
-                    macro.add(instList[0])
-                    if macroGuard != "":
-                        macro.add(ValueEndif())
+                    for inst in instList[0].flatitems():
+                        if isinstance(inst, SWaitCnt):
+                            nllvmcntHandling(inst, opt1.nglshift, opt1.nllshift)
+                        else:
+                            if macroGuard != "":
+                                macro.add(ValueIf(macroGuard))
+                            macro.add(inst)
+                            if macroGuard != "":
+                                macro.add(ValueEndif(comment="EndIf %s"%(macroGuard)))
+
         for k,ts in ToSched.items():
             if k in ['GRIncA', 'GRIncB']: # check for global read inc
                 scheduleInst1(ts, "\\useGRInc == 1")
@@ -223,11 +252,15 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
                 def scheduleInst2(instList, macroGuard=""):
                     if len(instList) == numCodePath:
                         if instList[codepath] != None:
-                            if macroGuard != "":
-                                macro.add(ValueIf(macroGuard))
-                            macro.add(instList[codepath])
-                            if macroGuard != "":
-                                macro.add(ValueEndif())
+                            for inst in instList[codepath].flatitems():
+                                if isinstance(inst, SWaitCnt):
+                                    nllvmcntHandling(inst, opt1.nglshift, opt1.nllshift)
+                                else:
+                                    if macroGuard != "":
+                                        macro.add(ValueIf(macroGuard))
+                                    macro.add(inst)
+                                    if macroGuard != "":
+                                        macro.add(ValueEndif(comment="EndIf %s"%(macroGuard)))
 
                 for k,ts in ToSched.items():
                     if k in ['GRIncA', 'GRIncB']: # check for global read inc
@@ -242,7 +275,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
                         scheduleInst2(ts)
 
                 if codepath == numCodePath - 1:
-                    macro.add(ValueEndif())
+                    macro.add(ValueEndif(comment="EndIf \\ID checks"))
 
     module.add(macro)
     return module, numCodePath
@@ -291,6 +324,7 @@ def hasCustomSchedule(kernel):
         optSchedule = dict()
         syncCode = []
 
+        nglshift = nllshift = 0 # vmcnt shift for ngl and nll
         if isTN and TLDS == 1:
             optSchedule = {
                 'SYNC'   : [[19,20, 50,51, 67,68, 104, 105]],
@@ -322,6 +356,7 @@ def hasCustomSchedule(kernel):
                         SBarrier(comment=""),
                         SWaitCnt(dscnt=-1, vlcnt=15, vscnt=-1, comment="Wait for previous GRA to completely"),
                         SBarrier(comment="")]
+            nglshift = nllshift = 16
         elif isNT and not useLDSTr and TLDS == 0:
             kernel["UsePLRPack"] = True
 
@@ -365,6 +400,7 @@ def hasCustomSchedule(kernel):
                         SBarrier(comment=""),
                         SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 to complete"),
                         SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB1 to complete")]
+            nglshift = nllshift = 16
         elif (isNN or isTT) and not useLDSTr and TLDS == 1:
             kernel["UsePLRPack"] = True
 
@@ -412,12 +448,12 @@ def hasCustomSchedule(kernel):
                 optSchedule['PackB0'] = optSchedule['PackA0']
                 optSchedule['PackB1'] = optSchedule['PackA1']
                 del optSchedule['PackA0'], optSchedule['PackA1']
+            nglshift = nllshift = 16
         else:
             return False, None
 
-
         numMfma = 128
-        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode)
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
         return True, opt1
     elif is256x256x128DTL and is8bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [16, 16, 16]) and MI == [16,16,128,1] and MIWG == [2,2]:
 
@@ -427,7 +463,7 @@ def hasCustomSchedule(kernel):
         syncCode = []
 
         plr = 3 if kernel["ForceUnrollSubIter"] else 1
-
+        nglshift = nllshift = 0 # vmcnt shift for ngl and nll
         if isTN and TLDS == 1:
             optSchedule = {
                 'SYNC'      : [[6,7, 20,21, 46,47, 61]],
@@ -452,6 +488,7 @@ def hasCustomSchedule(kernel):
                         SWaitCnt(dscnt=-1, vlcnt=15, vscnt=-1, comment="Wait for GRA to complete"),
                         SBarrier(comment=""),
                         SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for PLR to complete")]
+            nglshift = nllshift = 16
         else:
             return False, None
 
@@ -463,7 +500,7 @@ def hasCustomSchedule(kernel):
                            4,5,6,7, 12,13,14,15, 20,21,22,23, 28,29,30,31,
                            32,33,34,35, 40,41,42,43, 48,49,50,51, 56,57,58,59,
                            36,37,38,39, 44,45,46,47, 52,53,54,55, 60,61,62,63]
-        opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, mfmaReorder)
+        opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder)
         return True, opt1
     elif is192x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16,16,32,1] and MIWG == [2,2]:
 
@@ -471,6 +508,7 @@ def hasCustomSchedule(kernel):
 
         optSchedule = dict()
         syncCode = []
+        nglshift = nllshift = 0 # vmcnt shift for ngl and nll
         if isNN and useLDSTr and TLDS==1:
             # TODO: This schedule can be improved when BC are resolved for MT192
             # Note: A/B Global read orders are swapped
@@ -511,12 +549,12 @@ def hasCustomSchedule(kernel):
                         SWaitCnt(dscnt=-1, vlcnt=9, vscnt=-1, comment="Wait for LRB0 to complete"),
                         SBarrier(comment=""),
                         SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),]
-
+            nglshift = nllshift = 14 # vmcnt shift for ngl and nll
         else:
             return False, None
 
         numMfma = 96
-        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode)
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
         return True, opt1
 
     return False, None

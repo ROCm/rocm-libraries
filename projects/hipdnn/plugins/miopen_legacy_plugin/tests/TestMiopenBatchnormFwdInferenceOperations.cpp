@@ -228,13 +228,12 @@ protected:
                                                   static_cast<IntermediateType>(1.0f),
                                                   testCase.seed);
 
-        CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::batchnormFwdInference(
-            xTensorCpu,
-            scaleTensorCpu,
-            biasTensorCpu,
-            meanTensorCpu,
-            invVarianceTensorCpu,
-            yTensorCpu);
+        CpuFpReferenceBatchnorm::fwdInference(xTensorCpu,
+                                              scaleTensorCpu,
+                                              biasTensorCpu,
+                                              meanTensorCpu,
+                                              invVarianceTensorCpu,
+                                              yTensorCpu);
 
         CpuFpReferenceValidation<InputType> cpuRefValidation(tolerance, tolerance);
         EXPECT_TRUE(cpuRefValidation.allClose(yTensorCpu, yTensor));
