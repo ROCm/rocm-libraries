@@ -6935,7 +6935,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             statesBNumVgprG2LAllocated = roundUp(statesBNumVgprG2LAllocated * 4 / 3)
       else:
         statesBNumVgprG2LAllocated = statesBNumVgprG2L
-      if not kernel["DirectToLdsB"] or self.do["KeepDirectToLdsAlloc"] and not kernel["enableTDMB"]:
+      if (not kernel["DirectToLdsB"] or self.do["KeepDirectToLdsAlloc"]) and not kernel["enableTDMB"]:
         self.states.b.numVgprG2L = statesBNumVgprG2L
         self.states.b.numVgprG2LAllocated = statesBNumVgprG2LAllocated
         self.states.b.numVgprG2LTailloopAllocated = statesBNumVgprG2LAllocated if tensorParametersB["globalReadInstruction"].blockWidth != 6 else roundUp(statesBNumVgprG2LAllocated * 4 / 3)
