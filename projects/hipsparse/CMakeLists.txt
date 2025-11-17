@@ -78,6 +78,31 @@ if(HIPSPARSE_ENABLE_CUDA)
     find_package(CUDA REQUIRED)
 elseif(HIPSPARSE_ENABLE_HIP)
     find_package(hip REQUIRED CONFIG)
+    
+    # Include supported architectures
+    include(SupportedArchitectures)
+    
+    # Set GPU targets with backward compatibility
+    # Check if AMDGPU_TARGETS is provided for backward compatibility
+    if(AMDGPU_TARGETS)
+        set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "AMD GPU targets to compile for" FORCE)
+    endif()
+    
+    # Get default GPU targets
+    hipsparse_get_base_architectures(DEFAULT_GPU_TARGETS)
+    
+    # Use GPU_TARGETS if set, otherwise use defaults
+    if(NOT GPU_TARGETS)
+        set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "AMD GPU targets to compile for")
+    else()
+        # Handle "all" keyword
+        if(GPU_TARGETS STREQUAL "all")
+            set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "AMD GPU targets to compile for" FORCE)
+        endif()
+    endif()
+    
+    message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
+    
     find_package(rocsparse 4.0.1 REQUIRED CONFIG)
 endif()
 
