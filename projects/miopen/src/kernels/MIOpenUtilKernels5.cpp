@@ -22,7 +22,8 @@ static inline __device__ unsigned int iMod(unsigned int v, unsigned int u, unsig
 
 #define UNUSED __attribute__((unused))
 
-static inline __device__ unsigned int GetInOff(const unsigned int p_blck, const unsigned int n, const unsigned int c)
+static inline __device__ unsigned int
+GetInOff(const unsigned int p_blck, const unsigned int n, const unsigned int c)
 {
 #if TRANS
 
@@ -49,7 +50,8 @@ static inline __device__ unsigned int GetInOff(const unsigned int p_blck, const 
     return in_off;
 }
 
-static inline __device__ unsigned int GetOutOff(const unsigned int p_blck, const unsigned int n, const unsigned int c)
+static inline __device__ unsigned int
+GetOutOff(const unsigned int p_blck, const unsigned int n, const unsigned int c)
 {
 #if TRANS
 
@@ -78,15 +80,15 @@ static inline __device__ unsigned int GetOutOff(const unsigned int p_blck, const
 
 static inline __device__ void LoadData(const unsigned int in_off,
 #if !(FORWARD && TRANS)
-                                        UNUSED
+                                       UNUSED
 #endif
-                                        const unsigned int n,
+                                       const unsigned int n,
 #if !(FORWARD && !TRANS)
-                                        UNUSED
+                                       UNUSED
 #endif
-                                        const unsigned int c,
-                                        const DATA_TYPE* __restrict__ in,
-                                        DATA_TYPE* in_buf)
+                                       const unsigned int c,
+                                       const DATA_TYPE* __restrict__ in,
+                                       DATA_TYPE* in_buf)
 {
 #if FORWARD
 #pragma unroll
@@ -94,9 +96,11 @@ static inline __device__ void LoadData(const unsigned int in_off,
     {
         auto dst = reinterpret_cast<READ_TYPE*>(in_buf + RD_BLCK * v);
 #if TRANS
-        *dst = ((n * VEC_SIZE + v) < N) ? *reinterpret_cast<const READ_TYPE*>(in + in_off + CHW * v) : (READ_TYPE)0;
+        *dst = ((n * VEC_SIZE + v) < N) ? *reinterpret_cast<const READ_TYPE*>(in + in_off + CHW * v)
+                                        : (READ_TYPE)0;
 #else
-        *dst = ((c * VEC_SIZE + v) < C) ? *reinterpret_cast<const READ_TYPE*>(in + in_off + HW * v) : (READ_TYPE)0;
+        *dst = ((c * VEC_SIZE + v) < C) ? *reinterpret_cast<const READ_TYPE*>(in + in_off + HW * v)
+                                        : (READ_TYPE)0;
 #endif
     }
 #else
@@ -122,15 +126,15 @@ static inline __device__ void LocalTrans(DATA_TYPE* in_buf, DATA_TYPE* out_buf)
 
 static inline __device__ void WriteData(const unsigned int out_off,
 #if !(!FORWARD && TRANS)
-                                         UNUSED
+                                        UNUSED
 #endif
-                                         const unsigned int n,
+                                        const unsigned int n,
 #if !(!FORWARD && !TRANS)
-                                         UNUSED
+                                        UNUSED
 #endif
-                                         const unsigned int c,
-                                         DATA_TYPE* out,
-                                         const DATA_TYPE* out_buf)
+                                        const unsigned int c,
+                                        DATA_TYPE* out,
+                                        const DATA_TYPE* out_buf)
 {
 #if FORWARD
     *reinterpret_cast<WRITE_TYPE*>(out + out_off) = *reinterpret_cast<const WRITE_TYPE*>(out_buf);
@@ -138,7 +142,7 @@ static inline __device__ void WriteData(const unsigned int out_off,
 #pragma unroll
     for(int v = 0; v < VEC_SIZE; v++)
     {
-        auto src = reinterpret_cast<const READ_TYPE*>(out_buf + RD_BLCK * v); 
+        auto src = reinterpret_cast<const READ_TYPE*>(out_buf + RD_BLCK * v);
 #if TRANS
         if((n * VEC_SIZE + v) < N)
             *reinterpret_cast<READ_TYPE*>(out + out_off + CHW * v) = *src;
@@ -151,18 +155,18 @@ static inline __device__ void WriteData(const unsigned int out_off,
 }
 
 static inline __device__ void GlobalTrans(const unsigned int in_off,
-                                           const unsigned int out_off,
-                                           const unsigned int p_blck,
+                                          const unsigned int out_off,
+                                          const unsigned int p_blck,
 #if !TRANS
-                                           UNUSED
+                                          UNUSED
 #endif
-                                           const unsigned int n,
+                                          const unsigned int n,
 #if TRANS
-                                           UNUSED
+                                          UNUSED
 #endif
-                                           const unsigned int c,
-                                           const DATA_TYPE* __restrict__ in,
-                                           DATA_TYPE* __restrict__ out)
+                                          const unsigned int c,
+                                          const DATA_TYPE* __restrict__ in,
+                                          DATA_TYPE* __restrict__ out)
 {
     int HW_tail = iMod(HW, p_blck, RD_BLCK);
 
@@ -197,15 +201,15 @@ static inline __device__ void GlobalTrans(const unsigned int in_off,
 }
 
 extern "C" __global__ void TransposeNCHW2Vec(const DATA_TYPE* __restrict__ in,
-                                              DATA_TYPE* __restrict__ out,
+                                             DATA_TYPE* __restrict__ out,
 #if !USE_ALPHA
-                                              UNUSED
+                                             UNUSED
 #endif
-                                              const float alpha,
+                                             const float alpha,
 #if !USE_BETA
-                                              UNUSED
+                                             UNUSED
 #endif
-                                              const float beta)
+                                             const float beta)
 {
     const unsigned int c_p_blck = blockIdx.x * blockDim.x + threadIdx.x;
     const unsigned int c        = c_p_blck / HW_RD;
