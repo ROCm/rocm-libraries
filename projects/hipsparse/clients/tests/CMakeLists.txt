@@ -91,6 +91,7 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_coo_aos.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_sell.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_axpby.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_gather.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_scatter.cpp"

@@ -123,6 +123,9 @@ private:
         case hipdnn_sdk::data_objects::PointwiseMode::NEG:
             policy.executeUnary(input, output, pointwise::Negation{});
             break;
+        case hipdnn_sdk::data_objects::PointwiseMode::IDENTITY:
+            policy.executeUnary(input, output, pointwise::Identity{});
+            break;
         default:
             throw std::runtime_error("Unsupported unary pointwise operation: "
                                      + std::to_string(static_cast<int>(operation)));
