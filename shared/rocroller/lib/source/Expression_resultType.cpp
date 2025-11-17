@@ -73,6 +73,11 @@ namespace rocRoller
                 {
                     varType = lhsVal.varType;
                 }
+                // A bitfieldCombine's type is the same as the destination type.
+                else if constexpr(std::same_as<T, BitfieldCombine>)
+                {
+                    varType = rhsVal.varType;
+                }
                 else if(std::same_as<T, Subtract> && lhsVal.varType.isPointer()
                         && lhsVal.varType == rhsVal.varType)
                 {
@@ -323,6 +328,43 @@ namespace rocRoller
                     return {Register::Type::Vector, varType};
                 }
                 return {Register::Type::Scalar, varType};
+            }
+
+            ResultType operator()(Concatenate const& expr)
+            {
+                auto         registerType = Register::Type::Literal;
+                VariableType variableType = expr.destinationType;
+
+                auto expectedNumRegister   = DataTypeInfo::Get(expr.destinationType).registerCount;
+                unsigned actualNumRegister = 0;
+
+                for(auto const& operand : expr.operands)
+                {
+                    auto&& [operandRegisterType, operandVariableType] = call(operand);
+                    switch(operandRegisterType)
+                    {
+                    case Register::Type::Literal:
+                    case Register::Type::Scalar:
+                    case Register::Type::Vector:
+                        break;
+                    default:
+                        Throw<FatalError>(
+                            "Invalid register type for concatenate expression operands",
+                            ShowValue(operand));
+                    }
+
+                    registerType = Register::PromoteType(registerType, operandRegisterType);
+                    actualNumRegister
+                        = actualNumRegister
+                          + DataTypeInfo::Get(operandVariableType.dataType).registerCount;
+                }
+
+                AssertFatal(expectedNumRegister == actualNumRegister,
+                            ShowValue(expr.destinationType),
+                            ShowValue(expectedNumRegister),
+                            ShowValue(actualNumRegister));
+
+                return {registerType, variableType};
             }
 
             ResultType operator()(CommandArgumentPtr const& expr)

@@ -61,5 +61,3 @@ BenchmarkProblems:
           - Exact: [ 230, 230, 64, 64, 3, 7, 7]
 # resnet0:
 # ./bin/MIOpenDriver conv -n 64 -c 3 -H 230 -W 230 -k 64 -y 7 -x 7 -p 0 -q 0 -u 2 -v 2 -l 1 -j 1 -t 1
-
-

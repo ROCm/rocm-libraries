@@ -180,6 +180,9 @@ void iterator_test_function(IteratorType d_itr, std::vector<T> &h_reference)
     ASSERT_TRUE(d_itr == h_itrs[1]);
 
     HIP_CHECK(g_allocator.DeviceFree(device_output));
+    HIP_CHECK(hipFree(d_itrs));
+    free(h_itrs);
+
 }
 
 TYPED_TEST_SUITE(HipcubIteratorTests, HipcubIteratorTestsParams);
@@ -400,6 +403,9 @@ TYPED_TEST(HipcubIteratorTests, TestTexObj)
 
         iterator_test_function<IteratorType, T>(d_obj_itr, h_reference);
 
+        HIP_CHECK(d_obj_itr.UnbindTexture());
+        HIP_CHECK(d_obj_itr2.UnbindTexture());
+
         HIP_CHECK(g_allocator.DeviceFree(d_data));
         HIP_CHECK(g_allocator.DeviceFree(d_dummy));
     }
@@ -473,6 +479,9 @@ TYPED_TEST(HipcubIteratorTests, TestTexRef)
         HIP_CHECK(d_ref_itr2.BindTexture((CastT*)d_dummy, sizeof(T) * DUMMY_TEST_VALUES));
 
         iterator_test_function<IteratorType, T>(d_ref_itr, h_reference);
+
+        HIP_CHECK(d_ref_itr.UnbindTexture());
+        HIP_CHECK(d_ref_itr2.UnbindTexture());
 
         HIP_CHECK(g_allocator.DeviceFree(d_data));
         HIP_CHECK(g_allocator.DeviceFree(d_dummy));

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,15 +40,15 @@ ROCSOLVER_BEGIN_NAMESPACE
 
 // return char from type
 template <typename>
-static constexpr char rocblas2char_precision = '\0';
+inline constexpr char rocblas2char_precision = '\0';
 template <>
-static constexpr auto rocblas2char_precision<float> = 's';
+inline constexpr char rocblas2char_precision<float> = 's';
 template <>
-static constexpr auto rocblas2char_precision<double> = 'd';
+inline constexpr char rocblas2char_precision<double> = 'd';
 template <>
-static constexpr auto rocblas2char_precision<rocblas_float_complex> = 'c';
+inline constexpr char rocblas2char_precision<rocblas_float_complex> = 'c';
 template <>
-static constexpr auto rocblas2char_precision<rocblas_double_complex> = 'z';
+inline constexpr char rocblas2char_precision<rocblas_double_complex> = 'z';
 
 /* ============================================================================================
  */

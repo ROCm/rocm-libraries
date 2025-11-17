@@ -5,7 +5,6 @@ GlobalParameters:
   NumElementsToValidate: -1
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 1
-  #PrintSolutionRejectionReason: True
   Device: 0
   CMakeBuildType: Release
   MergeFiles: False
@@ -16,11 +15,9 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   BoundsCheck: 2
-  #MaxFileName: 256
   KeepBuildTmp: True
   DeviceLDS: 163840
   MaxLDS: 163840
-  #GenerateSourcesAndExit: True
 
 BenchmarkProblems:
   ########################################
@@ -62,7 +59,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[1,67,517], [1,93,709], [1], [1,76,865]]
+          - Range: [[1,67,300], [1,93,300], [1], [1,76,192]]
     - # Check DTL+nonDTL tuning
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -112,6 +109,9 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1, 1, 1, 1]
           - [16, 16, 4, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 4, 1, 1, 3, 3, 2, 2]
+          - [16, 16, 4, 1, 1, 5, 3, 2, 2]
+          - [16, 16, 4, 1, 1, 7, 7, 2, 2]
         - DepthU: [ 32 ]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -129,7 +129,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[1,67,517], [1,93,709], [1], [1,76,865]]
+          - Range: [[1,67,300], [1,93,300], [1], [1,76,192]]
 
   ########################################
   # F8HS TN DTL
@@ -195,7 +195,7 @@ BenchmarkProblems:
           - Range: [[19], [19], [1], [1,3,12]]
           - Range: [[31], [31], [1], [1,7,72]]
           - Range: [[127], [127], [1], [128,4,140]]
-          - Range: [[13], [17], [1], [258, 3, 512]]
+          - Range: [[13], [17], [1], [258, 3, 384]]
           - Exact: [256, 256, 1, 64]
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 320]
@@ -222,10 +222,14 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,   1, 1,  1,1 ]
           - [32, 32, 64, 1,  1,   1, 1,  1,1 ]
+          - [32, 32, 64, 1,  1,   5, 1,  1,1 ]
+          - [32, 32, 64, 1,  1,   3, 7,  4,1 ]
           - [16, 16, 128, 1,  1,   4, 4,  2,2 ]
+          - [16, 16, 128, 1,  1,   6, 5,  2,2 ]
           - [32, 32, 64, 1,  1,   2, 2,  2,2 ]
           - [32, 32, 64, 1,  1,   3, 2,  2,2 ]
           - [32, 32, 64, 1,  1,   2, 3,  2,2 ]
+          - [32, 32, 64, 1,  1,   3, 3,  2,2 ]
           - [16, 16, 128, 1,  1,   3, 2,  2,2 ]
           - [16, 16, 128, 1,  1,   2, 3,  2,2 ]
         - WorkGroup:
@@ -264,7 +268,7 @@ BenchmarkProblems:
           - Range: [[19], [19], [1], [1,3,12]]
           - Range: [[31], [31], [1], [1,7,72]]
           - Range: [[127], [127], [1], [128,4,140]]
-          - Range: [[13], [17], [1], [258, 3, 512]]
+          - Range: [[13], [17], [1], [258, 3, 384]]
           - Exact: [256, 256, 1, 64]
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 320]
@@ -276,6 +280,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1,   1, 1,  1,1 ]
           - [32, 32, 64, 1,  1,   1, 1,  1,1 ]
+          - [32, 32, 64, 1,  1,   3, 3,  1,1 ]
         - WorkGroup:
           - [16,16,1]
         - GlobalReadVectorWidthA: [16]
@@ -334,7 +339,6 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          #- [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
           - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
@@ -359,7 +363,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[63], [127], [1], [1,63,512]]
+          - Range: [[63], [127], [1], [1,63,384]]
 
   ########################################
   # F8B8HS TN DTL
@@ -422,7 +426,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[16,9,34],   [16,9,34], [1], [1,3,12]]
+          - Range: [[16,9,34], [16,9,34], [1], [1,3,12]]
           - Exact: [256, 256, 1, 320]
 
   ########################################
@@ -450,8 +454,8 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1,   4, 4,  2,2 ]
           - [32, 32, 64, 1,  1,   2, 2,  2,2 ]
           - [32, 32, 64, 1,  1,   3, 2,  2,2 ]
-          - [32, 32, 64, 1,  1,   2, 3,  2,2 ]
-          - [16, 16, 128, 1,  1,   3, 2,  2,2 ]
+          - [32, 32, 64, 1,  1,   5, 3,  2,2 ]
+          - [16, 16, 128, 1,  1,   3, 7,  2,2 ]
           - [16, 16, 128, 1,  1,   2, 3,  2,2 ]
         - WorkGroup:
           - [16,16,1]
@@ -487,7 +491,7 @@ BenchmarkProblems:
           - Range: [[19], [19], [1], [1,3,12]]
           - Range: [[31], [31], [1], [1,7,72]]
           - Range: [[127], [127], [1], [128,4,140]]
-          - Range: [[13],   [17], [1], [258, 3, 512]]
+          - Range: [[13],   [17], [1], [258, 3, 384]]
           - Exact: [256, 256, 1, 64]
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 320]
@@ -516,11 +520,11 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          #- [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
           - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
           - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
+          - [16, 16, 32, 1, 1, 7, 5, 2, 2 ]
           - [32, 32, 16, 1, 1, 3, 2, 2, 2 ]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1, 2]
@@ -541,7 +545,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[63], [127], [1], [1,31,512]]
+          - Range: [[63], [127], [1], [1,31,384]]
 
   ########################################
   # F8F8S TT DTL
@@ -586,10 +590,8 @@ BenchmarkProblems:
         - LocalWritePerMfma: [-1]
         - StaggerU: [4]
         - StaggerUStride: [256]
-        #- StaggerUMapping: [2]
         - WorkGroupMapping: [1]
         - ScheduleIterAlg: [3]
-        #- ExpandPointerSwap: [0,1]
         - StorePriorityOpt: [0]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
@@ -597,7 +599,6 @@ BenchmarkProblems:
         - LdsPadB: [-1, 0, 8]
         - 1LDSBuffer: [0]
         - GlobalSplitU: [1,2]
-        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
         - SourceSwap: [1]#[0, 1]
         - LocalReadVectorWidth: [8]
         - DirectToLds: [1]
@@ -608,7 +609,7 @@ BenchmarkProblems:
           - Range: [[19], [19], [1], [1,3,12]]
           - Range: [[31], [31], [1], [1,7,72]]
           - Range: [[127], [127], [1], [128,4,140]]
-          - Range: [[13],   [17], [1], [258, 3, 512]]
+          - Range: [[13],   [17], [1], [258, 3, 384]]
           - Exact: [256, 256, 1, 64]
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 320]
@@ -641,6 +642,7 @@ BenchmarkProblems:
           - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
           - [16, 16, 32, 1, 1, 2, 3, 2, 2 ]
+          - [16, 16, 32, 1, 1, 6, 5, 2, 2 ]
           - [32, 32, 16, 1, 1, 3, 2, 2, 2 ]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1, 2]
@@ -657,6 +659,7 @@ BenchmarkProblems:
         - LdsPadB: [0, 8]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1, 2]
+        - LDSTrInst: [0,1]
         - SourceSwap: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -665,7 +668,34 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 256]
           - Exact: [256, 256, 1, 512]
-          - Range: [[65], [123], [1], [1,123,512]]
+          - Range: [[65], [123], [1], [1,71,192]]
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
+          - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1, 2]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - AssertSummationElementMultiple: [1]
+        - LdsPadA: [8]
+        - LdsPadB: [8]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
           - Exact: [4096, 8192, 1, 128]
 
   ########################################
@@ -691,7 +721,6 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          #- [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
           - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
@@ -720,8 +749,7 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 256]
           - Exact: [256, 256, 1, 512]
-          - Range: [[47], [97], [1], [1,31,512]]
-          - Exact: [4096, 8192, 1, 128]
+          - Range: [[47], [97], [1], [1,31,192]]
     - # ASEM/AFEM check
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -749,6 +777,34 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Range: [[16,2,32],[16,2,32],[1],[1,1,32]]
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1, 2]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - AssertSummationElementMultiple: [1]
+        - LdsPadA: [8]
+        - LdsPadB: [8]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 8192, 1, 128]
 
   ########################################
   # HHS TT DTL
@@ -773,7 +829,6 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          #- [32, 32, 16, 1, 1, 2, 2, 2, 2 ]
           - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
           - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
           - [16, 16, 32, 1, 1, 1, 1, 2, 2 ]
@@ -800,9 +855,8 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [256, 256, 1, 64]
           - Exact: [256, 256, 1, 128]
-          - Exact: [256, 256, 1, 256]
           - Exact: [256, 256, 1, 512]
-          - Range: [[18], [99], [1], [1,31,512]]
+          - Range: [[18], [99], [1], [1,31,192]]
 
   ########################################
   # HHS TT DTL
@@ -850,8 +904,35 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[4096], [8192], [1], [64,64,384]]
-
+          - Range: [[256], [512], [1], [64,64,192]]
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
+          - [16, 16, 32, 1, 1, 7, 7, 2, 2 ]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1, 2]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [1] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - LdsPadA: [8]
+        - LdsPadB: [8]
+        - 1LDSBuffer: [-1]
+        - SourceSwap: [1]
+        - LDSTrInst: [0,1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[4096], [8192], [1], [64,64,192]]
 
   ########################################
   # HHS NT DTL
@@ -904,8 +985,7 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 256]
           - Exact: [256, 256, 1, 512]
-          - Range: [[65], [123], [1], [1,123,512]]
-          #- Exact: [4096, 8192, 1, 128]
+          - Range: [[65], [123], [1], [1,123,192]]
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -919,7 +999,6 @@ BenchmarkProblems:
         - DepthU: [64]
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0]
-        #- TransposeLDS: [1] #0,1
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
@@ -930,11 +1009,11 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
         - SourceSwap: [1]
+        - LDSTrInst: [0,1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[65], [123], [1], [1,123,512]]
-          - Range: [[4096], [8192], [1], [64,64,384]]
+          - Range: [[65], [123], [1], [1,123,192]]
     - # Check DTL for load width less than 32bits
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -958,4 +1037,86 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Range: [[65], [123], [1], [1,123,512]]
+          - Range: [[65], [123], [1], [1,63,192]]
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 16, 1, 1, 4, 4, 2, 2 ]
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2 ]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1, 2]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - DirectToLds: [1]
+        - AssertSummationElementMultiple: [1]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - 1LDSBuffer: [-1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[4096], [8192], [1], [64,64,192]]
+
+
+  ########################################
+  # BBS TN - checks tail loop padding logic
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+      ActivationFuncCall: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+           - [16, 16, 32, 1,  1, 2, 1,  4, 1 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [256]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [0]
+        - TransposeLDS: [2] #0,1
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [2]
+        - ClusterLocalRead: [0]#[0,1]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [0] #[-1]
+        - LdsPadB: [8] #[-1]
+        - StaggerU: [0]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [2]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0]
+        - LDSTrInst: [1]
+        - VectorWidthA: [2]
+        - VectorWidthB: [1]
+        - WaveSeparateGlobalReadA: [0]
+        - WaveSeparateGlobalReadB: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 255]

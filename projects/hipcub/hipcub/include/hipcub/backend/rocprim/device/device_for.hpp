@@ -348,10 +348,10 @@ HIPCUB_RUNTIME_FUNCTION
         using wrapped_op_type
             = detail::for_each_in_extents::OpWrapper<OpT, IndexType, ext_index_type, Extents...>;
 
-        // CountingInputIterator only holds the index, not the data.
-        using InputIterator = typename hipcub::CountingInputIterator<IndexType>;
-        // We don't actually need the output, so we use DiscardOutputIterator here as a placeholder.
-        using OutputIterator = typename hipcub::DiscardOutputIterator<IndexType>;
+        // rocprim::counting_iterator only holds the index, not the data.
+        using InputIterator = typename rocprim::counting_iterator<IndexType>;
+        // We don't actually need the output, so we use rocprim::discard_iterator here as a placeholder.
+        using OutputIterator = typename rocprim::discard_iterator;
 
         // How many times rocprim::transform will iterate.
         constexpr auto ext_size = ::hipcub::extents_size<ext_type>::value;
@@ -362,8 +362,8 @@ HIPCUB_RUNTIME_FUNCTION
         // `ForEachInExtents` only iterates over the extents on device and does not guarantee ordering.
         // We only need to invoke `$op` `$ext_size` times. Therefore, `rocprim::transform` is suitable.
         // In `ForEachInExtents`, the data isn’t necessarily needed, but even if it's needed, it may be embedded
-        // in `OpT`. We only need to iterate exactly `$ext_size` times. Therefore, we use a `CountingInputIterator`,
-        // which provides only the index, and a `DiscardOutputIterator` for output.
+        // in `OpT`. We only need to iterate exactly `$ext_size` times. Therefore, we use a `rocprim::counting_iterator`,
+        // which provides only the index, and a `rocprim::discard_iterator` for output.
         return rocprim::transform(input,
                                   output,
                                   ext_size,

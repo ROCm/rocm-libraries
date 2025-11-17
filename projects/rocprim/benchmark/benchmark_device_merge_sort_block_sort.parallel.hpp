@@ -67,8 +67,8 @@ template<typename Config>
 std::string config_name()
 {
     const rocprim::detail::merge_sort_block_sort_config_params config = Config();
-    return "{bs:" + std::to_string(config.block_sort_config.block_size)
-           + ",ipt:" + std::to_string(config.block_sort_config.items_per_thread) + "}";
+    return "{bs:" + std::to_string(config.kernel_config.block_size)
+           + ",ipt:" + std::to_string(config.kernel_config.items_per_thread) + "}";
 }
 
 template<>

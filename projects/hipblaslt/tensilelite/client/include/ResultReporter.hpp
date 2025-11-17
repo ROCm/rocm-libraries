@@ -225,7 +225,7 @@ namespace TensileLite
             virtual void preProblem(ContractionProblem* const problem) override {}
             virtual void postProblem() override {}
 
-            virtual void preSolution(ContractionSolution const& solution) override {}
+            virtual void preSolution(ContractionSolution* const solution) override {}
             virtual void postSolution() override {}
 
             virtual bool needMoreRunsInSolution() const override
@@ -280,8 +280,11 @@ namespace TensileLite
 
             virtual int error() const override
             {
-                return 0;
+                return m_exceptionsReported;
             }
+
+        protected:
+            size_t m_exceptionsReported = 0;
         };
 
     } // namespace Client

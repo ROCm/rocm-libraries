@@ -14,17 +14,11 @@ if(NOT GTest_FOUND)
     endif()
 endif()
 
-find_package(mxDataGenerator QUIET)
-if(NOT mxDataGenerator_FOUND)
-    if(ROCROLLER_ENABLE_FETCH)
-        FetchContent_Declare(
-            mxDataGenerator
-            GIT_REPOSITORY ${MXDATAGENERATOR_GIT_URL}
-            GIT_TAG ${MXDATAGENERATOR_GIT_TAG}
-        )
-        FetchContent_MakeAvailable(mxDataGenerator)
+if(NOT ROCM_LIBS_SUPERBUILD)
+    if(ROCROLLER_ENABLE_THEROCK)
+        find_package(mxDataGenerator REQUIRED)
     else()
-        message(FATAL_ERROR "Failed to find mxDataGenerator")
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator" "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
     endif()
 endif()
 
@@ -32,6 +26,9 @@ add_executable(rocroller-tests)
 
 if(ROCROLLER_ENABLE_CATCH AND (ROCROLLER_BUILD_TESTING OR BUILD_TESTING))
     add_executable(rocroller-tests-catch)
+    if(ROCROLLER_ENABLE_ROCPROF_ANALYZER)
+        add_executable(rocroller-tests-rocprofiler)
+    endif()
     # When detecting tests gtest and catch test discovery modules run
     # something like:
     # execute_process(COMMAND ${_TEST_EXECUTOR} "${_TEST_EXECUTABLE}" --gtest_list_tests ${filter})
@@ -46,9 +43,16 @@ if(ROCROLLER_ENABLE_CATCH AND (ROCROLLER_BUILD_TESTING OR BUILD_TESTING))
     if(ROCROLLER_ENABLE_ASAN)
         rocroller_target_configure_sanitizers(rocroller-tests-catch PRIVATE)
         set_target_properties(rocroller-tests-catch
-            PROPERTIES 
+            PROPERTIES
                 CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
         )
+        if(ROCROLLER_ENABLE_ROCPROF_ANALYZER)
+            rocroller_target_configure_sanitizers(rocroller-tests-rocprofiler PRIVATE)
+            set_target_properties(rocroller-tests-rocprofiler
+                PROPERTIES
+                    CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
+            )
+        endif()
     endif()
 endif()
 
@@ -58,12 +62,12 @@ add_executable(component-test)
 if(ROCROLLER_ENABLE_ASAN)
     rocroller_target_configure_sanitizers(component-test PRIVATE)
     set_target_properties(component-test
-        PROPERTIES 
+        PROPERTIES
             CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
     )
     rocroller_target_configure_sanitizers(rocroller-tests PRIVATE)
     set_target_properties(rocroller-tests
-        PROPERTIES 
+        PROPERTIES
             CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
     )
 endif()
@@ -115,6 +119,9 @@ endif()
 
 if(ROCROLLER_ENABLE_CATCH)
     add_subdirectory(catch)
+    if(ROCROLLER_ENABLE_ROCPROF_ANALYZER)
+        add_subdirectory(rocprofiler)
+    endif()
 endif()
 add_subdirectory(common)
 add_subdirectory(standalone)
@@ -182,6 +189,21 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
                        "ENVIRONMENT" "${asan_opts}"
             SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
         )
+        if(ROCROLLER_ENABLE_ROCPROF_ANALYZER)
+            catch_discover_tests(
+                rocroller-tests-rocprofiler
+                REPORTER JUnit
+                OUTPUT_DIR ${TEST_REPORT_DIR}
+                OUTPUT_SUFFIX ".xml"
+                DISCOVERY_MODE PRE_TEST
+                EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
+                PROPERTIES "LABELS" "ROCPROFILER"
+                           "LABELS" "CATCH"
+                           "LABELS" "GPU"
+                           "ENVIRONMENT" "${asan_opts}"
+                SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
+            )
+        endif()
     endif()
 
     if(NOT ROCROLLER_ENABLE_SLOW_TESTS)
@@ -232,4 +254,9 @@ if(ROCROLLER_ENABLE_COVERAGE OR BUILD_CODE_COVERAGE)
 
     target_compile_options(rocroller-tests-catch PRIVATE -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(rocroller-tests-catch PRIVATE -fprofile-instr-generate)
+
+    if(ROCROLLER_ENABLE_ROCPROF_ANALYZER)
+        target_compile_options(rocroller-tests-rocprofiler PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+        target_link_options(rocroller-tests-rocprofiler PRIVATE -fprofile-instr-generate)
+    endif()
 endif()

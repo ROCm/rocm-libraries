@@ -1,0 +1,14 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+@PACKAGE_INIT@
+
+# Include the SDK config file to get plugin-related variables
+include(CMakeFindDependencyMacro)
+find_dependency(hipdnn_sdk CONFIG REQUIRED)
+find_dependency(hipdnn_backend CONFIG REQUIRED)
+
+# Include the targets file
+include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_frontendTargets.cmake")
+
+check_required_components(hipdnn_frontend)
