@@ -247,10 +247,10 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
  *  \p rocsparse_spmv_set_extra sets a gamma dnvec vector and z vectors
  *  appended to the spmv computation. The computation will be:
  *  \f$y = \alpha * op(A) * x + \beta * y + \sum_{i=1}^{n} \gamma_i z_i\f$
- *  where $n$ is the number of extra terms set by \p num_extras.
+ *  where \f$n\f$ is the number of extra terms set by \p num_extras.
  * 
  *  This feature can be used to implement residual calculations of the form
- *  $r = b - A * x$ within the SpMV call by setting \f$\gamma = 1\f$ and $z = b$.
+ *  \f$r = b - A * x\f$ within the SpMV call by setting \f$\gamma = 1\f$ and \f$z = b\f$.
  *
  *  \par Datatype Requirements
  *  The following datatype requirements must be satisfied:
