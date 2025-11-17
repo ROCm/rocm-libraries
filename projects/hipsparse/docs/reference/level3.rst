@@ -24,6 +24,32 @@ hipsparseXbsrmm()
   :outline:
 .. doxygenfunction:: hipsparseZbsrmm
 
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_bsrmm_cpp.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_bsrmm_c.c
+         :language: c
+         :start-after: /*! [doc example start] */
+         :end-before: /*! [doc example end] */
+         :linenos:
+
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_bsrmm_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
+         :linenos:
+
 hipsparseXcsrmm()
 =================
 
@@ -34,6 +60,32 @@ hipsparseXcsrmm()
 .. doxygenfunction:: hipsparseCcsrmm
   :outline:
 .. doxygenfunction:: hipsparseZcsrmm
+
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_csrmm_cpp.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_csrmm_c.c
+         :language: c
+         :start-after: /*! [doc example start] */
+         :end-before: /*! [doc example end] */
+         :linenos:
+
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_csrmm_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
+         :linenos:
 
 hipsparseXcsrmm2()
 ==================
@@ -84,6 +136,24 @@ hipsparseXbsrsm2_solve()
   :outline:
 .. doxygenfunction:: hipsparseZbsrsm2_solve
 
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_bsrsm_cpp.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_bsrsm_c.c
+         :language: c
+         :start-after: /*! [doc example start] */
+         :end-before: /*! [doc example end] */
+         :linenos:
+
 hipsparseXcsrsm2_zeroPivot()
 =============================
 
@@ -122,6 +192,32 @@ hipsparseXcsrsm2_solve()
   :outline:
 .. doxygenfunction:: hipsparseZcsrsm2_solve
 
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_csrsm2_cpp.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_csrsm2_c.c
+         :language: c
+         :start-after: /*! [doc example start] */
+         :end-before: /*! [doc example end] */
+         :linenos:
+
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_csrsm2_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
+         :linenos:
+
 hipsparseXgemmi()
 =================
 
@@ -132,3 +228,29 @@ hipsparseXgemmi()
 .. doxygenfunction:: hipsparseCgemmi
   :outline:
 .. doxygenfunction:: hipsparseZgemmi
+
+.. tabs::
+
+   .. tab:: C++
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_gemmi_cpp.cpp
+         :language: cpp
+         :start-after: //! [doc example start]
+         :end-before: //! [doc example end]
+         :linenos:
+
+   .. tab:: C
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_gemmi_c.c
+         :language: c
+         :start-after: /*! [doc example start] */
+         :end-before: /*! [doc example end] */
+         :linenos:
+
+   .. tab:: Fortran
+
+      .. literalinclude:: ../../clients/samples/documentation_examples/level3/example_hipsparse_gemmi_fortran.f90
+         :language: fortran
+         :start-after: ! [doc example start]
+         :end-before: ! [doc example end]
+         :linenos:
