@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -170,6 +170,7 @@ namespace ScratchOperationTest
                 = command->addOperation(Scratch(tag, ScratchPolicy::ZeroedBeforeAndAfter));
 
             CHECK(tag.uninitialized() == false);
+            CHECK(scratchTag.uninitialized() == false);
         }
 
         SECTION("Tag assignment works correctly")
@@ -181,12 +182,14 @@ namespace ScratchOperationTest
 
             Scratch scratch1(scratchTag1, ScratchPolicy::None);
             Scratch scratch2(scratchTag2, ScratchPolicy::ZeroedBeforeAndAfter);
-            command->addOperation(scratch1);
-            command->addOperation(scratch2);
+            auto    scratchOpTag1 = command->addOperation(scratch1);
+            auto    scratchOpTag2 = command->addOperation(scratch2);
 
             CHECK(scratch1.getTag() == scratchTag1);
             CHECK(scratch2.getTag() == scratchTag2);
             CHECK(scratch1 != scratch2);
+            CHECK(scratchOpTag1.uninitialized() == false);
+            CHECK(scratchOpTag2.uninitialized() == false);
         }
     }
 
