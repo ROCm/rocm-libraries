@@ -317,7 +317,16 @@ private:
         double threshold = 80;
         if(CONV_DIR == Direction::Forward)
         {
-            threshold *= std::numeric_limits<T>::epsilon();
+            if constexpr(std::is_same_v<T, float>)
+            {
+                // float use tf32 compute which share same mantissa bits
+                threshold *= (compute_type == "TF32") ? std::numeric_limits<half>::epsilon()
+                                                      : std::numeric_limits<float>::epsilon();
+            }
+            else
+            {
+                threshold *= std::numeric_limits<T>::epsilon();
+            }
         }
         else
         {
@@ -352,6 +361,9 @@ private:
         auto ctx = miopen::ExecutionContext{};
 
         ctx.SetStream(&handle);
+
+        if(compute_type == "TF32")
+            problem.SetupComputeType(ctx);
 
         if(!solv.IsApplicable(ctx, problem))
         {
@@ -463,6 +475,11 @@ protected:
                 test_skipped = true;
                 GTEST_SKIP() << "bf16 tests skipped on this hardware.";
             }
+            if(!IsTestSupportedByDevice(Gpu::gfx94X) && compute_type == "TF32")
+            {
+                test_skipped = true;
+                GTEST_SKIP() << "tf32 tests skipped on this hardware.";
+            }
         }
 
         float alpha_val;
@@ -477,6 +494,10 @@ protected:
         weights = tensor<T>{tensor_layout, conv_config.GetWeights()};
 
         conv_desc = conv_config.GetConv();
+        if(compute_type == "TF32")
+            conv_desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, miopenMathDefault);
+        else
+            conv_desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, miopenMathPedantic);
 
         miopen::TensorDescriptor output_desc =
             conv_desc.GetForwardOutputTensor(input.desc, weights.desc, miopen_type<T>{});
@@ -561,6 +582,8 @@ protected:
 
     miopen::Scalar alpha{1.0};
     miopen::Scalar beta{0.0};
+
+    std::string compute_type;
 };
 
 template <unsigned NDIM>
@@ -613,6 +636,7 @@ std::vector<float> GetBetaValues()
     struct GPU_GroupConv##ndim##D_##dir##_##naming_type                                            \
         : GroupConvTestFix<ndim, type, Direction::dir>                                             \
     {                                                                                              \
+        GPU_GroupConv##ndim##D_##dir##_##naming_type() { compute_type = #naming_type; }            \
     };                                                                                             \
     TEST_P(GPU_GroupConv##ndim##D_##dir##_##naming_type, GroupConv##ndim##D_##dir##_##type##_Test) \
     {                                                                                              \
