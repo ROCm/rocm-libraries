@@ -47,9 +47,9 @@ project_map = {
         "cmake_options": "-DTHEROCK_ENABLE_FFT=ON",
         "project_to_test": "hipfft, rocfft",
     },
-    "hipdnn": {
-        "cmake_options": "-DTHEROCK_ENABLE_HIPDNN=ON",
-        "project_to_test": "hipdnn",
+    "hipdnn": { # due to MIOpen plugin project being inside the hipDNN directory, we cannot have the MIOpen plugin project as a separate project for now https://github.com/ROCm/rocm-libraries/issues/2316
+        "cmake_options": "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON -DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON -DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON -DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
+        "project_to_test": "hipdnn, miopen_plugin",
     },
     "rocwmma": {
         "cmake_options": "-DTHEROCK_ENABLE_ROCWMMA=ON",
