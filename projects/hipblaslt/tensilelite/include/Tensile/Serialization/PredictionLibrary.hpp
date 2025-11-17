@@ -81,6 +81,7 @@ namespace TensileLite
                         else
                         {
                             auto solution = slnIter->second;
+                            solution->sizeMapping.autoWGM = true;
                             lib.solutionmap.insert(std::make_pair(index, solution));
 
                             auto solution_tuple = std::make_tuple(

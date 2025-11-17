@@ -130,6 +130,7 @@ namespace TensileLite
         int16_t globalSplitU       = 0;
         size_t  staggerStrideShift = 0;
         int     workGroupMapping   = 0;
+        bool    autoWGM            = false;
 
         size_t packBatchDims              = 0;
         int    packSummationDims          = 0;
