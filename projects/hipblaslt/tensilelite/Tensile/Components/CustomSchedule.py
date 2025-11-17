@@ -347,13 +347,17 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     elif isTN(kernel) and not useLDSTr and TLDS == 1:
         #index and code pair
-        syncTable = [8, SBarrier(comment="for GRA start"),
-                    23, SWaitCnt(dscnt=17, vlcnt=-1, vscnt=-1, comment="for LRB1-4"),
-                    29, SWaitCnt(dscnt=16, vlcnt=-1, vscnt=-1, comment="for LRB1-5"),
-                    35, SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="for LRB1-6"),
-                    41, SWaitCnt(dscnt=14, vlcnt=-1, vscnt=-1, comment="for LRB1-7"),
-                    47, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="for LRA/B1"),
-                    46, SBarrier(comment="for GRB start"),]
+        syncTable = [-1, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="for LRB1-0"),
+                      6, SWaitCnt(dscnt=6+5, vlcnt=-1, vscnt=-1, comment="for LRB1-1"),
+                      8, SBarrier(comment="for GRA start"),
+                     11, SWaitCnt(dscnt=5+8, vlcnt=-1, vscnt=-1, comment="for LRB1-2"),
+                     17, SWaitCnt(dscnt=4+11, vlcnt=-1, vscnt=-1, comment="for LRB1-3"),
+                     23, SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="for LRB1-4:6"),
+                     41, SWaitCnt(dscnt=14, vlcnt=-1, vscnt=-1, comment="for LRB1-7"),
+                     46, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="for LRA1"),
+                     48, SBarrier(comment="for LRA1 start"),
+                     78, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="for LRB1"),
+                     78, SBarrier(comment="for LRB1 start"),]
         optSchedule = {
                 'SYNC'  : [syncTable[::2]],
                 'GRIncA': [[0,1,2,3,4,5,6,7,8]],
@@ -365,11 +369,11 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
                 'GRA'   : [[8,8, 10,10, 12,12, 14,14, 26,26, 31,31],
                            [9,9, 11,11, 13,13, 15,15, 27,27, 32,32]],
 
-                'GRB'   : [[46,46, 50,50, 54,54, 58,58, 62,62, 66,66, 70,70, 77,77],
-                           [47,47, 51,51, 55,55, 59,59, 63,63, 67,67, 71,71, 78,78]],
+                'GRB'   : [[46,46, 50,50, 54,54, 58,58, 62,62, 66,66, 70,70, 76,76],
+                           [47,47, 51,51, 55,55, 59,59, 63,63, 67,67, 71,71, 77,77]],
                 'LRA1'  : [[48, 52, 56, 58, 60, 64],
                            [49, 53, 57, 59, 61, 65]],
-                        # 0   1   2    3   4  5   6   7
+                          # 0   1   2    3   4  5   6   7
                 'LRB1'  : [[78, 80, 82, 84, 86, 90, 92, 94],
                            [79, 81, 83, 85, 87, 91, 93, 95]],
 
@@ -381,6 +385,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
                 'LCC'   : [[95, 95]],
             }
         syncCode = syncTable[1::2]
+        nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     else:
         return False, None
 
