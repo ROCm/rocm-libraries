@@ -27,15 +27,16 @@
 #ifndef GUARD_MIOPEN_HANDLE_LOCK_HPP
 #define GUARD_MIOPEN_HANDLE_LOCK_HPP
 
-#include <boost/interprocess/sync/file_lock.hpp>
-#include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/filesystem/operations.hpp>
+
+#include <miopen/config.h>
+#include <miopen/filesystem.hpp>
+#include <miopen/file_lock.hpp>
+#include <miopen/logger.hpp>
+
+#include <chrono>
 #include <fstream>
 #include <mutex>
-#include <miopen/filesystem.hpp>
-#include <miopen/config.h>
-#include <miopen/errors.hpp>
-#include <miopen/logger.hpp>
 
 namespace miopen {
 
@@ -69,7 +70,7 @@ inline fs::path get_handle_lock_path(const char* name)
 struct handle_mutex
 {
     std::recursive_timed_mutex m;
-    boost::interprocess::file_lock flock;
+    miopen::file_lock flock;
 
     handle_mutex(const char* name) : flock(name) {}
 
@@ -81,10 +82,9 @@ struct handle_mutex
     bool try_lock_for(Duration d)
     {
         return m.try_lock_for(d) &&
-               flock.timed_lock(
-                   boost::posix_time::second_clock::universal_time() +
-                   boost::posix_time::milliseconds(
-                       std::chrono::duration_cast<std::chrono::milliseconds>(d).count()));
+               flock.timed_lock(std::chrono::steady_clock::now() +
+                                std::chrono::duration_cast<Duration>(d) +
+                                std::chrono::duration_cast<std::chrono::milliseconds>(d));
     }
 
     template <class Point>
