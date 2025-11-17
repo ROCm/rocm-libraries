@@ -175,7 +175,7 @@ static inline __device__ void GlobalTrans(const unsigned int in_off,
 
 #if TRANS
             out[out_off + i * VEC_SIZE + v] =
-                ((n * VEC_SIZE + v) < N) = in[in_off + CHW * v + i] : (DATA_TYPE)0;
+                ((n * VEC_SIZE + v) < N) ? in[in_off + CHW * v + i] : (DATA_TYPE)0;
 #else
             out[out_off + i * VEC_SIZE + v] =
                 ((c * VEC_SIZE + v) < C) ? in[in_off + HW * v + i] : (DATA_TYPE)0;
