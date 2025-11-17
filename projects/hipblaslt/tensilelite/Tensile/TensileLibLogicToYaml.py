@@ -33,6 +33,7 @@ from Tensile.Common.DataType import DataType
 import argparse
 import os
 import sys
+import re
 
 
 def tPrint(verbosity: int, arg) -> None:
@@ -49,44 +50,33 @@ def tPrint(verbosity: int, arg) -> None:
         print(arg)
         sys.stdout.flush()
 
-def TensileLibLogicToYaml(userArgs):
+def parseArgs():
+    argParser = argparse.ArgumentParser()
+    argHelp = {
+        "input": "Library logic file to be converted to tensile input yaml file.",
+        "indices": "Comma-separated list of Solution indices from library logic File to extract. Ex: 0,3,4,5",
+        "output": "Base Output file name.",
+        "skipMI": "Skips the MatrixInstruction field in the tensile yaml file"
+    }
+
+    argParser.add_argument("--input", "-i", action="store", type=os.path.realpath,
+                           required=True, default=None, help=argHelp["input"])    
+    argParser.add_argument("--indices", "-d", action="store", type=str,
+                           required=True, default="0", help=argHelp["indices"])
+    argParser.add_argument("--output", "-o", action="store", type=os.path.realpath,
+                           required=True, default=None, help=argHelp["output"])
+    argParser.add_argument("--skipMI", "-s", action="store_true",
+                           default=None, help=argHelp["skipMI"], required=False)
+
+    return argParser.parse_args()
+
+def TensileLibLogicToYaml(logicFilePath, solutionIndex, tensileYamlFile, skipMI):
     tPrint(1, "")
     tPrint(1, HR)
     tPrint(1, "#")
     tPrint(1, "#  TensileLibLogicToYaml Library v{}".format(__version__))
 
-    argParser = argparse.ArgumentParser()
-
-    argParser.add_argument(
-        "LibLogicFile",
-        type=os.path.realpath,
-        help="Library logic file to be converted to tensile input yaml file",
-    )
-    argParser.add_argument(
-        "SolutionIndex",
-        type=int,
-        help="Solution index from library logic File",
-        default=None,
-    )
-    argParser.add_argument(
-        "OutputYaml",
-        type=os.path.realpath,
-        help="OutputYaml path where output tensile yaml files are placed",
-    )
-
-    argParser.add_argument(
-        "--skipMI",
-        "-s",
-        action="store_true",
-        help="Skips the MatrixInstruction field in the tensile yaml file"
-        "i.e Thread Tile and Work Group parameters without MI",
-        required=False,
-    )
-
-    args = argParser.parse_args(userArgs)
-    logicFilePath = args.LibLogicFile
-    solutionIndex = args.SolutionIndex
-    tensileYamlFile = args.OutputYaml
+    tensileYamlFile = re.sub(".yaml", f"_{solutionIndex}.yaml", tensileYamlFile)
 
     tPrint(1, "#  Library Logic: {}".format(logicFilePath))
     tPrint(1, "#  Solution Index: {}".format(solutionIndex))
@@ -141,7 +131,7 @@ def TensileLibLogicToYaml(userArgs):
             )
 
     tensileYamlFileData = []
-    if args.skipMI != True and isMatrixInsEnabled:
+    if skipMI != True and isMatrixInsEnabled:
         checkMacroTileThreadTileWorkGroupMatches(currentIndexSolution)
         MIInstruction9Bits = form9BitMIInstruction(currentIndexSolution)
     else:
@@ -161,7 +151,7 @@ def TensileLibLogicToYaml(userArgs):
 
     # Forms the Library logic string
     problemSizeYamlData = formProblemSizeYamlData(
-        exactLogic, solutionIndex, scheduleName, deviceNames, architectureName
+        exactLogic, solutionIndex, scheduleName, deviceNames, architectureName, problemTypeState
     )
     tensileYamlFileData.append(problemSizeYamlData)
 
@@ -207,19 +197,19 @@ def formProblemTypeYamlData(problemTypeState, versionString):
 
     for problemTypeKey, problemTypeValue in problemTypeState.items():
         # Ignore DataTypeA, DataTypeB, DataTypeE, OperationType, UseBias
-        if problemTypeKey in [
-            "DataTypeA",
-            "DataTypeB",
-            "DataTypeE",
-            "OperationType",
-            "UseBeta",
-            "UseBias",
-            "Gradient",
-        ]:
-            continue
+        # if problemTypeKey in [
+        #     "DataTypeA",
+        #     "DataTypeB",
+        #     "DataTypeE",
+        #     "OperationType",
+        #     "UseBeta",
+        #     #"UseBias",
+        #     "Gradient",
+        # ]:
+        #     continue
         # Convert TransposeA, TransposeB, UseBeta
-        if problemTypeKey in ["TransposeA", "TransposeB", "UseBeta"]:
-            problemTypeValue = True if problemTypeValue == 1 else False
+        # if problemTypeKey in ["TransposeA", "TransposeB", "UseBeta", "UseBias"]:
+        #     problemTypeValue = True if problemTypeValue == 1 else False
         # Always print DataType, DestDataType, ComputeDataType
         if problemTypeKey in ["DataType", "DestDataType", "ComputeDataType"]:
             problemTypeYamlData.append(
@@ -317,7 +307,7 @@ def form9BitMIInstruction(currentSolutionState):
     return MIInstruction9Bits
 
 def formProblemSizeYamlData(
-    exactLogic, solutionIndex, scheduleName, deviceNames, architectureName
+    exactLogic, solutionIndex, scheduleName, deviceNames, architectureName, ProblemTypeStat
 ):
     problemSizeYamlData = []
 
@@ -331,6 +321,8 @@ def formProblemSizeYamlData(
                 "        - Exact: %s             # Eff: %s  Solution Index: %s\n"
                 % (size, mapping[1], mapping[0])
             )
+    BiasTypeArgs = ProblemTypeStat["BiasDataTypeList"]
+    problemSizeYamlData.append(f"    - BiasTypeArgs: {BiasTypeArgs}\n")
 
     # Form final library logic string
     problemSizeYamlData.append("LibraryLogic:\n")
@@ -448,4 +440,7 @@ def writeToTensileYamlFile(tensileYamlFile, tensileYamlData):
         )
 
 def main():
-    TensileLibLogicToYaml(sys.argv[1:])
+    args = parseArgs()
+    ids = [int(x.strip()) for x in args.indices.split(',')]
+    for id in ids:
+        TensileLibLogicToYaml(args.input, int(id), args.output, args.skipMI)

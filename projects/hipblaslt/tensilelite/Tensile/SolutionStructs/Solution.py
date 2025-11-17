@@ -78,9 +78,12 @@ class BiasTypeArgs:
   def __init__(self, problemType, config):
     self.biasTypes = []
     self.totalProblemSizes = 0
+    print("IN SOLUTION ", config)
     if problemType["UseBias"]:
       for btype in config:
         datatype = DataType(btype)
+        print("IN SOLUTION", datatype)
+        print("IN SOLUTION", problemType["BiasDataTypeList"])
         if datatype not in problemType["BiasDataTypeList"]:
           printWarning("Datatype: %s not support in this kernel (%s)"%(datatype, str(problemType["BiasDataTypeList"])))
         self.biasTypes.append(datatype)
