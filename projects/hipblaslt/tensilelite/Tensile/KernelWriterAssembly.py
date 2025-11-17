@@ -566,6 +566,7 @@ class KernelWriterAssembly(KernelWriter):
 
     self.removeSgprVarFromPool("GlobalReadIncsA")
     self.removeSgprVarFromPool("GlobalReadIncsB")
+    return module
 
   def shiftSrd(self, tc) -> Module:
     module = Module("shiftSrd")
