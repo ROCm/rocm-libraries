@@ -1,70 +1,100 @@
 CompileFlags:
   Add:
     - -std=c++20
+
+    # ROCm/HIP Platform Definitions:
+    - -D__HIP_PLATFORM_AMD__=1                       # Targeting AMD platform
+    - -U__HIP_PLATFORM_NVIDIA__                      # Explicitly undefine NVIDIA platform
+    - -D__HIP_DEVICE_COMPILE__=0                     # Indicating device compilation
+    - -D__HIPCC_RTC__=0                              # Enabling HIP runtime compilation
+    - -D__CLANG_HIP_RUNTIME_WRAPPER_INCLUDED__=1     # Indicates HIP runtime wrapper is included
+    - -D__HIPCC__=1                                  # Indicates HIP compiler
+    - -D__HIP__=1                                    # Indicates HIP platform
+
+    # hipTensor-Specific Definitions:
+    - -DHIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=1        # Sets default tensor layout to column-major order
+    - -DUSE_PROF_API=1                               # Enables profiling API support
+
+    # Composable Kernel (CK) Library Definitions:
+    - -DCK_CODE_GEN_RTC=0                            # runtime code generation in CK library
+    - -DCK_WORKAROUND_SWDEV_383542=0                 # Disables workaround for specific issue
+
+    # HIP/CUDA Compatibility Macros:
+    - -D__HOST_DEVICE__=
+    - -D__device__=
+    - -D__host__=
+    - -D__forceinline__=inline
+
+    # ROCm Toolchain Configuration:
+    - --rocm-path=/opt/rocm                          # ROCm installation directory
+    - --rocm-device-lib-path=/opt/rocm/lib           # ROCm device libraries path
+    - -nogpulib                                      # Disables automatic GPU library linking
+
+    # clangd-Specific:
+    - -D__CLANGD__=1                                 # Indicates code is being analyzed by clangd (useful for conditional compilation)
+
+    # Error/Warning Configuration:
+    - -fdeclspec
+    - -ferror-limit=0                                # No limit on the number of errors reported
+    - -Wno-inconsistent-missing-override             # Suppress warnings about inconsistent use of 'override'
+    - -Wno-redundant-decls                           # Suppress warnings about redundant declarations
+    - -Wno-unknown-pragmas                           # Suppress unknown pragma warnings
+    - -Wno-ignored-attributes                        # Suppress ignored attribute warnings
+    - -Wno-deprecated-declarations                   # Suppress deprecated declaration warnings
+
+    # Local include Paths:
     - -I/projects/rocm-libraries/projects/hiptensor/library/include
     - -I/projects/rocm-libraries/projects/hiptensor/library/src/include
     - -I/projects/rocm-libraries/projects/hiptensor/test/01_contraction
     - -I/projects/rocm-libraries/projects/hiptensor/test/02_elementwise
     - -I/projects/rocm-libraries/projects/hiptensor/test/03_reduction
-    - -I/opt/rocm/include
-    - -I/opt/rocm/include/ck
-    - -I/opt/rocm/include/ck/utility
-    - -I/opt/rocm/include/ck/tensor_description
-    - -I/opt/rocm/include/ck/tensor
-    - -I/opt/rocm/include/ck/problem_transform
-    - -I/opt/rocm/include/ck/tensor_operation/gpu/device
-    - -I/opt/rocm/include/ck/tensor_operation/gpu/device/impl
-    - -I/opt/rocm/include/ck/tensor_operation/gpu/grid
-    - -I/opt/rocm/include/ck/tensor_operation/gpu/block
-    - -I/opt/rocm/include/ck/tensor_operation/gpu/warp
-    - -I/opt/rocm/include/ck/tensor_operation/gpu/thread
-    - -I/opt/rocm/include/ck/tensor_operation/gpu/element
-    - -I/opt/rocm/include/ck/library/utility
-    - -I/opt/rocm/include/ck/library/tensor_operation_instance
-    - -I/opt/rocm/include/ck/library/tensor_operation_instance/gpu
-    - -I/opt/rocm/include/ck/library/tensor_operation_instance/gpu/quantization
-    - -I/opt/rocm/include/ck/library/tensor_operation_instance/gpu/softmax
-    - -isystem
-    - /opt/rocm/include
-    - -D__HIP_PLATFORM_AMD__=1
-    - -DHIPTENSOR_DEFAULT_STRIDES_COL_MAJOR=1
-    - -DUSE_PROF_API=1
-    - -D__HIP_DEVICE_COMPILE__=0
-    - -D__HIPCC_RTC__=0
-    - -DCK_CODE_GEN_RTC=0
-    - -DCK_WORKAROUND_SWDEV_383542=0
-    - -D__HOST_DEVICE__=
-    - -D__device__=
-    - -D__host__=
-    - -D__forceinline__=inline
-    - -D__CLANG_HIP_RUNTIME_WRAPPER_INCLUDED__=1
-    - -D__CLANGD__=1
-    - --rocm-path=/opt/rocm
-    - --rocm-device-lib-path=/opt/rocm/lib
-    - -nogpulib
-    - -ferror-limit=0
-    - -Wno-inconsistent-missing-override
-    - -Wno-redundant-decls
+
+    # System include Paths:
+    - -isystem /opt/rocm/include
+    - -isystem /opt/rocm/include/ck
+    - -isystem /opt/rocm/include/ck/utility
+    - -isystem /opt/rocm/include/ck/tensor_description
+    - -isystem /opt/rocm/include/ck/tensor
+    - -isystem /opt/rocm/include/ck/problem_transform
+    - -isystem /opt/rocm/include/ck/tensor_operation/gpu/device
+    - -isystem /opt/rocm/include/ck/tensor_operation/gpu/device/impl
+    - -isystem /opt/rocm/include/ck/tensor_operation/gpu/grid
+    - -isystem /opt/rocm/include/ck/tensor_operation/gpu/block
+    - -isystem /opt/rocm/include/ck/tensor_operation/gpu/warp
+    - -isystem /opt/rocm/include/ck/tensor_operation/gpu/thread
+    - -isystem /opt/rocm/include/ck/tensor_operation/gpu/element
+    - -isystem /opt/rocm/include/ck/library/utility
+    - -isystem /opt/rocm/include/ck/library/tensor_operation_instance
+    - -isystem /opt/rocm/include/ck/library/tensor_operation_instance/gpu
+    - -isystem /opt/rocm/include/ck/library/tensor_operation_instance/gpu/quantization
+    - -isystem /opt/rocm/include/ck/library/tensor_operation_instance/gpu/softmax
+
   Remove:
-    - -x
-    - hip
-    - -fno-offload-uniform-block
-    - -mllvm
-    - --offload-arch=*
-    - --offload-compress
+    - -x                                             # Removes HIP language mode specification
+    - hip                                            # Removes HIP language mode specification
+    - -fno-offload-uniform-block                     # Removes HIP-specific optimization flag
+    - -mllvm                                         # Removes LLVM-specific flags
+    - --offload-arch=*                               # Removes GPU architecture specifications
+    - --offload-compress                             # Removes GPU code compression flag
 
 Diagnostics:
   Suppress:
-    - drv_no_rocm_device_lib
-    - constexpr_redecl
-    - function_redefinition
-    - inconsistent_missing_override
-    - redundant_decls
+    - drv_no_rocm_device_lib                         # Suppresses "no ROCm device library" driver warnings
+    - constexpr_redecl                               # Suppresses constexpr redeclaration warnings
+    - function_redefinition                          # Suppresses function redefinition warnings
+    - inconsistent_missing_override                  # Suppresses override keyword consistency warnings
+    - redundant_decls                                # Suppresses redundant declaration warnings
+    - use_of_undeclared_identifier                   # Suppresses undeclared identifier warnings
+    - non_constexpr_declaration_follows_constexpr    # Suppresses constexpr/non-constexpr conflicts
+    - unknown_type_name                              # Suppresses unknown type name warnings
+    - attributes_not_enabled                         # Suppresses __declspec attribute warnings
+    - functions_that_differ_only_in_return_type      # Suppresses function overload conflicts
+    - redefinition                                   # Suppresses redefinition errors
   ClangTidy:
     Remove:
-      - readability-*
-      - google-*
-      - modernize-*
+      - readability-*                                # Removes all readability-related checks
+      - google-*                                     # Removes all Google style checks
+      - modernize-*                                  # Removes all modernization suggestions
 
 Index:
-  Background: Build
+  Background: Build                                  # Configures the indexing to happen in the background during build, improving IDE responsiveness
