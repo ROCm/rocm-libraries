@@ -87,6 +87,10 @@ struct ParameterizedReluBackward
         {
             localGradient = ComputeType{1};
         }
+        else if(xCompute <= lowerClip)
+        {
+            localGradient = lowerSlope;
+        }
         else
         {
             localGradient = ComputeType{0};
