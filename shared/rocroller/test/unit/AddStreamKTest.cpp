@@ -89,7 +89,6 @@ namespace AddStreamKTest
                     uint m = (tile / numTileK) / numTileN;
                     uint n = (tile / numTileK) % numTileN;
                     uint k = tile % numTileK;
-
                     coverage[{m, n, k}]++;
                     f(m, n, k, wg);
                     //referenceResult[m * numTileN * numTileK + n * numTileK + k] = wg;
