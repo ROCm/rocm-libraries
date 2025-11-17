@@ -16,7 +16,7 @@ The hipTensor library is a work in progress (WIP).
 For more information, see :doc:`What is hipTensor? <./what-is-hiptensor>`
 
 
-The hipTensor public repository is located at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiptensor>`_.
+The hipTensor library is included in the rocm-libraries public repository, and it is located at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiptensor>`_.
 
 .. note::
 
