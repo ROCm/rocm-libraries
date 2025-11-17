@@ -18,7 +18,7 @@ jobs:
     name: Build
     runs-on: azure-windows-scale-rocm
     # Skip hipDNN & plugin build on Windows since it's not supported yet https://github.com/ROCm/TheRock/issues/1822
-    if: ${{ !contains(inputs.project_to_test, 'hipdnn') && !contains(inputs.project_to_test, 'miopen-plugin') }}
+    if: ${{ !contains(inputs.project_to_test, 'hipdnn') && !contains(inputs.project_to_test, 'miopen_plugin') }}
     outputs:
       AMDGPU_FAMILIES: ${{ env.AMDGPU_FAMILIES }}
     permissions:
@@ -44,7 +44,7 @@ jobs:
 
        # We only want to build MIOpen HEAD against CK HEAD, not applicable for other projects
       - name: Checkout composable_kernel repository
-        if: ${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen-plugin') }}
+        if: ${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen_plugin') }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/composable_kernel"
@@ -152,6 +152,7 @@ jobs:
         with:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+          special-characters-workaround: true
 
       - name: Post Build Upload
         if: always()
@@ -166,7 +167,7 @@ jobs:
     name: "Test"
     needs: [therock-build-windows]
     # Skip hipDNN & plugin tests on Windows since it's not supported yet https://github.com/ROCm/TheRock/issues/1822
-    if: ${{ !contains(inputs.project_to_test, 'hipdnn') && !contains(inputs.project_to_test, 'miopen-plugin') }}
+    if: ${{ !contains(inputs.project_to_test, 'hipdnn') && !contains(inputs.project_to_test, 'miopen_plugin') }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       project_to_test: ${{ inputs.project_to_test }}
