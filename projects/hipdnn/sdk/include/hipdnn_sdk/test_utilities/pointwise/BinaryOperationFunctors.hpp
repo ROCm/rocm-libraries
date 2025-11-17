@@ -83,6 +83,8 @@ struct ParameterizedReluBackward
         auto dyCompute = static_cast<ComputeType>(dy);
 
         ComputeType localGradient;
+        // Exclusive of lowerClip to match MIOpen:
+        // https://github.com/ROCm/rocm-libraries/blob/develop/projects/miopen/src/kernels/bnorm_spatial_activation_functions.h#L75
         if(xCompute > lowerClip && xCompute <= upperClip)
         {
             localGradient = ComputeType{1};
