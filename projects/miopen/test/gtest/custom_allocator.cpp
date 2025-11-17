@@ -55,10 +55,7 @@ std::vector<AllocatorTestCase> GetAllocatorTestCases()
 
 struct GPU_CustomAllocator_FP32 : public ::testing::TestWithParam<AllocatorTestCase>
 {
-    void SetUp() override
-    {
-        buffer = h.Create(size);
-    }
+    void SetUp() override { buffer = h.Create(size); }
 
     miopen::Handle h{};
     static const int size = 42;
@@ -134,7 +131,8 @@ TEST_P(GPU_CustomAllocator_FP32, Test)
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_CustomAllocator_FP32, testing::ValuesIn(GetAllocatorTestCases()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_CustomAllocator_FP32,
+                         testing::ValuesIn(GetAllocatorTestCases()));
 
 } // namespace
-
