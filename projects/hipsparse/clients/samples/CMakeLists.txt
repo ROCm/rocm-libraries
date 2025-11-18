@@ -12,8 +12,6 @@ if(NOT WIN32)
         target_compile_definitions(example_c_headers PRIVATE __HIP_PLATFORM_NVIDIA__)
         target_include_directories(example_c_headers PRIVATE ${HIP_INCLUDE_DIRS})
         target_link_libraries(example_c_headers PRIVATE ${CUDA_LIBRARIES})
-    elseif(HIPSPARSE_ENABLE_HIP)
-        target_link_libraries(example_c_headers PRIVATE hip::host hip::device)
     endif()
     set_target_properties(example_c_headers PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"

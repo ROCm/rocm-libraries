@@ -9,8 +9,9 @@ target_sources(hipsparse PRIVATE
 
 # Link AMD dependencies with proper visibility
 target_link_libraries(hipsparse
-    PUBLIC hip::host
-    PRIVATE roc::rocsparse
+    PRIVATE
+        hip::host
+        roc::rocsparse
 )
 
 # AMD-specific compile definitions

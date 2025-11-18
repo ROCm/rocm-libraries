@@ -164,8 +164,6 @@ if(HIPSPARSE_ENABLE_CUDA)
     target_compile_definitions(hipsparse-test PRIVATE __HIP_PLATFORM_NVIDIA__)
     target_include_directories(hipsparse-test PRIVATE ${HIP_INCLUDE_DIRS})
     target_link_libraries(hipsparse-test PRIVATE ${CUDA_LIBRARIES})
-elseif(HIPSPARSE_ENABLE_HIP)
-    target_link_libraries(hipsparse-test PRIVATE hip::host hip::device)
 endif()
 
 # Set output directory
