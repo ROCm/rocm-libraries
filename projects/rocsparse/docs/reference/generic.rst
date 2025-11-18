@@ -56,6 +56,16 @@ rocsparse_v2_spmv()
 
 .. doxygenfunction:: rocsparse_v2_spmv
 
+rocsparse_spmv_set_extra()
+--------------------------
+
+.. doxygenfunction:: rocsparse_spmv_set_extra
+
+rocsparse_spmv_clear_extra()
+----------------------------
+
+.. doxygenfunction:: rocsparse_spmv_clear_extra
+
 rocsparse_spsv()
 ----------------
 
