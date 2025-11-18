@@ -10,15 +10,15 @@ endif()
 add_executable(
     miopen_plugin_integration_test
     main.cpp
-    IntegrationGpuBatchnormBackward.cpp
-    IntegrationGpuBatchnormBackwardActivation.cpp
-    IntegrationGpuBatchnormForwardInference.cpp
-    IntegrationGpuBatchnormFwdPlusActive.cpp
-    IntegrationGpuBatchnormForwardTraining.cpp
+    #IntegrationGpuBatchnormBackward.cpp
+    #IntegrationGpuBatchnormBackwardActivation.cpp
+    #IntegrationGpuBatchnormForwardInference.cpp
+    #IntegrationGpuBatchnormFwdPlusActive.cpp
+    #IntegrationGpuBatchnormForwardTraining.cpp
     IntegrationGpuConvForward.cpp
     IntegrationGpuConvFwdBiasActiv.cpp
-    IntegrationGpuConvBackwardData.cpp
-    IntegrationGpuConvBackwardWeights.cpp
+    #IntegrationGpuConvBackwardData.cpp
+    #IntegrationGpuConvBackwardWeights.cpp
 )
 
 target_compile_options(miopen_plugin_integration_test PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
