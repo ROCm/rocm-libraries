@@ -561,7 +561,6 @@ namespace MemoryInstructionsTest
                     auto     bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
                     bufferExpr = bfc(Expression::literal(2147483548), bufferExpr, 0, 64, 32);
                     bufferExpr = bfc(Expression::literal(opts), bufferExpr, 0, 96, 32);
-                    // TODO: this bfc generates two redundant bfe instructions
                     bufferExpr = bfc(s_a->expression(), bufferExpr, 0, 0, 64);
                     bufferExpr = bfc(Expression::literal(N), bufferExpr, 0, 64, 32);
 

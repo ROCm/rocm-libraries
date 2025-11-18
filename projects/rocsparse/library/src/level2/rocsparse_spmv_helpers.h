@@ -29,18 +29,14 @@
 
 namespace rocsparse
 {
+    bool spmv_has_device_arrays(void* spmv_descr_ptr);
+
     // Template helpers that directly call the template functions from v2_spmv.cpp
     template <typename T>
-    inline T* get_gamma_array_helper(void* spmv_descr_ptr)
-    {
-        return rocsparse_spmv_get_gamma_device_array<T>(spmv_descr_ptr);
-    }
+    T* spmv_get_gamma_device_array(void* spmv_descr_ptr);
 
     template <typename Z>
-    inline const Z** get_z_array_helper(void* spmv_descr_ptr)
-    {
-        return rocsparse_spmv_get_z_array<Z>(spmv_descr_ptr);
-    }
+    const Z** spmv_get_z_array(void* spmv_descr_ptr);
 }
 
 #endif // ROCSPARSE_SPMV_HELPERS_H

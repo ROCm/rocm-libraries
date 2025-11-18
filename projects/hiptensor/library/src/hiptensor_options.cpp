@@ -26,6 +26,9 @@
 
 #include "hiptensor_options.hpp"
 
+#include <algorithm>
+#include <cctype>
+
 namespace hiptensor
 {
     HiptensorOptions::HiptensorOptions()
