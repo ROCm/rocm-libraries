@@ -2346,7 +2346,7 @@ namespace GEMMDriverTest
                 {
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
                     // 2x2 wave config: NumAScaleLoadTiles = 256/2/64 = 2 and NumBScaleLoadTiles = 256/2/64 = 2
-                    EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 4);
+                    EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 8);
                 }
                 else if(unrollK == 4)
                 {

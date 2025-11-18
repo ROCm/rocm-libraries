@@ -660,37 +660,10 @@ namespace rocRoller
             return mergeables;
         }
 
-        void swizzleScaleLoads(KernelGraph& graph,
-                               ContextPtr   context,
-                               NaryArgument arg,
-                               int          loopTag,
-                               bool         addDuplicateMacroTile = false)
+        void
+            swizzleScaleLoads(KernelGraph& graph, ContextPtr context, NaryArgument arg, int loopTag)
         {
             auto scaleLoads = collectScaleLoadInfo(graph, arg, loopTag);
-            if(addDuplicateMacroTile)
-            {
-
-                for(auto [loadTag, multiplyAndMacroTile] : scaleLoads)
-                {
-                    auto [multiplyTag, macroTileTag] = multiplyAndMacroTile;
-                    auto duplicatedMacroTileTag
-                        = graph.coordinates.addElement(graph.coordinates.getElement(macroTileTag));
-                    graph.coordinates.addElement(
-                        CT::Duplicate(), {duplicatedMacroTileTag}, {macroTileTag});
-
-                    // Fixup Multiply coordinate connections
-                    graph.mapper.disconnect(
-                        multiplyTag, macroTileTag, Connections::typeArgument<MacroTile>(arg));
-                    graph.mapper.connect(multiplyTag,
-                                         duplicatedMacroTileTag,
-                                         Connections::typeArgument<MacroTile>(arg));
-
-                    // Fixup LoadTiled coordinate connections
-                    graph.mapper.disconnect<CT::MacroTile>(loadTag, macroTileTag);
-                    graph.mapper.connect<CT::MacroTile>(loadTag, duplicatedMacroTileTag);
-                    scaleLoads[loadTag] = {multiplyTag, duplicatedMacroTileTag};
-                }
-            }
 
             if(scaleLoads.empty())
             {
@@ -897,8 +870,8 @@ namespace rocRoller
             if(maybeKLoopTailTag)
             {
                 auto const kLoopTailTag = maybeKLoopTailTag.value();
-                swizzleScaleLoads(newGraph, m_context, NaryArgument::LHS_SCALE, kLoopTailTag, true);
-                swizzleScaleLoads(newGraph, m_context, NaryArgument::RHS_SCALE, kLoopTailTag, true);
+                swizzleScaleLoads(newGraph, m_context, NaryArgument::LHS_SCALE, kLoopTailTag);
+                swizzleScaleLoads(newGraph, m_context, NaryArgument::RHS_SCALE, kLoopTailTag);
             }
 
             removeRedundantSequenceEdges(newGraph);
