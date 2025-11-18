@@ -186,8 +186,8 @@ namespace rocRoller::Expression::EvaluateDetail
         BitFieldExtract expr;
 
         template <CCommandArgumentValue ARG>
-        requires(!std::same_as<bool, ARG> && std::integral<ARG>) CommandArgumentValue
-            operator()(ARG const& arg) const
+        requires(CIntegral<ARG>)
+        CommandArgumentValue operator()(ARG const& arg) const
         {
             auto argBits = resultVariableType(arg).getElementSize() * 8u;
             AssertFatal(argBits >= expr.offset + expr.width,
@@ -222,14 +222,23 @@ namespace rocRoller::Expression::EvaluateDetail
                 }
             }
 
-            auto resultExpr = literal(static_cast<ARG>(result));
-            return evaluate(convert(expr.outputDataType, resultExpr));
+            AssertFatal(expr.width <= sizeof(expr.outputDataType) * 8,
+                        "BitFieldExtract: width {} exceeds output type size {} bits",
+                        expr.width,
+                        sizeof(ARG) * 8);
+
+            return reinterpret(static_cast<ARG>(result), expr.outputDataType);
+        }
+
+        CommandArgumentValue operator()(Raw32 const& arg) const
+        {
+            return call(arg.value);
         }
 
         template <typename ARG>
         CommandArgumentValue operator()(ARG const&) const
         {
-            Throw<FatalError>("BitFieldExtract: unsupported argument type");
+            Throw<FatalError>("BitFieldExtract: unsupported argument type ", ShowValue(expr));
         }
 
         CommandArgumentValue call(CommandArgumentValue const& arg) const

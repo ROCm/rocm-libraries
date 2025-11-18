@@ -779,9 +779,10 @@ namespace rocRoller
                 if(result.has_value())
                     return literal(result.value());
 
-                // Extracting the entire arg with no offset
-                if(cpy.offset == 0 && cpy.width == resultVariableType(cpy.arg).getElementSize() * 8)
-                    return call(convert(cpy.outputDataType, cpy.arg));
+                // TODO: Enable this simplification with a reinterpret_cast expression
+                // // Extracting the entire arg with no offset
+                // if(cpy.offset == 0 && cpy.width == resultVariableType(cpy.arg).getElementSize() * 8)
+                //     return call(convert(cpy.outputDataType, cpy.arg));
 
                 cpy.arg = call(cpy.arg);
                 return std::make_shared<Expression>(cpy);

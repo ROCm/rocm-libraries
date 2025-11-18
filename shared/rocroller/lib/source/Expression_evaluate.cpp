@@ -76,7 +76,14 @@ namespace rocRoller
             CommandArgumentValue operator()(BitfieldCombine const& expr)
             {
                 auto exprPtr = std::make_shared<Expression>(expr);
-                return evaluate(lowerBitfieldCombine(exprPtr));
+                auto result = evaluate(lowerBitfieldCombine(exprPtr));
+
+                auto resultType = resultVariableType(result);
+                auto exprType = resultVariableType(expr);
+                if (resultType != exprType)
+                    return reinterpret(result, exprType.dataType);
+
+                return result;
             }
 
             CommandArgumentValue operator()(MatrixMultiply const& expr)

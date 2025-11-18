@@ -707,5 +707,66 @@ namespace rocRoller
             }
         }
 
+        template <CCommandArgumentValue FromType, int Idx>
+        CommandArgumentValue reinterpret(FromType const& value, DataType targetDataType)
+        {
+            constexpr auto IdxType = static_cast<DataType>(Idx);
+
+            if constexpr(IdxType == DataType::None || IdxType == DataType::Count)
+            {
+                Throw<FatalError>("Unsupported conversion to type: ", toString(targetDataType));
+                return 0;
+            }
+            else
+            {
+                using ToType = typename EnumTypeInfo<IdxType>::Type;
+
+                if(targetDataType == IdxType)
+                {
+                    AssertFatal(std::is_trivially_copyable_v<FromType>, "FromType must be trivially copyable");
+                    AssertFatal(std::is_trivially_copyable_v<ToType>, "ToType must be trivially copyable");
+                    AssertFatal(
+                        std::endian::native == std::endian::little || std::endian::native == std::endian::big,
+                        "Unsupported or mixed endianness: only pure little- or big-endian are supported.");
+
+                    // Found matching DataType
+                    if constexpr(!CCommandArgumentValue<ToType>)
+                    {
+                        // Invalid target: either not in CommandArgumentValue or is integral
+                        Throw<FatalError>("Cannot reinterpret cast to ", friendlyTypeName<ToType>());
+                        return 0;
+                    }
+                    else
+                    {
+                        if constexpr (sizeof(ToType) == sizeof(FromType)) {
+                            return std::bit_cast<ToType>(value);
+                        } else {
+                            // Truncation or widening
+                            constexpr std::size_t N = (sizeof(ToType) < sizeof(FromType)) ? sizeof(ToType) : sizeof(FromType);
+
+                            // Source and destination as bytes
+                            const auto src_bytes = std::bit_cast<std::array<std::byte, sizeof(FromType)>>(value);
+                            std::array<std::byte, sizeof(ToType)> dst_bytes{};
+                            dst_bytes.fill(std::byte{0});
+
+                            if constexpr (std::endian::native == std::endian::little) {
+                                // Keep least-significant bytes: at low addresses.
+                                std::copy_n(src_bytes.data(), N, dst_bytes.data());
+                            } else {
+                                // Big-endian: least-significant bytes live at high addresses.
+                                std::copy_n(src_bytes.data() + (sizeof(FromType) - N), N,
+                                            dst_bytes.data() + (sizeof(ToType) - N));
+                            }
+
+                            return std::bit_cast<ToType>(dst_bytes);
+                        }
+                    }
+                }
+                else
+                {
+                    return reinterpret<FromType, Idx + 1>(value, targetDataType);
+                }
+            }
+        }
     }
 }
