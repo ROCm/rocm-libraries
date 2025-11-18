@@ -126,6 +126,7 @@ set( hipfft-test_source
   multi_device_test.cpp
   multi_stream_test.cpp
   ../../shared/array_validator.cpp
+  ../../shared/test_callbacks.cpp
   )
 
 add_executable( hipfft-test ${hipfft-test_source} ${hipfft-test_includes} )

@@ -70,7 +70,6 @@ set( rocfft-test_source
   gtest_main.cpp
   rocfft_accuracy_test.cpp
   bitwise_repro/bitwise_repro_test.cpp
-  accuracy_test.cpp
   accuracy_test_1D.cpp	
   accuracy_test_2D.cpp
   accuracy_test_3D.cpp
@@ -89,6 +88,7 @@ set( rocfft-test_source
   validate_length_stride.cpp
   random.cpp
   ../../shared/array_validator.cpp
+  ../../shared/test_callbacks.cpp
   )
 
 add_executable( rocfft-test ${rocfft-test_source} ${rocfft-test_includes} )
