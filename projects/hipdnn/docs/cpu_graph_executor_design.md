@@ -4,13 +4,12 @@
 1. [Executive Summary](#executive-summary)
 2. [System Overview](#system-overview)
 3. [Architecture Components](#architecture-components)
-4. [Plan Builder Pattern](#plan-builder-pattern)
-5. [Plan Execution Pattern](#plan-execution-pattern)
-6. [Signature Key System](#signature-key-system)
-7. [Registry Mechanism](#registry-mechanism)
-8. [Execution Flow](#execution-flow)
-9. [Supported Operations](#supported-operations)
-10. [Extension Guidelines](#extension-guidelines)
+4. [Plan Builders](#plan-builders)
+5. [Signature Key System](#signature-key-system)
+6. [Registry Mechanism](#registry-mechanism)
+7. [Execution Flow](#execution-flow)
+8. [Supported Operations](#supported-operations)
+9. [Extension Guidelines](#extension-guidelines)
 
 ## Executive Summary
 
@@ -139,40 +138,6 @@ template <typename InputDataType,
           typename MeanVarianceDataType,
           typename ComputeDataType>
 class BatchnormBwdPlan : public IGraphNodePlanExecutor
-```
-
-## Plan Execution Pattern
-
-Plans are executed in a two-phase approach:
-
-### Phase 1: Plan Creation
-```
-   Foreach Node in Graph
-       │
-       v
-   isApplicable() ──> Check tensor types
-       │              Check node attributes
-       │              Validate configuration
-       v
-   buildPlanForNode() ──> Create specialized plan
-       │                  Configure parameters
-       │                  Return executor
-       v
-   Plan Executor List
-```
-
-### Phase 2: Plan Execution
-```
-   Find and Create Virtual Tensors
-       │
-       v
-   Foreach Plan Executor
-       │
-       v
-   execute(variantPack)
-       │
-       ├──> Invoke CPU reference implementation
-       └──> Write results to output tensors
 ```
 
 ## Signature Key System
