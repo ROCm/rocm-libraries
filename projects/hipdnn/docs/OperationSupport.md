@@ -14,13 +14,15 @@ The following table lists all operations currently supported in hipDNN:
 | Batchnorm Backward  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Spatial mode only¹ |
 | Batchnorm Inference + DRelu + Backward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Fused graph³ |
 | Batchnorm Training  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Spatial mode only¹ |
+| Batchnorm Training + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Fused graph³⁴ |
 | Convolution Dgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Cross-correlation only² |
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Cross-correlation only² |
 | Convolution Wgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Cross-correlation only² |
 
 ¹ See Batchnorm Operations note below  
 ² See Convolution Operations note below  
-³ See Fused Operations note below
+³ See Fused Operations note below  
+⁴ See Activation Functions note below
 
 ## Operation Notes
 
@@ -32,6 +34,9 @@ The following table lists all operations currently supported in hipDNN:
 
 > [!NOTE]
 > **Fused Operations:** The Batchnorm Inference + Activation Backward operation is a fused graph pattern that combines three operations: (1) Batchnorm Inference, (2) Activation Backward (DReLU), and (3) Batchnorm Backward.
+
+> [!NOTE]
+> **Activation Functions:** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU is not supported.
 
 > [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only. Sparse tensor support is planned for future releases.

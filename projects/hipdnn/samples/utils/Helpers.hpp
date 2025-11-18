@@ -55,14 +55,16 @@ inline void printSampleHelp(const std::string& sampleName)
 {
     std::cout << "Usage: " << sampleName << " [OPTIONS]\n"
               << "Options:\n"
-              << "  --verify-cpu, -vc    Enable CPU reference validation\n"
-              << "  --help, -h      Show this help message\n"
+              << "  --verify-cpu, -vc         Enable CPU reference validation\n"
+              << "  --activation-type TYPE    Set activation type (relu, relu6, clamp) [default: relu]\n"
+              << "  --help, -h                Show this help message\n"
               << std::endl;
 }
 
 struct Config
 {
     bool cpuValidation = false;
+    std::string activationType = "relu";
 };
 
 inline Config parseCommandLineArgs(int argc, char* argv[])
@@ -76,6 +78,24 @@ inline Config parseCommandLineArgs(int argc, char* argv[])
         if(arg == "--verify-cpu" || arg == "-vc")
         {
             config.cpuValidation = true;
+        }
+        else if(arg == "--activation-type")
+        {
+            if(i + 1 >= argc)
+            {
+                std::cerr << "--activation-type requires an argument" << std::endl;
+                printSampleHelp(argv[0]);
+                exit(EXIT_FAILURE);
+            }
+
+            config.activationType = argv[++i];
+            if(config.activationType != "relu" && config.activationType != "relu6"
+               && config.activationType != "clamp")
+            {
+                std::cerr << "Invalid activation type: " << config.activationType << std::endl;
+                std::cerr << "Valid options are: relu, relu6, clamp" << std::endl;
+                exit(EXIT_FAILURE);
+            }
         }
         else if(arg == "--help" || arg == "-h")
         {
