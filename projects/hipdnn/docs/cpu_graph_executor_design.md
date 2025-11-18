@@ -14,7 +14,7 @@
 
 ## Executive Summary
 
-The CPU Graph Executor is a reference implementation system designed to execute computational graphs on CPU for testing and validation purposes within the hipDNN framework. It provides a flexible, extensible architecture for executing various deep learning operations including BatchNormalization, Convolution, and Pointwise operations.
+The CPU Graph Executor is a reference implementation system designed to execute computational graphs on CPU for testing and validation purposes within the hipDNN project. It provides a flexible, extensible architecture for executing various deep learning operations including BatchNormalization, Convolution, and Pointwise operations.
 
 ### Purpose
 - **Reference Implementation**: Provides ground-truth results for validating GPU implementations
@@ -26,28 +26,28 @@ The CPU Graph Executor is a reference implementation system designed to execute 
 
 The CPU Graph Executor follows a modular architecture pattern with clear separation of concerns:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     CPU Graph Executor System                    │
-├───────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ┌─────────────┐    ┌──────────────┐    ┌──────────────┐       │
-│  │   Graph     │───>│  Signature   │───>│   Plan       │       │
-│  │   Input     │    │   Key Gen    │    │   Builder    │       │
-│  └─────────────┘    └──────────────┘    └──────────────┘       │
-│         │                  │                     │               │
-│         v                  v                     v               │
-│  ┌─────────────┐    ┌──────────────┐    ┌──────────────┐       │
-│  │   Graph     │    │   Registry   │    │   Plan       │       │
-│  │   Wrapper   │    │   Lookup     │    │  Executor    │       │
-│  └─────────────┘    └──────────────┘    └──────────────┘       │
-│                                                  │               │
-│                                                  v               │
-│                                          ┌──────────────┐       │
-│                                          │   Result     │       │
-│                                          │   Tensors    │       │
-│                                          └──────────────┘       │
-└───────────────────────────────────────────────────────────────────┘
+``` 
+┌───────────────────────────────────────────────────────────┐
+│                  CPU Graph Executor System                │
+├───────────────────────────────────────────────────────────┤
+│                                                           │
+│  ┌─────────────┐    ┌──────────────┐    ┌──────────────┐  │
+│  │   Graph     │───>│  Signature   │───>│   Plan       │  │
+│  │   Input     │    │   Key Gen    │    │   Builder    │  │
+│  └─────────────┘    └──────────────┘    └──────────────┘  │
+│                            │                     │        │
+│                            v                     v        │
+│                     ┌──────────────┐    ┌──────────────┐  │
+│                     │   Registry   │    │   Plan       │  │
+│                     │   Lookup     │    │  Executor    │  │
+│                     └──────────────┘    └──────────────┘  │
+│                                                  │        │
+│                                                  v        │
+│                                         ┌──────────────┐  │
+│                                         │   Result     │  │
+│                                         │   Tensors    │  │
+│                                         └──────────────┘  │
+└───────────────────────────────────────────────────────────┘
 ```
 
 ## Architecture Components
@@ -72,7 +72,7 @@ The CPU Graph Executor follows a modular architecture pattern with clear separat
   - `buildNodePlan()`: Creates an execution plan for the node
 
 #### IGraphNodePlanExecutor
-- **Purpose**: Interface for executing plans with tensor data
+- **Purpose**: Interface for executing plans with tensor data. Each plan executor is specialized for a specific operation and data type combination.
 - **Methods**:
   - `execute()`: Executes the plan with provided tensor data
 
@@ -80,11 +80,11 @@ The CPU Graph Executor follows a modular architecture pattern with clear separat
 
 ```
 ┌───────────────────────────────────────────────────────────┐
-│              CpuReferenceGraphExecutor                     │
+│              CpuReferenceGraphExecutor                    │
 ├───────────────────────────────────────────────────────────┤
-│ - _planRegistry: PlanBuilderRegistry                       │
+│ - _planRegistry: PlanBuilderRegistry                      │
 ├───────────────────────────────────────────────────────────┤
-│ + execute(graphBuffer, size, variantPack)                  │
+│ + execute(graphBuffer, size, variantPack)                 │
 │ - buildPlanForNode(graph, node)                           │
 │ - buildSignatureKey(node, tensorMap, computeType)         │
 │ - populateVariantPackWithMissingVirtualTensors(...)       │
@@ -93,21 +93,21 @@ The CPU Graph Executor follows a modular architecture pattern with clear separat
                            │ uses
                            v
 ┌───────────────────────────────────────────────────────────┐
-│              PlanBuilderRegistry                           │
+│              PlanBuilderRegistry                          │
 ├───────────────────────────────────────────────────────────┤
-│ - _registry: PlanRegistryMap                               │
-│ - _initialized: bool                                       │
+│ - _registry: PlanRegistryMap                              │
+│ - _initialized: bool                                      │
 ├───────────────────────────────────────────────────────────┤
 │ + getPlanBuilder(key): IGraphNodePlanBuilder&             │
-│ - initializeRegistry()                                     │
+│ - initializeRegistry()                                    │
 │ - initializePlanBuilders()                                │
-│ - registerBuilder<T>()                                     │
+│ - registerBuilder<T>()                                    │
 └───────────────────────────────────────────────────────────┘
 ```
 
-## Plan Builder Pattern
+## Plan Builders
 
-The Plan Builder pattern is used to create execution plans for different operation types:
+Plan Builders are instantiated for each supported operation & data type combination. All plan builders are then stored in the PlanBuilderRegistry for lookup during graph execution.
 
 ```
 ┌────────────────────┐
@@ -129,7 +129,7 @@ The Plan Builder pattern is used to create execution plans for different operati
 └───────────────────┘  └───────────────────┘  └─────────────────┘  └────────────────┘
 ```
 
-### Template-Based Type Safety
+### Plan Builder Template-Based Type Safety
 
 Each plan builder uses templates to ensure type safety:
 
@@ -147,28 +147,30 @@ Plans are executed in a two-phase approach:
 
 ### Phase 1: Plan Creation
 ```
-   Graph Node
+   Foreach Node in Graph
        │
        v
    isApplicable() ──> Check tensor types
        │              Check node attributes
        │              Validate configuration
        v
-   buildNodePlan() ──> Create specialized plan
-       │              Configure parameters
-       │              Return executor
+   buildPlanForNode() ──> Create specialized plan
+       │                  Configure parameters
+       │                  Return executor
        v
-   Plan Executor
+   Plan Executor List
 ```
 
 ### Phase 2: Plan Execution
 ```
-   Plan Executor
+   Find and Create Virtual Tensors
+       │
+       v
+   Foreach Plan Executor
        │
        v
    execute(variantPack)
        │
-       ├──> Create shallow tensors
        ├──> Invoke CPU reference implementation
        └──> Write results to output tensors
 ```
@@ -179,8 +181,8 @@ The Signature Key system provides unique identification for operation configurat
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                  PlanRegistrySignatureKey                    │
-│                        (Variant)                             │
+│                  PlanRegistrySignatureKey                   │
+│                        (Variant)                            │
 ├─────────────────────────────────────────────────────────────┤
 │  - BatchnormFwdInferenceSignatureKey                        │
 │  - BatchnormBwdSignatureKey                                 │
@@ -193,12 +195,12 @@ The Signature Key system provides unique identification for operation configurat
 ```
 
 ### Signature Key Requirements
-
 Each signature key must implement:
-1. **Constructor**: Build from `Node` and `tensorMap`
+1. **Constructor from Node**: Build from `Node` and `tensorMap` for runtime graph parsing
+2. **Constructor from Datatypes**: Build from base datatypes for direct instantiation
 2. **hashSelf()**: Generate unique hash
 3. **Equality operator**: Compare keys
-4. **getPlanBuilders()**: Return map of builders
+4. **getPlanBuilders()**: Return map of supported builder types for this key
 
 ### Signature Key Generation
 
@@ -223,23 +225,23 @@ Node Attributes + Tensor Types + Compute Type
 The registry provides a centralized mapping of signature keys to plan builders:
 
 ```
-┌───────────────────────────────────────────────────────┐
-│                 PlanBuilderRegistry                    │
-├───────────────────────────────────────────────────────┤
-│                                                        │
-│  ┌──────────────────────────────────────────────┐    │
-│  │         _registry (PlanRegistryMap)          │    │
-│  ├──────────────────────────────────────────────┤    │
-│  │  Key: PlanRegistrySignatureKey               │    │
-│  │  Value: unique_ptr<IGraphNodePlanBuilder>    │    │
-│  └──────────────────────────────────────────────┘    │
-│                                                        │
-│  Registration Process:                                 │
-│  1. Initialize on first use (lazy initialization)     │
-│  2. Each operation type registers its builders        │
-│  3. Builders mapped to unique signature keys          │
-│                                                        │
-└───────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────┐
+│                 PlanBuilderRegistry                │
+├────────────────────────────────────────────────────┤
+│                                                    │
+│  ┌──────────────────────────────────────────────┐  │
+│  │         _registry (PlanRegistryMap)          │  │
+│  ├──────────────────────────────────────────────┤  │
+│  │  Key: PlanRegistrySignatureKey               │  │
+│  │  Value: unique_ptr<IGraphNodePlanBuilder>    │  │
+│  └──────────────────────────────────────────────┘  │
+│                                                    │
+│  Registration Process:                             │
+│  1. Initialize on first use (lazy initialization)  │
+│  2. Each operation type registers its builders     │
+│  3. Builders mapped to unique signature keys       │
+│                                                    │
+└────────────────────────────────────────────────────┘
 ```
 
 ### Registry Initialization Flow
@@ -255,7 +257,7 @@ First getPlanBuilder() call
          │                   for each operation type
          │                           │
          v                           v
-    Lookup builder              Populate _registry
+    Lookup builder           Populate _registry
          │                           │
          v                           │
     Return builder <─────────────────┘
@@ -269,13 +271,6 @@ The complete execution flow from graph input to results:
 ┌─────────────────┐
 │  Graph Buffer   │
 └────────┬────────┘
-         │
-         v
-┌─────────────────────────────────────────────┐
-│         GraphWrapper Creation                │
-│  - Parse flatbuffer                         │
-│  - Extract nodes and tensors                │
-└────────┬────────────────────────────────────┘
          │
          v
 ┌─────────────────────────────────────────────┐
@@ -300,6 +295,7 @@ The complete execution flow from graph input to results:
          v
 ┌─────────────────────────────────────────────┐
 │        Virtual Tensor Allocation            │
+├─────────────────────────────────────────────┤
 │  - Identify missing virtual tensors         │
 │  - Allocate memory for intermediates        │
 └────────┬────────────────────────────────────┘
@@ -307,6 +303,7 @@ The complete execution flow from graph input to results:
          v
 ┌─────────────────────────────────────────────┐
 │         Execute All Plans                   │
+├─────────────────────────────────────────────┤
 │  - Sequential execution                     │
 │  - Pass variant pack to each executor       │
 │  - Results written to output tensors        │
@@ -335,9 +332,9 @@ The complete execution flow from graph input to results:
 
 | Operation | Plan Builder | Signature Key | Description |
 |-----------|-------------|---------------|-------------|
-| Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | Element-wise unary operations |
-| Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | Element-wise binary operations |
-| Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | Element-wise ternary operations |
+| Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG |
+| Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, RELU_BWD, SIGMOID_BWD, TANH_BWD |
+| Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | None Supported Yet |
 
 ## Extension Guidelines
 
@@ -370,10 +367,13 @@ public:
 ```cpp
 class MyOperationSignatureKey {
 public:
-    MyOperationSignatureKey(const Node& node, const TensorMap& tensorMap);
+    MyOperationSignatureKey(DataType dataType1, DataType dataType2, /* ... */);
+    MyOperationSignatureKey(const Node& node, const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap);
     size_t hashSelf() const;
     bool operator==(const MyOperationSignatureKey& other) const;
-    static PlanRegistryMap getPlanBuilders();
+    static std::unordered_map<MyOperationSignatureKey,
+                              std::unique_ptr<IGraphNodePlanBuilder>,
+                              MyOperationSignatureKey> getPlanBuilders();
 };
 ```
 
@@ -401,43 +401,10 @@ case NodeAttributes::MyOperationAttributes:
 4. **Testing**: Create comprehensive unit tests for new operations
 5. **Documentation**: Document tensor requirements and operation semantics
 
-### Utility Macros
-
-The system provides utility macros for common validation tasks:
-
-```cpp
-CHECK_TENSOR_EXISTS(tensor_map, tensor_uid)
-CHECK_TENSOR_TYPE(tensor_map, tensor_uid, datatype_enum)  
-CHECK_OPTIONAL_TENSOR_EXISTS(tensor_map, optional_tensor_uid)
-CHECK_OPTIONAL_TENSOR_TYPE(tensor_map, optional_tensor_uid, datatype_enum)
-```
-
 ## Performance Considerations
 
 While the CPU Graph Executor is primarily for reference and testing:
 
 1. **Memory Management**: Virtual tensors are allocated on-demand
 2. **Sequential Execution**: Operations execute in topological order
-3. **Type Specialization**: Templates enable optimized implementations
-4. **Shallow Tensors**: Avoid unnecessary data copies
-
-## Testing Infrastructure
-
-The CPU Graph Executor is extensively tested:
-
-```
-sdk/tests/test_utilities/cpu_graph_executor/
-├── TestBatchnormBwdPlan.cpp
-├── TestBatchnormFwdInferencePlan.cpp
-├── TestConvolutionFwdPlan.cpp
-├── TestPointwisePlan.cpp
-├── TestCpuReferenceGraphExecutor.cpp
-├── TestPlanRegistrySignatureKey.cpp
-└── ... (additional test files)
-```
-
-## Conclusion
-
-The CPU Graph Executor provides a robust, extensible framework for reference implementations of deep learning operations. Its modular architecture, type-safe design, and comprehensive testing infrastructure make it an essential component of the hipDNN validation ecosystem.
-
-The system's clear separation of concerns through interfaces, use of the registry pattern for extensibility, and template-based type safety ensure maintainability and reliability while supporting the addition of new operations as the framework evolves.
+3. **Type Specialization**: Templates enable different typed implementations
