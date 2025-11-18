@@ -53,13 +53,6 @@
 #include <type_traits>
 #include <vector>
 
-#if __has_include(<valgrind/valgrind.h>)
-    #include <valgrind/valgrind.h>
-    #define HAS_VALGRIND_H 1
-#else
-    #define HAS_VALGRIND_H 0
-#endif
-
 namespace
 {
 

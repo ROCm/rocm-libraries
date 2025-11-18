@@ -67,13 +67,6 @@
 #include <utility>
 #include <vector>
 
-#if __has_include(<valgrind/valgrind.h>)
-    #include <valgrind/valgrind.h>
-    #define HAS_VALGRIND_H 1
-#else
-    #define HAS_VALGRIND_H 0
-#endif
-
 template<unsigned int SizeLimit>
 using size_limit_config = rocprim::scan_config<256,
                                                16,

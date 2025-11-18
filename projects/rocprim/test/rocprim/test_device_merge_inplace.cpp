@@ -51,13 +51,6 @@
 #if !defined(_WIN32)
 #include <unistd.h>
 
-#if __has_include(<valgrind/valgrind.h>)
-    #include <valgrind/valgrind.h>
-    #define HAS_VALGRIND_H 1
-#else
-    #define HAS_VALGRIND_H 0
-#endif
-
 unsigned long long get_available_host_memory()
 {
     // See "man sysconf 3" for more information on this system call.
