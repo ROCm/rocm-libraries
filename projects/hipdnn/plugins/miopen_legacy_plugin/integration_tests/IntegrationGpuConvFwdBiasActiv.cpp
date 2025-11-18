@@ -177,7 +177,7 @@ TEST_P(IntegrationGpuConvFwdBiasActivNhwcFp32, Correctness)
     runGraphTest(conv::getToleranceFwd<float>(), TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuConvFwdBiasActivNdhwcFp32, DISABLED_Correctness)
+TEST_P(IntegrationGpuConvFwdBiasActivNdhwcFp32, Correctness)
 {
     runGraphTest(conv::getToleranceFwd<float>(), TensorLayout::NDHWC);
 }
@@ -187,7 +187,7 @@ TEST_P(IntegrationGpuConvFwdBiasActivNhwcBfp16, Correctness)
     runGraphTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuConvFwdBiasActivNdhwcBfp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuConvFwdBiasActivNdhwcBfp16, Correctness)
 {
     runGraphTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NDHWC);
 }
@@ -197,7 +197,7 @@ TEST_P(IntegrationGpuConvFwdBiasActivNhwcFp16, Correctness)
     runGraphTest(conv::getToleranceFwd<half>(), TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuConvFwdBiasActivNdhwcFp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuConvFwdBiasActivNdhwcFp16, Correctness)
 {
     runGraphTest(conv::getToleranceFwd<half>(), TensorLayout::NDHWC);
 }
