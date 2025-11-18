@@ -2312,25 +2312,10 @@ namespace
         {
             // rocfft can't create some plans with non-default strides for lengths
             // AxBxC wherein B, C are in
-            const std::vector<std::array<ptrdiff_t, 2>> symptomatic_sub_len = {{16, 4},
-                                                                               {4, 16},
-                                                                               {27, 4},
-                                                                               {4, 27},
-                                                                               {25, 4},
-                                                                               {4, 25},
-                                                                               {16, 25},
-                                                                               {25, 16},
-                                                                               {25, 25},
-                                                                               {8, 9},
-                                                                               {9, 8},
-                                                                               {8, 4},
-                                                                               {4, 8},
-                                                                               {8, 8},
-                                                                               {4, 9},
-                                                                               {9, 4},
-                                                                               {4, 4},
-                                                                               {20, 10},
-                                                                               {10, 20}};
+            const std::vector<std::array<ptrdiff_t, 2>> symptomatic_sub_len
+                = {{16, 4},  {4, 16},  {16, 16}, {27, 4}, {4, 27},  {25, 4}, {4, 25},
+                   {16, 25}, {25, 16}, {25, 25}, {8, 9},  {9, 8},   {8, 4},  {4, 8},
+                   {8, 8},   {4, 9},   {9, 4},   {4, 4},  {20, 10}, {10, 20}};
             // (Note: failing lengths usually have a value of A involving a prime factor > 17)
             ret = ret
                   || std::any_of(symptomatic_sub_len.begin(),
