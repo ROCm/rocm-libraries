@@ -366,10 +366,11 @@ case NodeAttributes::MyOperationAttributes:
 4. **Testing**: Create comprehensive unit tests for new operations
 5. **Documentation**: Document tensor requirements and operation semantics
 
-## Performance Considerations
+## Performance & Usage Considerations
 
 While the CPU Graph Executor is primarily for reference and testing:
 
 1. **Memory Management**: Virtual tensors are allocated on-demand
 2. **Sequential Execution**: Operations execute in topological order
 3. **Type Specialization**: Templates enable different typed implementations
+4. **Usability**: Designed to operate using the same API as hipdnn backend so a single graph can be built and used for the real and reference executors interchangeably.
