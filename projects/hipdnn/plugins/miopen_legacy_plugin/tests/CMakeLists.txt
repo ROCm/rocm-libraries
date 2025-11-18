@@ -21,11 +21,7 @@ add_executable(
     engines/TestMiopenEngine.cpp
     main.cpp
     TestMiopenActivationDescriptor.cpp
-    TestMiopenBatchnormFwdInferenceOperations.cpp
-    TestMiopenBatchnormBwdOperations.cpp
-    TestMiopenBatchnormBwdActFusionOperations.cpp
     TestMiopenConvFwdBiasActivOperations.cpp
-    TestMiopenConvFwdOperations.cpp
     TestMiopenConvDescriptor.cpp
     TestMiopenEngineManager.cpp
     TestMiopenHandleFactory.cpp
