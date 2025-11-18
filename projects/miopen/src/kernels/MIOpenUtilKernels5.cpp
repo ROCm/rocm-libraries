@@ -15,11 +15,6 @@
 #define USE_BETA 0
 #endif
 
-static inline __device__ unsigned int iMod(unsigned int v, unsigned int u, unsigned int d)
-{
-    return v - __mul24(u, d);
-}
-
 #define UNUSED __attribute__((unused))
 
 static inline __device__ unsigned int
@@ -168,7 +163,7 @@ static inline __device__ void GlobalTrans(const unsigned int in_off,
                                           const DATA_TYPE* __restrict__ in,
                                           DATA_TYPE* __restrict__ out)
 {
-    int HW_tail = iMod(HW, p_blck, RD_BLCK);
+    int HW_tail = HW - p_blck * RD_BLCK;
 
     for(int i = 0; i < HW_tail; i++)
     {
@@ -212,8 +207,11 @@ extern "C" __global__ void TransposeNCHW2Vec(const DATA_TYPE* __restrict__ in,
                                              const float beta)
 {
     const unsigned int c_p_blck = blockIdx.x * blockDim.x + threadIdx.x;
-    const unsigned int c        = c_p_blck / HW_RD;
-    const unsigned int p_blck   = iMod(c_p_blck, c, HW_RD);
+    if(c_p_blck >= MAP_RD)
+        return;
+
+    const unsigned int c      = c_p_blck / HW_RD;
+    const unsigned int p_blck = c_p_blck - c * HW_RD;
 
     DATA_TYPE in_buf[RD_BLCK * VEC_SIZE];
     DATA_TYPE out_buf[RD_BLCK * VEC_SIZE];

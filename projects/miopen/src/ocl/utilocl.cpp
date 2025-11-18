@@ -1176,8 +1176,9 @@ float transpose_NCHW2Vec(const Handle& handle,
         // params += " -DGD_1=" + std::to_string(gd1);
         //}
 
-        const std::vector<size_t> vgd{gd0, gd1, 1};
         const std::vector<size_t> vld{std::min(WG_SIZE, gd0), 1, 1};
+        std::vector<size_t> vgd{
+            (gd0 + vld[0] - 1) / vld[0] * vld[0], (gd1 + vld[1] - 1) / vld[1] * vld[1], 1};
 
         handle.AddKernel(algo_name, network_config, program_name, kernel_name, vld, vgd, params)(
             in, out, alpha_fp, beta_fp);
