@@ -2,6 +2,10 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(hipsparse_shim)
+
 project(hipsparse VERSION 4.2.0 LANGUAGES CXX C)
 
 if(POLICY CMP0066)
@@ -11,8 +15,6 @@ endif()
 if(POLICY CMP0077)
     cmake_policy(SET CMP0077 NEW) # option() honors normal variables
 endif()
-
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Set cpack license file here to avoid rocm-cmake warning
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
@@ -78,31 +80,6 @@ if(HIPSPARSE_ENABLE_CUDA)
     find_package(CUDA REQUIRED)
 elseif(HIPSPARSE_ENABLE_HIP)
     find_package(hip REQUIRED CONFIG)
-    
-    # Include supported architectures
-    include(SupportedArchitectures)
-    
-    # Set GPU targets with backward compatibility
-    # Check if AMDGPU_TARGETS is provided for backward compatibility
-    if(AMDGPU_TARGETS)
-        set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "AMD GPU targets to compile for" FORCE)
-    endif()
-    
-    # Get default GPU targets
-    hipsparse_get_base_architectures(DEFAULT_GPU_TARGETS)
-    
-    # Use GPU_TARGETS if set, otherwise use defaults
-    if(NOT GPU_TARGETS)
-        set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "AMD GPU targets to compile for")
-    else()
-        # Handle "all" keyword
-        if(GPU_TARGETS STREQUAL "all")
-            set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "AMD GPU targets to compile for" FORCE)
-        endif()
-    endif()
-    
-    message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
-    
     find_package(rocsparse 4.0.1 REQUIRED CONFIG)
 endif()
 

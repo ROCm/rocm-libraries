@@ -16,8 +16,7 @@
       "CMAKE_C_COMPILER": "/opt/rocm/bin/amdclang",
       "CMAKE_PREFIX_PATH": "/opt/rocm",
       "CMAKE_INSTALL_PREFIX": "/opt/rocm",
-      "CMAKE_BUILD_TYPE": "Release",
-      "GPU_TARGETS": "gfx90a"
+      "CMAKE_BUILD_TYPE": "Release"
       },
       "environment": {
         "ROCM_PATH": "/opt/rocm"
