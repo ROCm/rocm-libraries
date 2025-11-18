@@ -49,7 +49,7 @@ if(HIPSPARSE_ENABLE_CUDA)
     target_include_directories(hipsparse-clients-common PUBLIC ${HIP_INCLUDE_DIRS})
     target_link_libraries(hipsparse-clients-common PUBLIC ${CUDA_LIBRARIES})
 elseif(HIPSPARSE_ENABLE_HIP)
-    target_link_libraries(hipsparse-clients-common PUBLIC hip::host hip::device)
+    target_link_libraries(hipsparse-clients-common PUBLIC hip::host)
 endif()
 
 # Enable POSITION_INDEPENDENT_CODE for OBJECT library if building shared libs
