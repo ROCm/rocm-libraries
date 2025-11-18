@@ -87,27 +87,6 @@ The CPU Graph Executor follows a modular architecture pattern with clear separat
 
 Plan Builders are instantiated for each supported operation & data type combination. All plan builders are then stored in the PlanBuilderRegistry for lookup during graph execution.
 
-```
-┌────────────────────┐
-│  Plan Builder      │
-│  (Abstract)        │
-└────────┬───────────┘
-         │
-         ├──────────────────────┬──────────────────────┬─────────────────────┐
-         │                      │                      │                     │
-         v                      v                      v                     v
-┌───────────────────┐  ┌───────────────────┐  ┌─────────────────┐  ┌────────────────┐
-│ BatchnormBwdPlan  │  │ ConvolutionFwdPlan│  │ PointwisePlan   │  │ Other Plans... │
-│     Builder       │  │     Builder       │  │    Builder      │  │                │
-└───────────────────┘  └───────────────────┘  └─────────────────┘  └────────────────┘
-         │                      │                      │                     │
-         │                      │                      │                     │
-         v                      v                      v                     v
-┌───────────────────┐  ┌───────────────────┐  ┌─────────────────┐  ┌────────────────┐
-│ BatchnormBwdPlan  │  │ ConvolutionFwdPlan│  │ PointwisePlan   │  │ Other Plans... │
-└───────────────────┘  └───────────────────┘  └─────────────────┘  └────────────────┘
-```
-
 ### Plan Builder Template-Based Type Safety
 
 Each plan builder uses templates to ensure type safety:
