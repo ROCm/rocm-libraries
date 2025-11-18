@@ -565,7 +565,7 @@ namespace TensileLite
         TensorDescriptor const& compressed = problem.compressed();
         TensorDescriptor const& metadata   = problem.metadata();
 
-        auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problem, hardware);
+        auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problem, hardware, sk.grid);
         uint32_t autoGsuVal = calculateAutoGSU(problem, hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
 
@@ -719,101 +719,65 @@ namespace TensileLite
 
             auto tiles = problem.getNumTiles(sizeMapping, gsu);
 
-            if(sizeMapping.customKernelName.empty())
-            {
-                // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
-                // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
-                auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
-                auto     totalIters   = tiles * itersPerTile;
-                uint32_t magicNumberItersPerTile;
-                uint32_t magicShiftItersPerTile;
-                magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
+            // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
+            // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
+            auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
+            auto     totalIters   = tiles * itersPerTile;
+            uint32_t magicNumberItersPerTile;
+            uint32_t magicShiftItersPerTile;
+            magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
 
-                args.template append<uint32_t>("itersPerTile", itersPerTile);
-                args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
-                args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
-                args.template append<uint32_t>("totalIters", totalIters);
+            args.template append<uint32_t>("itersPerTile", itersPerTile);
+            args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
+            args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
+            args.template append<uint32_t>("totalIters", totalIters);
 
-                if(sizeMapping.streamK == 1) // Basic SK
-                {
-                    uint32_t itersPerWave = CeilDivide(totalIters, numWorkGroups.x);
-                    args.template append<uint32_t>("SKItersPerWG", itersPerWave);
-                }
-                else if(sizeMapping.streamK >= 2) // Two-tile SK
-                {
-                    if(sk.reduction == ReductionType::Parallel)
-                    {
-                        uint32_t skSplit = sk.grid / tiles; // skTiles is skSplit in parallel reduction path
-                        uint32_t skItersPerWG = itersPerTile / skSplit;
-                        
-                        args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                        args.template append<uint32_t>("skGrid",       sk.grid);
-                        args.template append<uint32_t>("skTiles",      skSplit);
-                    }
-                    else
-                    {
-                        AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
-                        assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
-                        int fullTiles = pAMDGPU->skFullTiles;
+            if(sizeMapping.streamK == 1) // Basic SK
+              {
+                uint32_t itersPerWave = CeilDivide(totalIters, numWorkGroups.x);
+                args.template append<uint32_t>("SKItersPerWG", itersPerWave);
+              }
+            else if(sizeMapping.streamK >= 2) // Two-tile SK
+              {
+                if(sk.reduction == ReductionType::Parallel)
+                  {
+                    uint32_t skSplit = sk.grid / tiles; // skTiles is skSplit in parallel reduction path
+                    uint32_t skItersPerWG = itersPerTile / skSplit;
 
-                        bool bigEnough = tiles > sk.grid;
-                        // skTiles is number of Stream-K tiles to complete
-                        // Two-tile algorithm causes each WG to run an even number of Stream-K iterations,
-                        // followed by an even number of data-parllel tiles.
-                        // If total tiles is evenly divisble by grid size,
-                        // then no Stream-K tiles are needed, all data-parallel
-                        uint32_t skTiles = sk.grid;
-                        // If not evenly divisible, determine number of Stream-K tiles
-                        if(tiles % sk.grid != 0)
-                        {
-                            // Number of data-parallel tiles on each workgroup would be:
-                            // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
-                            skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
-                            // Cap Stream-K tiles at total number of tiles in case of large multiplier
-                            skTiles = min(skTiles, tiles);
-                        }
+                    args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
+                    args.template append<uint32_t>("skGrid",       sk.grid);
+                    args.template append<uint32_t>("skTiles",      skSplit);
+                  }
+                else
+                  {
+                    AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
+                    assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
+                    int fullTiles = pAMDGPU->skFullTiles;
 
-                        uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;
+                    bool bigEnough = tiles > sk.grid;
+                    // skTiles is number of Stream-K tiles to complete
+                    // Two-tile algorithm causes each WG to run an even number of Stream-K iterations,
+                    // followed by an even number of data-parllel tiles.
+                    // If total tiles is evenly divisble by grid size,
+                    // then no Stream-K tiles are needed, all data-parallel
+                    uint32_t skTiles = sk.grid;
+                    // If not evenly divisible, determine number of Stream-K tiles
+                    if(tiles % sk.grid != 0)
+                      {
+                        // Number of data-parallel tiles on each workgroup would be:
+                        // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
+                        skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
+                        // Cap Stream-K tiles at total number of tiles in case of large multiplier
+                        skTiles = min(skTiles, tiles);
+                      }
 
-                        args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                        args.template append<uint32_t>("skGrid",       sk.grid);
-                        args.template append<uint32_t>("skTiles",      skTiles);                    
-                    }
-                }
-            }
-            else // custom kernel
-            {
-                auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
-                auto     totalIters   = tiles * itersPerTile;
+                    uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;
 
-                AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
-                assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
-                int fullTiles = pAMDGPU->skFullTiles;
-
-                bool bigEnough = tiles > sk.grid;
-                uint32_t skTiles = sk.grid;
-                if(tiles % sk.grid != 0)
-                {
-                    skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
-                    skTiles = min(skTiles, tiles);
-                }
-
-                uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;
-                uint32_t skExtraIters = skTiles * itersPerTile % (sk.grid);
-                uint32_t skGridAndTiles = (sk.grid << 16) | (skTiles & 0xFFFF);
-
-                // safe guard
-                if(sk.grid > 65535 || skTiles > 65535)
-                {
-                    throw std::runtime_error("Packing skGrid and skTiles exceeds the capacity of a 32-bit register.");
-                }
-
-                args.template append<uint32_t>("itersPerTile", itersPerTile);
-                args.template append<uint32_t>("totalIters", totalIters);
-                args.template append<uint32_t>("SKItersPerWG",   skItersPerWG);
-                args.template append<uint32_t>("skGridAndTiles", skGridAndTiles);
-                args.template append<uint32_t>("skExtraIters",   skExtraIters);
-            }
+                    args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
+                    args.template append<uint32_t>("skGrid",       sk.grid);
+                    args.template append<uint32_t>("skTiles",      skTiles);
+                  }
+              }
         }
 
         if constexpr(insertKernelArgs)
@@ -991,88 +955,103 @@ namespace TensileLite
         return (double)(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount)
                / std::ceil(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount);
     }
-    
+
     std::pair<int32_t, uint32_t> ContractionSolution::calculateAutoWGM(
         Problem const&  problem,
-        Hardware const* hardware) const
+        Hardware const* hardware,
+        uint32_t const  skgrid) const
     {
-        // Default
-        int32_t defaultWGM = sizeMapping.workGroupMapping;
+        // Hardware
+        AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
+        hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
+
+        // Default WGM
+        int32_t defaultWGM;
         uint32_t defaultWGMXCC;
-        if(sizeMapping.workGroupMappingXCC == -1)
+
+        // Dynamically pick the values
+        if(sizeMapping.streamK != 0
+            && skgrid != 0
+            && sizeMapping.workGroupMapping == 0
+            && sizeMapping.workGroupMappingXCC == -1
+            && sizeMapping.nonTemporalA < 4 /* Exclude NTs for now till we fix libs */
+            && sizeMapping.nonTemporalB < 4 /* Exclude NTs for now till we fix libs */)
         {
-            hip::HipAMDGPU const* hipAMDGPU
-                    = dynamic_cast<hip::HipAMDGPU const*>(hardware);
-            defaultWGMXCC = hipAMDGPU->analyticalHardware->NUM_XCD;
+            int32_t c_wgm = 0;
+            uint32_t c_wgmxcc = 0;
+            // Try to find cached WGM and WGMXCC
+            std::tie(c_wgm, c_wgmxcc) = paramsCache.find(problem);
+
+            if(!c_wgm && !c_wgmxcc)
+            {
+                auto sizes = problem.problemSizes();
+                if(sizes.size() >= 4)
+                {
+                    auto wgm_pred = origami::select_best_wgm(*(hipAMDGPU->analyticalHardware),
+                                                            sizes[0],
+                                                            sizes[1],
+                                                            sizes[3],
+                                                            sizes[2],
+                                                            sizeMapping.macroTile.x,
+                                                            sizeMapping.macroTile.y,
+                                                            sizeMapping.depthU,
+                                                            sizeMapping.nonTemporalA,
+                                                            sizeMapping.nonTemporalB,
+                                                            skgrid,
+                                                            false);
+                    defaultWGMXCC = std::get<0>(wgm_pred);
+                    defaultWGM    = std::get<1>(wgm_pred);
+
+                    // Add to cache only if dynamically calculated.
+                    paramsCache.add(std::make_pair(defaultWGM, defaultWGMXCC), problem);
+                    if(Debug::Instance().printPropertyEvaluation())
+                        std::cout << "Dynamic WGM "<< defaultWGM << ", WGMXCC " << defaultWGMXCC << std::endl;
+                }
+            }
+            else
+            {
+                defaultWGM = c_wgm;
+                defaultWGMXCC = c_wgmxcc;
+            }
         }
         else
-            defaultWGMXCC = sizeMapping.workGroupMappingXCC;
-
-        // Run-time prediction
-        if(sizeMapping.streamK != 0)
         {
-            AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
-            // Runtime selection for WGM and WGMXCC
-            if(pAMDGPU->skDynamicWGM == 1)
+            // Default WGM
+            if(sizeMapping.workGroupMapping == 0)
             {
-                int32_t c_wgm = 0;
-                uint32_t c_wgmxcc = 0;
-                // Try to find cached WGM and WGMXCC
-                std::tie(c_wgm, c_wgmxcc) = paramsCache.find(problem);
+                auto numCU  = hipAMDGPU->analyticalHardware->N_CU;
+                auto numXCD = hipAMDGPU->analyticalHardware->NUM_XCD;
 
-                if(!c_wgm && !c_wgmxcc)
-                { // Did not find values in cache
-                    hip::HipAMDGPU const* hipAMDGPU
-                        = dynamic_cast<hip::HipAMDGPU const*>(hardware);
-                    auto sizes = problem.problemSizes();
-                    if(sizes.size() >= 4)
-                    {
-                        defaultWGMXCC = origami::select_best_wgmxcc(*(hipAMDGPU->analyticalHardware),
-                                                                    sizes[0],
-                                                                    sizes[1],
-                                                                    sizes[3],
-                                                                    sizes[2],
-                                                                    sizeMapping.macroTile.x,
-                                                                    sizeMapping.macroTile.y,
-                                                                    sizeMapping.depthU,
-                                                                    false);
-                        defaultWGM = origami::select_best_wgm(*(hipAMDGPU->analyticalHardware),
-                                                                sizes[0],
-                                                                sizes[1],
-                                                                sizes[3],
-                                                                sizes[2],
-                                                                sizeMapping.macroTile.x,
-                                                                sizeMapping.macroTile.y,
-                                                                sizeMapping.depthU,
-                                                                defaultWGMXCC,
-                                                                false);
-                        // Add to cache only if dynamically calculated.
-                        paramsCache.add(std::make_pair(defaultWGM, defaultWGMXCC), problem);
-                        if(Debug::Instance().printPropertyEvaluation())
-                            std::cout << "Dynamic WGM "<< defaultWGM << ", WGMXCC " << defaultWGMXCC << std::endl;
-                    }
-                }
-                else {
-                    defaultWGM = c_wgm;
-                    defaultWGMXCC = c_wgmxcc;
-                }
+                defaultWGM = std::ceil(std::sqrt(numCU / numXCD));
             }
+            else
+                defaultWGM = sizeMapping.workGroupMapping;
 
-            // If WGM and WGMXCC are explicitly specified at runtime, they override default and predictions
-            if(pAMDGPU->fixedWGM != std::numeric_limits<int>::max())
+            // Default WGMXCC
+            if(sizeMapping.workGroupMappingXCC == -1)
             {
-                defaultWGM = pAMDGPU->fixedWGM;
+                defaultWGMXCC = hipAMDGPU->analyticalHardware->NUM_XCD;
             }
-            if(pAMDGPU->fixedWGMXCC != std::numeric_limits<int>::max())
-            {
-                defaultWGMXCC = pAMDGPU->fixedWGMXCC;
-            }
-
-            // WGM should be in this range: [-1023, -1022, ..., -1, 0, 1, ..., 1023]
-            assert(std::fabs(defaultWGM) < 1024);
-            // WGMXCC should be in this range: [1, 2, 3, ..., 63]
-            assert(defaultWGMXCC > 0 && defaultWGMXCC < 64);
+            else
+                defaultWGMXCC = sizeMapping.workGroupMappingXCC;
         }
+
+
+        // If WGM and WGMXCC are explicitly specified at runtime, they override default and predictions
+        if(pAMDGPU->fixedWGM != std::numeric_limits<int>::max())
+        {
+            defaultWGM = pAMDGPU->fixedWGM;
+        }
+        if(pAMDGPU->fixedWGMXCC != std::numeric_limits<int>::max())
+        {
+            defaultWGMXCC = pAMDGPU->fixedWGMXCC;
+        }
+
+        // WGM should be in this range: [-1023, -1022, ..., -1, 0, 1, ..., 1023]
+        assert(std::fabs(defaultWGM) < 1024);
+        // WGMXCC should be in this range: [1, 2, 3, ..., 63]
+        assert(defaultWGMXCC > 0 && defaultWGMXCC < 64);
+
         return std::make_pair(defaultWGM, defaultWGMXCC);
     }
 
@@ -1117,8 +1096,11 @@ namespace TensileLite
             gsuVal = min(gsuVal, std::ceil(static_cast<float>(K) / MT2));
 
         // SynchronizerSizeCheck
-        if(gsuVal > 1)
-            gsuVal = min(gsuVal, 409600/(sizeMapping.synchronizerSizePerWG * problem.getNumTiles(sizeMapping, 1) * B));
+        if(gsuVal > 1 && sizeMapping.globalAccumulation == 3) // MBSK
+        {
+            uint32_t synchronizerUsage = sizeMapping.synchronizerSizePerWG * problem.getNumTiles(sizeMapping, 1) * B;
+            gsuVal = synchronizerUsage > 409600 ? 1 : gsuVal;
+        }
 
         // avoid gsu < 1
         gsuVal = max(gsuVal, 1);
@@ -1332,7 +1314,7 @@ namespace TensileLite
 
         if(internalArgsSupport.useUniversalArgs)
         {
-            auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problem, &hardware);
+            auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problem, &hardware, sk.grid);
             if(T_Debug)
             {
                 std::cout << "AutoWGM: " << autoWGM << std::endl;
@@ -1503,7 +1485,7 @@ namespace TensileLite
 
         if constexpr(!std::is_same<KA, KernelArgumentsCounter>::value)
         {
-            auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problems[0], &hardware);
+            auto [autoWGM, autoWGMXCC] = calculateAutoWGM(problems[0], &hardware, 0);
 
             if(internalArgsSupport.useUniversalArgs)
             {
@@ -2996,6 +2978,7 @@ namespace TensileLite
                 ReductionType reductionStrat = getSKReduction(problem, hardware);
                 size_t skGrid = getSKGrid(problem, hardware, tiles, reductionStrat);
                 // Get space required for partial tiles=
+                // TODO Revise parallel reduction WS to account for LDD
                 if(skGrid > 0 && (reductionStrat == ReductionType::Parallel || (tiles % skGrid != 0 && !streamKDP)))
                 {
                     // Check ideal amount of workspace for optimal performance
@@ -3162,6 +3145,11 @@ namespace TensileLite
         if(!sizeMapping.customKernelName.empty())
         {
             // Custom kernel currently only supports single-kernel reduction
+            reductionStrat = ReductionType::Tree;
+        }
+        else if (problem.d().totalAllocatedElements() > problem.d().totalLogicalElements())
+        {
+            // If LDD > M, fall back to tree reduction
             reductionStrat = ReductionType::Tree;
         }
         else if(pAMDGPU->skDynamicGrid > 0)

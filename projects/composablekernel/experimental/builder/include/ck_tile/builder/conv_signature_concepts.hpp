@@ -1,5 +1,5 @@
+// Copyright (C) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 // This file defines the compile-time "signature" for grouped convolution operations.
 // A signature is a collection of properties that fully describe a convolution kernel's
@@ -40,16 +40,44 @@ template <DataType T>
 concept ConvDataType = (T == DataType::FP32) || (T == DataType::FP16) || (T == DataType::BF16) ||
                        (T == DataType::FP8) || (T == DataType::I8) || (T == DataType::U8);
 
+template <typename T>
+concept ConvLayout = std::same_as<std::remove_cvref_t<T>, GroupConvLayout>;
+
+template <typename T>
+concept HasElementwiseOp = requires(T t) {
+    { t.elementwise_operation };
+};
+
+template <typename T>
+concept HasConvolutionDirection = requires(T t) {
+    { t.direction };
+};
+
+// Note: it is not required to provide an ElementwiseOp, but if one is provided, check if well
+// defined
+template <typename T>
+concept ElementwiseOpWellDefinedIfProvided = requires(T t) {
+    requires !HasElementwiseOp<T> || requires {
+        { t.elementwise_operation } -> std::convertible_to<ElementwiseOperation>;
+    };
+};
+
+// Note: it is not required to provide a convolution, but if one is provided, check if well defined
+template <typename T>
+concept ConvolutionDirectionWellDefinedIfProvided = requires(T t) {
+    requires !HasConvolutionDirection<T> || requires {
+        { t.direction } -> std::convertible_to<ConvDirection>;
+    };
+};
+
 // Concept for a type that defines a convolution's operational signature.
 template <typename T>
 concept ConvSignatureDescriptor = requires(T t) {
     { t.spatial_dim } -> std::convertible_to<unsigned int>;
-    { t.direction } -> std::convertible_to<ConvDirection>;
-    requires std::convertible_to<decltype(t.layout), GroupConvLayout1D> ||
-                 std::convertible_to<decltype(t.layout), GroupConvLayout2D> ||
-                 std::convertible_to<decltype(t.layout), GroupConvLayout3D>;
+    { t.layout } -> ConvLayout;
     { t.data_type } -> std::convertible_to<DataType>;
-    { t.elementwise_operation } -> std::convertible_to<ElementwiseOperation>;
+    requires ElementwiseOpWellDefinedIfProvided<T>;
+    requires ConvolutionDirectionWellDefinedIfProvided<T>;
 };
 
 // Concept to validate a convolution signature's values.

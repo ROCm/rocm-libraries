@@ -73,13 +73,14 @@ private:
         buildPlanForNode(const hipdnn_plugin::IGraph& graph,
                          const hipdnn_sdk::data_objects::Node& node)
     {
-        // TODO: Switch this to the node's compute_type
-        auto key = buildSignatureKey(node, graph.getTensorMap(), graph.getGraph().compute_type());
+        auto key = buildSignatureKey(node, graph.getTensorMap(), node.compute_data_type());
 
         const auto& planBuilder = _planRegistry.getPlanBuilder(key);
         if(!planBuilder.isApplicable(node, graph.getTensorMap()))
         {
-            throw std::runtime_error("Plan builder is not applicable for the given node");
+            std::string nodeName = node.name() == nullptr ? "" : " " + node.name()->str();
+            throw std::runtime_error("Plan builder is not applicable for the given node: "
+                                     + nodeName);
         }
 
         return planBuilder.buildNodePlan(graph, node);
