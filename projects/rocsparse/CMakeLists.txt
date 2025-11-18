@@ -35,12 +35,8 @@ include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 include(CheckCXXCompilerFlag)
 
-<<<<<<< HEAD
 # Version setup
 set(VERSION_STRING "4.3.0")
-=======
-set(VERSION_STRING "4.2.0")
->>>>>>> 9f8ea79e9b (refactor: review of refactored files and comments)
 set(SOVERSION_STRING "1.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 set(rocsparse_SOVERSION ${SOVERSION_STRING})
@@ -113,43 +109,12 @@ endif()
 
 set(GPU_TARGETS "all" CACHE STRING "AMD GFX targets to cross-compile")
 
-<<<<<<< HEAD
-# Detect compiler support for target ID
-if(CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+")
-    execute_process(
-        COMMAND ${CMAKE_CXX_COMPILER} "--help"
-        OUTPUT_VARIABLE CXX_OUTPUT
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_STRIP_TRAILING_WHITESPACE
-    )
-    string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
-endif()
-
-# Set GPU targets with backward compatibility
-if(COMMAND rocm_check_target_ids)
-    if(ROCSPARSE_ENABLE_ASAN)
-        rocm_check_target_ids(DEFAULT_GPU_TARGETS
-            TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+"
-        )
-    else()
-        rocm_check_target_ids(DEFAULT_GPU_TARGETS
-            TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
-    endif()
-else()
-    # Use target ID syntax if supported
-    if(TARGET_ID_SUPPORT)
-        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
-    else()
-        set(DEFAULT_GPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
-    endif()
-=======
 if(NOT GPU_TARGETS)
     message(FATAL_ERROR "No GPU targets specified.")
 elseif(GPU_TARGETS STREQUAL "all")
     rocsparse_get_base_architectures(GPU_TARGETS)
 else()
     rocsparse_validate_gpu_targets("${GPU_TARGETS}")
->>>>>>> 9f8ea79e9b (refactor: review of refactored files and comments)
 endif()
 
 message(STATUS "Building for GPU targets: ${GPU_TARGETS}")

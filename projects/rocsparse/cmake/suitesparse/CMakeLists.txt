@@ -25,6 +25,10 @@ project(rocsparse_mtx2csr)
 message("CMAKE_SOURCE_DIR : ${CMAKE_SOURCE_DIR}")
 add_executable(rocsparse_mtx2csr ../../deps/convert.cpp)
 
+if(ROCSPARSE_ENABLE_ASAN)
+    rocsparse_target_configure_sanitizers(rocsparse_mtx2csr PRIVATE)
+endif()
+
 if(WIN32)
     target_compile_options(rocsparse_mtx2csr PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()

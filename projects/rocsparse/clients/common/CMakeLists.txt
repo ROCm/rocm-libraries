@@ -1,0 +1,85 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+if(ROCSPARSE_BUILD_TESTING OR BUILD_TESTING)
+    target_sources(rocsparse-test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_random.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_reproducibility.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_reproducibility_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_reproducibility_test_data.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_reproducibility_results.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_check.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_parse_data.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_enum.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_enum_name.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_enum_from_name.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_init.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_host.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_vector_utils.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory_laplace2d.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory_laplace3d.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory_zero.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory_random.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory_tridiagonal.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory_pentadiagonal.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory_file.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_exporter_rocsparseio.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_exporter_rocalution.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_exporter_matrixmarket.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_exporter_ascii.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_exporter_format_t.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_type_conversion.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_importer_rocalution.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_importer_rocsparseio.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_importer_matrixmarket.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_importer_mlbsr.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_importer_mlcsr.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_importer_format_t.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_clients_envariables.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_clients_matrices_dir.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparseio.cpp
+    )
+endif()
+
+if(ROCSPARSE_ENABLE_BENCHMARKS)
+    target_sources(rocsparse-bench PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_reproducibility.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_reproducibility_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_reproducibility_test_data.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_reproducibility_results.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_random.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_check.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_enum.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_enum_name.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_enum_from_name.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_init.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_host.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_vector_utils.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory_laplace2d.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory_laplace3d.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory_zero.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory_random.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory_tridiagonal.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory_pentadiagonal.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_matrix_factory_file.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_exporter_rocsparseio.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_exporter_rocalution.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_exporter_matrixmarket.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_exporter_ascii.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_exporter_format_t.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_type_conversion.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_importer_rocalution.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_importer_rocsparseio.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_importer_matrixmarket.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_importer_mlbsr.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_importer_mlcsr.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_importer_format_t.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_clients_envariables.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparse_clients_matrices_dir.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/rocsparseio.cpp
+    )
+endif()

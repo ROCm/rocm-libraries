@@ -4,17 +4,21 @@
 foreach(app rocsparseio-info rocsparseio-convert)
     add_executable(${app}
         ${app}.cpp
-        ${PROJECT_SOURCE_DIR}/clients/common/rocsparseio.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../common/rocsparseio.cpp
     )
 
     target_compile_features(${app} PRIVATE cxx_std_17)
 
     target_include_directories(${app} PRIVATE
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/clients/include>
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/clients/common>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../common>
     )
 
     target_link_libraries(${app} PRIVATE hip::host)
+
+    if(ROCSPARSE_ENABLE_ASAN)
+        rocsparse_target_configure_sanitizers(${app} PRIVATE)
+    endif()
 
     # Install tools
     if(WIN32)

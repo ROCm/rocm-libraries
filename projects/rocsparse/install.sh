@@ -517,14 +517,7 @@ if [[ "${install_dependencies}" == true ]]; then
 
   install_packages
 
-  # The following builds googletest from source, installs into cmake default /usr/local
-  pushd .
-    printf "\033[32mBuilding \033[33mgoogletest\033[32m from source; installing into \033[33m/usr/local\033[0m\n"
-    mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-    ${cmake_executable} ../../deps
-    make -j$(nproc)
-    elevate_if_not_root make install
-  popd
+  # NOTE: GoogleTest is no longer built from source here, instead install it via package manager
 fi
 
 if [[ "${build_relocatable}" == true ]]; then

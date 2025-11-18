@@ -35,6 +35,18 @@ add_dependencies(rocsparse rocsparse_headers)
 # Add source files from src subdirectory
 add_subdirectory(src)
 
+# Create Fortran module OBJECT library if Fortran is enabled
+if(ROCSPARSE_ENABLE_FORTRAN)
+    # Set Fortran module output directory
+    set(CMAKE_Fortran_MODULE_DIRECTORY "${PROJECT_BINARY_DIR}/include/rocsparse")
+
+    # Create Fortran module OBJECT library
+    add_library(rocsparse-fortran-module OBJECT
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/rocsparse_enums.f90
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/rocsparse.f90
+    )
+endif()
+
 # Target compile options
 target_compile_options(rocsparse PRIVATE
     -Wno-unused-command-line-argument

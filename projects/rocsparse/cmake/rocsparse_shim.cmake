@@ -27,16 +27,6 @@ macro(_rocsparse_check_conflict old_var new_var)
     endif()
 endmacro()
 
-# BUILD_SHARED_LIBS → ROCSPARSE_BUILD_SHARED_LIBS
-if(DEFINED BUILD_SHARED_LIBS)
-    _rocsparse_check_conflict(BUILD_SHARED_LIBS ROCSPARSE_BUILD_SHARED_LIBS)
-    if(NOT DEFINED ROCSPARSE_BUILD_SHARED_LIBS)
-        set(ROCSPARSE_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS} CACHE BOOL 
-            "Build rocSPARSE as a shared library" FORCE)
-        _rocsparse_deprecation_warning(BUILD_SHARED_LIBS ROCSPARSE_BUILD_SHARED_LIBS)
-    endif()
-endif()
-
 # BUILD_CLIENTS_TESTS → ROCSPARSE_BUILD_TESTING
 if(DEFINED BUILD_CLIENTS_TESTS)
     _rocsparse_check_conflict(BUILD_CLIENTS_TESTS ROCSPARSE_BUILD_TESTING)
@@ -195,7 +185,6 @@ endif()
 
 # Cleanup: Unset old variables to prevent accidental usage downstream
 # This ensures the modern names are authoritative
-unset(BUILD_SHARED_LIBS CACHE)
 unset(BUILD_CLIENTS_TESTS CACHE)
 unset(BUILD_CLIENTS_BENCHMARKS CACHE)
 unset(BUILD_CLIENTS_SAMPLES CACHE)

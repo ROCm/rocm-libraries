@@ -1,22 +1,11 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Fortran module handling
-if(ROCSPARSE_ENABLE_FORTRAN)
-    # Set Fortran module output directory
-    set(CMAKE_Fortran_MODULE_DIRECTORY "${PROJECT_BINARY_DIR}/include/rocsparse")
-
-    # Create Fortran module OBJECT library
-    add_library(rocsparse-fortran-module OBJECT
-        ${PROJECT_SOURCE_DIR}/library/src/rocsparse_enums.f90
-        ${PROJECT_SOURCE_DIR}/library/src/rocsparse.f90
-    )
-endif()
-
 # Set directory-level runtime output for all client executables
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/staging")
 
-# Add subdirectories based on enabled options
+add_subdirectory(tools)
+
 if(ROCSPARSE_ENABLE_SAMPLES)
     add_subdirectory(samples)
 endif()
@@ -25,12 +14,34 @@ if(ROCSPARSE_ENABLE_BENCHMARKS)
     add_subdirectory(benchmarks)
 endif()
 
-# Always build tools
-add_subdirectory(tools)
-
-if(ROCSPARSE_BUILD_TESTING)
+if(ROCSPARSE_BUILD_TESTING OR BUILD_TESTING)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+add_subdirectory(testings)
+add_subdirectory(common)
+
+if(ROCSPARSE_BUILD_TESTING OR BUILD_TESTING)
+    # Build custom matrices if they don't exist
+    if(NOT EXISTS "${CMAKE_MATRICES_DIR}")
+        set(CMAKE_MATRICES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/matrices CACHE STRING "Matrices directory")
+        file(MAKE_DIRECTORY ${CMAKE_MATRICES_DIR})
+
+        set(CONVERT_SOURCE ${PROJECT_SOURCE_DIR}/deps/convert.cpp CACHE STRING "Convert tool mtx2csr")
+        include(${PROJECT_SOURCE_DIR}/cmake/ClientMatrices.cmake)
+    else()
+        if(NOT CMAKE_MATRICES_DIR STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}/matrices")
+            message(STATUS "Copying matrix files from ${CMAKE_MATRICES_DIR} to ${CMAKE_CURRENT_SOURCE_DIR}/matrices")
+            execute_process(
+                COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_MATRICES_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/matrices
+                RESULT_VARIABLE STATUS
+            )
+            if(STATUS AND NOT STATUS EQUAL 0)
+                message(FATAL_ERROR "Failed to copy matrix .csr files")
+            endif()
+        endif()
+    endif()
 
     # Build mtx2csr converter executable
     if(NOT CONVERT_SOURCE)
@@ -49,7 +60,7 @@ if(ROCSPARSE_BUILD_TESTING)
 
     # Create custom targets and commands for test data files
     set(ROCSPARSE_CLIENTMATRICES "${PROJECT_SOURCE_DIR}/cmake/rocsparse_clientmatrices.cmake")
-    set(ROCSPARSE_CONVERT "${PROJECT_BINARY_DIR}/rocsparse_mtx2csr")
+    set(ROCSPARSE_CONVERT "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_mtx2csr")
 
     add_custom_command(
         OUTPUT "${ROCSPARSE_CONVERT}"
@@ -59,7 +70,7 @@ if(ROCSPARSE_BUILD_TESTING)
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
 
-    set(ROCSPARSE_COMMON "${PROJECT_BINARY_DIR}/staging/rocsparse_common.yaml")
+    set(ROCSPARSE_COMMON "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_common.yaml")
     add_custom_command(
         OUTPUT "${ROCSPARSE_COMMON}"
         COMMAND ${CMAKE_COMMAND} -E copy
@@ -68,7 +79,7 @@ if(ROCSPARSE_BUILD_TESTING)
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
 
-    set(ROCSPARSE_TEMPLATE "${PROJECT_BINARY_DIR}/staging/rocsparse_template.yaml")
+    set(ROCSPARSE_TEMPLATE "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_template.yaml")
     add_custom_command(
         OUTPUT "${ROCSPARSE_TEMPLATE}"
         COMMAND ${CMAKE_COMMAND} -E copy
@@ -77,9 +88,9 @@ if(ROCSPARSE_BUILD_TESTING)
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
 
-    set(ROCSPARSE_SMOKE "${PROJECT_BINARY_DIR}/staging/rocsparse_smoke.yaml")
-    set(ROCSPARSE_REGRESSION "${PROJECT_BINARY_DIR}/staging/rocsparse_regression.yaml")
-    set(ROCSPARSE_EXTENDED "${PROJECT_BINARY_DIR}/staging/rocsparse_extended.yaml")
+    set(ROCSPARSE_SMOKE "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_smoke.yaml")
+    set(ROCSPARSE_REGRESSION "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_regression.yaml")
+    set(ROCSPARSE_EXTENDED "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_extended.yaml")
 
     add_custom_command(
         OUTPUT "${ROCSPARSE_SMOKE}" "${ROCSPARSE_REGRESSION}" "${ROCSPARSE_EXTENDED}"
@@ -96,7 +107,7 @@ if(ROCSPARSE_BUILD_TESTING)
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
 
-    set(ROCSPARSE_GENTEST "${PROJECT_BINARY_DIR}/staging/rocsparse_gentest.py")
+    set(ROCSPARSE_GENTEST "${CMAKE_CURRENT_BINARY_DIR}/staging/rocsparse_gentest.py")
     add_custom_command(
         OUTPUT "${ROCSPARSE_GENTEST}"
         COMMAND ${CMAKE_COMMAND} -E copy

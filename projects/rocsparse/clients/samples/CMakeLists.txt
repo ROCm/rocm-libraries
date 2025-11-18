@@ -9,7 +9,7 @@ function(add_rocsparse_example EXAMPLE_SOURCE)
     target_compile_features(${EXAMPLE_TARGET} PRIVATE cxx_std_17)
     
     target_include_directories(${EXAMPLE_TARGET} PRIVATE
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/clients/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
     )
     
     target_link_libraries(${EXAMPLE_TARGET} PRIVATE
@@ -17,12 +17,19 @@ function(add_rocsparse_example EXAMPLE_SOURCE)
         hip::host
         hip::device
     )
+
+    if(ROCSPARSE_ENABLE_ASAN)
+        rocsparse_target_configure_sanitizers(${EXAMPLE_TARGET} PRIVATE)
+    endif()
 endfunction()
 
 # Empty C program for checking rocsparse headers are C compatible
 if(NOT WIN32)
     add_executable(example_c_headers example_c_headers.c)
     target_link_libraries(example_c_headers PRIVATE roc::rocsparse hip::host hip::device)
+    if(ROCSPARSE_ENABLE_ASAN)
+        rocsparse_target_configure_sanitizers(example_c_headers PRIVATE)
+    endif()
 endif()
 
 # Auxiliary
@@ -97,7 +104,7 @@ if(ROCSPARSE_ENABLE_FORTRAN AND NOT WIN32)
         target_compile_options(${EXAMPLE_TARGET} PRIVATE -Wno-unused-command-line-argument)
         
         target_include_directories(${EXAMPLE_TARGET} PRIVATE
-            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/clients/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
         )
         
         target_link_libraries(${EXAMPLE_TARGET} PRIVATE
