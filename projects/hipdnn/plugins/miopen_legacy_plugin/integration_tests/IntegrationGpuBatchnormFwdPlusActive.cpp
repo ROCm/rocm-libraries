@@ -219,14 +219,14 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuBatchnormFwdPlusActivNchwFp32,
     testing::Combine(
         testing::ValuesIn(getBnFwdInferenceTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
     IntegrationGpuBatchnormFwdPlusActivNchwFp32,
     testing::Combine(
         testing::ValuesIn(getBnFwdInferenceFullTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormFwdPlusActivNchwBfp16, DISABLED_Correctness)
 {
@@ -238,14 +238,14 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuBatchnormFwdPlusActivNchwBfp16,
     testing::Combine(
         testing::ValuesIn(getBnFwdInferenceTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
     IntegrationGpuBatchnormFwdPlusActivNchwBfp16,
     testing::Combine(
         testing::ValuesIn(getBnFwdInferenceFullTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormFwdPlusActivNchwFp16, DISABLED_Correctness)
 {
@@ -257,14 +257,14 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuBatchnormFwdPlusActivNchwFp16,
     testing::Combine(
         testing::ValuesIn(getBnFwdInferenceTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
     IntegrationGpuBatchnormFwdPlusActivNchwFp16,
     testing::Combine(
         testing::ValuesIn(getBnFwdInferenceFullTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormFwdPlusActivNhwcFp32, DISABLED_Correctness)
 {
@@ -276,14 +276,14 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuBatchnormFwdPlusActivNhwcFp32,
     testing::Combine(
         testing::ValuesIn(getBnFwdInferenceTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
     IntegrationGpuBatchnormFwdPlusActivNhwcFp32,
     testing::Combine(
         testing::ValuesIn(getBnFwdInferenceFullTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormFwdPlusActivNhwcBfp16, DISABLED_Correctness)
 {
@@ -295,14 +295,14 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuBatchnormFwdPlusActivNhwcBfp16,
     testing::Combine(
         testing::ValuesIn(getBnFwdInferenceTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
     IntegrationGpuBatchnormFwdPlusActivNhwcBfp16,
     testing::Combine(
         testing::ValuesIn(getBnFwdInferenceFullTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormFwdPlusActivNhwcFp16, DISABLED_Correctness)
 {
@@ -314,14 +314,14 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuBatchnormFwdPlusActivNhwcFp16,
     testing::Combine(
         testing::ValuesIn(getBnFwdInferenceTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
     IntegrationGpuBatchnormFwdPlusActivNhwcFp16,
     testing::Combine(
         testing::ValuesIn(getBnFwdInferenceFullTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 //Ncdhw
 TEST_P(IntegrationGpuBatchnormFwdPlusActivNcdhwFp32, DISABLED_Correctness)
@@ -334,7 +334,7 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuBatchnormFwdPlusActivNcdhwFp32,
     testing::Combine(
         testing::ValuesIn(getBnFwdInference3dTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormFwdPlusActivNcdhwBfp16, DISABLED_Correctness)
 {
@@ -346,7 +346,7 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuBatchnormFwdPlusActivNcdhwBfp16,
     testing::Combine(
         testing::ValuesIn(getBnFwdInference3dTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormFwdPlusActivNcdhwFp16, DISABLED_Correctness)
 {
@@ -358,7 +358,7 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuBatchnormFwdPlusActivNcdhwFp16,
     testing::Combine(
         testing::ValuesIn(getBnFwdInference3dTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 //NDHWC
 TEST_P(IntegrationGpuBatchnormFwdPlusActivNdhwcFp32, DISABLED_Correctness)
@@ -371,7 +371,7 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuBatchnormFwdPlusActivNdhwcFp32,
     testing::Combine(
         testing::ValuesIn(getBnFwdInference3dTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormFwdPlusActivNdhwcBfp16, DISABLED_Correctness)
 {
@@ -383,7 +383,7 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuBatchnormFwdPlusActivNdhwcBfp16,
     testing::Combine(
         testing::ValuesIn(getBnFwdInference3dTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormFwdPlusActivNdhwcFp16, DISABLED_Correctness)
 {
@@ -395,4 +395,4 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuBatchnormFwdPlusActivNdhwcFp16,
     testing::Combine(
         testing::ValuesIn(getBnFwdInference3dTestCases()),
-        testing::ValuesIn(test_activation_common::createBatchnormFwdActivationTestCases())));
+        testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
