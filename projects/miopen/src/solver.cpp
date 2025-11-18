@@ -618,15 +618,9 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
                        ++id,
                        conv::ConvHipImplicitGemmGroupFwdXdlops{},
                        miopenConvolutionAlgoImplicitGEMM);
-    RegisterWithSolver(
-        registry, ++id, conv::ConvHipImplicitGemmGroupFwdWmma{}, miopenConvolutionAlgoImplicitGEMM);
     RegisterWithSolver(registry,
                        ++id,
                        conv::ConvHipImplicitGemm3DGroupFwdXdlops{},
-                       miopenConvolutionAlgoImplicitGEMM);
-    RegisterWithSolver(registry,
-                       ++id,
-                       conv::ConvHipImplicitGemm3DGroupFwdWmma{},
                        miopenConvolutionAlgoImplicitGEMM);
     RegisterWithSolver(
         registry, ++id, conv::ConvWinoFuryRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
@@ -737,6 +731,12 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     RegisterWithSolver(registry,
                        ++id,
                        conv::ConvHipImplicitGemm3DGroupWrwWmma{},
+                       miopenConvolutionAlgoImplicitGEMM);
+    RegisterWithSolver(
+        registry, ++id, conv::ConvHipImplicitGemmGroupFwdWmma{}, miopenConvolutionAlgoImplicitGEMM);
+    RegisterWithSolver(registry,
+                       ++id,
+                       conv::ConvHipImplicitGemm3DGroupFwdWmma{},
                        miopenConvolutionAlgoImplicitGEMM);
     // IMPORTANT: New solvers should be added to the end of the function, and don't leave a white
     // space between this comment and the newly registered solver(s)!
