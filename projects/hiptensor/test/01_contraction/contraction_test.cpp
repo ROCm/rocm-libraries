@@ -204,6 +204,14 @@ namespace hiptensor
         auto beta         = std::get<9>(param);
         auto memoryLayout = std::get<10>(param);
 
+        //Set hipTensor memory layout from input in yaml file
+        using hiptensor::HiptensorOptions;
+        auto& options = HiptensorOptions::instance();
+        if(memoryLayout == HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR)
+           options -> setColMajorStrides(true);
+        else if(memoryLayout == HIPTENSOR_MEMORY_LAYOUT_ROW_MAJOR)
+           options -> setColMajorStrides(false);
+
         EXPECT_EQ(dataTypes.size(), 5);
 
         //Check the format of lengths, strides and Modes(Max support is 6D across M,N,K dimensions)

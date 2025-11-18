@@ -159,6 +159,26 @@ namespace hiptensor
         };
     }
 
+    std::vector<std::size_t> getCKColMajorStrides(std::vector<std::size_t> const& lengths)
+    {
+        std::vector<std::size_t> strides(lengths.size(), 1);
+        // Assign second half of strides
+        int stride = 1;
+        for(int s = strides.size() / 2 - 1; s >= 0; s--)
+        {
+            strides[s] = stride;
+            stride *= lengths[s];
+        }
+    
+        // Assign first half of strides
+        for(int s = strides.size() - 1; s > static_cast<int>(strides.size()) / 2 - 1; s--)
+        {
+            strides[s] = stride;
+            stride *= lengths[s];
+        }
+        return strides;
+    }
+
     ContractionSolution::ContractionSolution(
         std::unique_ptr<ck::tensor_operation::device::BaseOperator>&& deviceOp,
         std::unique_ptr<ContractionSolutionParams>&&                  params)

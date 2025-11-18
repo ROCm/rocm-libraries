@@ -169,6 +169,14 @@ namespace hiptensor
         auto operators    = std::get<5>(param);
         auto memoryLayout = std::get<6>(param);
 
+        //Set hipTensor memory layout from input in yaml file
+        using hiptensor::HiptensorOptions;
+        auto& options = HiptensorOptions::instance();
+        if(memoryLayout == HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR)
+           options -> setColMajorStrides(true);
+        else if(memoryLayout == HIPTENSOR_MEMORY_LAYOUT_ROW_MAJOR)
+           options -> setColMajorStrides(false);
+
         EXPECT_TRUE((lengths.size() > 1) && (lengths.size() <= 6));
         EXPECT_TRUE((permutedDims.size() > 1) && (permutedDims.size() <= 6));
 
