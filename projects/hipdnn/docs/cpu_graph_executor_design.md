@@ -211,49 +211,7 @@ First getPlanBuilder() call
 ## Execution Flow
 
 The complete execution flow from graph input to results:
-
-```
-┌─────────────────┐
-│  Graph Buffer   │
-└────────┬────────┘
-         │
-         v
-┌─────────────────────────────────────────────┐
-│      For Each Node (Topological Order)      │
-├─────────────────────────────────────────────┤
-│                                             │
-│  1. Build Signature Key                     │
-│     - Extract node attributes               │
-│     - Identify tensor types                 │
-│     - Determine compute type                │
-│                                             │
-│  2. Registry Lookup                         │
-│     - Find matching plan builder            │
-│     - Verify applicability                  │
-│                                             │
-│  3. Build Execution Plan                    │
-│     - Create specialized executor           │
-│     - Configure parameters                  │
-│                                             │
-└────────┬────────────────────────────────────┘
-         │
-         v
-┌─────────────────────────────────────────────┐
-│        Virtual Tensor Allocation            │
-├─────────────────────────────────────────────┤
-│  - Identify missing virtual tensors         │
-│  - Allocate memory for intermediates        │
-└────────┬────────────────────────────────────┘
-         │
-         v
-┌─────────────────────────────────────────────┐
-│         Execute All Plans                   │
-├─────────────────────────────────────────────┤
-│  - Sequential execution                     │
-│  - Pass variant pack to each executor       │
-│  - Results written to output tensors        │
-└─────────────────────────────────────────────┘
-```
+![CPU Graph Executor Execution Flow](./images/hipdnn_cpu_graph_execution_flow.png)
 
 ## Supported Operations
 
