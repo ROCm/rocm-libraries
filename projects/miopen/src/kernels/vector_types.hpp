@@ -27,6 +27,9 @@
 #ifndef VECTOR_TYPES_HPP
 #define VECTOR_TYPES_HPP
 
+#include <type_traits>
+#include "bfloat16_dev.hpp"
+
 #ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
@@ -40,111 +43,84 @@ struct mapped_vector_type
     static_assert(false, "there is no specialization for this T & N combination.");
 };
 
-// Note: we should make sure there is no exception
-template <typename T>
-struct mapped_vector_type<T, 1>
-{
-    using type = T;
-};
-
-// float
-
-template <>
-struct mapped_vector_type<float, 8>
-{
-    using type = float __attribute__((ext_vector_type(8)));
-};
-template <>
-struct mapped_vector_type<float, 4>
-{
-    using type = float __attribute__((ext_vector_type(4)));
-};
-
-template <>
-struct mapped_vector_type<float, 2>
-{
-    using type = float __attribute__((ext_vector_type(2))); //::float2;
-};
-
 template <typename Vec>
 struct mapped_vector_info;
 
-template <>
-struct mapped_vector_info<float __attribute__((ext_vector_type(4)))>
+#define DEFINE_VECTOR_MAPPING(ScalarType, N)                                  \
+    template <>                                                               \
+    struct mapped_vector_type<ScalarType, N>                                  \
+    {                                                                         \
+        using type = ScalarType __attribute__((ext_vector_type(N)));          \
+    };                                                                        \
+    template <>                                                               \
+    struct mapped_vector_info<ScalarType __attribute__((ext_vector_type(N)))> \
+    {                                                                         \
+        using UnderlyingType         = ScalarType;                            \
+        static constexpr size_t size = N;                                     \
+    };
+
+#define DEFINE_SCALAR_MAPPING(ScalarType)          \
+    template <>                                    \
+    struct mapped_vector_type<ScalarType, 1>       \
+    {                                              \
+        using type = ScalarType;                   \
+    };                                             \
+    template <>                                    \
+    struct mapped_vector_info<ScalarType>          \
+    {                                              \
+        using UnderlyingType         = ScalarType; \
+        static constexpr size_t size = 1;          \
+    };
+
+DEFINE_SCALAR_MAPPING(double)
+DEFINE_SCALAR_MAPPING(float)
+DEFINE_SCALAR_MAPPING(_Float16)
+DEFINE_SCALAR_MAPPING(ushort)
+DEFINE_SCALAR_MAPPING(int)
+DEFINE_SCALAR_MAPPING(unsigned int)
+
+DEFINE_VECTOR_MAPPING(float, 2)
+DEFINE_VECTOR_MAPPING(float, 4)
+
+DEFINE_VECTOR_MAPPING(_Float16, 2)
+DEFINE_VECTOR_MAPPING(_Float16, 4)
+DEFINE_VECTOR_MAPPING(_Float16, 8)
+
+DEFINE_VECTOR_MAPPING(ushort, 2)
+DEFINE_VECTOR_MAPPING(ushort, 4)
+DEFINE_VECTOR_MAPPING(ushort, 8)
+
+DEFINE_VECTOR_MAPPING(int, 2)
+DEFINE_VECTOR_MAPPING(int, 4)
+
+DEFINE_VECTOR_MAPPING(unsigned int, 2)
+DEFINE_VECTOR_MAPPING(unsigned int, 4)
+
+namespace detail {
+
+template <typename OutType, typename InType>
+__forceinline__ __device__ __host__ OutType scalarcast(InType in)
 {
-    using UnderlyingType         = float;
-    static constexpr size_t size = 4;
-};
+    if constexpr(std::is_same<OutType, InType>::value)
+    {
+        return in;
+    }
+    else if constexpr(std::is_same<OutType, ushort>::value && std::is_same<InType, float>::value)
+    {
+        return float_to_bfloat16(in);
+    }
+    else if constexpr(std::is_same<InType, ushort>::value && std::is_same<OutType, float>::value)
+    {
+        return bfloat16_to_float(in);
+    }
+    else
+    {
+        return static_cast<OutType>(in);
+    }
+}
 
-template <>
-struct mapped_vector_info<float __attribute__((ext_vector_type(2)))>
-{
-    using UnderlyingType         = float;
-    static constexpr size_t size = 2;
-};
-
-template <>
-struct mapped_vector_info<float>
-{
-    using UnderlyingType         = float;
-    static constexpr size_t size = 1;
-};
-
-// half
-
-template <>
-struct mapped_vector_type<_Float16, 8>
-{
-    using type = _Float16 __attribute__((ext_vector_type(8)));
-};
-
-template <>
-struct mapped_vector_type<_Float16, 4>
-{
-    using type = _Float16 __attribute__((ext_vector_type(4)));
-};
-
-template <>
-struct mapped_vector_type<_Float16, 2>
-{
-    using type = _Float16 __attribute__((ext_vector_type(2)));
-};
-
-// ushort
-template <>
-struct mapped_vector_type<ushort, 8>
-{
-    using type = ushort __attribute__((ext_vector_type(8)));
-};
-
-template <>
-struct mapped_vector_type<ushort, 4>
-{
-    using type = ushort __attribute__((ext_vector_type(4)));
-};
-
-template <>
-struct mapped_vector_type<ushort, 2>
-{
-    using type = ushort __attribute__((ext_vector_type(2)));
-};
-
-// int
-template <>
-struct mapped_vector_type<int, 4>
-{
-    using type = int4;
-};
-
-template <>
-struct mapped_vector_type<int, 2>
-{
-    using type = int2;
-};
-
-// Fill mapped vector with the same value.
 template <typename MappedVectorType, typename T>
-__forceinline__ __device__ __host__ MappedVectorType fill(const T val)
+__forceinline__ __device__ __host__ MappedVectorType broadcast(const T val)
 {
     using VectorInfo = mapped_vector_info<MappedVectorType>;
     MappedVectorType retval;
@@ -156,10 +132,36 @@ __forceinline__ __device__ __host__ MappedVectorType fill(const T val)
     return retval;
 };
 
-template <typename MappedVectorType>
-__forceinline__ __device__ __host__ MappedVectorType ones()
+} // namespace detail
+
+template <typename OutType, typename InType>
+__forceinline__ __device__ __host__ auto cast(InType input)
 {
-    return fill<MappedVectorType>(1);
+    using InTypeInfo  = mapped_vector_info<InType>;
+    using OutTypeInfo = mapped_vector_info<OutType>;
+
+    constexpr auto inSize  = InTypeInfo::size;
+    constexpr auto outSize = OutTypeInfo::size;
+
+    if constexpr(inSize == outSize && outSize == 4)
+    {
+        return OutType{detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.x),
+                       detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.y),
+                       detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.z),
+                       detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.w)};
+    }
+    else if constexpr(inSize == outSize && outSize == 1)
+    {
+        return detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input);
+    }
+    else if constexpr(inSize == 1 && outSize > 1)
+    {
+        return detail::broadcast<OutType>(input);
+    }
+    else
+    {
+        static_assert(false, "Unsupported type cast.");
+    }
 }
 
 } // namespace miopen

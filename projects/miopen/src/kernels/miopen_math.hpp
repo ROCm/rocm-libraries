@@ -30,6 +30,7 @@
 #include "vector_types.hpp"
 
 namespace miopen {
+namespace detail {
 
 //=============================================================================
 // Float overloads
@@ -48,8 +49,6 @@ __forceinline__ __device__ float fabs(float x) { return fabsf(x); }
 __forceinline__ __device__ float fmax(float x, float y) { return fmaxf(x, y); }
 __forceinline__ __device__ float fmin(float x, float y) { return fminf(x, y); }
 __forceinline__ __device__ float fma(float a, float b, float c) { return ::fma(a, b, c); }
-__forceinline__ __device__ bool isnan(float a) { return ::isnan(a); }
-__forceinline__ __device__ bool isinf(float a) { return ::isinf(a); }
 
 //=============================================================================
 // Half precision overloads
@@ -84,9 +83,6 @@ __forceinline__ __device__ _Float16 fma(_Float16 a, _Float16 b, _Float16 c)
 {
     return __hfma(__half(a), __half(b), __half(c));
 }
-
-__forceinline__ __device__ bool isnan(_Float16 a) { return __hisnan(__half(a)); }
-__forceinline__ __device__ bool isinf(_Float16 a) { return __hisinf(__half(a)); }
 
 //=============================================================================
 // BFloat16 overloads
@@ -162,9 +158,6 @@ __forceinline__ __device__ ushort fma(ushort a, ushort b, ushort c)
     return __hfma(bf_a, bf_b, bf_c);
 }
 
-__forceinline__ __device__ bool isnan(ushort a) { return __hisnan(__ushort_as_bfloat16(a)); }
-__forceinline__ __device__ bool isinf(ushort a) { return __hisinf(__ushort_as_bfloat16(a)); }
-
 //=============================================================================
 // Double precision overloads
 //=============================================================================
@@ -182,163 +175,182 @@ __forceinline__ __device__ double fabs(double x) { return ::fabs(x); }
 __forceinline__ __device__ double fmax(double x, double y) { return ::fmax(x, y); }
 __forceinline__ __device__ double fmin(double x, double y) { return ::fmin(x, y); }
 __forceinline__ __device__ double fma(double a, double b, double c) { return ::fma(a, b, c); }
-__forceinline__ __device__ bool isnan(double a) { return ::isnan(a); }
-__forceinline__ __device__ bool isinf(double a) { return ::isinf(a); }
+
+} // namespace detail
 
 //=============================================================================
-// 4-element vector overloads
+// 2-element vector overloads
 //=============================================================================
 
-template <typename FpType> // do std::enable_if?
-__forceinline__ __device__ typename mapped_vector_type<FpType, 4>::type
-exp(typename mapped_vector_type<FpType, 4>::type x)
+template <typename FpVecType>
+__forceinline__ __device__ FpVecType exp(FpVecType x)
 {
-    typename mapped_vector_type<FpType, 4>::type out = x;
-    out.x                                            = ::exp(x.x);
-    out.y                                            = ::exp(x.y);
-    out.z                                            = ::exp(x.z);
-    out.w                                            = ::exp(x.w);
-    return out;
+    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    if constexpr(VecSize == 4)
+    {
+        FpVecType out;
+        out.x = detail::exp(x.x);
+        out.y = detail::exp(x.y);
+        out.z = detail::exp(x.z);
+        out.w = detail::exp(x.w);
+        return out;
+    }
+    else if constexpr(VecSize == 1)
+    {
+        return detail::exp(x);
+    }
+    else
+    {
+        static_assert(false, "Unsupported miopen vector operation.");
+    }
 }
 
-template <typename FpType>
-__forceinline__ __device__ typename mapped_vector_type<FpType, 4>::type
-log(typename mapped_vector_type<FpType, 4>::type x)
+template <typename FpVecType>
+__forceinline__ __device__ FpVecType log(FpVecType x)
 {
-    typename mapped_vector_type<FpType, 4>::type out = x;
-    out.x                                            = log(x.x);
-    out.y                                            = log(x.y);
-    out.z                                            = log(x.z);
-    out.w                                            = log(x.w);
-    return out;
+    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    if constexpr(VecSize == 4)
+    {
+        FpVecType out;
+        out.x = detail::log(x.x);
+        out.y = detail::log(x.y);
+        out.z = detail::log(x.z);
+        out.w = detail::log(x.w);
+        return out;
+    }
+    else if constexpr(VecSize == 1)
+    {
+        return detail::log(x);
+    }
+    else
+    {
+        static_assert(false, "Unsupported miopen vector operation.");
+    }
 }
 
-template <typename FpType>
-__forceinline__ __device__ typename mapped_vector_type<FpType, 4>::type
-sqrt(typename mapped_vector_type<FpType, 4>::type x)
+template <typename FpVecType>
+__forceinline__ __device__ FpVecType sqrt(FpVecType x)
 {
-    typename mapped_vector_type<FpType, 4>::type out = x;
-    out.x                                            = sqrt(x.x);
-    out.y                                            = sqrt(x.y);
-    out.z                                            = sqrt(x.z);
-    out.w                                            = sqrt(x.w);
-    return out;
+    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    if constexpr(VecSize == 4)
+    {
+        FpVecType out;
+        out.x = detail::sqrt(x.x);
+        out.y = detail::sqrt(x.y);
+        out.z = detail::sqrt(x.z);
+        out.w = detail::sqrt(x.w);
+        return out;
+    }
+    else if constexpr(VecSize == 1)
+    {
+        return detail::sqrt(x);
+    }
+    else
+    {
+        static_assert(false, "Unsupported miopen vector operation.");
+    }
 }
 
-template <typename FpType>
-__forceinline__ __device__ typename mapped_vector_type<FpType, 4>::type
-rsqrt(typename mapped_vector_type<FpType, 4>::type x)
+template <typename FpVecType>
+__forceinline__ __device__ FpVecType rsqrt(FpVecType x)
 {
-    typename mapped_vector_type<FpType, 4>::type out = x;
-    out.x                                            = rsqrt(x.x);
-    out.y                                            = rsqrt(x.y);
-    out.z                                            = rsqrt(x.z);
-    out.w                                            = rsqrt(x.w);
-    return out;
+    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    if constexpr(VecSize == 4)
+    {
+        FpVecType out;
+        out.x = detail::rsqrt(x.x);
+        out.y = detail::rsqrt(x.y);
+        out.z = detail::rsqrt(x.z);
+        out.w = detail::rsqrt(x.w);
+        return out;
+    }
+    else if constexpr(VecSize == 1)
+    {
+        return detail::rsqrt(x);
+    }
+    else
+    {
+        static_assert(false, "Unsupported miopen vector operation.");
+    }
 }
 
-template <typename FpType>
-__forceinline__ __device__ typename mapped_vector_type<FpType, 4>::type
-fma(typename mapped_vector_type<FpType, 4>::type a,
-    typename mapped_vector_type<FpType, 4>::type b,
-    typename mapped_vector_type<FpType, 4>::type c)
+template <typename FpVecType>
+__forceinline__ __device__ FpVecType fma(FpVecType a, FpVecType b, FpVecType c)
 {
-    typename mapped_vector_type<FpType, 4>::type out;
-    out.x = fma(a.x, b.x, c.x);
-    out.y = fma(a.y, b.y, c.y);
-    out.z = fma(a.z, b.z, c.z);
-    out.w = fma(a.w, b.w, c.w);
-
-    return out;
+    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    if constexpr(VecSize == 4)
+    {
+        FpVecType out;
+        out.x = detail::fma(a.x, b.x, c.x);
+        out.y = detail::fma(a.y, b.y, c.y);
+        out.z = detail::fma(a.z, b.z, c.z);
+        out.w = detail::fma(a.w, b.w, c.w);
+        return out;
+    }
+    else if constexpr(VecSize == 1)
+    {
+        return detail::fma(a, b, c);
+    }
+    else
+    {
+        static_assert(false, "Unsupported miopen vector operation.");
+    }
 }
 
-// __forceinline__ __device__ double sin(double x) { return ::sin(x); }
-// __forceinline__ __device__ double cos(double x) { return ::cos(x); }
-// __forceinline__ __device__ double tan(double x) { return ::tan(x); }
-// __forceinline__ __device__ double tanh(double x) { return ::tanh(x); }
-// __forceinline__ __device__ double pow(double x, double y) { return ::pow(x, y); }
-// __forceinline__ __device__ double fabs(double x) { return ::fabs(x); }
-
-// TODO: consult with OpenCL spec if that is indeed how these funcs are implemented
-template <typename FpType>
-__forceinline__ __device__ typename mapped_vector_type<FpType, 4>::type
-fmax(typename mapped_vector_type<FpType, 4>::type x, typename mapped_vector_type<FpType, 4>::type y)
+template <typename FpVecType>
+__forceinline__ __device__ FpVecType fmax(FpVecType x, FpVecType y)
 {
-    typename mapped_vector_type<FpType, 4>::type out = x;
-    out.x                                            = fmax(x.x, y.x);
-    out.y                                            = fmax(x.y, y.y);
-    out.z                                            = fmax(x.z, y.z);
-    out.w                                            = fmax(x.w, y.w);
-    return out;
+    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    if constexpr(VecSize == 4)
+    {
+        FpVecType out;
+        out.x = detail::fmax(x.x, y.x);
+        out.y = detail::fmax(x.y, y.y);
+        out.z = detail::fmax(x.z, y.z);
+        out.w = detail::fmax(x.w, y.w);
+        return out;
+    }
+    else if constexpr(VecSize == 1)
+    {
+        return detail::fmax(x, y);
+    }
+    else
+    {
+        static_assert(false, "Unsupported miopen vector operation.");
+    }
 }
 
-template <typename FpType>
-__forceinline__ __device__ typename mapped_vector_type<FpType, 4>::type
-fmin(typename mapped_vector_type<FpType, 4>::type x, typename mapped_vector_type<FpType, 4>::type y)
+template <typename FpVecType>
+__forceinline__ __device__ FpVecType fmin(FpVecType x, FpVecType y)
 {
-    typename mapped_vector_type<FpType, 4>::type out = x;
-    out.x                                            = fmin(x.x, y.x);
-    out.y                                            = fmin(x.y, y.y);
-    out.z                                            = fmin(x.z, y.z);
-    out.w                                            = fmin(x.w, y.w);
-    return out;
+    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    if constexpr(VecSize == 4)
+    {
+        FpVecType out;
+        out.x = detail::fmin(x.x, y.x);
+        out.y = detail::fmin(x.y, y.y);
+        out.z = detail::fmin(x.z, y.z);
+        out.w = detail::fmin(x.w, y.w);
+        return out;
+    }
+    else if constexpr(VecSize == 1)
+    {
+        return detail::fmin(x, y);
+    }
+    else
+    {
+        static_assert(false, "Unsupported miopen vector operation.");
+    }
 }
 
-__forceinline__ __device__ typename mapped_vector_type<float, 4>::type
-fma(typename mapped_vector_type<float, 4>::type a,
-    typename mapped_vector_type<float, 4>::type b,
-    typename mapped_vector_type<float, 4>::type c)
-{
-    typename mapped_vector_type<float, 4>::type out;
-    out.x = fma(a.x, b.x, c.x);
-    out.y = fma(a.y, b.y, c.y);
-    out.z = fma(a.z, b.z, c.z);
-    out.w = fma(a.w, b.w, c.w);
-
-    return out;
-}
-
-__forceinline__ __device__ typename mapped_vector_type<float, 4>::type
-fmax(typename mapped_vector_type<float, 4>::type x, typename mapped_vector_type<float, 4>::type y)
-{
-    typename mapped_vector_type<float, 4>::type out = x;
-    out.x                                           = fmax(x.x, y.x);
-    out.y                                           = fmax(x.y, y.y);
-    out.z                                           = fmax(x.z, y.z);
-    out.w                                           = fmax(x.w, y.w);
-    return out;
-}
-
-__forceinline__ __device__ typename mapped_vector_type<float, 4>::type
-fmin(typename mapped_vector_type<float, 4>::type x, typename mapped_vector_type<float, 4>::type y)
-{
-    typename mapped_vector_type<float, 4>::type out = x;
-    out.x                                           = fmin(x.x, y.x);
-    out.y                                           = fmin(x.y, y.y);
-    out.z                                           = fmin(x.z, y.z);
-    out.w                                           = fmin(x.w, y.w);
-    return out;
-}
-
-__forceinline__ __device__ typename mapped_vector_type<float, 4>::type
-rsqrt(typename mapped_vector_type<float, 4>::type x)
-{
-    typename mapped_vector_type<float, 4>::type out = x;
-    out.x                                           = rsqrt(x.x);
-    out.y                                           = rsqrt(x.y);
-    out.z                                           = rsqrt(x.z);
-    out.w                                           = rsqrt(x.w);
-    return out;
-}
-
-template <typename FpType>
-__forceinline__ __device__ FpType min(FpType x, FpType y)
+template <typename FpVecType>
+__forceinline__ __device__ FpVecType min(FpVecType x, FpVecType y)
 {
     return fmin(x, y);
 }
 
-template <typename FpType>
-__forceinline__ __device__ FpType max(FpType x, FpType y)
+template <typename FpVecType>
+__forceinline__ __device__ FpVecType max(FpVecType x, FpVecType y)
 {
     return fmax(x, y);
 }

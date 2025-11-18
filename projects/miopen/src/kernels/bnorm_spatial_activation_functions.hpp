@@ -47,12 +47,39 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
 
 template <typename FpPrecType,
           miopen::neuron_op_type NrnOpType = miopen::config::neuron_op,
+          typename std::enable_if<NrnOpType == neuron_op_type::pasthru>::type* = nullptr>
+__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
+                                                                 FpPrecType const&,
+                                                                 FpPrecType const&,
+                                                                 FpPrecType const&,
+                                                                 FpPrecType const&,
+                                                                 FpPrecType const&)
+{
+    return dy;
+}
+
+template <typename FpPrecType,
+          miopen::neuron_op_type NrnOpType = miopen::config::neuron_op,
           typename std::enable_if<NrnOpType == neuron_op_type::relu>::type* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
                                                              FpPrecType const&,
                                                              FpPrecType const&)
 {
-    return miopen::max(tmp, static_cast<FpPrecType>(0.));
+    return max(tmp, cast<FpPrecType>(0.));
+}
+
+template <typename FpPrecType,
+          miopen::neuron_op_type NrnOpType = miopen::config::neuron_op,
+          typename std::enable_if<NrnOpType == neuron_op_type::relu>::type* = nullptr>
+__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
+                                                                 FpPrecType const& xnorm,
+                                                                 FpPrecType const& scale,
+                                                                 FpPrecType const& bias,
+                                                                 FpPrecType const&,
+                                                                 FpPrecType const&)
+{
+    FpPrecType macro_tmp = scale * xnorm + bias;
+    return (macro_tmp > 0) ? dy : 0;
 }
 
 template <typename FpPrecType,
@@ -62,7 +89,21 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
                                                              FpPrecType const& _alpha,
                                                              FpPrecType const&)
 {
-    return miopen::min(_alpha, miopen::max(tmp, static_cast<FpPrecType>(0.)));
+    return min(_alpha, max(tmp, cast<FpPrecType>(0.)));
+}
+
+template <typename FpPrecType,
+          miopen::neuron_op_type NrnOpType = miopen::config::neuron_op,
+          typename std::enable_if<NrnOpType == neuron_op_type::clipped_relu>::type* = nullptr>
+__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
+                                                                 FpPrecType const& xnorm,
+                                                                 FpPrecType const& scale,
+                                                                 FpPrecType const& bias,
+                                                                 FpPrecType const& alpha,
+                                                                 FpPrecType const&)
+{
+    FpPrecType macro_tmp = scale * xnorm + bias;
+    return (macro_tmp > 0 && macro_tmp <= alpha) ? dy : 0;
 }
 
 template <typename FpPrecType,
@@ -72,8 +113,21 @@ __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& t
                                                              FpPrecType const& _alpha,
                                                              FpPrecType const& _beta)
 {
-    return miopen::max(static_cast<FpPrecType>(_alpha),
-                       miopen::min(static_cast<FpPrecType>(_beta), tmp));
+    return miopen::max(_alpha, miopen::min(_beta, tmp));
+}
+
+template <typename FpPrecType,
+          miopen::neuron_op_type NrnOpType = miopen::config::neuron_op,
+          typename std::enable_if<NrnOpType == neuron_op_type::clamp>::type* = nullptr>
+__forceinline__ __host__ __device__ FpPrecType bwd_activation_op(FpPrecType const& dy,
+                                                                 FpPrecType const& xnorm,
+                                                                 FpPrecType const& scale,
+                                                                 FpPrecType const& bias,
+                                                                 FpPrecType const& alpha,
+                                                                 FpPrecType const& beta)
+{
+    FpPrecType macro_tmp = scale * xnorm + bias;
+    return (macro_tmp > alpha && macro_tmp <= beta) ? dy : 0;
 }
 
 } // namespace batchnorm
