@@ -694,14 +694,46 @@ namespace rocRoller
             }
 
             // Duplicate the body of the original for loop into the tail.
+            // Follow the same logic as unrollLoop() for KLOOP:
+            // - Find loop-carried dependencies
+            // - Don't duplicate coordinates that are loop-carried but NOT paired with LDS
+            // - Duplicate everything else (including LDS-paired coordinates)
+            // This allows register-allocated coordinates to be freed before the tail loop.
             {
                 auto loopBodies = graph.control.getOutputNodeIndices<Body>(loop).to<std::vector>();
-                auto newBodies
-                    = duplicateControlNodes(graph, nullptr, loopBodies, [](int x) { return true; });
+
+                // Find loop-carried dependencies (same logic as unrollLoop for KLOOP)
+                auto loopCarriedDependencies = findLoopCarriedDependencies(graph, loop);
+                std::unordered_set<int> dontDuplicate;
+
+                for(auto const& [coord, controls] : loopCarriedDependencies)
+                {
+                    // In the KLOOP, we do want to duplicate LDS (and paired tiles)
+                    bool pairedWithLDS = false;
+                    for(auto op : controls)
+                        pairedWithLDS |= graph.mapper.get<LDS>(op) != -1;
+                    if(pairedWithLDS)
+                        continue;
+
+                    dontDuplicate.insert(coord);
+                }
+
+                // Create a reindexer for the tail loop
+                if(m_unrollReindexers.count({forLoopDimension, -1}) == 0)
+                    m_unrollReindexers[{forLoopDimension, -1}] = std::make_shared<GraphReindexer>();
+                auto tailReindexer = m_unrollReindexers[{forLoopDimension, -1}];
+
+                auto dontDuplicatePredicate = [&](int x) { return dontDuplicate.contains(x); };
+                auto newBodies              = duplicateControlNodes(
+                    graph, tailReindexer, loopBodies, dontDuplicatePredicate);
+
                 for(auto node : newBodies)
                 {
                     graph.control.chain<Body>(tailLoop, node);
                 }
+
+                // Clear the control mapping after duplication
+                tailReindexer->control = {};
             }
 
             {
