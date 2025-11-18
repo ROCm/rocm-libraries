@@ -779,21 +779,21 @@ protected:
                         auto upstreamGradVal
                             = static_cast<float>(upstreamGrad.getHostValue(n, c, h, w));
 
-                        // For x < lower_clip: local_gradient = lower_slope
-                        // For lower_clip <= x <= upper_clip: local_gradient = 1.0
+                        // For x <= lower_clip: local_gradient = lower_slope
+                        // For x > lower_clip && x <= upper_clip: local_gradient = 1.0
                         // For x > upper_clip: local_gradient = 0.0
                         float localGradient;
-                        if(inputVal < lowerClip)
+                        if(inputVal > lowerClip && inputVal <= upperClip)
+                        {
+                            localGradient = 1.0f;
+                        }
+                        else if(inputVal <= lowerClip)
                         {
                             localGradient = lowerSlope;
                         }
-                        else if(inputVal > upperClip)
-                        {
-                            localGradient = 0.0f;
-                        }
                         else
                         {
-                            localGradient = 1.0f;
+                            localGradient = 0.0f;
                         }
 
                         auto downstreamGrad = upstreamGradVal * localGradient;

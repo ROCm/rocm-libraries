@@ -60,8 +60,19 @@ struct ReluBackward
     }
 };
 
-// The Two bwd relus are split because this one is inclusive of your lower clip, whereas default
-// bwd relu is exclusive of 0.
+// CLAMP is f(x) = min(max(x, lowerClip), upperClip)
+// Thus, we have:
+// f'(x) = 1, if x > lowerClip && x < upperClip
+// f'(x) = 0, if x < lowerClip || x > upperClip
+// The derivatives at the bounds are technically undefined, but we follow convention
+// of treating the upper bound as inclusive and the lower bound as exclusive.
+// e.g. https://github.com/ROCm/rocm-libraries/blob/develop/projects/miopen/src/kernels/bnorm_spatial_activation_functions.h#L75
+
+// Leaky ReLU is f(x) = x, if x > 0; f(x) = lowerSlope * x, otherwise
+// Thus, we have:
+// f'(x) = 1, if x > 0
+// f'(x) = lowerSlope, if x < 0
+// Again, the derivative at 0 is technically undefined, but we follow convention of treating f'(0) = lowerSlope.
 template <typename ComputeType = float>
 struct ParameterizedReluBackward
 {
@@ -83,7 +94,7 @@ struct ParameterizedReluBackward
         auto dyCompute = static_cast<ComputeType>(dy);
 
         ComputeType localGradient;
-        if(xCompute < lowerClip)
+        if(xCompute <= lowerClip)
         {
             localGradient = lowerSlope;
         }
