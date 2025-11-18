@@ -783,5 +783,4 @@ namespace HazardObserverTest
             }
         }
     }
-
 }
