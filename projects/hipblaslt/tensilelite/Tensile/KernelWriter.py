@@ -2845,13 +2845,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
 
     if kernel["UseCustomMainLoopSchedule"]:
-      optSchedule, numCodePath = customMainLoopSchedule(self, kernel, tensorParametersA, tensorParametersB, globalReadIncACode, globalReadIncBCode, \
+      optSchedule, numCodePath, waitLR = customMainLoopSchedule(self, kernel, tensorParametersA, tensorParametersB, globalReadIncACode, globalReadIncBCode, \
                                                    LRCodeAAllIters, PackCodeAAllIters, LRCodeBAllIters, PackCodeBAllIters, \
                                                    LRSwapAAllIters, LRSwapBAllIters, self.codes.globalReadA, self.codes.globalReadB, \
                                                    LWSwapAAllIters, LWSwapBAllIters, MfmaCodeAllIters, \
                                                    self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, False))
       module.add(optSchedule)
-      module.add(self.simdSpecDispatch(kernel, numCodePath))
+      module.add(self.simdSpecDispatch(kernel, numCodePath, waitLR))
 
     # close unrolled loop
     endStr = ""

@@ -42,7 +42,7 @@ from copy import deepcopy
 class ScheduleInfo:
     numCodePaths: int
     numMfma: int
-    def __init__(self, numCodePaths, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder = []):
+    def __init__(self, numCodePaths, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder = [], waitLR = True):
         self.numCodePaths = numCodePaths
         self.numMfma = numMfma
         self.optSchedule = optSchedule
@@ -50,6 +50,8 @@ class ScheduleInfo:
         self.nglshift = nglshift # vmcnt shift for noglobalload loop
         self.nllshift = nllshift # vmcnt shift for nolocalload loop
         self.mfmaReorder = mfmaReorder
+        # Wait for all LR in pre-loop to complete before we start main loop
+        self.waitLR = waitLR
 
 
 def removeComments(module):
@@ -279,7 +281,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
                     macro.add(ValueEndif(comment="EndIf \\ID checks"))
 
     module.add(macro)
-    return module, numCodePath
+    return module, numCodePath, opt1.waitLR
 
 
 @CallableGuard

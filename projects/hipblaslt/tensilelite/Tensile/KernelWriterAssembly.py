@@ -14024,7 +14024,7 @@ class KernelWriterAssembly(KernelWriter):
     module.addSpaceLine()
     return module
 
-  def simdSpecDispatch(self, kernel, numCodePath):
+  def simdSpecDispatch(self, kernel, numCodePath, waitLR):
     module = Module()
 
     loopLabelBegin = []
@@ -14033,7 +14033,8 @@ class KernelWriterAssembly(KernelWriter):
     loopChar = self.states.indexChars[kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
 
     # Wait for all LR in pre-loop to complete before we start main loop
-    module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LR in pre-loop to complete"))
+    if waitLR:
+      module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LR in pre-loop to complete"))
 
     if numCodePath == 1:
       module.add(MacroInstruction(name="MAINLOOP", args=[0]))
