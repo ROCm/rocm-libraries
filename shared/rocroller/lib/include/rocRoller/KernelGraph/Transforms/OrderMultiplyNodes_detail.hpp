@@ -47,17 +47,37 @@ namespace rocRoller
                 getGroupedMultiplyNodes(KernelGraph const& graph);
 
             /**
+             * Creates a sub-graph of the given nodes.
+             *
+             * The sub-graph is created by adding the given nodes to a new control graph,
+             * and then adding sequence edges between the nodes based on the order of the
+             * nodes in the original control graph.
+             */
+            ControlGraph::ControlGraph createSubGraph(KernelGraph const&      graph,
+                                                      std::vector<int> const& nodes);
+
+            /**
+             * Sorts `nodes` according to existing order and according to BestNodeOrder.
+             *
+             * `nodes` must be a collection of nodes directly within the same body-parent in
+             * `graph.control`.
+             */
+            void orderNodes(KernelGraph const& graph, std::vector<int>& nodes);
+
+            /**
              * Comparator for ordering multiply nodes.
              *
              * This is used to order the multiply nodes in each group.
              *
+             * Note that this is NOT guaranteed to be a strict weak ordering and should not be
+             * used with `std::sort`.
+             *
              * The order is determined by the following criteria:
-             * 1. If the nodes are already ordered, use that order.
-             * 2. Otherwise if available, use downstream memory nodes, to enable memory nodes
+             * 1. If available, use downstream memory nodes, to enable memory nodes
              *    to be scheduled earlier in some kernels.
-             * 3. Otherwise if available, use last upstream tag dependencies, to prioritize
+             * 2. Otherwise if available, use last upstream tag dependencies, to prioritize
              *    multiplies that will have lower waitcount values.
-             * 4. Otherwise use integer comparison as a last resort.
+             * 3. Otherwise use integer comparison as a last resort.
              */
             struct BestNodeOrder
             {
@@ -77,33 +97,6 @@ namespace rocRoller
                 ControlFlowRWTracer                                 m_tracer;
                 mutable std::unordered_map<int, std::optional<int>> m_downstreamMemoryNodes;
                 mutable std::unordered_map<int, std::vector<int>>   m_reversedTagDependencies;
-            };
-
-            struct OrderByDownstreamMemoryNodes
-            {
-                OrderByDownstreamMemoryNodes(KernelGraph const& graph);
-
-                bool operator()(int a, int b) const;
-
-            private:
-                std::optional<int> downstreamMemoryNode(int node) const;
-
-                KernelGraph const&                                  m_graph;
-                mutable std::unordered_map<int, std::optional<int>> m_downstreamMemoryNodes;
-            };
-
-            struct OrderByLastTagDependencies
-            {
-                OrderByLastTagDependencies(KernelGraph const& graph);
-
-                bool operator()(int a, int b) const;
-
-            private:
-                std::vector<int> const& reversedTagDependencies(int node) const;
-
-                KernelGraph const&                                m_graph;
-                ControlFlowRWTracer                               m_tracer;
-                mutable std::unordered_map<int, std::vector<int>> m_reversedTagDependencies;
             };
         }
     }
