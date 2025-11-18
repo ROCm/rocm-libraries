@@ -42,7 +42,7 @@ function(add_rocwmma_sample TEST_TARGET TEST_SOURCE)
   add_executable(${TEST_TARGET} ${TEST_SOURCE})
   target_link_libraries(${TEST_TARGET} OpenMP::OpenMP_CXX "-L${HIP_CLANG_ROOT}/lib")
   if(UNIX)
-    target_link_libraries(${TEST_TARGET} "-Wl,-rpath=$ORIGIN/../llvm/lib"  "-fno-rtlib-add-rpath")
+    target_link_libraries(${TEST_TARGET} "-Wl,-rpath='\$$ORIGIN/../llvm/lib'" "-fno-rtlib-add-rpath")
   endif()
   target_link_libraries(${TEST_TARGET} rocwmma hiprtc::hiprtc)
   target_include_directories(${TEST_TARGET} PRIVATE
