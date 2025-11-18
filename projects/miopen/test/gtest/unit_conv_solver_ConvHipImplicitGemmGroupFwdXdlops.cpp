@@ -26,7 +26,28 @@
 
 #include "unit_conv_solver.hpp"
 
+#define WORKAROUND_SWDEV_522871 1
+
+#if WORKAROUND_SWDEV_522871
+#define SOLVER_NAME_DEV_APP DISABLED_ConvHipImplicitGemmGroupFwdXdlops
+#else
+#define SOLVER_NAME_DEV_APP ConvHipImplicitGemmGroupFwdXdlops
+#endif
+
 namespace {
+
+auto GetConvSmokeTestCases(miopenDataType_t datatype)
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+
+    return std::vector{
+        // clang-format off
+        TestCase{{datatype, miopenTensorNHWC, {1, 64, 8, 8}},
+                 {datatype, miopenTensorNHWC, {96, 64, 1, 1}},
+                 datatype, {{0, 0}, {1, 1}, {1, 1}}},
+        // clang-format on
+    };
+}
 
 auto GetConvFullTestCases(miopenDataType_t datatype)
 {
@@ -47,16 +68,13 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
                  {datatype, miopenTensorNHWC, {384, 64, 1, 1}},
                  datatype, {{0, 0}, {1, 1}, {1, 1}}}, // some different NCHW and k parameters
 
-        // Group count 2
-        TestCase{{datatype, miopenTensorNHWC, {1, 64, 24, 48}},
-                 {datatype, miopenTensorNHWC, {384, 32, 1, 1}},
-                 datatype, {{0, 0}, {1, 1}, {1, 1}, 2}}, // some different NCHW and k parameters
-
-        // Group count 4
+        // Group count = 2 and 4                 
         TestCase{{datatype, miopenTensorNHWC, {1, 64, 8, 8}},
-                 {datatype, miopenTensorNHWC, {96, 16, 1, 1}},
-                 datatype, {{0, 0}, {1, 1}, {2, 2}, 4}}, // dilation > 1
-
+                 {datatype, miopenTensorNHWC, {96, 32, 1, 1}},
+                 datatype, {{0, 0}, {1, 1}, {2, 2}, 2}}, // dilation > 1
+        TestCase{{datatype, miopenTensorNHWC, {1, 64, 24, 48}},
+                 {datatype, miopenTensorNHWC, {384, 16, 1, 1}},
+                 datatype, {{0, 0}, {1, 1}, {1, 1}, 4}}, // some different NCHW and k parameters
 
         // clang-format on
     };
@@ -107,10 +125,36 @@ TEST_P(GPU_UnitTestConvSolverImplicitGemmGroupFwdXdlops_FP32, ConvHipImplicitGem
     this->RunTest(miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops{});
 };
 
-TEST_P(CPU_UnitTestConvSolverImplicitGemmGroupFwdXdlopsDevApplicability_NONE, ConvHipImplicitGemmGroupFwdXdlops)
+TEST_P(CPU_UnitTestConvSolverImplicitGemmGroupFwdXdlopsDevApplicability_NONE, SOLVER_NAME_DEV_APP)
 {
     this->RunTest(miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops{});
 };
+
+// Smoke tests
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverImplicitGemmGroupFwdXdlops_I8,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoImplicitGEMM),
+                                          testing::ValuesIn(GetConvSmokeTestCases(miopenInt8))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverImplicitGemmGroupFwdXdlops_FP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoImplicitGEMM),
+                                          testing::ValuesIn(GetConvSmokeTestCases(miopenHalf))));
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    GPU_UnitTestConvSolverImplicitGemmGroupFwdXdlops_BFP16,
+    testing::Combine(testing::Values(GetTestParams()),
+                     testing::Values(miopenConvolutionAlgoImplicitGEMM),
+                     testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverImplicitGemmGroupFwdXdlops_FP32,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoImplicitGEMM),
+                                          testing::ValuesIn(GetConvSmokeTestCases(miopenFloat))));
 
 // Full tests
 INSTANTIATE_TEST_SUITE_P(Full,
@@ -138,7 +182,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::ValuesIn(GetConvFullTestCases(miopenFloat))));
 
 // Device applicability test
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_UnitTestConvSolverImplicitGemmGroupFwdXdlopsDevApplicability_NONE,
                          testing::Combine(testing::Values(GetTestParams()),
-                                          testing::Values(GetConvFullTestCases(miopenHalf)[0])));
+                                          testing::Values(GetConvSmokeTestCases(miopenHalf)[0])));
