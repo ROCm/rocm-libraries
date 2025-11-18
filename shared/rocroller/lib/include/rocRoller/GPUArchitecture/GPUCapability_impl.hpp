@@ -134,9 +134,9 @@ namespace rocRoller
 
             {"v_mov_b64", Value::v_mov_b64},
 
-            {"v_add_u32", Value::v_add_u32},
-
             {"v_add3_u32", Value::v_add3_u32},
+
+            {"v_add_u32", Value::v_add_u32},
 
             {"s_barrier", Value::s_barrier},
             {"s_barrier_signal", Value::s_barrier_signal},
