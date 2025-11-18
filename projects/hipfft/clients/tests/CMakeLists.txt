@@ -136,7 +136,7 @@ set( TEST_TARGETS hipfft-test )
 # MPI worker for MPI tests
 if( HIPFFT_MPI_ENABLE )
   # build MPI worker to support the tests
-  add_executable( hipfft_mpi_worker hipfft_mpi_worker.cpp )
+  add_executable( hipfft_mpi_worker hipfft_mpi_worker.cpp ../../shared/test_callbacks.cpp )
   list( APPEND TEST_TARGETS hipfft_mpi_worker )
   target_include_directories( hipfft_mpi_worker
     PRIVATE
