@@ -172,10 +172,11 @@ else()
 
           block(SCOPE_FOR VARIABLES)
           set(HIPBLASLT_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS} CACHE BOOL "" FORCE)
+          option(HIPSPARSELT_ENABLE_DEVICE "Build hipSPARSELt device libraries." ON)
           set(HIPBLASLT_ENABLE_HOST OFF CACHE BOOL "" FORCE)
           set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
           # Builds tensilelite's device libraries (.co/.dat)
-          set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "" FORCE)
+          set(HIPBLASLT_ENABLE_DEVICE ${HIPSPARSELT_ENABLE_DEVICE} CACHE BOOL "" FORCE)
           set(HIPBLASLT_ENABLE_ASAN ${BUILD_ADDRESS_SANITIZER} CACHE BOOL "" FORCE)
           # Builds tensilelite::tensilelite-host target
           set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
