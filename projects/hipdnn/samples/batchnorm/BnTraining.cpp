@@ -242,27 +242,27 @@ void SampleRunner::operator()(const TensorLayout& layout)
         {
             // BATCH_STATS_ONLY mode validation
             test_utilities::CpuFpReferenceBatchnorm::fwdTraining<
-                InputType,          // XDataType
-                IntermediateType,   // ScaleBiasDataType
-                IntermediateType,   // MeanVarianceDataType
-                InputType           // YDataType
-            >(
-                xTensor,
-                scaleTensor,
-                biasTensor,
-                yRefTensor,
-                utilities::BATCHNORM_DEFAULT_EPSILON,
-                0.1, // momentum (not used in BATCH_STATS_ONLY mode but required by API)
-                &savedMeanRefTensor,
-                &savedInvVarRefTensor,
-                nullptr, // prevRunningMean (not used)
-                nullptr, // prevRunningVariance (not used)
-                nullptr, // nextRunningMean (not used)
-                nullptr // nextRunningVariance (not used)
+                InputType, // XDataType
+                IntermediateType, // ScaleBiasDataType
+                IntermediateType, // MeanVarianceDataType
+                InputType // YDataType
+                >(xTensor,
+                  scaleTensor,
+                  biasTensor,
+                  yRefTensor,
+                  utilities::BATCHNORM_DEFAULT_EPSILON,
+                  0.1, // momentum (not used in BATCH_STATS_ONLY mode but required by API)
+                  &savedMeanRefTensor,
+                  &savedInvVarRefTensor,
+                  nullptr, // prevRunningMean (not used)
+                  nullptr, // prevRunningVariance (not used)
+                  nullptr, // nextRunningMean (not used)
+                  nullptr // nextRunningVariance (not used)
             );
 
             auto tolerance = test_utilities::batchnorm::getToleranceTraining<InputType>();
-            auto yValidator = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+            auto yValidator
+                = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
             auto statsValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
                 static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 
@@ -273,7 +273,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
             std::cout << "CPU reference validation:\n";
             std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
             std::cout << "  saved_mean: " << (meanValid ? "successful" : "failed") << "\n";
-            std::cout << "  saved_inv_variance: " << (invVarValid ? "successful" : "failed") << "\n";
+            std::cout << "  saved_inv_variance: " << (invVarValid ? "successful" : "failed")
+                      << "\n";
         }
     }
 
