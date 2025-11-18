@@ -25,8 +25,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
 
     std::cout << "Running batch normalization training + activation graph " << inputType << " ["
-              << layout << "]"
-              << (config.cpuValidation ? " (with CPU validation)" : "")
+              << layout << "]" << (config.cpuValidation ? " (with CPU validation)" : "")
               << " [activation: " << config.activationType << "]...\n";
 
     int64_t n = 16; // BATCH SIZE
@@ -50,6 +49,22 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto bnAttributes = graph::BatchnormAttributes();
     bnAttributes.set_name("bn_training_node");
     bnAttributes.set_epsilon(epsilon);
+
+#if 0
+    // TODO: Enable when MIOpen supports separate input/output buffers for running statistics
+    // Conditionally setup running statistics inputs
+    if(config.useRunningStats)
+    {
+        auto prevRunningMean = createTensor({1, c, 1, 1}, intermediateType);
+        auto prevRunningVar = createTensor({1, c, 1, 1}, intermediateType);
+
+        // Momentum: use pass-by-value with double (matches MIOpen API)
+        auto momentum = std::make_shared<graph::TensorAttributes>();
+        momentum->set_value(0.1);
+
+        bnAttributes.set_previous_running_stats(prevRunningMean, prevRunningVar, momentum);
+    }
+#endif
 
     // Step 1: Batchnorm Training
     auto [y, savedMean, savedInvVariance, nextRunningMean, nextRunningVariance]
@@ -99,6 +114,23 @@ void SampleRunner::operator()(const TensorLayout& layout)
     savedInvVariance->set_dim({1, c, 1, 1});
     savedInvVariance->set_stride(utilities::generateStrides({1, c, 1, 1}));
 
+#if 0
+    // TODO: Enable when MIOpen supports separate input/output buffers for running statistics
+    // Configure running statistics output tensors
+    if(config.useRunningStats)
+    {
+        nextRunningMean->set_output(true);
+        nextRunningMean->set_data_type(intermediateType);
+        nextRunningMean->set_dim({1, c, 1, 1});
+        nextRunningMean->set_stride(utilities::generateStrides({1, c, 1, 1}));
+
+        nextRunningVariance->set_output(true);
+        nextRunningVariance->set_data_type(intermediateType);
+        nextRunningVariance->set_dim({1, c, 1, 1});
+        nextRunningVariance->set_stride(utilities::generateStrides({1, c, 1, 1}));
+    }
+#endif
+
     HIPDNN_FE_CHECK(graph->validate());
     std::cout << "Graph validation successful.\n";
 
@@ -122,12 +154,31 @@ void SampleRunner::operator()(const TensorLayout& layout)
     utilities::Tensor<IntermediateType> savedMeanTensor(savedMean->get_dim());
     utilities::Tensor<IntermediateType> savedInvVarTensor(savedInvVariance->get_dim());
 
+#if 0
+    // TODO: Enable when MIOpen supports separate input/output buffers for running statistics
+    utilities::Tensor<IntermediateType> prevMeanTensor(prevRunningMean->get_dim());
+    utilities::Tensor<IntermediateType> prevVarTensor(prevRunningVar->get_dim());
+    utilities::Tensor<IntermediateType> nextMeanTensor(nextRunningMean->get_dim());
+    utilities::Tensor<IntermediateType> nextVarTensor(nextRunningVariance->get_dim());
+#endif
+
     // Initialize tensors
     xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
     scaleTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
                                      static_cast<IntermediateType>(1.0f));
     biasTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
                                     static_cast<IntermediateType>(1.0f));
+
+#if 0
+    // TODO: Enable when MIOpen supports separate input/output buffers for running statistics
+    if(config.useRunningStats)
+    {
+        prevMeanTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
+                                            static_cast<IntermediateType>(1.0f));
+        prevVarTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
+                                           static_cast<IntermediateType>(1.0f));
+    }
+#endif
 
     // Build variant pack
     std::unordered_map<int64_t, void*> variantPack;
@@ -138,6 +189,17 @@ void SampleRunner::operator()(const TensorLayout& layout)
     variantPack[savedMean->get_uid()] = savedMeanTensor.memory().deviceData();
     variantPack[savedInvVariance->get_uid()] = savedInvVarTensor.memory().deviceData();
 
+#if 0
+    // TODO: Enable when MIOpen supports separate input/output buffers for running statistics
+    if(config.useRunningStats)
+    {
+        variantPack[prevRunningMean->get_uid()] = prevMeanTensor.memory().deviceData();
+        variantPack[prevRunningVar->get_uid()] = prevVarTensor.memory().deviceData();
+        variantPack[nextRunningMean->get_uid()] = nextMeanTensor.memory().deviceData();
+        variantPack[nextRunningVariance->get_uid()] = nextVarTensor.memory().deviceData();
+    }
+#endif
+
     int64_t workspaceSize;
     HIPDNN_FE_CHECK(graph->get_workspace_size(workspaceSize));
     utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
@@ -147,6 +209,15 @@ void SampleRunner::operator()(const TensorLayout& layout)
     activatedYTensor.memory().markDeviceModified();
     savedMeanTensor.memory().markDeviceModified();
     savedInvVarTensor.memory().markDeviceModified();
+
+#if 0
+    // TODO: Enable when MIOpen supports separate input/output buffers for running statistics
+    if(config.useRunningStats)
+    {
+        nextMeanTensor.memory().markDeviceModified();
+        nextVarTensor.memory().markDeviceModified();
+    }
+#endif
 
     auto activatedYHostPtr = activatedYTensor.memory().hostData();
     auto savedMeanHostPtr = savedMeanTensor.memory().hostData();
@@ -161,6 +232,12 @@ void SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<IntermediateType> savedMeanRefTensor(savedMean->get_dim());
         utilities::Tensor<IntermediateType> savedInvVarRefTensor(savedInvVariance->get_dim());
 
+#if 0
+        // TODO: Enable when MIOpen supports separate input/output buffers for running statistics
+        utilities::Tensor<IntermediateType> nextMeanRefTensor(nextRunningMean->get_dim());
+        utilities::Tensor<IntermediateType> nextVarRefTensor(nextRunningVariance->get_dim());
+#endif
+
         // Build variant pack for CPU execution (using host pointers)
         std::unordered_map<int64_t, void*> cpuVariantPack;
         cpuVariantPack[x->get_uid()] = xTensor.memory().hostData();
@@ -170,14 +247,24 @@ void SampleRunner::operator()(const TensorLayout& layout)
         cpuVariantPack[savedMean->get_uid()] = savedMeanRefTensor.memory().hostData();
         cpuVariantPack[savedInvVariance->get_uid()] = savedInvVarRefTensor.memory().hostData();
 
+#if 0
+        // TODO: Enable when MIOpen supports separate input/output buffers for running statistics
+        if(config.useRunningStats)
+        {
+            cpuVariantPack[prevRunningMean->get_uid()] = prevMeanTensor.memory().hostData();
+            cpuVariantPack[prevRunningVar->get_uid()] = prevVarTensor.memory().hostData();
+            cpuVariantPack[nextRunningMean->get_uid()] = nextMeanRefTensor.memory().hostData();
+            cpuVariantPack[nextRunningVariance->get_uid()] = nextVarRefTensor.memory().hostData();
+        }
+#endif
+
         // Execute on CPU using graph executor
         auto serializedGraph = graph->buildFlatbufferOperationGraph();
         test_utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 
         auto tolerance = test_utilities::batchnorm::getToleranceTraining<InputType>();
-        auto yValidator
-            = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+        auto yValidator = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
         auto statsValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
             static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 
@@ -185,10 +272,32 @@ void SampleRunner::operator()(const TensorLayout& layout)
         bool meanValid = statsValidator.allClose(savedMeanRefTensor, savedMeanTensor);
         bool invVarValid = statsValidator.allClose(savedInvVarRefTensor, savedInvVarTensor);
 
+#if 0
+        // TODO: Enable when MIOpen supports separate input/output buffers for running statistics
+        bool nextMeanValid = false;
+        bool nextVarValid = false;
+        if(config.useRunningStats)
+        {
+            nextMeanValid = statsValidator.allClose(nextMeanRefTensor, nextMeanTensor);
+            nextVarValid = statsValidator.allClose(nextVarRefTensor, nextVarTensor);
+        }
+#endif
+
         std::cout << "CPU reference validation:\n";
         std::cout << "  activated_y: " << (yValid ? "successful" : "failed") << "\n";
         std::cout << "  saved_mean: " << (meanValid ? "successful" : "failed") << "\n";
         std::cout << "  saved_inv_variance: " << (invVarValid ? "successful" : "failed") << "\n";
+
+#if 0
+        // TODO: Enable when MIOpen supports separate input/output buffers for running statistics
+        if(config.useRunningStats)
+        {
+            std::cout << "  next_running_mean: " << (nextMeanValid ? "successful" : "failed")
+                      << "\n";
+            std::cout << "  next_running_variance: " << (nextVarValid ? "successful" : "failed")
+                      << "\n";
+        }
+#endif
     }
 
     std::cout << "First 10 activated_y values: ";
