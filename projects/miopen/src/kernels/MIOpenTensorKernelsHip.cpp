@@ -655,8 +655,8 @@ extern "C" __global__ void OpTensorFwdBias(MIOPEN_TYPE* a,
 
     int gid = blockIdx.x;
 
-// num_wg: the number of workgroups should be launched
-// MAX_NUM_WG: the maximum number of workgroups actually launched
+    // num_wg: the number of workgroups should be launched
+    // MAX_NUM_WG: the maximum number of workgroups actually launched
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wfloat-equal"
@@ -667,16 +667,16 @@ extern "C" __global__ void OpTensorFwdBias(MIOPEN_TYPE* a,
         {
             int lid = threadIdx.x;
 
-            int o_c = incr_wg == 1 ? (gid % b_c) : gid;
+            int o_c             = incr_wg == 1 ? (gid % b_c) : gid;
             MIOPEN_TYPE operand = b_off[o_c] * alpha1;
 
             // each workgroup computes N*H*W for each C (bias-term)
             // number of workgroups = c_c (b_c)
             while(lid < work_per_wg)
             {
-                int o_hw = incr_wg == 0 ? (lid % (work_per_wg / c_n)) : lid;
-                int o_n  = incr_wg == 0 ? (lid / (work_per_wg / c_n)) : (gid / b_c);
-                int index = o_n * c_nstride + o_c * c_cstride + o_hw;
+                int o_hw     = incr_wg == 0 ? (lid % (work_per_wg / c_n)) : lid;
+                int o_n      = incr_wg == 0 ? (lid / (work_per_wg / c_n)) : (gid / b_c);
+                int index    = o_n * c_nstride + o_c * c_cstride + o_hw;
                 c_off[index] = MIOPEN_TENSOR_OP(a_off[index] * alpha0, operand);
 
                 lid += blockDim.x;
@@ -689,17 +689,18 @@ extern "C" __global__ void OpTensorFwdBias(MIOPEN_TYPE* a,
         {
             int lid = threadIdx.x;
 
-            int o_c = incr_wg == 1 ? (gid % b_c) : gid;
+            int o_c             = incr_wg == 1 ? (gid % b_c) : gid;
             MIOPEN_TYPE operand = b_off[o_c] * alpha1;
 
             // each workgroup computes N*H*W for each C (bias-term)
             // number of workgroups = c_c (b_c)
             while(lid < work_per_wg)
             {
-                int o_hw = incr_wg == 0 ? (lid % (work_per_wg / c_n)) : lid;
-                int o_n  = incr_wg == 0 ? (lid / (work_per_wg / c_n)) : (gid / b_c);
+                int o_hw  = incr_wg == 0 ? (lid % (work_per_wg / c_n)) : lid;
+                int o_n   = incr_wg == 0 ? (lid / (work_per_wg / c_n)) : (gid / b_c);
                 int index = o_n * c_nstride + o_c * c_cstride + o_hw;
-                c_off[index] = MIOPEN_TENSOR_OP(a_off[index] * alpha0, operand) + beta * c_off[index];
+                c_off[index] =
+                    MIOPEN_TENSOR_OP(a_off[index] * alpha0, operand) + beta * c_off[index];
 
                 lid += blockDim.x;
             }
@@ -738,8 +739,8 @@ extern "C" __global__ void OpTensorFwdBiasGeneric(MIOPEN_TYPE* a,
     MIOPEN_TYPE* b_off = b + Boffset;
     MIOPEN_TYPE* c_off = c + Coffset;
 
-// num_wg: the number of workgroups should be launched
-// MAX_NUM_WG: the maximum number of workgroups actually launched
+    // num_wg: the number of workgroups should be launched
+    // MAX_NUM_WG: the maximum number of workgroups actually launched
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wfloat-equal"
@@ -752,16 +753,16 @@ extern "C" __global__ void OpTensorFwdBiasGeneric(MIOPEN_TYPE* a,
 
             // each workgroup computes N*H*W for each C (bias-term)
             // number of workgroups = c_c (b_c)
-            int o_c = (incr_wg == 1) ? (gid % b_c) : gid;
+            int o_c             = (incr_wg == 1) ? (gid % b_c) : gid;
             MIOPEN_TYPE operand = b_off[o_c * b_cstride] * alpha1;
 
             while(lid < work_per_wg)
             {
-                int o_n = (incr_wg == 1) ? (gid / b_c) : (lid % c_n);
-                int o_h = (incr_wg == 1) ? (lid / c_w) : ((lid / c_n) / c_w);
-                int o_w = (incr_wg == 1) ? (lid % c_w) : ((lid / c_n) % c_w);
-                int aindex = o_n * a_nstride + o_c * a_cstride + o_h * a_hstride + o_w;
-                int cindex = o_n * c_nstride + o_c * c_cstride + o_h * c_hstride + o_w;
+                int o_n       = (incr_wg == 1) ? (gid / b_c) : (lid % c_n);
+                int o_h       = (incr_wg == 1) ? (lid / c_w) : ((lid / c_n) / c_w);
+                int o_w       = (incr_wg == 1) ? (lid % c_w) : ((lid / c_n) % c_w);
+                int aindex    = o_n * a_nstride + o_c * a_cstride + o_h * a_hstride + o_w;
+                int cindex    = o_n * c_nstride + o_c * c_cstride + o_h * c_hstride + o_w;
                 c_off[cindex] = MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand);
 
                 lid += blockDim.x;
@@ -776,17 +777,18 @@ extern "C" __global__ void OpTensorFwdBiasGeneric(MIOPEN_TYPE* a,
 
             // each workgroup computes N*H*W for each C (bias-term)
             // number of workgroups = c_c (b_c)
-            int o_c = (incr_wg == 1) ? (gid % b_c) : gid;
+            int o_c             = (incr_wg == 1) ? (gid % b_c) : gid;
             MIOPEN_TYPE operand = b_off[o_c * b_cstride] * alpha1;
 
             while(lid < work_per_wg)
             {
-                int o_n = (incr_wg == 1) ? (gid / b_c) : (lid % c_n);
-                int o_h = (incr_wg == 1) ? (lid / c_w) : ((lid / c_n) / c_w);
-                int o_w = (incr_wg == 1) ? (lid % c_w) : ((lid / c_n) % c_w);
+                int o_n    = (incr_wg == 1) ? (gid / b_c) : (lid % c_n);
+                int o_h    = (incr_wg == 1) ? (lid / c_w) : ((lid / c_n) / c_w);
+                int o_w    = (incr_wg == 1) ? (lid % c_w) : ((lid / c_n) % c_w);
                 int aindex = o_n * a_nstride + o_c * a_cstride + o_h * a_hstride + o_w;
                 int cindex = o_n * c_nstride + o_c * c_cstride + o_h * c_hstride + o_w;
-                c_off[cindex] = MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand) + beta * c_off[cindex];
+                c_off[cindex] =
+                    MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand) + beta * c_off[cindex];
 
                 lid += blockDim.x;
             }
