@@ -1244,11 +1244,6 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestStreamKWGMGPU, GPU_BasicGEMMStreamKWorkgroupMapping)
     {
-        // if(m_context->targetArchitecture().target().isCDNA1GPU())
-        // {
-        //     GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamKWorkgroupMapping test";
-        // }
-
         GEMMProblem gemm;
 
         hipDeviceProp_t deviceProperties;

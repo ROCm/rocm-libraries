@@ -32,6 +32,7 @@
 #include "TestContext.hpp"
 #include "TestKernels.hpp"
 #include "rocRoller/Scheduling/Observers/WaitState/VALUTransWrite94x.hpp"
+#include "rocRoller/Scheduling/Observers/WaitState/VALUWriteVCCVDIVFMAS.hpp"
 
 #include <common/SourceMatcher.hpp>
 #include <common/TestValues.hpp>
@@ -95,9 +96,10 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(!arch.isCDNAGPU())
+            auto observer = Scheduling::VALUWriteVCCVDIVFMAS();
+            if(!observer.required(arch))
             {
-                SKIP("This test is only supported on CDNA");
+                SKIP("Architecture does not meet requirements for this observer");
             }
 
             SECTION("v_readlane (2nd op) read as laneselect")

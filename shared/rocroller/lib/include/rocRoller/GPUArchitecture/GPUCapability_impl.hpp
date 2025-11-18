@@ -71,6 +71,7 @@ namespace rocRoller
             {"HasExplicitScalarCOCI", Value::HasExplicitScalarCOCI},
             {"HasExplicitVectorCO", Value::HasExplicitVectorCO},
             {"HasExplicitVectorCOCI", Value::HasExplicitVectorCOCI},
+            {"HasExplicitVectorRev", Value::HasExplicitVectorRev},
             {"HasExplicitVectorRevCO", Value::HasExplicitVectorRevCO},
             {"HasExplicitVectorRevCOCI", Value::HasExplicitVectorRevCOCI},
             {"HasExplicitVectorRevNC", Value::HasExplicitVectorRevNC},
@@ -132,6 +133,8 @@ namespace rocRoller
             {"v_fmac_f32", Value::v_fmac_f32},
 
             {"v_mov_b64", Value::v_mov_b64},
+
+            {"v_add_u32", Value::v_add_u32},
 
             {"v_add3_u32", Value::v_add3_u32},
 
