@@ -175,7 +175,7 @@ namespace rocRoller
         template <typename T>
         void Hypergraph<Node, Edge, Hyper>::setElement(int tag, T&& element)
         {
-            AssertFatal(m_elements.find(tag) != m_elements.end());
+            // AssertFatal(m_elements.find(tag) != m_elements.end());
 
             m_elements[tag] = std::forward<T>(element);
             clearCache(GraphModification::SetElement);

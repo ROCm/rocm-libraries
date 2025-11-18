@@ -78,6 +78,33 @@ namespace rocRoller
                 mutable std::unordered_map<int, std::optional<int>> m_downstreamMemoryNodes;
                 mutable std::unordered_map<int, std::vector<int>>   m_reversedTagDependencies;
             };
+
+            struct OrderByDownstreamMemoryNodes
+            {
+                OrderByDownstreamMemoryNodes(KernelGraph const& graph);
+
+                bool operator()(int a, int b) const;
+
+            private:
+                std::optional<int> downstreamMemoryNode(int node) const;
+
+                KernelGraph const&                                  m_graph;
+                mutable std::unordered_map<int, std::optional<int>> m_downstreamMemoryNodes;
+            };
+
+            struct OrderByLastTagDependencies
+            {
+                OrderByLastTagDependencies(KernelGraph const& graph);
+
+                bool operator()(int a, int b) const;
+
+            private:
+                std::vector<int> const& reversedTagDependencies(int node) const;
+
+                KernelGraph const&                                m_graph;
+                ControlFlowRWTracer                               m_tracer;
+                mutable std::unordered_map<int, std::vector<int>> m_reversedTagDependencies;
+            };
         }
     }
 }
