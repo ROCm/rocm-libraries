@@ -31,7 +31,7 @@
 
 #define PERF_ENABLE 1
 #if PERF_ENABLE
-  #include "perf_helper.hpp"
+#include "perf_helper.hpp"
 #endif
 
 struct TensorsConfig
@@ -82,14 +82,13 @@ std::vector<TensorsConfig> TensorsConfigs()
     };
 
 #if PERF_ENABLE
-    const auto& handle = get_handle();
-       std::string deviceName = handle.GetDeviceName();
+    const auto& handle     = get_handle();
+    std::string deviceName = handle.GetDeviceName();
 
     size_t maxTotalSize;
     // Generate all NCHW tensors that are limited by L3 cache size
     // or 2xL2 cache size when L3 is not available
-    if(miopen::StartsWith(deviceName, "gfx90a") ||
-       miopen::StartsWith(deviceName, "gfx908"))
+    if(miopen::StartsWith(deviceName, "gfx90a") || miopen::StartsWith(deviceName, "gfx908"))
     {
         maxTotalSize = 16; // twice the 8MB L2
     }
@@ -97,8 +96,7 @@ std::vector<TensorsConfig> TensorsConfigs()
     {
         maxTotalSize = 4; // twice the 2MB L2
     }
-    else if(miopen::StartsWith(deviceName, "gfx900") ||
-            miopen::StartsWith(deviceName, "gfx906"))
+    else if(miopen::StartsWith(deviceName, "gfx900") || miopen::StartsWith(deviceName, "gfx906"))
     {
         maxTotalSize = 8; // twice the 4MB L2
     }
@@ -120,9 +118,9 @@ std::vector<TensorsConfig> TensorsConfigs()
     {
         for(int C : {1, 2, 4})
         {
-            for(int H = 1; H < maxTotalSize/(N*C); H *= 2)
+            for(int H = 1; H < maxTotalSize / (N * C); H *= 2)
             {
-                for(int W = 1; W < maxTotalSize/(N*C*H); W *= 2)
+                for(int W = 1; W < maxTotalSize / (N * C * H); W *= 2)
                 {
                     size_t totalSize = N * C * H * W;
                     // Ensure the total size does not exceed the maximum limit
@@ -161,15 +159,18 @@ struct OpTensorFwdBiasGenericTest
 protected:
     void SetUp() override
     {
-        auto&& handle = get_handle();
+        auto&& handle                                 = get_handle();
         std::tie(tensorsConfig, alpha0, alpha1, beta) = GetParam();
 
         data_type = miopen_type<T>{};
 
         // Generate elements in tensors
-        tensA = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(tensor_elem_gen_integer{17});
-        tensB = tensor<T>{tensorsConfig.blens, tensorsConfig.bstrides}.generate(tensor_elem_gen_integer{17});
-        tensC = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate([](auto...) { return 1; });
+        tensA = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(
+            tensor_elem_gen_integer{17});
+        tensB = tensor<T>{tensorsConfig.blens, tensorsConfig.bstrides}.generate(
+            tensor_elem_gen_integer{17});
+        tensC = tensor<T>{tensorsConfig.aclens, tensorsConfig.acstrides}.generate(
+            [](auto...) { return 1; });
 
         // Write the device tensors
         tensA_dev = handle.Write(tensA.data);
@@ -184,7 +185,7 @@ protected:
             tensorsConfig.blens.rbegin(), tensorsConfig.blens.rend(), [](int i) { return i != 1; });
         auto d = std::distance(tensorsConfig.blens.begin(), first_not_one.base());
 
-        num_wg = first_not_one != tensorsConfig.blens.rend()
+        num_wg      = first_not_one != tensorsConfig.blens.rend()
                           ? static_cast<int>(*first_not_one == 0 ? 1 : *first_not_one)
                           : 1;
         work_per_wg = std::accumulate(tensorsConfig.aclens.begin() + d,
@@ -209,7 +210,9 @@ protected:
         }
 
         // quick fix for btensor = <1,1,1,1>
-        if (1 == std::accumulate(tensorsConfig.blens.begin(), tensorsConfig.blens.end(), 1, std::multiplies<int>()))
+        if(1 ==
+           std::accumulate(
+               tensorsConfig.blens.begin(), tensorsConfig.blens.end(), 1, std::multiplies<int>()))
         {
             bitmap = 4;
         }
@@ -218,8 +221,8 @@ protected:
         // for fwd-bias, bitmap looks like <0, 1, 0, 0>
         // Is the no. of work-groups and the work for each wg balanced?
         auto fwd_conv_bias = bitmap == (1 << 2) ? 1 : 0;
-        auto dims = tensorsConfig.aclens.size();
-        auto c_n = tensorsConfig.aclens[0];
+        auto dims          = tensorsConfig.aclens.size();
+        auto c_n           = tensorsConfig.aclens[0];
         // This block gives off indexing for 5d tensors, skipping
         if(fwd_conv_bias == 1 && dims < 5 && num_wg < 640 && work_per_wg > 256 && c_n > 0)
         { // 640 workgroups of size 256 needed to completely fill the GPU
@@ -228,7 +231,8 @@ protected:
             incr_wg = 1;
         }
 
-        if (num_wg > max_num_wg) num_wg = max_num_wg;
+        if(num_wg > max_num_wg)
+            num_wg = max_num_wg;
 
         size_t local_threads = 256;
 
@@ -243,9 +247,10 @@ protected:
             local_threads = 64;
         }
 
-        //size_t global_threads = num_wg * local_threads;
-        // Special case for adding tensors in place
-        size_t global_threads = (static_cast<int>(leading_ones) == 1 && (d - 1) == 3) ? num_wg : num_wg * local_threads;
+        // size_t global_threads = num_wg * local_threads;
+        //  Special case for adding tensors in place
+        size_t global_threads =
+            (static_cast<int>(leading_ones) == 1 && (d - 1) == 3) ? num_wg : num_wg * local_threads;
         global_threads = (global_threads < local_threads) ? local_threads : global_threads;
 
         vld = {local_threads, 1, 1};
@@ -266,7 +271,7 @@ protected:
         params += " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::OpenCL{});
         params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_FWD_BIAS_GENERIC";
 
-        std::string program_name = "MIOpenTensorKernels.cl";
+        std::string program_name       = "MIOpenTensorKernels.cl";
         std::string network_config_ocl = network_config + "-ocl";
 
         handle.AddKernel("OpTensorFwdBiasGeneric",
@@ -275,24 +280,24 @@ protected:
                          "OpTensorFwdBiasGeneric",
                          vld,
                          vgd,
-                         params)(tensA_dev.get(), //a
-                                 tensorsConfig.acstrides[0], //a_nstride
-                                 tensorsConfig.acstrides[1], //a_cstride
-                                 tensorsConfig.acstrides[2], //a_hstride
-                                 tensB_dev.get(), //b
-                                 tensorsConfig.blens[1], //b_c
-                                 tensorsConfig.bstrides[1], //b_cstride
-                                 tensC_dev.get(), //c
-                                 tensorsConfig.aclens[0], //c_n
-                                 tensorsConfig.acstrides[0], //c_nstride
-                                 tensorsConfig.acstrides[1], //c_cstride
+                         params)(tensA_dev.get(),            // a
+                                 tensorsConfig.acstrides[0], // a_nstride
+                                 tensorsConfig.acstrides[1], // a_cstride
+                                 tensorsConfig.acstrides[2], // a_hstride
+                                 tensB_dev.get(),            // b
+                                 tensorsConfig.blens[1],     // b_c
+                                 tensorsConfig.bstrides[1],  // b_cstride
+                                 tensC_dev.get(),            // c
+                                 tensorsConfig.aclens[0],    // c_n
+                                 tensorsConfig.acstrides[0], // c_nstride
+                                 tensorsConfig.acstrides[1], // c_cstride
                                  work_per_wg,
                                  alpha0,
                                  alpha1,
                                  beta,
-                                 uint64_t(0), //Aoffset
-                                 uint64_t(0), //Boffset
-                                 uint64_t(0), //Coffset
+                                 uint64_t(0), // Aoffset
+                                 uint64_t(0), // Boffset
+                                 uint64_t(0), // Coffset
                                  num_wg,
                                  incr_wg);
 
@@ -328,14 +333,14 @@ protected:
     void runHIP() // run HIP kernel
     {
         auto&& handle = get_handle();
-        tensC_dev = handle.Write(tensC.data);
+        tensC_dev     = handle.Write(tensC.data);
 
         params = " -DMIOPEN_TYPE=" + miopen::GetDataType(data_type) +
                  " -DMAX_NUM_WG=" + std::to_string(max_num_wg);
         params += " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::HIP{});
         params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_FWD_BIAS_GENERIC";
 
-        std::string program_name = "MIOpenTensorKernelsHip.cpp";
+        std::string program_name       = "MIOpenTensorKernelsHip.cpp";
         std::string network_config_hip = network_config + "-hip";
 
         handle.AddKernel("OpTensorFwdBiasGeneric",
@@ -344,24 +349,24 @@ protected:
                          "OpTensorFwdBiasGeneric",
                          vld,
                          vgd,
-                         params)(tensA_dev.get(), //a
-                                 tensorsConfig.acstrides[0], //a_nstride
-                                 tensorsConfig.acstrides[1], //a_cstride
-                                 tensorsConfig.acstrides[2], //a_hstride
-                                 tensB_dev.get(), //b
-                                 tensorsConfig.blens[1], //b_c
-                                 tensorsConfig.bstrides[1], //b_cstride
-                                 tensC_dev.get(), //c
-                                 tensorsConfig.aclens[0], //c_n
-                                 tensorsConfig.acstrides[0], //c_nstride
-                                 tensorsConfig.acstrides[1], //c_cstride
+                         params)(tensA_dev.get(),            // a
+                                 tensorsConfig.acstrides[0], // a_nstride
+                                 tensorsConfig.acstrides[1], // a_cstride
+                                 tensorsConfig.acstrides[2], // a_hstride
+                                 tensB_dev.get(),            // b
+                                 tensorsConfig.blens[1],     // b_c
+                                 tensorsConfig.bstrides[1],  // b_cstride
+                                 tensC_dev.get(),            // c
+                                 tensorsConfig.aclens[0],    // c_n
+                                 tensorsConfig.acstrides[0], // c_nstride
+                                 tensorsConfig.acstrides[1], // c_cstride
                                  work_per_wg,
                                  alpha0,
                                  alpha1,
                                  beta,
-                                 uint64_t(0), //Aoffset
-                                 uint64_t(0), //Boffset
-                                 uint64_t(0), //Coffset
+                                 uint64_t(0), // Aoffset
+                                 uint64_t(0), // Boffset
+                                 uint64_t(0), // Coffset
                                  num_wg,
                                  incr_wg);
 
@@ -433,7 +438,7 @@ protected:
     std::vector<size_t> vld, vgd;
     int work_per_wg, num_wg;
     const int max_num_wg = 4096;
-    int incr_wg = 0;
+    int incr_wg          = 0;
 
     tensor<T> tensA;
     tensor<T> tensB;
@@ -455,23 +460,23 @@ protected:
 #endif
 };
 
-//#define CHECK_HALF
+// #define CHECK_HALF
 #define CHECK_FLOAT
-//#define CHECK_DOUBLE
+// #define CHECK_DOUBLE
 
 #ifdef CHECK_HALF
 using GPU_OpTensorFwdBiasGenericTest = OpTensorFwdBiasGenericTest<half_float::half>;
-static auto tensorsConfigs = TensorsConfigs<half_float::half>();
+static auto tensorsConfigs           = TensorsConfigs<half_float::half>();
 #endif
 
 #ifdef CHECK_FLOAT
 using GPU_OpTensorFwdBiasGenericTest = OpTensorFwdBiasGenericTest<float>;
-static auto tensorsConfigs = TensorsConfigs<float>();
+static auto tensorsConfigs           = TensorsConfigs<float>();
 #endif
 
 #ifdef CHECK_DOUBLE
 using GPU_OpTensorFwdBiasGenericTest = OpTensorFwdBiasGenericTest<double>;
-static auto tensorsConfigs = TensorsConfigs<double>();
+static auto tensorsConfigs           = TensorsConfigs<double>();
 #endif
 
 TEST_P(GPU_OpTensorFwdBiasGenericTest, PortTest)

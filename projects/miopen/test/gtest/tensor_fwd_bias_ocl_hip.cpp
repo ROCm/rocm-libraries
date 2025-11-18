@@ -163,7 +163,8 @@ std::vector<TensorsConfig> TensorsConfigs()
                                             // limit
                                             if(totalSize <= maxTotalSize)
                                             {
-                                                insertTestCase((N + dn), (C + dc), (H + dh), (W + dw));
+                                                insertTestCase(
+                                                    (N + dn), (C + dc), (H + dh), (W + dw));
                                             }
                                         }
                                     }
@@ -191,7 +192,7 @@ std::vector<TensorsConfig> TensorsConfigs()
         C = 32;
         H = 64;
         W = 16;
-        //insertTestCase(N, C, H, W);
+        // insertTestCase(N, C, H, W);
         return configs;
     }
 }
@@ -203,7 +204,7 @@ struct OpTensorFwdBiasTest
 protected:
     void SetUp() override
     {
-        auto&& handle = get_handle();
+        auto&& handle                                 = get_handle();
         std::tie(tensorsConfig, alpha0, alpha1, beta) = GetParam();
 
         data_type = miopen_type<T>{};
@@ -229,7 +230,7 @@ protected:
             tensorsConfig.blens.rbegin(), tensorsConfig.blens.rend(), [](int i) { return i != 1; });
         auto d = std::distance(tensorsConfig.blens.begin(), first_not_one.base());
 
-        num_wg = first_not_one != tensorsConfig.blens.rend()
+        num_wg      = first_not_one != tensorsConfig.blens.rend()
                           ? static_cast<int>(*first_not_one == 0 ? 1 : *first_not_one)
                           : 1;
         work_per_wg = std::accumulate(tensorsConfig.aclens.begin() + d,
@@ -249,11 +250,12 @@ protected:
             }
         }
 
-        if (num_wg > max_num_wg) num_wg = max_num_wg;
+        if(num_wg > max_num_wg)
+            num_wg = max_num_wg;
 
-        size_t local_threads = 256;
+        size_t local_threads  = 256;
         size_t global_threads = num_wg * local_threads;
-        global_threads = (global_threads < local_threads) ? local_threads : global_threads;
+        global_threads        = (global_threads < local_threads) ? local_threads : global_threads;
 
         vld = {local_threads, 1, 1};
         vgd = {global_threads, 1, 1};
@@ -273,7 +275,7 @@ protected:
         params += " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::OpenCL{});
         params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_FWD_BIAS";
 
-        std::string program_name = "MIOpenTensorKernels.cl";
+        std::string program_name       = "MIOpenTensorKernels.cl";
         std::string network_config_ocl = network_config + "-ocl";
 
         handle.AddKernel("OpTensorFwdBias",
@@ -284,23 +286,23 @@ protected:
                          vgd,
                          params)(tensA_dev.get(),
                                  tensB_dev.get(),
-                                 static_cast<int>(tensorsConfig.blens[1]), //b_c
+                                 static_cast<int>(tensorsConfig.blens[1]), // b_c
                                  tensC_dev.get(),
-                                 static_cast<int>(tensorsConfig.aclens[0]), //c_n
-                                 static_cast<int>(tensorsConfig.acstrides[0]), //c_nstride
-                                 static_cast<int>(tensorsConfig.acstrides[1]), //c_cstride
+                                 static_cast<int>(tensorsConfig.aclens[0]),    // c_n
+                                 static_cast<int>(tensorsConfig.acstrides[0]), // c_nstride
+                                 static_cast<int>(tensorsConfig.acstrides[1]), // c_cstride
                                  work_per_wg,
                                  alpha0,
                                  alpha1,
                                  beta,
-                                 static_cast<int64_t>(0), //Aoffset
-                                 static_cast<int64_t>(0), //Boffset
-                                 static_cast<int64_t>(0), //Coffset
+                                 static_cast<int64_t>(0), // Aoffset
+                                 static_cast<int64_t>(0), // Boffset
+                                 static_cast<int64_t>(0), // Coffset
                                  num_wg,
                                  incr_wg);
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
-std::cout << "tensC_ocl=" << tensC_ocl.data[0] << std::endl;
+        std::cout << "tensC_ocl=" << tensC_ocl.data[0] << std::endl;
 
         if constexpr(PERF_ENABLE)
         {
@@ -330,14 +332,14 @@ std::cout << "tensC_ocl=" << tensC_ocl.data[0] << std::endl;
     void runHIP()
     {
         auto&& handle = get_handle();
-        tensC_dev = handle.Write(tensC.data);
+        tensC_dev     = handle.Write(tensC.data);
 
         params = " -DMIOPEN_TYPE=" + miopen::GetDataType(data_type) +
                  " -DMAX_NUM_WG=" + std::to_string(max_num_wg);
         params += " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::HIP{});
         params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_FWD_BIAS";
 
-        std::string program_name = "MIOpenTensorKernelsHip.cpp";
+        std::string program_name       = "MIOpenTensorKernelsHip.cpp";
         std::string network_config_hip = network_config + "-hip";
 
         handle.AddKernel("OpTensorFwdBias",
@@ -348,23 +350,23 @@ std::cout << "tensC_ocl=" << tensC_ocl.data[0] << std::endl;
                          vgd,
                          params)(tensA_dev.get(),
                                  tensB_dev.get(),
-                                 static_cast<int>(tensorsConfig.blens[1]), //b_c
+                                 static_cast<int>(tensorsConfig.blens[1]), // b_c
                                  tensC_dev.get(),
-                                 static_cast<int>(tensorsConfig.aclens[0]), //c_n
-                                 static_cast<int>(tensorsConfig.acstrides[0]), //c_nstride
-                                 static_cast<int>(tensorsConfig.acstrides[1]), //c_cstride
+                                 static_cast<int>(tensorsConfig.aclens[0]),    // c_n
+                                 static_cast<int>(tensorsConfig.acstrides[0]), // c_nstride
+                                 static_cast<int>(tensorsConfig.acstrides[1]), // c_cstride
                                  work_per_wg,
                                  alpha0,
                                  alpha1,
                                  beta,
-                                 static_cast<int64_t>(0), //Aoffset
-                                 static_cast<int64_t>(0), //Boffset
-                                 static_cast<int64_t>(0), //Coffset
+                                 static_cast<int64_t>(0), // Aoffset
+                                 static_cast<int64_t>(0), // Boffset
+                                 static_cast<int64_t>(0), // Coffset
                                  num_wg,
                                  incr_wg);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
-std::cout << "tensC_hip=" << tensC_hip.data[0] << std::endl;
+        std::cout << "tensC_hip=" << tensC_hip.data[0] << std::endl;
 
         if constexpr(PERF_ENABLE)
         {
@@ -431,7 +433,7 @@ std::cout << "tensC_hip=" << tensC_hip.data[0] << std::endl;
     int work_per_wg;
     int num_wg;
     int max_num_wg = 4096;
-    int incr_wg = 0;
+    int incr_wg    = 0;
 
     tensor<T> tensA;
     tensor<T> tensB;
