@@ -82,37 +82,51 @@ std::vector<TensorsConfig> TensorsConfigs()
     };
 
 #if PERF_ENABLE
-    const auto& handle     = get_handle();
-    std::string deviceName = handle.GetDeviceName();
+        const auto& handle           = get_handle();
+        const std::string deviceName = handle.GetDeviceName();
 
-    size_t maxTotalSize;
-    // Generate all NCHW tensors that are limited by L3 cache size
-    // or 2xL2 cache size when L3 is not available
-    if(miopen::StartsWith(deviceName, "gfx90a") || miopen::StartsWith(deviceName, "gfx908"))
-    {
-        maxTotalSize = 16; // twice the 8MB L2
-    }
-    else if(miopen::StartsWith(deviceName, "gfx803"))
-    {
-        maxTotalSize = 4; // twice the 2MB L2
-    }
-    else if(miopen::StartsWith(deviceName, "gfx900") || miopen::StartsWith(deviceName, "gfx906"))
-    {
-        maxTotalSize = 8; // twice the 4MB L2
-    }
-    else if(miopen::StartsWith(deviceName, "gfx942"))
-    {
-        maxTotalSize = 256; // 256MB L3
-    }
-    else if(miopen::StartsWith(deviceName, "gfx103"))
-    {
-        maxTotalSize = 128; // 128MB L3
-    }
-    else
-    {
-        maxTotalSize = 4; // twice the 2MB L2, default case.
-    }
-    maxTotalSize = maxTotalSize * 1024ull * 1024ull / sizeof(T);
+        // Determine a cache-aware cap on total tensor elements for HIP/AMD:
+        // 1) Query L2 size via HIP and use 2x L2 as working set
+        // 2) Fallback to per-architecture table (MiB) if L2 is not reported
+        size_t maxTotalSizeBytes = 0;
+
+        // 1) HIP L2 cache query
+        int dev = -1;
+        if(hipSuccess == hipGetDevice(&dev))
+        {
+            int l2_bytes = 0;
+            if(hipSuccess ==
+                   hipDeviceGetAttribute(&l2_bytes, hipDeviceAttributeL2CacheSize, dev) &&
+               l2_bytes > 0)
+            {
+                // Use 2x L2 as a working-set heuristic
+                maxTotalSizeBytes = static_cast<size_t>(2) * static_cast<size_t>(l2_bytes);
+            }
+        }
+
+        // 2) Fallback table by architecture family (MiB)
+        if(maxTotalSizeBytes == 0)
+        {
+            size_t mb = 0;
+            if(miopen::StartsWith(deviceName, "gfx90a") || miopen::StartsWith(deviceName, "gfx908"))
+                mb = 16; // twice the 8MB L2
+            else if(miopen::StartsWith(deviceName, "gfx803"))
+                mb = 4; // twice the 2MB L2
+            else if(miopen::StartsWith(deviceName, "gfx900") ||
+                    miopen::StartsWith(deviceName, "gfx906"))
+                mb = 8; // twice the 4MB L2
+            else if(miopen::StartsWith(deviceName, "gfx942"))
+                mb = 256; // 256MB L3
+            else if(miopen::StartsWith(deviceName, "gfx103"))
+                mb = 128; // 128MB L3
+            else
+                mb = 4; // default: twice the 2MB L2
+
+            maxTotalSizeBytes = mb * 1024ull * 1024ull;
+        }
+
+        // Convert bytes -> elements of type T
+        size_t maxTotalSize = maxTotalSizeBytes / sizeof(T);
 
     for(int N = 1; N < maxTotalSize; N *= 4)
     {
