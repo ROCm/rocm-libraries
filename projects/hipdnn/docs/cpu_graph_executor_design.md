@@ -302,7 +302,6 @@ case NodeAttributes::MyOperationAttributes:
 2. **Validation**: Implement thorough validation in `isApplicable()`
 3. **Error Handling**: Provide clear error messages for unsupported configurations
 4. **Testing**: Create comprehensive unit tests for new operations
-5. **Documentation**: Document tensor requirements and operation semantics
 
 ## Performance & Usage Considerations
 
