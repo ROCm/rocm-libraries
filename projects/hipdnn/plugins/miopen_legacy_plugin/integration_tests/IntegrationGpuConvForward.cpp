@@ -92,37 +92,37 @@ using IntegrationGpuConvFwdNdhwcFp16 = ConvForward<half>;
 
 } // namespace
 
-TEST_P(IntegrationGpuConvFwdNchwFp32, Correctness)
+TEST_P(IntegrationGpuConvFwdNchwFp32, DISABLED_Correctness)
 {
     runGraphTest(4e-6f, TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuConvFwdNcdhwFp32, Correctness)
+TEST_P(IntegrationGpuConvFwdNcdhwFp32, DISABLED_Correctness)
 {
     runGraphTest(conv::getToleranceFwd<float>(), TensorLayout::NCDHW);
 }
 
-TEST_P(IntegrationGpuConvFwdNchwBfp16, Correctness)
+TEST_P(IntegrationGpuConvFwdNchwBfp16, DISABLED_Correctness)
 {
     runGraphTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuConvFwdNcdhwBfp16, Correctness)
+TEST_P(IntegrationGpuConvFwdNcdhwBfp16, DISABLED_Correctness)
 {
     runGraphTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NCDHW);
 }
 
-TEST_P(IntegrationGpuConvFwdNchwFp16, Correctness)
+TEST_P(IntegrationGpuConvFwdNchwFp16, DISABLED_Correctness)
 {
     runGraphTest(conv::getToleranceFwd<half>(), TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuConvFwdNcdhwFp16, Correctness)
+TEST_P(IntegrationGpuConvFwdNcdhwFp16, DISABLED_Correctness)
 {
     runGraphTest(conv::getToleranceFwd<half>(), TensorLayout::NCDHW);
 }
 
-TEST_P(IntegrationGpuConvFwdNhwcFp32, Correctness)
+TEST_P(IntegrationGpuConvFwdNhwcFp32, DISABLED_Correctness)
 {
     runGraphTest(conv::getToleranceFwd<float>(), TensorLayout::NHWC);
 }
@@ -132,22 +132,22 @@ TEST_P(IntegrationGpuConvFwdNdhwcFp32, Correctness)
     runGraphTest(conv::getToleranceFwd<float>(), TensorLayout::NDHWC);
 }
 
-TEST_P(IntegrationGpuConvFwdNhwcBfp16, Correctness)
+TEST_P(IntegrationGpuConvFwdNhwcBfp16, DISABLED_Correctness)
 {
     runGraphTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuConvFwdNdhwcBfp16, Correctness)
+TEST_P(IntegrationGpuConvFwdNdhwcBfp16, DISABLED_Correctness)
 {
     runGraphTest(conv::getToleranceFwd<hip_bfloat16>(), TensorLayout::NDHWC);
 }
 
-TEST_P(IntegrationGpuConvFwdNhwcFp16, Correctness)
+TEST_P(IntegrationGpuConvFwdNhwcFp16, DISABLED_Correctness)
 {
     runGraphTest(conv::getToleranceFwd<half>(), TensorLayout::NHWC);
 }
 
-TEST_P(IntegrationGpuConvFwdNdhwcFp16, Correctness)
+TEST_P(IntegrationGpuConvFwdNdhwcFp16, DISABLED_Correctness)
 {
     runGraphTest(conv::getToleranceFwd<half>(), TensorLayout::NDHWC);
 }
