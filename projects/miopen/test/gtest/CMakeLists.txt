@@ -109,6 +109,10 @@ function(add_gtest TEST_NAME TEST_CPP)
         add_gtest_negative_filter("*GPU*")
     endif()
 
+    if(MIOPEN_TEST_HALF AND NOT (MIOPEN_TEST_BFLOAT16))
+        add_gtest_negative_filter("*BFP16*")
+    endif()
+
     # NONE datatype is explicitly enabled for all the state, all the NONE tests take 4 seconds to complete.
     set(MIOPEN_GTEST_FILTER "${MIOPEN_GTEST_PREFIX}*${MIOPEN_GTEST_SUFFIX}*:${MIOPEN_GTEST_PREFIX}*NONE*${MIOPEN_GTEST_FILTER_NEGATIVE}")
 
