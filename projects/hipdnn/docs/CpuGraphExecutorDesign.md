@@ -10,6 +10,7 @@
 7. [Execution Flow](#execution-flow)
 8. [Supported Operations](#supported-operations)
 9. [Extension Guidelines](#extension-guidelines)
+10. [Performance & Usage Considerations](#performance--usage-considerations)
 
 ## Executive Summary
 
@@ -213,6 +214,20 @@ Add case to `buildSignatureKey()` method in `CpuReferenceGraphExecutor`:
 ```cpp
 case NodeAttributes::MyOperationAttributes:
     return MyOperationSignatureKey(node, tensorMap);
+```
+
+### Adding a New Data Type for an Existing Operation
+Find the existing signature key for the operation and add a new plan builder mapping in `getPlanBuilders()`.
+```cpp
+static std::unordered_map<MyOperationSignatureKey,
+                          std::unique_ptr<IGraphNodePlanBuilder>,
+                          MyOperationSignatureKey>
+        getPlanBuilders()
+{
+    //existing mappings...
+    addPlanBuilder<DataType::NewType>(map);
+    return map;
+}
 ```
 
 ### Best Practices
