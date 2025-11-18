@@ -109,7 +109,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
 
-        test_utilities::CpuFpReferenceConvolutionImpl<InputType, float>::convFwdInference(
+        test_utilities::CpuFpReferenceConvolution::fprop(
             xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
         auto tolerance = test_utilities::conv::getToleranceFwd<InputType>();
@@ -131,12 +131,13 @@ int main(int argc, char* argv[])
 
     initializeFrontendLogging();
 
+    auto backend = hipdnnBackend();
     hipdnnHandle_t handle;
-    HIPDNN_CHECK(hipdnnCreate(&handle));
+    HIPDNN_CHECK(backend->create(&handle));
 
     run(SampleRunner{handle, config});
 
-    HIPDNN_CHECK(hipdnnDestroy(handle));
+    HIPDNN_CHECK(backend->destroy(handle));
     std::cout << "All convolution fprop runs completed.\n";
     return 0;
 }

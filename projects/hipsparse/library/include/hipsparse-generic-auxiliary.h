@@ -346,6 +346,52 @@ hipsparseStatus_t hipsparseCreateConstBlockedEll(hipsparseConstSpMatDescr_t* spM
 #endif
 
 /*! \ingroup generic_module
+*  \brief Create a sparse Sliced ELL matrix descriptor
+*  \details
+*  \p hipsparseCreateSlicedEll creates a sparse Sliced ELL matrix descriptor. It should be
+*  destroyed at the end using \p hipsparseDestroySpMat.
+*/
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12011)
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseCreateSlicedEll(hipsparseSpMatDescr_t* spMatDescr,
+                                           int64_t                rows,
+                                           int64_t                cols,
+                                           int64_t                nnz,
+                                           int64_t                sellValuesSize,
+                                           int64_t                sliceSize,
+                                           void*                  sellSliceOffsets,
+                                           void*                  sellColInd,
+                                           void*                  sellValues,
+                                           hipsparseIndexType_t   sellSliceOffsetsType,
+                                           hipsparseIndexType_t   sellColIndType,
+                                           hipsparseIndexBase_t   idxBase,
+                                           hipDataType            valueType);
+#endif
+
+/*! \ingroup generic_module
+*  \brief Create a sparse Sliced ELL matrix descriptor
+*  \details
+*  \p hipsparseCreateConstSlicedEll creates a sparse Sliced ELL matrix descriptor. It should be
+*  destroyed at the end using \p hipsparseDestroySpMat.
+*/
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12011)
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMatDescr,
+                                                int64_t                     rows,
+                                                int64_t                     cols,
+                                                int64_t                     nnz,
+                                                int64_t                     sellValuesSize,
+                                                int64_t                     sliceSize,
+                                                const void*                 sellSliceOffsets,
+                                                const void*                 sellColInd,
+                                                const void*                 sellValues,
+                                                hipsparseIndexType_t        sellSliceOffsetsType,
+                                                hipsparseIndexType_t        sellColIndType,
+                                                hipsparseIndexBase_t        idxBase,
+                                                hipDataType                 valueType);
+#endif
+
+/*! \ingroup generic_module
 *  \brief Destroy a sparse matrix descriptor
 *  \details
 *  \p hipsparseDestroySpMat destroys a sparse matrix descriptor and releases all

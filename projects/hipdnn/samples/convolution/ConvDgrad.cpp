@@ -114,7 +114,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         utilities::Tensor<InputType> dxRefTensor(dxAttr->get_dim(), layout);
 
-        test_utilities::CpuFpReferenceConvolutionImpl<InputType, float>::convBwdData(
+        test_utilities::CpuFpReferenceConvolution::dgrad(
             dxRefTensor, wTensor, dyTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
         auto tolerance = test_utilities::conv::getToleranceBwd<InputType>();
@@ -137,12 +137,13 @@ int main(int argc, char* argv[])
 
     initializeFrontendLogging();
 
+    auto backend = hipdnnBackend();
     hipdnnHandle_t handle;
-    HIPDNN_CHECK(hipdnnCreate(&handle));
+    HIPDNN_CHECK(backend->create(&handle));
 
     run(SampleRunner{handle, config});
 
-    HIPDNN_CHECK(hipdnnDestroy(handle));
+    HIPDNN_CHECK(backend->destroy(handle));
     std::cout << "All convolution backward data runs completed.\n";
     return 0;
 }

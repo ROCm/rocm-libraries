@@ -10,6 +10,7 @@ add_executable(
     miopen_legacy_plugin_tests
     engines/plans/TestMiopenBatchnormBwdPlan.cpp
     engines/plans/TestMiopenBatchnormFwdInferencePlan.cpp
+    engines/plans/TestMiopenBatchnormFwdTrainingPlan.cpp
     engines/plans/TestMiopenBatchnormPlanBuilder.cpp
     engines/plans/TestMiopenConvFwdBiasActivPlan.cpp
     engines/plans/TestMiopenConvFwdBiasActivPlanBuilder.cpp
@@ -20,11 +21,7 @@ add_executable(
     engines/TestMiopenEngine.cpp
     main.cpp
     TestMiopenActivationDescriptor.cpp
-    TestMiopenBatchnormFwdInferenceOperations.cpp
-    TestMiopenBatchnormBwdOperations.cpp
-    TestMiopenBatchnormBwdActFusionOperations.cpp
     TestMiopenConvFwdBiasActivOperations.cpp
-    TestMiopenConvFwdOperations.cpp
     TestMiopenConvDescriptor.cpp
     TestMiopenEngineManager.cpp
     TestMiopenHandleFactory.cpp
@@ -41,15 +38,13 @@ target_compile_definitions(
     miopen_legacy_plugin_tests PRIVATE COMPONENT_NAME="miopen_legacy_plugin_tests"
 )
 
-target_link_libraries(
-    miopen_legacy_plugin_tests
-    PUBLIC GTest::gtest
-           GTest::gmock
-           hip::host
-           miopen_legacy_plugin
-           miopen_legacy_plugin_private
-           hipdnn_sdk
-           Threads::Threads
+target_link_libraries(miopen_legacy_plugin_tests PUBLIC 
+    GTest::gtest
+    GTest::gmock
+    hip::host
+    miopen_legacy_plugin_private
+    hipdnn_sdk
+    Threads::Threads
 )
 
 # make it so tests inside folders can find the mocks folder without having to use a relative path.

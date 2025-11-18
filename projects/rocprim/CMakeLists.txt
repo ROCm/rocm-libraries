@@ -189,7 +189,7 @@ if(BUILD_CODE_COVERAGE)
 endif()
 
 # Setup VERSION
-set(VERSION_STRING "4.1.0")
+set(VERSION_STRING "4.2.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocprim_VERSION_NUMBER "${rocprim_VERSION_MAJOR} * 100000 + ${rocprim_VERSION_MINOR} * 100 + ${rocprim_VERSION_PATCH}")
 
