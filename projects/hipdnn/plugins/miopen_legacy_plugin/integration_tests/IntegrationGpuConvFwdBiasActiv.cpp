@@ -204,8 +204,7 @@ TEST_P(IntegrationGpuConvFwdBiasActivNdhwcFp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuConvFwdBiasActivNchwFp32,
-                         // Dilation test cases are skipped, as fusions with dilation other than 1 are not supported by MIOpen
-                         testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases4D(/*false*/)),
+                         testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases4D()),
                                           testing::Bool(),
                                           testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
 
