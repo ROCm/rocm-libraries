@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,18 +26,18 @@
 
 #pragma once
 
+#include <cstddef>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 #include <rocRoller/Serialization/Base.hpp>
 #include <rocRoller/Serialization/Containers.hpp>
 #include <rocRoller/Serialization/HasTraits.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 #include <amd_comgr/amd_comgr.h>
-
-#include <cstddef>
-#include <sstream>
-#include <string>
-#include <unordered_map>
-#include <vector>
 
 namespace rocRoller
 {
