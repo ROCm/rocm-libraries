@@ -32,22 +32,11 @@ The CPU Graph Executor follows a modular architecture pattern with clear separat
 
 ### Core Interfaces
 
-```
-    ┌────────────────────────┐
-    │ IGraphNodePlanBuilder  │
-    └───────────┬────────────┘
-                │ builds
-                v
-    ┌────────────────────────┐
-    │ IGraphNodePlanExecutor │
-    └────────────────────────┘
-```
-
 #### IGraphNodePlanBuilder
 - **Purpose**: Interface for creating execution plans for graph nodes
 - **Methods**:
   - `isApplicable()`: Checks if builder can handle a specific node
-  - `buildNodePlan()`: Creates an execution plan for the node
+  - `buildNodePlan()`: Creates an IGraphNodePlanExecutor for the node
 
 #### IGraphNodePlanExecutor
 - **Purpose**: Interface for executing plans with tensor data. Each plan executor is specialized for a specific operation and data type combination.
@@ -56,32 +45,26 @@ The CPU Graph Executor follows a modular architecture pattern with clear separat
 
 ### Main Components
 
-```
-┌───────────────────────────────────────────────────────────┐
-│              CpuReferenceGraphExecutor                    │
-├───────────────────────────────────────────────────────────┤
-│ - _planRegistry: PlanBuilderRegistry                      │
-├───────────────────────────────────────────────────────────┤
-│ + execute(graphBuffer, size, variantPack)                 │
-│ - buildPlanForNode(graph, node)                           │
-│ - buildSignatureKey(node, tensorMap, computeType)         │
-│ - populateVariantPackWithMissingVirtualTensors(...)       │
-└───────────────────────────────────────────────────────────┘
-                           │
-                           │ uses
-                           v
-┌───────────────────────────────────────────────────────────┐
-│              PlanBuilderRegistry                          │
-├───────────────────────────────────────────────────────────┤
-│ - _registry: PlanRegistryMap                              │
-│ - _initialized: bool                                      │
-├───────────────────────────────────────────────────────────┤
-│ + getPlanBuilder(key): IGraphNodePlanBuilder&             │
-│ - initializeRegistry()                                    │
-│ - initializePlanBuilders()                                │
-│ - registerBuilder<T>()                                    │
-└───────────────────────────────────────────────────────────┘
-```
+#### CpuReferenceGraphExecutor
+- **Purpose**: Main orchestrator for executing computational graphs on CPU
+- **Members**:
+    - `_planRegistry`: Registry for looking up plan builders
+- **Methods**:
+    - `execute()`: Executes a graph from serialized buffer with tensor data
+    - `buildPlanForNode()`: Creates execution plan for a single graph node
+    - `buildSignatureKey()`: Generates signature key from node attributes
+    - `populateVariantPackWithMissingVirtualTensors()`: Allocates temporary tensors
+
+#### PlanBuilderRegistry
+- **Purpose**: Central registry mapping signature keys to plan builders
+- **Members**:
+    - `_registry`: Map of signature keys to plan builders
+    - `_initialized`: Lazy initialization flag
+- **Methods**:
+    - `getPlanBuilder()`: Retrieves appropriate builder for a signature key
+    - `initializeRegistry()`: Performs one-time registry setup
+    - `initializePlanBuilders()`: Registers all supported operation builders
+    - `registerBuilder()`: Template method to register builder types
 
 ## Plan Builders
 
@@ -114,7 +97,8 @@ The Signature Key system provides unique identification for operation configurat
 │  - ConvolutionFwdSignatureKey                               │
 │  - ConvolutionBwdSignatureKey                               │
 │  - ConvolutionWrwSignatureKey                               │
-│  - PointwiseSignatureKey                                    │
+│  - PointwiseSignatureKey                                    |
+|  - ...                                                      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -126,66 +110,22 @@ Each signature key must implement:
 3. **Equality operator**: Compare keys
 4. **getPlanBuilders()**: Return map of supported builder types for this key
 
-### Signature Key Generation
-
-```
-Node Attributes + Tensor Types + Compute Type
-                    │
-                    v
-            ┌──────────────┐
-            │ Signature    │
-            │ Key Builder  │
-            └──────┬───────┘
-                   │
-                   v
-            Unique Key Hash
-                   │
-                   v
-            Registry Lookup
-```
-
 ## Registry Mechanism
 
-The registry provides a centralized mapping of signature keys to plan builders:
+The registry provides a centralized mapping of signature keys to plan builders.
 
 ```
-┌────────────────────────────────────────────────────┐
-│                 PlanBuilderRegistry                │
-├────────────────────────────────────────────────────┤
-│                                                    │
-│  ┌──────────────────────────────────────────────┐  │
-│  │         _registry (PlanRegistryMap)          │  │
-│  ├──────────────────────────────────────────────┤  │
-│  │  Key: PlanRegistrySignatureKey               │  │
-│  │  Value: unique_ptr<IGraphNodePlanBuilder>    │  │
-│  └──────────────────────────────────────────────┘  │
-│                                                    │
-│  Registration Process:                             │
-│  1. Initialize on first use (lazy initialization)  │
-│  2. Each operation type registers its builders     │
-│  3. Builders mapped to unique signature keys       │
-│                                                    │
-└────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│         _registry (PlanRegistryMap)          │
+├──────────────────────────────────────────────┤
+│  Key: PlanRegistrySignatureKey               │
+│  Value: unique_ptr<IGraphNodePlanBuilder>    │
+└──────────────────────────────────────────────┘
 ```
-
-### Registry Initialization Flow
-
-```
-First getPlanBuilder() call
-         │
-         v
-    Is initialized? ──No──> initializeRegistry()
-         │                           │
-        Yes                          v
-         │                   registerBuilder<T>()
-         │                   for each operation type
-         │                           │
-         v                           v
-    Lookup builder           Populate _registry
-         │                           │
-         v                           │
-    Return builder <─────────────────┘
-```
+Runtime Registration Process:
+1. The registry initializes on first access
+2. Each signature key defines its supported plan builders, these are queried and registered during initialization
+3. Builders are mapped to unique signature keys
 
 ## Execution Flow
 
