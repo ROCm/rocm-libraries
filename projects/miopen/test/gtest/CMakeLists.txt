@@ -109,7 +109,7 @@ function(add_gtest TEST_NAME TEST_CPP)
         add_gtest_negative_filter("*GPU*")
     endif()
 
-    if(MIOPEN_TEST_HALF AND NOT (MIOPEN_TEST_BFLOAT16))
+    if(MIOPEN_TEST_HALF AND NOT MIOPEN_TEST_BFLOAT16)
         add_gtest_negative_filter("*BFP16*")
     endif()
 
@@ -168,6 +168,10 @@ function(add_gtest TEST_NAME TEST_CPP)
         add_gtest_negative_filter("Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
         add_gtest_negative_filter("Smoke/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
         add_gtest_negative_filter("*SerialRun3D*") # These FP32 SerialRun3D tests use so much memory that they have a risk of timing out the machine during tests
+    endif()
+
+    if(MIOPEN_TEST_HALF AND NOT MIOPEN_TEST_BFLOAT16)
+        add_gtest_negative_filter("*BFP16*")
     endif()
 
     # when building the single gtest, add them in a sharded manner
