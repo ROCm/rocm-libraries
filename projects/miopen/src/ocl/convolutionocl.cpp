@@ -198,6 +198,7 @@ static Invoker PrepareInvoker(ExecutionContext ctx,
                               solver::Id solver_id)
 {
     problem.SetupFloats(ctx);
+    problem.SetupComputeType(ctx);
     ctx.do_search              = false;
     ctx.disable_search_enforce = true;
 
@@ -593,6 +594,7 @@ void ConvolutionDescriptor::FindConvFwdAlgorithm(const Handle& handle,
     const auto ctx = [&] {
         auto tmp = ExecutionContext{&handle};
         problem.SetupFloats(tmp);
+        problem.SetupComputeType(tmp);
         tmp.do_search = exhaustiveSearch;
         return tmp;
     }();
@@ -810,6 +812,8 @@ void ConvolutionDescriptor::ConvolutionForward(const Handle& handle,
     Scalar beta_val(beta, GetScalarDataType(yDesc));
     const auto problem = conv::ProblemDescription{
         xDesc, wDesc, yDesc, *this, conv::Direction::Forward, 0, alpha_val, beta_val};
+    auto ctx = ExecutionContext{&handle};
+    problem.SetupComputeType(ctx);
     ValidateAlphaBeta(problem);
 
     ConvForwardCheckNumerics(handle, tensors, [&]() {
@@ -1132,6 +1136,7 @@ void ConvolutionDescriptor::FindConvBwdDataAlgorithm(const Handle& handle,
     const auto ctx = [&] {
         auto tmp = ExecutionContext{&handle};
         problem.SetupFloats(tmp);
+        problem.SetupComputeType(tmp);
         tmp.do_search = exhaustiveSearch;
         return tmp;
     }();
@@ -1339,6 +1344,7 @@ void ConvolutionDescriptor::FindConvBwdWeightsAlgorithm(const Handle& handle,
     const auto ctx = [&] {
         auto tmp = ExecutionContext{&handle};
         problem.SetupFloats(tmp);
+        problem.SetupComputeType(tmp);
         tmp.do_search = exhaustiveSearch;
         return tmp;
     }();
@@ -1504,6 +1510,11 @@ void ConvolutionDescriptor::ConvolutionWrwImmediate(const Handle& handle,
     });
 }
 
+miopenMathType_t ConvolutionDescriptor::GetMathType() const
+{
+    return static_cast<miopenMathType_t>(this->attribute.Get(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE));
+}
+
 void ConvolutionBackwardBias(const Handle& handle,
                              const void* alpha,
                              const TensorDescriptor& dyDesc,
@@ -1597,6 +1608,20 @@ void ConvolutionBackwardBias(const Handle& handle,
     {
         miopen::checkNumericsOutput(handle, dbDesc, db);
     }
+}
+
+bool EnvEnableTF32()
+{
+    // disable TF32 by default temporarily until we fully complete this feature.
+    // so either one is set to true, we enable TF32
+    // TODO:(LYM) change back
+    bool bool_miopen = miopen::env::enabled(MIOPEN_TF32_OVERRIDE);
+    bool bool_nvidia = miopen::env::enabled(NVIDIA_TF32_OVERRIDE);
+    if(bool_miopen != bool_nvidia)
+        MIOPEN_LOG_I2("TF32_OVERRIDE is set to different values for MIOPEN_TF32_OVERRIDE ("
+                      << bool_miopen << ") and NVIDIA_TF32_OVERRIDE (" << bool_nvidia
+                      << "). TF32 will be treated as enabled."); // TODO:(LYM) back to disabled
+    return bool_miopen || bool_nvidia;                           // TODO:(LYM) back to disabled
 }
 
 } // namespace miopen

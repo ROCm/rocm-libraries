@@ -234,16 +234,15 @@ namespace rocRoller
          * Returns tag of new Assign node.
          */
         int addFixup(KernelGraph& graph,
-                     int          accumMacTileTag,
                      int          partialMacTileTag,
                      int          destMacTileTag,
                      DataType     dataType,
                      uint         numVGPRs)
         {
             auto lhsExpr = std::make_shared<Expression::Expression>(
-                Expression::DataFlowTag{accumMacTileTag, Register::Type::Vector, DataType::None});
+                Expression::DataFlowTag{destMacTileTag, Register::Type::Vector, dataType});
             auto rhsExpr = std::make_shared<Expression::Expression>(
-                Expression::DataFlowTag{partialMacTileTag, Register::Type::Vector, DataType::None});
+                Expression::DataFlowTag{partialMacTileTag, Register::Type::Vector, dataType});
 
             auto addExpr = lhsExpr + rhsExpr;
             auto fixupTag
@@ -292,8 +291,9 @@ namespace rocRoller
                                               VariableType                     varType,
                                               LoopInfo const&                  loopInfo,
                                               ArgumentInfo const&              argInfo,
-                                              CommandParametersPtr             params,
-                                              ContextPtr                       context)
+                                              int                  forReceiveTileLoopCoord,
+                                              CommandParametersPtr params,
+                                              ContextPtr           context)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
@@ -410,8 +410,8 @@ namespace rocRoller
 
             auto tileNumTag = graph.coordinates.addElement(
                 *graph.coordinates.get<MacroTileNumber>(nextTileNumTag)); // Copy existing
-
-            graph.coordinates.addElement(Split(), {nextTileNumTag}, {tileNumTag, plusOneTag});
+            graph.coordinates.addElement(
+                Split(), {nextTileNumTag}, {tileNumTag, plusOneTag, forReceiveTileLoopCoord});
 
             loadConnections.push_back(DC<MacroTile>(loadScratchTileTag));
             loadConnections.push_back(DC<User>(globalScratchTag));
@@ -511,30 +511,35 @@ namespace rocRoller
          * Create send-tile block, which is roughly:
          *
          *     WaitZero()
-         *     fullyAccumulatedTile = Assign(localPartiallyAccumulatedTile)
          *     if receiveTileExpr:
-         *       if WG + 1 < numScratch:
-         *         do:
-         *           LoadSGPR(flag)
-         *         while flag == 0
-         *         partiallyAccumulatedTile = LoadTiled()
-         *         fullyAccumulatedTile = Assign(fullyAccumulatedTile + partiallyAccumulatedTile)
-         *         WaitZero()
+         *       for (i = 0; i < numFixupsExpr; i++)
+         *          nextWG = WG + 1 + i
+         *          Assert nextWG < numScratch
+         *          do:
+         *          LoadSGPR(flag[nextWG])
+         *          while flag[nextWG] == 0
+         *          partiallyAccumulatedTile = LoadTiled()
+         *          fullyAccumulatedTile = Assign(localPartiallyAccumulatedTile)
+         *          fullyAccumulatedTile = Assign(fullyAccumulatedTile + partiallyAccumulatedTile)
+         *          localPartiallyAccumulatedTile = Assign(fullyAccumulatedTile)
+         *          WaitZero()
          *
          * Note this also update all subsequent references to
          * localPartiallyAccumulatedTile to fullyAccumulatedTile.
          */
         RecvInfo receiveTile(KernelGraph&                           graph,
                              ExpressionPtr                          receiveTileExpr,
+                             ExpressionPtr                          numFixupsExpr,
                              int                                    scratchTileTag,
                              std::vector<DeferredConnection> const& loadConnections,
                              int                                    flagsScratchTag,
                              int                                    accumulatorTileTag,
                              std::unordered_set<int> const&         usesAccumulatorTile,
                              DataType                               dataType,
-                             std::vector<int> const&                epilogueOperations,
                              LoopInfo const&                        loopInfo,
                              ArgumentInfo const&                    argInfo,
+                             int                                    forReceiveTileLoopOp,
+                             int                                    forReceiveTileLoopCoord,
                              CommandParametersPtr                   params,
                              ContextPtr                             context)
         {
@@ -558,7 +563,8 @@ namespace rocRoller
             graph.mapper.connect<Linear>(setPlusOneTag, plusOneTag);
 
             auto nextWorkgroupTag = graph.coordinates.addElement(Linear(nullptr, one));
-            graph.coordinates.addElement(Split(), {nextWorkgroupTag}, {workgroup, plusOneTag});
+            graph.coordinates.addElement(
+                Split(), {nextWorkgroupTag}, {workgroup, plusOneTag, forReceiveTileLoopCoord});
 
             // TODO: Improve setting of arch-specific buffer options
             BufferInstructionOptions bufOpts{.glc = true};
@@ -566,9 +572,10 @@ namespace rocRoller
             auto flagRegister = graph.coordinates.addElement(VGPR());
             auto loadFlagTag  = graph.control.addElement(LoadSGPR(DataType::UInt32, bufOpts));
 
-            auto numScratch     = argInfo.numWGs;
+            auto numScratch = argInfo.numWGs;
+
             auto boundsCheckTag = graph.control.addElement(
-                ConditionalOp{(DF(workgroup) + one < numScratch), "Bounds Check"});
+                AssertOp{"Bounds Check", (DF(nextWorkgroupTag) < numScratch)});
 
             graph.mapper.connect<User>(loadFlagTag, flagsScratchTag);
             graph.mapper.connect<VGPR>(loadFlagTag, flagRegister);
@@ -581,7 +588,6 @@ namespace rocRoller
             uint numRegisters    = accumulatorTile->elements()
                                 / (product(context->kernel()->workgroupSize()) * loopInfo.xLoopSize
                                    * loopInfo.yLoopSize);
-            auto fullyAccumulatedTileTag = graph.coordinates.addElement(MacroTile());
 
             // Read tile
             int loadAddForX = cloneForLoop(graph, loopInfo.xLoop);
@@ -603,41 +609,27 @@ namespace rocRoller
                 graph.coordinates.addElement(
                     PassThrough(), {jammedY}, {graph.mapper.get<ForLoop>(loadAddForY)});
 
-            auto fixupTag = addFixup(graph,
-                                     accumulatorTileTag,
-                                     scratchTileTag,
-                                     fullyAccumulatedTileTag,
-                                     dataType,
-                                     numRegisters);
+            // Assign accumulator tile to temporal vgpr tile
+            auto fullyAccumulatedTileTag  = graph.coordinates.addElement(MacroTile());
+            auto localAccumulatorTileExpr = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{accumulatorTileTag, Register::Type::Vector, dataType});
+            auto assignAccTileOp = graph.control.addElement(
+                Assign{Register::Type::Vector, localAccumulatorTileExpr, numRegisters});
+            graph.mapper.connect(assignAccTileOp, fullyAccumulatedTileTag, NaryArgument::DEST);
+            graph.control.addElement(Sequence(), {loadTileTag}, {assignAccTileOp});
 
-            graph.control.addElement(Sequence(), {loadTileTag}, {fixupTag});
+            // Fixup
+            auto fixupTag
+                = addFixup(graph, scratchTileTag, fullyAccumulatedTileTag, dataType, numRegisters);
+            graph.control.addElement(Sequence(), {assignAccTileOp}, {fixupTag});
 
-            // Attach epilogue operations after the fixup
-            auto epilogueYLoop = only(graph.control.findNodes(
-                epilogueOperations, makeFindLoopPredicate(graph, rocRoller::YLOOP)));
-            AssertFatal(epilogueYLoop, "Must have exactly one Y loop in the epilogue");
-            auto reindexer       = std::make_shared<GraphReindexer>();
-            auto newEpilogueBody = duplicateControlNodes(
-                graph,
-                reindexer,
-                graph.control.getOutputNodeIndices<Body>(*epilogueYLoop).to<std::vector>(),
-                [](int x) { return false; });
-
-            // Replace accumulatorTileTag with fullyAccumulatedTileTag in the epilogue
-            {
-                GraphReindexer expressionReindexer;
-                expressionReindexer.coordinates.emplace(accumulatorTileTag,
-                                                        fullyAccumulatedTileTag);
-                for(auto const& node : graph.control.depthFirstVisit(newEpilogueBody))
-                {
-                    reindexExpressions(graph, node, expressionReindexer);
-                }
-            }
-
-            for(auto const& epilogueBody : newEpilogueBody)
-            {
-                graph.control.addElement(Sequence(), {fixupTag}, {epilogueBody});
-            }
+            // Assign fixup result to accumulator tile
+            auto fullyAccumulatedTileExpr = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{fullyAccumulatedTileTag, Register::Type::Vector, dataType});
+            auto assignFixupResult = graph.control.addElement(
+                Assign{Register::Type::Accumulator, fullyAccumulatedTileExpr, numRegisters});
+            graph.mapper.connect(assignFixupResult, accumulatorTileTag, NaryArgument::DEST);
+            graph.control.addElement(Sequence(), {fixupTag}, {assignFixupResult});
 
             // Add to control
             auto preWaitZeroTag  = graph.control.addElement(WaitZero());
@@ -645,8 +637,9 @@ namespace rocRoller
 
             graph.control.chain<Sequence>(preWaitZeroTag, receiveTileTag);
 
-            graph.control.addElement(Body(), {receiveTileTag}, {boundsCheckTag});
-            graph.control.addElement(Body(), {boundsCheckTag}, {doWhileTag});
+            graph.control.addElement(Body(), {receiveTileTag}, {forReceiveTileLoopOp});
+            graph.control.addElement(Body(), {forReceiveTileLoopOp}, {boundsCheckTag});
+            graph.control.addElement(Sequence(), {boundsCheckTag}, {doWhileTag});
             graph.control.addElement(Body(), {doWhileTag}, {loadFlagTag});
 
             graph.control.chain<Sequence>(doWhileTag, loadAddForX, postWaitZeroTag);
@@ -1174,6 +1167,26 @@ namespace rocRoller
             int         postAccumulationCond;
             if(accumInfo.accumulatorTile != -1)
             {
+                // auto accumTileIdxStart
+                //     = (argInfo.numSKTilesPerWG * wgExpr + DF(forTileIncr)) % numAccumTiles;
+                // auto accumTileIdxEnd
+                //     = (argInfo.numSKTilesPerWG * wgExpr + DF(forTileIncr) + DF(forAccumIncr) - one)
+                //       % numAccumTiles;
+                // auto remainAccumTiles = numAccumTiles - accumTileIdxEnd - one;
+                // auto numRemainPartialResults
+                //     = (remainAccumTiles + argInfo.numSKTilesPerWG - one) / argInfo.numSKTilesPerWG;
+
+                auto remainAccumTiles = numAccumTiles - DF(lastAccumTile) - one;
+                auto numRemainPartialResults
+                    = (remainAccumTiles + argInfo.numSKTilesPerWG - one) / argInfo.numSKTilesPerWG;
+
+                // For loop that sums up all the partial result
+                auto [forReceiveTileLoopCoord, forReceiveTileLoopOp]
+                    = rangeFor(graph,
+                               numRemainPartialResults,
+                               rocRoller::RECEIVE,
+                               resultVariableType(numRemainPartialResults));
+
                 // Create scratch space for flags
                 auto flagsScratch = newScratchCoordinate(argInfo.numWGs, DataType::UInt32, context);
                 auto flagsScratchTag = graph.coordinates.addElement(flagsScratch);
@@ -1187,12 +1200,16 @@ namespace rocRoller
                                                             accumInfo.accumulatorVarType,
                                                             loopInfo,
                                                             argInfo,
+                                                            forReceiveTileLoopCoord,
                                                             params,
                                                             context);
 
-                // Add send
+                // Add send and receive
+                auto hasFirstAccumTile = DF(firstAccumTile) == zero;
+                auto hasLastAccumTile  = DF(lastAccumTile) < (numAccumTiles - one);
+
                 sendInfo = sendTile(graph,
-                                    zero < DF(firstAccumTile),
+                                    logicalNot(hasFirstAccumTile),
                                     storeConnections,
                                     flagsScratchTag,
                                     accumInfo.accumulatorVarType.dataType,
@@ -1200,25 +1217,43 @@ namespace rocRoller
                                     loopInfo,
                                     context);
 
-                // Add receive
+                // <<<<<<< HEAD
+                //                 receiveInfo = receiveTile(graph,
+                //                                           DF(lastAccumTile) < (numAccumTiles - one),
+                // =======
+                //                 auto hasLastAccumTile = accumTileIdxEnd < (numAccumTiles - one);
+                //                 receiveInfo           = receiveTile(graph,
+                //                                           hasLastAccumTile && hasFirstAccumTile,
+                //                                           numRemainPartialResults,
+                // >>>>>>> develop
                 receiveInfo = receiveTile(graph,
-                                          DF(lastAccumTile) < (numAccumTiles - one),
+                                          hasLastAccumTile && hasFirstAccumTile,
+					  numRemainPartialResults,
                                           scratchTileInfo.load,
                                           loadConnections,
                                           flagsScratchTag,
                                           accumInfo.accumulatorTile,
                                           accumInfo.usesAccumulatorTile,
                                           accumInfo.accumulatorVarType.dataType,
-                                          epilogueOperations,
                                           loopInfo,
                                           argInfo,
+                                          forReceiveTileLoopOp,
+                                          forReceiveTileLoopCoord,
                                           params,
                                           context);
 
+                // <<<<<<< HEAD
+                //                 postAccumulationCond = graph.control.addElement(
+                //                     ConditionalOp{zero >= DF(firstAccumTile), "Post-accumulation Condition"});
+
+                //                 graph.control.addElement(Else(), {receiveInfo.receiveCond}, {postAccumulationCond});
+                // =======
+                //                 postAccumulationCond = graph.control.addElement(ConditionalOp{
+                //                     zero >= DF(sendInfo.sendBoolSGPR), "Post-accumulation Condition"});
+                // >>>>>>> develop
+
                 postAccumulationCond = graph.control.addElement(
                     ConditionalOp{zero >= DF(firstAccumTile), "Post-accumulation Condition"});
-
-                graph.control.addElement(Else(), {receiveInfo.receiveCond}, {postAccumulationCond});
             }
             else
             {
@@ -1233,9 +1268,8 @@ namespace rocRoller
                 graph.control.addElement(Sequence(), {sendInfo.preWaitZero}, {sendInfo.sendCond});
                 graph.control.addElement(
                     Sequence(), {receiveInfo.preWaitZero}, {receiveInfo.receiveCond});
-                graph.control.addElement(
-                    Sequence(), {receiveInfo.receiveCond}, {postAccumulationCond});
             }
+            graph.control.addElement(Sequence(), {receiveInfo.receiveCond}, {postAccumulationCond});
 
             //
             // Add definitions to the Scope
@@ -1446,10 +1480,20 @@ namespace rocRoller
 
                 if(params->streamK.isTwoTileMode())
                 {
-                    numSKTilesArgExpr      = (numNonAccTiles % numWGs + numWGs) * numAccTiles;
+                    auto enoughNonAccTilesExpr = numNonAccTiles > numWGs - one;
+
+                    numSKTilesArgExpr
+                        = conditional(enoughNonAccTilesExpr,
+                                      (numNonAccTiles % numWGs + numWGs) * numAccTiles,
+                                      numNonAccTiles * numAccTiles);
+
                     numSKTilesPerWGArgExpr = (numSKTilesArgExpr + numWGs - one) / numWGs;
-                    numDPTilesArgExpr      = (numNonAccTiles / numWGs - one) * numWGs * numAccTiles;
-                    numDPTilesPerWGArgExpr = (numNonAccTiles / numWGs - one) * numAccTiles;
+                    numDPTilesArgExpr
+                        = conditional(enoughNonAccTilesExpr,
+                                      (numNonAccTiles / numWGs - one) * numWGs * numAccTiles,
+                                      zero);
+                    numDPTilesPerWGArgExpr = conditional(
+                        enoughNonAccTilesExpr, (numNonAccTiles / numWGs - one) * numAccTiles, zero);
                 }
                 else
                 {
