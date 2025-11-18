@@ -76,11 +76,11 @@ prediction_result_t select_config(const problem_t& problem,
  * @return A tuple: best predicted (l2_hit_rate, wgm).
  */
 
-std::tuple<size_t, int32_t> select_workgroup_mapping(const problem_t& problem,
-                                                     const hardware_t& hardware,
-                                                     const config_t& config,
-                                                     size_t skGrid,
-                                                     bool print) {
+std::tuple<size_t, size_t> select_workgroup_mapping(const problem_t& problem,
+                                                    const hardware_t& hardware,
+                                                    const config_t& config,
+                                                    size_t skGrid,
+                                                    bool print) {
   // Extract parameters from structured types
   size_t M     = problem.size.m;
   size_t N     = problem.size.n;

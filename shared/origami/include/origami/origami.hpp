@@ -33,13 +33,13 @@ prediction_result_t select_config(const problem_t& problem,
  * @param mt Macro-tile of the kernel.
  * @param mi Matrix-instruction of the kernel.
  * @param wgms List of possible workgroup-mappings.
- * @return std::pair<double, size_t>
+ * @return std::tuple<size_t, size_t>
  */
-std::pair<double, size_t> select_workgroup_mapping(const problem_t& problem,
-                                                   const hardware_t& hardware,
-                                                   const config_t& config,
-                                                   size_t skGrid,
-                                                   bool print);
+std::tuple<size_t, size_t> select_workgroup_mapping(const problem_t& problem,
+                                                    const hardware_t& hardware,
+                                                    const config_t& config,
+                                                    size_t skGrid,
+                                                    bool print);
 
 /**
  * @brief Rank configurations based on predicted performance.

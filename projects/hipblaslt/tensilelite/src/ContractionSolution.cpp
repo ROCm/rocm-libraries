@@ -1004,8 +1004,8 @@ namespace TensileLite
                                                                          origami_config,
                                                                          skgrid,
                                                                          false);
-                    defaultWGMXCC = bestWGM.first;
-                    defaultWGM = bestWGM.second;
+                    defaultWGMXCC = std::get<0>(bestWGM);
+                    defaultWGM = std::get<1>(bestWGM);
 
                     // Add to cache only if dynamically calculated.
                     paramsCache.add(std::make_pair(defaultWGM, defaultWGMXCC), problem);
