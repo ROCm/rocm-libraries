@@ -83,21 +83,24 @@ namespace rocRoller::Client
                     ShowValue(src),
                     ShowValue(desc));
 
+        std::vector<size_t> dimOrder;
+
         if(tileMN == 64)
         {
-            dst = TensorDescriptor::ShuffledNoPadding(
-                desc.dataType(), srcSizes, {6, 1, 2, 3, 4, 5, 0, 7});
+            dimOrder = {6, 1, 2, 3, 4, 5, 0, 7};
         }
         else if(tileMN == 32 && subTileK == 4)
         {
-            dst = TensorDescriptor::ShuffledNoPadding(
-                desc.dataType(), srcSizes, {6, 2, 1, 3, 4, 5, 0, 7});
+            dimOrder = {6, 2, 1, 3, 4, 5, 0, 7};
         }
         else if(tileMN == 32 && subTileK == 2)
         {
-            dst = TensorDescriptor::ShuffledNoPadding(
-                desc.dataType(), srcSizes, {1, 2, 0, 3, 4, 5, 6, 7});
+            dimOrder = {1, 2, 0, 3, 4, 5, 6, 7};
         }
+
+        AssertFatal(!dimOrder.empty(), "pre-swizzle permutation order not populated");
+
+        dst = TensorDescriptor::ShuffledNoPadding(desc.dataType(), srcSizes, dimOrder);
 
         AssertFatal(src.totalAllocatedElements() == dst.totalAllocatedElements(),
                     ShowValue(src.totalAllocatedElements()),
