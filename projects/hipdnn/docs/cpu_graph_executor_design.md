@@ -20,48 +20,27 @@ The CPU Graph Executor is a reference implementation system designed to execute 
 - **Testing Infrastructure**: Enables comprehensive testing of graph execution
 - **Extensibility**: Supports easy addition of new operations through a plugin-like architecture
 - **Type Safety**: Uses C++ templates to ensure compile-time type checking
+- **Sequential Operation**: Executes operations sequentially in topological order
 
 ## System Overview
 
 The CPU Graph Executor follows a modular architecture pattern with clear separation of concerns:
 
-``` 
-┌───────────────────────────────────────────────────────────┐
-│                  CPU Graph Executor System                │
-├───────────────────────────────────────────────────────────┤
-│                                                           │
-│  ┌─────────────┐    ┌──────────────┐    ┌──────────────┐  │
-│  │   Graph     │───>│  Signature   │───>│   Plan       │  │
-│  │   Input     │    │   Key Gen    │    │   Builder    │  │
-│  └─────────────┘    └──────────────┘    └──────────────┘  │
-│                            │                     │        │
-│                            v                     v        │
-│                     ┌──────────────┐    ┌──────────────┐  │
-│                     │   Registry   │    │   Plan       │  │
-│                     │   Lookup     │    │  Executor    │  │
-│                     └──────────────┘    └──────────────┘  │
-│                                                  │        │
-│                                                  v        │
-│                                         ┌──────────────┐  │
-│                                         │   Result     │  │
-│                                         │   Tensors    │  │
-│                                         └──────────────┘  │
-└───────────────────────────────────────────────────────────┘
-```
+![CPU Graph Executor Architecture](./images/CPU_reference_graph_executor_high_level_arch.png)
 
 ## Architecture Components
 
 ### Core Interfaces
 
 ```
-                    ┌────────────────────────┐
-                    │ IGraphNodePlanBuilder  │
-                    └───────────┬────────────┘
-                                │ builds
-                                v
-                    ┌────────────────────────┐
-                    │ IGraphNodePlanExecutor │
-                    └────────────────────────┘
+    ┌────────────────────────┐
+    │ IGraphNodePlanBuilder  │
+    └───────────┬────────────┘
+                │ builds
+                v
+    ┌────────────────────────┐
+    │ IGraphNodePlanExecutor │
+    └────────────────────────┘
 ```
 
 #### IGraphNodePlanBuilder
@@ -116,7 +95,8 @@ Plan Builders are instantiated for each supported operation & data type combinat
          │
          ├──────────────────────┬──────────────────────┬─────────────────────┐
          │                      │                      │                     │
-┌────────v──────────┐  ┌───────v───────────┐  ┌──────v──────────┐  ┌───────v────────┐
+         v                      v                      v                     v
+┌───────────────────┐  ┌───────────────────┐  ┌─────────────────┐  ┌────────────────┐
 │ BatchnormBwdPlan  │  │ ConvolutionFwdPlan│  │ PointwisePlan   │  │ Other Plans... │
 │     Builder       │  │     Builder       │  │    Builder      │  │                │
 └───────────────────┘  └───────────────────┘  └─────────────────┘  └────────────────┘
