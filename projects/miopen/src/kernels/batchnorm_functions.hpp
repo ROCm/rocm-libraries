@@ -99,7 +99,7 @@ __forceinline__ __device__ __host__ OutType cast(InType in)
     }
 }
 
-// Just temporary, only to get the tests to pass; TODO: think of how to make it more robust
+// Specialized casting overloads
 template <>
 __forceinline__ __device__ __host__ HIP_vector_type<float, 4>
 cast(typename miopen::mapped_vector_type<_Float16, 4>::type in)

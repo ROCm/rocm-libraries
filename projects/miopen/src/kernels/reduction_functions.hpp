@@ -106,9 +106,9 @@ __forceinline__ __device__ void lds_reduce2_2d(FloatAccumC& x,
     __syncthreads();
     for(unsigned int red = (1 << detail::log2_ceil_v<SizeLclData>) >> 1; red > 0; red >>= 1)
     {
-        if(ylid < red)
+        unsigned int offset2 = offset1 + red * xstride * 2;
+        if(ylid < red && offset2 < SizeLclData)
         {
-            unsigned int offset2 = offset1 + red * xstride * 2;
             // make sure there is one read and one write
             x += lcl_data[offset2 + 0];
             y += lcl_data[offset2 + 1];
