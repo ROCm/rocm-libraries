@@ -36,8 +36,8 @@ namespace rocRoller
     namespace Serialization
     {
         /**
-         * Note that the functions declared here will assume that you have included the serialization headers for any
-         * type(s) you want to serialize.
+         * Note that the functions declared here will assume that you have included the deserialization headers for any
+         * type(s) you want to deserialize.
          */
 
         /**
