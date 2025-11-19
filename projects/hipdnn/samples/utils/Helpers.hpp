@@ -82,6 +82,10 @@ inline Config parseCommandLineArgs(int argc, char* argv[])
         {
             config.cpuValidation = true;
         }
+        else if(arg == "--batch-stats-only")
+        {
+            config.useRunningStats = false;
+        }
         else if(arg == "--full-training")
         {
             config.useRunningStats = true;

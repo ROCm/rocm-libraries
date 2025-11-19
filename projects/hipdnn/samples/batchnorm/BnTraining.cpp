@@ -41,7 +41,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
                      "supported.\n";
         std::cerr << "Please use --batch-stats-only mode (default) instead.\n";
         std::cerr << "See docs/OperationSupport.md for more details.\n";
-        return;
+        exit(EXIT_FAILURE);
     }
 
     int64_t n = 16; // BATCH SIZE
