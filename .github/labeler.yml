@@ -112,6 +112,7 @@ documentation:
     - '**/docs/**/*'
     - '**/*.md'
     - '**/*.rst'
+    - '**/.readthedocs.yaml'
 
 "ci:docs-only":
 - changed-files:
@@ -120,6 +121,7 @@ documentation:
     - '**/docs/**/*'
     - '**/*.md'
     - '**/*.rst'
+    - '**/.readthedocs.yaml'
 
 External CI:
 - changed-files:
