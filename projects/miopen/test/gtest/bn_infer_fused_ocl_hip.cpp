@@ -24,15 +24,13 @@
  *
  *******************************************************************************/
 
-#include "get_handle.hpp"
-#include "random.hpp"
-#include "verify.hpp"
 #include <gtest/gtest.h>
 #include <miopen/miopen.h>
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/batchnorm/problem_description.hpp>
 
 #include "na.hpp"
+#include "verify.hpp"
 #include "perf_helper.hpp"
 
 #define PERF_ENABLE 0
@@ -348,9 +346,9 @@ protected:
     miopen::Allocator::ManageDataPtr estMean_dev;     // GPU estimated mean data
     miopen::Allocator::ManageDataPtr estVariance_dev; // GPU estimated variance data
     miopenActivationMode_t activ_mode;                // Activation mode
-    const float activ_alpha = static_cast<float>(0.5f);
-    const float activ_beta  = static_cast<float>(0.5f);
-    const float activ_gamma = static_cast<float>(0.5f);
+    const float activ_alpha = 0.5f;
+    const float activ_beta  = 0.5f;
+    const float activ_gamma = 0.5f;
     double epsilon          = 1.0e-5;
     PerfHelper perf_helper;
 };
@@ -407,39 +405,8 @@ std::vector<BNTestCase> BNFusedInferTestConfigs(miopenBatchNormMode_t mode)
     if constexpr(PERF_ENABLE)
     {
         std::vector<BNTestCase> configs;
-        const auto& handle = get_handle();
-        size_t maxTotalSize;
-
-        // Generate all NCHW tensors that are limited by L3 cache size
-        // or 2xL2 cache size when L3 is not available
-        if(miopen::StartsWith(handle.GetDeviceName(), "gfx90a") ||
-           miopen::StartsWith(handle.GetDeviceName(), "gfx908"))
-        {
-            maxTotalSize = 16; // twice the available L2 (8MB)
-        }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx803"))
-        {
-            maxTotalSize = 4; // twice the available L2 (2MB)
-        }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx900") ||
-                miopen::StartsWith(handle.GetDeviceName(), "gfx906"))
-        {
-            maxTotalSize = 8; // twice the available L2 (4MB)
-        }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx942"))
-        {
-            maxTotalSize = 256; // L3 size (256MB)
-        }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx103"))
-        {
-            maxTotalSize = 128; // L3 size (128MB)
-        }
-        else
-        {
-            maxTotalSize = 4; // twice the available L2 (2MB), default case.
-        }
-
-        maxTotalSize = maxTotalSize * 1024ull * 1024ull / sizeof(T);
+        const std::string deviceName = get_handle().GetDeviceName();
+        size_t maxTotalSize          = getCacheSizeLimit(deviceName) / sizeof(T);
 
         for(size_t N = 1; N <= maxTotalSize; N *= 2)
         {

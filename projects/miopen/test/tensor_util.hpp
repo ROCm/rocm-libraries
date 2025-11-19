@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,14 +27,8 @@
 #ifndef GUARD_TENSOR_UTIL_HPP
 #define GUARD_TENSOR_UTIL_HPP
 
-#include <type_traits>
-
-#include <miopen/miopen.h>
-#include <miopen/filesystem.hpp>
-#include <miopen/tensor.hpp>
 #include "tensor_holder.hpp"
-
-namespace fs = miopen::fs;
+#include <miopen/filesystem.hpp>
 
 // unary operation
 template <class DataOp, typename Container>
@@ -166,7 +160,7 @@ void operate_over_subtensor(DataOp&& dataOp,
 }
 
 template <typename T>
-void output_tensor_to_csv(const tensor<T>& x, const fs::path& filename)
+void output_tensor_to_csv(const tensor<T>& x, const miopen::fs::path& filename)
 {
     int dim = x.desc.GetSize();
     std::vector<int> index(dim);
@@ -195,7 +189,7 @@ void output_tensor_to_csv(const tensor<T>& x, const fs::path& filename)
 }
 
 template <typename T>
-void output_tensor_to_bin(const fs::path& fileName, T* data, size_t dataNumItems)
+void output_tensor_to_bin(const miopen::fs::path& fileName, T* data, size_t dataNumItems)
 {
     std::ofstream outFile(fileName, std::ios::binary);
     if(outFile.is_open())
@@ -269,6 +263,25 @@ void print_tensor(const tensor<T>& tensor_val,
     }
 
     std::cout << "\n=================end=====================\n";
+}
+
+size_t getCacheSizeLimit(const std::string& deviceName)
+{
+    size_t mb = 0;
+    if(miopen::StartsWith(deviceName, "gfx90a") || miopen::StartsWith(deviceName, "gfx908"))
+        mb = 16; // twice the available L2 (8MB)
+    else if(miopen::StartsWith(deviceName, "gfx803"))
+        mb = 4; // twice the available L2 (2MB)
+    else if(miopen::StartsWith(deviceName, "gfx900") || miopen::StartsWith(deviceName, "gfx906"))
+        mb = 8; // twice the available L2 (4MB)
+    else if(miopen::StartsWith(deviceName, "gfx942"))
+        mb = 256; // L3 size (256MB)
+    else if(miopen::StartsWith(deviceName, "gfx103"))
+        mb = 128; // L3 size (128MB)
+    else
+        mb = 4; // default: twice the available L2 (2MB)
+
+    return (mb * 1024ul * 1024ul); // convert to MiB
 }
 
 #endif

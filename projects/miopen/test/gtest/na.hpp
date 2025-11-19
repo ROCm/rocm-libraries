@@ -34,6 +34,7 @@
 #include "tensor_util.hpp"
 #include "get_handle.hpp"
 #include "random.hpp"
+
 struct BNTestCase
 {
     size_t N;

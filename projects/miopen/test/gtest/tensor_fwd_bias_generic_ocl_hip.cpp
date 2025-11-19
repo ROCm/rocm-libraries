@@ -27,9 +27,10 @@
 #include <gtest/gtest.h>
 
 #include "get_handle.hpp"
+#include "tensor_util.hpp"
 #include "verify.hpp"
 
-#define PERF_ENABLE 1
+#define PERF_ENABLE 0
 #if PERF_ENABLE
 #include "perf_helper.hpp"
 #endif
@@ -82,51 +83,30 @@ std::vector<TensorsConfig> TensorsConfigs()
     };
 
 #if PERF_ENABLE
-        const auto& handle           = get_handle();
-        const std::string deviceName = handle.GetDeviceName();
+    // Determine a cache-aware cap on total tensor elements for HIP/AMD:
+    // 1) Query L2 size via HIP and use 2x L2 as working set
+    // 2) Fallback to per-architecture table (MiB) if L2 is not reported
+    size_t maxTotalSize = 0;
 
-        // Determine a cache-aware cap on total tensor elements for HIP/AMD:
-        // 1) Query L2 size via HIP and use 2x L2 as working set
-        // 2) Fallback to per-architecture table (MiB) if L2 is not reported
-        size_t maxTotalSizeBytes = 0;
-
-        // 1) HIP L2 cache query
-        int dev = -1;
-        if(hipSuccess == hipGetDevice(&dev))
+    // 1) HIP L2 cache query
+    int dev = -1;
+    if(hipSuccess == hipGetDevice(&dev))
+    {
+        int L2_bytes = 0;
+        if(hipSuccess == hipDeviceGetAttribute(&L2_bytes, hipDeviceAttributeL2CacheSize, dev) &&
+           L2_bytes > 0)
         {
-            int l2_bytes = 0;
-            if(hipSuccess ==
-                   hipDeviceGetAttribute(&l2_bytes, hipDeviceAttributeL2CacheSize, dev) &&
-               l2_bytes > 0)
-            {
-                // Use 2x L2 as a working-set heuristic
-                maxTotalSizeBytes = static_cast<size_t>(2) * static_cast<size_t>(l2_bytes);
-            }
+            // Use 2x L2 as a working-set heuristic
+            maxTotalSize = 2ul * static_cast<size_t>(L2_bytes);
         }
+    }
 
-        // 2) Fallback table by architecture family (MiB)
-        if(maxTotalSizeBytes == 0)
-        {
-            size_t mb = 0;
-            if(miopen::StartsWith(deviceName, "gfx90a") || miopen::StartsWith(deviceName, "gfx908"))
-                mb = 16; // twice the 8MB L2
-            else if(miopen::StartsWith(deviceName, "gfx803"))
-                mb = 4; // twice the 2MB L2
-            else if(miopen::StartsWith(deviceName, "gfx900") ||
-                    miopen::StartsWith(deviceName, "gfx906"))
-                mb = 8; // twice the 4MB L2
-            else if(miopen::StartsWith(deviceName, "gfx942"))
-                mb = 256; // 256MB L3
-            else if(miopen::StartsWith(deviceName, "gfx103"))
-                mb = 128; // 128MB L3
-            else
-                mb = 4; // default: twice the 2MB L2
+    // 2) Fallback table by architecture family (MiB)
+    if(maxTotalSize == 0)
+        maxTotalSize = getCacheSizeLimit(get_handle().GetDeviceName());
 
-            maxTotalSizeBytes = mb * 1024ull * 1024ull;
-        }
-
-        // Convert bytes -> elements of type T
-        size_t maxTotalSize = maxTotalSizeBytes / sizeof(T);
+    // Convert bytes -> elements of type T
+    maxTotalSize = maxTotalSize / sizeof(T);
 
     for(int N = 1; N < maxTotalSize; N *= 4)
     {
@@ -154,13 +134,13 @@ std::vector<TensorsConfig> TensorsConfigs()
     int H = 1;
     int W = 1;
     insertTestCase(N, C, H, W);
-    C = 16;
-    H = 32;
-    W = 8;
-    insertTestCase(N, C, H, W);
-    C = 32;
-    H = 64;
+    C = 4;
+    H = 16;
     W = 16;
+    insertTestCase(N, C, H, W);
+    C = 1;
+    H = 20;
+    W = 20;
     insertTestCase(N, C, H, W);
     return configs;
 #endif

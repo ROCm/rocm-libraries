@@ -26,13 +26,16 @@
 #include <miopen/datatype.hpp>
 #include <gtest/gtest.h>
 
+#include "get_handle.hpp"
 #include "tensor_util.hpp"
 #include "verify.hpp"
-#include "get_handle.hpp"
+
+#define PERF_ENABLE 0
+#if PERF_ENABLE
 #include "perf_helper.hpp"
+#endif
 
 #define MAX_TENSOR_ELEM 17
-#define PERF_ENABLE 0
 #define POW_2 1
 
 struct TensorsConfig
@@ -82,90 +85,56 @@ std::vector<TensorsConfig> TensorsConfigs()
             {{N, C, H, W}, {C * H * W, H * W, W, 1}, {1, 1, 1, 1}, {1 * 1 * 1, 1 * 1, 1, 1}});
     };
 
-    if constexpr(PERF_ENABLE)
+#if PERF_ENABLE
+    size_t maxTotalSize = getCacheSizeLimit(get_handle().GetDeviceName()) / sizeof(T);
+
+    // Generate all NCHW tensors that are limited by L3 cache size
+    // or 2xL2 cache size when L3 is not available
+    if constexpr(POW_2)
     {
-        const auto& handle = get_handle();
-        size_t maxTotalSize;
-
-        // Generate all NCHW tensors that are limited by L3 cache size
-        // or 2xL2 cache size when L3 is not available
-        if(miopen::StartsWith(handle.GetDeviceName(), "gfx90a") ||
-           miopen::StartsWith(handle.GetDeviceName(), "gfx908"))
+        for(size_t N = 1; N <= maxTotalSize; N *= 2)
         {
-            maxTotalSize = 16; // twice the 8MB L2
-        }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx803"))
-        {
-            maxTotalSize = 4; // twice the 2MB L2
-        }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx900") ||
-                miopen::StartsWith(handle.GetDeviceName(), "gfx906"))
-        {
-            maxTotalSize = 8; // twice the 4MB L2
-        }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx942"))
-        {
-            maxTotalSize = 256; // 256MB L3
-        }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx103"))
-        {
-            maxTotalSize = 128; // 128MB L3
-        }
-        else
-        {
-            maxTotalSize = 4; // twice the 2MB L2, default case.
-        }
-
-        maxTotalSize = maxTotalSize * 1024ull * 1024ull / sizeof(T);
-
-        if constexpr(POW_2)
-        {
-            for(size_t N = 1; N <= maxTotalSize; N *= 2)
+            for(size_t C = 1; C <= maxTotalSize / N; C *= 2)
             {
-                for(size_t C = 1; C <= maxTotalSize / N; C *= 2)
+                for(size_t H = 1; H <= maxTotalSize / (N * C); H *= 2)
                 {
-                    for(size_t H = 1; H <= maxTotalSize / (N * C); H *= 2)
+                    for(size_t W = 1; W <= maxTotalSize / (N * C * H); W *= 2)
                     {
-                        for(size_t W = 1; W <= maxTotalSize / (N * C * H); W *= 2)
+                        size_t totalSize = N * C * H * W;
+                        // Ensure the total size does not exceed the maximum limit
+                        if(totalSize <= maxTotalSize)
                         {
-                            size_t totalSize = N * C * H * W;
-                            // Ensure the total size does not exceed the maximum limit
-                            if(totalSize <= maxTotalSize)
-                            {
-                                insertTestCase(N, C, H, W);
-                            }
+                            insertTestCase(N, C, H, W);
                         }
                     }
                 }
             }
         }
-        else
+    }
+    else
+    {
+        for(size_t N = 1; N <= maxTotalSize; N *= 2)
         {
-            for(size_t N = 1; N <= maxTotalSize; N *= 2)
+            for(size_t C = 1; C <= maxTotalSize / N; C *= 2)
             {
-                for(size_t C = 1; C <= maxTotalSize / N; C *= 2)
+                for(size_t H = 1; H <= maxTotalSize / (N * C); H *= 2)
                 {
-                    for(size_t H = 1; H <= maxTotalSize / (N * C); H *= 2)
+                    for(size_t W = 1; W <= maxTotalSize / (N * C * W); W *= 2)
                     {
-                        for(size_t W = 1; W <= maxTotalSize / (N * C * W); W *= 2)
+                        for(int dn = -1; dn <= 1; dn += 2)
                         {
-                            for(int dn = -1; dn <= 1; dn += 2)
+                            for(int dc = -1; dc <= 1; dc += 2)
                             {
-                                for(int dc = -1; dc <= 1; dc += 2)
+                                for(int dh = -1; dh <= 1; dh += 2)
                                 {
-                                    for(int dh = -1; dh <= 1; dh += 2)
+                                    for(int dw = -1; dw <= 1; dw += 2)
                                     {
-                                        for(int dw = -1; dw <= 1; dw += 2)
+                                        size_t totalSize =
+                                            (N + dn) * (C + dc) * (H + dh) * (W + dw);
+                                        // Ensure the total size does not exceed the maximum limit
+                                        if(totalSize <= maxTotalSize)
                                         {
-                                            size_t totalSize =
-                                                (N + dn) * (C + dc) * (H + dh) * (W + dw);
-                                            // Ensure the total size does not exceed the maximum
-                                            // limit
-                                            if(totalSize <= maxTotalSize)
-                                            {
-                                                insertTestCase(
-                                                    (N + dn), (C + dc), (H + dh), (W + dw));
-                                            }
+                                            insertTestCase((N + dn), (C + dc), (H + dh), (W + dw));
                                         }
                                     }
                                 }
@@ -175,26 +144,25 @@ std::vector<TensorsConfig> TensorsConfigs()
                 }
             }
         }
+    }
 
-        return configs;
-    }
-    else
-    {
-        size_t N = 1;
-        size_t C = 1;
-        size_t H = 1;
-        size_t W = 1;
-        insertTestCase(N, C, H, W);
-        C = 20;
-        H = 16;
-        W = 8;
-        insertTestCase(N, C, H, W);
-        C = 32;
-        H = 64;
-        W = 16;
-        // insertTestCase(N, C, H, W);
-        return configs;
-    }
+    return configs;
+#else
+    size_t N = 1;
+    size_t C = 1;
+    size_t H = 1;
+    size_t W = 1;
+    insertTestCase(N, C, H, W);
+    C = 4;
+    H = 16;
+    W = 16;
+    insertTestCase(N, C, H, W);
+    C = 1;
+    H = 20;
+    W = 20;
+    insertTestCase(N, C, H, W);
+    return configs;
+#endif
 }
 
 template <typename T>
@@ -302,31 +270,29 @@ protected:
                                  incr_wg);
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
-        std::cout << "tensC_ocl=" << tensC_ocl.data[0] << std::endl;
 
-        if constexpr(PERF_ENABLE)
-        {
-            ph.perfTest(handle,
-                        "OpTensorFwdBias",
-                        network_config_ocl,
-                        false,
-                        tensA_dev.get(),
-                        tensB_dev.get(),
-                        static_cast<int>(tensorsConfig.blens[1]),
-                        tensC_dev.get(),
-                        static_cast<int>(tensorsConfig.aclens[0]),
-                        static_cast<int>(tensorsConfig.acstrides[0]),
-                        static_cast<int>(tensorsConfig.acstrides[1]),
-                        work_per_wg,
-                        alpha0,
-                        alpha1,
-                        beta,
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        num_wg,
-                        incr_wg);
-        }
+#if PERF_ENABLE
+        ph.perfTest(handle,
+                    "OpTensorFwdBias",
+                    network_config_ocl,
+                    false,
+                    tensA_dev.get(),
+                    tensB_dev.get(),
+                    static_cast<int>(tensorsConfig.blens[1]),
+                    tensC_dev.get(),
+                    static_cast<int>(tensorsConfig.aclens[0]),
+                    static_cast<int>(tensorsConfig.acstrides[0]),
+                    static_cast<int>(tensorsConfig.acstrides[1]),
+                    work_per_wg,
+                    alpha0,
+                    alpha1,
+                    beta,
+                    static_cast<int64_t>(0),
+                    static_cast<int64_t>(0),
+                    static_cast<int64_t>(0),
+                    num_wg,
+                    incr_wg);
+#endif
     }
 
     void runHIP()
@@ -366,31 +332,29 @@ protected:
                                  incr_wg);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
-        std::cout << "tensC_hip=" << tensC_hip.data[0] << std::endl;
 
-        if constexpr(PERF_ENABLE)
-        {
-            ph.perfTest(handle,
-                        "OpTensorFwdBias",
-                        network_config_hip,
-                        false,
-                        tensA_dev.get(),
-                        tensB_dev.get(),
-                        static_cast<int>(tensorsConfig.blens[1]),
-                        tensC_dev.get(),
-                        static_cast<int>(tensorsConfig.aclens[0]),
-                        static_cast<int>(tensorsConfig.acstrides[0]),
-                        static_cast<int>(tensorsConfig.acstrides[1]),
-                        work_per_wg,
-                        alpha0,
-                        alpha1,
-                        beta,
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        num_wg,
-                        incr_wg);
-        }
+#if PERF_ENABLE
+        ph.perfTest(handle,
+                    "OpTensorFwdBias",
+                    network_config_hip,
+                    false,
+                    tensA_dev.get(),
+                    tensB_dev.get(),
+                    static_cast<int>(tensorsConfig.blens[1]),
+                    tensC_dev.get(),
+                    static_cast<int>(tensorsConfig.aclens[0]),
+                    static_cast<int>(tensorsConfig.acstrides[0]),
+                    static_cast<int>(tensorsConfig.acstrides[1]),
+                    work_per_wg,
+                    alpha0,
+                    alpha1,
+                    beta,
+                    static_cast<int64_t>(0),
+                    static_cast<int64_t>(0),
+                    static_cast<int64_t>(0),
+                    num_wg,
+                    incr_wg);
+#endif
     }
 
     void verify()
@@ -401,30 +365,29 @@ protected:
 
     void TearDown() override
     {
-        if constexpr(PERF_ENABLE)
-        {
-            std::string stats{};
-            stats += "_aclens_" + std::to_string(tensorsConfig.aclens[0]) + "_" +
-                     std::to_string(tensorsConfig.aclens[1]) + "_" +
-                     std::to_string(tensorsConfig.aclens[2]) + "_" +
-                     std::to_string(tensorsConfig.aclens[3]) + "_acstrides_" +
-                     std::to_string(tensorsConfig.acstrides[0]) + "_" +
-                     std::to_string(tensorsConfig.acstrides[1]) + "_" +
-                     std::to_string(tensorsConfig.acstrides[2]) + "_" +
-                     std::to_string(tensorsConfig.acstrides[3]);
-            stats += "_blens_" + std::to_string(tensorsConfig.blens[0]) + "_" +
-                     std::to_string(tensorsConfig.blens[1]) + "_" +
-                     std::to_string(tensorsConfig.blens[2]) + "_" +
-                     std::to_string(tensorsConfig.blens[3]) + "_bstrides_" +
-                     std::to_string(tensorsConfig.bstrides[0]) + "_" +
-                     std::to_string(tensorsConfig.bstrides[1]) + "_" +
-                     std::to_string(tensorsConfig.bstrides[2]) + "_" +
-                     std::to_string(tensorsConfig.bstrides[3]);
-            stats += "_alpha0_" + std::to_string(alpha0) + "_alpha1_" + std::to_string(alpha1) +
-                     "_beta_" + std::to_string(beta) + "_" + miopen::GetDataType(data_type);
+#if PERF_ENABLE
+        std::string stats{};
+        stats += "_aclens_" + std::to_string(tensorsConfig.aclens[0]) + "_" +
+                 std::to_string(tensorsConfig.aclens[1]) + "_" +
+                 std::to_string(tensorsConfig.aclens[2]) + "_" +
+                 std::to_string(tensorsConfig.aclens[3]) + "_acstrides_" +
+                 std::to_string(tensorsConfig.acstrides[0]) + "_" +
+                 std::to_string(tensorsConfig.acstrides[1]) + "_" +
+                 std::to_string(tensorsConfig.acstrides[2]) + "_" +
+                 std::to_string(tensorsConfig.acstrides[3]);
+        stats += "_blens_" + std::to_string(tensorsConfig.blens[0]) + "_" +
+                 std::to_string(tensorsConfig.blens[1]) + "_" +
+                 std::to_string(tensorsConfig.blens[2]) + "_" +
+                 std::to_string(tensorsConfig.blens[3]) + "_bstrides_" +
+                 std::to_string(tensorsConfig.bstrides[0]) + "_" +
+                 std::to_string(tensorsConfig.bstrides[1]) + "_" +
+                 std::to_string(tensorsConfig.bstrides[2]) + "_" +
+                 std::to_string(tensorsConfig.bstrides[3]);
+        stats += "_alpha0_" + std::to_string(alpha0) + "_alpha1_" + std::to_string(alpha1) +
+                 "_beta_" + std::to_string(beta) + "_" + miopen::GetDataType(data_type);
 
-            ph.writeStatsToCSV("tensor_fwd_bias.csv", stats);
-        }
+        ph.writeStatsToCSV("tensor_fwd_bias.csv", stats);
+#endif
     }
 
     std::string network_config{};
@@ -450,7 +413,9 @@ protected:
     TensorsConfig tensorsConfig;
     float alpha0, alpha1, beta;
 
-    PerfHelper<T> ph;
+#if PERF_ENABLE
+    PerfHelper ph;
+#endif
 };
 
 struct GPU_OpTensorFwdBiasTest_FP32 : OpTensorFwdBiasTest<float>
