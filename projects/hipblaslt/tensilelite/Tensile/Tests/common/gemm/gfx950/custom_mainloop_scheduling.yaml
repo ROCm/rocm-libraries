@@ -110,6 +110,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Range: [[255, 1, 257], [255, 1, 257], [1], [1, 37, 192]]
+          - Exact: [3264, 3072, 1, 1536]
         - BiasTypeArgs: ['b']
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
