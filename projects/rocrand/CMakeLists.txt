@@ -26,7 +26,7 @@ cmake_policy(VERSION 3.16...3.25)
 # Build options
 include(CMakeDependentOption)
 
-option(BUILD_FORTRAN_WRAPPER "Build Fortran wrapper" OFF)
+option(BUILD_FORTRAN_WRAPPER "Build Fortran wrapper" ON)
 option(BUILD_TEST "Build tests (requires googletest)" ON)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 cmake_dependent_option(BUILD_BENCHMARK_TUNING
