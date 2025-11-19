@@ -61,22 +61,23 @@ struct verify_lrn_forward
         const int radius_upper = static_cast<int>(lrn_n / 2);
         const auto mode        = lrn.GetMode();
 
-        if (mode == miopenLRNCrossChannel)
+        if(mode == miopenLRNCrossChannel)
         {
             const auto alphaoverarea = alpha / lrn_n;
 
             miopen::par_for(n_batch)([&](int b) {
-                for (int c = 0; c < channels; ++c)
+                for(int c = 0; c < channels; ++c)
                 {
                     const int start = c < radius_lower ? 0 : (c - radius_lower);
-                    const int end   = (c + radius_upper + 1) > channels ? channels : (c + radius_upper + 1);
+                    const int end =
+                        (c + radius_upper + 1) > channels ? channels : (c + radius_upper + 1);
 
-                    for (int h = 0; h < height; ++h)
+                    for(int h = 0; h < height; ++h)
                     {
-                        for (int w = 0; w < width; ++w)
+                        for(int w = 0; w < width; ++w)
                         {
                             double scale = 0;
-                            for (int k = start; k < end; ++k)
+                            for(int k = start; k < end; ++k)
                             {
                                 scale += std::pow(input(b, k, h, w), 2);
                             }
@@ -96,22 +97,24 @@ struct verify_lrn_forward
             const double alphaoverarea = radius_upper == 0 ? 1 : alpha / (lrn_n * lrn_n);
 
             miopen::par_for(n_batch)([&](int b) {
-                for (int c = 0; c < channels; ++c)
+                for(int c = 0; c < channels; ++c)
                 {
-                    for (int h = 0; h < height; ++h)
+                    for(int h = 0; h < height; ++h)
                     {
-                        const int top      = (h - radius_lower) < 0 ? 0 : (h - radius_lower);
-                        const int bottom   = (h + radius_upper + 1) > height ? height : (h + radius_upper + 1);
+                        const int top = (h - radius_lower) < 0 ? 0 : (h - radius_lower);
+                        const int bottom =
+                            (h + radius_upper + 1) > height ? height : (h + radius_upper + 1);
 
-                        for (int w = 0; w < width; ++w)
+                        for(int w = 0; w < width; ++w)
                         {
-                            const int left     = (w - radius_lower) < 0 ? 0 : (w - radius_lower);
-                            const int right    = (w + radius_upper + 1) > width ? width : (w + radius_upper + 1);
+                            const int left = (w - radius_lower) < 0 ? 0 : (w - radius_lower);
+                            const int right =
+                                (w + radius_upper + 1) > width ? width : (w + radius_upper + 1);
                             double scale = 0;
 
-                            for (int i = left; i < right; ++i)
+                            for(int i = left; i < right; ++i)
                             {
-                                for (int j = top; j < bottom; ++j)
+                                for(int j = top; j < bottom; ++j)
                                 {
                                     scale += std::pow(input(b, c, j, i), 2);
                                 }
@@ -144,23 +147,24 @@ struct verify_lrn_forward
         const int radius_upper = static_cast<int>(lrn_n / 2);
         const auto mode        = lrn.GetMode();
 
-        if (mode == miopenLRNCrossChannel)
+        if(mode == miopenLRNCrossChannel)
         {
             const auto alphaoverarea = alpha / lrn_n;
 
-            for (int b = 0; b < n_batch; ++b)
+            for(int b = 0; b < n_batch; ++b)
             {
-                for (int c = 0; c < channels; ++c)
+                for(int c = 0; c < channels; ++c)
                 {
                     const int start = c < radius_lower ? 0 : (c - radius_lower);
-                    const int end   = (c + radius_upper + 1) > channels ? channels : (c + radius_upper + 1);
+                    const int end =
+                        (c + radius_upper + 1) > channels ? channels : (c + radius_upper + 1);
 
-                    for (int h = 0; h < height; ++h)
+                    for(int h = 0; h < height; ++h)
                     {
-                        for (int w = 0; w < width; ++w)
+                        for(int w = 0; w < width; ++w)
                         {
                             double scale = 0;
-                            for (int k = start; k < end; ++k)
+                            for(int k = start; k < end; ++k)
                             {
                                 scale += std::pow(input(b, k, h, w), 2);
                             }
@@ -179,24 +183,26 @@ struct verify_lrn_forward
         {
             const double alphaoverarea = radius_upper == 0 ? 1 : alpha / (lrn_n * lrn_n);
 
-            for (int b = 0; b < n_batch; ++b)
+            for(int b = 0; b < n_batch; ++b)
             {
-                for (int c = 0; c < channels; ++c)
+                for(int c = 0; c < channels; ++c)
                 {
-                    for (int h = 0; h < height; ++h)
+                    for(int h = 0; h < height; ++h)
                     {
-                        const int top      = (h - radius_lower) < 0 ? 0 : (h - radius_lower);
-                        const int bottom   = (h + radius_upper + 1) > height ? height : (h + radius_upper + 1);
+                        const int top = (h - radius_lower) < 0 ? 0 : (h - radius_lower);
+                        const int bottom =
+                            (h + radius_upper + 1) > height ? height : (h + radius_upper + 1);
 
-                        for (int w = 0; w < width; ++w)
+                        for(int w = 0; w < width; ++w)
                         {
-                            const int left     = (w - radius_lower) < 0 ? 0 : (w - radius_lower);
-                            const int right    = (w + radius_upper + 1) > width ? width : (w + radius_upper + 1);
+                            const int left = (w - radius_lower) < 0 ? 0 : (w - radius_lower);
+                            const int right =
+                                (w + radius_upper + 1) > width ? width : (w + radius_upper + 1);
                             double scale = 0;
 
-                            for (int i = left; i < right; ++i)
+                            for(int i = left; i < right; ++i)
                             {
-                                for (int j = top; j < bottom; ++j)
+                                for(int j = top; j < bottom; ++j)
                                 {
                                     scale += std::pow(input(b, c, j, i), 2);
                                 }
@@ -269,8 +275,8 @@ struct verify_lrn_bwd
 
         int n_batch, channels, height, width;
         std::tie(n_batch, channels, height, width) = miopen::tien<4>(inputY.desc.GetLengths());
-        const auto lrn_n = lrn.GetN();
-        const auto mode = lrn.GetMode();
+        const auto lrn_n                           = lrn.GetN();
+        const auto mode                            = lrn.GetMode();
     }
 
     tensor<T> cpu() const
@@ -286,36 +292,39 @@ struct verify_lrn_bwd
         const int radius_lower = static_cast<int>((lrn_n - 1) / 2);
         const int radius_upper = static_cast<int>(lrn_n / 2);
 
-        if (mode == miopenLRNWithinChannel)
+        if(mode == miopenLRNWithinChannel)
         {
             const auto adjust_area       = lrn_n * lrn_n;
             const auto cache_ratio_value = 2 * alpha * beta / adjust_area;
 
             miopen::par_for(n_batch)([&](int b) {
-                for (int c = 0; c < channels; ++c)
+                for(int c = 0; c < channels; ++c)
                 {
-                    for (int h = 0; h < height; ++h)
+                    for(int h = 0; h < height; ++h)
                     {
-                        const int top    = h < radius_upper ? 0 : (h - radius_upper);
-                        const int bottom = (h + radius_lower + 1) > height ? height : (h + radius_lower + 1);
+                        const int top = h < radius_upper ? 0 : (h - radius_upper);
+                        const int bottom =
+                            (h + radius_lower + 1) > height ? height : (h + radius_lower + 1);
 
-                        for (int w = 0; w < width; ++w)
+                        for(int w = 0; w < width; ++w)
                         {
-                            const int left   = w < radius_upper ? 0 : (w - radius_upper);
-                            const int right  = (w + radius_lower + 1) > width ? width : (w + radius_lower + 1);
+                            const int left = w < radius_upper ? 0 : (w - radius_upper);
+                            const int right =
+                                (w + radius_lower + 1) > width ? width : (w + radius_lower + 1);
                             double ydy = 0;
 
-                            for (int i = left; i < right; i++)
+                            for(int i = left; i < right; i++)
                             {
-                                for (int j = top; j < bottom; j++)
+                                for(int j = top; j < bottom; j++)
                                 {
                                     ydy += (double(inputY(b, c, j, i) * inputDY(b, c, j, i)) /
                                             double(scale(b, c, j, i)));
                                 }
                             }
-            
+
                             routputDX(b, c, h, w) = static_cast<T>(
-                                std::pow(static_cast<double>(scale(b, c, h, w)), -beta) * inputDY(b, c, h, w) -
+                                std::pow(static_cast<double>(scale(b, c, h, w)), -beta) *
+                                    inputDY(b, c, h, w) -
                                 cache_ratio_value * inputX(b, c, h, w) * ydy);
                         }
                     }
@@ -327,25 +336,27 @@ struct verify_lrn_bwd
             const auto cache_ratio_value = 2 * alpha * beta / lrn_n;
 
             miopen::par_for(n_batch)([&](int b) {
-                for (int c = 0; c < channels; ++c)
+                for(int c = 0; c < channels; ++c)
                 {
                     const int start = c < radius_upper ? 0 : (c - radius_upper);
-                    const int end   = (c + radius_lower + 1) > channels ? channels : (c + radius_lower + 1);
+                    const int end =
+                        (c + radius_lower + 1) > channels ? channels : (c + radius_lower + 1);
 
-                    for (int h = 0; h < height; ++h)
+                    for(int h = 0; h < height; ++h)
                     {
-                        for (int w = 0; w < width; ++w)
+                        for(int w = 0; w < width; ++w)
                         {
                             double ydy = 0;
 
-                            for (auto k = start; k < end; ++k)
+                            for(auto k = start; k < end; ++k)
                             {
                                 ydy += (double(inputY(b, k, h, w) * inputDY(b, k, h, w)) /
                                         double(scale(b, k, h, w)));
                             }
-            
+
                             routputDX(b, c, h, w) = static_cast<T>(
-                                std::pow(static_cast<double>(scale(b, c, h, w)), -beta) * inputDY(b, c, h, w) -
+                                std::pow(static_cast<double>(scale(b, c, h, w)), -beta) *
+                                    inputDY(b, c, h, w) -
                                 cache_ratio_value * inputX(b, c, h, w) * ydy);
                         }
                     }
@@ -369,37 +380,40 @@ struct verify_lrn_bwd
         const int radius_lower = static_cast<int>((lrn_n - 1) / 2);
         const int radius_upper = static_cast<int>(lrn_n / 2);
 
-        if (mode == miopenLRNWithinChannel)
+        if(mode == miopenLRNWithinChannel)
         {
             const auto adjust_area       = lrn_n * lrn_n;
             const auto cache_ratio_value = 2 * alpha * beta / adjust_area;
 
-            for (int b = 0; b < n_batch; ++b)
+            for(int b = 0; b < n_batch; ++b)
             {
-                for (int c = 0; c < channels; ++c)
+                for(int c = 0; c < channels; ++c)
                 {
-                    for (int h = 0; h < height; ++h)
+                    for(int h = 0; h < height; ++h)
                     {
-                        const int top    = h < radius_upper ? 0 : (h - radius_upper);
-                        const int bottom = (h + radius_lower + 1) > height ? height : (h + radius_lower + 1);
+                        const int top = h < radius_upper ? 0 : (h - radius_upper);
+                        const int bottom =
+                            (h + radius_lower + 1) > height ? height : (h + radius_lower + 1);
 
-                        for (int w = 0; w < width; ++w)
+                        for(int w = 0; w < width; ++w)
                         {
-                            const int left   = w < radius_upper ? 0 : (w - radius_upper);
-                            const int right  = (w + radius_lower + 1) > width ? width : (w + radius_lower + 1);
+                            const int left = w < radius_upper ? 0 : (w - radius_upper);
+                            const int right =
+                                (w + radius_lower + 1) > width ? width : (w + radius_lower + 1);
                             double ydy = 0;
 
-                            for (int i = left; i < right; i++)
+                            for(int i = left; i < right; i++)
                             {
-                                for (int j = top; j < bottom; j++)
+                                for(int j = top; j < bottom; j++)
                                 {
                                     ydy += (double(inputY(b, c, j, i) * inputDY(b, c, j, i)) /
                                             double(scale(b, c, j, i)));
                                 }
                             }
-            
+
                             routputDX(b, c, h, w) = static_cast<T>(
-                                std::pow(static_cast<double>(scale(b, c, h, w)), -beta) * inputDY(b, c, h, w) -
+                                std::pow(static_cast<double>(scale(b, c, h, w)), -beta) *
+                                    inputDY(b, c, h, w) -
                                 cache_ratio_value * inputX(b, c, h, w) * ydy);
                         }
                     }
@@ -410,27 +424,29 @@ struct verify_lrn_bwd
         {
             const auto cache_ratio_value = 2 * alpha * beta / lrn_n;
 
-            for (int b = 0; b < n_batch; ++b)
+            for(int b = 0; b < n_batch; ++b)
             {
-                for (int c = 0; c < channels; ++c)
+                for(int c = 0; c < channels; ++c)
                 {
                     const int start = c < radius_upper ? 0 : (c - radius_upper);
-                    const int end   = (c + radius_lower + 1) > channels ? channels : (c + radius_lower + 1);
+                    const int end =
+                        (c + radius_lower + 1) > channels ? channels : (c + radius_lower + 1);
 
-                    for (int h = 0; h < height; ++h)
+                    for(int h = 0; h < height; ++h)
                     {
-                        for (int w = 0; w < width; ++w)
+                        for(int w = 0; w < width; ++w)
                         {
                             double ydy = 0;
 
-                            for (auto k = start; k < end; ++k)
+                            for(auto k = start; k < end; ++k)
                             {
                                 ydy += (double(inputY(b, k, h, w) * inputDY(b, k, h, w)) /
                                         double(scale(b, k, h, w)));
                             }
-            
+
                             routputDX(b, c, h, w) = static_cast<T>(
-                                std::pow(static_cast<double>(scale(b, c, h, w)), -beta) * inputDY(b, c, h, w) -
+                                std::pow(static_cast<double>(scale(b, c, h, w)), -beta) *
+                                    inputDY(b, c, h, w) -
                                 cache_ratio_value * inputX(b, c, h, w) * ydy);
                         }
                     }
@@ -585,8 +601,8 @@ public:
             const tensor<T> cpu = direction.cpu();
             const tensor<T> gpu = direction.gpu();
 
-            const double threshold  = std::numeric_limits<T>::epsilon() * tolerance;
-            const double error      = miopen::rms_range(cpu, gpu);
+            const double threshold = std::numeric_limits<T>::epsilon() * tolerance;
+            const double error     = miopen::rms_range(cpu, gpu);
 
             if(saveCpuResults)
             {
@@ -609,8 +625,8 @@ public:
             const tensor<T> cpu = direction.cpu_st();
             const tensor<T> gpu = direction.gpu();
 
-            const double threshold  = std::numeric_limits<T>::epsilon() * tolerance;
-            const double error      = miopen::rms_range(cpu, gpu);
+            const double threshold = std::numeric_limits<T>::epsilon() * tolerance;
+            const double error     = miopen::rms_range(cpu, gpu);
 
             if(saveCpuResults)
             {

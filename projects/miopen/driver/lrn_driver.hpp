@@ -246,9 +246,9 @@ int LRNDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         scale_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, workSpaceNbVal, sizeof(Tgpu)));
     }
 
-    in      = std::vector<Tgpu>(in_sz, static_cast<Tgpu>(0));
-    out     = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
-    outhost = std::vector<Tref>(out_sz, static_cast<Tref>(0));
+    in         = std::vector<Tgpu>(in_sz, static_cast<Tgpu>(0));
+    out        = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
+    outhost    = std::vector<Tref>(out_sz, static_cast<Tref>(0));
     outhost_mt = std::vector<Tref>(out_sz, static_cast<Tref>(0));
     if(do_backward)
     {
@@ -263,9 +263,9 @@ int LRNDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
             }
         }
     }
-    din     = std::vector<Tgpu>(in_sz, static_cast<Tgpu>(0));
-    dout    = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
-    dinhost = std::vector<Tref>(in_sz, static_cast<Tref>(0));
+    din        = std::vector<Tgpu>(in_sz, static_cast<Tgpu>(0));
+    dout       = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
+    dinhost    = std::vector<Tref>(in_sz, static_cast<Tref>(0));
     dinhost_mt = std::vector<Tref>(in_sz, static_cast<Tref>(0));
 
     for(int i = 0; i < in_sz; i++)
@@ -472,8 +472,8 @@ int LRNDriver<Tgpu, Tref>::VerifyForward()
                                      scalehost.data(),
                                      outhost.data());
 
-    const auto error        = miopen::rms_range(outhost, out);
-    const Tref tolerance    = 1.5e-4; // 1e-6;
+    const auto error     = miopen::rms_range(outhost, out);
+    const Tref tolerance = 1.5e-4; // 1e-6;
 
     if(!std::isfinite(error) || error > tolerance)
     {
@@ -605,8 +605,8 @@ int LRNDriver<Tgpu, Tref>::VerifyBackward()
                                       in.data(),
                                       dinhost.data());
 
-    const auto error        = miopen::rms_range(dinhost, din);
-    const Tref tolerance    = 6.0e-5;
+    const auto error     = miopen::rms_range(dinhost, din);
+    const Tref tolerance = 6.0e-5;
 
     if(!std::isfinite(error) || error > tolerance)
     {
@@ -618,39 +618,39 @@ int LRNDriver<Tgpu, Tref>::VerifyBackward()
     }
 
     mloLRNBackwardRunHost_mt<Tgpu, Tref>(static_cast<int>(v_mode),
-                                        pad,
-                                        v_lrnN,
-                                        alphaoverarea,
-                                        v_lrnAlpha,
-                                        v_lrnBeta,
-                                        v_lrnK,
-                                        nIn,         // batch_sz,
-                                        cOut,        // n_outputs,
-                                        cIn,         // n_inputs,
-                                        hIn,         // bot_height,
-                                        wIn,         // bot_width,
-                                        hInStride,   // bot_stride,
-                                        cInStride,   // bot_channel_stride,
-                                        nInStride,   // bot_batch_stride,
-                                        hdInStride,  // bot_df_v_stride,
-                                        cdInStride,  // bot_df_v_channel_stride,
-                                        ndInStride,  // bot_df_v_batch_stride,
-                                        hOut,        // top_height,
-                                        wOut,        // top_width,
-                                        hOutStride,  // top_stride,
-                                        cOutStride,  // top_channel_stride,
-                                        nOutStride,  // top_batch_stride,
-                                        hdOutStride, // top_df_stride,
-                                        cdOutStride, // top_df_channel_stride,
-                                        ndOutStride, // top_df_batch_stride,
-                                        hdOutStride, // scale_stride,
-                                        cdOutStride, // scale_channel_stride,
-                                        ndOutStride, // scale_batch_stride,
-                                        out.data(),
-                                        dout.data(),
-                                        scale.data(),
-                                        in.data(),
-                                        dinhost_mt.data());
+                                         pad,
+                                         v_lrnN,
+                                         alphaoverarea,
+                                         v_lrnAlpha,
+                                         v_lrnBeta,
+                                         v_lrnK,
+                                         nIn,         // batch_sz,
+                                         cOut,        // n_outputs,
+                                         cIn,         // n_inputs,
+                                         hIn,         // bot_height,
+                                         wIn,         // bot_width,
+                                         hInStride,   // bot_stride,
+                                         cInStride,   // bot_channel_stride,
+                                         nInStride,   // bot_batch_stride,
+                                         hdInStride,  // bot_df_v_stride,
+                                         cdInStride,  // bot_df_v_channel_stride,
+                                         ndInStride,  // bot_df_v_batch_stride,
+                                         hOut,        // top_height,
+                                         wOut,        // top_width,
+                                         hOutStride,  // top_stride,
+                                         cOutStride,  // top_channel_stride,
+                                         nOutStride,  // top_batch_stride,
+                                         hdOutStride, // top_df_stride,
+                                         cdOutStride, // top_df_channel_stride,
+                                         ndOutStride, // top_df_batch_stride,
+                                         hdOutStride, // scale_stride,
+                                         cdOutStride, // scale_channel_stride,
+                                         ndOutStride, // scale_batch_stride,
+                                         out.data(),
+                                         dout.data(),
+                                         scale.data(),
+                                         in.data(),
+                                         dinhost_mt.data());
 
     const auto error_mt = miopen::rms_range(dinhost_mt, din);
 
