@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,6 +56,7 @@ namespace TensileLite
     {
         using Row = LibraryRow<MyProblem, MySolution, MyPredicate>;
         std::vector<Row> rows;
+        mutable bool     lastFindTopRetAll;
 
         ExactLogicLibrary() = default;
         ExactLogicLibrary(std::initializer_list<Row> init)
@@ -129,9 +130,14 @@ namespace TensileLite
         {
             SolutionSet<MySolution> rv;
             const bool              streamK = Debug::Instance().useExperimentalSelection() == 2;
+            const auto&             excludedLib = Debug::Instance().excludedLibFromGetAll();
 
             for(auto const& row : rows)
             {
+                // we want to exclude this lib from getAll
+                if(excludedLib.count(row.first.value->type()))
+                    continue;
+
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
 
@@ -139,6 +145,34 @@ namespace TensileLite
                     continue;
 
                 auto rowSolutions = row.second->findAllSolutions(problem, hardware, searchType);
+
+                if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(row.first.value.get()))
+                {
+                    for(auto& sol : rowSolutions)
+                        sol->tag = MySolution::MatchingTag::Equal;
+                }
+                else if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(row.first.value.get()))
+                {
+                    for(auto& sol : rowSolutions)
+                        sol->tag = MySolution::MatchingTag::GridBased;
+                }
+                else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(row.first.value.get()))
+                {
+                    for(auto& sol : rowSolutions)
+                        sol->tag = MySolution::MatchingTag::Range;
+                }
+                else if(dynamic_cast<Predicates::Contraction::FreeSizeMatching*>(row.first.value.get()))
+                {
+                    for(auto& sol : rowSolutions)
+                        sol->tag = MySolution::MatchingTag::FreeSize;
+                }
+                else if(dynamic_cast<Predicates::Contraction::PredictionMatching*>(row.first.value.get()))
+                {
+                    for(auto& sol : rowSolutions)
+                        sol->tag = MySolution::MatchingTag::Prediction;
+                }
+                // TODO- Experimental?
+
                 rv.insert(rowSolutions.begin(), rowSolutions.end());
             }
 
@@ -179,12 +213,15 @@ namespace TensileLite
             const bool                 streamK = Debug::Instance().useExperimentalSelection() == 2;
             const bool                 predictionLib = Debug::Instance().usePredictionLibrary();
 
+            // false in case of early return;
+            lastFindTopRetAll = false;
+
             for(auto const& row : rows)
             {
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
 
-                if(predictionLib && ((row.first.value->type() == "EqualityMatching") 
+                if(predictionLib && ((row.first.value->type() == "EqualityMatching")
                                      || (row.first.value->type() == "RangeMatching")))
                     continue;
 
@@ -193,10 +230,32 @@ namespace TensileLite
                     solutions
                         = row.second->findTopSolutions(problem, hardware, numSolutions - rv.size());
 
-                    if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(
-                           row.first.value.get()))
+                    if(dynamic_cast<Predicates::Contraction::EqualityMatching*>(row.first.value.get()))
+                    {
                         for(auto& sol : solutions)
                             sol->tag = MySolution::MatchingTag::Equal;
+                    }
+                    else if(dynamic_cast<Predicates::Contraction::GridBasedMatching*>(row.first.value.get()))
+                    {
+                        for(auto& sol : solutions)
+                            sol->tag = MySolution::MatchingTag::GridBased;
+                    }
+                    else if(dynamic_cast<Predicates::Contraction::RangeMatching*>(row.first.value.get()))
+                    {
+                        for(auto& sol : solutions)
+                            sol->tag = MySolution::MatchingTag::Range;
+                    }
+                    else if(dynamic_cast<Predicates::Contraction::FreeSizeMatching*>(row.first.value.get()))
+                    {
+                        for(auto& sol : solutions)
+                            sol->tag = MySolution::MatchingTag::FreeSize;
+                    }
+                    else if(dynamic_cast<Predicates::Contraction::PredictionMatching*>(row.first.value.get()))
+                    {
+                        for(auto& sol : solutions)
+                            sol->tag = MySolution::MatchingTag::Prediction;
+                    }
+                    // TODO- Experimental
 
                     rv.insert(std::end(rv), std::begin(solutions), std::end(solutions));
                     if(rv.size() == numSolutions)
@@ -204,7 +263,14 @@ namespace TensileLite
                 }
             }
 
+            // can't reach the requested number, means findTop already done its best
+            lastFindTopRetAll = (rv.size() < numSolutions);
             return rv;
+        }
+
+        virtual bool lastFindTopAlreadyRetAll() const override
+        {
+            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>

@@ -53,9 +53,10 @@ namespace TensileLite
         using ProblemFeatures  = std::vector<std::shared_ptr<MLFeatures::MLFeature<MyProblem>>>;
 
         std::map<int, std::shared_ptr<MySolution>> solutionmap;
-        std::shared_ptr<MLPNet>                   model;
+        std::shared_ptr<MLPNet>                    model;
         SolutionFeatures                           solFeatures;
         ProblemFeatures                            probFeatures;
+        mutable bool                               lastFindTopRetAll;
 
         static std::string Type()
         {
@@ -155,7 +156,15 @@ namespace TensileLite
                         numToSort--;
                     }
             }
+
+            // can't reach the requested number, means findTop already done its best
+            lastFindTopRetAll = (rv.size() < numSolutions);
             return rv;
+        }
+
+        virtual bool lastFindTopAlreadyRetAll() const override
+        {
+            return lastFindTopRetAll;
         }
 
         virtual SolutionSet<MySolution>

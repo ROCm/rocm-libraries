@@ -890,7 +890,7 @@ namespace
                     "algo_method",
                     2,
                     "solution_index",
-                    solutionIndex,                                          
+                    solutionIndex,
                     "activation_type",
                     tensileActivationtType_to_bench_string(problem.getParams().activationEnum()),
                     "flush",
@@ -1283,7 +1283,7 @@ namespace
             "algo_method",
             2,
             "solution_index",
-            solutionIndex,                                          
+            solutionIndex,
             "activation_type",
             tensileActivationtType_to_bench_string(problem.gemms[0].getParams().activationEnum()),
             "flush",
@@ -3626,8 +3626,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
             prob, library, hardware, data->problem, enableEpilogue, requestedAlgoCount);
     }
 
-    memset(
-        heuristicResultsArray, 0, sizeof(rocblaslt_matmul_heuristic_result) * requestedAlgoCount);
+    auto algoCount = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
+    memset(heuristicResultsArray, 0, sizeof(rocblaslt_matmul_heuristic_result) * algoCount);
     _convertToHeuristicResultArray(solutions,
                                    requestedAlgoCount,
                                    heuristicResultsArray,
@@ -3645,6 +3645,8 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
                                  size_t                                          maxWorkSpaceBytes)
 {
+    log_api(__func__, "Entering function");
+
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                            library;
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
@@ -3698,6 +3700,7 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
     heuristicResults.resize(solutions.size());
 
     int i = 0;
+    int duplicated_counts = 0;
     for(auto solution : solutions)
     {
         //workaround: findAllSolutions should get all solutions without duplications
@@ -3706,7 +3709,10 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
             if(*(int*)(heuristicResults[j].algo.data) == solution->index)
                 duplicated_sol = true;
         if(duplicated_sol)
+        {
+            ++duplicated_counts;
             continue;
+        }
         memset(&heuristicResults[i], 0, sizeof(rocblaslt_matmul_heuristic_result));
         memset(heuristicResults[i].algo.data, 0, sizeof(heuristicResults[i].algo.data));
         int* solutionIndex                           = (int*)(heuristicResults[i].algo.data);
@@ -3718,10 +3724,14 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
             heuristicResults[i].workspaceSize = solution->requiredWorkspaceSize(prob, *hardware);
         else
             heuristicResults[i].workspaceSize = 0;
+
+        // debug
+        // std::cout << "getAllSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
         i++;
     }
     heuristicResults.resize(i);
     log_api(__func__, "Final hardware solutions: ", heuristicResults.size());
+    log_api(__func__, "Leaving function, duplicated counts: ", duplicated_counts);
 
     return rocblaslt_status_success;
 }
@@ -4149,6 +4159,8 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   const int              requestedAlgoCount,
                                   std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults)
 {
+    log_api(__func__, "Entering function");
+
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                            library;
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
@@ -4191,6 +4203,14 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
         int  returnAlgoCount = 0;
         heuristicResults.clear();
         heuristicResults.resize(algoCount);
+
+        // debug
+        // for(size_t i = 0; i < algoCount; ++i)
+        // {
+        //     auto& solution = solutions[i];
+        //     std::cout << "getBestSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
+        // }
+
         _convertToHeuristicResultArray(solutions,
                                        algoCount,
                                        heuristicResults.data(),

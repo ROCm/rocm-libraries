@@ -135,7 +135,12 @@ namespace TensileLite
         template <typename SubMap, typename K>
         void add_impl(SubMap& map, Value const& value, K const& key)
         {
-            map.emplace(key, value);
+            // use faster emplace entry when key is new, otherwise update value with []
+            if(!map.count(key))
+                map.emplace(key, value);
+            else
+                map[key] = value;
+
         }
 
         template <typename SubMap, typename K, typename... Ks>
@@ -160,6 +165,8 @@ namespace TensileLite
         using Library = SolutionLibrary<MyProblem, MySolution>;
         using Cache  = CacheMap<std::tuple<std::shared_ptr<MySolution>, double>, AMDGPU, MyProblem>;
         using Caches = CacheMap<SolutionVector<MySolution>, AMDGPU, MyProblem>;
+        using CachesAllSolsFlag
+            = CacheMap<bool, AMDGPU, MyProblem>;
         using CachesGroupedGemm
             = CacheMap<SolutionVector<MySolution>, AMDGPU, std::vector<MyProblem>>;
 
@@ -167,6 +174,7 @@ namespace TensileLite
             : m_subLibrary(subLibrary)
             , m_cache(std::make_tuple(nullptr, std::numeric_limits<double>::max()))
             , m_caches(SolutionVector<MySolution>{})
+            , m_cachesAllSolutions(false)
             , m_cachesGroupedGemm(SolutionVector<MySolution>{})
         {
         }
@@ -255,22 +263,41 @@ namespace TensileLite
             {
                 auto const&                amdgpu = dynamic_cast<AMDGPU const&>(hardware);
                 SolutionVector<MySolution> solutions;
+                bool                       cacheAlreadyContainAll;
                 solutions = m_caches.find(problem, amdgpu);
+                cacheAlreadyContainAll = m_cachesAllSolutions.find(problem, amdgpu);
+                // set flag in case of early return
+                lastFindTopRetAll = cacheAlreadyContainAll;
 
-                if(solutions.size() != 0)
+                if(solutions.size() >= numSolutions || cacheAlreadyContainAll)
                     return solutions;
 
                 solutions = m_subLibrary->findTopSolutions(problem, hardware, numSolutions);
                 if(solutions.size() != 0)
+                {
+                    bool alreadyRetAll = m_subLibrary->lastFindTopAlreadyRetAll();
                     m_caches.add(solutions, problem, amdgpu);
+                    m_cachesAllSolutions.add(alreadyRetAll, problem, amdgpu);
+                    // debug
+                    // std::cout << "m_cachesAllSolutions.add() with solution.size() = " << solutions.size()
+                    //           << " and alreadyRetAll: " << (alreadyRetAll? "True" : "False") << std::endl;
+                }
 
+                // can't reach the requested number, means findTop already done its best
+                lastFindTopRetAll = (solutions.size() < numSolutions);
                 return solutions;
             }
             catch(std::bad_cast const& exc)
             {
                 return m_subLibrary->findTopSolutions(problem, hardware, numSolutions);
             }
+            // TODO- redundant ??
             return m_subLibrary->findTopSolutions(problem, hardware, numSolutions);
+        }
+
+        virtual bool lastFindTopAlreadyRetAll() const override
+        {
+            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>
@@ -305,7 +332,9 @@ namespace TensileLite
         std::shared_ptr<Library>  m_subLibrary;
         mutable Cache             m_cache;
         mutable Caches            m_caches;
+        mutable CachesAllSolsFlag m_cachesAllSolutions;
         mutable CachesGroupedGemm m_cachesGroupedGemm;
+        mutable bool              lastFindTopRetAll;
     };
 
 #if 0

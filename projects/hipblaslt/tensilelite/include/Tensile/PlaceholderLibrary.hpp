@@ -149,6 +149,7 @@ namespace TensileLite
         std::string                                                     filePrefix;
         std::string                                                     suffix;
         std::string                                                     libraryDirectory;
+        mutable bool                                                    lastFindTopRetAll;
 
         mutable std::map<std::string, std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>>*
             indexLoadedLibraries;
@@ -303,7 +304,15 @@ namespace TensileLite
             {
                 solution->codeObjectFilename = getCodeObjectFileName();
             }
+
+            // can't reach the requested number, means findTop already done its best
+            lastFindTopRetAll = (solutions.size() < numSolutions);
             return solutions;
+        }
+
+        virtual bool lastFindTopAlreadyRetAll() const override
+        {
+            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>
