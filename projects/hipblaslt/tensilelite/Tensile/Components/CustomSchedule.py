@@ -695,39 +695,33 @@ def _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0
     if isTN(kernel) and TLDS == 1:
         syncTable = [
-            10, SWaitCnt(dscnt= 4, vlcnt=-1, vscnt=-1, comment="Wait for LRA0"),
-            10, SBarrier(comment=""),
+            20, SWaitCnt(dscnt= 4, vlcnt=-1, vscnt=-1, comment="Wait for LRA0"),
+            20, SBarrier(comment=""),
 
-            32, SWaitCnt(dscnt= 0, vlcnt= 8, vscnt=-1, comment="Wait for LRB0"),
-            32, SBarrier(comment=""),
+            52, SWaitCnt(dscnt= 0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0"),
+            52, SBarrier(comment=""),
 
-            64, SWaitCnt(dscnt=-1, vlcnt= 6, vscnt=-1, comment="Wait for GRA"),
+            52, SWaitCnt(dscnt=-1, vlcnt=16, vscnt=-1, comment="Wait for GRA"),
 
-            96, SWaitCnt(dscnt=-1, vlcnt= 0, vscnt=-1, comment="Wait for GRB"),
-            96, SBarrier(comment=""),
+            83, SWaitCnt(dscnt= 0, vlcnt=10, vscnt=-1, comment="Wait for GRB"),
+            83, SBarrier(comment=""),
         ]
         optSchedule = {
             'SYNC'   : [syncTable[::2]],
             'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
             'GRIncB' : [[9,10,11,12,13,14,15,16,17]],
 
-            'LRA0'   : [[0,2,4,6,8,10,12],
-                        [1,3,5,7,9,11,13]],
-            'LRB0'   : [[14,16,18,20,22,24,26,28],
-                        [15,17,19,21,23,25,27,29]],
+            'LRA0' : [[ 0, 2, 4, 6, 8, 10, 12]],
+            'LRB0' : [[ 14, 16, 18, 20, 22, 24, 26, 28]],
 
-            'GRA'    : [[20,20, 22,22, 24,24, 26,26, 28,28, 30,30, 32,32],
-                        [21,21, 23,23, 25,25, 27,27, 29,29, 31,31, 33,33]],
-            'GRB'    : [[56,56, 58,58, 60,60, 62,62, 64,64, 66,66, 68,68, 70,70],
-                        [57,57, 59,59, 61,61, 63,63, 65,65, 67,67, 69,69, 71,71]],
+            'GRA' : [[ 18,18, 22,22, 26,26,  36,36, 40,40, 44,44, 48,48]],
+            'GRB' : [[ 56,56, 58,58, 60,60,  66,66, 70,70, 74,74, 78,78, 82,82]],
 
-            'LRA1'   : [[48,50,52,54,56,58,60],
-                        [49,51,53,55,57,59,61]],
-            'LRB1'   : [[72,74,76,78,80,82,84,86],
-                        [73,75,77,79,81,83,85,87]],
+            'LRA1' : [[ 58, 60, 62, 64, 66, 68, 70]],
+            'LRB1' : [[ 84, 85, 86, 87, 88, 89, 90, 91]],
 
             'LRSA'   : [[46]],
-            'LRSB'   : [[47]],
+            'LRSB'   : [[46]],
             'LWSA'   : [[109]],
             'LWSB'   : [[110]],
             'LCC'    : [[111, 111]],
