@@ -59,8 +59,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 #Set clang - driver mode to g++
 set(CLANG_DRIVER_MODE "--driver-mode=g++")
-set(CMAKE_CXX_FLAGS_DEBUG "-g -O1 -ggdb") # clang++ crashes with -O0
-set(CMAKE_CXX_FLAGS_MINSIZEREL "-O2 -DNDEBUG") # clang++ failed to build the project with the default -Os
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O1 -ggdb")           # clang++ crashes with -O0
+set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -O2 -DNDEBUG") # clang++ failed to build the project with the default -Os
 
 # Project options
 if( CMAKE_PROJECT_NAME STREQUAL "hiptensor" )
