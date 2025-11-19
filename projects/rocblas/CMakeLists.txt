@@ -232,7 +232,10 @@ if(NOT SKIP_LIBRARY)
   endif()
 endif()
 
-message(STATUS "Using GPU_TARGETS: ${GPU_TARGETS}")
+message(STATUS "Initial GPU_TARGETS: ${GPU_TARGETS}")
+# the one and only target
+set( GPU_TARGETS "amdgcnspirv" CACHE STRING "List of GPUs (gfx targets) to support" FORCE )
+message(STATUS "Forcing GPU_TARGETS: ${GPU_TARGETS}")
 
 # Find HIP dependencies
 if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
