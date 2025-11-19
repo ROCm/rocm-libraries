@@ -110,14 +110,16 @@ documentation:
   - any-glob-to-any-file:
     - docs/**/*
     - '**/docs/**/*'
-    - '*.md'
+    - '**/*.md'
+    - '**/*.rst'
 
 "ci:docs-only":
 - changed-files:
   - all-globs-to-all-files:
     - docs/**/*
     - '**/docs/**/*'
-    - '*.md'
+    - '**/*.md'
+    - '**/*.rst'
 
 External CI:
 - changed-files:
