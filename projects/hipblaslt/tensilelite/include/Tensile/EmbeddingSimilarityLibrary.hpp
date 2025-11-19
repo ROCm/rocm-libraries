@@ -31,10 +31,10 @@
 #include <vector>
 
 #include <Tensile/Debug.hpp>
+#include <Tensile/EmbeddingSimilarity.hpp>
 #include <Tensile/MLFeatures.hpp>
 #include <Tensile/ProblemKey.hpp>
 #include <Tensile/SolutionLibrary.hpp>
-#include <Tensile/EmbeddingSimilarity.hpp>
 #include <Tensile/Utils.hpp>
 
 namespace TensileLite
@@ -110,18 +110,18 @@ namespace TensileLite
                                                             Hardware const&  hardware,
                                                             int numSolutions) const override
         {
-            if (problem.batchSize(0) > 1) // TODO Temporary patch until we have the logic for it
+            if(problem.batchSize(0) > 1) // TODO Temporary patch until we have the logic for it
                 return {};
 
             std::vector<float> gemm_embedding = computeGEMMEmbeddings(problem);
 
-            std::vector<int> centroid_indexes(embeddings->centroids.size()); 
-            std::iota(centroid_indexes.begin(), centroid_indexes.end(), 0); 
-            std::vector<float> centroid_similarities(embeddings->centroids.size()); 
+            std::vector<int> centroid_indexes(embeddings->centroids.size());
+            std::iota(centroid_indexes.begin(), centroid_indexes.end(), 0);
+            std::vector<float> centroid_similarities(embeddings->centroids.size());
 
             int max_sim_idx
                 = (embeddings->centroids.size()) > 1
-                      ? inner_product(embeddings->centroids, gemm_embedding, centroid_similarities) 
+                      ? inner_product(embeddings->centroids, gemm_embedding, centroid_similarities)
                       : 0;
 
             std::vector<std::pair<float, std::shared_ptr<MySolution>>> rankedSolutions;
@@ -136,7 +136,7 @@ namespace TensileLite
                                             rankedSolutions);
             if(remSolutions > 0)
             {
-                auto cent_begin = centroid_indexes.begin(), cent_end = centroid_indexes.end(); 
+                auto cent_begin = centroid_indexes.begin(), cent_end = centroid_indexes.end();
 
                 size_t currentIndex = 1;
                 while(remSolutions > 0 && currentIndex < centroid_indexes.size())
@@ -145,13 +145,14 @@ namespace TensileLite
                                       cent_begin + currentIndex + 1,
                                       cent_end,
                                       [&centroid_similarities](int i0, int i1) {
-                                          return centroid_similarities[i0] > centroid_similarities[i1]; 
+                                          return centroid_similarities[i0]
+                                                 > centroid_similarities[i1];
                                       });
                     auto cidx    = centroid_indexes[currentIndex];
                     remSolutions = checkCluster(remSolutions,
                                                 gemm_embedding,
                                                 embeddings->embeddings[cidx],
-                                                embeddings->cluster_indices[cidx], 
+                                                embeddings->cluster_indices[cidx],
                                                 problem,
                                                 hardware,
                                                 rankedSolutions);
@@ -211,6 +212,8 @@ namespace TensileLite
             float ldc = problem.c().strides()[1];
             float ldd = problem.d().strides()[1];
 
+            float batch_count = problem.batchSize(0);
+
             float stride_a = transA ? lda * m : lda * k;
             float stride_b = transB ? ldb * k : ldb * n;
 
@@ -219,8 +222,19 @@ namespace TensileLite
 
             float flops = 2 * m * n * k;
 
-            std::vector<float> features
-                = {m, n, k, lda, stride_a, ldb, stride_b, ldc, stride_c, ldd, stride_d, flops};
+            std::vector<float> features = {m,
+                                           n,
+                                           k,
+                                           lda,
+                                           stride_a,
+                                           ldb,
+                                           stride_b,
+                                           ldc,
+                                           stride_c,
+                                           ldd,
+                                           stride_d,
+                                           batch_count,
+                                           flops};
 
             return encoder->forward(features);
         }
@@ -229,7 +243,7 @@ namespace TensileLite
             int                                                         remSolutions,
             const std::vector<float>&                                   gemm_embedding,
             const std::vector<std::vector<float>>&                      solution_embeddings,
-            const std::vector<int>&                                     cluster_indices, 
+            const std::vector<int>&                                     cluster_indices,
             const MyProblem&                                            problem,
             const Hardware&                                             hardware,
             std::vector<std::pair<float, std::shared_ptr<MySolution>>>& rankedSolutions) const
@@ -239,7 +253,7 @@ namespace TensileLite
             int max_sim_idx
                 = inner_product(solution_embeddings, gemm_embedding, solution_similarities);
 
-            auto sol = solutions[cluster_indices[max_sim_idx]]; 
+            auto sol = solutions[cluster_indices[max_sim_idx]];
             if((*(sol->problemPredicate))(problem))
             {
                 Task task(hardware, problem, *(sol));
@@ -273,7 +287,7 @@ namespace TensileLite
                 {
                     Task task(hardware, problem, *(sol));
                     if((*sol->taskPredicate)(task))
-                    { 
+                    {
                         rankedSolutions.emplace_back(solution_similarities[kidx], sol);
                         remSolutions--;
                     }
@@ -293,8 +307,8 @@ namespace TensileLite
             {
                 auto& solution_embedding = solution_embeddings[i];
 #ifdef __AVX2__
-                scores[i]
-                    = avx_dot(gemm_embedding.size(), solution_embedding.data(), gemm_embedding.data());
+                scores[i] = avx_dot(
+                    gemm_embedding.size(), solution_embedding.data(), gemm_embedding.data());
 #else
                 scores[i] = 0.0f;
                 for(int j = 0; j < gemm_embedding.size(); j += 4)
