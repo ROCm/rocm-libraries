@@ -6,7 +6,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
-* Support for data type BF16 for gfx90a
+* Support for the 'BF16' data type for gfx90a.
 
 ## hipBLASLt 1.1.0 for ROCm 7.1.0
 
