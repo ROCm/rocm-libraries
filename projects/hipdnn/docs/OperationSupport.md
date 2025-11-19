@@ -38,7 +38,7 @@ The following table lists all operations currently supported in hipDNN:
 > **Sparse Support:** All operations currently work with dense tensors only. Sparse tensor support is planned for future releases.
 
 > [!NOTE]
-> **Batchnorm Training Running Statistics:** Currently, batchnorm training only supports computing batch statistics (mean and inverse variance) without updating running statistics. Running statistics updates are not supported due to an API mismatch between hipDNN and MIOpen that requires upstream changes to resolve.
+> **Batchnorm Training Running Statistics:** Currently, batchnorm training only supports computing batch statistics (mean and inverse variance) without updating running statistics.
 
 ## Legend
 

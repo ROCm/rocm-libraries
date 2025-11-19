@@ -65,12 +65,14 @@ void SampleRunner::operator()(const TensorLayout& layout)
     bnAttributes.set_name("bn_training_node");
     bnAttributes.set_epsilon(epsilon);
 
-#if 0
+    std::shared_ptr<graph::TensorAttributes> prevRunningMean;
+    std::shared_ptr<graph::TensorAttributes> prevRunningVar;
+
     // Conditionally setup running statistics inputs
     if(config.useRunningStats)
     {
-        auto prevRunningMean = createTensor({1, c, 1, 1}, intermediateType);
-        auto prevRunningVar = createTensor({1, c, 1, 1}, intermediateType);
+        prevRunningMean = createTensor({1, c, 1, 1}, intermediateType);
+        prevRunningVar = createTensor({1, c, 1, 1}, intermediateType);
 
         // Momentum: use pass-by-value with double (matches MIOpen API)
         auto momentum = std::make_shared<graph::TensorAttributes>();
@@ -78,7 +80,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         bnAttributes.set_previous_running_stats(prevRunningMean, prevRunningVar, momentum);
     }
-#endif
 
     // API always returns 5 values regardless of whether running stats are used
     auto [y, savedMean, savedInvVariance, nextRunningMean, nextRunningVariance]
@@ -89,14 +90,11 @@ void SampleRunner::operator()(const TensorLayout& layout)
     savedMean->set_output(true);
     savedInvVariance->set_output(true);
 
-#if 0
-    // TODO: When running stats support is enabled, configure running stats output tensors
     if(config.useRunningStats)
     {
         nextRunningMean->set_output(true);
         nextRunningVariance->set_output(true);
     }
-#endif
 
     HIPDNN_FE_CHECK(graph->validate());
     std::cout << "Graph validation successful.\n";
@@ -122,17 +120,16 @@ void SampleRunner::operator()(const TensorLayout& layout)
     utilities::Tensor<IntermediateType> savedMeanTensor(savedMean->get_dim());
     utilities::Tensor<IntermediateType> savedInvVarTensor(savedInvVariance->get_dim());
 
-#if 0
-    // TODO: When running stats support is enabled, allocate these additional tensors:
-    if(config.useRunningStats)
-    {
-        utilities::Tensor<IntermediateType> prevMeanTensor(prevRunningMean->get_dim());
-        utilities::Tensor<IntermediateType> prevVarTensor(prevRunningVar->get_dim());
-        utilities::Tensor<IntermediateType> nextMeanTensor(nextRunningMean->get_dim());
-        utilities::Tensor<IntermediateType> nextVarTensor(nextRunningVar->get_dim());
-        // Note: momentum would also be pass-by-value like epsilon
-    }
-#endif
+    // Declare running statistics tensors at broader scope (conditionally initialized)
+    utilities::Tensor<IntermediateType> prevMeanTensor(
+        config.useRunningStats ? prevRunningMean->get_dim() : std::vector<int64_t>{1});
+    utilities::Tensor<IntermediateType> prevVarTensor(
+        config.useRunningStats ? prevRunningVar->get_dim() : std::vector<int64_t>{1});
+    utilities::Tensor<IntermediateType> nextMeanTensor(
+        config.useRunningStats ? nextRunningMean->get_dim() : std::vector<int64_t>{1});
+    utilities::Tensor<IntermediateType> nextVarTensor(
+        config.useRunningStats ? nextRunningVariance->get_dim() : std::vector<int64_t>{1});
+    // Note: momentum would also be pass-by-value like epsilon
 
     // Initialize tensors
     xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
@@ -141,8 +138,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
     biasTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
                                     static_cast<IntermediateType>(1.0f));
 
-#if 0
-    // TODO: When running stats support is enabled, initialize running stats tensors:
     if(config.useRunningStats)
     {
         prevMeanTensor.fillWithRandomValues(static_cast<IntermediateType>(0.0f),
@@ -150,7 +145,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
         prevVarTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
                                            static_cast<IntermediateType>(1.0f));
     }
-#endif
 
     // Build variant pack with batch statistics
     // Note: epsilon is pass-by-value, not included in variantPack
@@ -162,17 +156,14 @@ void SampleRunner::operator()(const TensorLayout& layout)
     variantPack[savedMean->get_uid()] = savedMeanTensor.memory().deviceData();
     variantPack[savedInvVariance->get_uid()] = savedInvVarTensor.memory().deviceData();
 
-#if 0
-    // TODO: When running stats support is enabled, add to variant pack:
     if(config.useRunningStats)
     {
         variantPack[prevRunningMean->get_uid()] = prevMeanTensor.memory().deviceData();
         variantPack[prevRunningVar->get_uid()] = prevVarTensor.memory().deviceData();
         variantPack[nextRunningMean->get_uid()] = nextMeanTensor.memory().deviceData();
-        variantPack[nextRunningVar->get_uid()] = nextVarTensor.memory().deviceData();
+        variantPack[nextRunningVariance->get_uid()] = nextVarTensor.memory().deviceData();
         // Note: momentum is also pass-by-value, not included in variantPack
     }
-#endif
 
     HIPDNN_FE_CHECK(graph->execute(handle, variantPack, nullptr));
 
@@ -192,35 +183,34 @@ void SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<IntermediateType> savedMeanRefTensor(savedMean->get_dim());
         utilities::Tensor<IntermediateType> savedInvVarRefTensor(savedInvVariance->get_dim());
 
-#if 0
         if(config.useRunningStats)
         {
             // FULL_TRAINING mode validation
             utilities::Tensor<IntermediateType> nextMeanRefTensor(nextRunningMean->get_dim());
-            utilities::Tensor<IntermediateType> nextVarRefTensor(nextRunningVar->get_dim());
+            utilities::Tensor<IntermediateType> nextVarRefTensor(nextRunningVariance->get_dim());
 
             test_utilities::CpuFpReferenceBatchnorm::fwdTraining<
-                InputType,          // XDataType
-                IntermediateType,   // ScaleBiasDataType
-                IntermediateType,   // MeanVarianceDataType
-                InputType           // YDataType
-            >(
-                xTensor,
-                scaleTensor,
-                biasTensor,
-                yRefTensor,
-                utilities::BATCHNORM_DEFAULT_EPSILON,
-                0.1, // momentum value used
-                &savedMeanRefTensor,
-                &savedInvVarRefTensor,
-                &prevMeanTensor,      // used
-                &prevVarTensor,       // used
-                &nextMeanRefTensor,   // used
-                &nextVarRefTensor     // used
+                InputType, // XDataType
+                IntermediateType, // ScaleBiasDataType
+                IntermediateType, // MeanVarianceDataType
+                InputType // YDataType
+                >(xTensor,
+                  scaleTensor,
+                  biasTensor,
+                  yRefTensor,
+                  utilities::BATCHNORM_DEFAULT_EPSILON,
+                  0.1, // momentum value used
+                  &savedMeanRefTensor,
+                  &savedInvVarRefTensor,
+                  &prevMeanTensor, // used
+                  &prevVarTensor, // used
+                  &nextMeanRefTensor, // used
+                  &nextVarRefTensor // used
             );
 
             auto tolerance = test_utilities::batchnorm::getToleranceTraining<InputType>();
-            auto yValidator = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+            auto yValidator
+                = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
             auto statsValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
                 static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 
@@ -233,12 +223,13 @@ void SampleRunner::operator()(const TensorLayout& layout)
             std::cout << "CPU reference validation:\n";
             std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
             std::cout << "  saved_mean: " << (meanValid ? "successful" : "failed") << "\n";
-            std::cout << "  saved_inv_variance: " << (invVarValid ? "successful" : "failed") << "\n";
-            std::cout << "  next_running_mean: " << (nextMeanValid ? "successful" : "failed") << "\n";
+            std::cout << "  saved_inv_variance: " << (invVarValid ? "successful" : "failed")
+                      << "\n";
+            std::cout << "  next_running_mean: " << (nextMeanValid ? "successful" : "failed")
+                      << "\n";
             std::cout << "  next_running_var: " << (nextVarValid ? "successful" : "failed") << "\n";
         }
         else
-#endif
         {
             // BATCH_STATS_ONLY mode validation
             test_utilities::CpuFpReferenceBatchnorm::fwdTraining<
