@@ -26,7 +26,25 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     std::cout << "Running batch normalization training + activation graph " << inputType << " ["
               << layout << "]" << (config.cpuValidation ? " (with CPU validation)" : "")
-              << " [activation: " << config.activationType << "]...\n";
+              << " [activation: " << config.activationType << "]";
+
+    if(config.useRunningStats)
+    {
+        std::cout << " [FULL_TRAINING mode]...\n";
+    }
+    else
+    {
+        std::cout << " [BATCH_STATS_ONLY mode]...\n";
+    }
+
+    if(config.useRunningStats)
+    {
+        std::cerr << "ERROR: Running statistics mode (--full-training) is not currently "
+                     "supported.\n";
+        std::cerr << "Please use --batch-stats-only mode (default) instead.\n";
+        std::cerr << "See docs/OperationSupport.md for more details.\n";
+        exit(EXIT_FAILURE);
+    }
 
     int64_t n = 16; // BATCH SIZE
     int64_t c = 16; // CHANNELS (FEATURES)
