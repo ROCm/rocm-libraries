@@ -430,7 +430,7 @@
     CodeObjectVersion: default
     ConvertAfterDS: false
     CustomKernelName: ''
-    DepthU: 16
+    DepthU: 32
     DirectToLds: false
     DirectToLdsA: false
     DirectToLdsB: false
@@ -457,32 +457,32 @@
     InternalSupportParams: {SupportCustomStaggerU: true, SupportCustomWGM: true, SupportUserGSU: true,
       UseUniversalArgs: true}
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Alik_Bljk_SB_Bias_HAS_SAV_UserArgs_MT8x8x16_SN_TT1_1
-    LSCA: 16
-    LSCB: 16
-    LSPA: 4
-    LSPB: 4
-    LVCA: 16
-    LVCB: 16
-    LVPA: 4
-    LVPB: 4
+    KernelNameMin: Cijk_Alik_Bljk_SB_Bias_HAS_SAV_UserArgs_MT64x64x32_SN_TT8_8
+    LSCA: 32
+    LSCB: 32
+    LSPA: 2
+    LSPB: 2
+    LVCA: 32
+    LVCB: 32
+    LVPA: 2
+    LVPB: 2
     LdsBlockSizePerPadA: 0
     LdsBlockSizePerPadB: 0
     LdsBlockSizePerPadMetadata: 0
     LdsInitCVgprs: false
-    LdsNumBytes: 2048
-    LdsNumElementsAlignedA: 512
-    LdsNumElementsAlignedB: 512
+    LdsNumBytes: 16384
+    LdsNumElementsAlignedA: 8192
+    LdsNumElementsAlignedB: 8192
     LdsNumElementsAlignedMetadata: 0
     LdsOffsetA: 0
-    LdsOffsetA_Blk: 1024
-    LdsOffsetB: 512
-    LdsOffsetB_Blk: 1536
+    LdsOffsetA_Blk: 0
+    LdsOffsetB: 8192
+    LdsOffsetB_Blk: 0
     LdsOffsetBias: 0
     LdsOffsetBiasGSU: 0
     LdsOffsetBiasNonGSU: 0
-    LdsOffsetMetadata: 512
-    LdsOffsetMetadata_Blk: 1536
+    LdsOffsetMetadata: 8192
+    LdsOffsetMetadata_Blk: 0
     LdsPadA: 0
     LdsPadB: 0
     LdsPadMetadata: 0
@@ -491,14 +491,14 @@
     LocalWritePerMfma: -1
     LocalWriteUseSgprA: false
     LocalWriteUseSgprB: false
-    LoopIters: 16
-    LoopUnroll: 16
+    LoopIters: 32
+    LoopUnroll: 32
     MIArchVgpr: false
     MIWaveTileMetadata: 0
-    MacroTile0: 8
-    MacroTile1: 8
-    MacroTileA: 8
-    MacroTileB: 8
+    MacroTile0: 64
+    MacroTile1: 64
+    MacroTileA: 64
+    MacroTileB: 64
     MagicDivAlg: 2
     MatrixInstruction: []
     MaxOccupancy: 40
@@ -513,14 +513,14 @@
     NonTemporalE: 0
     NonTemporalMetadata: 0
     NumElementsPerBatchStore: 0
-    NumElementsPerThread: 1
-    NumGlobalWriteVectorsPerThread: 1
-    NumLoadsA: 2
-    NumLoadsB: 2
+    NumElementsPerThread: 64
+    NumGlobalWriteVectorsPerThread: 64
+    NumLoadsA: 32
+    NumLoadsB: 32
     NumLoadsCoalescedA: 1
     NumLoadsCoalescedB: 1
-    NumLoadsPerpendicularA: 2
-    NumLoadsPerpendicularB: 2
+    NumLoadsPerpendicularA: 32
+    NumLoadsPerpendicularB: 32
     NumThreads: 64
     OptNoLoadLoop: 1
     PackedC0IdxChars: [I]
@@ -534,7 +534,7 @@
     ScheduleIterAlg: 1
     ScheduleLocalWrite: 1
     SolutionIndex: 2
-    SolutionNameMin: Cijk_Alik_Bljk_SB_Bias_HAS_SAV_UserArgs_MT8x8x16_SN_GSU1_SU32_SUM0_SUS256_TT1_1_WGM1
+    SolutionNameMin: Cijk_Alik_Bljk_SB_Bias_HAS_SAV_UserArgs_MT64x64x32_SN_GSU1_SU32_SUM0_SUS256_TT8_8_WGM1
     SourceSwap: false
     StaggerU: 32
     StaggerUMapping: 0
@@ -548,11 +548,11 @@
     SubGroupA: 8
     SubGroupB: 8
     SuppressNoLoadLoop: false
-    ThreadTile: [1, 1]
-    ThreadTile0: 1
-    ThreadTile1: 1
-    ThreadTileA: 1
-    ThreadTileB: 1
+    ThreadTile: [8, 8]
+    ThreadTile0: 8
+    ThreadTile1: 8
+    ThreadTileA: 8
+    ThreadTileB: 8
     TransposeLDS: 0
     TransposeLDSMetadata: true
     UnrollMajorLDSA: false
@@ -568,22 +568,22 @@
     WaveSeparateGlobalReadA: 0
     WaveSeparateGlobalReadB: 0
     WaveSeparateGlobalReadMetadata: 0
-    WavefrontSize: 64
+    WavefrontSize: 32
     WorkGroup: [8, 8, 1]
     WorkGroupMapping: 1
     WorkGroupMappingXCC: 1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
-    _DepthU: 16
-    _DepthUA: 16
-    _DepthUB: 16
-    _DepthUMetadata: 16
+    _DepthU: 32
+    _DepthUA: 32
+    _DepthUB: 32
+    _DepthUMetadata: 32
     _GlobalAccumulation: MultipleBuffer
-    _UseSgprForGRO: 1
+    _UseSgprForGRO: 0
     _VectorStore: 1
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
-    _staggerStrideShift: 2
+    _staggerStrideShift: 1
   - 1LDSBuffer: 0
     ActivationAlt: false
     ActivationFuncCall: true
