@@ -132,6 +132,17 @@ Tests:
   alpha: 2
   beta: 3
 
+- name: matmul_large
+  category: pre_checkin
+  function:
+    matmul: *single_precision
+  matrix_size: *large_matrix_size_range
+  transA: T
+  transB: N
+  alpha: 1
+  beta: 0
+  gpu_arch: '120[0-1]'
+
 - name: matmul_deepbench
   category: nightly
   function:
