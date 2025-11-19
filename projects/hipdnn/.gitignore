@@ -14,6 +14,10 @@
 *.dylib
 *.dll
 
+# Python Venv
+venv/
+install/
+
 # Fortran module files
 *.mod
 

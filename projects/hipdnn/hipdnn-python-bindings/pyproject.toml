@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hipdnn_frontend"
+version = "0.1.0"
+description = "Python bindings for hipDNN frontend"
+authors = [{ name = "Your Name", email = "your.email@example.com" }]
+license = { file = "LICENSE" }
+readme = "README.md"
+homepage = "https://github.com/yourusername/hipdnn-python-bindings"
+repository = "https://github.com/yourusername/hipdnn-python-bindings"
+keywords = ["hipdnn", "bindings", "python", "nanobind"]
+
+[tool.setuptools]
+packages = ["hipdnn_frontend"]
+package_dir = { "" = "python" }
+
+[tool.setuptools.extension]
+modules = ["src/module.cpp", "src/graph_bindings.cpp", "src/tensor_bindings.cpp", "src/attributes_bindings.cpp", "src/types_bindings.cpp"]
+
+[project.dependencies]
+nanobind = "^0.3.0"  # Adjust the version as necessary
+```
