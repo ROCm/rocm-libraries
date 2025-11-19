@@ -169,9 +169,7 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
         // Align each size to 256 bytes
         constexpr size_t ALIGNMENT_BOUNDARY = 256;
         constexpr size_t ALIGNMENT = ALIGNMENT_BOUNDARY - 1;
-        auto alignToBoundary = [](size_t size) {
-            return (size + ALIGNMENT) & ~ALIGNMENT;
-        };
+        auto alignToBoundary = [](size_t size) { return (size + ALIGNMENT) & ~ALIGNMENT; };
         std::transform(sizes.begin(), sizes.end(), sizes.begin(), alignToBoundary);
 
         // Calculate the total workspace size as the sum of aligned sizes

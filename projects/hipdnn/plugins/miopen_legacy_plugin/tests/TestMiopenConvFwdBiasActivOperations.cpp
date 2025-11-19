@@ -128,29 +128,30 @@ protected:
         const auto xTensorUid = getTensorUid("x");
         ASSERT_TRUE(xTensorUid.has_value());
         deviceBuffers.push_back(generateRandomDeviceBuffer(xTensor,
-                                                            static_cast<int>(xTensorUid.value()),
-                                                            static_cast<DataType>(-1.0f),
-                                                            static_cast<DataType>(1.0f),
-                                                            testCase.conv.seed));
+                                                           static_cast<int>(xTensorUid.value()),
+                                                           static_cast<DataType>(-1.0f),
+                                                           static_cast<DataType>(1.0f),
+                                                           testCase.conv.seed));
 
         const auto wTensorUid = getTensorUid("w");
         ASSERT_TRUE(wTensorUid.has_value());
         deviceBuffers.push_back(generateRandomDeviceBuffer(wTensor,
-                                                            static_cast<int>(wTensorUid.value()),
-                                                            static_cast<DataType>(-1.0f),
-                                                            static_cast<DataType>(1.0f),
-                                                            testCase.conv.seed));
+                                                           static_cast<int>(wTensorUid.value()),
+                                                           static_cast<DataType>(-1.0f),
+                                                           static_cast<DataType>(1.0f),
+                                                           testCase.conv.seed));
 
         std::optional<int64_t> biasTensorUid;
         if(testCase.doBias)
         {
             biasTensorUid = getTensorUid("bias");
             ASSERT_TRUE(biasTensorUid.has_value());
-            deviceBuffers.push_back(generateRandomDeviceBuffer(biasTensor,
-                                                                static_cast<int>(biasTensorUid.value()),
-                                                                static_cast<DataType>(-1.0f),
-                                                                static_cast<DataType>(1.0f),
-                                                                testCase.conv.seed));
+            deviceBuffers.push_back(
+                generateRandomDeviceBuffer(biasTensor,
+                                           static_cast<int>(biasTensorUid.value()),
+                                           static_cast<DataType>(-1.0f),
+                                           static_cast<DataType>(1.0f),
+                                           testCase.conv.seed));
         }
 
         const auto yTensorUid = getTensorUid("y");
