@@ -32,6 +32,8 @@
 #include "internal/pack_util.hpp"
 #include "internal/types.hpp"
 
+#define NOP_CHANGE
+
 /**
  * \mainpage
  *
