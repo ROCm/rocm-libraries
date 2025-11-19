@@ -12,7 +12,6 @@ Architectures:
       HasDirectToLds: 0
       HasExpcnt: 0
       HasExplicitVectorCO: 0
-      HasExplicitVectorRev: 0
       HasExplicitVectorRevCO: 0
       HasGlobalOffset: 0
       HasLshlOr: 0
@@ -33,7 +32,6 @@ Architectures:
       SupportedSource: 0
       s_barrier: 0
       v_add3_u32: 0
-      v_add_u32: 0
       v_dot2_f32_f16: 0
       v_dot2c_f32_f16: 0
       v_dot4c_i32_i8: 0

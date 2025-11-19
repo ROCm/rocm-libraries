@@ -65,7 +65,6 @@ namespace GPUArchitectureGenerator
             {rocRoller::GPUCapability::HasExplicitVectorCOCI,
              {{"v_add_co_ci_u32 v0, vcc, v0, 1, vcc", "v_add_co_ci_u32 v0, vcc_lo, v0, 1, vcc_lo"},
               ""}},
-            {rocRoller::GPUCapability::HasExplicitVectorRev, {{"v_subrev_u32 v0, 1, v0"}, ""}},
             {rocRoller::GPUCapability::HasExplicitVectorRevCO,
              {{"v_subrev_co_u32 v0, vcc, 1, v0", "v_subrev_co_u32 v0, vcc_lo, 1, v0"}, ""}},
             {rocRoller::GPUCapability::HasExplicitVectorRevCOCI,
@@ -167,8 +166,6 @@ namespace GPUArchitectureGenerator
             {rocRoller::GPUCapability::v_mov_b64, {{"v_mov_b64 v[2:3], v[0:1]"}, ""}},
 
             {rocRoller::GPUCapability::v_add3_u32, {{"v_add3_u32 v0, v1, v2, v3"}, ""}},
-
-            {rocRoller::GPUCapability::v_add_u32, {{"v_add_u32 v0, 1, v0"}, ""}},
 
             {rocRoller::GPUCapability::s_barrier, {{"s_barrier"}, ""}},
             {rocRoller::GPUCapability::s_barrier_signal, {{"s_barrier_signal -1"}, ""}},
