@@ -5,23 +5,29 @@
 
 #include <algorithm>
 #include <chrono>  // For timing
+#include <string>
 #include <cmath>
-#include <iomanip>  // For output formatting
+#include <iomanip> // For output formatting
 #include <iostream>
 
 namespace origami {
 
 static double read_heuristics_variance_env_var() {
-    const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE");
-    if (!env) return 0;  // Set default variance to 0
+    constexpr double default_variance = 0.01; // 1%
 
-    try {
-        double val = std::stod(env);
-        return (val > 0.) ? val : 0.;
-    } catch (...) {
-        return 0;
+    if (const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE")) {
+        try {
+            double val = std::stod(env);
+            if (std::isfinite(val) && val > 0.0) {
+                return val;
+            }
+        } catch (...) {
+            // fall through to default
+        }
     }
+    return default_variance;
 }
+
 //
 // Tiebreaker function.
 //

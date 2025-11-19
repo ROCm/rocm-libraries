@@ -70,45 +70,50 @@ extern "C" {
 *  \note
 *  Currently, only \p transA == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported.
 *
-*  @param[in]
-*  handle      handle to the hipsparse library context queue.
-*  @param[in]
-*  transA      matrix operation type.
-*  @param[in]
-*  m           number of rows of the sparse CSR matrix.
-*  @param[in]
-*  n           number of columns of the sparse CSR matrix.
-*  @param[in]
-*  nnz         number of non-zero entries of the sparse CSR matrix.
-*  @param[in]
-*  alpha       scalar \f$\alpha\f$.
-*  @param[in]
-*  descrA      descriptor of the sparse CSR matrix. Currently, only
-*              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
-*  @param[in]
-*  csrSortedValA array of \p nnz elements of the sparse CSR matrix.
-*  @param[in]
-*  csrSortedRowPtrA array of \p m+1 elements that point to the start
-*              of every row of the sparse CSR matrix.
-*  @param[in]
-*  csrSortedColIndA array of \p nnz elements containing the column indices of the sparse
-*              CSR matrix.
-*  @param[in]
-*  x           array of \p n elements (\f$op(A) == A\f$) or \p m elements
-*              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
-*  @param[in]
-*  beta        scalar \f$\beta\f$.
-*  @param[inout]
-*  y           array of \p m elements (\f$op(A) == A\f$) or \p n elements
-*              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n or \p nnz, \p descr,
-*              \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p x,
-*              \p beta or \p y is invalid.
-*  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
-*  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
-*              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*  @param[in]
+*  handle              handle to the hipsparse library context queue.
+*  @param[in]
+*  transA              matrix operation type.
+*  @param[in]
+*  m                   number of rows of the sparse CSR matrix. Must be non-negative.
+*  @param[in]
+*  n                   number of columns of the sparse CSR matrix. Must be non-negative.
+*  @param[in]
+*  nnz                 number of non-zero entries of the sparse CSR matrix. Must be non-negative.
+*  @param[in]
+*  alpha               scalar \f$\alpha\f$.
+*  @param[in]
+*  descrA              descriptor of the sparse CSR matrix. Currently, only
+*                      \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  @param[in]
+*  csrSortedValA       array of \p nnz elements of the sparse CSR matrix.
+*  @param[in]
+*  csrSortedRowPtrA    array of \p m+1 elements that point to the start
+*                      of every row of the sparse CSR matrix.
+*  @param[in]
+*  csrSortedColIndA    array of \p nnz elements containing the column indices of the sparse
+*                      CSR matrix.
+*  @param[in]
+*  x                   array of \p n elements (\f$op(A) == A\f$) or \p m elements
+*                      (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
+*  @param[in]
+*  beta                scalar \f$\beta\f$.
+*  @param[inout]
+*  y                   array of \p m elements (\f$op(A) == A\f$) or \p n elements
+*                      (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha or \p beta is nullptr,
+*          \p m, \p n or \p nnz is negative, or \p csrSortedValA, \p csrSortedRowPtrA,
+*          \p csrSortedColIndA, \p x or \p y is nullptr.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
+*          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 *
 *  \par Example
 *  \snippet example_hipsparse_csrmv.cpp doc example

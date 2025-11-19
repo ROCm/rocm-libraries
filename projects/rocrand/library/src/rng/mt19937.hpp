@@ -570,9 +570,7 @@ void generate_long_mt19937(dim3 block_idx,
             mt19937_octo_engine& engine    = thread_engines[warp_lane];
             const unsigned int   thread_id = block_idx.x * block_size + thread_idx.x + warp_lane;
 #endif
-// Disabled for warning: optimizer failed to unroll when compiling
-// TODO: enable when the compiler successfully unrolls the loop
-// #pragma unroll
+#pragma unroll
             for(unsigned int j = 0; j < inputs_per_state; j++)
             {
 #pragma unroll
@@ -616,9 +614,7 @@ void generate_long_mt19937(dim3 block_idx,
             mt19937_octo_engine& engine    = thread_engines[warp_lane];
             const unsigned int   thread_id = block_idx.x * block_size + thread_idx.x + warp_lane;
 #endif
-// Disabled for warning: optimizer failed to unroll when compiling
-// TODO: enable when the compiler successfully unrolls the loop
-// #pragma unroll
+#pragma unroll
             for(unsigned int j = 0; j < inputs_per_state; j++)
             {
 #pragma unroll
