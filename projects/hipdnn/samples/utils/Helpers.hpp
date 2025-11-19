@@ -103,6 +103,10 @@ inline Config parseCommandLineArgs(int argc, char* argv[])
                 exit(EXIT_FAILURE);
             }
         }
+        else if(arg == "--batch-stats-only")
+        {
+            config.useRunningStats = false;
+        }
         else if(arg == "--full-training")
         {
             config.useRunningStats = true;
