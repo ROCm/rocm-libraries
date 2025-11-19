@@ -14036,8 +14036,9 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all LR in pre-loop to complete"))
 
     if numCodePath == 1:
+      module.add(Label("LoopBegin%s_0"%(loopChar), "" ))
       module.add(MacroInstruction(name="MAINLOOP", args=[0]))
-      module.add(SCBranchSCC0(labelName="label_LoopBegin%s"%(loopChar), comment="" ))
+      module.add(SCBranchSCC0(labelName="label_LoopBegin%s_0"%(loopChar), comment="" ))
       module.add(Label("LoopEnd%s"%(loopChar), "" ))
       return module
 
