@@ -94,7 +94,7 @@ struct ActivTestCase
     }
 };
 
-inline std::vector<ActivTestCase> createBatchnormFwdActivationTestCases()
+inline std::vector<ActivTestCase> createFwdActivationSmokeCases()
 {
     using PM = hipdnn_sdk::data_objects::PointwiseMode;
 
