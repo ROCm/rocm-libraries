@@ -89,9 +89,6 @@ namespace AddDeallocateTest
 
         SECTION("Downstream Barriers")
         {
-            auto topo
-                = TopologicalCompare(std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph));
-
             auto graph  = kgraph;
             auto tracer = LastRWTracer(graph);
 
@@ -103,7 +100,7 @@ namespace AddDeallocateTest
                 if(maybeLDS)
                 {
                     AddDeallocateDetail::addDownstreamBarrierInLoop(
-                        dependencies, coordinate, controls, kgraph, topo);
+                        dependencies, coordinate, controls, kgraph);
                     CHECK(dependencies.size() >= 1);
                     if(dependencies.size() == 1)
                     {

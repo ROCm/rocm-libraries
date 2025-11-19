@@ -100,7 +100,11 @@
 "project: rocwmma":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocwmma/**/*'
-
+  
+"project: hiptensor":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hiptensor/**/*'
+  
 documentation:
 - changed-files:
   - any-glob-to-any-file:

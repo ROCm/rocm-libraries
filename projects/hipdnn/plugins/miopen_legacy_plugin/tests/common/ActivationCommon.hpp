@@ -94,23 +94,60 @@ struct ActivTestCase
     }
 };
 
-inline std::vector<ActivTestCase> createBwdActivationTestCases()
+inline std::vector<ActivTestCase> createBatchnormFwdActivationTestCases()
 {
-    using PM = hipdnn_sdk::data_objects::PointwiseMode;
+    return {//Standard ReLU Max(0, x)
+            ActivTestCase(hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+                          0.0f,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt),
+            //Clipped ReLU
+            ActivTestCase(hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+                          std::nullopt,
+                          0.5f,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt),
+            //CLAMP
+            ActivTestCase(hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+                          0.1f,
+                          0.5f,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt)};
+}
 
-    std::vector<ActivTestCase> cases;
-
-    // RELU backward
-    cases.emplace_back(PM::RELU_BWD,
-                       std::nullopt, // reluLowerClip
-                       std::nullopt, // reluUpperClip
-                       std::nullopt, // reluLowerClipSlope
-                       std::nullopt, // swishBeta
-                       std::nullopt, // eluAlpha
-                       std::nullopt // softplusBeta
-    );
-
-    return cases;
+inline std::vector<ActivTestCase> createBatchnormBwdActivationTestCases()
+{
+    return {// ReLU Backward: d/dx Max(0, x) = 1 * (x > 0)
+            ActivTestCase(hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
+                          0.0f,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt),
+            // Clipped ReLU Backward: d/dx Clamp(x, -inf, upper)
+            ActivTestCase(hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
+                          std::nullopt,
+                          0.5f,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt),
+            // CLAMP Backward: d/dx Clamp(x, lower, upper)
+            ActivTestCase(hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
+                          0.1f,
+                          0.5f,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt,
+                          std::nullopt)};
 }
 
 } // namespace test_activation_common
