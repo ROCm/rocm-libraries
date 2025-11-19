@@ -107,6 +107,11 @@ if(DEFINED USE_CUDA)
         _hipsparse_deprecation_warning(USE_CUDA HIPSPARSE_ENABLE_CUDA)
         list(APPEND _HIPSPARSE_LEGACY_OPTIONS_USED "USE_CUDA=${USE_CUDA}")
         list(APPEND _HIPSPARSE_CURRENT_OPTIONS "HIPSPARSE_ENABLE_CUDA=${HIPSPARSE_ENABLE_CUDA}")
+        
+        # Auto-disable HIP when CUDA is enabled (unless user explicitly set HIP)
+        if(HIPSPARSE_ENABLE_CUDA AND NOT DEFINED HIPSPARSE_ENABLE_HIP)
+            set(HIPSPARSE_ENABLE_HIP OFF CACHE BOOL "Build hipSPARSE with HIP backend." FORCE)
+        endif()
     endif()
 endif()
 
@@ -123,6 +128,11 @@ if(DEFINED BUILD_CUDA)
             "To suppress these warnings: cmake -DCMAKE_WARN_DEPRECATED=OFF ...")
         list(APPEND _HIPSPARSE_LEGACY_OPTIONS_USED "BUILD_CUDA=${BUILD_CUDA}")
         list(APPEND _HIPSPARSE_CURRENT_OPTIONS "HIPSPARSE_ENABLE_CUDA=${HIPSPARSE_ENABLE_CUDA}")
+        
+        # Auto-disable HIP when CUDA is enabled (unless user explicitly set HIP)
+        if(HIPSPARSE_ENABLE_CUDA AND NOT DEFINED HIPSPARSE_ENABLE_HIP)
+            set(HIPSPARSE_ENABLE_HIP OFF CACHE BOOL "Build hipSPARSE with HIP backend." FORCE)
+        endif()
     endif()
 endif()
 

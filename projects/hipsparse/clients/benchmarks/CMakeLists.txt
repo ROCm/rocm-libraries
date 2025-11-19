@@ -32,9 +32,14 @@ if(HIPSPARSE_ENABLE_CUDA)
     target_link_libraries(hipsparse-bench PRIVATE ${CUDA_LIBRARIES})
 endif()
 
-# Set output directory
+# Set output directory - backward compatible with Jenkins expectations
+# Jenkins expects build/{release|debug}/clients/staging/
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "release")
+endif()
+string(TOLOWER "${CMAKE_BUILD_TYPE}" build_type_lower)
 set_target_properties(hipsparse-bench PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${build_type_lower}/clients/staging"
 )
 
 # Installation
