@@ -171,8 +171,7 @@ public:
             hipfftXtFree(d);
         }
     };
-    // allocated memory on devices for multi-GPU transforms - inplace
-    // just uses xt_output
+    // Allocated memory on devices for multi-GPU transforms - inplace just uses xt_output
     std::unique_ptr<hipLibXtDesc, hipLibXtDesc_deleter> xt_input;
     std::unique_ptr<hipLibXtDesc, hipLibXtDesc_deleter> xt_output;
 

@@ -268,13 +268,15 @@ int main(int argc, char* argv[])
     }
 
     // Create plans:
+    if(verbose > 0)
+        std::cout << "Making a plan..." << std::endl;
     auto ret = params.create_plan();
     if(ret != fft_status_success)
         throw std::runtime_error("Plan creation failed");
 
     hipError_t hip_rt;
     // GPU input buffer:
-    auto                ibuffer_sizes = params.ibuffer_sizes();
+    const auto          ibuffer_sizes = params.ibuffer_sizes();
     std::vector<gpubuf> ibuffer;
     std::vector<void*>  pibuffer;
     std::vector<void*>  pobuffer;
@@ -304,6 +306,8 @@ int main(int argc, char* argv[])
                                && !(params.igen == fft_input_generator_host
                                     || params.igen == fft_input_random_generator_host);
 
+    if(verbose > 0)
+        std::cout << "Setting up buffers..." << std::endl;
     if(is_device_gen)
     {
 #ifdef USE_HIPRAND
@@ -376,6 +380,8 @@ int main(int argc, char* argv[])
         pobuffer[i] = obuffer->at(i).data();
     }
 
+    if(verbose > 0)
+        std::cout << "Test execution..." << std::endl;
     auto res = params.execute(pibuffer.data(), pobuffer.data());
     if(res != fft_status_success)
         throw std::runtime_error("Execution failed");
@@ -392,6 +398,8 @@ int main(int argc, char* argv[])
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipEventCreate failed");
 
+    if(verbose > 0)
+        std::cout << "Main execution loop..." << std::endl;
     for(size_t itrial = 0; itrial < gpu_time.size(); ++itrial)
     {
         // Compute input on default device

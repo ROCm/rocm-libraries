@@ -1903,6 +1903,11 @@ static size_t hipDataType_bytes(hipDataType t, size_t numElems)
     return hipDataType_bits(t) * numElems / 8;
 }
 
+struct hipFFTXtState
+{
+    bool inplace_transformed = false;
+};
+
 hipfftResult hipfftXtMalloc(hipfftHandle plan, hipLibXtDesc** desc, hipfftXtSubFormat format)
 try
 {
@@ -1920,6 +1925,7 @@ try
     auto xt_desc = std::make_unique<hipXtDesc>();
     memset(xt_desc.get(), 0, sizeof(hipXtDesc));
     xt_desc->version = 0;
+    xt_desc-> hipXtState = std::make_unique<hipFFTXtState>();
 
     std::vector<hipfft_brick>* bricks           = nullptr;
     size_t                     bits_per_element = 0;
