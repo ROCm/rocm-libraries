@@ -251,7 +251,7 @@ def form9BitMIInst(currentSolutionState):
     groups = {}
     groups["MatrixInstruction"] = FlowList(MIInstruction9Bits)
     groups["WorkGroup"] = FlowList(currentSolutionState["WorkGroup"])
-    groups["MIArchVgpr"] = 0
+    groups["MIArchVgpr"] = currentSolutionState["MIArchVgpr"]
 
     return groups
 
@@ -321,9 +321,15 @@ def formProblemSize(
     data["BenchmarkFinalParameters"] = []
 
     temp = {}
-    for size, mapping in exactLogic:
-        if mapping[0] == solutionIndex:
-            temp["ProblemSizes"] = [{"Exact": FlowList(size)}]
+    # for origami exactLogic is not present so we need to create it
+
+    if exactLogic == None:
+        tPrint(1, "Warning: For Origami liblogics, Exact logic needs to be set manually")
+        temp["ProblemSizes"] = [{"Exact": FlowList([1,1,1,1])}]
+    else:
+        for size, mapping in exactLogic:
+            if mapping[0] == solutionIndex:
+                temp["ProblemSizes"] = [{"Exact": FlowList(size)}]
 
     data["BenchmarkFinalParameters"].append(temp)
 
@@ -358,6 +364,7 @@ def writeToTensileYamlFile(tensileYamlFile, tensileYamlData):
                 sort_keys=False,
                 Dumper=yaml.Dumper,
             )
+        tPrint(1, "Config library is written to {}".format(tensileYamlFile))
 
     except (OSError, IOError):
         tPrint(

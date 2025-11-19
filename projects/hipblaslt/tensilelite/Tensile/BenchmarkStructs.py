@@ -105,7 +105,7 @@ class BenchmarkProcess:
         print1("# Filling in Parameters With Defaults")
         print2("####################################################################")
         print2("")
-        print("DAVOOD: ", config)
+
         # check for no longer supported legacy benchmark steps
         badParams = ["InitialSolutionParameters", "BenchmarkForkParameters", \
                      "JoinParameters", "BenchmarkJoinParameters"]
@@ -172,7 +172,7 @@ class BenchmarkProcess:
 
         self.problemSizes = ProblemSizes(self.problemType, sizes)
         checkCDBufferAndStrides(self.problemType, self.problemSizes, globalParameters["CEqualD"])
-        print("poroblem TYPE: ",biasTypesConf)
+
         self.biasTypesArgs  = BiasTypeArgs(self.problemType, biasTypesConf)
         self.activationArgs = ActivationArgs(self.problemType, activationConf)
         self.factorDimArgs  = FactorDimArgs(self.problemType, factorDimConf)
