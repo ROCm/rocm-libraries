@@ -15,6 +15,7 @@ Documentation for rocFFT is available at
 * Fixed potential division by zero when constructing plans using dimensions of length 1.
 * Fixed result scaling on multi-device transforms.
 * Fixed callbacks on single-process multi-GPU transforms.
+* Fixed potential issue with data generation for multidimensional transforms in rocfft-tests and rocfft-bench.
 
 ## rocFFT 1.0.35 for ROCM 7.1.0
 
@@ -29,10 +30,6 @@ Documentation for rocFFT is available at
   - (32,32,64)
   - (64,32,128)
 * Improved performance of 3D MPI pencil decompositions by using sub-communicators for global transpose operations.
-
-### Resolved issues
-
-* Fixed potential issue with data generation for multidimensional transforms in rocfft-tests and rocfft-bench.
 
 ## rocFFT 1.0.34 for ROCm 7.0.0
 
