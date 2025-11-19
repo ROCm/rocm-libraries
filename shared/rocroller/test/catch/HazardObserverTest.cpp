@@ -31,7 +31,11 @@
 #include "CustomSections.hpp"
 #include "TestContext.hpp"
 #include "TestKernels.hpp"
+#include "rocRoller/Scheduling/Observers/WaitState/MFMA/CMPXWriteExec.hpp"
+#include "rocRoller/Scheduling/Observers/WaitState/OPSEL94x.hpp"
 #include "rocRoller/Scheduling/Observers/WaitState/VALUTransWrite94x.hpp"
+#include "rocRoller/Scheduling/Observers/WaitState/VALUWriteReadlane94x.hpp"
+#include "rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVMEM.hpp"
 #include "rocRoller/Scheduling/Observers/WaitState/VALUWriteVCCVDIVFMAS.hpp"
 
 #include <common/SourceMatcher.hpp>
@@ -99,7 +103,8 @@ namespace HazardObserverTest
             auto observer = Scheduling::VALUWriteVCCVDIVFMAS();
             if(!observer.required(arch))
             {
-                SKIP("Architecture does not meet requirements for this observer");
+                SKIP("Architecture " + arch.toString()
+                     + " does not meet requirements for this observer");
             }
 
             SECTION("v_readlane (2nd op) read as laneselect")
@@ -318,10 +323,9 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(!TestContext::ForTarget(arch)->targetArchitecture().HasCapability(
-                   GPUCapability::v_add_u32))
+            if(!arch.isCDNAGPU())
             {
-                SKIP("Architecture " + arch.toString() + " does not support v_add_u32");
+                SKIP("This observer only applies to CDNA archictectures");
             }
 
             SECTION("Has hazard with 2nd op (non-trans) accessing the same register")
@@ -411,10 +415,9 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(!TestContext::ForTarget(arch)->targetArchitecture().HasCapability(
-                   GPUCapability::HasExplicitVectorRev))
+            if(!arch.isCDNAGPU())
             {
-                SKIP("Architecture " + arch.toString() + " does not support v_subrev_u32");
+                SKIP("This observer only applies to CDNA archictectures");
             }
 
             SECTION("Hazard with VALU write followed by a readlane or permlane")
@@ -429,22 +432,22 @@ namespace HazardObserverTest
                            "v_readlane_b32", {s[1]}, {v[0], Register::Value::Literal(0)}, {}, ""),
                        Instruction("s_endpgm", {}, {}, {}, "")};
 
-                if(arch.isCDNA1GPU() || arch.isCDNA2GPU())
+                auto observer = Scheduling::VALUWriteReadlane94x();
+                if(observer.required(arch))
+                {
+                    peekAndSchedule(context, insts[0]);
+                    peekAndSchedule(context, insts[1], 1);
+                    peekAndSchedule(context, insts[2]);
+
+                    CHECK_THAT(context.output(), ContainsSubstring("s_nop 0"));
+                }
+                else
                 {
                     peekAndSchedule(context, insts[0]);
                     peekAndSchedule(context, insts[1]);
                     peekAndSchedule(context, insts[2]);
 
                     CHECK_THAT(context.output(), !(ContainsSubstring("s_nop")));
-                }
-                else
-                {
-                    // NOPs are required on 94X arch
-                    peekAndSchedule(context, insts[0]);
-                    peekAndSchedule(context, insts[1], 1);
-                    peekAndSchedule(context, insts[2]);
-
-                    CHECK_THAT(context.output(), ContainsSubstring("s_nop 0"));
                 }
             }
 
@@ -522,9 +525,11 @@ namespace HazardObserverTest
 
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(arch.isRDNAGPU())
+            auto observer = Scheduling::CMPXWriteExec();
+            if(!observer.required(arch))
             {
-                SKIP("RDNA not supported yet");
+                SKIP("Architecture " + arch.toString()
+                     + " does not meet requirements for this observer");
             }
 
             SECTION("Hazard on 94X with 2nd op is v_readlane")
@@ -630,9 +635,9 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(arch.isRDNAGPU())
+            if(!arch.isCDNAGPU())
             {
-                SKIP("RDNA not supported yet");
+                SKIP("This observer only applies to CDNA archictectures");
             }
 
             auto context = TestContext::ForTarget(arch);
@@ -644,20 +649,20 @@ namespace HazardObserverTest
                    Instruction("v_mov_b32", {v[0]}, {v[1]}, {}, ""),
                    Instruction("s_endpgm", {}, {}, {}, "")};
 
-            if(arch.isCDNA1GPU() || arch.isCDNA2GPU())
+            auto observer = Scheduling::OPSEL94x();
+            if(observer.required(arch))
+            {
+                peekAndSchedule(context, insts[0]);
+                peekAndSchedule(context, insts[1], 1);
+
+                CHECK_THAT(context.output(), ContainsSubstring("s_nop 0"));
+            }
+            else
             {
                 peekAndSchedule(context, insts[0]);
                 peekAndSchedule(context, insts[1]);
 
                 CHECK_THAT(context.output(), !(ContainsSubstring("s_nop")));
-            }
-            else
-            {
-                // NOPs are required on 94X arch
-                peekAndSchedule(context, insts[0]);
-                peekAndSchedule(context, insts[1], 1);
-
-                CHECK_THAT(context.output(), ContainsSubstring("s_nop 0"));
             }
         }
     }
@@ -666,9 +671,11 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            if(arch.isRDNAGPU())
+            auto observer = Scheduling::VALUWriteSGPRVMEM();
+            if(!observer.required(arch))
             {
-                SKIP("RDNA not supported yet");
+                SKIP("Architecture " + arch.toString()
+                     + " does not meet requirements for this observer");
             }
 
             auto context = TestContext::ForTarget(arch);
