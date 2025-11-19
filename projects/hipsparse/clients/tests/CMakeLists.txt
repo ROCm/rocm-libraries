@@ -199,7 +199,7 @@ add_custom_command(
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-set(HIPSPARSE_COMMON "${PROJECT_BINARY_DIR}/staging/hipsparse_common.yaml")
+set(HIPSPARSE_COMMON "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_common.yaml")
 add_custom_command(
     OUTPUT "${HIPSPARSE_COMMON}"
     COMMAND ${CMAKE_COMMAND} -E copy ../include/hipsparse_common.yaml "${HIPSPARSE_COMMON}"
@@ -207,7 +207,7 @@ add_custom_command(
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-set(HIPSPARSE_TEMPLATE "${PROJECT_BINARY_DIR}/staging/hipsparse_template.yaml")
+set(HIPSPARSE_TEMPLATE "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_template.yaml")
 add_custom_command(
     OUTPUT "${HIPSPARSE_TEMPLATE}"
     COMMAND ${CMAKE_COMMAND} -E copy ../include/hipsparse_template.yaml "${HIPSPARSE_TEMPLATE}"
@@ -215,7 +215,7 @@ add_custom_command(
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-set(HIPSPARSE_GENTEST "${PROJECT_BINARY_DIR}/staging/hipsparse_gentest.py")
+set(HIPSPARSE_GENTEST "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_gentest.py")
 add_custom_command(
     OUTPUT "${HIPSPARSE_GENTEST}"
     COMMAND ${CMAKE_COMMAND} -E copy ../common/hipsparse_gentest.py "${HIPSPARSE_GENTEST}"
@@ -272,7 +272,7 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
                          test_prune_dense2csr_by_percentage.yaml)
 
 # Prepare testing data
-set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparse_test.data")
+set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_test.data")
 add_custom_command(OUTPUT "${HIPSPARSE_TEST_DATA}"
                    COMMAND ${Python3_EXECUTABLE} ../common/hipsparse_gentest.py -m ${PROJECT_BINARY_DIR}/matrices -I ../include hipsparse_test.yaml -o "${HIPSPARSE_TEST_DATA}"
                    DEPENDS ../common/hipsparse_gentest.py hipsparse_test.yaml ../include/hipsparse_common.yaml ${HIPSPARSE_TEST_YAMLS}
@@ -319,7 +319,7 @@ file(GLOB dll_files
     \"C:/Windows/System32/libomp140*.dll\"
 )
 foreach(dll IN LISTS dll_files)
-    file(COPY \"\${dll}\" DESTINATION \"${PROJECT_BINARY_DIR}/staging/\")
+    file(COPY \"\${dll}\" DESTINATION \"${PROJECT_BINARY_DIR}/clients/staging/\")
 endforeach()
 ")
     add_custom_command(
