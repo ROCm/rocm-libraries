@@ -318,6 +318,12 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
+            if(!TestContext::ForTarget(arch)->targetArchitecture().HasCapability(
+                   GPUCapability::v_add_u32))
+            {
+                SKIP("Architecture " + arch.toString() + " does not support v_add_u32");
+            }
+
             SECTION("Has hazard with 2nd op (non-trans) accessing the same register")
             {
                 auto context = TestContext::ForTarget(arch);
@@ -405,10 +411,11 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            // if(arch.isRDNAGPU())
-            // {
-            //     SKIP("RDNA not supported yet");
-            // }
+            if(!TestContext::ForTarget(arch)->targetArchitecture().HasCapability(
+                   GPUCapability::HasExplicitVectorRev))
+            {
+                SKIP("Architecture " + arch.toString() + " does not support v_subrev_u32");
+            }
 
             SECTION("Hazard with VALU write followed by a readlane or permlane")
             {
