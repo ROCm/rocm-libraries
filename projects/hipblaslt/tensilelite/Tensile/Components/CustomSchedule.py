@@ -468,6 +468,40 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
             }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+    if isNN(kernel) and not useLDSTr and TLDS == 1:
+        #index and code pair
+        
+        syncTable = [
+        -1, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="LRB1-0"),
+        7, SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="LRB1-1"),
+        8, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="LRB0"),
+        8, SBarrier(comment=""),
+        15, SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="LRB1 remaining"),
+        54, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="wait for previous set of global reads"),
+        54, SBarrier(comment="LRA1"),
+        ]
+        optSchedule = {
+                'SYNC'  : [syncTable[::2]],
+                'GRIncA': [[0,1,2,3,4,5,6,7,8]],
+                'GRIncB': [[9,10,11,12,13,14,15,16,17]],
+
+                'LRA0': [[0, 1, 2, 3, 4, 5, 6, 7]],
+                'LRB0': [[8, 10, 12, 14, 16, 18]],
+                'GRA': [[9,9, 18,18, 26,26, 30,30, 34,34, 40,40, 42,42, 44,44]],
+                'GRB': [[54,54, 58,58, 62,62, 66,66, 70,70, 74,74]],
+                'LRA1': [[55, 57, 59, 61, 63, 65, 67, 71]],
+                'LRB1': [[72, 74, 76, 78, 80, 82]],
+                'LRSA': [[46]],
+                'LRSB': [[46]],
+                'LWSA': [[33]],
+                'LWSB': [[80]],
+                'PackA0': [[47, 47, 47, 47, 47, 47, 48, 48, 48, 48, 49, 49, 49, 49, 50, 50, 50, 50, 51, 51, 51, 51, 52, 52, 52, 52, 53, 53, 53, 53, 53, 53]],
+                'PackA1': [[-1, -1, -1, -1, -1, -1, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5]],
+
+                'LCC' : [[95, 95]],
+            }
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     else:
         return False, None
 
