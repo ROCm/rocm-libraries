@@ -267,14 +267,8 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     const hipdnn_plugin::IGraph& opGraph) const
 {
-    HIPDNN_LOG_INFO("MiopenBatchnormFwdTrainingPlanBuilder::isApplicable called with {} nodes",
-                    opGraph.nodeCount());
-
     if(opGraph.nodeCount() != 1 && opGraph.nodeCount() != 2)
     {
-        HIPDNN_LOG_INFO(
-            "BatchnormFwdTraining plan builder requires 1 or 2 nodes, got {} - not applicable",
-            opGraph.nodeCount());
         return false;
     }
 
@@ -293,7 +287,6 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
         }
 
         // nodeCount == 2: Batchnorm training + activation fusion
-        HIPDNN_LOG_INFO("Checking 2-node batchnorm training + activation fusion pattern");
         const auto& activAttr = checkActivationNode(opGraph.getNodeWrapper(1), bnAttr);
         checkTensorVirtuality2Node(bnAttr, activAttr, opGraph.getTensorMap());
         // Validate params can be created successfully

@@ -53,19 +53,24 @@ using hipdnn_sdk::utilities::TensorLayout;
 
 inline void printSampleHelp(const std::string& sampleName)
 {
-    std::cout
-        << "Usage: " << sampleName << " [OPTIONS]\n"
-        << "Options:\n"
-        << "  --verify-cpu, -vc         Enable CPU reference validation\n"
-        << "  --activation-type TYPE    Set activation type (relu, relu6, clamp) [default: relu]\n"
-        << "  --help, -h                Show this help message\n"
-        << std::endl;
+    std::cout << "Usage: " << sampleName << " [OPTIONS]\n"
+              << "Options:\n"
+              << "  --verify-cpu, -vc           Enable CPU reference validation\n"
+              << "  --activation-type TYPE      Set activation type (relu, relu6, clamp) [default: "
+                 "relu]\n"
+              << "  --batch-stats-only          Use batch statistics only (no running stats) [BN "
+                 "training only]\n"
+              << "  --full-training             Use full training with running statistics [BN "
+                 "training only]\n"
+              << "  --help, -h                  Show this help message\n"
+              << std::endl;
 }
 
 struct Config
 {
     bool cpuValidation = false;
     std::string activationType = "relu";
+    bool useRunningStats = false;
 };
 
 inline Config parseCommandLineArgs(int argc, char* argv[])
@@ -97,6 +102,10 @@ inline Config parseCommandLineArgs(int argc, char* argv[])
                 std::cerr << "Valid options are: relu, relu6, clamp" << std::endl;
                 exit(EXIT_FAILURE);
             }
+        }
+        else if(arg == "--full-training")
+        {
+            config.useRunningStats = true;
         }
         else if(arg == "--help" || arg == "-h")
         {

@@ -36,7 +36,7 @@ The following table lists all operations currently supported in hipDNN:
 > **Fused Operations:** The Batchnorm Inference + Activation Backward operation is a fused graph pattern that combines three operations: (1) Batchnorm Inference, (2) Activation Backward (DReLU), and (3) Batchnorm Backward.
 
 > [!NOTE]
-> **Activation Functions:** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU is not supported.
+> **Activation Functions:** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips).
 
 > [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only. Sparse tensor support is planned for future releases.
