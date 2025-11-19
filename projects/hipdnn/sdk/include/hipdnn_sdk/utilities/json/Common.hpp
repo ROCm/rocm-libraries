@@ -82,16 +82,29 @@ NLOHMANN_JSON_SERIALIZE_ENUM(DataType,
                              }
 
 )
+
+NLOHMANN_JSON_SERIALIZE_ENUM(TensorValue,
+                             {
+                                 {TensorValue::NONE, "NONE"},
+                                 {TensorValue::Float32Value, "Float32Value"},
+                                 {TensorValue::Float16Value, "Float16Value"},
+                                 {TensorValue::BFloat16Value, "BFloat16Value"},
+                                 {TensorValue::Float8Value, "Float8Value"},
+                                 {TensorValue::Int32Value, "Int32Value"},
+                                 {TensorValue::Float64Value, "Float64Value"},
+                             }
+
+)
 }
 
 namespace hipdnn_sdk::json
 {
 
 template <class T>
-auto to(flatbuffers::FlatBufferBuilder& builder, nlohmann::json const& entry);
+inline auto to(flatbuffers::FlatBufferBuilder& builder, const nlohmann::json& entry);
 
 template <class T>
-auto toVector(flatbuffers::FlatBufferBuilder& builder, const nlohmann::json& entry)
+inline auto toVector(flatbuffers::FlatBufferBuilder& builder, const nlohmann::json& entry)
 {
     if(!entry.is_array())
     {

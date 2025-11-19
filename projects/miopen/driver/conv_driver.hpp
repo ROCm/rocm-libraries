@@ -406,6 +406,7 @@ private:
     bool is_gpualloc           = false;
     bool init_output_nan       = false;
     GPUMem::Check buffer_check = GPUMem::Check::None;
+    int tuning_policy          = 0;
 
     int num_iterations = 1;
 
@@ -455,6 +456,12 @@ private:
         constexpr bool is_bfp8 = std::is_same<Tgpu, bfloat8_fnuz>::value;
         if(is_bfp8 || is_fp8 || TensorsCasted())
             tolerance *= 37.0;
+
+        { // tf32 has same mantissa length as fp16
+            auto math_type_ = inflags.GetValueInt("math_type");
+            if(std::is_same_v<Tgpu, float> && (miopen::EnvEnableTF32() || math_type_))
+                tolerance = 8.2e-3;
+        }
         return tolerance;
     }
 
@@ -708,6 +715,12 @@ int ConvDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
 
     buffer_check = GetGpuBufferCheck(inflags);
 
+    tuning_policy = inflags.GetValueInt("tuning_policy");
+    if(tuning_policy != 0)
+    {
+        miopenSetTuningPolicy(GetHandle(), static_cast<miopenTuningPolicy_t>(tuning_policy));
+    }
+
     return 0;
 }
 
@@ -861,6 +874,8 @@ int ConvDriver<Tgpu, Tref>::GetandSetData()
             warmupConvDesc,
             static_cast<int>(miopenConvolutionFindModeNormal)); // Repeat via hidden API.
         miopenSetConvolutionGroupCount(warmupConvDesc, group_count);
+        miopenSetConvolutionAttribute(
+            warmupConvDesc, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, inflags.GetValueInt("math_type"));
 
         int warmup_out_len_size = miopen::deref(warmupInputTensor).GetNumDims();
         std::vector<int> warmup_out_len(warmup_out_len_size);
@@ -1010,6 +1025,13 @@ int ConvDriver<Tgpu, Tref>::AddCmdLineArgs()
         "wei_cast_type", 'R', "-1", "Cast type for weight tensor, default to not set", "string");
     inflags.AddInputFlag(
         "init_output_nan", 'N', "0", "populate output buffers with nan values (Default=0)", "int");
+    inflags.AddInputFlag("tuning_policy",
+                         '&',
+                         "0",
+                         "MIOpen tuning policy (Default=0, or no tuning policy set)",
+                         "int");
+    // TODO:(LYM) change back to 0
+    inflags.AddInputFlag("math_type", 'M', "1", "math type of compute (Default=1)", "int");
 
     return 0;
 }
@@ -1213,6 +1235,14 @@ int ConvDriver<Tgpu, Tref>::SetConvDescriptorFromCmdLineArgs()
     {
         miopenSetTransposeConvNdOutputPadding(convDesc, spatial_dim, trans_output_pads.data());
     }
+
+    auto math_type_ = inflags.GetValueInt("math_type");
+    if(math_type_ < miopenMathDefault || math_type_ > miopenMathPedantic)
+    {
+        std::cout << "Invalid math_type value: " << math_type_ << std::endl;
+        exit(0); // NOLINT (concurrency-mt-unsafe)
+    }
+    miopenSetConvolutionAttribute(convDesc, MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, math_type_);
 
     return miopenStatusSuccess;
 }

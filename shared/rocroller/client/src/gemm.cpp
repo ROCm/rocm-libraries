@@ -24,7 +24,10 @@
  *
  *******************************************************************************/
 
+#include "rocRoller/Serialization/YAML.hpp"
 #include <filesystem>
+#include <fstream>
+#include <string>
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -44,15 +47,19 @@
 #include <common/Utilities.hpp>
 #include <common/mxDataGen.hpp>
 
+#include "client/CLI_Utils.hpp"
 #include "client/DataParallelGEMMSolution.hpp"
 #include "client/GEMMParameters.hpp"
 #include "client/GEMMParameters_serialization.hpp"
 #include "client/PreSwizzle.hpp"
+#include "client/RotatingBuffer.hpp"
 #include "client/StreamKGEMMSolution.hpp"
 
 #include <CLI/CLI.hpp>
 
 using namespace rocRoller;
+
+namespace SolutionParams = rocRoller::Parameters::Solution;
 
 enum ReturnCodes : int
 {
@@ -195,16 +202,32 @@ namespace rocRoller::Client::GEMMClient
                       problemParams.types.scaleB == Operations::ScaleMode::Separate,
                       -1.f,
                       1.f,
-                      static_cast<uint>(scaleBlockSize));
+                      static_cast<uint>(scaleBlockSize),
+                      problemParams.initModeA,
+                      problemParams.initModeB,
+                      problemParams.initModeC);
         }
         else
         {
-            DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
+            DGenInput(seed,
+                      hostA,
+                      descA,
+                      hostB,
+                      descB,
+                      hostC,
+                      descC,
+                      -1.f,
+                      1.f,
+                      problemParams.initModeA,
+                      problemParams.initModeB,
+                      problemParams.initModeC);
         }
 
-        auto deviceA = make_shared_device(hostA);
-        auto deviceB = make_shared_device(hostB);
-        auto deviceC = make_shared_device(hostC);
+        size_t rotatingSize = benchmarkParams.rotatingBuffSize;
+
+        RotatingBuffer<PackedTypeA> rotatingA(hostA, rotatingSize);
+        RotatingBuffer<PackedTypeB> rotatingB(hostB, rotatingSize);
+        RotatingBuffer<C>           rotatingC(hostC, rotatingSize);
         auto deviceD = make_shared_device<D>(problemParams.m * problemParams.n, D{});
 
         std::shared_ptr<uint8_t> deviceScaleA, deviceScaleB;
@@ -270,9 +293,7 @@ namespace rocRoller::Client::GEMMClient
         auto commandArgs = gemm->commandArguments(command, problemParams, runParams);
 
         auto [aTag, bTag, cTag, dTag] = gemm->getABCDTags();
-        commandArgs.setArgument(aTag, ArgumentType::Value, (A*)deviceA.get());
-        commandArgs.setArgument(bTag, ArgumentType::Value, (B*)deviceB.get());
-        commandArgs.setArgument(cTag, ArgumentType::Value, (C*)deviceC.get());
+
         commandArgs.setArgument(dTag, ArgumentType::Value, (D*)deviceD.get());
 
         if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
@@ -355,12 +376,40 @@ namespace rocRoller::Client::GEMMClient
             // Warmup runs
             for(int i = 0; i < benchmarkParams.numWarmUp; ++i)
             {
+                auto spanA = rotatingA.next();
+                auto spanB = rotatingB.next();
+                auto spanC = rotatingC.next();
+
+                commandArgs.setArgument(
+                    aTag, ArgumentType::Value, reinterpret_cast<unsigned char*>(spanA.data()));
+
+                commandArgs.setArgument(
+                    bTag, ArgumentType::Value, reinterpret_cast<unsigned char*>(spanB.data()));
+
+                commandArgs.setArgument(
+                    cTag, ArgumentType::Value, reinterpret_cast<unsigned char*>(spanC.data()));
+
+                auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs);
             }
 
             HIP_TIMER(t_kernel, "GEMM", benchmarkParams.numInner);
             for(int inner = 0; inner < benchmarkParams.numInner; ++inner)
             {
+                auto spanA = rotatingA.next();
+                auto spanB = rotatingB.next();
+                auto spanC = rotatingC.next();
+
+                commandArgs.setArgument(
+                    aTag, ArgumentType::Value, reinterpret_cast<unsigned char*>(spanA.data()));
+
+                commandArgs.setArgument(
+                    bTag, ArgumentType::Value, reinterpret_cast<unsigned char*>(spanB.data()));
+
+                commandArgs.setArgument(
+                    cTag, ArgumentType::Value, reinterpret_cast<unsigned char*>(spanC.data()));
+
+                auto runtimeArgs = commandArgs.runtimeArguments();
                 commandKernel->launchKernel(runtimeArgs, t_kernel, inner);
             }
             HIP_SYNC(t_kernel);
@@ -387,6 +436,15 @@ namespace rocRoller::Client::GEMMClient
 
         result.kernelAssemble = TimerPool::nanoseconds("Assembler::assembleMachineCode");
         result.kernelGenerate = TimerPool::nanoseconds("CommandKernel::generateKernel");
+
+        if(commandKernel->getContext() && commandKernel->getContext()->kernel())
+        {
+            auto assemblyKernel = commandKernel->getContext()->kernel();
+            result.sgprCount    = assemblyKernel->sgpr_count();
+            result.vgprCount    = assemblyKernel->vgpr_count();
+            result.agprCount    = assemblyKernel->agpr_count();
+            result.ldsBytes     = assemblyKernel->group_segment_fixed_size();
+        }
 
         if(benchmarkParams.check)
         {
@@ -1010,58 +1068,230 @@ namespace rocRoller::Client::GEMMClient
     }
 }
 
-constexpr bool PARSE_SUCCESS = true;
-constexpr bool PARSE_FAILURE = false;
-
-static bool ParseMI(const std::string&                                 arg,
-                    rocRoller::Client::GEMMClient::SolutionParameters& solution)
+namespace rocRoller::Client::GEMMClient::CLI
 {
-    if(arg.empty())
-        return PARSE_FAILURE;
+    constexpr auto SolutionParameterArguments = std::make_tuple(
+        std::make_pair("--arch", &SolutionParameters::architecture),
+        std::make_pair("--mac_m", &SolutionParameters::macM),
+        std::make_pair("--mac_n", &SolutionParameters::macN),
+        std::make_pair("--mac_k", &SolutionParameters::macK),
+        std::make_pair("--wave_m", &SolutionParameters::waveM),
+        std::make_pair("--wave_n", &SolutionParameters::waveN),
+        std::make_pair("--wave_k", &SolutionParameters::waveK),
+        std::make_pair("--wave_b", &SolutionParameters::waveB),
+        std::make_pair("--workgroup_size_x", &SolutionParameters::workgroupSizeX),
+        std::make_pair("--workgroup_size_y", &SolutionParameters::workgroupSizeY),
+        std::make_pair("--workgroupMappingDim", &SolutionParameters::workgroupMappingDim),
+        std::make_pair("--workgroupRemapXCC", &SolutionParameters::workgroupRemapXCC),
+        std::make_pair("--workgroupRemapXCCValue", &SolutionParameters::workgroupRemapXCCValue),
+        std::make_pair("--loadLDSScale_A", &SolutionParameters::loadLDSScaleA),
+        std::make_pair("--loadLDSScale_B", &SolutionParameters::loadLDSScaleB),
+        std::make_pair("--swizzleScale", &SolutionParameters::swizzleScale),
+        std::make_pair("--sts", &SolutionParameters::swizzleTileSize),
+        std::make_pair("--prefetchScale", &SolutionParameters::prefetchScale),
+        std::make_pair("--load_A", &SolutionParameters::loadPathA),
+        std::make_pair("--load_B", &SolutionParameters::loadPathB),
+        std::make_pair("--storeLDS_D", &SolutionParameters::storeLDSD),
+        std::make_pair("--prefetch", &SolutionParameters::prefetch),
+        std::make_pair("--prefetchInFlight", &SolutionParameters::prefetchInFlight),
+        std::make_pair("--prefetchLDSFactor", &SolutionParameters::prefetchLDSFactor),
+        std::make_pair("--prefetchMixMemOps", &SolutionParameters::prefetchMixMemOps),
+        std::make_pair("--betaInFMA", &SolutionParameters::betaInFma),
+        std::make_pair("--unroll_x", &SolutionParameters::unrollX),
+        std::make_pair("--unroll_y", &SolutionParameters::unrollY),
+        std::make_pair("--scheduler", &SolutionParameters::scheduler),
+        std::make_pair("--schedulerCost", &SolutionParameters::schedulerCost),
+        std::make_pair("--matchMemoryAccess", &SolutionParameters::matchMemoryAccess),
+        std::make_pair("--streamK", &SolutionParameters::streamK),
+        std::make_pair("--streamKTwoTile", &SolutionParameters::streamKTwoTile),
+        std::make_pair("--streamKTwoTileDPFirst", &SolutionParameters::streamKTwoTileDPFirst));
 
-    bool fail = false;
-    try
+    template <typename T, typename U>
+    std::string getSolutionParameterArgumentName(U T::*member_ptr)
     {
-        std::istringstream iss(arg);
-        std::string        token;
+        std::optional<std::string> found_name;
 
-        iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit | std::ifstream::badbit);
-        std::getline(iss, token, 'x');
-        solution.waveM = std::stoi(token);
-        std::getline(iss, token, 'x');
-        solution.waveN = std::stoi(token);
-        std::getline(iss, token, 'x');
-        solution.waveK = std::stoi(token);
-        iss.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-        std::getline(iss, token, 'x');
-        solution.waveB = std::stoi(token);
+        std::apply(
+            [&](auto&&... args) {
+                (([&] {
+                     if constexpr(std::is_same_v<decltype(args.second), decltype(member_ptr)>)
+                     {
+                         if(args.second == member_ptr)
+                         {
+                             found_name = args.first;
+                         }
+                     }
+                 }()),
+                 ...);
+            },
+            SolutionParameterArguments);
+
+        AssertFatal(found_name, "Internal error: could not find argument name.");
+
+        return found_name.value();
     }
-    catch(const std::invalid_argument&)
+
+    void updateSolutionFromArguments(rocRoller::Client::GEMMClient::SolutionParameters& solution,
+                                     ::CLI::App const&                                  app)
     {
-        fail = true;
+        using SP = rocRoller::Client::GEMMClient::SolutionParameters;
+        auto SN  = [](auto x) {
+            return rocRoller::Client::GEMMClient::CLI::getSolutionParameterArgumentName(x);
+        };
+
+        auto update = [&](const std::string& optionName, auto& value) -> bool {
+            if(app.get_option(optionName)->count())
+            {
+                value = app.get_option(optionName)->as<std::decay_t<decltype(value)>>();
+                return true;
+            }
+            return false;
+        };
+
+        // Architecture
+
+        if(app.get_option(SN(&SP::architecture))->count())
+        {
+            auto architectureName = app.get_option(SN(&SP::architecture))->as<std::string>();
+            solution.architecture = GPUArchitectureTarget::fromString(architectureName);
+        }
+
+        // Workgroup tile size
+
+        bool wgtsSet = false;
+        if(app.get_option("--wgts")->count())
+        {
+            rocRoller::Client::GEMMClient::MNKTuple mnk{0, 0, 0};
+            if(!ParseMNK(app.get_option("--wgts")->as<std::string>(), mnk))
+                Throw<FatalError>("Failed to parse WGTS argument.");
+            solution.macM = mnk.m;
+            solution.macN = mnk.n;
+            solution.macK = mnk.k;
+            wgtsSet       = true;
+        }
+
+        bool macSet = false;
+        macSet |= update(SN(&SP::macM), solution.macM);
+        macSet |= update(SN(&SP::macN), solution.macN);
+        macSet |= update(SN(&SP::macK), solution.macK);
+        if(wgtsSet && macSet)
+        {
+            Throw<FatalError>("Workgroup tile size was overspecified.  Please use only --wgts or "
+                              "the --mac_M, --mac_N, and --mac_K arguments; but not both.");
+        }
+
+        // Matrix instruction
+
+        if(app.get_option("--mi")->count())
+        {
+            auto x = rocRoller::Client::GEMMClient::MNKBTuple{0, 0, 0, 1};
+            if(!ParseMNKB(app.get_option("--mi")->as<std::string>(), x))
+                Throw<FatalError>("Failed to parse MI argument.");
+            solution.waveM = x.m;
+            solution.waveN = x.n;
+            solution.waveK = x.k;
+            solution.waveB = x.b;
+        }
+
+        update(SN(&SP::waveM), solution.waveM);
+        update(SN(&SP::waveN), solution.waveN);
+        update(SN(&SP::waveK), solution.waveK);
+        update(SN(&SP::waveB), solution.waveB);
+
+        // Workgroup size
+
+        update(SN(&SP::workgroupSizeX), solution.workgroupSizeX);
+        update(SN(&SP::workgroupSizeY), solution.workgroupSizeY);
+
+        // Workgroup mapping
+
+        update(SN(&SP::workgroupMappingDim), solution.workgroupMappingDim);
+        update(SN(&SP::workgroupRemapXCC), solution.workgroupRemapXCC);
+        update(SN(&SP::workgroupRemapXCCValue), solution.workgroupRemapXCCValue);
+
+        // LDS
+
+        if(app.get_option("--lds")->count())
+        {
+            auto arg = app.get_option("--lds")->as<std::string>();
+
+            solution.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
+            if(arg.find('A') != std::string::npos)
+                solution.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+
+            solution.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
+            if(arg.find('B') != std::string::npos)
+                solution.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+
+            solution.storeLDSD = false;
+            if(arg.find('D') != std::string::npos)
+                solution.storeLDSD = true;
+        }
+
+        update(SN(&SP::loadPathA), solution.loadPathA);
+        update(SN(&SP::loadPathB), solution.loadPathB);
+        update(SN(&SP::storeLDSD), solution.storeLDSD);
+
+        if(app.get_option("--d2lds")->count())
+        {
+            auto arg = app.get_option("--d2lds")->as<std::string>();
+
+            solution.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
+            if(arg.find('A') != std::string::npos)
+                solution.loadPathA = SolutionParams::LoadPath::BufferToLDS;
+
+            solution.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
+            if(arg.find('B') != std::string::npos)
+                solution.loadPathB = SolutionParams::LoadPath::BufferToLDS;
+        }
+
+        update(SN(&SP::loadPathA), solution.loadPathA);
+        update(SN(&SP::loadPathB), solution.loadPathB);
+
+        if(app.get_option("--mxlds")->count())
+        {
+            auto arg = app.get_option("--mxlds")->as<std::string>();
+
+            solution.loadLDSScaleA = false;
+            if(arg.find('A') != std::string::npos)
+                solution.loadLDSScaleA = true;
+
+            solution.loadLDSScaleB = false;
+            if(arg.find('B') != std::string::npos)
+                solution.loadLDSScaleB = true;
+        }
+
+        update(SN(&SP::loadLDSScaleA), solution.loadLDSScaleA);
+        update(SN(&SP::loadLDSScaleB), solution.loadLDSScaleB);
+
+        // Swizzling
+
+        update(SN(&SP::swizzleScale), solution.swizzleScale);
+        update(SN(&SP::swizzleTileSize), solution.swizzleTileSize);
+        update(SN(&SP::prefetchScale), solution.prefetchScale);
+
+        // Prefetching
+
+        update(SN(&SP::prefetch), solution.prefetch);
+        update(SN(&SP::prefetchInFlight), solution.prefetchInFlight);
+        update(SN(&SP::prefetchLDSFactor), solution.prefetchLDSFactor);
+        update(SN(&SP::prefetchMixMemOps), solution.prefetchMixMemOps);
+
+        // StreamK
+
+        update(SN(&SP::streamK), solution.streamK);
+        update(SN(&SP::streamKTwoTile), solution.streamKTwoTile);
+        update(SN(&SP::streamKTwoTileDPFirst), solution.streamKTwoTileDPFirst);
+
+        // Other
+
+        update(SN(&SP::betaInFma), solution.betaInFma);
+        update(SN(&SP::unrollX), solution.unrollX);
+        update(SN(&SP::unrollY), solution.unrollY);
+        update(SN(&SP::scheduler), solution.scheduler);
+        update(SN(&SP::schedulerCost), solution.schedulerCost);
+        update(SN(&SP::matchMemoryAccess), solution.matchMemoryAccess);
     }
-    catch(const std::ios_base::failure&)
-    {
-        fail = true;
-    }
-
-    fail |= (solution.waveM < 1) || (solution.waveN < 1) || (solution.waveK < 1)
-            || (solution.waveB < 1);
-
-    if(fail)
-    {
-        std::cerr << "Invalid format for MI instruction." << std::endl;
-        std::cerr << std::endl;
-        std::cerr << "The MI argument should be formatted like:" << std::endl;
-        std::cerr << std::endl;
-        std::cerr << "    --mi=MxNxKxB" << std::endl;
-        std::cerr << std::endl;
-        std::cerr << "For example: --mi=32x32x2x1" << std::endl;
-
-        return PARSE_FAILURE;
-    }
-
-    return PARSE_SUCCESS;
 }
 
 /*
@@ -1069,6 +1299,8 @@ static bool ParseMI(const std::string&                                 arg,
  */
 int main(int argc, const char* argv[])
 {
+    using namespace rocRoller::Client::GEMMClient::CLI;
+
     CLI::App app{"GEMM Driver: D (MxN) = alpha * A (MxK) * B (KxN) + beta * C (MxN)"};
     app.footer(Settings::getInstance()->help());
 
@@ -1107,12 +1339,9 @@ int main(int argc, const char* argv[])
         .swizzleScale  = false,
         .prefetchScale = false,
 
-        .loadLDSA  = true,
-        .loadLDSB  = true,
+        .loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR,
+        .loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR,
         .storeLDSD = true,
-
-        .direct2LDSA = false,
-        .direct2LDSB = false,
 
         .prefetch          = false,
         .prefetchInFlight  = 0,
@@ -1144,6 +1373,10 @@ int main(int argc, const char* argv[])
 
         .scaleValueA = 1.0f,
         .scaleValueB = 1.0f,
+
+        .initModeA = DataInitMode(Bounded{}),
+        .initModeB = DataInitMode(Bounded{}),
+        .initModeC = DataInitMode(Bounded{}),
     };
 
     rocRoller::Client::GEMMClient::TypeParameters types;
@@ -1154,12 +1387,13 @@ int main(int argc, const char* argv[])
     };
 
     rocRoller::Client::BenchmarkParameters benchmarkParams{
-        .device    = 0,
-        .numWarmUp = 3,
-        .numOuter  = 5,
-        .numInner  = 2,
-        .check     = true,
-        .visualize = false,
+        .device           = 0,
+        .numWarmUp        = 3,
+        .numOuter         = 5,
+        .numInner         = 2,
+        .rotatingBuffSize = 32'000'000ull,
+        .check            = true,
+        .visualize        = false,
     };
 
     rocRoller::Client::GEMMClient::IOParameters io{
@@ -1189,6 +1423,27 @@ int main(int argc, const char* argv[])
     app.add_option("--beta", problem.beta, "Beta scalar.");
     app.add_option("--scaleValue_A", problem.scaleValueA, "Single scale value for A.");
     app.add_option("--scaleValue_B", problem.scaleValueB, "Single scale value for B.");
+    app.add_option(
+        "--initMode_A",
+        [&problem](auto& args) -> bool { return ParseInitMode(args[0], problem.initModeA); },
+        "Data initialization mode for A [Bounded | BoundedAlternatingSign | Unbounded | "
+        "Identity | Ones | Zeros | TrigonometricFromFloat | \"NormalFromFloat(<mean>, "
+        "<std_dev>)\"]. "
+        "Default: Bounded.");
+    app.add_option(
+        "--initMode_B",
+        [&problem](auto& args) -> bool { return ParseInitMode(args[0], problem.initModeB); },
+        "Data initialization mode for B [Bounded | BoundedAlternatingSign | Unbounded | "
+        "Identity | Ones | Zeros | TrigonometricFromFloat | \"NormalFromFloat(<mean>, "
+        "<std_dev>)\"]. "
+        "Default: Bounded.");
+    app.add_option(
+        "--initMode_C",
+        [&problem](auto& args) -> bool { return ParseInitMode(args[0], problem.initModeC); },
+        "Data initialization mode for C [Bounded | BoundedAlternatingSign | Unbounded | "
+        "Identity | Ones | Zeros | TrigonometricFromFloat | \"NormalFromFloat(<mean>, "
+        "<std_dev>)\"]. "
+        "Default: Bounded.");
 
     //
     // Problem types
@@ -1265,81 +1520,81 @@ int main(int argc, const char* argv[])
                    "Experimental: Skip Permlane instructions for scale data for performance.");
 
     //
-    // Kernel options
+    // Solution parameters
     //
     app.option_defaults()->ignore_case()->group("Solution parameters");
-    app.add_option("--mac_m", solution.macM, "(Macro) Tile size M.");
-    app.add_option("--mac_n", solution.macN, "(Macro) Tile size N.");
-    app.add_option("--mac_k", solution.macK, "(Macro) Tile size K.");
-    app.add_option("--wave_m", solution.waveM, "(MI) Tile size M.");
-    app.add_option("--wave_n", solution.waveN, "(MI) Tile size N.");
-    app.add_option("--wave_k", solution.waveK, "(MI) Tile size K.");
-    app.add_option("--wave_b", solution.waveB, "(MI) Tile size K.");
 
-    app.add_option(
-        "--mi",
-        [&solution](auto& args) -> bool { return ParseMI(args[0], solution); },
-        "MI instruction to use");
+    using SP = rocRoller::Client::GEMMClient::SolutionParameters;
+    auto SN  = [](auto x) {
+        return rocRoller::Client::GEMMClient::CLI::getSolutionParameterArgumentName(x);
+    };
 
-    app.add_option(
-        "--workgroup_size_x", solution.workgroupSizeX, "Workgroup size in the x dimension.");
-    app.add_option(
-        "--workgroup_size_y", solution.workgroupSizeY, "Workgroup size in the y dimension.");
+    app.add_option(SN(&SP::macM), "(Macro) Tile size M.");
+    app.add_option(SN(&SP::macN), "(Macro) Tile size N.");
+    app.add_option(SN(&SP::macK), "(Macro) Tile size K.");
+    app.add_option("--wgts", "Workgroup tile size (m/n/k tuple).");
 
-    app.add_option("--workgroupMappingDim",
-                   solution.workgroupMappingDim,
+    app.add_option(SN(&SP::waveM), "(MI) Tile size M.");
+    app.add_option(SN(&SP::waveN), "(MI) Tile size N.");
+    app.add_option(SN(&SP::waveK), "(MI) Tile size K.");
+    app.add_option(SN(&SP::waveB), "(MI) Tile size B.");
+    app.add_option("--mi", "MI (matrix instruction) to use.");
+
+    app.add_option(SN(&SP::workgroupSizeX), "Workgroup size in the x dimension.");
+    app.add_option(SN(&SP::workgroupSizeY), "Workgroup size in the y dimension.");
+
+    app.add_option(SN(&SP::workgroupMappingDim),
                    "Workgroup mapping dimension (-1, 0, 1). Default: -1")
         ->check(CLI::IsMember({-1, 0, 1}));
+    app.add_flag(SN(&SP::workgroupRemapXCC), "Use an XCC-aware workgroup remapping.");
+    app.add_option(SN(&SP::workgroupRemapXCCValue),
+                   "Force an XCC-aware workgroup remapping value. (Optional)");
+    app.add_option(SN(&SP::unrollX), "Unroll size in X.");
+    app.add_option(SN(&SP::unrollY), "Unroll size in Y.");
+
+    app.add_option(
+        SN(&SP::loadPathA),
+        solution.loadPathA,
+        "How to load A (BufferToVGPR, BufferToLDSViaVGPR, BufferToLDS). Default: BufferToLDS");
+    app.add_option(
+        SN(&SP::loadPathB),
+        solution.loadPathB,
+        "How to load A (BufferToVGPR, BufferToLDSViaVGPR, BufferToLDS). Default: BufferToLDS");
+    app.add_flag(SN(&SP::storeLDSD), "Use LDS when storing D.");
+    app.add_option("--lds", "Use LDS for A/B/D.");
+    app.add_option("--d2lds", "Use direct-to-LDS for A/B.");
+
+    app.add_flag(SN(&SP::betaInFma), "Use beta in FMA instruction instead of alpha.");
+    app.add_option(SN(&SP::scheduler), "Which scheduler to use.");
+    app.add_option(SN(&SP::schedulerCost), "Which scheduler cost function to use.");
+
+    app.add_flag(SN(&SP::matchMemoryAccess),
+                 "Match memory access to transpose.  Currently decreases performance.");
+    app.add_flag(SN(&SP::prefetch), "Enable prefetching (UnrollK=2 implied).");
+    app.add_option(SN(&SP::prefetchInFlight), "Number of prefetches in flight at the same time");
+    app.add_option(SN(&SP::prefetchLDSFactor),
+                   "Prefetch 1/prefetchLDSFactor of MacroTile from LDS");
+    app.add_flag(SN(&SP::prefetchMixMemOps),
+                 "Mix global and LDS memory operations during prefetching.");
+    app.add_flag(SN(&SP::streamK), "Enable StreamK algorithm.");
+    app.add_flag(SN(&SP::streamKTwoTile), "Enable two-tile StreamK algorithm.");
+    app.add_flag(SN(&SP::streamKTwoTileDPFirst),
+                 "Execute data-parallel loop first in the two-tile StreamK algorithm.");
+
+    app.add_flag(SN(&SP::loadLDSScaleA), "Use LDS when loading A scale.");
+    app.add_flag(SN(&SP::loadLDSScaleB), "Use LDS when loading B scale.");
+    app.add_option("--mxlds", "Use LDS for A/B scales.");
+
+    app.add_flag(SN(&SP::swizzleScale), "Use Swizzle when loading A and B scale.");
+    app.add_option(SN(&SP::swizzleTileSize),
+                   "Size of swizzle tile in MxK/NxL format.  The A scale swizzle-tile is MxK.  The "
+                   "B scale swizzle-tile is NxL.");
+    app.add_flag(SN(&SP::prefetchScale), "Prefetch scale values with using Swizzled scales.");
+
     app.add_option("--workgroupMappingValue",
                    runParams.workgroupMappingValue,
                    "Workgroup mapping value. Default: -1")
         ->check(CLI::IsMember({-1}) | CLI::PositiveNumber);
-
-    app.add_flag(
-        "--workgroupRemapXCC", solution.workgroupRemapXCC, "Use an XCC-aware workgroup remapping.");
-    app.add_option("--workgroupRemapXCCValue",
-                   solution.workgroupRemapXCCValue,
-                   "Force an XCC-aware workgroup remapping value. (Optional)");
-    app.add_option("--unroll_x", solution.unrollX, "Unroll size in X.");
-    app.add_option("--unroll_y", solution.unrollY, "Unroll size in Y.");
-    app.add_flag("--loadLDS_A", solution.loadLDSA, "Use LDS when loading A.");
-    app.add_flag("--loadLDS_B", solution.loadLDSB, "Use LDS when loading B.");
-    app.add_flag("--storeLDS_D", solution.storeLDSD, "Use LDS when storing D.");
-    app.add_flag("--direct2LDS_A", solution.direct2LDSA, "Use direct-to-LDS when loading A.");
-    app.add_flag("--direct2LDS_B", solution.direct2LDSB, "Use direct-to-LDS when loading B.");
-    app.add_flag(
-        "--betaInFma", solution.betaInFma, "Use beta in FMA instruction instead of alpha.");
-    app.add_option("--scheduler", solution.scheduler, "Which scheduler to use.");
-    app.add_option(
-        "--schedulerCost", solution.schedulerCost, "Which scheduler cost function to use.");
-    app.add_flag("--matchMemoryAccess",
-                 solution.matchMemoryAccess,
-                 "Match memory access to transpose.  Currently decreases performance.");
-    app.add_flag("--prefetch", solution.prefetch, "Enable prefetching (UnrollK=2 implied).");
-    app.add_option("--prefetchInFlight",
-                   solution.prefetchInFlight,
-                   "Number of prefetches in flight at the same time");
-    app.add_option("--prefetchLDSFactor",
-                   solution.prefetchLDSFactor,
-                   "Prefetch 1/prefetchLDSFactor of MacroTile from LDS");
-    auto prefetchMixMemOpsFlag
-        = app.add_flag("--prefetchMixMemOps",
-                       solution.prefetchMixMemOps,
-                       "Mix global and LDS memory operations during prefetching.");
-    app.add_flag("--streamK", solution.streamK, "Enable StreamK algorithm.");
-    app.add_flag("--streamKTwoTile", solution.streamKTwoTile, "Enable two-tile StreamK algorithm.");
-    app.add_flag("--streamKTwoTileDPFirst",
-                 solution.streamKTwoTileDPFirst,
-                 "Execute data-parallel loop first in the two-tile StreamK algorithm.");
-
-    app.add_flag("--loadLDSScale_A", solution.loadLDSScaleA, "Use LDS when loading A scale.");
-    app.add_flag("--loadLDSScale_B", solution.loadLDSScaleB, "Use LDS when loading B scale.");
-
-    app.add_flag(
-        "--swizzleScale", solution.swizzleScale, "Use Swizzle when loading A and B scale.");
-    app.add_flag("--prefetchScale",
-                 solution.prefetchScale,
-                 "Prefetch scale values with using Swizzled scales.");
 
     //
     // Benchmarking options
@@ -1353,6 +1608,8 @@ int main(int argc, const char* argv[])
                    runParams.numWGs,
                    "Number of workgroups to use with StreamK algorithm.  Defaults to number of WGs "
                    "present on local device.");
+    app.add_option(
+        "--rotating_buff_size", benchmarkParams.rotatingBuffSize, "Rotating Buffer Size.");
 
     //
     // Client params and shortcuts
@@ -1362,7 +1619,7 @@ int main(int argc, const char* argv[])
 
     bool noCheckResult = false;
 
-    std::string loadPath, examplePath;
+    std::string loadPath, examplePath, exampleProblemPath;
 
     app.add_flag(
         "--hgemm",
@@ -1449,10 +1706,22 @@ int main(int argc, const char* argv[])
     example->add_option("save", examplePath, "Example config path.")->required();
 
     //
+    // example problem parameters sub-command
+    //
+    auto exampleProblem
+        = app.add_subcommand("exampleProblem", "Save example problem parameters to YAML file.")
+              ->fallthrough();
+
+    exampleProblem->add_option("save", exampleProblemPath, "Example problem config path")
+        ->required();
+
+    //
     // Parse and update/validate problem definition
     //
 
     CLI11_PARSE(app, argc, argv);
+
+    updateSolutionFromArguments(solution, app);
 
     if(architectureName.empty())
         architecture.target = GPUArchitectureLibrary::getInstance()
@@ -1465,14 +1734,14 @@ int main(int argc, const char* argv[])
 
     if(!loadConfigPath.empty())
     {
-        // THIS OVERWRITES COMMAND LINE OPTIONS
         solution = Serialization::readYAMLFile<rocRoller::Client::GEMMClient::SolutionParameters>(
             loadConfigPath);
 
+        updateSolutionFromArguments(solution, app);
+        overwriteTypesFromSolution(types, solution);
+
         if(solution.architecture.gfx == GPUArchitectureGFX::UNKNOWN)
             solution.architecture = architecture.target;
-
-        overwriteTypesFromSolution(types, solution);
     }
 
     if(!loadPath.empty())
@@ -1653,9 +1922,9 @@ int main(int argc, const char* argv[])
 
     if(arch.target().isRDNA4GPU())
     {
-        // Override default settings for the `example` and `generate` subcommands.
-        if((example->parsed() || generate->parsed()) && typeA == DataType::Float
-           && typeB == DataType::Float)
+        // Override default settings for the `example`, `exampleProblem`, and `generate` subcommands.
+        if((example->parsed() || exampleProblem->parsed() || generate->parsed())
+           && typeA == DataType::Float && typeB == DataType::Float)
         {
             std::cout << "Warning: A and B types and wave sizes have been overridden for RDNA4."
                       << std::endl;
@@ -1731,10 +2000,9 @@ int main(int argc, const char* argv[])
     solution.types = types;
 
     // Set default prefetchMixMemOps
-    if(prefetchMixMemOpsFlag->count() == 0)
+    if(app.get_option("--prefetchMixMemOps")->count() == 0)
     {
         solution.prefetchMixMemOps = false;
-
         if(solution.prefetchLDSFactor != 0)
             solution.prefetchMixMemOps = true;
 
@@ -1745,7 +2013,8 @@ int main(int argc, const char* argv[])
             solution.prefetchMixMemOps = false;
 
         // TODO: enable (prefetchMixMemOps == true && prefetchLDSFactor == 2 && direct2LDSA/B = true)
-        if(solution.prefetchLDSFactor == 2 && (solution.direct2LDSA || solution.direct2LDSB))
+        if(solution.prefetchLDSFactor == 2
+           && (IsBufferToLDS(solution.loadPathA) || IsBufferToLDS(solution.loadPathB)))
             solution.prefetchMixMemOps = false;
     }
 
@@ -1756,6 +2025,12 @@ int main(int argc, const char* argv[])
     {
         std::ofstream file(examplePath);
         Serialization::writeYAML(file, solution);
+        return 0;
+    }
+    if(exampleProblem->parsed())
+    {
+        std::ofstream file(exampleProblemPath);
+        Serialization::writeYAML(file, problem);
         return 0;
     }
 

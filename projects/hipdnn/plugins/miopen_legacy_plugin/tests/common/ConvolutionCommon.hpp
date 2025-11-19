@@ -7,6 +7,7 @@
 #include <ostream>
 #include <vector>
 
+#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/utilities/StringUtil.hpp>
 
 namespace test_conv_common
@@ -14,29 +15,29 @@ namespace test_conv_common
 
 struct ConvTestCase
 {
-    std::vector<int64_t> _xDims;
-    std::vector<int64_t> _wDims;
-    std::vector<int64_t> _yDims;
-    std::vector<int64_t> _convPrePadding;
-    std::vector<int64_t> _convPostPadding;
-    std::vector<int64_t> _convStride;
-    std::vector<int64_t> _convDilation;
-    unsigned _seed;
+    std::vector<int64_t> xDims;
+    std::vector<int64_t> wDims;
+    std::vector<int64_t> yDims;
+    std::vector<int64_t> convPrePadding;
+    std::vector<int64_t> convPostPadding;
+    std::vector<int64_t> convStride;
+    std::vector<int64_t> convDilation;
+    unsigned seed;
 
-    ConvTestCase(std::vector<int64_t>&& xDims,
-                 std::vector<int64_t>&& wDims,
-                 std::vector<int64_t>&& convPrePadding,
-                 std::vector<int64_t>&& convPostPadding,
-                 std::vector<int64_t>&& convStride,
-                 std::vector<int64_t>&& convDilation,
-                 unsigned seed)
-        : _xDims(std::move(xDims))
-        , _wDims(std::move(wDims))
-        , _convPrePadding(std::move(convPrePadding))
-        , _convPostPadding(std::move(convPostPadding))
-        , _convStride(std::move(convStride))
-        , _convDilation(std::move(convDilation))
-        , _seed(seed)
+    ConvTestCase(std::vector<int64_t>&& xDimsLocal,
+                 std::vector<int64_t>&& wDimsLocal,
+                 std::vector<int64_t>&& convPrePaddingLocal,
+                 std::vector<int64_t>&& convPostPaddingLocal,
+                 std::vector<int64_t>&& convStrideLocal,
+                 std::vector<int64_t>&& convDilationLocal,
+                 unsigned seedLocal)
+        : xDims(std::move(xDimsLocal))
+        , wDims(std::move(wDimsLocal))
+        , convPrePadding(std::move(convPrePaddingLocal))
+        , convPostPadding(std::move(convPostPaddingLocal))
+        , convStride(std::move(convStrideLocal))
+        , convDilation(std::move(convDilationLocal))
+        , seed(seedLocal)
     {
         // Indices for dimensions
         // N - Batch size, always at index 0
@@ -46,64 +47,64 @@ struct ConvTestCase
         // W - Width, always at index 3 for 4D tensors and index 4 for 5D tensors
         constexpr int N = 0; // Batch size index
 
-        if(_xDims.size() != _wDims.size())
+        if(xDims.size() != wDims.size())
         {
             throw std::invalid_argument("xDims and wDims must have the same number of dimensions.");
         }
 
         // Ensure xDims has at least 3 dimensions (N, C, and at least 1 spatial dimension)
-        if(_xDims.size() < 3)
+        if(xDims.size() < 3)
         {
             throw std::invalid_argument(
                 "xDims must have at least 3 dimensions (N, C, and at least 1 spatial dimension).");
         }
 
         // Determine the number of spatial dimensions
-        auto spatialDims = _xDims.size() - 2; // Exclude N and C
+        auto spatialDims = xDims.size() - 2; // Exclude N and C
 
         // Validate that the convolution parameter vectors match the number of spatial dimensions
-        if(_convPrePadding.size() != spatialDims || _convPostPadding.size() != spatialDims
-           || _convDilation.size() != spatialDims || _convStride.size() != spatialDims)
+        if(convPrePadding.size() != spatialDims || convPostPadding.size() != spatialDims
+           || convDilation.size() != spatialDims || convStride.size() != spatialDims)
         {
             throw std::invalid_argument(
                 "Convolution parameter vectors must match the number of spatial dimensions.");
         }
 
         // Calculate output dimensions based on input dimensions and convolution parameters
-        auto n = _xDims[N];
-        auto cOut = _wDims[N];
+        auto n = xDims[N];
+        auto cOut = wDims[N];
         std::vector<int64_t> outputDims = {n, cOut};
 
         for(size_t i = 0; i < spatialDims; ++i)
         {
-            auto paddedInputSize = _xDims[2 + i] + _convPrePadding[i] + _convPostPadding[i];
-            auto effectiveKernelSize = (_convDilation[i] * (_wDims[2 + i] - 1)) + 1;
-            auto dimOut = ((paddedInputSize - effectiveKernelSize) / _convStride[i]) + 1;
+            auto paddedInputSize = xDims[2 + i] + convPrePadding[i] + convPostPadding[i];
+            auto effectiveKernelSize = (convDilation[i] * (wDims[2 + i] - 1)) + 1;
+            auto dimOut = ((paddedInputSize - effectiveKernelSize) / convStride[i]) + 1;
             outputDims.push_back(dimOut);
         }
 
-        _yDims = outputDims;
+        yDims = outputDims;
     }
 
     friend std::ostream& operator<<(std::ostream& ss, const ConvTestCase& tc)
     {
-        using namespace hipdnn_sdk::test_utilities;
+        using namespace hipdnn_sdk::utilities;
 
         ss << "(x:";
-        vecToStream(ss, tc._xDims);
+        vecToStream(ss, tc.xDims);
         ss << " w:";
-        vecToStream(ss, tc._wDims);
+        vecToStream(ss, tc.wDims);
         ss << " y:";
-        vecToStream(ss, tc._yDims);
+        vecToStream(ss, tc.yDims);
         ss << " prePad:";
-        vecToStream(ss, tc._convPrePadding);
+        vecToStream(ss, tc.convPrePadding);
         ss << " postPad:";
-        vecToStream(ss, tc._convPostPadding);
+        vecToStream(ss, tc.convPostPadding);
         ss << " stride:";
-        vecToStream(ss, tc._convStride);
+        vecToStream(ss, tc.convStride);
         ss << " dilation:";
-        vecToStream(ss, tc._convDilation);
-        ss << " seed:" << tc._seed;
+        vecToStream(ss, tc.convDilation);
+        ss << " seed:" << tc.seed;
         ss << ")";
 
         return ss;
@@ -112,7 +113,7 @@ struct ConvTestCase
 
 inline std::vector<ConvTestCase> getConvTestCases4D()
 {
-    unsigned seed = std::random_device{}();
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
 
     return {
         // Filter 1x1
@@ -130,12 +131,16 @@ inline std::vector<ConvTestCase> getConvTestCases4D()
         {{8, 16, 16, 16}, {1, 16, 1, 1}, {0, 0}, {0, 0}, {1, 1}, {1, 1}, seed},
         // Non-square
         {{1, 16, 16, 8}, {1, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
+        // Grouped convolution - 2 groups
+        {{1, 16, 16, 16}, {2, 8, 3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, seed},
+        // Grouped convolution - 2 batches, 4 groups, stride, padding, dilation
+        {{2, 32, 16, 16}, {4, 8, 3, 3}, {1, 1}, {1, 1}, {2, 2}, {2, 2}, seed},
     };
 }
 
 inline std::vector<ConvTestCase> getConvTestCases5D()
 {
-    unsigned seed = std::random_device{}();
+    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
 
     return {
         // Filter 1x1
@@ -153,6 +158,10 @@ inline std::vector<ConvTestCase> getConvTestCases5D()
         {{8, 16, 16, 16, 16}, {1, 16, 1, 1, 1}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, seed},
         // Non-square
         {{1, 16, 16, 8, 4}, {1, 16, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, seed},
+        // Grouped convolution - 2 groups
+        {{1, 16, 16, 16, 16}, {2, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, seed},
+        // Grouped convolution - 2 batches, 4 groups, stride, padding, dilation
+        {{2, 32, 16, 16, 16}, {4, 8, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {2, 2, 2}, {2, 2, 2}, seed},
     };
 }
 

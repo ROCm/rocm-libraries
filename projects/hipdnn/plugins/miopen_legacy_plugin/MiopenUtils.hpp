@@ -3,11 +3,15 @@
 
 #pragma once
 
+#include <optional>
+#include <unordered_map>
+
+#include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_sdk/plugin/PluginException.hpp>
 #include <hipdnn_sdk/plugin/PluginFlatbufferTypeHelpers.hpp>
+#include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
 #include <miopen/miopen.h>
-#include <unordered_map>
 
 #include "MiopenTensor.hpp"
 
@@ -37,6 +41,17 @@ namespace miopen_legacy_plugin
 namespace miopen_utils
 {
 
+struct ActivationParams
+{
+    miopenActivationMode_t mode;
+    double alpha;
+    double beta;
+    double gamma;
+};
+
+std::optional<ActivationParams>
+    mapPointwiseModeToMiopenActivation(const hipdnn_sdk::data_objects::PointwiseAttributes& attrs);
+
 hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
                                             const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                             uint32_t numDeviceBuffers);
@@ -52,6 +67,9 @@ MiopenTensor createTensor(
     int64_t uid);
 
 size_t getSpatialDimCount(const hipdnn_sdk::data_objects::TensorAttributes& attr);
+
+using hipdnn_sdk::utilities::extractDoubleFromTensorValue;
+using hipdnn_sdk::utilities::extractValueFromTensorValue;
 
 }
 

@@ -37,6 +37,10 @@ function(add_hipsparse_example EXAMPLE_SOURCE)
   # Include common client headers
   target_include_directories(${EXAMPLE_TARGET} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
 
+  if (BUILD_CLIENTS_ONLY)
+    target_include_directories(${EXAMPLE_TARGET} PRIVATE ${hipsparse_INCLUDE_DIRS}/hipsparse)
+  endif()
+
   # Linker dependencies
   target_link_libraries(${EXAMPLE_TARGET} PRIVATE roc::hipsparse)
 
@@ -90,10 +94,13 @@ endif()
 
 if(NOT USE_CUDA)
   # Build documentation examples
-  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
+  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_CPP documentation_examples/*.cpp)
+  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_C documentation_examples/*.c)
+  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_F90 documentation_examples/*.f90)
+  
+  set(DOCUMENTATION_EXAMPLES ${DOCUMENTATION_EXAMPLES_CPP} ${DOCUMENTATION_EXAMPLES_C} ${DOCUMENTATION_EXAMPLES_F90})
 
   foreach(file ${DOCUMENTATION_EXAMPLES})
-      message(STATUS "Found .cpp file: ${file}")
       add_hipsparse_example(${file})
   endforeach()
 endif()

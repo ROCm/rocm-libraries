@@ -18,6 +18,13 @@ set(SOURCES
     unit_conv_solver.cpp
     )
 
+
+# We use a special entry point for HIP backend testing so we can detect and flag any HIP errors that tests don't
+# clean up themselves
+if(MIOPEN_BACKEND_HIP)
+  list(APPEND SOURCES main_hip.cpp)
+endif()
+
 if(MIOPEN_BACKEND_OPENCL)
   set(SKIP_TESTS dumpTensorTest.cpp)
 endif()
@@ -229,6 +236,11 @@ else()
             ${MIOPEN_CK_INCLUDE_DIR}
             ${MIOPEN_CK_BUILD_INCLUDE_DIR}
             ${MIOPEN_CK_LIBRARY_INCLUDE_DIR})
+    else()
+        # While building on TheRock we are missing CK include headers for miopen_gtest target
+        # But we need them, for example, for unit_implicitgemm_ck_util.cpp gtest, which is part of miopen_gtest target
+        find_package(composable_kernel 1.0.0 COMPONENTS utility)
+        target_link_libraries(miopen_gtest composable_kernel::utility)
     endif()
   endif()
 

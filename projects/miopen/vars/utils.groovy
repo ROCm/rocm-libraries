@@ -237,7 +237,7 @@ def getDockerImage(Map conf=[:])
     env.DOCKER_BUILDKIT=1
     def prefixpath = conf.get("prefixpath", "/opt/rocm") // one image for each prefix 1: /usr/local 2:/opt/rocm
     // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
-    def gpu_arch = "gfx908;gfx90a;gfx942;gfx1151" // prebuilt dockers should have all the architectures enabled so one image can be used for all stages
+    def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1151" // prebuilt dockers should have all the architectures enabled so one image can be used for all stages
 
     def dockerArgs = "--build-arg BUILDKIT_INLINE_CACHE=1 " +
                      "--build-arg PREFIX=${prefixpath} " +
@@ -269,7 +269,9 @@ def getDockerImage(Map conf=[:])
     try{
         echo "Pulling down image: ${image}"
         dockerImage = docker.image("${image}")
-        dockerImage.pull()
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            dockerImage.pull()
+        }
     }
     catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
         echo "The job was cancelled or aborted"
@@ -297,7 +299,9 @@ def getDockerImage(Map conf=[:])
         try{
             echo "Pulling down perf test image: ${image}"
             dockerImage = docker.image("${image}")
-            dockerImage.pull()
+            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                dockerImage.pull()
+            }
         }
         catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
             echo "The job was cancelled or aborted"
@@ -405,7 +409,9 @@ def RunPerfTest(Map conf=[:]){
         def docker_image = conf.get("docker_image")
         def miopen_install_path = conf.get("miopen_install_path", "/opt/rocm")
         def results_dir = conf.get("results_dir", "${env.WORKSPACE}/${env.REPO_DIR}/results")
-        docker_image.pull()
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            docker_image.pull()
+        }
         echo "docker image: ${docker_image}"
         //grab root of node workspace. not guaranteed to be /var/jenkins
         String remote_root = env.WORKSPACE.substring(0, env.WORKSPACE.lastIndexOf("workspace/"))

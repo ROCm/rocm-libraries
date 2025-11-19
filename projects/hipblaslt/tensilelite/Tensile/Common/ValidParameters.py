@@ -509,18 +509,56 @@ validParameters = { # we need to make sure this matches develop
     "WorkGroupMapping": list(
         range(-1024, 1024 + 1)
     ),  # change a workgroup's id so that the all the workgroups on the gpu at a time are hitting L2 cache the best
+    # 0: WorkGroupMapping is predicted at runtime. 
+    # 1: No mapping
     "WorkGroupMappingXCC": [
-        1,
-        2,
-        4,
-        8,
-        16,
-        32,
+        -1,
+         1,
+         2,
+         4,
+         8,
+         16,
+         32,
     ],  # change a workgroup's id so that contiguous workgroup can map on same XCC
-    # -1 : WorkGroupMappingXCCGroup will be set to CU_count at runtime. Please ensure that (CU_count % WGMXCC == 0).
+    # -1: WorkGroupMappingXCCGroup will be set dynamically at runtime. Note that this is consistent with what StreamKXCCMapping
+    # does, but the value for the mapping will be set at runtime (=num_xcc).
+    # Please ensure that (CU_count % WGMXCC == 0).
     "WorkGroupMappingXCCGroup": list(
         range(-1, 1024)
     ),  # change a workgroup's id so that contiguous workgroup can map on same XCC, remap workgroup in a group of WGMXCCG.
+    # Use Space-filling-algorithm to determine workgroup mapping
+    # Parameter is provided as a list of integers. The length of the list indicates the level depth.
+    # Each integer represents an ordering ID to denote which ordering to use at each level.
+    # An empty array means use default (old) WGM algo
+    #
+    # With multi-level orderings the WGM values contains grid dims for each level encoded as 8bit values
+    # WGM: (msb) [GridDimN_L2, GridDimM_L2, GridDimN_L1, GridDimM_L1] (lsb)
+    #
+    # Order IDS:
+    # 0 : map workgroup IDs to C based on col-major order
+    # 1 : map workgroup IDs to C based on row-major order
+    # 2 : map workgroup IDs to C tiles based on Hilbert curve
+    # 3 : map workgroup IDs to C tiles based on Morton Z-curve
+    # 4 : map workgroup IDs to C tiles based on Morton (reverseN)-curve
+    # 5 : map workgroup IDs to C tiles based on Morton U-curve
+    #
+    # Examples:
+    # [0]: Single level ordering of C tiles using column major ordering
+    # [0,1]: Double level ordering of C tiles using column major ordering, then row-major
+    # [1,1,1]: Triple level ordering of C tiles using row major ordering at each level
+    "SpaceFillingAlgo" : -1,
+    # Used to specify the grid dims for each level when using SpaceFillingAlgo. This value is directly passed into the
+    # WGM parameter. The format is
+    # WGM: (msb) [GridDimN_L2, GridDimM_L2, GridDimN_L1, GridDimM_L1] (lsb)
+    #
+    # Examples:
+    # 0x01020304
+    #  - Level1 grid dim 4x3
+    #  - Level2 grid dim 2x1 (if enabled, otherwise last 16 bit values are ignored)
+    # 0x10010820
+    #  - Level1 grid dim 32x8
+    #  - Level2 grid dim 1x16 (if enabled, otherwise last 16 bit values are ignored)
+    "SFCWGM" : -1,
     "MaxOccupancy": list(
         range(1, 40 + 1)
     ),  # wg / CU; if cache thrashing is hurting performance, this allocates extra lds to artificially limit occupancy
@@ -651,9 +689,13 @@ validParameters = { # we need to make sure this matches develop
     "StreamKAtomic": [0, 1],
     # Enables XCC-based remapping of workgroups, set the value to the number of XCCs
     # for the device/configuration being used
-    # 0: uses default workgroup assignment
+    #  0: uses default workgroup assignment
     # 2+: remaps workgroups to be contiguous within an XCC for a given number of XCCs
     "StreamKXCCMapping": [0] + list(range(2, 9)),
+    # Enables using a Tree-reduction for the fixup step of StreamK algorithm
+    # 0: use linear reduction
+    # 1: use tree reduction
+    "StreamKFixupTreeReduction": [0, 1],
     # Debug settings for stream-k kernels to disable parts of the kernel
     #   Bit 0: Don't generate fixup code
     #   Bit 1: Don't generate write to partials code
@@ -815,7 +857,8 @@ validParameters = { # we need to make sure this matches develop
     # 0  : Fetch from workgroup dim -> elements dim. (default)
     # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
     "MbskPrefetchMethod": [-1, 0, 1],
-    "UseCustomMainLoopSchedule" : [0, 1]
+    "UseCustomMainLoopSchedule" : [0, 1],
+    "AdaptiveGemm": [0, 1]
 }
 
 newMIValidParameters = {
@@ -844,6 +887,37 @@ newMIValidParameters = {
     'WorkGroup': -1,
 }
 
+def checkSpaceFillAlgoIsValid(name, value):
+    if type(value) != list:
+        msgBase = "Invalid parameter value: {} = {}\nMust be a list of values"
+        raise Exception(msgBase.format(name, value))
+    elif len(value) > 3:
+        msgBase = "Invalid parameter value: {} = {}\nOnly 3 level ordering supported"
+        raise Exception(msgBase.format(name, value))
+    else:
+        maxOrderID = 5
+        for orderId in value:
+            if orderId not in range(0,maxOrderID + 1):
+                msgBase = "Invalid parameter value: {} = {}\nOrderID out of range"
+                raise Exception(msgBase.format(name, value))
+
+def checkSpaceFillAlgoWGMIsValid(name, value):
+    if type(value) != list:
+        msgBase = "Invalid parameter value: {} = {}\nMust be a nested list of values"
+        raise Exception(msgBase.format(name, value))
+    elif len(value) > 2:
+        msgBase = "Invalid parameter value: {} = {}\nOnly 3 level ordering supported"
+        raise Exception(msgBase.format(name, value))
+    else:
+        for pair in value:
+            if len(pair) != 2:
+                msgBase = "Invalid parameter value: {} = {}\nMust be exactly 2 values per level"
+                raise Exception(msgBase.format(name, value))
+            for dim in pair:
+                if dim not in range(0,256):
+                    msgBase = "Invalid parameter value: {} = {}\nGridDim {} out of range [0,256)"
+                    raise Exception(msgBase.format(name, value, dim))
+
 
 def checkParametersAreValid(param, validParams):
     """Ensures paramaters in params exist and have valid values as specified by validParames"""
@@ -869,3 +943,7 @@ def checkParametersAreValid(param, validParams):
                 else ""
             )
             raise Exception(msgBase.format(name, value, name, validParams[name][:32], msgExt))
+        elif name == "SpaceFillingAlgo":
+            checkSpaceFillAlgoIsValid(name, value)
+        elif name == "SFCWGM":
+            checkSpaceFillAlgoWGMIsValid(name, value)

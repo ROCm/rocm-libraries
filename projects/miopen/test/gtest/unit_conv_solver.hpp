@@ -125,7 +125,6 @@ struct UnitTestConvSolverParams
 
     Gpu supported_devs;
     bool use_cpu_ref;
-    bool enable_deprecated_solvers;
     bool tunable;
     bool check_xnack_disabled;
     std::size_t tuning_iterations_max;
@@ -227,6 +226,8 @@ using GPU_UnitTestConvSolverWrw_BFP16 = miopen::unit_tests::UnitTestConvSolverWr
 using GPU_UnitTestConvSolverFwd_FP32 = miopen::unit_tests::UnitTestConvSolverFwd;
 using GPU_UnitTestConvSolverBwd_FP32 = miopen::unit_tests::UnitTestConvSolverBwd;
 using GPU_UnitTestConvSolverWrw_FP32 = miopen::unit_tests::UnitTestConvSolverWrw;
+
+using GPU_UnitTestConvSolverFwd_TF32 = miopen::unit_tests::UnitTestConvSolverFwd;
 
 using GPU_UnitTestConvSolverFwd_I8 = miopen::unit_tests::UnitTestConvSolverFwd;
 using GPU_UnitTestConvSolverBwd_I8 = miopen::unit_tests::UnitTestConvSolverBwd;

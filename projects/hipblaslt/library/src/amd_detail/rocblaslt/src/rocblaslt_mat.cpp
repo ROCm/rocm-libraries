@@ -157,8 +157,9 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     //     return rocblaslt_status_invalid_size;
     // }
 
-    if(algo)
-        workspaceSizeInBytes = min(workspaceSizeInBytes, algo->max_workspace_bytes);
+    if(algo) {
+        workspaceSizeInBytes = std::min<size_t>(workspaceSizeInBytes, algo->max_workspace_bytes);
+    }
     RocblasltContractionProblem problem{opA,
                                         opB,
                                         m,
@@ -1085,7 +1086,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp(const rocblaslt_handle           hand
         return rocblaslt_status_invalid_handle;
     }
 
-    if(matA->type != matB->type || matC->type != matD->type)
+    if(matC->type != matD->type)
     {
         log_error(__func__, "invalid matrix datatype");
         return rocblaslt_status_type_mismatch;

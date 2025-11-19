@@ -43,80 +43,45 @@ void copyWithCheck(const flatbuffers::Vector<int64_t>* src,
 }
 
 MiopenConvDescriptor::MiopenConvDescriptor(
-    size_t spatialDimCount, const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& attributes)
+    size_t spatialDimCount,
+    const hipdnn_sdk::data_objects::ConvolutionFwdAttributes& attributes,
+    int groupCount)
 {
-    if(spatialDimCount > std::numeric_limits<int>::max())
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MiopenConvDescriptor: spatialDimCount must be not greater than INT_MAX");
-    }
+    createDescriptorInternal(spatialDimCount,
+                             attributes.pre_padding(),
+                             attributes.post_padding(),
+                             attributes.stride(),
+                             attributes.dilation(),
+                             attributes.conv_mode(),
+                             groupCount);
+}
 
-    const auto convMode = attributes.conv_mode();
-    if(convMode != hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MiopenConvDescriptor: only ConvMode::CROSS_CORRELATION is supported");
-    }
+MiopenConvDescriptor::MiopenConvDescriptor(
+    size_t spatialDimCount,
+    const hipdnn_sdk::data_objects::ConvolutionBwdAttributes& attributes,
+    int groupCount)
+{
+    createDescriptorInternal(spatialDimCount,
+                             attributes.pre_padding(),
+                             attributes.post_padding(),
+                             attributes.stride(),
+                             attributes.dilation(),
+                             attributes.conv_mode(),
+                             groupCount);
+}
 
-    const auto attrPrePadding = attributes.pre_padding();
-    if(attrPrePadding == nullptr)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "MiopenConvDescriptor: pre_padding must be set");
-    }
-
-    const auto attrPostPadding = attributes.post_padding();
-    if(attrPostPadding == nullptr)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MiopenConvDescriptor: post_padding must be set");
-    }
-
-    const auto attrStride = attributes.stride();
-    if(attrStride == nullptr)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "MiopenConvDescriptor: stride must be set");
-    }
-
-    const auto attrDilation = attributes.dilation();
-    if(attrDilation == nullptr)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "MiopenConvDescriptor: dilation must be set");
-    }
-
-    if(attrPrePadding->size() != attrPostPadding->size())
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MiopenConvDescriptor: pre_padding and post_padding sizes must be equal");
-    }
-
-    if(!std::equal(attrPrePadding->begin(), attrPrePadding->end(), attrPostPadding->begin()))
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "MiopenConvDescriptor: asymmetric padding is not supported");
-    }
-
-    std::vector<int> padding(spatialDimCount);
-    std::vector<int> stride(spatialDimCount);
-    std::vector<int> dilation(spatialDimCount);
-
-    copyWithCheck(attrPrePadding, padding, spatialDimCount, "attrPadding", "spatialDimCount");
-    copyWithCheck(attrStride, stride, spatialDimCount, "attrStride", "spatialDimCount");
-    copyWithCheck(attrDilation, dilation, spatialDimCount, "attrDilation", "spatialDimCount");
-
-    THROW_ON_MIOPEN_FAILURE(miopenCreateConvolutionDescriptor(&_descriptor));
-    THROW_ON_MIOPEN_FAILURE(miopenInitConvolutionNdDescriptor(_descriptor,
-                                                              static_cast<int>(spatialDimCount),
-                                                              padding.data(),
-                                                              stride.data(),
-                                                              dilation.data(),
-                                                              miopenConvolution));
+MiopenConvDescriptor::MiopenConvDescriptor(
+    size_t spatialDimCount,
+    const hipdnn_sdk::data_objects::ConvolutionWrwAttributes& attributes,
+    int groupCount)
+{
+    createDescriptorInternal(spatialDimCount,
+                             attributes.pre_padding(),
+                             attributes.post_padding(),
+                             attributes.stride(),
+                             attributes.dilation(),
+                             attributes.conv_mode(),
+                             groupCount);
 }
 
 MiopenConvDescriptor::MiopenConvDescriptor(MiopenConvDescriptor&& other) noexcept
@@ -153,4 +118,89 @@ miopenConvolutionDescriptor_t MiopenConvDescriptor::convDescriptor() const
     return _descriptor;
 }
 
+void MiopenConvDescriptor::createDescriptorInternal(
+    size_t spatialDimCount,
+    const flatbuffers::Vector<int64_t>* attrPrePadding,
+    const flatbuffers::Vector<int64_t>* attrPostPadding,
+    const flatbuffers::Vector<int64_t>* attrStride,
+    const flatbuffers::Vector<int64_t>* attrDilation,
+    hipdnn_sdk::data_objects::ConvMode convMode,
+    int groupCount)
+{
+    if(spatialDimCount > std::numeric_limits<int>::max())
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MiopenConvDescriptor: spatialDimCount must be not greater than INT_MAX");
+    }
+
+    if(convMode != hipdnn_sdk::data_objects::ConvMode::CROSS_CORRELATION)
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MiopenConvDescriptor: only ConvMode::CROSS_CORRELATION is supported");
+    }
+
+    if(attrPrePadding == nullptr)
+    {
+        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                   "MiopenConvDescriptor: pre_padding must be set");
+    }
+
+    if(attrPostPadding == nullptr)
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MiopenConvDescriptor: post_padding must be set");
+    }
+
+    if(attrStride == nullptr)
+    {
+        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                   "MiopenConvDescriptor: stride must be set");
+    }
+
+    if(attrDilation == nullptr)
+    {
+        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                   "MiopenConvDescriptor: dilation must be set");
+    }
+
+    if(attrPrePadding->size() != attrPostPadding->size())
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MiopenConvDescriptor: pre_padding and post_padding sizes must be equal");
+    }
+
+    if(!std::equal(attrPrePadding->begin(), attrPrePadding->end(), attrPostPadding->begin()))
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MiopenConvDescriptor: asymmetric padding is not supported");
+    }
+
+    if(groupCount < 1)
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MiopenConvDescriptor: groupCount < 1 is not supported");
+    }
+
+    std::vector<int> padding(spatialDimCount);
+    std::vector<int> stride(spatialDimCount);
+    std::vector<int> dilation(spatialDimCount);
+
+    copyWithCheck(attrPrePadding, padding, spatialDimCount, "attrPadding", "spatialDimCount");
+    copyWithCheck(attrStride, stride, spatialDimCount, "attrStride", "spatialDimCount");
+    copyWithCheck(attrDilation, dilation, spatialDimCount, "attrDilation", "spatialDimCount");
+
+    THROW_ON_MIOPEN_FAILURE(miopenCreateConvolutionDescriptor(&_descriptor));
+    THROW_ON_MIOPEN_FAILURE(miopenInitConvolutionNdDescriptor(_descriptor,
+                                                              static_cast<int>(spatialDimCount),
+                                                              padding.data(),
+                                                              stride.data(),
+                                                              dilation.data(),
+                                                              miopenConvolution));
+    THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionGroupCount(_descriptor, groupCount));
+}
 }

@@ -7,6 +7,7 @@
 
 #include <hipdnn_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_sdk/utilities/ScopedResource.hpp>
 #include <miopen/miopen.h>
 
 #include "MiopenConvDescriptor.hpp"
@@ -35,25 +36,30 @@ public:
     const MiopenTensor& y() const;
     const MiopenConvDescriptor& conv() const;
 
+    bool validTensors() const;
+
 private:
     size_t _spatialDimCount;
     MiopenTensor _x;
     MiopenTensor _w;
     MiopenTensor _y;
     MiopenConvDescriptor _conv;
+    bool _tensorsValid;
 };
 
 class ConvFwdPlan : public IPlan
 {
 public:
     ConvFwdPlan(const HipdnnEnginePluginHandle& handle, ConvFwdParams&& params);
-    ~ConvFwdPlan() override;
+    ~ConvFwdPlan() override = default;
 
     ConvFwdPlan(const ConvFwdPlan&) = delete;
     ConvFwdPlan& operator=(const ConvFwdPlan&) = delete;
 
-    ConvFwdPlan(ConvFwdPlan&& other) noexcept;
-    ConvFwdPlan& operator=(ConvFwdPlan&& other) noexcept;
+    ConvFwdPlan(ConvFwdPlan&& other) = default;
+    ConvFwdPlan& operator=(ConvFwdPlan&& other) = default;
+
+    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
 
     void execute(const HipdnnEnginePluginHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
@@ -62,7 +68,8 @@ public:
 
 private:
     ConvFwdParams _params;
-    miopenSolution_t _solution = nullptr;
+    hipdnn_sdk::utilities::ScopedResource<miopenSolution_t> _solution;
+    size_t _workspaceSize = 0;
 };
 
 } // namespace miopen_legacy_plugin

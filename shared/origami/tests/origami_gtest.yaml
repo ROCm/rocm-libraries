@@ -38,11 +38,11 @@ tests:
 
   - name: ComputeTotalLatency
     inputs:
-      - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 0, batch: 2, MT_M: 128, MT_N: 128, MT_K: 64, MI_M: 32, MI_N: 32, MI_K: 8, element_size_A: 16, element_size_B: 16, element_size_out: 32, mx_block_size: 0, wgm: 1, splittingFactor: 6, gpu_arch: 942} 
+      - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 0, batch: 2, MT_M: 128, MT_N: 128, MT_K: 64, MI_M: 32, MI_N: 32, MI_K: 8, element_size_A: 16, element_size_B: 16, element_size_out: 32, mx_block_size: 0, wgm: 1, splittingFactor: 6, max_cus: 0, gpu_arch: 942} 
 
   - name: ComputePerfGflops
     inputs:
-      - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 0, batch: 2, MT_M: 128, MT_N: 128, MT_K: 64, MI_M: 32, MI_N: 32, MI_K: 8, element_size_A: 16, element_size_B: 16, element_size_out: 32, WGM: 1, gpu_arch: 942}
+      - { M: 4096, N: 4096, K: 1024, transA: 1, transB: 0, batch: 2, MT_M: 128, MT_N: 128, MT_K: 64, MI_M: 32, MI_N: 32, MI_K: 8, element_size_A: 16, element_size_B: 16, element_size_out: 32, WGM: 1, max_cus: 0, gpu_arch: 942}
 
   - name: EstimateMallHit
     inputs:
@@ -54,11 +54,12 @@ tests:
 
   - name: BestGridSize
     inputs:
-      - { M: 1024, N: 1024, K: 4096, batch: 1, transA: 1, transB: 0, MT_M: 256, MT_N: 256, MT_K: 64, MI_M: 32, MI_N: 32, MI_K: 8, element_size_A: 16, element_size_B: 16, element_size_out: 32, mx_block_size: 0, H_L2: 0.0, WGM: 1,  biggest_allowable_split: 20, gpu_arch: 942, expected_gt: 15} 
+      - { M: 1024, N: 1024, K: 4096, batch: 1, transA: 1, transB: 0, MT_M: 256, MT_N: 256, MT_K: 64, MI_M: 32, MI_N: 32, MI_K: 8, element_size_A: 16, element_size_B: 16, element_size_out: 32, mx_block_size: 0, H_L2: 0.0, WGM: 1,  biggest_allowable_split: 20, gpu_arch: 942, max_cus: 0, expected_gt: 15} 
 
   - name: BestMacroTileSize
     inputs:
-      - { M: 1024, N: 1024, K: 4096, batch: 1, transA: 1, transB: 0, element_size_A: 16, element_size_B: 16, element_size_out: 32, mx_block_size: 0, H_L2: 0.0, WGM: 1, gpu_arch: 942} 
+      - { M: 1024, N: 1024, K: 4096, batch: 1, transA: 1, transB: 0, element_size_A: 16, element_size_B: 16, element_size_out: 32, mx_block_size: 0, H_L2: 0.0, WGM: 1, max_cus: 0, gpu_arch: 942} 
+      - { M: 4, N: 4, K: 0, batch: 1, transA: 1, transB: 0, element_size_A: 16, element_size_B: 16, element_size_out: 32, mx_block_size: 0, H_L2: 0.0, WGM: 1, max_cus: 0, gpu_arch: 942}
 
   - name: BestWGM
     inputs:

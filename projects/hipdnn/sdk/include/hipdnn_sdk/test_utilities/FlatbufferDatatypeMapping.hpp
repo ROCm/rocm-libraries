@@ -41,6 +41,33 @@ constexpr auto datatypeToNative()
     }
 }
 
+inline std::variant<float, half, double, int32_t, hip_bfloat16>
+    datatypeToNativeVariant(hipdnn_sdk::data_objects::DataType type)
+{
+    using DataType = hipdnn_sdk::data_objects::DataType;
+
+    switch(type)
+    {
+    case DataType::FLOAT:
+        return float{};
+        break;
+    case DataType::HALF:
+        return half{};
+        break;
+    case DataType::DOUBLE:
+        return double{};
+        break;
+    case DataType::INT32:
+        return int32_t{};
+        break;
+    case DataType::BFLOAT16:
+        return hip_bfloat16{};
+        break;
+    default:
+        throw std::runtime_error("Error: Invalid type");
+    }
+}
+
 template <typename T>
 constexpr hipdnn_sdk::data_objects::DataType nativeTypeToDataType()
 {
@@ -76,21 +103,4 @@ using DataTypeToNative = decltype(datatypeToNative<DT>());
 template <typename T>
 using NativeToDataType = decltype(nativeTypeToDataType<T>());
 
-}
-
-template <typename T>
-inline std::vector<T> convertFlatBufferVectorToStdVector(const flatbuffers::Vector<T>* in)
-{
-    std::vector<T> out;
-
-    if(in)
-    {
-        out.resize(in->size());
-        for(::flatbuffers::uoffset_t i = 0; i < in->size(); i++)
-        {
-            out[i] = in->Get(i);
-        }
-    }
-
-    return out;
 }

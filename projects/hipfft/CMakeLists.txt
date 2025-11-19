@@ -123,7 +123,7 @@ string( TOUPPER "${BUILD_WITH_LIB}" BUILD_WITH_LIB )
 
 # nvc++ doesn't understand warning flags
 if( NOT CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+" )
-  set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wno-unknown-pragmas)
+  set( WARNING_FLAGS -Wall -Wno-unused-function -Wimplicit-fallthrough -Wunreachable-code -Wsign-compare -Wno-unknown-pragmas)
   if( WERROR )
     set( WARNING_FLAGS ${WARNING_FLAGS} -Werror )
   endif()
@@ -175,8 +175,9 @@ endif()
 message(STATUS "BUILD_WITH_COMPILER = " ${BUILD_WITH_COMPILER})
 
 # Version
-set( VERSION_STRING "1.0.21" )
+set( VERSION_STRING "1.0.22" )
 set( hipfft_SOVERSION 0.1 )
+set( hipfftw_SOVERSION 0.1 )
 
 if( ROCmCMakeBuildTools_FOUND )
   rocm_setup_version( VERSION ${VERSION_STRING} )

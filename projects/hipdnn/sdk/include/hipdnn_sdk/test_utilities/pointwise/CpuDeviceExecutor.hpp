@@ -20,6 +20,37 @@ template <class OutputType, class... InputTypes>
 class CpuDeviceExecutor
 {
 public:
+    template <typename Op, typename InputType>
+    void executeUnary(const TensorBase<InputType>& input, TensorBase<OutputType>& output, Op op)
+    {
+        const auto& inputDims = input.dims();
+        const auto& outputDims = output.dims();
+
+        // Validate that input and output dimensions are compatible
+        if(!areDimensionsBroadcastCompatible(inputDims, outputDims))
+        {
+            throw std::runtime_error("Input dimensions are not broadcast compatible with output");
+        }
+
+        // Use output dimensions as the broadcast shape
+        const auto& broadcastShape = outputDims;
+
+        auto func = [&](const std::vector<int64_t>& indices) {
+            // Get broadcasted index for input
+            auto inputIndices = getBroadcastableIndex(indices, inputDims);
+
+            // Get value from input tensor and apply operation
+            auto inputValue = input.getHostValue(inputIndices);
+
+            // Apply operation and set output
+            auto result = op(inputValue);
+            output.setHostValue(safeConvert<OutputType>(result), indices);
+        };
+
+        auto parallelFunc = makeParallelTensorFunctor(func, broadcastShape);
+        parallelFunc();
+    }
+
     template <typename Op, typename Input1Type, typename Input2Type>
     void executeBinaryBroadcast(const TensorBase<Input1Type>& input1,
                                 const TensorBase<Input2Type>& input2,
@@ -55,7 +86,7 @@ public:
 
             // Apply operation and set output
             auto result = op(input1Value, input2Value);
-            output.setHostValue(static_cast<OutputType>(result), indices);
+            output.setHostValue(safeConvert<OutputType>(result), indices);
         };
 
         auto parallelFunc = makeParallelTensorFunctor(func, broadcastShape);

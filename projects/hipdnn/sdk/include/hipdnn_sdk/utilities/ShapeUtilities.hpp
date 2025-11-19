@@ -2,9 +2,12 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#include <hipdnn_sdk/logging/Logger.hpp>
+#include <hipdnn_sdk/utilities/StringUtil.hpp>
 #include <algorithm>
 #include <numeric>
 #include <ranges>
+#include <stdexcept>
 #include <vector>
 
 namespace hipdnn_sdk
@@ -118,25 +121,68 @@ inline std::vector<int64_t> strideOrderNhwc(size_t numDims)
     return strideOrder;
 }
 
-// Extracts stride order from existing strides
-// The stride order indicates the memory layout priority (lower values = higher priority)
-// For example, strides [8, 1, 4] would produce order [2, 0, 1]
-// This is the inverse operation of generateStrides
+// Deduces the stride order from existing strides (assumes common/standard layouts).
+// The returned stride order indicates the memory layout priority (lower values = higher priority).
+// For example, strides [8, 1, 4] would produce order [2, 0, 1].
+// Attempts to determine between NC...W and N...WC layouts, defaulting to NC...W when uncertain.
+// For example, strides [1, 1, 1, 1] would produce order [3, 2, 1, 0].
+// A warning log will be added when input strides are not unique.
+// This is the inverse operation of generateStrides.
 inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strides)
 {
-    std::vector<int64_t> strideOrder(strides.size());
-    std::vector<size_t> indices(strides.size());
+    size_t numDims = strides.size();
+    std::vector<size_t> indices(numDims);
+    std::vector<int64_t> strideOrder(numDims);
     std::iota(indices.begin(), indices.end(), 0);
+    bool stridesAreUnique = true;
 
-    // Sort indices by their corresponding stride values (ascending)
-    std::sort(indices.begin(), indices.end(), [&strides](size_t a, size_t b) {
-        return strides[a] < strides[b];
+    if(strides.empty())
+    {
+        return {};
+    }
+
+    // Attempt to determine between N...C layouts and N...W layouts.
+    auto posFirstMax = static_cast<size_t>(std::distance(strides.begin(), std::max_element(strides.begin(), strides.end())));
+    auto posFirstMin = static_cast<size_t>(std::distance(strides.begin(), std::min_element(strides.begin(), strides.end())));
+
+    if(posFirstMax == 0 && posFirstMin == 1)
+    {
+        // N is amongst the largest strides and C is amongst the shortest.
+        for(size_t i = 2; i < numDims; ++i)
+        {
+            if(strides[i] > strides[posFirstMin])
+            {
+                // C is smaller than at least one of D, H, or W. Assume N...WC memory
+                // layout and force C to the end of the list before stable_sort() so
+                // that it's handled properly in case of duplicate minimum stride lengths.
+                indices.erase(indices.begin() + 1);
+                indices.push_back(1);
+                break;
+            }
+        }
+    }
+
+    // Sort indices by their corresponding stride values (descending; aligns with NC...W layout)
+    std::stable_sort(indices.begin(),
+                     indices.end(),
+                     [&stridesAreUnique, &strides](size_t a, size_t b) mutable {
+        if(strides[a] == strides[b])
+        {
+            stridesAreUnique = false;
+        }
+        return strides[a] > strides[b];
     });
 
-    // Assign order based on sorted indices
-    for(size_t i = 0; i < indices.size(); ++i)
+    // Assign order based on sorted stride indices from longest strides to shortest.
+    for(size_t i = 0; i < numDims; ++i)
     {
-        strideOrder[indices[i]] = static_cast<int64_t>(i);
+        strideOrder[indices[i]] = static_cast<int64_t>(numDims - i - 1);
+    }
+
+    if(!stridesAreUnique)
+    {
+        HIPDNN_LOG_WARN("extractStrideOrder(): Stride lengths {} are not unique, the deduced stride order {} may not be correct",
+                        vecToString(strides), vecToString(strideOrder));
     }
 
     return strideOrder;
@@ -156,6 +202,111 @@ inline std::vector<int64_t> getDerivedShape(const std::vector<int64_t>& shape)
     result[1] = shape[1];
 
     return result;
+}
+
+// Iterates the elements along each of the dimensions specified in dims and calls func for each unique index
+// Formally, we are iterating over a cartesian product of the ranges [0, dims[0]), [0, dims[1]), ..., [0, dims[n - 1]) for n dimensions
+template <typename F>
+static void iterateAlongDimensions(const std::vector<int64_t>& dims, F&& func)
+{
+    if(dims.empty())
+    {
+        func({});
+        return;
+    }
+
+    int64_t totalElements = 1;
+    for(auto dim : dims)
+    {
+        totalElements *= dim;
+    }
+
+    std::vector<int64_t> indices(dims.size(), 0);
+
+    // Iterate over each unique position
+    for(int64_t iter = 0; iter < totalElements; ++iter)
+    {
+        if constexpr(std::is_invocable_r_v<bool, F, const std::vector<int64_t>&>)
+        {
+            if(!func(indices))
+            {
+                return; // Early exit if lambda returns false
+            }
+        }
+        else
+        {
+            func(indices); // Original behavior for void-returning lambdas
+        }
+
+        for(int dim = static_cast<int>(dims.size()) - 1; dim >= 0; --dim)
+        {
+            auto dimIdx = static_cast<size_t>(dim);
+            indices[dimIdx]++;
+
+            if(indices[dimIdx] < dims[dimIdx])
+            {
+                break;
+            }
+
+            indices[dimIdx] = 0;
+        }
+    }
+}
+
+// Constructs a full tensor indices vector from batch, channel, and spatial components. spatialOffset allows
+// skipping initial elements in the spatialIndices vector for convenience.
+static inline std::vector<int64_t> buildTensorIndices(int64_t batchIdx,
+                                                      int64_t channelIdx,
+                                                      const std::vector<int64_t>& spatialIndices,
+                                                      size_t spatialOffset = 0)
+{
+    std::vector<int64_t> fullIndices = {batchIdx, channelIdx};
+    fullIndices.insert(fullIndices.end(),
+                       spatialIndices.begin() + static_cast<std::ptrdiff_t>(spatialOffset),
+                       spatialIndices.end());
+    return fullIndices;
+}
+
+// Utility for calculating group count given weight and input tensors
+// For grouped convolutions, group count = input_channels / weight_channels_per_group
+inline int64_t calculateGroupCount(const std::vector<int64_t>& inputDims,
+                                   const std::vector<int64_t>& weightDims)
+{
+    if(inputDims.size() < 2)
+    {
+        throw std::invalid_argument("Input tensor must have at least 2 dimensions, but got: "
+                                    + std::to_string(inputDims.size()));
+    }
+
+    if(weightDims.size() < 2)
+    {
+        throw std::invalid_argument("Weight tensor must have at least 2 dimensions, but got: "
+                                    + std::to_string(weightDims.size()));
+    }
+
+    auto inChannels = inputDims[1];
+    auto wChannels = weightDims[1];
+
+    if(inChannels <= 0)
+    {
+        throw std::invalid_argument("Input channels must be positive, but got: "
+                                    + std::to_string(inChannels));
+    }
+
+    if(wChannels <= 0)
+    {
+        throw std::invalid_argument("Weight channels must be positive, but got: "
+                                    + std::to_string(wChannels));
+    }
+
+    if(inChannels % wChannels != 0)
+    {
+        throw std::invalid_argument("Input channels (" + std::to_string(inChannels)
+                                    + ") must be evenly divisible by weight channels ("
+                                    + std::to_string(wChannels) + ")");
+    }
+
+    return inChannels / wChannels;
 }
 
 }

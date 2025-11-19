@@ -3,10 +3,7 @@
 
 #include "MiopenUtils.hpp"
 
-namespace miopen_legacy_plugin
-{
-
-namespace miopen_utils
+namespace miopen_legacy_plugin::miopen_utils
 {
 
 hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
@@ -79,6 +76,79 @@ size_t getSpatialDimCount(const hipdnn_sdk::data_objects::TensorAttributes& attr
     return attr.dims()->size() - 2;
 }
 
+std::optional<ActivationParams>
+    mapPointwiseModeToMiopenActivation(const hipdnn_sdk::data_objects::PointwiseAttributes& attrs)
+{
+    using PM = hipdnn_sdk::data_objects::PointwiseMode;
+
+    switch(attrs.operation())
+    {
+    case PM::RELU_FWD:
+    case PM::RELU_BWD:
+    {
+        if(attrs.relu_lower_clip() && attrs.relu_upper_clip())
+        {
+            // CLAMP
+            // act(x) = max(\alpha, min(\beta, x))
+            return ActivationParams{miopenActivationCLAMP,
+                                    static_cast<double>(*attrs.relu_lower_clip()),
+                                    static_cast<double>(*attrs.relu_upper_clip()),
+                                    0.0};
+        }
+        if(attrs.relu_upper_clip())
+        {
+            // Clipped ReLU
+            // act(x) = max(0, min(\alpha, x))
+            return ActivationParams{miopenActivationCLIPPEDRELU,
+                                    static_cast<double>(*attrs.relu_upper_clip()),
+                                    0.0,
+                                    0.0};
+        }
+        if(attrs.relu_lower_clip_slope())
+        {
+            // Leaky ReLU
+            return ActivationParams{miopenActivationLEAKYRELU,
+                                    static_cast<double>(*attrs.relu_lower_clip_slope()),
+                                    0.0,
+                                    0.0};
+        }
+        // Standard ReLU
+        return ActivationParams{miopenActivationRELU, 0.0, 0.0, 0.0};
+    }
+    case PM::SIGMOID_FWD:
+    case PM::SIGMOID_BWD:
+        return ActivationParams{miopenActivationLOGISTIC, 0.0, 0.0, 0.0};
+    case PM::TANH_FWD:
+    case PM::TANH_BWD:
+        return ActivationParams{miopenActivationTANH, 1.0, 1.0, 0.0};
+    case PM::ELU_FWD:
+    case PM::ELU_BWD:
+    {
+        double alpha = attrs.elu_alpha() ? static_cast<double>(*attrs.elu_alpha()) : 1.0;
+        return ActivationParams{miopenActivationELU, alpha, 0.0, 0.0};
+    }
+    case PM::SOFTPLUS_FWD:
+    case PM::SOFTPLUS_BWD:
+        // Softplus is (1/beta) * log(1 + e^(beta*x))
+        // However, MIOpen uses:
+        // log(1 + e^x)
+        // This is valid Softplus only when beta=1
+        if(attrs.softplus_beta())
+        {
+            // Only support beta=1
+            if(static_cast<double>(*attrs.softplus_beta()) != 1.0)
+            {
+                return std::nullopt;
+            }
+        }
+        return ActivationParams{miopenActivationSOFTRELU, 0.0, 0.0, 0.0};
+    case PM::ABS:
+        return ActivationParams{miopenActivationABS, 0.0, 0.0, 0.0};
+    case PM::IDENTITY:
+        return ActivationParams{miopenActivationPASTHRU, 0.0, 0.0, 0.0};
+    default:
+        return std::nullopt;
+    }
 }
 
 }

@@ -4,7 +4,11 @@
 #pragma once
 
 #if defined(__linux__)
+#include <array>
+#include <climits>
 #include <filesystem>
+#include <stdexcept>
+#include <unistd.h>
 namespace hipdnn_sdk
 {
 namespace utilities
@@ -44,6 +48,18 @@ inline void unsetEnv(const char* var)
 inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::path& b)
 {
     return a.native() == b.native();
+}
+
+inline std::filesystem::path getCurrentExecutableDirectory()
+{
+    std::array<char, PATH_MAX + 1> result{}; // +1 for trailing null termination
+    ssize_t count = readlink("/proc/self/exe", result.data(), PATH_MAX);
+    if(count == -1)
+    {
+        throw std::runtime_error("Failed to get executable path");
+    }
+    return std::filesystem::path(std::string(result.data(), static_cast<size_t>(count)))
+        .parent_path();
 }
 
 }

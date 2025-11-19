@@ -4,7 +4,10 @@
 #pragma once
 
 #include <hipdnn_sdk/logging/Logger.hpp>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/ReferenceValidationInterface.hpp>
+#include <hipdnn_sdk/test_utilities/VectorLoggingUtils.hpp>
+#include <hipdnn_sdk/utilities/TensorView.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 
@@ -16,7 +19,7 @@ namespace test_utilities
 using namespace hipdnn_sdk::utilities;
 
 template <class T>
-class CpuFpReferenceValidation : public IReferenceValidation<T>
+class CpuFpReferenceValidation : public IReferenceValidation
 {
 public:
     CpuFpReferenceValidation(T absoluteTolerance = std::numeric_limits<T>::epsilon(),
@@ -32,43 +35,49 @@ public:
 
     ~CpuFpReferenceValidation() override = default;
 
-    bool allClose(IMigratableMemory<T>& reference, IMigratableMemory<T>& implementation) override
+    bool allClose(ITensor& reference, ITensor& implementation) const override
     {
-        if(reference.count() != implementation.count())
+        if(reference.elementCount() != implementation.elementCount()
+           || reference.dims() != implementation.dims())
         {
             return false;
         }
 
-        size_t elementCount = reference.count();
+        TensorView<T> refView(reference);
+        TensorView<T> implView(implementation);
 
-        const T* refData = reference.hostData();
-        const T* implData = implementation.hostData();
+        std::atomic<bool> result(true);
 
-        for(size_t i = 0; i < elementCount; ++i)
-        {
-            T refValue = refData[i];
-            T implValue = implData[i];
+        auto validateFunc = [&](const std::vector<int64_t>& indices) {
+            T refValue = refView.getHostValue(indices);
+            T implValue = implView.getHostValue(indices);
 
             T absDiff = std::fabs(implValue - refValue);
             T threshold = _absoluteTolerance + _relativeTolerance * std::fabs(refValue);
 
             if(absDiff > threshold)
             {
-                HIPDNN_LOG_ERROR("Validation failed at index {}: reference value = {}, "
+                // Log error and mark as failed
+                HIPDNN_LOG_ERROR("Validation failed at indices {}: reference value = {}, "
                                  "implementation value = {}, "
                                  "absolute difference = {}, threshold = {} (atol={}, rtol={})",
-                                 i,
+                                 indices,
                                  refValue,
                                  implValue,
                                  absDiff,
                                  threshold,
                                  _absoluteTolerance,
                                  _relativeTolerance);
-                return false;
+                result.store(false, std::memory_order_relaxed);
             }
-        }
+            return result.load(std::memory_order_relaxed);
+        };
 
-        return true;
+        // Create and execute parallel functor
+        auto parallelFunc = makeParallelTensorFunctor(validateFunc, reference.dims());
+        parallelFunc(std::thread::hardware_concurrency());
+
+        return result.load();
     }
 
 private:
@@ -76,6 +85,31 @@ private:
     T _absoluteTolerance;
     T _relativeTolerance;
 };
+
+inline std::unique_ptr<hipdnn_sdk::test_utilities::IReferenceValidation>
+    createAllCloseValidator(hipdnn_sdk::data_objects::DataType dataType,
+                            float absoluteTolerance = std::numeric_limits<float>::epsilon(),
+                            float relativeTolerance = std::numeric_limits<float>::epsilon())
+{
+    switch(dataType)
+    {
+    case hipdnn_sdk::data_objects::DataType::FLOAT:
+        return std::make_unique<CpuFpReferenceValidation<float>>(absoluteTolerance,
+                                                                 relativeTolerance);
+    case hipdnn_sdk::data_objects::DataType::HALF:
+        return std::make_unique<CpuFpReferenceValidation<half>>(
+            static_cast<half>(absoluteTolerance), static_cast<half>(relativeTolerance));
+    case hipdnn_sdk::data_objects::DataType::BFLOAT16:
+        return std::make_unique<CpuFpReferenceValidation<hip_bfloat16>>(
+            static_cast<hip_bfloat16>(absoluteTolerance),
+            static_cast<hip_bfloat16>(relativeTolerance));
+    case hipdnn_sdk::data_objects::DataType::DOUBLE:
+        return std::make_unique<CpuFpReferenceValidation<double>>(
+            static_cast<double>(absoluteTolerance), static_cast<double>(relativeTolerance));
+    default:
+        throw std::runtime_error("Unsupported data type for allClose validator");
+    }
+}
 
 } // namespace test_utilities
 } // namespace hipdnn_sdk

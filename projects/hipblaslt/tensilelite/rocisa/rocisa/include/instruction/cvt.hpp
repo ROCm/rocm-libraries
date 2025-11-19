@@ -135,6 +135,50 @@ namespace rocisa
         }
     };
 
+    struct VCvtF64toU32 : public VCvtInstruction
+    {
+        VCvtF64toU32(const std::shared_ptr<RegisterContainer>& dst,
+                     const InstructionInput&                   src,
+                     const std::optional<SDWAModifiers>&       sdwa    = std::nullopt,
+                     const std::string&                        comment = "")
+            : VCvtInstruction(CvtType::CVT_F64_to_U32, dst, {src}, sdwa, std::nullopt, comment)
+        {
+            setInst("v_cvt_u32_f64");
+        }
+
+        VCvtF64toU32(const VCvtF64toU32& other)
+            : VCvtInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCvtF64toU32>(*this);
+        }
+    };
+
+    struct VCvtU32toF64 : public VCvtInstruction
+    {
+        VCvtU32toF64(const std::shared_ptr<RegisterContainer>& dst,
+                     const InstructionInput&                   src,
+                     const std::optional<SDWAModifiers>&       sdwa    = std::nullopt,
+                     const std::string&                        comment = "")
+            : VCvtInstruction(CvtType::CVT_U32_to_F64, dst, {src}, sdwa, std::nullopt, comment)
+        {
+            setInst("v_cvt_f64_u32");
+        }
+
+        VCvtU32toF64(const VCvtU32toF64& other)
+            : VCvtInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VCvtU32toF64>(*this);
+        }
+    };
+
     struct VCvtI32toF32 : public VCvtInstruction
     {
         VCvtI32toF32(const std::shared_ptr<RegisterContainer>& dst,
