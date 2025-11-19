@@ -128,6 +128,10 @@
 #define MIO_BN_VECTORIZE 0
 #endif
 
+#ifndef MIO_BN_VEC_SIZE
+#define MIO_BN_VEC_SIZE 1
+#endif
+
 #ifndef MIO_BN_STASH_METHOD
 #define MIO_BN_STASH_METHOD 0
 #endif
@@ -157,7 +161,7 @@
 #endif
 
 #ifndef MIO_BN_N_ELEMENTS
-#define MIO_BN_N_ELEMENTS MIO_BN_N 
+#define MIO_BN_N_ELEMENTS MIO_BN_N
 // This is determined as such in the heuristics that select the kernels
 // (src/include/miopen/batchnorm/common_spatial.hpp: DefaultConfigSpatialMultiple)
 #endif
