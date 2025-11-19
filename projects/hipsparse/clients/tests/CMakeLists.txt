@@ -29,6 +29,16 @@ else()
     endif()
 endif()
 
+# Create symlink for matrices directory
+# Test executable is in clients/staging/ and looks for ../matrices/
+# This symlink makes ../matrices/ resolve correctly to the actual matrices location
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/clients")
+file(CREATE_LINK 
+    "${PROJECT_BINARY_DIR}/matrices" 
+    "${PROJECT_BINARY_DIR}/clients/matrices" 
+    SYMBOLIC
+)
+
 # Create test executable
 add_executable(hipsparse-test)
 
