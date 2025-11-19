@@ -34,12 +34,9 @@ endif()
 
 # Set output directory - backward compatible with Jenkins expectations
 # Jenkins expects build/{release|debug}/clients/staging/
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "release")
-endif()
-string(TOLOWER "${CMAKE_BUILD_TYPE}" build_type_lower)
+# Note: PROJECT_BINARY_DIR already includes the build type directory from install.sh
 set_target_properties(hipsparse-bench PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${build_type_lower}/clients/staging"
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
 )
 
 # Installation
