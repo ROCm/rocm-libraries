@@ -509,6 +509,8 @@ validParameters = { # we need to make sure this matches develop
     "WorkGroupMapping": list(
         range(-1024, 1024 + 1)
     ),  # change a workgroup's id so that the all the workgroups on the gpu at a time are hitting L2 cache the best
+    # 0: WorkGroupMapping is predicted at runtime. 
+    # 1: No mapping
     "WorkGroupMappingXCC": [
         -1,
          1,
@@ -518,7 +520,7 @@ validParameters = { # we need to make sure this matches develop
          16,
          32,
     ],  # change a workgroup's id so that contiguous workgroup can map on same XCC
-    # -1 : WorkGroupMappingXCCGroup will be set to CU_count at runtime. Note that this is consistent with what StreamKXCCMapping
+    # -1: WorkGroupMappingXCCGroup will be set dynamically at runtime. Note that this is consistent with what StreamKXCCMapping
     # does, but the value for the mapping will be set at runtime (=num_xcc).
     # Please ensure that (CU_count % WGMXCC == 0).
     "WorkGroupMappingXCCGroup": list(
@@ -855,7 +857,8 @@ validParameters = { # we need to make sure this matches develop
     # 0  : Fetch from workgroup dim -> elements dim. (default)
     # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
     "MbskPrefetchMethod": [-1, 0, 1],
-    "UseCustomMainLoopSchedule" : [0, 1]
+    "UseCustomMainLoopSchedule" : [0, 1],
+    "AdaptiveGemm": [0, 1]
 }
 
 newMIValidParameters = {

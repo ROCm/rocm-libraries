@@ -22,30 +22,28 @@ template <typename BlockGemmShapeType,
           StreamKReductionStrategy ReductionStrategyType = StreamKReductionStrategy::Atomic>
 struct StreamKTilePartitionerBase
 {
-    using BlockGemmShape = BlockGemmShapeType;
 
-    static constexpr index_t MPerBlock                          = BlockGemmShape::kM;
-    static constexpr index_t NPerBlock                          = BlockGemmShape::kN;
-    static constexpr index_t KPerBlock                          = BlockGemmShape::kK;
+    static constexpr index_t MPerBlock                          = BlockGemmShapeType::kM;
+    static constexpr index_t NPerBlock                          = BlockGemmShapeType::kN;
+    static constexpr index_t KPerBlock                          = BlockGemmShapeType::kK;
     static constexpr StreamKReductionStrategy ReductionStrategy = ReductionStrategyType;
 
     StreamKTilePartitionerBase(index_t m, index_t n, index_t k, index_t grid);
 
-    private:
     /**
      * @brief Calculates the total space needed for the partials buffer.
      *
      * @param acc_element_bytes  The number of bytes for the accumulator data type used in the GEMM.
      * @return index_t           The number of bytes needed for the partials buffer.
      */
-    CK_TILE_HOST index_t get_partials_buffer_size(index_t acc_element_bytes) const noexcept;
+    CK_TILE_HOST_DEVICE index_t get_partials_buffer_size(index_t acc_element_bytes) const noexcept;
 
     /**
      * @brief Calculates the total space needed for the flags buffer.
      *
      * @return index_t The number of bytes needed for the flags buffer.
      */
-    CK_TILE_HOST index_t get_flags_buffer_size() const noexcept;
+    CK_TILE_HOST_DEVICE index_t get_flags_buffer_size() const noexcept;
 
     public:
     /**
@@ -123,7 +121,7 @@ struct StreamKTilePartitionerBase
      * @param acc_element_bytes  The number of bytes for the accumulator data type used in the GEMM.
      * @return index_t           The number of bytes needed for the partials and flags buffers.
      */
-    CK_TILE_HOST index_t get_workspace_size(index_t acc_element_bytes) const noexcept;
+    CK_TILE_HOST_DEVICE index_t get_workspace_size(index_t acc_element_bytes) const noexcept;
 
     /**
      * @brief Returns the number of macro tiles in the C tensor.

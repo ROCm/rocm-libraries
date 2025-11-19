@@ -22,8 +22,8 @@ using namespace test_bn_common;
 namespace
 {
 
-template <typename DataType, typename IntermediateType, typename TestCaseType>
-class BatchnormBackward : public IntegrationGraphVerificationHarness<DataType, TestCaseType>
+template <typename DataType, typename IntermediateType>
+class BatchnormBackward : public IntegrationGraphVerificationHarness<DataType, BatchnormTestCase>
 {
 protected:
     std::unordered_map<graph::BatchnormBackwardAttributes::InputNames, int64_t> _inputTensorIds;
@@ -52,9 +52,9 @@ protected:
 
     void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
     {
-        const TestCaseType& testCase = this->GetParam();
+        const BatchnormTestCase& testCase = this->GetParam();
 
-        auto derivedDims = getDerivedShape(testCase.getDims());
+        auto derivedDims = getDerivedShape(testCase.dims);
 
         hipdnn_frontend::graph::Graph graphObj;
 
@@ -66,21 +66,15 @@ protected:
         auto dataType = getDataTypeEnumFromType<DataType>();
         auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
 
-        auto xAttr
-            = graph::makeTensorAttributes("x",
-                                          dataType,
-                                          testCase.getDims(),
-                                          generateStrides(testCase.getDims(), layout.strideOrder));
+        auto xAttr = graph::makeTensorAttributes(
+            "x", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         xAttr.set_uid(uid++);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
         _inputTensorIds.insert(
             {graph::BatchnormBackwardAttributes::InputNames::X, xTensorAttr->get_uid()});
 
-        auto dyAttr
-            = graph::makeTensorAttributes("dy",
-                                          dataType,
-                                          testCase.getDims(),
-                                          generateStrides(testCase.getDims(), layout.strideOrder));
+        auto dyAttr = graph::makeTensorAttributes(
+            "dy", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         dyAttr.set_uid(uid++);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
         _inputTensorIds.insert(
@@ -121,8 +115,8 @@ protected:
             dxTensorAttr->set_uid(uid++);
         }
         dxTensorAttr->set_data_type(dataType);
-        dxTensorAttr->set_dim(testCase.getDims());
-        dxTensorAttr->set_stride(generateStrides(testCase.getDims(), layout.strideOrder));
+        dxTensorAttr->set_dim(testCase.dims);
+        dxTensorAttr->set_stride(generateStrides(testCase.dims, layout.strideOrder));
         dxTensorAttr->set_output(true);
 
         auto& dscaleTensorAttr = outputTensorsAttr[1];
@@ -151,39 +145,29 @@ protected:
     }
 };
 
-using IntegrationGpuBatchnormBackwardNchwFp32
-    = BatchnormBackward<float, float, Batchnorm2dTestCase>;
+using IntegrationGpuBatchnormBackwardNchwFp32 = BatchnormBackward<float, float>;
 
-using IntegrationGpuBatchnormBackwardNchwBfp16
-    = BatchnormBackward<hip_bfloat16, float, Batchnorm2dTestCase>;
+using IntegrationGpuBatchnormBackwardNchwBfp16 = BatchnormBackward<hip_bfloat16, float>;
 
-using IntegrationGpuBatchnormBackwardNchwFp16 = BatchnormBackward<half, float, Batchnorm2dTestCase>;
+using IntegrationGpuBatchnormBackwardNchwFp16 = BatchnormBackward<half, float>;
 
-using IntegrationGpuBatchnormBackwardNhwcFp32
-    = BatchnormBackward<float, float, Batchnorm2dTestCase>;
+using IntegrationGpuBatchnormBackwardNhwcFp32 = BatchnormBackward<float, float>;
 
-using IntegrationGpuBatchnormBackwardNhwcBfp16
-    = BatchnormBackward<hip_bfloat16, float, Batchnorm2dTestCase>;
+using IntegrationGpuBatchnormBackwardNhwcBfp16 = BatchnormBackward<hip_bfloat16, float>;
 
-using IntegrationGpuBatchnormBackwardNhwcFp16 = BatchnormBackward<half, float, Batchnorm2dTestCase>;
+using IntegrationGpuBatchnormBackwardNhwcFp16 = BatchnormBackward<half, float>;
 
-using IntegrationGpuBatchnormBackwardNcdhwFp32
-    = BatchnormBackward<float, float, Batchnorm3dTestCase>;
+using IntegrationGpuBatchnormBackwardNcdhwFp32 = BatchnormBackward<float, float>;
 
-using IntegrationGpuBatchnormBackwardNcdhwBfp16
-    = BatchnormBackward<hip_bfloat16, float, Batchnorm3dTestCase>;
+using IntegrationGpuBatchnormBackwardNcdhwBfp16 = BatchnormBackward<hip_bfloat16, float>;
 
-using IntegrationGpuBatchnormBackwardNcdhwFp16
-    = BatchnormBackward<half, float, Batchnorm3dTestCase>;
+using IntegrationGpuBatchnormBackwardNcdhwFp16 = BatchnormBackward<half, float>;
 
-using IntegrationGpuBatchnormBackwardNdhwcFp32
-    = BatchnormBackward<float, float, Batchnorm3dTestCase>;
+using IntegrationGpuBatchnormBackwardNdhwcFp32 = BatchnormBackward<float, float>;
 
-using IntegrationGpuBatchnormBackwardNdhwcBfp16
-    = BatchnormBackward<hip_bfloat16, float, Batchnorm3dTestCase>;
+using IntegrationGpuBatchnormBackwardNdhwcBfp16 = BatchnormBackward<hip_bfloat16, float>;
 
-using IntegrationGpuBatchnormBackwardNdhwcFp16
-    = BatchnormBackward<half, float, Batchnorm3dTestCase>;
+using IntegrationGpuBatchnormBackwardNdhwcFp16 = BatchnormBackward<half, float>;
 
 } // namespace
 
@@ -239,9 +223,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormBackwardNhwcFp32,
                          testing::ValuesIn(getBnBwdFullTestCases()));
 
-// MIOpen segfaults for this case, re-enable when fix is released:
-// https://github.com/ROCm/rocm-libraries/pull/1197}
-TEST_P(IntegrationGpuBatchnormBackwardNhwcBfp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardNhwcBfp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NHWC);
 }
@@ -254,9 +236,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          IntegrationGpuBatchnormBackwardNhwcBfp16,
                          testing::ValuesIn(getBnBwdFullTestCases()));
 
-// MIOpen segfaults for this case, re-enable when fix is released:
-// https://github.com/ROCm/rocm-libraries/pull/1197
-TEST_P(IntegrationGpuBatchnormBackwardNhwcFp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardNhwcFp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NHWC);
 }
@@ -305,8 +285,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormBackwardNdhwcFp32,
                          testing::ValuesIn(getBnBwd3dTestCases()));
 
-// MIOpen may have issues with NDHWC layout for certain data types
-TEST_P(IntegrationGpuBatchnormBackwardNdhwcBfp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardNdhwcBfp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<hip_bfloat16>(), TensorLayout::NDHWC);
 }
@@ -315,8 +294,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormBackwardNdhwcBfp16,
                          testing::ValuesIn(getBnBwd3dTestCases()));
 
-// MIOpen may have issues with NDHWC layout for certain data types
-TEST_P(IntegrationGpuBatchnormBackwardNdhwcFp16, DISABLED_Correctness)
+TEST_P(IntegrationGpuBatchnormBackwardNdhwcFp16, Correctness)
 {
     runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NDHWC);
 }

@@ -41,7 +41,6 @@ protected:
 TEST_F(TestBatchnormFwdPlan, ExecutePlan)
 {
     auto tolerance = batchnorm::getToleranceInference<float>();
-    double epsilon = BATCHNORM_DEFAULT_EPSILON;
     std::vector<int64_t> dims = {6, 3, 32, 32};
     unsigned int seed = getGlobalTestSeed();
     auto graph = buildBatchnormFwdInferenceGraph(DataType::FLOAT,
@@ -64,8 +63,7 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
                                        *tensorMap.at(attributes.scale_tensor_uid()),
                                        *tensorMap.at(attributes.bias_tensor_uid()),
                                        *tensorMap.at(attributes.mean_tensor_uid()),
-                                       *tensorMap.at(attributes.inv_variance_tensor_uid()),
-                                       epsilon);
+                                       *tensorMap.at(attributes.inv_variance_tensor_uid()));
 
     std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
@@ -84,15 +82,14 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
     auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
 
-    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(*shallowXTensor,
-                                                                     *shallowScaleTensor,
-                                                                     *shallowBiasTensor,
-                                                                     *shallowMeanTensor,
-                                                                     *shallowInvVarTensor,
-                                                                     *shallowYTensor,
-                                                                     epsilon);
+    CpuFpReferenceBatchnorm::fwdInference(*shallowXTensor,
+                                          *shallowScaleTensor,
+                                          *shallowBiasTensor,
+                                          *shallowMeanTensor,
+                                          *shallowInvVarTensor,
+                                          *shallowYTensor);
 
-    BatchnormFwdPlan<float, float, float, float> fwdPlan(std::move(params));
+    BatchnormFwdPlan<float, float, float, float, float> fwdPlan(std::move(params));
     fwdPlan.execute(variantPack);
 
     CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
@@ -116,13 +113,15 @@ TEST(TestBatchnormFwdInferencePlanBuilder, PlanConstruction)
     BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
                                      DataType::FLOAT,
                                      DataType::FLOAT,
+                                     DataType::FLOAT,
                                      DataType::FLOAT>
         patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
     bool result
-        = dynamic_cast<BatchnormFwdPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<BatchnormFwdPlan<float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -141,6 +140,7 @@ TEST(TestBatchnormFwdInferencePlanBuilder, IsApplicable)
     BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
                                      DataType::FLOAT,
                                      DataType::FLOAT,
+                                     DataType::FLOAT,
                                      DataType::FLOAT>
         floatPlanBuilder;
 
@@ -149,6 +149,7 @@ TEST(TestBatchnormFwdInferencePlanBuilder, IsApplicable)
 
     BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
                                      DataType::HALF,
+                                     DataType::FLOAT,
                                      DataType::FLOAT,
                                      DataType::FLOAT>
         badTypesPlanBuilder;

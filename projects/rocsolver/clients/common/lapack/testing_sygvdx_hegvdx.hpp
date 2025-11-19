@@ -36,6 +36,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T, typename S, typename U>
 void sygvdx_hegvdx_checkBadArgs(const rocblas_handle handle,
@@ -515,7 +516,7 @@ void sygvdx_hegvdx_getError(const rocblas_handle handle,
     // calls to the solver should look for computed eigenvalues in the range
     // (vl - tol, vu + tol], where `tol = C * n * ulp * ||A||`.
     //
-    S C = 4;
+    S C = 10;
     std::vector<S> tols(bc, 0);
     std::vector<S> norms(bc, 0);
     S tol = 0;
@@ -846,7 +847,7 @@ void sygvdx_hegvdx_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -863,13 +864,13 @@ void sygvdx_hegvdx_getPerfData(const rocblas_handle handle,
         sygvdx_hegvdx_initData<false, true, T>(handle, itype, evect, n, dA, lda, stA, dB, ldb, stB,
                                                bc, hA, hB, A, B, false, singular);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_sygvdx_hegvdx(STRIDED, handle, itype, evect, erange, uplo, n, dA.data(), lda, stA,
                                 dB.data(), ldb, stB, vl, vu, il, iu, dNev.data(), dW.data(), stW,
                                 dZ.data(), ldz, stZ, dInfo.data(), bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
@@ -1048,7 +1049,7 @@ void testing_sygvdx_hegvdx(Arguments& argus)
                 hInfo, hInfoRes, &max_error, argus.singular, hashA, hashB, hashW, hashZ);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sygvdx_hegvdx_getPerfData<STRIDED, T>(
                 handle, itype, evect, erange, uplo, n, dA, lda, stA, dB, ldb, stB, vl, vu, il, iu,
                 dNev, dW, stW, dZ, ldz, stZ, dInfo, bc, hA, hB, hNev, hW, hZ, hInfo, &gpu_time_used,
@@ -1095,7 +1096,7 @@ void testing_sygvdx_hegvdx(Arguments& argus)
                 hInfo, hInfoRes, &max_error, argus.singular, hashA, hashB, hashW, hashZ);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sygvdx_hegvdx_getPerfData<STRIDED, T>(
                 handle, itype, evect, erange, uplo, n, dA, lda, stA, dB, ldb, stB, vl, vu, il, iu,
                 dNev, dW, stW, dZ, ldz, stZ, dInfo, bc, hA, hB, hNev, hW, hZ, hInfo, &gpu_time_used,

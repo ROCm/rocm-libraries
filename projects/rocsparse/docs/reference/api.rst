@@ -166,6 +166,8 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_bell_descr`              |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_create_sell_descr`              |
++-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_const_coo_descr`         |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_const_csr_descr`         |
@@ -173,6 +175,8 @@ Auxiliary functions
 |:cpp:func:`rocsparse_create_const_csc_descr`         |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_create_const_bell_descr`        |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_create_const_sell_descr`        |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_destroy_spmat_descr`            |
 +-----------------------------------------------------+
@@ -209,6 +213,8 @@ Auxiliary functions
 |:cpp:func:`rocsparse_ell_get`                        |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_bell_get`                       |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_sell_get`                       |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_coo_set_pointers`               |
 +-----------------------------------------------------+
@@ -537,6 +543,10 @@ documentation for details about the supported data types and compute types.
 |:cpp:func:`rocsparse_v2_spmv_buffer_size()`          |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_v2_spmv()`                      |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmv_set_extra()`               |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_spmv_clear_extra()`             |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_spsv()`                         |
 +-----------------------------------------------------+
