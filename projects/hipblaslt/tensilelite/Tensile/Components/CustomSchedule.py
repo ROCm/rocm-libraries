@@ -345,47 +345,6 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment=""),
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
-    elif isTN(kernel) and not useLDSTr and TLDS == 1:
-        #index and code pair
-        syncTable = [-1, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="for LRB1-0"),
-                      6, SWaitCnt(dscnt=6+5, vlcnt=-1, vscnt=-1, comment="for LRB1-1"),
-                      8, SBarrier(comment="for GRA start"),
-                     11, SWaitCnt(dscnt=5+8, vlcnt=-1, vscnt=-1, comment="for LRB1-2"),
-                     17, SWaitCnt(dscnt=4+11, vlcnt=-1, vscnt=-1, comment="for LRB1-3"),
-                     23, SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="for LRB1-4:6"),
-                     41, SWaitCnt(dscnt=14, vlcnt=-1, vscnt=-1, comment="for LRB1-7"),
-                     46, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="for LRA1"),
-                     48, SBarrier(comment="for LRA1 start"),
-                     78, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="for LRB1"),
-                     78, SBarrier(comment="for LRB1 start"),]
-        optSchedule = {
-                'SYNC'  : [syncTable[::2]],
-                'GRIncA': [[0,1,2,3,4,5,6,7,8]],
-                'GRIncB': [[9,10,11,12,13,14,15,16,17]],
-
-                'LRA0'  : [[0, 2, 3, 4, 5, 6]],
-                'LRB0'  : [[7, 9, 11, 13, 15, 17, 19, 21],
-                           [8, 10, 12, 14, 16, 18, 20, 22]],
-                'GRA'   : [[8,8, 10,10, 12,12, 14,14, 26,26, 31,31],
-                           [9,9, 11,11, 13,13, 15,15, 27,27, 32,32]],
-
-                'GRB'   : [[46,46, 50,50, 54,54, 58,58, 62,62, 66,66, 70,70, 76,76],
-                           [47,47, 51,51, 55,55, 59,59, 63,63, 67,67, 71,71, 77,77]],
-                'LRA1'  : [[48, 52, 56, 58, 60, 64],
-                           [49, 53, 57, 59, 61, 65]],
-                          # 0   1   2    3   4  5   6   7
-                'LRB1'  : [[78, 80, 82, 84, 86, 90, 92, 94],
-                           [79, 81, 83, 85, 87, 91, 93, 95]],
-
-                'LRSA'  : [[22]],
-                'LRSB'  : [[23]],
-
-                'LWSA'  : [[20]],
-                'LWSB'  : [[78]],
-                'LCC'   : [[95, 95]],
-            }
-        syncCode = syncTable[1::2]
-        nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     else:
         return False, None
 
