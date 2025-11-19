@@ -118,8 +118,9 @@ public:
 
         // The start of the first bin is not overwritten since the input is sorted
         // and the starts are based on the second item.
-        // The very first item is never used as `b` in the operator, so its value
-        // can be properly assigned while the discontinuity operation.
+        // The very first item is never used as `b` in the discontinuity operator,
+        // so storage_.start[input[0]] will not be written during discontinuity
+        // operation, thus assigning its value here will not cause data race.
         if(flat_tid == 0)
         {
             storage_.start[static_cast<unsigned int>(input[0])] = 0;
