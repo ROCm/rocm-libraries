@@ -48,11 +48,13 @@ struct GPU_TransformersAdamWTest_Updated_FP32 : TransformersAdamWTest<float, flo
 {
 };
 
-struct GPU_TransformersAdamWTest_Updated_FP16 : TransformersAdamWTest<half_float::half, half_float::half>
+struct GPU_TransformersAdamWTest_Updated_FP16
+    : TransformersAdamWTest<half_float::half, half_float::half>
 {
 };
 
-struct GPU_TransformersAmpAdamWTest_Updated_FP32 : TransformersAdamWTest<float, half_float::half, true>
+struct GPU_TransformersAmpAdamWTest_Updated_FP32
+    : TransformersAdamWTest<float, half_float::half, true>
 {
 };
 
@@ -62,11 +64,13 @@ struct GPU_TransformersAdamWTest_Updated_Singlethread_FP32 : TransformersAdamWTe
 {
 };
 
-struct GPU_TransformersAdamWTest_Updated_Singlethread_FP16 : TransformersAdamWTest<half_float::half, half_float::half>
+struct GPU_TransformersAdamWTest_Updated_Singlethread_FP16
+    : TransformersAdamWTest<half_float::half, half_float::half>
 {
 };
 
-struct GPU_TransformersAmpAdamWTest_Updated_Singlethread_FP32 : TransformersAdamWTest<float, half_float::half, true>
+struct GPU_TransformersAmpAdamWTest_Updated_Singlethread_FP32
+    : TransformersAdamWTest<float, half_float::half, true>
 {
 };
 
@@ -117,19 +121,22 @@ TEST_P(GPU_TransformersAmpAdamWTest_Updated_FP32, TransformersAmpAdamWUpdatedTes
 
 /////////////////////////////////////////////////////////
 
-TEST_P(GPU_TransformersAdamWTest_Updated_Singlethread_FP32, TransformersAdamWUpdatedSinglethreadFloatTest)
+TEST_P(GPU_TransformersAdamWTest_Updated_Singlethread_FP32,
+       TransformersAdamWUpdatedSinglethreadFloatTest)
 {
     RunUpdatedSinglethreadTest();
     Verify();
 };
 
-TEST_P(GPU_TransformersAdamWTest_Updated_Singlethread_FP16, TransformersAdamWUpdatedSinglethreadFloat16Test)
+TEST_P(GPU_TransformersAdamWTest_Updated_Singlethread_FP16,
+       TransformersAdamWUpdatedSinglethreadFloat16Test)
 {
     RunUpdatedSinglethreadTest();
     Verify();
 };
 
-TEST_P(GPU_TransformersAmpAdamWTest_Updated_Singlethread_FP32, TransformersAmpAdamWUpdatedSinglethreadTest)
+TEST_P(GPU_TransformersAmpAdamWTest_Updated_Singlethread_FP32,
+       TransformersAmpAdamWUpdatedSinglethreadTest)
 {
     RunUpdatedSinglethreadTest();
     Verify();

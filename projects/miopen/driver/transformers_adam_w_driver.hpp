@@ -243,8 +243,8 @@ std::vector<int> TransformersAdamWDriver<Tgpu, Tref, Tgrad>::GetInputTensorLengt
 template <typename Tgpu, typename Tref, typename Tgrad>
 int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::AllocateBuffersAndCopy()
 {
-    const size_t param_sz   = GetTensorSize(paramDesc);
-    const uint32_t ctx      = 0;
+    const size_t param_sz = GetTensorSize(paramDesc);
+    const uint32_t ctx    = 0;
 
     param_dev      = std::unique_ptr<GPUMem>(new GPUMem(ctx, param_sz, sizeof(Tgpu)));
     grad_dev       = std::unique_ptr<GPUMem>(new GPUMem(ctx, param_sz, sizeof(Tgrad)));
@@ -273,14 +273,14 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::AllocateBuffersAndCopy()
 
     for(size_t i = 0; i < param_sz; ++i)
     {
-        param[i]            = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
-        grad[i]             = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0.0), static_cast<Tgrad>(0.1));
-        exp_avg[i]          = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0), static_cast<Tgrad>(0.1));
-        exp_avg_sq[i]       = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0), static_cast<Tgrad>(0.1));
-        param_host[i]       = param[i];
-        param_host_mt[i]    = param[i];
-        exp_avg_host[i]     = exp_avg[i];
-        exp_avg_sq_host[i]  = exp_avg_sq[i];
+        param[i]      = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
+        grad[i]       = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0.0), static_cast<Tgrad>(0.1));
+        exp_avg[i]    = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0), static_cast<Tgrad>(0.1));
+        exp_avg_sq[i] = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0), static_cast<Tgrad>(0.1));
+        param_host[i] = param[i];
+        param_host_mt[i]   = param[i];
+        exp_avg_host[i]    = exp_avg[i];
+        exp_avg_sq_host[i] = exp_avg_sq[i];
 
         if(is_amp)
         {
@@ -413,14 +413,15 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPU()
 
     const size_t numel = miopen::deref(paramDesc).GetElementSize();
 
-    const float bias_correction1    = 1.0 - pow(beta1, step);
-    const float bias_correction2    = 1.0 - pow(beta2, step);
-    const float corrected_step_size = correct_bias ? (lr * sqrt(bias_correction2) / bias_correction1) : 0.0;
-    const float step_size           = correct_bias ? corrected_step_size : lr;
-    const float k                   = 1.0 - (lr * weight_decay);
-    const float inv_grad_scale      = 1.0 / static_cast<float>(grad_scale);
-    const float one_minus_beta1     = 1.0 - beta1;
-    const float one_minus_beta2     = 1.0 - beta2;
+    const float bias_correction1 = 1.0 - pow(beta1, step);
+    const float bias_correction2 = 1.0 - pow(beta2, step);
+    const float corrected_step_size =
+        correct_bias ? (lr * sqrt(bias_correction2) / bias_correction1) : 0.0;
+    const float step_size       = correct_bias ? corrected_step_size : lr;
+    const float k               = 1.0 - (lr * weight_decay);
+    const float inv_grad_scale  = 1.0 / static_cast<float>(grad_scale);
+    const float one_minus_beta1 = 1.0 - beta1;
+    const float one_minus_beta2 = 1.0 - beta2;
 
     for(size_t i = 0; i < numel; ++i)
     {
@@ -464,14 +465,15 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPU_MT()
 
     const size_t numel = miopen::deref(paramDesc).GetElementSize();
 
-    const float bias_correction1    = 1.0 - pow(beta1, step);
-    const float bias_correction2    = 1.0 - pow(beta2, step);
-    const float corrected_step_size = correct_bias ? (lr * sqrt(bias_correction2) / bias_correction1) : 0.0;
-    const float step_size           = correct_bias ? corrected_step_size : lr;
-    const float k                   = 1.0 - (lr * weight_decay);
-    const float inv_grad_scale      = 1.0 / static_cast<float>(grad_scale);
-    const float one_minus_beta1     = 1.0 - beta1;
-    const float one_minus_beta2     = 1.0 - beta2;
+    const float bias_correction1 = 1.0 - pow(beta1, step);
+    const float bias_correction2 = 1.0 - pow(beta2, step);
+    const float corrected_step_size =
+        correct_bias ? (lr * sqrt(bias_correction2) / bias_correction1) : 0.0;
+    const float step_size       = correct_bias ? corrected_step_size : lr;
+    const float k               = 1.0 - (lr * weight_decay);
+    const float inv_grad_scale  = 1.0 / static_cast<float>(grad_scale);
+    const float one_minus_beta1 = 1.0 - beta1;
+    const float one_minus_beta2 = 1.0 - beta2;
 
     par_ford(numel)([&](size_t i) {
         Tref exp_avg_val    = exp_avgs[i];
@@ -533,25 +535,29 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::VerifyForward()
 {
     RunForwardCPU();
     RunForwardCPU_MT();
-    const Tref tolerance    = GetTolerance();
-    const auto error        = miopen::rms_range(param_host, param);
-    const auto error_mt     = miopen::rms_range(param_host_mt, param);
+    const Tref tolerance = GetTolerance();
+    const auto error     = miopen::rms_range(param_host, param);
+    const auto error_mt  = miopen::rms_range(param_host_mt, param);
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Forward Transformers Adam FAILED on single-threaded CPU reference: " << error << std::endl;
+        std::cout << "Forward Transformers Adam FAILED on single-threaded CPU reference: " << error
+                  << std::endl;
         return EC_VerifyFwd;
     }
 
-    std::cout << "Forward Transformers Adam Verifies OK on single-threaded CPU reference" << std::endl;
+    std::cout << "Forward Transformers Adam Verifies OK on single-threaded CPU reference"
+              << std::endl;
 
     if(!std::isfinite(error_mt) || error_mt > tolerance)
     {
-        std::cout << "Forward Transformers Adam FAILED on multi-threaded CPU reference: " << error_mt << std::endl;
+        std::cout << "Forward Transformers Adam FAILED on multi-threaded CPU reference: "
+                  << error_mt << std::endl;
         return EC_VerifyFwd;
     }
 
-    std::cout << "Forward Transformers Adam Verifies OK on multi-threaded CPU reference" << std::endl;
+    std::cout << "Forward Transformers Adam Verifies OK on multi-threaded CPU reference"
+              << std::endl;
 
     return miopenStatusSuccess;
 }
