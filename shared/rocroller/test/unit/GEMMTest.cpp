@@ -896,7 +896,7 @@ namespace GEMMDriverTest
     {
     };
 
-    // Params are: swizzle M/N tile size, mi K tile size, unroll factor
+    // Params are: mi K tile size, unroll factor
     class GEMMMXFP4TNSwizzleScaledUnrollTestGPU
         : public BaseGEMMContextFixture<std::tuple<int, int>>
     {
