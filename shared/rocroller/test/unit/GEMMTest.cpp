@@ -113,7 +113,7 @@ namespace GEMMDriverTest
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
             }
 
-            if((isF8<TA> || isF8<TB>) && (gemm.waveK >= 64))
+            if((isF8<TA> || isF8<TB>)&&(gemm.waveK >= 64))
             {
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
             }
@@ -449,7 +449,7 @@ namespace GEMMDriverTest
                 auto tagCvt
                     = srCvtSeed.has_value()
                           ? cvtOp.addXOp(rocRoller::Operations::E_StochasticRoundingCvt(
-                                tagStoreD, tagLoadSeed, dataTypeD))
+                              tagStoreD, tagLoadSeed, dataTypeD))
                           : cvtOp.addXOp(rocRoller::Operations::E_Cvt(tagStoreD, dataTypeD));
                 tagStoreD = command->addOperation(std::move(cvtOp));
                 command->addOperation(rocRoller::Operations::T_Store_Tiled(tagCvt, tagTensorD));
