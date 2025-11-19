@@ -71,31 +71,19 @@ TEST_CASE("Origami: best_macro_tile_size", "[origami]") {
       auto hardware = make_hardware(gpu_arch);
       auto problem  = make_problem(1024, 1024, 4096);
 
+      // List 1: config A first, then config B
       std::vector<origami::config_t> configs;
-      std::vector<
-          std::tuple<size_t, size_t, size_t, size_t, size_t, size_t, size_t, int, size_t, size_t>>
-          mt_list = {{256, 256, 32, 32, 32, 8, 1, 6, 0, 0},
-                     {128, 128, 64, 32, 32, 8, 1, 6, 0, 0},
-                     {64, 64, 64, 32, 32, 8, 1, 6, 0, 0}};
 
-      for (const auto& mt_tuple : mt_list) {
-        origami::config_t config;
-        config.mt.m              = std::get<0>(mt_tuple);
-        config.mt.n              = std::get<1>(mt_tuple);
-        config.mt.k              = std::get<2>(mt_tuple);
-        config.mi.m              = std::get<3>(mt_tuple);
-        config.mi.n              = std::get<4>(mt_tuple);
-        config.mi.k              = std::get<5>(mt_tuple);
-        config.occupancy         = std::get<6>(mt_tuple);
-        config.workgroup_mapping = std::get<7>(mt_tuple);
-        config.cache_hints_a     = std::get<8>(mt_tuple);
-        config.cache_hints_b     = std::get<9>(mt_tuple);
-        configs.push_back(config);
-      }
+      // config A[0]
+      configs.push_back(make_config(256, 256, 32, 32, 32, 8, 1, 6, 0, 0));
+      // config A[1]
+      configs.push_back(make_config(128, 128, 64, 32, 32, 8, 1, 6, 0, 0));
+      // config A[2]
+      configs.push_back(make_config(64, 64, 64, 32, 32, 8, 1, 6, 0, 0));
 
-      auto results = origami::rank_configs(problem, hardware, configs);
+      auto results = origami::select_config(problem, hardware, configs);
 
-      REQUIRE(results.size() == mt_list.size());
+      REQUIRE(results.size() == configs.size());
       // Results should be ranked, so latencies should be in ascending order (best first)
       for (size_t i = 0; i < results.size() - 1; i++) {
         REQUIRE(results[i].latency < results[i + 1].latency);
@@ -112,12 +100,12 @@ TEST_CASE("Origami: select_workgroup_mapping", "[origami]") {
 
       auto config_large = make_config(256, 256, 32, 32, 32, 8, 1);
       auto skGrid_large = (4096 + 256 - 1) / 256 * (4096 + 256 - 1) / 256;
-      auto best_wgm_large_tile =
+      auto [best_wgmxcc_large_tile, best_wgm_large_tile] =
           origami::select_workgroup_mapping(problem, hardware, config_large, skGrid_large);
 
       auto config_small = make_config(128, 128, 64, 32, 32, 8, 1);
       auto skGrid_small = (4096 + 128 - 1) / 128 * (4096 + 128 - 1) / 128;
-      auto best_wgm_small_tile =
+      auto [best_wgmxcc_small_tile, best_wgm_small_tile] =
           origami::select_workgroup_mapping(problem, hardware, config_small, skGrid_small);
 
       // Different problem size for nonsquare test
@@ -126,11 +114,12 @@ TEST_CASE("Origami: select_workgroup_mapping", "[origami]") {
       problem_nonsquare.size.n             = 5120;
       auto skGrid_nonsquare                = (2048 + 128 - 1) / 128 * (5120 + 128 - 1) / 128;
 
-      auto best_wgm_nonsquare = origami::select_workgroup_mapping(
+      auto [best_wgmxcc_nonsquare_tile, best_wgm_nonsquare] = origami::select_workgroup_mapping(
           problem_nonsquare, hardware, config_large, skGrid_nonsquare);
 
-      REQUIRE(std::get<1>(best_wgm_small_tile) > std::get<1>(best_wgm_large_tile));
-      REQUIRE(std::get<1>(best_wgm_large_tile) != std::get<1>(best_wgm_nonsquare));
+      REQUIRE(best_wgmxcc_large_tile == best_wgmxcc_small_tile);
+      REQUIRE(best_wgm_large_tile > best_wgm_small_tile);
+      REQUIRE(best_wgm_large_tile != best_wgm_nonsquare);
     }
   }
 }
@@ -151,15 +140,15 @@ TEST_CASE("GEMM: negative_occupancy", "[gemm]") {
           .b_mx_block_size = 0,
       };
       // List 1: config A first, then config B
-      std::vector<origami::config_t> origami_config;
+      std::vector<origami::config_t> config;
 
       // config[0]
-      origami_config.push_back(make_config(256, 256, 32, 16, 16, 32, -1, 6, 0, 0));
+      config.push_back(make_config(256, 256, 32, 16, 16, 32, -1, 6, 0, 0));
       // config[1]
-      origami_config.push_back(make_config(32, 256, 16, 32, 32, 8, 2, 6, 0, 0));
+      config.push_back(make_config(32, 256, 16, 32, 32, 8, 2, 6, 0, 0));
 
       // Call select_config
-      auto results = origami::select_config(problem, hardware, origami_config);
+      auto results = origami::select_config(problem, hardware, config);
 
       auto best_tile = results[0];
       size_t MT_M    = best_tile.config.mt.m;
@@ -185,23 +174,23 @@ TEST_CASE("GEMM: deterministic_tie_breaking", "[gemm]") {
       // Both have AI = 1048576 / 26624 = 39.38
 
       // List 1: config A first, then config B
-      std::vector<origami::config_t> origami_config_A;
-      std::vector<origami::config_t> origami_config_B;
+      std::vector<origami::config_t> config_A;
+      std::vector<origami::config_t> config_B;
 
       // config A[0]
-      origami_config_A.push_back(make_config(256, 64, 32, 32, 32, 8, 1, 6, 0, 0));
+      config_A.push_back(make_config(256, 64, 32, 32, 32, 8, 1, 6, 0, 0));
       // config A[1]
-      origami_config_A.push_back(make_config(64, 256, 32, 32, 32, 8, 1, 6, 0, 0));
+      config_A.push_back(make_config(64, 256, 32, 32, 32, 8, 1, 6, 0, 0));
 
       // config B[0] (reversed order)
-      origami_config_B.push_back(make_config(64, 256, 32, 32, 32, 8, 1, 6, 0, 0));
+      config_B.push_back(make_config(64, 256, 32, 32, 32, 8, 1, 6, 0, 0));
       // config B[1] (reversed order)
-      origami_config_B.push_back(make_config(256, 64, 32, 32, 32, 8, 1, 6, 0, 0));
+      config_B.push_back(make_config(256, 64, 32, 32, 32, 8, 1, 6, 0, 0));
 
       // Call select_config_mnk with both orderings
-      auto results_A_first = origami::select_config(problem, hardware, origami_config_A);
+      auto results_A_first = origami::select_config(problem, hardware, config_A);
 
-      auto results_B_first = origami::select_config(problem, hardware, origami_config_B);
+      auto results_B_first = origami::select_config(problem, hardware, config_B);
 
       // Extract the best tile from each result
       auto best_tile_A_first = results_A_first[0];

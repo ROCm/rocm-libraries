@@ -77,7 +77,7 @@ TEST_CASE("GEMM: compute_mt_compute_latency", "[gemm]") {
       auto config   = make_config(128, 128, 32, 32, 32, 8, 1);
 
       auto latency = origami::compute_mt_compute_latency(problem, hardware, config);
-      REQUIRE(latency > 2048);
+      REQUIRE(latency == 2048);
     }
 
     DYNAMIC_SECTION("gfx" << gpu_arch << " - larger tile") {
@@ -149,15 +149,16 @@ TEST_CASE("GEMM: compute_total_latency", "[gemm]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - smaller tiles have lower total latency") {
       auto hardware = make_hardware(gpu_arch);
-      auto problem =
+      auto problem_small =
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
-      auto config_small = make_config(128, 128, 64, 32, 32, 8, 1);
-      auto config_large = make_config(256, 256, 128, 32, 32, 8, 1);
+      auto problem_large =
+          make_problem(8192, 8192, 2048, origami::transpose_t::T, origami::transpose_t::N, 2);
+      auto config = make_config(128, 128, 64, 32, 32, 8, 1);
 
       auto latency_small =
-          origami::compute_total_latency(problem, hardware, config_small, hardware.N_CU);
+          origami::compute_total_latency(problem_small, hardware, config, hardware.N_CU);
       auto latency_large =
-          origami::compute_total_latency(problem, hardware, config_large, hardware.N_CU);
+          origami::compute_total_latency(problem_large, hardware, config, hardware.N_CU);
 
       REQUIRE(latency_small < latency_large);
     }
