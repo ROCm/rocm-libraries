@@ -111,7 +111,7 @@ namespace AliasDataFlowTagsTest
         {
             auto transformAliases = AliasDataFlowTagsDetail::findAliasCandidates(graph);
             CAPTURE(transformAliases);
-            CHECK(transformAliases.size() == 40);
+            CHECK(transformAliases.size() == 59);
         }
 
         SECTION("Try different orders of inputs")
@@ -158,7 +158,7 @@ namespace AliasDataFlowTagsTest
                 auto aliasEdges = graph.coordinates.getEdges<CT::DataFlowEdge>()
                                       .filter(isAliasEdge)
                                       .to<std::vector>();
-                CHECK(aliasEdges.size() == 40);
+                CHECK(aliasEdges.size() == 59);
             }
 
             {
@@ -178,7 +178,7 @@ namespace AliasDataFlowTagsTest
                                           .filter(isAliasEdge)
                                           .filter(isAliasForATiles)
                                           .to<std::vector>();
-                CHECK(aliasEdgesForA.size() == 32);
+                CHECK(aliasEdgesForA.size() == 48);
             }
 
             {
@@ -198,7 +198,7 @@ namespace AliasDataFlowTagsTest
                                           .filter(isAliasEdge)
                                           .filter(isAliasForBTiles)
                                           .to<std::vector>();
-                CHECK(aliasEdgesForB.size() == 8);
+                CHECK(aliasEdgesForB.size() == 11);
             }
         }
     }
