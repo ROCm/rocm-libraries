@@ -70,10 +70,10 @@ TEST(TestJson, GraphToJsonAndBack)
         toJsonAndBackTestSuite(graph, "(valid batchnorm backward graph)");
     }
     {
-        auto graphBuilder = hipdnn_sdk::test_utilities::createBatchnormGraph();
+        auto graphBuilder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
         auto graph = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
 
-        toJsonAndBackTestSuite(graph, "(valid batchnorm backward graph)");
+        toJsonAndBackTestSuite(graph, "(valid batchnorm forward training graph)");
     }
     {
         auto graphBuilder = hipdnn_sdk::test_utilities::createPointwiseGraph();

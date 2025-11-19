@@ -5,11 +5,17 @@
 
 #ifdef _WIN32
 
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
+
 #include <algorithm>
+#include <array>
 #include <cwctype>
 #include <filesystem>
 #include <windows.h>
+
+#include "StringUtil.hpp"
 
 namespace hipdnn_sdk
 {
@@ -51,27 +57,23 @@ inline void unsetEnv(const char* var)
     SetEnvironmentVariableA(var, nullptr);
 }
 
-}
-
 inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::path& b)
 {
-    std::wstring A = a.native(), B = b.native();
-    std::transform(A.begin(), A.end(), A.begin(), ::towlower);
-    std::transform(B.begin(), B.end(), B.begin(), ::towlower);
-    return A == B;
+    return toLower(a.string()) == toLower(b.string());
 }
 
 inline std::filesystem::path getCurrentExecutableDirectory()
 {
-    wchar_t result[MAX_PATH];
-    DWORD length = GetModuleFileNameW(nullptr, result, MAX_PATH);
+    std::array<wchar_t, MAX_PATH> result{};
+    DWORD length = GetModuleFileNameW(nullptr, result.data(), MAX_PATH);
     if(length == 0 || length == MAX_PATH)
     {
         throw std::runtime_error("Failed to get executable path");
     }
-    return std::filesystem::path(result).parent_path();
+    return std::filesystem::path(result.data()).parent_path();
 }
 
+}
 }
 
 #else
