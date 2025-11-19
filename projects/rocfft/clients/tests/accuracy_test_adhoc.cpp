@@ -483,7 +483,7 @@ const auto adhoc_nondefault_layout_tokens = {
     // clang-format on
 };
 
-INSTANTIATE_TEST_SUITE_P(DISABLED_adhoc_nondefault_layout,
+INSTANTIATE_TEST_SUITE_P(adhoc_nondefault_layout,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_token(test_prob,
                                                                    adhoc_nondefault_layout_tokens)),
