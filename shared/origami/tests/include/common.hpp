@@ -44,7 +44,9 @@ inline origami::config_t make_config(size_t mt_m,
                                      size_t mi_n   = 16,
                                      size_t mi_k   = 16,
                                      int wgm       = 1,
-                                     int occupancy = 1) {
+                                     int occupancy = 1,
+                                     int non_temporal_a = 0,
+                                     int non_temporal_b = 0) {
   origami::config_t config;
   config.mt.m              = mt_m;
   config.mt.n              = mt_n;
@@ -54,6 +56,8 @@ inline origami::config_t make_config(size_t mt_m,
   config.mi.k              = mi_k;
   config.occupancy         = occupancy;
   config.workgroup_mapping = wgm;
+  config.non_temporal_a    = non_temporal_a;
+  config.non_temporal_b    = non_temporal_b;
   return config;
 }
 

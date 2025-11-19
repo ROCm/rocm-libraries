@@ -277,19 +277,6 @@ namespace TensileLite
             StaticPerformanceModel staticModel;
         };
 
-        struct TAMetricProblemScore
-        {
-            Granularities granularites;
-
-            int CUs = 0;
-
-            double summationPerformance = 0.0;
-
-            double M;
-            double N;
-            double K;
-        };
-
         bool checkInternalArgumentsSupport(ContractionProblem const& problem,
                                            std::ostream&             stream,
                                            bool                      debug = false) const;
@@ -327,19 +314,6 @@ namespace TensileLite
                                                       double NumCUs,
                                                       double totalGranularity,
                                                       int    globalSplitU) const;
-        
-        TAMetricProblemScore computeProblemScore(
-            Hardware const& hardware, double M, double N, double K, double NumBatches) const;
-
-        double computeTileAwareMetric(TAMetricProblemScore pp,
-                                      TAMetricProblemScore ppReference) const;
-
-        double computeTAMScore(Problem const&  problem,
-                               Hardware const& hardware,
-                               double          model_M,
-                               double          model_N,
-                               double          model_K,
-                               double          model_NumBatches) const;
 
         /**
          * Calculate the projected performance based on granularity loss.

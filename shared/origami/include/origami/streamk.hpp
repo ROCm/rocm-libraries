@@ -20,11 +20,7 @@ namespace streamk {
  * @param batch Number of batches.
  * @return size_t Total number of output tiles.
  */
-std::size_t compute_number_of_output_tiles(std::size_t mt_m,
-                                           std::size_t mt_n,
-                                           std::size_t m,
-                                           std::size_t n,
-                                           std::size_t batch);
+size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, size_t m, size_t n, size_t batch);
 
 /**
  * @brief Select the best reduction strategy for StreamK.

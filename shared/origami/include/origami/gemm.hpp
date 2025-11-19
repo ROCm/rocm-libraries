@@ -12,13 +12,7 @@ namespace origami {
 /* Compute-related functions                                                                */
 /* ---------------------------------------------------------------------------------------- */
 // Compute the number of matrix instructions required to compute a single MT_MXMT_NXMT_K tile.
-size_t compute_number_matrix_instructions(const hardware_t& hardware,
-                                          size_t MT_M,
-                                          size_t MT_N,
-                                          size_t MT_K,
-                                          size_t MI_M,
-                                          size_t MI_N,
-                                          size_t MI_K);
+size_t compute_number_matrix_instructions(dim3_t mt, dim3_t mi);
 
 /**
  * @brief Compute TF32 conversion overhead.

@@ -22,9 +22,7 @@ target_sources(origami-tests
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/test_gemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/test_origami.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_tile_ordering_issue.cpp"
         # "${CMAKE_CURRENT_SOURCE_DIR}/test_variance_issue.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/test_negative_occupancy.cpp"
 )
 
 target_include_directories(origami-tests

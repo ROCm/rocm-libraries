@@ -99,7 +99,7 @@ std::tuple<size_t, size_t, size_t, size_t> compute_cu_occupancy(const problem_t&
                                                                 size_t max_cus,
                                                                 size_t split = 0) {
   // Number of output MTs
-  std::size_t num_mts = streamk::compute_number_of_output_tiles(
+  size_t num_mts = streamk::compute_number_of_output_tiles(
       config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
 
   size_t num_wgs, num_active_cus, numWaves, splitFactor;
@@ -854,9 +854,9 @@ double compute_tile_latency(const problem_t& problem,
   // num_iter      = std::ceil(num_iter / splitting_factor);
   // num_iter      = std::max(num_iter, 1L);
   const long k_per_split = static_cast<long>(math::safe_ceil_div(K, splitting_factor));
-  long num_iter          = std::max(
-      static_cast<long>(math::safe_ceil_div(static_cast<std::size_t>(k_per_split), MT_K) - 1),
-      static_cast<long>(1));
+  long num_iter =
+      std::max(static_cast<long>(math::safe_ceil_div(static_cast<size_t>(k_per_split), MT_K) - 1),
+               static_cast<long>(1));
   // Zero Padding in the K dimension on last iteration
   if (K % MT_K != 0) {
     const double problem_k_quant = static_cast<double>(K % MT_K) / static_cast<double>(K);
@@ -913,8 +913,8 @@ double compute_tile_latency(const problem_t& problem,
 double compute_wave_latency(const problem_t& problem,
                             const hardware_t& hardware,
                             const config_t& config,
-                            std::size_t num_active_cus,
-                            std::size_t splitting_factor) {
+                            size_t num_active_cus,
+                            size_t splitting_factor) {
   // Assume latency of a wave is latency of a single k-complete output tile.
   double L_wave = compute_tile_latency(problem, hardware, config, num_active_cus, splitting_factor);
 
@@ -928,20 +928,20 @@ double compute_total_latency(const problem_t& problem,
                              const config_t& config,
                              size_t max_cus) {
   // Extract parameters from structured types
-  std::size_t M     = problem.size.m;
-  std::size_t N     = problem.size.n;
-  std::size_t K     = problem.size.k;
-  std::size_t batch = problem.batch;
+  size_t M     = problem.size.m;
+  size_t N     = problem.size.n;
+  size_t K     = problem.size.k;
+  size_t batch = problem.batch;
 
   bool a_trans = problem.a_transpose == transpose_t::T;
   bool b_trans = problem.b_transpose == transpose_t::T;
 
-  std::size_t MT_M = config.mt.m;
-  std::size_t MT_N = config.mt.n;
-  std::size_t MT_K = config.mt.k;
-  std::size_t MI_M = config.mi.m;
-  std::size_t MI_N = config.mi.n;
-  std::size_t MI_K = config.mi.k;
+  size_t MT_M = config.mt.m;
+  size_t MT_N = config.mt.n;
+  size_t MT_K = config.mt.k;
+  size_t MI_M = config.mi.m;
+  size_t MI_N = config.mi.n;
+  size_t MI_K = config.mi.k;
 
   const int a_bits  = data_type_to_bits(problem.a_dtype);
   const int b_bits  = data_type_to_bits(problem.b_dtype);
@@ -1099,26 +1099,26 @@ std::unordered_map<std::string, std::string> extract_analytical_metrics(const ha
   hardware.set_metrics_collection_mode(true);
 
   // Extract basic parameters for forced logging
-  std::size_t M                = problem.size.m;
-  std::size_t N                = problem.size.n;
-  std::size_t K                = problem.size.k;
-  std::size_t batch            = problem.batch;
-  bool a_trans                 = problem.a_transpose == transpose_t::T;
-  bool b_trans                 = problem.b_transpose == transpose_t::T;
-  std::size_t element_size_A   = data_type_to_bits(problem.a_dtype);
-  std::size_t element_size_B   = data_type_to_bits(problem.b_dtype);
-  std::size_t element_size_out = data_type_to_bits(problem.d_dtype);
-  data_type_t mi_datatype      = problem.mi_dtype;
-  std::size_t a_mx_block_size  = problem.a_mx_block_size;
-  std::size_t b_mx_block_size  = problem.b_mx_block_size;
+  size_t M                = problem.size.m;
+  size_t N                = problem.size.n;
+  size_t K                = problem.size.k;
+  size_t batch            = problem.batch;
+  bool a_trans            = problem.a_transpose == transpose_t::T;
+  bool b_trans            = problem.b_transpose == transpose_t::T;
+  size_t element_size_A   = data_type_to_bits(problem.a_dtype);
+  size_t element_size_B   = data_type_to_bits(problem.b_dtype);
+  size_t element_size_out = data_type_to_bits(problem.d_dtype);
+  data_type_t mi_datatype = problem.mi_dtype;
+  size_t a_mx_block_size  = problem.a_mx_block_size;
+  size_t b_mx_block_size  = problem.b_mx_block_size;
 
-  std::size_t MT_M = config.mt.m;
-  std::size_t MT_N = config.mt.n;
-  std::size_t MT_K = config.mt.k;
-  std::size_t MI_M = config.mi.m;
-  std::size_t MI_N = config.mi.n;
-  std::size_t MI_K = config.mi.k;
-  int WGM          = config.workgroup_mapping;
+  size_t MT_M = config.mt.m;
+  size_t MT_N = config.mt.n;
+  size_t MT_K = config.mt.k;
+  size_t MI_M = config.mi.m;
+  size_t MI_N = config.mi.n;
+  size_t MI_K = config.mi.k;
+  int WGM     = config.workgroup_mapping;
 
   // Log basic problem and configuration parameters
   hardware.log_debug(

@@ -211,7 +211,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
         config.workgroup_mapping = wgm;
     }
 
-    auto prediction_result = origami::rank_configs(
+    auto prediction_result = origami::select_config(
         origami_problem,
         analaytical_hardware,
         origami_config_list

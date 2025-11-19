@@ -16,9 +16,65 @@
 
 namespace origami {
 
-prediction_result_t select_config(const problem_t& problem,
-                                  const hardware_t& hardware,
-                                  const std::vector<config_t>& configs) {
+static double read_heuristics_variance_env_var() {
+  constexpr double default_variance = 0.01;  // 1%
+
+  if (const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE")) {
+    try {
+      double val = std::stod(env);
+      if (std::isfinite(val) && val > 0.0) { return val; }
+    } catch (...) {
+      // fall through to default
+    }
+  }
+  return default_variance;
+}
+
+//
+// 1) Define a helper function to compute the arithmetic intensity of a tile.
+//    Here we assume:
+//    - Flops for tile (MT_M, MT_N, MT_K) is: 2 * MT_M * MT_N * MT_K
+//    - Memory traffic approximated as: MT_M*MT_K + MT_K*MT_N + MT_M*MT_N
+//    - Arithmetic intensity = flops / memory_traffic
+auto compute_arithmetic_intensity = [](const config_t& config) -> double {
+  // The tuple is: (latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K)
+  auto MT_M = config.mt.m;
+  auto MT_N = config.mt.n;
+  auto MT_K = config.mt.k;
+
+  double flops          = static_cast<double>(2ull * MT_M * MT_N * MT_K);
+  double memory_traffic = static_cast<double>(MT_M * MT_K + MT_N * MT_K + MT_M * MT_N);
+
+  // Avoid division by zero.
+  if (memory_traffic == 0.0) return 0.0;
+
+  return flops / memory_traffic;
+};
+
+//
+// Tiebreaker function.
+//
+void pick_best_config_by_arithmetic_intensity(std::vector<prediction_result_t>& top_results,
+                                              size_t num_to_sort) {
+  if (top_results.empty()) {
+    throw std::runtime_error("pick_best_tile_by_arithmetic_intensity received empty list.");
+  }
+
+  // 2) Sort the top_results in descending order of arithmetic intensity
+  //    (highest arithmetic intensity first).
+  std::stable_sort(top_results.begin(),
+                   top_results.begin() + num_to_sort,
+                   [&](const prediction_result_t& a, const prediction_result_t& b) {
+                     double ai_a = compute_arithmetic_intensity(a.config);
+                     double ai_b = compute_arithmetic_intensity(b.config);
+                     return ai_a > ai_b;  // descending
+                   });
+  // 3) Return the tile with the highest arithmetic intensity
+}
+
+std::vector<prediction_result_t> select_config(const problem_t& problem,
+                                               const hardware_t& hardware,
+                                               const std::vector<config_t>& configs) {
   // Use rank_configs to get configurations with latencies ranked by performance
   auto results = rank_configs(problem, hardware, configs);
 
@@ -28,42 +84,116 @@ prediction_result_t select_config(const problem_t& problem,
   double best_latency = results.front().latency;
   size_t num_the_same = 0;
 
-  double tiebreaker_tolerance = 0.01;
+  // Count the number of similar latencies
+  constexpr double epsilon = 1e-9;
+  // variance is set through environment variable ANALYTICAL_GEMM_HEURISTICS_VARIANCE
+  static const double top_N_heuristic = read_heuristics_variance_env_var();
+  for (const auto& res : results) {
+    bool within_top;
+    const double diff = std::abs(res.latency - best_latency);
 
-  // Count configs with similar latency (within 1%)
-  for (const auto& r : results) {
-    double diff = std::fabs(r.latency - best_latency);
-    diff /= best_latency;
-    if (diff < tiebreaker_tolerance)
-      num_the_same++;
+    if (top_N_heuristic <= epsilon) {
+      // Absolute tolerance path
+      within_top = diff < epsilon;
+    } else {
+      // Relative tolerance path (guard denom)
+      const double denom = std::max(std::abs(best_latency), epsilon);
+      // If it's within top_N_heuristic%, include it.
+      within_top = (diff / denom) < top_N_heuristic;
+    }
+
+    if (within_top)
+      ++num_the_same;
     else
       break;
   }
 
+  // Finally, use your existing tie-breaker on top_candidates
+  pick_best_config_by_arithmetic_intensity(results, num_the_same);
+
+  // After arithmetic intensity tie-breaking, check if we still have ties
+  // among the top results (those with same latency and arithmetic intensity)
   if (num_the_same > 1) {
-    // Apply tie-breaking using arithmetic intensity
-    auto compute_arithmetic_intensity = [](const config_t& config) -> double {
-      auto MT_M = config.mt.m;
-      auto MT_N = config.mt.n;
-      auto MT_K = config.mt.k;
+    // Check if the top tiles still have the same arithmetic intensity
+    double first_ai    = compute_arithmetic_intensity(results.front().config);
+    size_t num_same_ai = 1;
+    for (size_t i = 1; i < num_the_same; ++i) {
+      double current_ai = compute_arithmetic_intensity(results[i].config);
+      if (std::abs(current_ai - first_ai) < 1e-6) {
+        num_same_ai++;
+      } else {
+        break;
+      }
+    }
 
-      double flops          = static_cast<double>(2ull * MT_M * MT_N * MT_K);
-      double memory_traffic = static_cast<double>(MT_M * MT_K + MT_N * MT_K + MT_M * MT_N);
+    // If we still have ties after arithmetic intensity, apply problem dimension tie-breaker
+    if (num_same_ai > 1) {
+      // Problem dimension-based tie breaker:
+      // If M > N, prefer tiles with larger MT_M
+      // If N > M, prefer tiles with larger MT_N
+      // If M == N, this tie-breaker doesn't apply (will use final tie-breaker)
 
-      if (memory_traffic == 0.0) return 0.0;
-      return flops / memory_traffic;
-    };
+      if (problem.size.m != problem.size.n) {
+        std::stable_sort(results.begin(),
+                         results.begin() + num_same_ai,
+                         [problem](const prediction_result_t& a, const prediction_result_t& b) {
+                           size_t MT_M_a = a.config.mt.m;
+                           size_t MT_N_a = a.config.mt.n;
+                           size_t MT_M_b = b.config.mt.m;
+                           size_t MT_N_b = b.config.mt.n;
 
-    std::stable_sort(results.begin(),
-                     results.begin() + num_the_same,
-                     [&](const prediction_result_t& a, const prediction_result_t& b) {
-                       double ai_a = compute_arithmetic_intensity(a.config);
-                       double ai_b = compute_arithmetic_intensity(b.config);
-                       return ai_a > ai_b;  // descending
-                     });
+                           if (problem.size.m > problem.size.n) {
+                             // M-dominant: prefer larger MT_M
+                             if (MT_M_a != MT_M_b) return MT_M_a > MT_M_b;
+                             // If MT_M is same, prefer larger MT_N as secondary
+                             return MT_N_a > MT_N_b;
+                           } else  // N > M
+                           {
+                             // N-dominant: prefer larger MT_N
+                             if (MT_N_a != MT_N_b) return MT_N_a > MT_N_b;
+                             // If MT_N is same, prefer larger MT_M as secondary
+                             return MT_M_a > MT_M_b;
+                           }
+                         });
+      }
+
+      // Final tie-breaker: when all else is equal (including square problems),
+      // consistently prefer tiles with larger MT_M
+      // This ensures deterministic selection regardless of input order
+      std::stable_sort(results.begin(),
+                       results.begin() + num_same_ai,
+                       [](const prediction_result_t& a, const prediction_result_t& b) {
+                         size_t MT_M_a = a.config.mt.m;
+                         size_t MT_N_a = a.config.mt.n;
+                         size_t MT_K_a = a.config.mt.k;
+                         size_t MT_M_b = b.config.mt.m;
+                         size_t MT_N_b = b.config.mt.n;
+                         size_t MT_K_b = b.config.mt.k;
+
+                         // Prefer larger MT_M first
+                         if (MT_M_a != MT_M_b) return MT_M_a > MT_M_b;
+                         // If MT_M is same, prefer larger MT_N
+                         if (MT_N_a != MT_N_b) return MT_N_a > MT_N_b;
+                         // If both MT_M and MT_N are same, prefer larger MT_K
+                         return MT_K_a > MT_K_b;
+                       });
+    }
   }
 
-  return results.front();
+  if (hardware_t::is_debug_enabled()) {
+    for (const auto& tile : results) {
+      std::cout << problem.size.m << "x" << problem.size.n << "x" << problem.size.k
+                << "Selected Macro-Tile: Latency=" << tile.latency << ", MT_M=" << tile.config.mt.m
+                << ", MT_N=" << tile.config.mt.n << ", MT_K=" << tile.config.mt.k
+                << ", MI_M=" << tile.config.mi.m << ", MI_N=" << tile.config.mi.n
+                << ", MI_K=" << tile.config.mi.k << ", Occupancy=" << tile.config.occupancy
+                << ", WGM=" << tile.config.workgroup_mapping
+                << ", NonTemporalA=" << tile.config.non_temporal_a
+                << ", NonTemporalB=" << tile.config.non_temporal_b << "\n";
+    }
+  }
+
+  return results;
 }
 
 /**
@@ -79,8 +209,7 @@ prediction_result_t select_config(const problem_t& problem,
 std::tuple<size_t, size_t> select_workgroup_mapping(const problem_t& problem,
                                                     const hardware_t& hardware,
                                                     const config_t& config,
-                                                    size_t skGrid,
-                                                    bool print) {
+                                                    size_t skGrid) {
   // Extract parameters from structured types
   size_t M     = problem.size.m;
   size_t N     = problem.size.n;
@@ -263,7 +392,7 @@ std::tuple<size_t, size_t> select_workgroup_mapping(const problem_t& problem,
         bestWGM = wgm;
       }
 
-      if (print || hardware_t::is_debug_enabled())
+      if (hardware_t::is_debug_enabled())
         std::cout << "WGM (" << wgm << "), L2Estimate (" << wgmL2Estimate << ")" << std::endl;
     }
 
@@ -308,11 +437,11 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   return results;
 }
 
-prediction_result_t select_config_mnk(size_t M,
-                                      size_t N,
-                                      size_t K,
-                                      const hardware_t& hardware,
-                                      const std::vector<config_t>& configs) {
+std::vector<prediction_result_t> select_config_mnk(size_t M,
+                                                   size_t N,
+                                                   size_t K,
+                                                   const hardware_t& hardware,
+                                                   const std::vector<config_t>& configs) {
   // Create a default problem_t with the provided M, N, K and reasonable defaults
   problem_t problem;
   problem.size.m          = M;

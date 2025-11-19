@@ -9,11 +9,7 @@
 
 namespace origami {
 namespace streamk {
-constexpr size_t number_of_output_tiles(size_t mt_m,
-                                        size_t mt_n,
-                                        size_t m,
-                                        size_t n,
-                                        size_t batch) {
+size_t compute_number_of_output_tiles(size_t mt_m, size_t mt_n, size_t m, size_t n, size_t batch) {
   size_t m_tiles = math::safe_ceil_div(m, mt_m);
   size_t n_tiles = math::safe_ceil_div(n, mt_n);
   return m_tiles * n_tiles * batch;
@@ -99,7 +95,7 @@ std::tuple<double, size_t, size_t> predicted_runtime(dim3_t mt,
                                                      double b,
                                                      double c,
                                                      double d) {
-  size_t output_tiles   = number_of_output_tiles(mt.m, mt.n, size.m, size.n, batch);
+  size_t output_tiles   = compute_number_of_output_tiles(mt.m, mt.n, size.m, size.n, batch);
   size_t iters_per_tile = num_iters_per_tile(mt.k, size.k);
   size_t iters_total    = num_iters_total(output_tiles, iters_per_tile);
   size_t iters_per_cta  = num_iters_per_cta(iters_total, g);
@@ -118,7 +114,7 @@ std::tuple<double, size_t, size_t, double> predicted_runtime_v2(dim3_t mt,
                                                                 double b,
                                                                 double c,
                                                                 double d) {
-  size_t output_tiles   = number_of_output_tiles(mt.m, mt.n, size.m, size.n, batch);
+  size_t output_tiles   = compute_number_of_output_tiles(mt.m, mt.n, size.m, size.n, batch);
   size_t iters_per_tile = num_iters_per_tile(mt.k, size.k);
   size_t iters_total    = num_iters_total(output_tiles, iters_per_tile);
   size_t iters_per_cta  = num_iters_per_cta(iters_total, g);
@@ -188,7 +184,7 @@ reduction_t select_reduction(const problem_t& problem,
   reduction_t reduction_strategy = reduction_t::tree;
 
   if (algorithm == grid_selection_t::k_split_aware) {
-    size_t tiles = number_of_output_tiles(
+    size_t tiles = compute_number_of_output_tiles(
         config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
     size_t cu_count       = hardware.N_CU;
     size_t iters_per_tile = std::max(size_t(1), num_iters_per_tile(config.mt.k, problem.size.k));
@@ -325,14 +321,14 @@ size_t grid_reduction_cost_aware(const problem_t& problem,
 
   if (verbose) {
     std::cout << "[original] Number of Output Tiles: "
-              << number_of_output_tiles(
+              << compute_number_of_output_tiles(
                      config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch)
               << std::endl;
     std::cout << "[original] Minimum runtime: " << min_grid_runtime.second
               << " @ grid size: " << min_grid_runtime.first << std::endl;
 
     std::cout << "[cache-offset] Number of Output Tiles: "
-              << number_of_output_tiles(
+              << compute_number_of_output_tiles(
                      config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch)
               << std::endl;
     std::cout << "[cache-offset] Minimum runtime: " << min_grid_runtime_v2.second

@@ -1002,8 +1002,7 @@ namespace TensileLite
                     auto bestWGM = origami::select_workgroup_mapping(origami_problem,
                                                                          *(hipAMDGPU->analyticalHardware),
                                                                          origami_config,
-                                                                         skgrid,
-                                                                         false);
+                                                                         skgrid);
                     defaultWGMXCC = std::get<0>(bestWGM);
                     defaultWGM = std::get<1>(bestWGM);
 
