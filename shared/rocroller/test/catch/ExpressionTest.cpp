@@ -2354,6 +2354,39 @@ namespace ExpressionTest
             CHECK(std::get<uint32_t>(evaluate(expr1)) == 1u);
             CHECK(std::get<int32_t>(evaluate(expr2)) == -1);
         }
+
+        SECTION("Evaluation 6 - UInt64 to UInt32 truncation")
+        {
+            auto const offset = 0u;
+            auto const width  = 32u;
+            auto       src    = literal(0x123456789abcdef0ull, DataType::UInt64);
+
+            auto expr = bfe(DataType::UInt32, src, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x9abcdef0u);
+        }
+
+        SECTION("Evaluation 7 - UInt64 to Raw32 truncation")
+        {
+            auto const offset = 0u;
+            auto const width  = 32u;
+            auto       src    = literal(0xfedcba9876543210ull, DataType::UInt64);
+
+            auto expr = bfe(DataType::Raw32, src, offset, width);
+
+            CHECK(std::get<Raw32>(evaluate(expr)).value == 0x76543210u);
+        }
+
+        SECTION("Evaluation 8 - Int64 to Int32 truncation with sign extension")
+        {
+            auto const offset = 0u;
+            auto const width  = 32u;
+            auto       src    = literal(-1ll, DataType::Int64);
+
+            auto expr = bfe(DataType::Int32, src, offset, width);
+
+            CHECK(std::get<int32_t>(evaluate(expr)) == -1);
+        }
     }
 
     TEST_CASE("Expression generate dataflow tags", "[expression][codegen]")
