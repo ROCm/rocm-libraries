@@ -6,6 +6,8 @@ cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(hipsparse_shim)
 
+option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile_commands.json for clang tooling support" ON)
+
 project(hipsparse VERSION 4.2.0 LANGUAGES CXX C)
 
 if(POLICY CMP0066)
@@ -34,9 +36,6 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 
 # --- Build options and validation ---
-
-option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile_commands.json for clang tooling support" ON)
-
 option(HIPSPARSE_ENABLE_CUDA "Build hipSPARSE with CUDA backend." OFF)
 option(HIPSPARSE_ENABLE_HIP "Build hipSPARSE with HIP backend." ON)
 

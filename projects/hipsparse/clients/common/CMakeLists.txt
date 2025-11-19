@@ -32,6 +32,9 @@ target_compile_options(hipsparse-clients-common PUBLIC
     -Wall
 )
 
+# Common compile definitions
+target_compile_definitions(hipsparse-clients-common PUBLIC GOOGLE_TEST)
+
 # Link common dependencies
 target_link_libraries(hipsparse-clients-common PUBLIC roc::hipsparse)
 
