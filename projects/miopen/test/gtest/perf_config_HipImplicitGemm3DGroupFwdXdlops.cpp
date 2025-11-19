@@ -29,20 +29,11 @@ inline void set_env_var(const char* name, const char* value)
 {
     SetEnvironmentVariableA(name, value);
 }
-inline void unset_env_var(const char* name)
-{
-    SetEnvironmentVariableA(name, nullptr);
-}
+inline void unset_env_var(const char* name) { SetEnvironmentVariableA(name, nullptr); }
 #else
 #include <cstdlib>
-inline void set_env_var(const char* name, const char* value)
-{
-    setenv(name, value, 1);
-}
-inline void unset_env_var(const char* name)
-{
-    unsetenv(name);
-}
+inline void set_env_var(const char* name, const char* value) { setenv(name, value, 1); }
+inline void unset_env_var(const char* name) { unsetenv(name); }
 #endif
 
 std::vector<PerfConfigTestCase> GetPerfConfigTestCases(miopenDataType_t data_type, std::string arch)

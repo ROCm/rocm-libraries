@@ -258,26 +258,23 @@ protected:
         const miopen::TensorDescriptor emptyDesc;
         auto&& handle = get_handle();
 
-        cpu_adam_updated<Tp, Tg>
-        (
-            ref_param,
-            grad,
-            exp_avg,
-            exp_avg_sq,
-            max_exp_avg_sq,
-            lr,
-            beta1,
-            beta2,
-            weight_decay,
-            eps,
-            amsgrad,
-            maximize,
-            adamw,
-            is_amp,
-            grad_scale[0],
-            found_inf[0],
-            step_count
-        );
+        cpu_adam_updated<Tp, Tg>(ref_param,
+                                 grad,
+                                 exp_avg,
+                                 exp_avg_sq,
+                                 max_exp_avg_sq,
+                                 lr,
+                                 beta1,
+                                 beta2,
+                                 weight_decay,
+                                 eps,
+                                 amsgrad,
+                                 maximize,
+                                 adamw,
+                                 is_amp,
+                                 grad_scale[0],
+                                 found_inf[0],
+                                 step_count);
 
         for(uint32_t i = 1; i <= step_count; i++)
         {
@@ -335,26 +332,23 @@ protected:
         const miopen::TensorDescriptor emptyDesc;
         auto&& handle = get_handle();
 
-        cpu_adam_updated_singlethread<Tp, Tg>
-        (
-            ref_param,
-            grad,
-            exp_avg,
-            exp_avg_sq,
-            max_exp_avg_sq,
-            lr,
-            beta1,
-            beta2,
-            weight_decay,
-            eps,
-            amsgrad,
-            maximize,
-            adamw,
-            is_amp,
-            grad_scale[0],
-            found_inf[0],
-            step_count
-        );
+        cpu_adam_updated_singlethread<Tp, Tg>(ref_param,
+                                              grad,
+                                              exp_avg,
+                                              exp_avg_sq,
+                                              max_exp_avg_sq,
+                                              lr,
+                                              beta1,
+                                              beta2,
+                                              weight_decay,
+                                              eps,
+                                              amsgrad,
+                                              maximize,
+                                              adamw,
+                                              is_amp,
+                                              grad_scale[0],
+                                              found_inf[0],
+                                              step_count);
 
         for(uint32_t i = 1; i <= step_count; i++)
         {

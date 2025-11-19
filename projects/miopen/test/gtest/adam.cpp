@@ -144,6 +144,12 @@ INSTANTIATE_TEST_SUITE_P(Full, GPU_Adam_Updated_FP32, testing::ValuesIn(AdamTest
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Adam_Updated_FP16, testing::ValuesIn(AdamTestConfigs()));
 INSTANTIATE_TEST_SUITE_P(Full, GPU_AmpAdam_Updated_FP32, testing::ValuesIn(AdamTestConfigs()));
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Adam_Updated_Singlethread_FP32, testing::ValuesIn(AdamTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Adam_Updated_Singlethread_FP16, testing::ValuesIn(AdamTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_AmpAdam_Updated_Singlethread_FP32, testing::ValuesIn(AdamTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Adam_Updated_Singlethread_FP32,
+                         testing::ValuesIn(AdamTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Adam_Updated_Singlethread_FP16,
+                         testing::ValuesIn(AdamTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_AmpAdam_Updated_Singlethread_FP32,
+                         testing::ValuesIn(AdamTestConfigs()));

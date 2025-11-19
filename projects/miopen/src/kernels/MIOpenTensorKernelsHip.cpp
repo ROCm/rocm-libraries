@@ -358,7 +358,7 @@ extern "C" __global__ void Op4dTensorLite(const MIOPEN_TYPE* a,
                                           const long total_work,
                                           const int use_beta)
 {
-    int gid0 = blockIdx.x * blockDim.x + threadIdx.x;
+    int gid0        = blockIdx.x * blockDim.x + threadIdx.x;
     int global_size = gridDim.x * blockDim.x;
 
     MIOPEN_TYPE a_dat[RD_BLCK];
@@ -379,11 +379,14 @@ extern "C" __global__ void Op4dTensorLite(const MIOPEN_TYPE* a,
                 c_dat[i] = static_cast<MIOPEN_TYPE>(0);
             }
 
-            *(reinterpret_cast<READ_TYPE*>(a_dat)) = *(reinterpret_cast<const READ_TYPE*>(a + index + Aoffset));
-            *(reinterpret_cast<READ_TYPE*>(b_dat)) = *(reinterpret_cast<const READ_TYPE*>(b + index + Boffset));
+            *(reinterpret_cast<READ_TYPE*>(a_dat)) =
+                *(reinterpret_cast<const READ_TYPE*>(a + index + Aoffset));
+            *(reinterpret_cast<READ_TYPE*>(b_dat)) =
+                *(reinterpret_cast<const READ_TYPE*>(b + index + Boffset));
             if(use_beta == 1)
             {
-                *(reinterpret_cast<READ_TYPE*>(c_dat)) = *(reinterpret_cast<const READ_TYPE*>(c + index + Coffset));
+                *(reinterpret_cast<READ_TYPE*>(c_dat)) =
+                    *(reinterpret_cast<const READ_TYPE*>(c + index + Coffset));
             }
 
             for(int i = 0; i < RD_BLCK; ++i)
@@ -395,7 +398,8 @@ extern "C" __global__ void Op4dTensorLite(const MIOPEN_TYPE* a,
                 c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i] * alpha0, b_dat[i] * alpha1);
             }
 
-            *(reinterpret_cast<READ_TYPE*>(c + index + Coffset)) = *(reinterpret_cast<READ_TYPE*>(c_dat));
+            *(reinterpret_cast<READ_TYPE*>(c + index + Coffset)) =
+                *(reinterpret_cast<READ_TYPE*>(c_dat));
         }
     }
     else
@@ -409,11 +413,14 @@ extern "C" __global__ void Op4dTensorLite(const MIOPEN_TYPE* a,
                 c_dat[i] = (MIOPEN_TYPE)0;
             }
 
-            *(reinterpret_cast<READ_TYPE*>(a_dat)) = *(reinterpret_cast<const READ_TYPE*>(a + index + Aoffset));
-            *(reinterpret_cast<READ_TYPE*>(b_dat)) = *(reinterpret_cast<const READ_TYPE*>(b + index + Boffset));
+            *(reinterpret_cast<READ_TYPE*>(a_dat)) =
+                *(reinterpret_cast<const READ_TYPE*>(a + index + Aoffset));
+            *(reinterpret_cast<READ_TYPE*>(b_dat)) =
+                *(reinterpret_cast<const READ_TYPE*>(b + index + Boffset));
             if(use_beta == 1)
             {
-                *(reinterpret_cast<READ_TYPE*>(c_dat)) = *(reinterpret_cast<const READ_TYPE*>(c + index + Coffset));
+                *(reinterpret_cast<READ_TYPE*>(c_dat)) =
+                    *(reinterpret_cast<const READ_TYPE*>(c + index + Coffset));
             }
 
             for(int i = 0; i < RD_BLCK; ++i)
@@ -425,7 +432,8 @@ extern "C" __global__ void Op4dTensorLite(const MIOPEN_TYPE* a,
                 c_dat[i] += MIOPEN_TENSOR_OP(a_dat[i] * alpha0, b_dat[i] * alpha1);
             }
 
-            *(reinterpret_cast<READ_TYPE*>(c + index + Coffset)) = *(reinterpret_cast<READ_TYPE*>(c_dat));
+            *(reinterpret_cast<READ_TYPE*>(c + index + Coffset)) =
+                *(reinterpret_cast<READ_TYPE*>(c_dat));
         }
     }
 }

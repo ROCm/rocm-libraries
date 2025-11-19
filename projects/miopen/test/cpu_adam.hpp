@@ -100,30 +100,30 @@ void cpu_adam(tensor<T1>& params,
 
 template <typename T1, typename T2>
 void cpu_adam_updated(tensor<T1>& params,
-                    tensor<T2>& grads,
-                    tensor<T1>& exp_avgs,
-                    tensor<T1>& exp_avg_sqs,
-                    tensor<T1>& max_exp_avg_sqs,
-                    float lr,
-                    float beta1,
-                    float beta2,
-                    float weight_decay,
-                    float eps,
-                    bool amsgrad,
-                    bool maximize,
-                    bool adamw,
-                    bool is_amp,
-                    int32_t grad_scale,
-                    bool found_inf,
-                    int32_t step_count)
+                      tensor<T2>& grads,
+                      tensor<T1>& exp_avgs,
+                      tensor<T1>& exp_avg_sqs,
+                      tensor<T1>& max_exp_avg_sqs,
+                      float lr,
+                      float beta1,
+                      float beta2,
+                      float weight_decay,
+                      float eps,
+                      bool amsgrad,
+                      bool maximize,
+                      bool adamw,
+                      bool is_amp,
+                      int32_t grad_scale,
+                      bool found_inf,
+                      int32_t step_count)
 {
     if(is_amp && found_inf)
         return;
 
-    const float one_minus_lr_by_weight_decay    = adamw ? 1.0f - lr * weight_decay : 0.0f;
-    const float one_minus_beta1                 = 1.0 - beta1;
-    const float one_minus_beta2                 = 1.0 - beta2;
-    const float inv_grad_scale                  = 1.0f / static_cast<float>(grad_scale);
+    const float one_minus_lr_by_weight_decay = adamw ? 1.0f - lr * weight_decay : 0.0f;
+    const float one_minus_beta1              = 1.0 - beta1;
+    const float one_minus_beta2              = 1.0 - beta2;
+    const float inv_grad_scale               = 1.0f / static_cast<float>(grad_scale);
 
     par_ford(params.GetSize())([&](int32_t i) {
         T1 param          = params[i];
@@ -140,7 +140,7 @@ void cpu_adam_updated(tensor<T1>& params,
         if(is_amp)
             grad *= inv_grad_scale;
 
-        float grad_by_one_minus_beta1 = grad * one_minus_beta1;
+        float grad_by_one_minus_beta1        = grad * one_minus_beta1;
         float square_grad_by_one_minus_beta2 = grad * grad * one_minus_beta2;
 
         for(int32_t step = 1; step <= step_count; ++step)
@@ -156,7 +156,7 @@ void cpu_adam_updated(tensor<T1>& params,
                 {
                     auto updated_grad = grad;
                     updated_grad += param * weight_decay;
-                    grad_by_one_minus_beta1 = updated_grad * one_minus_beta1;
+                    grad_by_one_minus_beta1        = updated_grad * one_minus_beta1;
                     square_grad_by_one_minus_beta2 = updated_grad * updated_grad * one_minus_beta2;
                 }
             }
@@ -169,7 +169,7 @@ void cpu_adam_updated(tensor<T1>& params,
             {
                 if(exp_avg_sq > max_exp_avg_sq)
                 {
-                    max_exp_avg_sq = exp_avg_sq;
+                    max_exp_avg_sq      = exp_avg_sq;
                     sqrt_max_exp_avg_sq = sqrt(max_exp_avg_sq);
                 }
 
@@ -189,34 +189,34 @@ void cpu_adam_updated(tensor<T1>& params,
 
 template <typename T1, typename T2>
 void cpu_adam_updated_singlethread(tensor<T1>& params,
-                                tensor<T2>& grads,
-                                tensor<T1>& exp_avgs,
-                                tensor<T1>& exp_avg_sqs,
-                                tensor<T1>& max_exp_avg_sqs,
-                                float lr,
-                                float beta1,
-                                float beta2,
-                                float weight_decay,
-                                float eps,
-                                bool amsgrad,
-                                bool maximize,
-                                bool adamw,
-                                bool is_amp,
-                                int32_t grad_scale,
-                                bool found_inf,
-                                int32_t step_count)
+                                   tensor<T2>& grads,
+                                   tensor<T1>& exp_avgs,
+                                   tensor<T1>& exp_avg_sqs,
+                                   tensor<T1>& max_exp_avg_sqs,
+                                   float lr,
+                                   float beta1,
+                                   float beta2,
+                                   float weight_decay,
+                                   float eps,
+                                   bool amsgrad,
+                                   bool maximize,
+                                   bool adamw,
+                                   bool is_amp,
+                                   int32_t grad_scale,
+                                   bool found_inf,
+                                   int32_t step_count)
 {
     if(is_amp && found_inf)
         return;
 
-    const float one_minus_lr_by_weight_decay    = adamw ? 1.0f - lr * weight_decay : 0.0f;
-    const float one_minus_beta1                 = 1.0 - beta1;
-    const float one_minus_beta2                 = 1.0 - beta2;
-    const float inv_grad_scale                  = 1.0f / static_cast<float>(grad_scale);
+    const float one_minus_lr_by_weight_decay = adamw ? 1.0f - lr * weight_decay : 0.0f;
+    const float one_minus_beta1              = 1.0 - beta1;
+    const float one_minus_beta2              = 1.0 - beta2;
+    const float inv_grad_scale               = 1.0f / static_cast<float>(grad_scale);
 
-    const size_t n {params.GetSize()};
+    const size_t n{params.GetSize()};
 
-    for (size_t i = 0; i < n; ++i)
+    for(size_t i = 0; i < n; ++i)
     {
         T1 param          = params[i];
         T1 exp_avg        = exp_avgs[i];
@@ -232,7 +232,7 @@ void cpu_adam_updated_singlethread(tensor<T1>& params,
         if(is_amp)
             grad *= inv_grad_scale;
 
-        float grad_by_one_minus_beta1 = grad * one_minus_beta1;
+        float grad_by_one_minus_beta1        = grad * one_minus_beta1;
         float square_grad_by_one_minus_beta2 = grad * grad * one_minus_beta2;
 
         for(int32_t step = 1; step <= step_count; ++step)
@@ -248,7 +248,7 @@ void cpu_adam_updated_singlethread(tensor<T1>& params,
                 {
                     auto updated_grad = grad;
                     updated_grad += param * weight_decay;
-                    grad_by_one_minus_beta1 = updated_grad * one_minus_beta1;
+                    grad_by_one_minus_beta1        = updated_grad * one_minus_beta1;
                     square_grad_by_one_minus_beta2 = updated_grad * updated_grad * one_minus_beta2;
                 }
             }
@@ -261,7 +261,7 @@ void cpu_adam_updated_singlethread(tensor<T1>& params,
             {
                 if(exp_avg_sq > max_exp_avg_sq)
                 {
-                    max_exp_avg_sq = exp_avg_sq;
+                    max_exp_avg_sq      = exp_avg_sq;
                     sqrt_max_exp_avg_sq = sqrt(max_exp_avg_sq);
                 }
 
