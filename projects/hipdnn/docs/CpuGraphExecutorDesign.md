@@ -11,6 +11,7 @@
 8. [Supported Operations](#supported-operations)
 9. [Extension Guidelines](#extension-guidelines)
 10. [Performance & Usage Considerations](#performance--usage-considerations)
+11. [Future Work](#future-work)
 
 ## Executive Summary
 
@@ -216,6 +217,10 @@ case NodeAttributes::MyOperationAttributes:
     return MyOperationSignatureKey(node, tensorMap);
 ```
 
+#### 6. Test the New Operation
+- Create unit tests to validate all newly added classes
+- Add tests for the operation to the TestCpuReferenceGraphExecutor suite
+
 ### Adding a New Data Type for an Existing Operation
 Find the existing signature key for the operation and add a new plan builder mapping in `getPlanBuilders()`.
 ```cpp
@@ -245,3 +250,8 @@ While the CPU Graph Executor is primarily for reference and testing:
 2. **Sequential Execution**: Operations execute in topological order
 3. **Type Specialization**: Templates enable different typed implementations
 4. **Usability**: Designed to operate using the same API as hipdnn backend so a single graph can be built and used for the real and reference executors interchangeably.
+5. **Performance**: Not performance optimized
+
+## Future Work
+
+1. **GPU Reference Executor**: Extend to support GPU reference execution
