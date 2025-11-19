@@ -836,11 +836,11 @@ def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
 
             'LRB1'   : [[ 91,  93,  95,  97,  99, 101, 103, 105],
                         [ 92,  94,  96,  98, 100, 102, 104, 106]],
-            'LRSA'   : [[ 40]],
-            'LRSB'   : [[ 40]],
-            'LWSA'   : [[109]],
-            'LWSB'   : [[110]],
-            'LCC'    : [[111, 111]]
+            'LRSA'   : [[ 50], [52]],
+            'LRSB'   : [[ 50], [52]],
+            'LWSA'   : [[108]],
+            'LWSB'   : [[109]],
+            'LCC'    : [[110, 111]]
         }
         syncCode = [
             SWaitCnt(dscnt= 2, vlcnt=-1, vscnt=-1, comment="Wait for LRAs"),
