@@ -636,12 +636,13 @@ rocblas_gemvt_row_vectorized_kernel(rocblas_int    m,
                                     rocblas_int    batch_count)
 {
 // gfx90a gfx942 kernels
-#if defined(__gfx90a__) || defined(__gfx942__)
+#if defined(__SPIRV__) || defined(__gfx90a__) || defined(__SPIRV__) || defined(__gfx942__)
 
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -657,7 +658,7 @@ rocblas_gemvt_row_vectorized_kernel(rocblas_int    m,
             m, n, alpha, A, lda, x, incx, beta, y, incy);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 
 #endif
@@ -697,7 +698,8 @@ rocblas_gemv_scal_kernel(rocblas_int    n,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -715,7 +717,7 @@ rocblas_gemv_scal_kernel(rocblas_int    n,
         rocblas_gemv_scal_kernel_calc<NB>(n, beta, stride_beta, y, incy);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -1557,7 +1559,8 @@ rocblas_gemvn_double_buffered_kernel(rocblas_int    m,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -1581,7 +1584,7 @@ rocblas_gemvn_double_buffered_kernel(rocblas_int    m,
             m, n, alpha, A, lda, x, incx, y, incy);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -1614,7 +1617,8 @@ rocblas_gemvt_double_buffered_kernel(rocblas_int    m,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -1638,7 +1642,7 @@ rocblas_gemvt_double_buffered_kernel(rocblas_int    m,
             m, n, alpha, A, lda, x, incx, y, incy);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -1671,7 +1675,8 @@ rocblas_gemvn_kernel(rocblas_int    m,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -1696,7 +1701,7 @@ rocblas_gemvn_kernel(rocblas_int    m,
             m, n, alpha, A, lda, x, incx, beta, y, incy);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -1727,7 +1732,8 @@ rocblas_gemvt_kernel(rocblas_int    m,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -1751,7 +1757,7 @@ rocblas_gemvt_kernel(rocblas_int    m,
         rocblas_gemvt_kernel_calc<CONJ, NB_X>(m, n, alpha, A, lda, x, incx, beta, y, incy);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -1780,7 +1786,8 @@ rocblas_gemvt_warp_reduce_kernel(rocblas_int    m,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
@@ -1804,7 +1811,7 @@ rocblas_gemvt_warp_reduce_kernel(rocblas_int    m,
             m, n, alpha, A, lda, x, incx, beta, y, incy);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -1828,7 +1835,8 @@ rocblas_gemvt_sn_kernel(rocblas_int    m,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -1841,7 +1849,7 @@ rocblas_gemvt_sn_kernel(rocblas_int    m,
             m, n, alpha, A, lda, x, incx, workspace, batch);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -1860,7 +1868,8 @@ rocblas_gemvt_sn_reduce(rocblas_int    n_sums,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -1870,7 +1879,7 @@ rocblas_gemvt_sn_reduce(rocblas_int    n_sums,
         rocblas_gemvt_sn_reduce_calc<NB, WIN>(n_sums, beta, y, incy, workspace, batch);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -1992,7 +2001,7 @@ rocblas_gemvn_sm_mn_batched_kernel(rocblas_int    m,
                                    rocblas_int    batch_count)
 {
 // gfx90a gfx942 kernels
-#if defined(__gfx90a__) || defined(__gfx942__)
+#if defined(__SPIRV__) || defined(__gfx90a__) || defined(__SPIRV__) || defined(__gfx942__)
 
     const int b = blockIdx.x * blockDim.y + threadIdx.y;
     if(b >= batch_count)

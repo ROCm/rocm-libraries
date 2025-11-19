@@ -78,16 +78,17 @@ rocblas_internal_gemmt_kernel(rocblas_int    N,
     int thxB = idt % BLK_K; // thread's m position for loading B
     int thyB = idt / BLK_K; // thread's n position for loading B
 
-    uint32_t blz = blockIdx.z; // block's matrix in the batch
+    uint32_t batch = blockIdx.z; // block's matrix in the batch
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; blz < batch_count; blz += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
-        auto* dA = load_ptr_batch(dA_array, blz, stride_a);
-        auto* dB = load_ptr_batch(dB_array, blz, stride_b);
-        auto* dC = load_ptr_batch(dC_array, blz, stride_c);
+        auto* dA = load_ptr_batch(dA_array, batch, stride_a);
+        auto* dB = load_ptr_batch(dB_array, batch, stride_b);
+        auto* dC = load_ptr_batch(dC_array, batch, stride_c);
 
         __shared__ T sA[BLK_K][BLK_N]; // shared memory for A
         __shared__ T sB[BLK_N][BLK_K]; // shared memory for B
@@ -166,7 +167,7 @@ rocblas_internal_gemmt_kernel(rocblas_int    N,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 

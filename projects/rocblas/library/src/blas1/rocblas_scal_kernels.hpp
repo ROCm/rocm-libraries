@@ -38,7 +38,8 @@ rocblas_scal_kernel(rocblas_int    n,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -53,7 +54,7 @@ rocblas_scal_kernel(rocblas_int    n,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -75,7 +76,8 @@ rocblas_sscal_2_kernel(rocblas_int    n,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -103,7 +105,7 @@ rocblas_sscal_2_kernel(rocblas_int    n,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -127,7 +129,8 @@ rocblas_hscal_mlt_4_kernel(rocblas_int    n,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -175,7 +178,7 @@ rocblas_hscal_mlt_4_kernel(rocblas_int    n,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 

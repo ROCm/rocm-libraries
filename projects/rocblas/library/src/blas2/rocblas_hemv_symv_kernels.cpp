@@ -623,7 +623,8 @@ rocblas_hemvn_kernel_upper_block_sum(rocblas_int    n,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
         W* saved_workspace_address
             = workspace; //Saving the address of the workspace memory to assign it after the computation
@@ -677,7 +678,7 @@ rocblas_hemvn_kernel_upper_block_sum(rocblas_int    n,
 #if DEVICE_GRID_YZ_16BIT
         workspace
             = saved_workspace_address; // Assigning back the saved address of the workspace memory to do the next batch computation
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 // end hemvn_kernel_upper_block_sum_calc
@@ -1170,7 +1171,8 @@ rocblas_hemvn_kernel_lower_block_sum(rocblas_int    n,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
         W* saved_workspace_address
             = workspace; //Saving the address of the workspace memory to assign it after the computation
@@ -1225,7 +1227,7 @@ rocblas_hemvn_kernel_lower_block_sum(rocblas_int    n,
 #if DEVICE_GRID_YZ_16BIT
         workspace
             = saved_workspace_address; // Assigning back the saved address of the workspace memory to do the next batch computation
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 // end hemvn_kernel_lower_block_sum_calc
@@ -2574,7 +2576,8 @@ rocblas_hemvn_kernel_upper(rocblas_int    n,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -2601,7 +2604,7 @@ rocblas_hemvn_kernel_upper(rocblas_int    n,
                                         T_index>(n, alpha, A, lda, x, incx, workspace, batch);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -2640,7 +2643,8 @@ rocblas_hemvn_kernel_lower(rocblas_int    n,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -2663,7 +2667,7 @@ rocblas_hemvn_kernel_lower(rocblas_int    n,
             n, alpha, A, lda, x, incx, workspace, batch);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -2692,7 +2696,8 @@ rocblas_symv_kernel_upper_double_buffered_diagonal(bool           host_ptr_mode,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
         const auto alpha = host_ptr_mode ? alpha_device_host.value
@@ -2717,7 +2722,7 @@ rocblas_symv_kernel_upper_double_buffered_diagonal(bool           host_ptr_mode,
             n, alpha, A, lda, x, incx, beta, y, incy);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -2749,7 +2754,8 @@ rocblas_symv_kernel_upper_double_buffered_non_diagonal(bool           host_ptr_m
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -2775,7 +2781,7 @@ rocblas_symv_kernel_upper_double_buffered_non_diagonal(bool           host_ptr_m
             n, alpha, A, lda, x, incx, y, incy);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -2805,7 +2811,8 @@ rocblas_symv_kernel_upper_double_buffered_diagonal_generic(bool           host_p
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -2831,7 +2838,7 @@ rocblas_symv_kernel_upper_double_buffered_diagonal_generic(bool           host_p
             n, alpha, A, lda, x, incx, beta, y, incy, mod);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -2865,7 +2872,8 @@ rocblas_symv_kernel_upper_double_buffered_non_diagonal_generic(bool           ho
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
         const auto alpha = host_ptr_mode ? alpha_device_host.value
@@ -2891,7 +2899,7 @@ rocblas_symv_kernel_upper_double_buffered_non_diagonal_generic(bool           ho
             n, alpha, A, lda, x, incx, y, incy, mod);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -2920,7 +2928,8 @@ rocblas_symv_kernel_lower_double_buffered_diagonal(bool           host_ptr_mode,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -2946,7 +2955,7 @@ rocblas_symv_kernel_lower_double_buffered_diagonal(bool           host_ptr_mode,
             n, alpha, A, lda, x, incx, beta, y, incy);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -2978,7 +2987,8 @@ rocblas_symv_kernel_lower_double_buffered_non_diagonal(bool           host_ptr_m
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -3004,7 +3014,7 @@ rocblas_symv_kernel_lower_double_buffered_non_diagonal(bool           host_ptr_m
             n, alpha, A, lda, x, incx, y, incy);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -3034,7 +3044,8 @@ rocblas_symv_kernel_lower_double_buffered_diagonal_generic(bool           host_p
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
         const auto alpha = host_ptr_mode ? alpha_device_host.value
@@ -3059,7 +3070,7 @@ rocblas_symv_kernel_lower_double_buffered_diagonal_generic(bool           host_p
             n, alpha, A, lda, x, incx, beta, y, incy, mod);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -3092,7 +3103,8 @@ rocblas_symv_kernel_lower_double_buffered_non_diagonal_generic(bool           ho
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
         const auto alpha = host_ptr_mode ? alpha_device_host.value
@@ -3117,7 +3129,7 @@ rocblas_symv_kernel_lower_double_buffered_non_diagonal_generic(bool           ho
             n, alpha, A, lda, x, incx, y, incy, mod);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 

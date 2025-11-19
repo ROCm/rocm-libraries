@@ -72,7 +72,8 @@ rocblas_syr2k_scale_kernel(bool           is_upper,
 
     uint32_t batch = blockIdx.z;
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -80,7 +81,7 @@ rocblas_syr2k_scale_kernel(bool           is_upper,
         rocblas_syr2k_scale_device<API_INT, HERK>(is_upper, n, beta, C, ldc);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -109,19 +110,20 @@ rocblas_syrkx_herkx_small_kernel(rocblas_int    N,
                                  rocblas_stride stride_c,
                                  rocblas_int    batch_count)
 {
-    int thx = threadIdx.x; // thread's m position
-    int thy = threadIdx.y; // thread's n position
-    int blx = blockIdx.x; // block's m position
-    int bly = blockIdx.y; // block's n position
-    int blz = blockIdx.z; // block's matrix in the batch
+    int thx   = threadIdx.x; // thread's m position
+    int thy   = threadIdx.y; // thread's n position
+    int blx   = blockIdx.x; // block's m position
+    int bly   = blockIdx.y; // block's n position
+    int batch = blockIdx.z; // block's matrix in the batch
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; blz < batch_count; blz += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
-        auto* dA = load_ptr_batch(dA_array, blz, 0, stride_a);
-        auto* dB = load_ptr_batch(dB_array, blz, 0, stride_b);
-        auto* dC = load_ptr_batch(dC_array, blz, 0, stride_c);
+        auto* dA = load_ptr_batch(dA_array, batch, 0, stride_a);
+        auto* dB = load_ptr_batch(dB_array, batch, 0, stride_b);
+        auto* dC = load_ptr_batch(dC_array, batch, 0, stride_c);
 
         __shared__ T sA[DIM][DIM]; // shared memory for A
         __shared__ T sB[DIM][DIM]; // shared memory for B
@@ -185,7 +187,7 @@ rocblas_syrkx_herkx_small_kernel(rocblas_int    N,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -215,15 +217,15 @@ rocblas_syrkx_herkx_small_restrict_kernel(rocblas_int    N,
                                           rocblas_stride stride_c,
                                           rocblas_int    batch_count)
 {
-    int thx = threadIdx.x; // thread's m position
-    int thy = threadIdx.y; // thread's n position
-    int blx = blockIdx.x; // block's m position
-    int bly = blockIdx.y; // block's n position
-    int blz = blockIdx.z; // block's matrix in the batch
+    int thx   = threadIdx.x; // thread's m position
+    int thy   = threadIdx.y; // thread's n position
+    int blx   = blockIdx.x; // block's m position
+    int bly   = blockIdx.y; // block's n position
+    int batch = blockIdx.z; // block's matrix in the batch
 
-    auto* dA = load_ptr_batch(dA_array, blz, 0, stride_a);
-    auto* dB = load_ptr_batch(dB_array, blz, 0, stride_b);
-    auto* dC = load_ptr_batch(dC_array, blz, 0, stride_c);
+    auto* dA = load_ptr_batch(dA_array, batch, 0, stride_a);
+    auto* dB = load_ptr_batch(dB_array, batch, 0, stride_b);
+    auto* dC = load_ptr_batch(dC_array, batch, 0, stride_c);
 
     __shared__ T sA[DIM][DIM]; // shared memory for A
     __shared__ T sB[DIM][DIM]; // shared memory for B
@@ -302,20 +304,20 @@ rocblas_syrkx_herkx_general_kernel(rocblas_int    N,
                                    rocblas_stride stride_c,
                                    rocblas_int    batch_count)
 {
-    int thx  = threadIdx.x; // thread's m position in C
-    int thy  = threadIdx.y; // thread's n position in C
-    int idt  = DIM_N * thy + thx; // thread's number
-    int blx  = blockIdx.x; // block's m position
-    int bly  = blockIdx.y; // block's n position
-    int blz  = blockIdx.z; // block's matrix in the batch
-    int thxA = idt % BLK_N; // thread's m position for loading A
-    int thyA = idt / BLK_N; // thread's n position for loading A
-    int thxB = idt % BLK_K; // thread's m position for loading B
-    int thyB = idt / BLK_K; // thread's n position for loading B
+    int thx   = threadIdx.x; // thread's m position in C
+    int thy   = threadIdx.y; // thread's n position in C
+    int idt   = DIM_N * thy + thx; // thread's number
+    int blx   = blockIdx.x; // block's m position
+    int bly   = blockIdx.y; // block's n position
+    int batch = blockIdx.z; // block's matrix in the batch
+    int thxA  = idt % BLK_N; // thread's m position for loading A
+    int thyA  = idt / BLK_N; // thread's n position for loading A
+    int thxB  = idt % BLK_K; // thread's m position for loading B
+    int thyB  = idt / BLK_K; // thread's n position for loading B
 
-    auto* dA = load_ptr_batch(dA_array, blz, 0, stride_a);
-    auto* dB = load_ptr_batch(dB_array, blz, 0, stride_b);
-    auto* dC = load_ptr_batch(dC_array, blz, 0, stride_c);
+    auto* dA = load_ptr_batch(dA_array, batch, 0, stride_a);
+    auto* dB = load_ptr_batch(dB_array, batch, 0, stride_b);
+    auto* dC = load_ptr_batch(dC_array, batch, 0, stride_c);
 
     __shared__ T sA[BLK_K][BLK_N]; // shared memory for A
     __shared__ T sB[BLK_N][BLK_K]; // shared memory for B
@@ -427,20 +429,20 @@ rocblas_syrkx_herkx_restricted_kernel(rocblas_int    N,
                                       rocblas_stride stride_c,
                                       rocblas_int    batch_count)
 {
-    int thx  = threadIdx.x; // thread's m position in C
-    int thy  = threadIdx.y; // thread's n position in C
-    int idt  = DIM_N * thy + thx; // thread's number
-    int blx  = blockIdx.x; // block's m position
-    int bly  = blockIdx.y; // block's n position
-    int blz  = blockIdx.z; // block's matrix in the batch
-    int thxA = idt % BLK_N; // thread's m position for loading A
-    int thyA = idt / BLK_N; // thread's n position for loading A
-    int thxB = idt % BLK_K; // thread's m position for loading B
-    int thyB = idt / BLK_K; // thread's n position for loading B
+    int thx   = threadIdx.x; // thread's m position in C
+    int thy   = threadIdx.y; // thread's n position in C
+    int idt   = DIM_N * thy + thx; // thread's number
+    int blx   = blockIdx.x; // block's m position
+    int bly   = blockIdx.y; // block's n position
+    int batch = blockIdx.z; // block's matrix in the batch
+    int thxA  = idt % BLK_N; // thread's m position for loading A
+    int thyA  = idt / BLK_N; // thread's n position for loading A
+    int thxB  = idt % BLK_K; // thread's m position for loading B
+    int thyB  = idt / BLK_K; // thread's n position for loading B
 
-    auto* dA = load_ptr_batch(dA_array, blz, 0, stride_a);
-    auto* dB = load_ptr_batch(dB_array, blz, 0, stride_b);
-    auto* dC = load_ptr_batch(dC_array, blz, 0, stride_c);
+    auto* dA = load_ptr_batch(dA_array, batch, 0, stride_a);
+    auto* dB = load_ptr_batch(dB_array, batch, 0, stride_b);
+    auto* dC = load_ptr_batch(dC_array, batch, 0, stride_c);
 
     __shared__ T sA[BLK_K][BLK_N]; // shared memory for A
     __shared__ T sB[BLK_N][BLK_K]; // shared memory for B
@@ -546,20 +548,20 @@ rocblas_syrkx_herkx_restricted_kernel(rocblas_int    N,
                                       rocblas_stride stride_c,
                                       rocblas_int    batch_count)
 {
-    int thx  = threadIdx.x; // thread's m position in C
-    int thy  = threadIdx.y; // thread's n position in C
-    int idt  = DIM_N * thy + thx; // thread's number
-    int blx  = blockIdx.x; // block's m position
-    int bly  = blockIdx.y; // block's n position
-    int blz  = blockIdx.z; // block's matrix in the batch
-    int thxA = idt % BLK_N; // thread's m position for loading A
-    int thyA = idt / BLK_N; // thread's n position for loading A
-    int thxB = idt % BLK_K; // thread's m position for loading B
-    int thyB = idt / BLK_K; // thread's n position for loading B
+    int thx   = threadIdx.x; // thread's m position in C
+    int thy   = threadIdx.y; // thread's n position in C
+    int idt   = DIM_N * thy + thx; // thread's number
+    int blx   = blockIdx.x; // block's m position
+    int bly   = blockIdx.y; // block's n position
+    int batch = blockIdx.z; // block's matrix in the batch
+    int thxA  = idt % BLK_N; // thread's m position for loading A
+    int thyA  = idt / BLK_N; // thread's n position for loading A
+    int thxB  = idt % BLK_K; // thread's m position for loading B
+    int thyB  = idt / BLK_K; // thread's n position for loading B
 
-    auto* dA = load_ptr_batch(dA_array, blz, 0, stride_a);
-    auto* dB = load_ptr_batch(dB_array, blz, 0, stride_b);
-    auto* dC = load_ptr_batch(dC_array, blz, 0, stride_c);
+    auto* dA = load_ptr_batch(dA_array, batch, 0, stride_a);
+    auto* dB = load_ptr_batch(dB_array, batch, 0, stride_b);
+    auto* dC = load_ptr_batch(dC_array, batch, 0, stride_c);
 
     __shared__ T sA[BLK_K][BLK_N]; // shared memory for A
     __shared__ T sB[BLK_N][BLK_K]; // shared memory for B
@@ -1230,7 +1232,8 @@ rocblas_syr2k_her2k_kernel(bool           is_upper,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -1244,7 +1247,7 @@ rocblas_syr2k_her2k_kernel(bool           is_upper,
             is_upper, n, k, alpha, A, lda, B, ldb, C, ldc);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -1345,7 +1348,8 @@ rocblas_copy_triangular_syrk_herk_kernel(rocblas_int    n,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -1391,7 +1395,7 @@ rocblas_copy_triangular_syrk_herk_kernel(rocblas_int    n,
                 C[row + row * int64_t(ldc)] = std::real(C[row + row * int64_t(ldc)]);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 

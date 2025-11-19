@@ -71,7 +71,8 @@ rocblas_ger_kernel(rocblas_int    m,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -116,7 +117,7 @@ rocblas_ger_kernel(rocblas_int    m,
             }
         }
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -141,7 +142,7 @@ rocblas_sger_gfx942_kernel(rocblas_int    m,
                            rocblas_stride strideA)
 {
 // gfx942 kernels
-#if defined(__gfx942__)
+#if defined(__SPIRV__) || defined(__gfx942__)
 
     rocblas_int tx  = (blockIdx.x * DIM_X + threadIdx.x) * 2;
     rocblas_int col = blockIdx.y;
@@ -212,7 +213,8 @@ rocblas_sger_kernel(rocblas_int    m,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -248,7 +250,7 @@ rocblas_sger_kernel(rocblas_int    m,
             A[i] += res_y * x[(tx + i) * int64_t(incx)];
         }
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -293,7 +295,8 @@ rocblas_ger_double_buffered_kernel(bool           host_ptr_mode,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -368,7 +371,7 @@ rocblas_ger_double_buffered_kernel(bool           host_ptr_mode,
             A[(DIM_X / 2) + j + k * size_t(lda)] = areg_lower[k];
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 

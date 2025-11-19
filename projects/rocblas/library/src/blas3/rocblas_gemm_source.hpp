@@ -64,7 +64,8 @@ namespace
 
         uint32_t batch = blockIdx.z;
 #if DEVICE_GRID_YZ_16BIT
-        for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+        DEVICE_GRID_SETUP
+        do
         {
 #endif
 
@@ -73,7 +74,7 @@ namespace
             gemm_ex_scale_device<DIM_X, DIM_Y>(m, n, beta, C, ldc, D, ldd);
 
 #if DEVICE_GRID_YZ_16BIT
-        }
+        } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
     }
 
@@ -172,14 +173,15 @@ namespace
         uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-        for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+        DEVICE_GRID_SETUP
+        do
         {
 #endif
             auto C = load_ptr_batch(dC, batch, shift_c, stride_c);
             rocblas_gemm_scale_device<DIM_X, DIM_Y>(m, n, beta, C, ldc);
 
 #if DEVICE_GRID_YZ_16BIT
-        }
+        } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
     }
 
@@ -273,22 +275,23 @@ namespace
                                         rocblas_stride d_st_or_of,
                                         rocblas_int    batch_count)
     {
-        int     thx = threadIdx.x; // thread's m position in C
-        int     thy = threadIdx.y; // thread's n position in C
-        int64_t idt = int64_t(DIM_M) * thy + thx; // thread's number
-        int     blx = blockIdx.x; // block's m position
-        int     bly = blockIdx.y; // block's n position
-        int     blz = blockIdx.z; // block's matrix in the batch
+        int     thx   = threadIdx.x; // thread's m position in C
+        int     thy   = threadIdx.y; // thread's n position in C
+        int64_t idt   = int64_t(DIM_M) * thy + thx; // thread's number
+        int     blx   = blockIdx.x; // block's m position
+        int     bly   = blockIdx.y; // block's n position
+        int     batch = blockIdx.z; // block's matrix in the batch
 
 #if DEVICE_GRID_YZ_16BIT
-        for(; blz < batch_count; blz += c_YZ_grid_launch_limit)
+        DEVICE_GRID_SETUP
+        do
         {
 #endif
 
-            auto* dA = load_ptr_batch(dA_input, blz, a_st_or_of);
-            auto* dB = load_ptr_batch(dB_input, blz, b_st_or_of);
-            auto* dC = load_ptr_batch(dC_input, blz, c_st_or_of);
-            auto* dD = load_ptr_batch(dD_input, blz, d_st_or_of);
+            auto* dA = load_ptr_batch(dA_input, batch, a_st_or_of);
+            auto* dB = load_ptr_batch(dB_input, batch, b_st_or_of);
+            auto* dC = load_ptr_batch(dC_input, batch, c_st_or_of);
+            auto* dD = load_ptr_batch(dD_input, batch, d_st_or_of);
 
             auto tmp = *dD;
             using To = decltype(tmp);
@@ -417,7 +420,7 @@ namespace
             }
 
 #if DEVICE_GRID_YZ_16BIT
-        }
+        } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
     }
 
@@ -457,22 +460,23 @@ namespace
                                 rocblas_stride d_st_or_of,
                                 rocblas_int    batch_count)
     {
-        int     thx = threadIdx.x; // thread's m position in C
-        int     thy = threadIdx.y; // thread's n position in C
-        int64_t idt = int64_t(DIM_M) * thy + thx; // thread's number
-        int     blx = blockIdx.x; // block's m position
-        int     bly = blockIdx.y; // block's n position
-        int     blz = blockIdx.z; // block's matrix in the batch
+        int     thx   = threadIdx.x; // thread's m position in C
+        int     thy   = threadIdx.y; // thread's n position in C
+        int64_t idt   = int64_t(DIM_M) * thy + thx; // thread's number
+        int     blx   = blockIdx.x; // block's m position
+        int     bly   = blockIdx.y; // block's n position
+        int     batch = blockIdx.z; // block's matrix in the batch
 
 #if DEVICE_GRID_YZ_16BIT
-        for(; blz < batch_count; blz += c_YZ_grid_launch_limit)
+        DEVICE_GRID_SETUP
+        do
         {
 #endif
 
-            auto* dA = load_ptr_batch(dA_input, blz, a_st_or_of);
-            auto* dB = load_ptr_batch(dB_input, blz, b_st_or_of);
-            auto* dC = load_ptr_batch(dC_input, blz, c_st_or_of);
-            auto* dD = load_ptr_batch(dD_input, blz, d_st_or_of);
+            auto* dA = load_ptr_batch(dA_input, batch, a_st_or_of);
+            auto* dB = load_ptr_batch(dB_input, batch, b_st_or_of);
+            auto* dC = load_ptr_batch(dC_input, batch, c_st_or_of);
+            auto* dD = load_ptr_batch(dD_input, batch, d_st_or_of);
 
             auto tmp = *dD;
             using To = decltype(tmp);
@@ -588,7 +592,7 @@ namespace
             }
 
 #if DEVICE_GRID_YZ_16BIT
-        }
+        } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
     }
 

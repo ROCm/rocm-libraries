@@ -74,7 +74,8 @@ rocblas_dot_kernel_inc1(rocblas_int n,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
         const auto* x = load_ptr_batch(xa, batch, shiftx, stridex);
@@ -97,7 +98,7 @@ rocblas_dot_kernel_inc1(rocblas_int n,
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -118,7 +119,8 @@ rocblas_dot_kernel_inc1by2(rocblas_int n,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -167,7 +169,7 @@ rocblas_dot_kernel_inc1by2(rocblas_int n,
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -197,7 +199,8 @@ rocblas_dot_kernel(rocblas_int n,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -221,7 +224,7 @@ rocblas_dot_kernel(rocblas_int n,
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -240,7 +243,7 @@ rocblas_dot_kernel_gfx942_float_double(rocblas_int n,
                                        T* __restrict__ out)
 {
 // gfx942 kernels
-#if defined(__gfx942__)
+#if defined(__SPIRV__) || defined(__gfx942__)
     int         i = blockIdx.x * NB + threadIdx.x;
     const auto* x = load_ptr_batch(xa, blockIdx.z, shiftx, stridex);
     const auto* y = load_ptr_batch(ya, blockIdx.z, shifty, stridey);
@@ -295,7 +298,8 @@ rocblas_dot_kernel_magsq(rocblas_int n,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -318,7 +322,7 @@ rocblas_dot_kernel_magsq(rocblas_int n,
         rocblas_dot_save_sum<ONE_BLOCK>(sum, batch, workspace, out);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 

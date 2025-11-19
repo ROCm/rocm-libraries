@@ -50,7 +50,8 @@ rocblas_axpy_kernel(rocblas_int    n,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
@@ -66,7 +67,7 @@ rocblas_axpy_kernel(rocblas_int    n,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -92,7 +93,8 @@ rocblas_saxpy_2_kernel(rocblas_int    n,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -119,7 +121,7 @@ rocblas_saxpy_2_kernel(rocblas_int    n,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -156,7 +158,8 @@ rocblas_axpy_kernel_batched(rocblas_int    n,
         int64_t iy = tid * incy;
 
 #if DEVICE_GRID_YZ_16BIT
-        for(; batch < batch_count; batch += gridDim.z * DIM_Y * 4)
+        // note non-standard looping for batch so no DEVICE_GRID_SETUP
+        do
         {
 #endif
 
@@ -178,7 +181,7 @@ rocblas_axpy_kernel_batched(rocblas_int    n,
             }
 
 #if DEVICE_GRID_YZ_16BIT
-        }
+        } while((batch += gridDim.z * DIM_Y * 4) < batch_count);
 #endif
     }
 }
@@ -204,7 +207,8 @@ rocblas_haxpy_mod_8_kernel(rocblas_int    n_mod_8,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -220,7 +224,7 @@ rocblas_haxpy_mod_8_kernel(rocblas_int    n_mod_8,
         }
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -244,7 +248,8 @@ rocblas_haxpy_mlt_8_kernel(rocblas_int    n_mlt_8,
 
     uint32_t batch = blockIdx.z;
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -311,7 +316,7 @@ rocblas_haxpy_mlt_8_kernel(rocblas_int    n_mlt_8,
             }
         }
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 

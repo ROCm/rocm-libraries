@@ -69,7 +69,8 @@ rocblas_hpr_kernel(bool           is_upper,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
         const auto* x  = load_ptr_batch(xa, batch, shift_x, stride_x);
@@ -78,7 +79,7 @@ rocblas_hpr_kernel(bool           is_upper,
         rocblas_hpr_kernel_calc<DIM_X, DIM_Y, N_TX>(is_upper, n, alpha, x, incx, AP);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 

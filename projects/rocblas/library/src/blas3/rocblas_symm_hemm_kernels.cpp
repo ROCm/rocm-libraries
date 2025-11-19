@@ -75,13 +75,14 @@ rocblas_symm_scale_kernel(rocblas_int    m,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
         auto C = load_ptr_batch(CP_array, batch, shift_c, stride_c);
         rocblas_symm_scale_device<DIM_X, DIM_Y>(m, n, beta, C, ldc);
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
@@ -256,7 +257,8 @@ rocblas_symm_hemm_kernel(bool           is_upper,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -270,7 +272,7 @@ rocblas_symm_hemm_kernel(bool           is_upper,
             is_upper, m, n, alpha, A, lda, B, ldb, C, ldc);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 

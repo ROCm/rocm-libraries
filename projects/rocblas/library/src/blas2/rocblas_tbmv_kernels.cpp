@@ -275,7 +275,8 @@ rocblas_tbmvx_kernel(rocblas_operation transA,
     uint32_t batch = blockIdx.z;
 
 #if DEVICE_GRID_YZ_16BIT
-    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    DEVICE_GRID_SETUP
+    do
     {
 #endif
 
@@ -287,7 +288,7 @@ rocblas_tbmvx_kernel(rocblas_operation transA,
             transA, is_upper, is_unit_diag, n, k, A, lda, w_x_copy, x, incx);
 
 #if DEVICE_GRID_YZ_16BIT
-    }
+    } while((batch += dc_YZ_grid_launch_limit) < batch_count);
 #endif
 }
 
