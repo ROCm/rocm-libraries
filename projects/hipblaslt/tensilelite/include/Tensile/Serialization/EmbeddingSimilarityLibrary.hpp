@@ -198,11 +198,11 @@ namespace TensileLite
                         "ERROR: EmbeddingSimilarity library solution embeddings size "
                         "does not match the network output size.");
 
-                if(lib.encoder->network.proj_weights[0].size() != 13)
+                if(lib.encoder->network.weights[0].size() != (13 * lib.encoder->network.bias[0].size()))
                 {
                     throw std::runtime_error(
                         "ERROR: EmbeddingSimilarity network input size ("
-                        + std::to_string(lib.encoder->network.proj_weights[0].size())
+                        + std::to_string((int) (lib.encoder->network.weights[0].size() / lib.encoder->network.bias[0].size()))
                         + ") does not match the input vector size (13)");
                 }
             }
