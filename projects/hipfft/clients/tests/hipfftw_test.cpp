@@ -2498,20 +2498,29 @@ namespace
         if(helper.get_rank() == 3 && is_complex(dft_kind) && !helper.is_using_default_strides())
         {
             // rocfft can't create some plans with non-default strides for lengths
-            // AxBxC wherein B, C are in
-            const std::vector<std::array<ptrdiff_t, 2>> symptomatic_sub_len
-                = {{16, 4},  {4, 16},  {16, 16}, {27, 4}, {4, 27},  {25, 4},  {4, 25},
-                   {16, 25}, {25, 16}, {25, 25}, {8, 9},  {9, 8},   {8, 4},   {4, 8},
-                   {8, 8},   {4, 9},   {9, 4},   {4, 4},  {20, 10}, {10, 20}, {27, 27}};
-            // (Note: failing lengths usually have a value of A involving a prime factor > 17.
-            // See adhoc tokens in rocfft's disabled suite of adhoc accuracy tests)
-            ret = ret
-                  || std::any_of(symptomatic_sub_len.begin(),
-                                 symptomatic_sub_len.end(),
-                                 [&](const std::array<ptrdiff_t, 2>& sub_len) {
-                                     return std::equal(
-                                         sub_len.begin(), sub_len.end(), len.begin() + 1);
-                                 });
+            // AxBxC wherein the two lengths of smallest input or output strides are in
+            const std::vector<std::vector<ptrdiff_t>> symptomatic_sub_len
+                = {{16, 4},  {4, 16},  {16, 16}, {27, 4},  {4, 27},  {25, 4},  {4, 25},
+                   {16, 25}, {25, 16}, {25, 25}, {8, 9},   {9, 8},   {8, 4},   {4, 8},
+                   {8, 8},   {4, 9},   {9, 4},   {4, 4},   {20, 10}, {10, 20}, {27, 27},
+                   {32, 9},  {9, 32},  {32, 4},  {4, 32},  {32, 8},  {8, 32},  {27, 9},
+                   {9, 27},  {16, 9},  {9, 16},  {25, 32}, {32, 25}, {9, 9},   {25, 9},
+                   {9, 25},  {16, 8},  {8, 16},  {16, 32}, {32, 16}, {25, 8},  {8, 25}};
+            // (Note: failing lengths usually have a value of length involving a prime factor > 17
+            // along the slowest dimension.  See adhoc tokens in rocfft's disabled suite of adhoc
+            // accuracy tests)
+            for(auto io : {fft_io::fft_io_in, fft_io::fft_io_out})
+            {
+                const auto& strides = helper.get_strides(io);
+                // get the sub-lengths corresponding of the fastest-varying dimensions
+                auto sub_len = len;
+                sub_len.erase(sub_len.begin()
+                              + std::distance(strides.begin(),
+                                              std::max_element(strides.begin(), strides.end())));
+                ret = ret
+                      || std::find(symptomatic_sub_len.begin(), symptomatic_sub_len.end(), sub_len)
+                             != symptomatic_sub_len.end();
+            }
         }
         if(helper.get_rank() > 1 && is_real(dft_kind) && !helper.is_using_default_strides())
         {
@@ -2521,25 +2530,10 @@ namespace
             // - 3D size Ax1xB
             ret = ret || (helper.get_rank() == 3 && len[1] == 1);
             // - 2D sizes in the following set
-            const std::vector<std::vector<ptrdiff_t>> symptomatic_real_lengths = {{25, 8},
-                                                                                  {9, 54},
-                                                                                  {81, 18},
-                                                                                  {25, 16},
-                                                                                  {8, 18},
-                                                                                  {64, 8},
-                                                                                  {64, 16},
-                                                                                  {27, 16},
-                                                                                  {25, 32},
-                                                                                  {9, 16},
-                                                                                  {8, 8},
-                                                                                  {9, 32},
-                                                                                  {20, 20},
-                                                                                  {16, 8},
-                                                                                  {32, 8},
-                                                                                  {81, 64},
-                                                                                  {16, 16},
-                                                                                  {4, 18},
-                                                                                  {9, 8}};
+            const std::vector<std::vector<ptrdiff_t>> symptomatic_real_lengths
+                = {{25, 8},  {9, 54},  {81, 18}, {25, 16}, {8, 18}, {64, 8},  {64, 16},
+                   {27, 16}, {25, 32}, {9, 16},  {8, 8},   {9, 32}, {20, 20}, {16, 8},
+                   {32, 8},  {81, 64}, {16, 16}, {4, 18},  {9, 8},  {32, 18}};
 
             ret = ret
                   || std::any_of(symptomatic_real_lengths.begin(),

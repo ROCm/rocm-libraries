@@ -492,6 +492,7 @@ const auto adhoc_nondefault_layout_real_tokens = {
     "real_inverse_len_16_16_single_ip_batch_6600_istride_19_1_HI_ostride_38_1_R_idist_798_odist_1596_ioffset_0_0_ooffset_0_0",
     "real_inverse_len_4_18_double_ip_batch_7484_istride_64_1_HI_ostride_128_1_R_idist_8192_odist_16384_ioffset_0_0_ooffset_0_0",
     "real_inverse_len_9_8_double_ip_batch_6908_istride_7_1_HI_ostride_14_1_R_idist_462_odist_924_ioffset_0_0_ooffset_0_0",
+    "real_inverse_len_32_18_double_ip_batch_7083_istride_15_1_HI_ostride_30_1_R_idist_915_odist_1830_ioffset_0_0_ooffset_0_0",
     // plan can be created but inaccurate results are produced:
     "real_forward_len_486_double_op_batch_7014_istride_7014_R_ostride_7014_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0_flags_64",
     "real_forward_len_486_double_op_batch_910_istride_910_R_ostride_910_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
