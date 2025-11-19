@@ -287,8 +287,8 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                     hwidx = (k + (lid << 2)) - (nidx * mio_bn_config::hw);
                     index = nidx * mio_bn_config::chw + chwid + hwidx;
                     read4 = *(reinterpret_cast<const fp_type4*>(in + index));
-                    miopen::batchnorm::_accumulate4(mean, read4);
-                    miopen::batchnorm::_accumulate_mad4(variance, read4, read4, variance);
+                    miopen::batchnorm::_accumulate(mean, read4);
+                    miopen::batchnorm::_accumulate_mad(variance, read4, read4);
                 }
             }};
 
@@ -306,8 +306,8 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                 if(index < (mio_bn_config::nchw - 3))
                 {
                     read4 = *(reinterpret_cast<const fp_type4*>(in + index));
-                    miopen::batchnorm::_accumulate4(mean, read4);
-                    miopen::batchnorm::_accumulate_mad4(variance, read4, read4, variance);
+                    miopen::batchnorm::_accumulate(mean, read4);
+                    miopen::batchnorm::_accumulate_mad(variance, read4, read4);
                 }
             }
         }
@@ -685,22 +685,6 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
                 xgrp_id,
                 xlid,
                 xstride);
-            auto meanAddr   = getStashIndex(0,
-                                          zgrp_sz * zgrp_id * MIO_BN_N_ELEMENTS,
-                                          ygrp_sz * ygrp_id * mio_bn_config::vec_size_y,
-                                          ystride / mio_bn_config::vec_size_x,
-                                          xgrp_sz,
-                                          xgrp_id,
-                                          xlid,
-                                          xstride);
-            auto invVarAddr = getStashIndex(1,
-                                            zgrp_sz * zgrp_id * MIO_BN_N_ELEMENTS,
-                                            ygrp_sz * ygrp_id * mio_bn_config::vec_size_y,
-                                            ystride / mio_bn_config::vec_size_x,
-                                            xgrp_sz,
-                                            xgrp_id,
-                                            xlid,
-                                            xstride);
         }
         __syncthreads();
 
@@ -832,7 +816,7 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
 
         variance    = miopen::fma(-mean, mean, variance);
         variance    = miopen::max(variance, cast<FpPrecType_C>(0.));
-        invVariance = miopen::rsqrt(variance + miopen::fill<FpPrecType_C>(epsilon));
+        invVariance = miopen::rsqrt(variance + cast<FpPrecType_C>(epsilon));
 
         for(unsigned int zoffset = zlid; zoffset < MIO_BN_NGRPS2; zoffset += zgrp_sz)
         {
@@ -887,8 +871,8 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
 
         unsigned int index;
 
-        FpPrecType_C mean     = miopen::fill<FpPrecType_C>(0.);
-        FpPrecType_C variance = miopen::fill<FpPrecType_C>(0.);
+        FpPrecType_C mean     = cast<FpPrecType_C>(0.);
+        FpPrecType_C variance = cast<FpPrecType_C>(0.);
         FpPrecLsType value;
 
         if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
@@ -906,16 +890,8 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
                 read4 = *((const FpLsType*)(in + index));
                 value = cast<FpPrecLsType>(read4);
 
-                if constexpr(mio_bn_config::vectorize && mio_config::layout_nhwc)
-                {
-                    miopen::batchnorm::_accumulate1(mean, value);
-                    miopen::batchnorm::_accumulate_mad1(variance, value, value, variance);
-                }
-                else
-                {
-                    miopen::batchnorm::_accumulate(mean, value);
-                    miopen::batchnorm::_accumulate_mad(variance, value, value, variance);
-                }
+                miopen::batchnorm::_accumulate(mean, value);
+                miopen::batchnorm::_accumulate_mad(variance, value, value);
             }
         }
 
@@ -925,7 +901,7 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
             __shared__ FpAccumCType lcl_data[2 * mio_bn_config::lds_size];
             miopen::reduction::lds_reduce2_2d(mean,
                                               variance,
-                                              miopen::fill<FpAccumType>(1.0),
+                                              cast<FpAccumType>(1.0),
                                               lcl_data,
                                               xgrp_sz,
                                               xlid,
@@ -938,7 +914,7 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
             __shared__ FpAccumCType lcl_data_y[mio_bn_config::lds_gcn_size];
             miopen::reduction::gcn_reduce2(mean,
                                            variance,
-                                           miopen::fill<FpAccumType>(1.0),
+                                           cast<FpAccumType>(1.0),
                                            lcl_data_x,
                                            lcl_data_y,
                                            ylid + zlid * ygrp_sz);

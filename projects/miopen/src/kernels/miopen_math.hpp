@@ -355,4 +355,73 @@ __forceinline__ __device__ FpVecType max(FpVecType x, FpVecType y)
     return fmax(x, y);
 }
 
+template <typename FpVecType>
+__forceinline__ __device__ FpVecType tanh(FpVecType x)
+{
+    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    if constexpr(VecSize == 4)
+    {
+        FpVecType out;
+        out.x = detail::tanh(x.x);
+        out.y = detail::tanh(x.y);
+        out.z = detail::tanh(x.z);
+        out.w = detail::tanh(x.w);
+        return out;
+    }
+    else if constexpr(VecSize == 1)
+    {
+        return detail::tanh(x);
+    }
+    else
+    {
+        static_assert(false, "Unsupported miopen vector operation.");
+    }
+}
+
+template <typename FpVecType>
+__forceinline__ __device__ FpVecType pow(FpVecType x)
+{
+    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    if constexpr(VecSize == 4)
+    {
+        FpVecType out;
+        out.x = detail::pow(x.x);
+        out.y = detail::pow(x.y);
+        out.z = detail::pow(x.z);
+        out.w = detail::pow(x.w);
+        return out;
+    }
+    else if constexpr(VecSize == 1)
+    {
+        return detail::pow(x);
+    }
+    else
+    {
+        static_assert(false, "Unsupported miopen vector operation.");
+    }
+}
+
+template <typename FpVecType>
+__forceinline__ __device__ FpVecType fabs(FpVecType x)
+{
+    constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
+    if constexpr(VecSize == 4)
+    {
+        FpVecType out;
+        out.x = detail::fabs(x.x);
+        out.y = detail::fabs(x.y);
+        out.z = detail::fabs(x.z);
+        out.w = detail::fabs(x.w);
+        return out;
+    }
+    else if constexpr(VecSize == 1)
+    {
+        return detail::fabs(x);
+    }
+    else
+    {
+        static_assert(false, "Unsupported miopen vector operation.");
+    }
+}
+
 } // namespace miopen
