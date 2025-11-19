@@ -910,11 +910,11 @@ double compute_tile_latency(const problem_t& problem,
 
 // Computes the latency per K-complete MT wave
 // A wave is defined as : The time it takes for one CU to complete one K-complete output tile
-double compute_wave_latency(const problem_t& problem,
-                            const hardware_t& hardware,
-                            const config_t& config,
-                            size_t num_active_cus,
-                            size_t splitting_factor) {
+double compute_timestep_latency(const problem_t& problem,
+                                const hardware_t& hardware,
+                                const config_t& config,
+                                size_t num_active_cus,
+                                size_t splitting_factor) {
   // Assume latency of a wave is latency of a single k-complete output tile.
   double L_wave = compute_tile_latency(problem, hardware, config, num_active_cus, splitting_factor);
 
@@ -1013,7 +1013,8 @@ double compute_total_latency(const problem_t& problem,
 
   // 2) Compute latency of a wave
   // Compute latency of a wave
-  double L_wave = compute_wave_latency(problem, hardware, config, num_active_cus, splitting_factor);
+  double L_wave =
+      compute_timestep_latency(problem, hardware, config, num_active_cus, splitting_factor);
 
   // Compute latency for all waves and return it as the latency for the MT/problem
   double total_latency = L_wave * numWaves;

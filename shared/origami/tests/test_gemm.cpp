@@ -138,7 +138,7 @@ TEST_CASE("GEMM: compute_timestep_latency", "[gemm]") {
       auto config = make_config(128, 128, 64, 32, 32, 8, 8);
 
       auto tile_latency = origami::compute_tile_latency(problem, hardware, config, 304, 4);
-      auto wave_latency = origami::compute_wave_latency(problem, hardware, config, 304, 4);
+      auto wave_latency = origami::compute_timestep_latency(problem, hardware, config, 304, 4);
 
       REQUIRE(wave_latency == Approx(tile_latency));
     }

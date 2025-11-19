@@ -131,11 +131,11 @@ double compute_tile_latency(const problem_t& problem,
  * @param splitting_factor
  * @return double Latency in cycles.
  */
-double compute_wave_latency(const problem_t& problem,
-                            const hardware_t& hardware,
-                            const config_t& config,
-                            std::size_t num_active_cus,
-                            std::size_t splitting_factor);
+double compute_timestep_latency(const problem_t& problem,
+                                const hardware_t& hardware,
+                                const config_t& config,
+                                std::size_t num_active_cus,
+                                std::size_t splitting_factor);
 
 /**
  * @brief Compute the total latency of a gemm based on the latency of one wave multiplied by the

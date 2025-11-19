@@ -137,22 +137,19 @@ std::vector<prediction_result_t> select_config(const problem_t& problem,
         std::stable_sort(results.begin(),
                          results.begin() + num_same_ai,
                          [problem](const prediction_result_t& a, const prediction_result_t& b) {
-                           size_t MT_M_a = a.config.mt.m;
-                           size_t MT_N_a = a.config.mt.n;
-                           size_t MT_M_b = b.config.mt.m;
-                           size_t MT_N_b = b.config.mt.n;
-
                            if (problem.size.m > problem.size.n) {
                              // M-dominant: prefer larger MT_M
-                             if (MT_M_a != MT_M_b) return MT_M_a > MT_M_b;
+                             if (a.config.mt.m != b.config.mt.m)
+                               return a.config.mt.m > b.config.mt.m;
                              // If MT_M is same, prefer larger MT_N as secondary
-                             return MT_N_a > MT_N_b;
+                             return a.config.mt.n > b.config.mt.n;
                            } else  // N > M
                            {
                              // N-dominant: prefer larger MT_N
-                             if (MT_N_a != MT_N_b) return MT_N_a > MT_N_b;
+                             if (a.config.mt.n != b.config.mt.n)
+                               return a.config.mt.n > b.config.mt.n;
                              // If MT_N is same, prefer larger MT_M as secondary
-                             return MT_M_a > MT_M_b;
+                             return a.config.mt.m > b.config.mt.m;
                            }
                          });
       }
@@ -163,36 +160,15 @@ std::vector<prediction_result_t> select_config(const problem_t& problem,
       std::stable_sort(results.begin(),
                        results.begin() + num_same_ai,
                        [](const prediction_result_t& a, const prediction_result_t& b) {
-                         size_t MT_M_a = a.config.mt.m;
-                         size_t MT_N_a = a.config.mt.n;
-                         size_t MT_K_a = a.config.mt.k;
-                         size_t MT_M_b = b.config.mt.m;
-                         size_t MT_N_b = b.config.mt.n;
-                         size_t MT_K_b = b.config.mt.k;
-
                          // Prefer larger MT_M first
-                         if (MT_M_a != MT_M_b) return MT_M_a > MT_M_b;
+                         if (a.config.mt.m != b.config.mt.m) return a.config.mt.m > b.config.mt.m;
                          // If MT_M is same, prefer larger MT_N
-                         if (MT_N_a != MT_N_b) return MT_N_a > MT_N_b;
+                         if (a.config.mt.n != b.config.mt.n) return a.config.mt.n > b.config.mt.n;
                          // If both MT_M and MT_N are same, prefer larger MT_K
-                         return MT_K_a > MT_K_b;
+                         return a.config.mt.k > b.config.mt.k;
                        });
     }
   }
-
-  if (hardware_t::is_debug_enabled()) {
-    for (const auto& tile : results) {
-      std::cout << problem.size.m << "x" << problem.size.n << "x" << problem.size.k
-                << "Selected Macro-Tile: Latency=" << tile.latency << ", MT_M=" << tile.config.mt.m
-                << ", MT_N=" << tile.config.mt.n << ", MT_K=" << tile.config.mt.k
-                << ", MI_M=" << tile.config.mi.m << ", MI_N=" << tile.config.mi.n
-                << ", MI_K=" << tile.config.mi.k << ", Occupancy=" << tile.config.occupancy
-                << ", WGM=" << tile.config.workgroup_mapping
-                << ", NonTemporalA=" << tile.config.non_temporal_a
-                << ", NonTemporalB=" << tile.config.non_temporal_b << "\n";
-    }
-  }
-
   return results;
 }
 
