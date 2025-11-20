@@ -2,9 +2,9 @@
 // SPDX-License-Identifier:  MIT
 #pragma once
 
+#include <algorithm>
 #include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/utilities/StringUtil.hpp>
-#include <algorithm>
 #include <numeric>
 #include <ranges>
 #include <stdexcept>
@@ -142,8 +142,10 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
     }
 
     // Attempt to determine between N...C layouts and N...W layouts.
-    auto posFirstMax = static_cast<size_t>(std::distance(strides.begin(), std::max_element(strides.begin(), strides.end())));
-    auto posFirstMin = static_cast<size_t>(std::distance(strides.begin(), std::min_element(strides.begin(), strides.end())));
+    auto posFirstMax = static_cast<size_t>(
+        std::distance(strides.begin(), std::max_element(strides.begin(), strides.end())));
+    auto posFirstMin = static_cast<size_t>(
+        std::distance(strides.begin(), std::min_element(strides.begin(), strides.end())));
 
     if(posFirstMax == 0 && posFirstMin == 1)
     {
@@ -163,15 +165,14 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
     }
 
     // Sort indices by their corresponding stride values (descending; aligns with NC...W layout)
-    std::stable_sort(indices.begin(),
-                     indices.end(),
-                     [&stridesAreUnique, &strides](size_t a, size_t b) mutable {
-        if(strides[a] == strides[b])
-        {
-            stridesAreUnique = false;
-        }
-        return strides[a] > strides[b];
-    });
+    std::stable_sort(
+        indices.begin(), indices.end(), [&stridesAreUnique, &strides](size_t a, size_t b) mutable {
+            if(strides[a] == strides[b])
+            {
+                stridesAreUnique = false;
+            }
+            return strides[a] > strides[b];
+        });
 
     // Assign order based on sorted stride indices from longest strides to shortest.
     for(size_t i = 0; i < numDims; ++i)
@@ -181,8 +182,10 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
 
     if(!stridesAreUnique)
     {
-        HIPDNN_LOG_WARN("extractStrideOrder(): Stride lengths {} are not unique, the deduced stride order {} may not be correct",
-                        vecToString(strides), vecToString(strideOrder));
+        HIPDNN_LOG_WARN("extractStrideOrder(): Stride lengths {} are not unique, the deduced "
+                        "stride order {} may not be correct",
+                        vecToString(strides),
+                        vecToString(strideOrder));
     }
 
     return strideOrder;
