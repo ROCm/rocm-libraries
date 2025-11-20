@@ -147,9 +147,15 @@ TEST(GPU_CheckNumerics_FP32, AbnormalInf)
 }
 
 // Half tests
-TEST(GPU_CheckNumerics_FP16, NormalZero) { TestNormalValue<half_float::half>(half_float::half(0.0f)); }
+TEST(GPU_CheckNumerics_FP16, NormalZero)
+{
+    TestNormalValue<half_float::half>(half_float::half(0.0f));
+}
 
-TEST(GPU_CheckNumerics_FP16, NormalOne) { TestNormalValue<half_float::half>(half_float::half(1.0f)); }
+TEST(GPU_CheckNumerics_FP16, NormalOne)
+{
+    TestNormalValue<half_float::half>(half_float::half(1.0f));
+}
 
 TEST(GPU_CheckNumerics_FP16, AbnormalNaN)
 {
