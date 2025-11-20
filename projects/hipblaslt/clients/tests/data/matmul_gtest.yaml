@@ -136,9 +136,9 @@ Tests:
   category: pre_checkin
   function:
     matmul: *single_precision
+    matmul: *double_precision
   matrix_size: *large_matrix_size_range
-  transA: T
-  transB: N
+  transA_transB: *transA_transB_range
   alpha: 1
   beta: 0
   gpu_arch: '120[0-1]'
