@@ -122,12 +122,16 @@ struct PerfHelper
         // If the file was just created (i.e., its size is 0), write the header.
         if(miopen::fs::file_size(filename) == 0)
         {
-            file << ((kernelTestStats.size() == 1)
-                         ? "KernelAndTestInfo,min_exec_time (ms),max_exec_time (ms),mean_exec_time "
-                           "(ms),median_"
-                           "exec_time (ms),SD_exec_time (ms)\n"
-                         : "KernelAndTestInfo,min_exec_time_ratio,max_exec_time_ratio,mean_exec_"
-                           "time_ratio,median_exec_time_ratio,SD_reference (ms),SD_actual (ms)\n");
+            if(kernelTestStats.size() == 1)
+            {
+                file << "KernelAndTestInfo,min_exec_time (ms),max_exec_time (ms),mean_exec_time "
+                        "(ms),median_exec_time (ms),SD_exec_time (ms)\n";
+            }
+            else
+            {
+                file << "KernelAndTestInfo,min_exec_time_ratio,max_exec_time_ratio,mean_exec_time_"
+                        "ratio,median_exec_time_ratio,SD_reference (ms),SD_actual (ms)\n";
+            }
         }
 
         // if the number of entries in the kernelTestStats vector is not 1 and not even, throw an
