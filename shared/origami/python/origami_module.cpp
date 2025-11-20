@@ -179,7 +179,7 @@ NB_MODULE(origami, m) {
   // GEMM functions
   m.def("compute_total_latency",
         static_cast<double (*)(
-            const origami::problem_t&, const origami::hardware_t&, const origami::config_t&)>(
+            const origami::problem_t&, const origami::hardware_t&, const origami::config_t&, size_t max_cus)>(
             &origami::compute_total_latency),
         "Compute total latency");
 
