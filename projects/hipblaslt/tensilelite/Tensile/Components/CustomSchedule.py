@@ -361,12 +361,16 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
     if isNT(kernel) and useLDSTr and TLDS == 0:
         #index and code pair
         syncTable = [-1, SWaitCnt(dscnt=10, vlcnt=-1, vscnt=-1, comment="for LRB1-0"),
-                      7, SWaitCnt(dscnt=8+7, vlcnt=-1, vscnt=-1, comment="for LRB1-1"),
-                     15, SWaitCnt(dscnt=8+7, vlcnt=-1, vscnt=-1, comment="for LRB1-2"),
+                      7, SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="for LRB1-remaining"),
                      17, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="for GRA"),
                      17, SBarrier(comment="for GRA"),
+                     47, SWaitCnt(dscnt=10, vlcnt=-1, vscnt=-1, comment="for LRB0-0"),
+
                      54, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="wait for previous set of global reads"),
-                     54, SBarrier(comment="for GRB"),]
+                     54, SBarrier(comment="for GRB"),
+                     55, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="for LRB0-1"),
+                     63, SWaitCnt(dscnt=6+8, vlcnt=-1, vscnt=-1, comment="for LRB0-2"),
+                     71, SWaitCnt(dscnt=14, vlcnt=-1, vscnt=-1, comment="for LRB0-remaining"),]
         optSchedule = {
                 'SYNC'  : [syncTable[::2]],
                 'GRIncA': [[0,1,2,3,4,5,6,7,8]],
