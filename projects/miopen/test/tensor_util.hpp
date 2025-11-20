@@ -268,6 +268,7 @@ void print_tensor(const tensor<T>& tensor_val,
     std::cout << "\n=================end=====================\n";
 }
 
+template <typename T>
 size_t getCacheSizeLimit(const std::string& deviceName)
 {
     size_t mb = 0;
@@ -284,7 +285,8 @@ size_t getCacheSizeLimit(const std::string& deviceName)
     else
         mb = 4; // default: twice the available L2 (2MB)
 
-    return (mb * 1024ul * 1024ul); // convert to MiB
+    mb = (mb * 1024ul * 1024ul); // convert to MiB
+    return (mb / sizeof(T)); // number of elements of type T
 }
 
 #endif

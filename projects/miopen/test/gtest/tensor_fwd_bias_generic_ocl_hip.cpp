@@ -98,15 +98,14 @@ std::vector<TensorsConfig> TensorsConfigs()
         {
             // Use 2x L2 as a working-set heuristic
             maxTotalSize = 2ul * static_cast<size_t>(L2_bytes);
+            // Convert bytes -> elements of type T
+            maxTotalSize = maxTotalSize / sizeof(T);
         }
     }
 
     // 2) Fallback table by architecture family (MiB)
     if(maxTotalSize == 0)
         maxTotalSize = getCacheSizeLimit(get_handle().GetDeviceName());
-
-    // Convert bytes -> elements of type T
-    maxTotalSize = maxTotalSize / sizeof(T);
 
     for(int N = 1; N < maxTotalSize; N *= 4)
     {

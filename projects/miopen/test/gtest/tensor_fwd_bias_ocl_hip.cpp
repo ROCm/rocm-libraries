@@ -87,7 +87,7 @@ std::vector<TensorsConfig> TensorsConfigs()
     };
 
 #if PERF_ENABLE
-    size_t maxTotalSize = getCacheSizeLimit(get_handle().GetDeviceName()) / sizeof(T);
+    size_t maxTotalSize = getCacheSizeLimit(get_handle().GetDeviceName());
 
     // Generate all NCHW tensors that are limited by L3 cache size
     // or 2xL2 cache size when L3 is not available
@@ -141,7 +141,7 @@ std::vector<TensorsConfig> TensorsConfigs()
             }
         }
     }
-#endif
+#endif // POW_2
 #else
     size_t N = 1;
     size_t C = 1;
@@ -156,7 +156,7 @@ std::vector<TensorsConfig> TensorsConfigs()
     H = 20;
     W = 20;
     insertTestCase(N, C, H, W);
-#endif
+#endif // PERF_ENABLE
 
     return configs;
 }

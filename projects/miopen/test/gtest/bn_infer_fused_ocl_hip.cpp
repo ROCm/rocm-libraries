@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -159,27 +159,26 @@ void BatchNormFusedInferencGPU(const miopen::Handle& handle,
         estimatedMean,
         estimatedVariance);
 
-    if constexpr(PERF_ENABLE)
+#if PERF_ENABLE
+    // disable the perf test for FP16 as OpenCL FP16 is broken
+    if(xDesc.GetType() != miopenHalf)
     {
-        // disable the perf test for FP16 as OpenCL FP16 is broken
-        if(xDesc.GetType() != miopenHalf)
-        {
-            perf_helper.perfTest(handle,
-                                 kernel_name,
-                                 network_config,
-                                 use_hip,
-                                 static_cast<float>(activ_alpha),
-                                 static_cast<float>(activ_beta),
-                                 static_cast<float>(activ_gamma),
-                                 static_cast<double>(epsilon),
-                                 x,
-                                 y,
-                                 bnBias,
-                                 bnScale,
-                                 estimatedMean,
-                                 estimatedVariance);
+        perf_helper.perfTest(handle,
+                             kernel_name,
+                             network_config,
+                             use_hip,
+                             static_cast<float>(activ_alpha),
+                             static_cast<float>(activ_beta),
+                             static_cast<float>(activ_gamma),
+                             static_cast<double>(epsilon),
+                             x,
+                             y,
+                             bnBias,
+                             bnScale,
+                             estimatedMean,
+                             estimatedVariance);
         }
-    }
+#endif
 }
 
 template <typename XDataType,
@@ -299,36 +298,35 @@ protected:
 
     void TearDown() override
     {
-        if constexpr(PERF_ENABLE)
-        {
-            // get the input tensor size and store in a string with x in between
-            std::vector<size_t> in_dims = bn_config.GetInput();
-            std::string kernel_info     = std::to_string(in_dims[0]) + "x" +
+#if PERF_ENABLE
+        // get the input tensor size and store in a string with x in between
+        std::vector<size_t> in_dims = bn_config.GetInput();
+        std::string kernel_info     = std::to_string(in_dims[0]) + "x" +
                                       std::to_string(in_dims[1]) + "x" +
                                       std::to_string(in_dims[2]) + "x" + std::to_string(in_dims[3]);
 
-            std::unordered_map<miopenActivationMode_t, std::string> activation_map = {
-                {miopenActivationPASTHRU, "pasthru"},
-                {miopenActivationLOGISTIC, "logistic"},
-                {miopenActivationTANH, "tanh"},
-                {miopenActivationRELU, "relu"},
-                {miopenActivationSOFTRELU, "softrelu"},
-                {miopenActivationABS, "abs"},
-                {miopenActivationPOWER, "power"},
-                {miopenActivationCLIPPEDRELU, "clippedrelu"},
-                {miopenActivationLEAKYRELU, "leakyrelu"},
-                {miopenActivationELU, "elu"}};
+        std::unordered_map<miopenActivationMode_t, std::string> activation_map = {
+            {miopenActivationPASTHRU, "pasthru"},
+            {miopenActivationLOGISTIC, "logistic"},
+            {miopenActivationTANH, "tanh"},
+            {miopenActivationRELU, "relu"},
+            {miopenActivationSOFTRELU, "softrelu"},
+            {miopenActivationABS, "abs"},
+            {miopenActivationPOWER, "power"},
+            {miopenActivationCLIPPEDRELU, "clippedrelu"},
+            {miopenActivationLEAKYRELU, "leakyrelu"},
+            {miopenActivationELU, "elu"}};
 
-            auto it = activation_map.find(activ_mode);
-            if(it != activation_map.end())
-            {
-                kernel_info += "_" + it->second;
-            }
-
-            perf_helper.writeStatsToCSV(sPerfTestFilename,
-                                        "_" + kernel_info + "_" +
-                                            (input.desc.GetType() == miopenHalf ? "FP16" : "FP32"));
+        auto it = activation_map.find(activ_mode);
+        if(it != activation_map.end())
+        {
+            kernel_info += "_" + it->second;
         }
+
+        perf_helper.writeStatsToCSV(sPerfTestFilename,
+                                    "_" + kernel_info + "_" +
+                                        (input.desc.GetType() == miopenHalf ? "FP16" : "FP32"));
+#endif
     }
 
     BNTestCase bn_config;      // Holds the test configuration
@@ -402,56 +400,51 @@ std::vector<miopenActivationMode_t> ActivationConfigs()
 template <typename T>
 std::vector<BNTestCase> BNFusedInferTestConfigs(miopenBatchNormMode_t mode)
 {
-    if constexpr(PERF_ENABLE)
-    {
-        std::vector<BNTestCase> configs;
-        const std::string deviceName = get_handle().GetDeviceName();
-        size_t maxTotalSize          = getCacheSizeLimit(deviceName) / sizeof(T);
+#if PERF_ENABLE
+    std::vector<BNTestCase> configs;
+    size_t maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
 
-        for(size_t N = 1; N <= maxTotalSize; N *= 2)
+    for(size_t N = 1; N <= maxTotalSize; N *= 2)
+    {
+        for(size_t C = 1; C <= maxTotalSize / N; C *= 2)
         {
-            for(size_t C = 1; C <= maxTotalSize / N; C *= 2)
+            for(size_t H = 1; H <= maxTotalSize / (N * C); H *= 2)
             {
-                for(size_t H = 1; H <= maxTotalSize / (N * C); H *= 2)
+                for(size_t W = 1; W <= maxTotalSize / (N * C * H); W *= 2)
                 {
-                    for(size_t W = 1; W <= maxTotalSize / (N * C * H); W *= 2)
+                    size_t totalSize = N * C * H * W;
+                    // Ensure the total size does not exceed the maximum limit
+                    if(totalSize <= maxTotalSize)
                     {
-                        size_t totalSize = N * C * H * W;
-                        // Ensure the total size does not exceed the maximum limit
-                        if(totalSize <= maxTotalSize)
-                        {
-                            configs.push_back({N,
-                                               C,
-                                               H,
-                                               W,
-                                               mode,
-                                               miopen::batchnorm::Direction::ForwardInference,
-                                               0,
-                                               0});
-                        }
+                        configs.push_back({N,
+                                           C,
+                                           H,
+                                           W,
+                                           mode,
+                                           miopen::batchnorm::Direction::ForwardInference,
+                                           0,
+                                           0});
                     }
                 }
             }
         }
 
         return configs;
-    }
-    else
-    {
-        // clang-format off
-        return {
-            {64, 128, 56, 56, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 2048, 7, 7, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 256, 14, 14, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 256, 28, 28, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 256, 56, 56, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 512, 14, 14, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 512, 28, 28, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 512, 7, 7, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 64, 112, 112, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
-            {64, 64, 56, 56, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0}};
-        // clang-format on
-    }
+#else
+    // clang-format off
+    return {
+        {64, 128, 56, 56, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+        {64, 2048, 7, 7, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+        {64, 256, 14, 14, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+        {64, 256, 28, 28, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+        {64, 256, 56, 56, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+        {64, 512, 14, 14, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+        {64, 512, 28, 28, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+        {64, 512, 7, 7, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+        {64, 64, 112, 112, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0},
+        {64, 64, 56, 56, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0}};
+    // clang-format on
+#endif
 }
 
 TEST_P(GPU_bn_infer_fused_spatial_FP32, PortTest)
