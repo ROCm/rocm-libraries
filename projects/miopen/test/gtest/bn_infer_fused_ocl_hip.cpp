@@ -177,7 +177,7 @@ void BatchNormFusedInferencGPU(const miopen::Handle& handle,
                              bnScale,
                              estimatedMean,
                              estimatedVariance);
-        }
+    }
 #endif
 }
 
@@ -301,9 +301,9 @@ protected:
 #if PERF_ENABLE
         // get the input tensor size and store in a string with x in between
         std::vector<size_t> in_dims = bn_config.GetInput();
-        std::string kernel_info     = std::to_string(in_dims[0]) + "x" +
-                                      std::to_string(in_dims[1]) + "x" +
-                                      std::to_string(in_dims[2]) + "x" + std::to_string(in_dims[3]);
+        std::string kernel_info = std::to_string(in_dims[0]) + "x" + std::to_string(in_dims[1]) +
+                                  "x" + std::to_string(in_dims[2]) + "x" +
+                                  std::to_string(in_dims[3]);
 
         std::unordered_map<miopenActivationMode_t, std::string> activation_map = {
             {miopenActivationPASTHRU, "pasthru"},
@@ -445,71 +445,71 @@ std::vector<BNTestCase> BNFusedInferTestConfigs(miopenBatchNormMode_t mode)
         {64, 64, 56, 56, mode, miopen::batchnorm::Direction::ForwardInference, 1, 0}};
     // clang-format on
 #endif
-}
+    }
 
-TEST_P(GPU_bn_infer_fused_spatial_FP32, PortTest)
-{
-    // Run the OpenCL reference
-    RunTestGPU(false);
-    // Optionally use the CPU output as reference, might have to tweak the tolerance
-    // RunTestCPU();
-    // Run the HIP implementation
-    RunTestGPU(true);
-    // Compare the outputs, we expect the outputs to be exactly the same
-    Verify();
-};
+    TEST_P(GPU_bn_infer_fused_spatial_FP32, PortTest)
+    {
+        // Run the OpenCL reference
+        RunTestGPU(false);
+        // Optionally use the CPU output as reference, might have to tweak the tolerance
+        // RunTestCPU();
+        // Run the HIP implementation
+        RunTestGPU(true);
+        // Compare the outputs, we expect the outputs to be exactly the same
+        Verify();
+    };
 
-TEST_P(GPU_bn_infer_fused_per_act_FP32, PortTest)
-{
-    // Run the OpenCL reference
-    RunTestGPU(false);
-    // Optionally use the CPU output as reference, might have to tweak the tolerance
-    // RunTestCPU();
-    // Run the HIP implementation
-    RunTestGPU(true);
-    // Compare the outputs, we expect the outputs to be exactly the same
-    Verify();
-};
+    TEST_P(GPU_bn_infer_fused_per_act_FP32, PortTest)
+    {
+        // Run the OpenCL reference
+        RunTestGPU(false);
+        // Optionally use the CPU output as reference, might have to tweak the tolerance
+        // RunTestCPU();
+        // Run the HIP implementation
+        RunTestGPU(true);
+        // Compare the outputs, we expect the outputs to be exactly the same
+        Verify();
+    };
 
-TEST_P(GPU_bn_infer_fused_spatial_FP16, PortTest)
-{
-    // Run the CPU reference FP16 is broken in OpenCL
-    RunTestCPU();
-    // Run the HIP implementation
-    RunTestGPU(true);
-    // Compare the outputs.
-    Verify();
-};
+    TEST_P(GPU_bn_infer_fused_spatial_FP16, PortTest)
+    {
+        // Run the CPU reference FP16 is broken in OpenCL
+        RunTestCPU();
+        // Run the HIP implementation
+        RunTestGPU(true);
+        // Compare the outputs.
+        Verify();
+    };
 
-TEST_P(GPU_bn_infer_fused_per_act_FP16, PortTest)
-{
-    // Run the CPU reference FP16 is broken in OpenCL
-    RunTestCPU();
-    // Run the HIP implementation
-    RunTestGPU(true);
-    // Compare the outputs.
-    Verify();
-};
+    TEST_P(GPU_bn_infer_fused_per_act_FP16, PortTest)
+    {
+        // Run the CPU reference FP16 is broken in OpenCL
+        RunTestCPU();
+        // Run the HIP implementation
+        RunTestGPU(true);
+        // Compare the outputs.
+        Verify();
+    };
 
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_infer_fused_spatial_FP32,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                     testing::ValuesIn(BNFusedInferTestConfigs<float>(miopenBNSpatial))));
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_infer_fused_per_act_FP32,
-    testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                     testing::ValuesIn(BNFusedInferTestConfigs<float>(miopenBNPerActivation))));
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_infer_fused_spatial_FP16,
-    testing::Combine(
-        testing::ValuesIn(ActivationConfigs()),
-        testing::ValuesIn(BNFusedInferTestConfigs<half_float::half>(miopenBNSpatial))));
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    GPU_bn_infer_fused_per_act_FP16,
-    testing::Combine(
-        testing::ValuesIn(ActivationConfigs()),
-        testing::ValuesIn(BNFusedInferTestConfigs<half_float::half>(miopenBNPerActivation))));
+    INSTANTIATE_TEST_SUITE_P(
+        Smoke,
+        GPU_bn_infer_fused_spatial_FP32,
+        testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                         testing::ValuesIn(BNFusedInferTestConfigs<float>(miopenBNSpatial))));
+    INSTANTIATE_TEST_SUITE_P(
+        Smoke,
+        GPU_bn_infer_fused_per_act_FP32,
+        testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                         testing::ValuesIn(BNFusedInferTestConfigs<float>(miopenBNPerActivation))));
+    INSTANTIATE_TEST_SUITE_P(
+        Smoke,
+        GPU_bn_infer_fused_spatial_FP16,
+        testing::Combine(
+            testing::ValuesIn(ActivationConfigs()),
+            testing::ValuesIn(BNFusedInferTestConfigs<half_float::half>(miopenBNSpatial))));
+    INSTANTIATE_TEST_SUITE_P(
+        Smoke,
+        GPU_bn_infer_fused_per_act_FP16,
+        testing::Combine(
+            testing::ValuesIn(ActivationConfigs()),
+            testing::ValuesIn(BNFusedInferTestConfigs<half_float::half>(miopenBNPerActivation))));

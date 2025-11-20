@@ -31,8 +31,6 @@
 #include <miopen/stringutils.hpp>
 #include <miopen/filesystem.hpp>
 
-namespace fs = miopen::fs;
-
 // unary operation
 template <class DataOp, typename Container>
 void operate_over_subtensor(DataOp&& dataOp,
@@ -163,7 +161,7 @@ void operate_over_subtensor(DataOp&& dataOp,
 }
 
 template <typename T>
-void output_tensor_to_csv(const tensor<T>& x, const fs::path& filename)
+void output_tensor_to_csv(const tensor<T>& x, const miopen::fs::path& filename)
 {
     int dim = x.desc.GetSize();
     std::vector<int> index(dim);
@@ -192,7 +190,7 @@ void output_tensor_to_csv(const tensor<T>& x, const fs::path& filename)
 }
 
 template <typename T>
-void output_tensor_to_bin(const fs::path& fileName, T* data, size_t dataNumItems)
+void output_tensor_to_bin(const miopen::fs::path& fileName, T* data, size_t dataNumItems)
 {
     std::ofstream outFile(fileName, std::ios::binary);
     if(outFile.is_open())
@@ -286,7 +284,7 @@ size_t getCacheSizeLimit(const std::string& deviceName)
         mb = 4; // default: twice the available L2 (2MB)
 
     mb = (mb * 1024ul * 1024ul); // convert to MiB
-    return (mb / sizeof(T)); // number of elements of type T
+    return (mb / sizeof(T));     // returning number of elements of type T
 }
 
 #endif
