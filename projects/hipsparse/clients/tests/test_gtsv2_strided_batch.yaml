@@ -38,3 +38,9 @@ Tests:
   M: [512]
   batch_count: [512]
 
+- name: gtsv2_strided_batch
+  category: pre_checkin
+  function: gtsv2_strided_batch
+  precision: *single_double_precisions_complex_real
+  M: [100000]
+  batch_count: [10]

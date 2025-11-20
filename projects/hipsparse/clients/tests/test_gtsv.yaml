@@ -38,3 +38,9 @@ Tests:
   M: [512]
   N: [512]
 
+- name: gtsv2
+  category: pre_checkin
+  function: gtsv2
+  precision: *single_double_precisions_complex_real
+  M: [100000]
+  N: [10]
