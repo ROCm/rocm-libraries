@@ -156,82 +156,6 @@ def calculateThreadTileMacroTileWorkGroupParameters(
     return TT0, TT1, MT0, MT1, WG0, WG1
 
 
-def checkMacroTileThreadTileWorkGroupMatches(currentSolution):
-    MIBlock = currentSolution["MIBlock"]
-    MIWaveTile = currentSolution["MIWaveTile"]
-    MIWaveGroup = currentSolution["MIWaveGroup"]
-
-    if MIBlock == "" or MIWaveTile == "" or MIWaveGroup == "":
-        raise RuntimeError(
-            "Length of MIBlock:{0}, MIWaveTile:{1},MIWaveGroup:{2} cannot be empty,Check the library logic file !\n".format(
-                len(MIBlock), len(MIWaveTile), len(MIWaveGroup)
-            )
-        )
-
-    if not currentSolution.keys() & {"WavefrontSize"}:
-        waveFrontSize = 64
-    else:
-        waveFrontSize = int(currentSolution["WavefrontSize"])
-
-    TT0, TT1, MT0, MT1, WG0, WG1 = calculateThreadTileMacroTileWorkGroupParameters(
-        MIBlock, MIWaveTile, MIWaveGroup, waveFrontSize
-    )
-
-    if not currentSolution.keys() & {
-        "MacroTile0",
-        "MacroTile1",
-        "ThreadTile",
-        "WorkGroup",
-        "MatrixInstM",
-        "MatrixInstN",
-    }:
-        raise RuntimeError(
-            "one or more of these fields MacroTile0,MacroTile1,ThreadTile, WorkGroup,MatrixInstM,MatrixInstN is missing in the library logic file!! ..\n"
-        )
-
-    if MT0 != currentSolution["MacroTile0"]:
-        raise RuntimeError(
-            "Macro Tile0 {0} does not match LibLogic value {1}".format(
-                MT0, currentSolution["MacroTile0"]
-            )
-        )
-
-    if MT1 != currentSolution["MacroTile1"]:
-        raise RuntimeError(
-            "Macro Tile1 {0} does not match LibLogic value {1}".format(
-                MT1, currentSolution["MacroTile1"]
-            )
-        )
-
-    if TT0 != int(currentSolution["ThreadTile"][0]):
-        raise RuntimeError(
-            "ThreadTile0 {0} does not match LibLogic value {1}".format(
-                TT0, currentSolution["ThreadTile"][0]
-            )
-        )
-
-    if TT1 != int(currentSolution["ThreadTile"][1]):
-        raise RuntimeError(
-            "ThreadTile1 {0} does not match LibLogic value {1}".format(
-                TT1, currentSolution["ThreadTile"][1]
-            )
-        )
-
-    if WG0 != int(currentSolution["WorkGroup"][0]):
-        raise RuntimeError(
-            "WorkGroup0 {0} does not match LibLogic value {1}\n".format(
-                WG0, currentSolution["WorkGroup"][0]
-            )
-        )
-
-    if WG1 != int(currentSolution["WorkGroup"][1]):
-        raise RuntimeError(
-            "WorkGroup1 {0} does not match LibLogic value {1}".format(
-                WG1, currentSolution["WorkGroup"][1]
-            )
-        )
-
-
 def form9BitMIInst(currentSolutionState):
     MIBlock = currentSolutionState["MIBlock"]
     MIWaveTile = currentSolutionState["MIWaveTile"]
@@ -244,7 +168,7 @@ def form9BitMIInst(currentSolutionState):
             )
         )
 
-    MIBlock1 = [MIBlock[i] for i in (0, 1, 2, 3, 4)]
+    MIBlock1 = MIBlock1[0:5]
 
     MIInstruction9Bits = MIBlock1 + MIWaveTile + MIWaveGroup
 
