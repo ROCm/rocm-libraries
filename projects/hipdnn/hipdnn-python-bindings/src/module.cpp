@@ -11,7 +11,7 @@ void tensor_bindings(nb::module_& m);
 void attributes_bindings(nb::module_& m);
 void types_bindings(nb::module_& m);
 
-NB_MODULE(hipdnn_frontend, m)
+NB_MODULE(hipdnn_frontend_python, m)
 {
     m.doc() = "Python bindings for the hipDNN frontend library";
 

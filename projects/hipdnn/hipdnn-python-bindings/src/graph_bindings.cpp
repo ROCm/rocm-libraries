@@ -49,7 +49,14 @@ void graph_bindings(nb::module_& m)
         .def("set_io_data_type", &graph::Graph::set_io_data_type, nb::rv_policy::reference_internal)
         .def("batchnorm", &graph::Graph::batchnorm)
         .def("batchnorm_backward", &graph::Graph::batchnorm_backward)
-        .def("batchnorm_inference", &graph::Graph::batchnorm_inference)
+        .def("batchnorm_inference",
+             &graph::Graph::batchnorm_inference,
+             nb::arg("x"),
+             nb::arg("mean"),
+             nb::arg("inv_variance"),
+             nb::arg("scale"),
+             nb::arg("bias"),
+             nb::arg("attributes"))
         .def(
             "pointwise",
             nb::overload_cast<std::shared_ptr<graph::TensorAttributes>, graph::PointwiseAttributes>(

@@ -50,20 +50,19 @@ def run_batch_norm_inference():
 
     # Set attributes for batch normalization inference
     bn_attributes = hipdnn.BatchnormInferenceAttributes()
-    bn_attributes.set_name("bn_inference_node")
-    bn_attributes.set_compute_data_type(hipdnn.DataType.FLOAT)
+    #bn_attributes.set_name("bn_inference_node")
+    # Note: compute_data_type is set on the graph, not on the attributes
     
     print("\nBuilding batch normalization operation...")
     # Perform batch normalization inference
-    # Note: The batchnorm_inference method returns the output tensor
-    y = graph.batchnorm_inference(bn_attributes)
+    # The batchnorm_inference method takes all tensors as arguments
+    y = graph.batchnorm_inference(x, mean, inv_variance, scale, bias, bn_attributes)
     
-    # Get the output tensor from the attributes
-    output_tensor = bn_attributes.get_y()
-    if output_tensor:
-        output_tensor.set_name("output")
-        output_tensor.set_output(True)
-        print(f"Output tensor created: uid={output_tensor.get_uid()}")
+    # Mark the output tensor
+    if y:
+        y.set_name("output")
+        y.set_output(True)
+        print(f"Output tensor created: uid={y.get_uid()}")
     
     # Validate the graph
     print("\nValidating graph...")
@@ -74,29 +73,29 @@ def run_batch_norm_inference():
         print(f"✗ Graph validation failed: {validation_result.get_message()}")
         return
 
-    # Check if the graph has duplicate tensor IDs
-    print("\nChecking for duplicate tensor IDs...")
-    duplicate_check = graph.checkNoDuplicateTensorIds()
-    if duplicate_check.is_good():
-        print("✓ No duplicate tensor IDs found")
-    else:
-        print(f"✗ Duplicate tensor IDs detected: {duplicate_check.get_message()}")
+    # # Check if the graph has duplicate tensor IDs
+    # print("\nChecking for duplicate tensor IDs...")
+    # duplicate_check = graph.checkNoDuplicateTensorIds()
+    # if duplicate_check.is_good():
+    #     print("✓ No duplicate tensor IDs found")
+    # else:
+    #     print(f"✗ Duplicate tensor IDs detected: {duplicate_check.get_message()}")
 
-    # Sort the graph topologically
-    print("\nPerforming topological sort...")
-    sort_result = graph.topologicallySortGraph()
-    if sort_result.is_good():
-        print("✓ Graph successfully sorted")
-    else:
-        print(f"✗ Topological sort failed: {sort_result.get_message()}")
+    # # Sort the graph topologically
+    # print("\nPerforming topological sort...")
+    # sort_result = graph.topologicallySortGraph()
+    # if sort_result.is_good():
+    #     print("✓ Graph successfully sorted")
+    # else:
+    #     print(f"✗ Topological sort failed: {sort_result.get_message()}")
 
-    # Build flatbuffer operation graph
-    print("\nBuilding flatbuffer operation graph...")
-    build_result = graph.buildFlatbufferOperationGraph()
-    if build_result.is_good():
-        print("✓ Flatbuffer operation graph built successfully")
-    else:
-        print(f"✗ Failed to build flatbuffer graph: {build_result.get_message()}")
+    # # Build flatbuffer operation graph
+    # print("\nBuilding flatbuffer operation graph...")
+    # build_result = graph.buildFlatbufferOperationGraph()
+    # if build_result.is_good():
+    #     print("✓ Flatbuffer operation graph built successfully")
+    # else:
+    #     print(f"✗ Failed to build flatbuffer graph: {build_result.get_message()}")
 
     # Create execution plans
     print("\nCreating execution plans...")
@@ -122,13 +121,13 @@ def run_batch_norm_inference():
     else:
         print(f"✗ Failed to build plans: {build_plans_result.get_message()}")
 
-    # Get workspace size
-    print("\nQuerying workspace requirements...")
-    workspace_result, workspace_size = graph.get_workspace_size()
-    if workspace_result.is_good():
-        print(f"✓ Workspace size: {workspace_size} bytes")
-    else:
-        print(f"✗ Failed to get workspace size: {workspace_result.get_message()}")
+    # # Get workspace size
+    # print("\nQuerying workspace requirements...")
+    # workspace_result, workspace_size = graph.get_workspace_size()
+    # if workspace_result.is_good():
+    #     print(f"✓ Workspace size: {workspace_size} bytes")
+    # else:
+    #     print(f"✗ Failed to get workspace size: {workspace_result.get_message()}")
 
     print("\n" + "="*50)
     print("Graph construction complete!")

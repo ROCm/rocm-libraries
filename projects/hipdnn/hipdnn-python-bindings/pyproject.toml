@@ -1,25 +1,65 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 [build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = [
+    "scikit-build-core>=0.4.3",
+    "nanobind>=1.8.0",
+    "cmake>=3.18",
+]
+build-backend = "scikit_build_core.build"
 
 [project]
-name = "hipdnn_frontend"
+name = "hipdnn-frontend"
 version = "0.1.0"
-description = "Python bindings for hipDNN frontend"
-authors = [{ name = "Your Name", email = "your.email@example.com" }]
-license = { file = "LICENSE" }
+description = "Python bindings for the hipDNN frontend library"
 readme = "README.md"
-homepage = "https://github.com/yourusername/hipdnn-python-bindings"
-repository = "https://github.com/yourusername/hipdnn-python-bindings"
-keywords = ["hipdnn", "bindings", "python", "nanobind"]
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Advanced Micro Devices, Inc."},
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries",
+]
 
-[tool.setuptools]
-packages = ["hipdnn_frontend"]
-package_dir = { "" = "python" }
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "numpy",
+]
 
-[tool.setuptools.extension]
-modules = ["src/module.cpp", "src/graph_bindings.cpp", "src/tensor_bindings.cpp", "src/attributes_bindings.cpp", "src/types_bindings.cpp"]
+[tool.scikit-build]
+# Specify the CMake source directory
+cmake.source-dir = "."
+# Build directory
+build-dir = "build"
+# Minimum CMake version
+cmake.minimum-version = "3.18"
+# Build type
+cmake.build-type = "Release"
+# Where the Python module will be installed
+wheel.install-dir = "hipdnn_frontend"
+# Package data
+wheel.packages = ["python/hipdnn_frontend"]
 
-[project.dependencies]
-nanobind = "^0.3.0"  # Adjust the version as necessary
-```
+[tool.scikit-build.cmake.define]
+# Pass any additional CMake definitions if needed
+CMAKE_PREFIX_PATH = "/home/AMD/addickin/rocm-libraries/projects/hipdnn/install"
+hip_DIR = "${hip_DIR}"
+hipdnn_frontend_DIR = "${hipdnn_frontend_DIR}"
+hipdnn_backend_DIR = "${hipdnn_backend_DIR}"
+
+[tool.cibuildwheel]
+# Skip building for certain Python versions or platforms if needed
+skip = ["pp*", "cp36-*", "cp37-*"]

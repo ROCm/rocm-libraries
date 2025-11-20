@@ -46,9 +46,15 @@ target_include_directories(hipdnn_frontend_python PRIVATE
     ${HIP_INCLUDE_DIRS}
 )
 
+set_target_properties(hipdnn_frontend_python PROPERTIES
+    INSTALL_RPATH "/home/AMD/addickin/rocm-libraries/projects/hipdnn/build/install/lib"
+    INSTALL_RPATH_USE_LINK_PATH TRUE
+)
+
+
 # Link against hipDNN frontend library if it exists as a separate library
 # Adjust this based on your actual library structure
 target_link_libraries(hipdnn_frontend_python PRIVATE hipdnn_frontend hipdnn_backend hip::host)
 
-# Install the module
-install(TARGETS hipdnn_frontend_python LIBRARY DESTINATION python/hipdnn_frontend)
+# Install the module - scikit-build-core handles the destination
+install(TARGETS hipdnn_frontend_python LIBRARY DESTINATION .)

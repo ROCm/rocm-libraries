@@ -52,10 +52,12 @@ void attributes_bindings(nb::module_& m)
         .def(nb::init<>())
         .def("set_name",
              &graph::BatchnormInferenceAttributes::set_name,
+             nb::arg("name"),
              nb::rv_policy::reference_internal)
         .def("get_name", &graph::BatchnormInferenceAttributes::get_name)
         .def("set_compute_data_type",
              &graph::BatchnormInferenceAttributes::set_compute_data_type,
+             nb::arg("compute_type"),
              nb::rv_policy::reference_internal)
         .def("get_compute_data_type", &graph::BatchnormInferenceAttributes::get_compute_data_type)
         .def("get_x", &graph::BatchnormInferenceAttributes::get_x)
