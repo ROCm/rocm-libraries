@@ -110,7 +110,14 @@ documentation:
   - any-glob-to-any-file:
     - docs/**/*
     - '**/docs/**/*'
-    - '*.md'
+    - '**/*.md'
+    - '**/*.rst'
+    - '**/.readthedocs.yaml'
+
+"ci:docs-only":
+- changed-files:
+  - any-glob-to-all-files:
+    - '{**/*.md,**/*.rst,**/docs/**/*,**/.readthedocs.yaml}'
 
 External CI:
 - changed-files:

@@ -98,9 +98,17 @@ if(NOT USE_CUDA)
   FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_C documentation_examples/*.c)
   FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_F90 documentation_examples/*.f90)
   
-  set(DOCUMENTATION_EXAMPLES ${DOCUMENTATION_EXAMPLES_CPP} ${DOCUMENTATION_EXAMPLES_C} ${DOCUMENTATION_EXAMPLES_F90})
-
-  foreach(file ${DOCUMENTATION_EXAMPLES})
+  foreach(file ${DOCUMENTATION_EXAMPLES_CPP})
       add_hipsparse_example(${file})
   endforeach()
+
+  foreach(file ${DOCUMENTATION_EXAMPLES_C})
+      add_hipsparse_example(${file})
+  endforeach()
+
+  if (NOT WIN32)
+    foreach(file ${DOCUMENTATION_EXAMPLES_F90})
+        add_hipsparse_example(${file})
+    endforeach()
+  endif()
 endif()
