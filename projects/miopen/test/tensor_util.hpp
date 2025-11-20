@@ -30,7 +30,7 @@
 #include "tensor_holder.hpp"
 
 #include <miopen/filesystem.hpp>
-namespace fs = miopen::fs
+namespace fs = miopen::fs;
 
 // unary operation
 template <class DataOp, typename Container>
