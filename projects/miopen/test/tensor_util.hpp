@@ -28,8 +28,9 @@
 #define GUARD_TENSOR_UTIL_HPP
 
 #include "tensor_holder.hpp"
-
+#include <miopen/stringutils.hpp>
 #include <miopen/filesystem.hpp>
+
 namespace fs = miopen::fs;
 
 // unary operation
