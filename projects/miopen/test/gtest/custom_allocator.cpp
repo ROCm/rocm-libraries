@@ -1,153 +1,90 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
+#include "test.hpp"
 #include <miopen/handle.hpp>
 #include <miopen/miopen.h>
 #include <gtest/gtest.h>
-#include <stdexcept>
-
-#include "get_handle.hpp"
+#include <vector>
 
 namespace {
 
-enum class AllocatorTestType
+struct GPU_Allocator_FP32 : public ::testing::TestWithParam<int>
 {
-    TestAllocator,
-    TestNullAllocator,
-    TestDeallocator,
-    TestDeallocator2
-};
+    void SetUp() override { buffer = h.Create(size); }
 
-struct AllocatorTestCase
-{
-    AllocatorTestType test_type;
-};
-
-std::vector<AllocatorTestCase> GetAllocatorTestCases()
-{
-    return {{AllocatorTestType::TestAllocator},
-            {AllocatorTestType::TestNullAllocator},
-            {AllocatorTestType::TestDeallocator},
-            {AllocatorTestType::TestDeallocator2}};
-}
-
-struct GPU_CustomAllocator_FP32 : public ::testing::TestWithParam<AllocatorTestCase>
-{
-    void SetUp() override
-    {
-        auto&& handle = get_handle();
-        buffer        = handle.Create(GPU_CustomAllocator_FP32::size);
-    }
-
-    void TearDown() override
-    {
-        // Reset allocator to default after each test
-        auto&& handle = get_handle();
-        handle.SetAllocator(nullptr, nullptr, nullptr);
-    }
-
+    miopen::Handle h{};
+    static const int size = 42;
     miopen::Allocator::ManageDataPtr buffer;
-    static constexpr int size = 42;
 };
 
-constexpr int GPU_CustomAllocator_FP32::size;
-
-TEST_P(GPU_CustomAllocator_FP32, Test)
+TEST_P(GPU_Allocator_FP32, CustomAllocator)
 {
-    const auto& test_case = this->GetParam();
-    auto&& handle         = get_handle();
-
-    switch(test_case.test_type)
-    {
-    case AllocatorTestType::TestAllocator: {
-        handle.SetAllocator(
-            +[](void*, std::size_t n) -> void* {
-                EXPECT_EQ(n, GPU_CustomAllocator_FP32::size);
-                throw "Called allocator"; // NOLINT
-            },
-            nullptr,
-            nullptr);
-        miopen::Allocator::ManageDataPtr p = nullptr;
-        EXPECT_THROW({ p = handle.Create(GPU_CustomAllocator_FP32::size); }, const char*);
-        break;
-    }
-    case AllocatorTestType::TestNullAllocator: {
-        handle.SetAllocator(
-            +[](void*, std::size_t n) -> void* {
-                EXPECT_EQ(n, GPU_CustomAllocator_FP32::size);
-                return nullptr;
-            },
-            nullptr,
-            nullptr);
-        miopen::Allocator::ManageDataPtr p = nullptr;
-        EXPECT_THROW({ p = handle.Create(GPU_CustomAllocator_FP32::size); }, std::exception);
-        break;
-    }
-    case AllocatorTestType::TestDeallocator: {
-        handle.SetAllocator(
-            +[](void* ctx, std::size_t n) -> void* {
-                EXPECT_EQ(n, GPU_CustomAllocator_FP32::size);
-                return reinterpret_cast<miopen::Allocator::ManageDataPtr*>(ctx)->get();
-            },
-            +[](void* ctx, void* data) {
-                auto b = reinterpret_cast<miopen::Allocator::ManageDataPtr*>(ctx);
-                EXPECT_EQ(data, b->get());
-                *b = nullptr;
-            },
-            &buffer);
-        miopen::Allocator::ManageDataPtr p = handle.Create(GPU_CustomAllocator_FP32::size);
-        EXPECT_EQ(p.get(), buffer.get());
-        p = nullptr;
-        EXPECT_EQ(p, nullptr);
-        EXPECT_EQ(buffer, nullptr);
-        break;
-    }
-    case AllocatorTestType::TestDeallocator2: {
-        handle.SetAllocator(
-            +[](void* ctx, std::size_t n) -> void* {
-                EXPECT_EQ(n, GPU_CustomAllocator_FP32::size);
-                return reinterpret_cast<miopen::Allocator::ManageDataPtr*>(ctx)->get();
-            },
-            +[](void* ctx, void* data) {
-                auto b = reinterpret_cast<miopen::Allocator::ManageDataPtr*>(ctx);
-                EXPECT_EQ(data, b->get());
-            },
-            &buffer);
-        miopen::Allocator::ManageDataPtr p = handle.Create(GPU_CustomAllocator_FP32::size);
-        EXPECT_EQ(p.get(), buffer.get());
-        p = nullptr;
-        EXPECT_EQ(p, nullptr);
-        EXPECT_NE(buffer, nullptr);
-        break;
-    }
-    }
+    h.SetAllocator(
+        +[](void*, std::size_t n) -> void* {
+            EXPECT_EQ(n, size);
+            throw "Called allocator"; // NOLINT
+        },
+        nullptr,
+        nullptr);
+    miopen::Allocator::ManageDataPtr p = nullptr;
+    // NOLINTNEXTLINE (bugprone-assignment-in-if-condition)
+    EXPECT_TRUE(throws([&]() { p = h.Create(size); }));
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_CustomAllocator_FP32,
-                         testing::ValuesIn(GetAllocatorTestCases()));
+TEST_P(GPU_Allocator_FP32, NullAllocator)
+{
+    h.SetAllocator(
+        +[](void*, std::size_t n) -> void* {
+            EXPECT_EQ(n, size);
+            return nullptr;
+        },
+        nullptr,
+        nullptr);
+    miopen::Allocator::ManageDataPtr p = nullptr;
+    // NOLINTNEXTLINE (bugprone-assignment-in-if-condition)
+    EXPECT_TRUE(throws([&]() { p = h.Create(size); }));
+}
+
+TEST_P(GPU_Allocator_FP32, Deallocator)
+{
+    h.SetAllocator(
+        +[](void* ctx, std::size_t n) -> void* {
+            EXPECT_EQ(n, size);
+            return reinterpret_cast<miopen::Allocator::ManageDataPtr*>(ctx)->get();
+        },
+        +[](void* ctx, void* data) {
+            auto b = reinterpret_cast<miopen::Allocator::ManageDataPtr*>(ctx);
+            EXPECT_EQ(data, b->get());
+            *b = nullptr;
+        },
+        &buffer);
+    miopen::Allocator::ManageDataPtr p = h.Create(size);
+    EXPECT_EQ(p.get(), buffer.get());
+    p = nullptr;
+    EXPECT_EQ(p, nullptr);
+    EXPECT_EQ(buffer, nullptr);
+}
+
+TEST_P(GPU_Allocator_FP32, Deallocator2)
+{
+    h.SetAllocator(
+        +[](void* ctx, std::size_t n) -> void* {
+            EXPECT_EQ(n, size);
+            return reinterpret_cast<miopen::Allocator::ManageDataPtr*>(ctx)->get();
+        },
+        +[](void* ctx, void* data) {
+            auto b = reinterpret_cast<miopen::Allocator::ManageDataPtr*>(ctx);
+            EXPECT_EQ(data, b->get());
+        },
+        &buffer);
+    miopen::Allocator::ManageDataPtr p = h.Create(size);
+    EXPECT_EQ(p.get(), buffer.get());
+    p = nullptr;
+    EXPECT_EQ(p, nullptr);
+    EXPECT_NE(buffer, nullptr);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Allocator_FP32, testing::ValuesIn({0}));
 
 } // namespace
