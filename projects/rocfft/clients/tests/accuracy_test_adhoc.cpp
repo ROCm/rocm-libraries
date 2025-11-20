@@ -519,7 +519,7 @@ INSTANTIATE_TEST_SUITE_P(
     accuracy_test::TestName);
 
 INSTANTIATE_TEST_SUITE_P(
-    DISABLED_adhoc_nondefault_layout_real,
+    adhoc_nondefault_layout_real,
     accuracy_test,
     ::testing::ValuesIn(param_generator_token(test_prob, adhoc_nondefault_layout_real_tokens)),
     accuracy_test::TestName);
