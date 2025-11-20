@@ -38,6 +38,8 @@ nanobind_add_module(
     src/tensor_bindings.cpp
     src/attributes_bindings.cpp
     src/types_bindings.cpp
+    src/handle_bindings.cpp
+    src/memory_bindings.cpp
 )
 
 # Include directories

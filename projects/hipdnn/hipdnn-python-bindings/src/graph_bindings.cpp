@@ -26,9 +26,21 @@ void graph_bindings(nb::module_& m)
         .def("checkNoDuplicateTensorIds", &graph::Graph::checkNoDuplicateTensorIds)
         .def("topologicallySortGraph", &graph::Graph::topologicallySortGraph)
         .def("buildFlatbufferOperationGraph", &graph::Graph::buildFlatbufferOperationGraph)
-        // Note: build_operation_graph requires hipdnnHandle_t which is not exposed to Python
-        // Users should use the higher-level methods instead
-        .def("create_execution_plans", &graph::Graph::create_execution_plans)
+        .def(
+            "build_operation_graph",
+            [](graph::Graph& g, nb::object handle) {
+                // Extract handle pointer from Python Handle object
+                auto handlePtr = handle.attr("get")();
+                hipdnnHandle_t rawHandle
+                    = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+                return g.build_operation_graph(rawHandle);
+            },
+            nb::arg("handle"),
+            "Build the operation graph with the given handle")
+        .def("create_execution_plans",
+             &graph::Graph::create_execution_plans,
+             nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+             "Create execution plans with specified heuristic modes")
         .def("check_support", &graph::Graph::check_support)
         .def("build_plans", &graph::Graph::build_plans)
         .def("get_workspace_size",
@@ -37,8 +49,32 @@ void graph_bindings(nb::module_& m)
                  auto result = g.get_workspace_size(workspaceSize);
                  return std::make_pair(result, workspaceSize);
              })
-        // Note: execute methods require hipdnnHandle_t which is not exposed to Python
-        // Users should use a wrapper that manages the handle internally
+        .def(
+            "execute",
+            [](const graph::Graph& g,
+               nb::object handle,
+               std::unordered_map<int64_t, uintptr_t>& variantPack,
+               uintptr_t workspace) {
+                // Extract handle pointer from Python Handle object
+                auto handlePtr = handle.attr("get")();
+                hipdnnHandle_t rawHandle
+                    = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+
+                // Convert Python integer pointers to void*
+                std::unordered_map<int64_t, void*> cppVariantPack;
+                for(const auto& [key, value] : variantPack)
+                {
+                    cppVariantPack[key] = reinterpret_cast<void*>(value);
+                }
+
+                void* workspacePtr = workspace ? reinterpret_cast<void*>(workspace) : nullptr;
+
+                return g.execute(rawHandle, cppVariantPack, workspacePtr);
+            },
+            nb::arg("handle"),
+            nb::arg("variant_pack"),
+            nb::arg("workspace") = 0,
+            "Execute the graph with the given handle, variant pack, and optional workspace")
         .def("set_name", &graph::Graph::set_name, nb::rv_policy::reference_internal)
         .def("set_compute_data_type",
              &graph::Graph::set_compute_data_type,
