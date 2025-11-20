@@ -11,6 +11,7 @@
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/ScopedResource.hpp>
 
+#include "TestPluginConstants.hpp"
 #include "plugin/EnginePlugin.hpp"
 
 using namespace hipdnn_backend;
@@ -33,7 +34,9 @@ TEST(TestGpuEnginePluginManager, LoadPluginsAndExecuteOpGraph)
     SimpleEnginePluginManager pluginManager;
 
     // Create a list of paths to plugins
-    std::set<std::filesystem::path> pluginPaths = {"../lib/test_plugins/" TEST_ENGINE_PLUGIN1_NAME};
+    std::set<std::filesystem::path> pluginPaths
+        = {std::filesystem::path("..") / plugin_constants::getTestPluginDefaultDir()
+           / TEST_ENGINE_PLUGIN1_NAME};
 
     // Load the plugins
     pluginManager.loadPlugins(pluginPaths, HIPDNN_PLUGIN_LOADING_ABSOLUTE);

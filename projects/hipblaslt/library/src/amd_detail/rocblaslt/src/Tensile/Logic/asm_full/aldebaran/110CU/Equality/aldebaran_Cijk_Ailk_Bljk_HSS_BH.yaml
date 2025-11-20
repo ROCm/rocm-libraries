@@ -4987,7 +4987,7 @@
     WaveSeparateGlobalReadB: 0
     WavefrontSize: 64
     WorkGroup: [128, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupReduction: false
     WorkspaceCheck: [48, 0]
     _DepthULds: 64
@@ -5149,7 +5149,7 @@
     WaveSeparateGlobalReadB: 0
     WavefrontSize: 64
     WorkGroup: [128, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupReduction: false
     WorkspaceCheck: [72, 0]
     _DepthULds: 64
@@ -5311,7 +5311,7 @@
     WaveSeparateGlobalReadB: 0
     WavefrontSize: 64
     WorkGroup: [128, 2, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupReduction: false
     WorkspaceCheck: [72, 0]
     _DepthULds: 64
@@ -5473,7 +5473,7 @@
     WaveSeparateGlobalReadB: 1
     WavefrontSize: 64
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupReduction: false
     WorkspaceCheck: [20, 0]
     _DepthULds: 64
@@ -5635,7 +5635,7 @@
     WaveSeparateGlobalReadB: 1
     WavefrontSize: 64
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupReduction: false
     WorkspaceCheck: [20, 0]
     _DepthULds: 64

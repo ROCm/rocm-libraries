@@ -26,6 +26,7 @@
 
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Conditional.hpp>
+#include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
 {

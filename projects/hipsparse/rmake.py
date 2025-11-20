@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Copyright (C) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
+"""Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
 
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
@@ -53,16 +53,11 @@ def parse_args():
                         help='List of additional cmake defines for builds (optional, e.g. CMAKE)')
     parser.add_argument('-v', '--verbose', required=False, default = False, action='store_true',
                         help='Verbose build (optional, default: False)')
-    # hipsparse
-    parser.add_argument(      '--rocm_dev', type=str, required=False, default = "",
-                        help='Set specific rocm-dev version')
-    parser.add_argument(      '--cpu_ref_lib', type=str, required=False, default = "blis",
-                        help='Specify library to use for CPU reference code in testing (blis or lapack)')
+    parser.add_argument('--matrices-dir', dest='matrices_dir', type=str, required=False, default=None,
+                        help='Path to directory containing matrices')
+    # hipsparse    
     parser.add_argument(     '--clients-only', dest='clients_only', required=False, default = False, action='store_true',
                         help='Build only clients with a pre-built library')
-    # rocsparse
-    parser.add_argument('-b', '--rocsparse', dest='rocsparse_version', type=str, required=False, default="",
-                        help='Set a specific rocSPARSE vesrion (optional)')
     parser.add_argument('--rocsparse-path', dest='rocsparse_path', type=str, required=False, default=None,
                         help='Set specific path to custom build rocSPARSE (optional)')
 
@@ -117,10 +112,9 @@ def config_cmd():
     if os.name == "nt":
         generator = f"-G Ninja"
         cmake_options.append( generator )
-        # CMAKE_PREFIX_PATH set to rocm_path and HIP_PATH set BY SDK Installer
-        raw_rocm_path = cmake_path(os.getenv('HIP_PATH', "C:/hip"))
-        rocm_path = f'"{raw_rocm_path}"' # guard against spaces in path
 
+        # CMAKE_PREFIX_PATH set to rocm_path and HIP_PATH set BY SDK Installer
+        rocm_path = cmake_path(os.getenv('HIP_PATH', "C:/hip"))
         #set CPACK_PACKAGING_INSTALL_PREFIX= defined as blank as it is appended to end of path for archive creation
         cmake_platform_opts.append( f"-DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}" )
         toolchain = os.path.join( src_path, "toolchain-windows.cmake" )
@@ -137,7 +131,7 @@ def config_cmd():
 
     cmake_options.extend( cmake_platform_opts )
 
-    cmake_base_options = f"-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH={rocm_path}"
+    cmake_base_options = f"-DROCM_PATH=\"{rocm_path}\" -DCMAKE_PREFIX_PATH:PATH=\"{rocm_path}\""
     cmake_options.append( cmake_base_options )
 
     # packaging options
@@ -181,15 +175,45 @@ def config_cmd():
 
     if args.rocsparse_path is not None:
         # "Custom" rocsparse
-        raw_rocsparse_path = cmake_path(args.rocsparse_path)
-        rocsparse_path_cmake =  f'"{raw_rocsparse_path}"'
-        cmake_options.append( f"-DCUSTOM_ROCSPARSE={rocsparse_path_cmake}")
+        rocsparse_path_cmake =  cmake_path(args.rocsparse_path)
+        cmake_options.append( f"-DCUSTOM_ROCSPARSE=\"{rocsparse_path_cmake}\"")
     else:
-        args.rocsparse_path = "C:/hipSDK"
-        raw_rocsparse_path = cmake_path(args.rocsparse_path)
-        rocsparse_path_cmake =  f'"{raw_rocsparse_path}"'
+        if os.name == "nt":
+            args.rocsparse_path = "C:/hipSDK"
+        else:
+            args.rocsparse_path = "/opt/rocm/"
 
-    cmake_options.append( f"-DROCSPARSE_PATH={args.rocsparse_path}")
+    cmake_options.append( f"-DROCSPARSE_PATH=\"{args.rocsparse_path}\"")
+
+    if args.matrices_dir is not None:
+        matrices_dir = cmake_path(os.path.abspath(args.matrices_dir))
+    
+        if os.getenv("CXX"):
+            cxx_compiler = os.getenv("CXX")
+        else:
+            if os.name == "nt":
+                cxx_compiler = cmake_path(os.path.join(rocm_path, "bin", "clang++"))
+            else:
+                cxx_compiler = cmake_path(os.path.join(rocm_path, "bin", "amdclang++"))
+        
+        program_list = [
+        cmake_executable,
+            f'-DCMAKE_CXX_COMPILER={cxx_compiler}',
+            f'-DPROJECT_BINARY_DIR={matrices_dir}',
+            f'-DCMAKE_MATRICES_DIR={matrices_dir}',
+            f'-DROCM_PATH={rocm_path}',
+            '-DCMAKE_INSTALL_LIBDIR=lib',
+            '-P',
+            './cmake/ClientMatrices.cmake'
+        ]
+        proc = subprocess.run(
+            program_list,
+            cwd=src_path,
+            check=True,
+            stderr=subprocess.STDOUT,
+            shell=False)
+
+        cmake_options.append(f'-DCMAKE_MATRICES_DIR=\"{matrices_dir}\"')
 
     if args.clients_only:
         cmake_options.append( f"-DBUILD_CLIENTS_ONLY=ON -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON" )

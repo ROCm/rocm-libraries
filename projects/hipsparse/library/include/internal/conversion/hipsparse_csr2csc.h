@@ -75,14 +75,18 @@ extern "C" {
 *  This function is non blocking and executed asynchronously with respect to the host.
 *  It may return before the actual computation has finished.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
 *  handle          handle to the hipsparse library context queue.
 *  @param[in]
-*  m               number of rows of the sparse CSR matrix.
+*  m               number of rows of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  n               number of columns of the sparse CSR matrix.
+*  n               number of columns of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  nnz             number of non-zero entries of the sparse CSR matrix.
+*  nnz             number of non-zero entries of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
 *  csrSortedVal    array of \p nnz elements of the sparse CSR matrix.
 *  @param[in]
@@ -102,16 +106,19 @@ extern "C" {
 *  @param[in]
 *  copyValues      \ref HIPSPARSE_ACTION_SYMBOLIC or \ref HIPSPARSE_ACTION_NUMERIC.
 *  @param[in]
-*  idxBase         \ref HIPSPARSE_INDEX_BASE_ZERO or \ref HIPSPARSE_INDEX_BASE_ONE.
+*  idxBase         index base. \ref HIPSPARSE_INDEX_BASE_ZERO for zero-based indexing or
+*                  \ref HIPSPARSE_INDEX_BASE_ONE for one-based indexing.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p csrSortedVal, \p csrSortedRowPtr,
-*              \p csrSortedColInd, \p cscSortedVal, \p cscSortedRowInd or \p cscSortedColPtr pointer is invalid.
-*  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
-*  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p m, \p n or \p nnz is negative,
+*          \p csrSortedVal, \p csrSortedRowPtr, \p csrSortedColInd, \p cscSortedVal, \p cscSortedRowInd
+*          or \p cscSortedColPtr is nullptr when \p nnz is greater than zero, \p copyValues is neither
+*          \ref HIPSPARSE_ACTION_SYMBOLIC nor \ref HIPSPARSE_ACTION_NUMERIC, or \p idxBase is neither
+*          \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *
-*  \par Example
-*  \snippet example_hipsparse_csr2csc.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
@@ -310,9 +317,6 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p csrRowPtr, \p csrColInd or
 *              \p pBufferSizeInBytes pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
-*
-*  \par Example
-*  \snippet example_hipsparse_csr2csc_ex2.cpp doc example
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCsr2cscEx2(hipsparseHandle_t     handle,

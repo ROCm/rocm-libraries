@@ -216,17 +216,14 @@ struct UniversalFlatmmPipelineAgBgCrPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSizeA()
     {
-        constexpr index_t smem_size_a = sizeof(typename Problem::ADataType) *
-                                        MakeALdsBlockDescriptor<Problem>().get_element_space_size();
-        return smem_size_a;
+        return sizeof(typename Problem::ADataType) *
+               MakeALdsBlockDescriptor<Problem>().get_element_space_size();
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
-        constexpr index_t smem_size_a = GetSmemSizeA<Problem>();
-
-        return smem_size_a;
+        return GetSmemSizeA<Problem>();
     }
 
     template <typename Problem>
@@ -291,10 +288,12 @@ struct UniversalFlatmmPipelineAgBgCrPolicy
         constexpr index_t MPerBlock = Problem::BlockGemmShape::kM;
         constexpr index_t KPerBlock = Problem::BlockGemmShape::kK;
 
+        constexpr index_t APackedSize = numeric_traits<ADataType>::PackedSize;
+
         if constexpr(std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::ColumnMajor>)
         {
-            constexpr index_t M1           = Problem::VectorLoadSize / sizeof(ADataType);
-            constexpr index_t M0           = MPerBlock / M1;
+            constexpr index_t M1 = Problem::VectorLoadSize / sizeof(ADataType) * APackedSize;
+            constexpr index_t M0 = MPerBlock / M1;
             constexpr index_t total_pixels = MPerBlock * KPerBlock / BlockSize;
             static_assert(total_pixels % M1 == 0);
             constexpr index_t K3    = total_pixels / M1;
@@ -331,7 +330,7 @@ struct UniversalFlatmmPipelineAgBgCrPolicy
         }
         else
         {
-            constexpr index_t K1 = Problem::VectorLoadSize / sizeof(ADataType);
+            constexpr index_t K1 = Problem::VectorLoadSize / sizeof(ADataType) * APackedSize;
             constexpr index_t K0 = KPerBlock / K1;
             // coalesce reading for each blocks
             if constexpr(get_warp_size() % K0 == 0)
