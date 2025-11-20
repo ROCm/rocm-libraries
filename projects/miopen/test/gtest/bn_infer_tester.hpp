@@ -32,25 +32,25 @@ template <typename XDataType,
           typename YDataType,
           typename ScaleDataType,
           typename BiasDataType,
-          typename MeanVarDataType,
-          miopenTensorLayout_t TensorLayout>
+          typename MeanVarDataType>
 struct BatchNormInferTester
-    : public ::testing::TestWithParam<std::tuple<miopenActivationMode_t, BNTestCase>>
+    : public ::testing::TestWithParam<
+          std::tuple<miopenActivationMode_t, BNTestCase, miopenTensorLayout_t>>
 {
     void SetUp() override
     {
-        std::tie(activ_mode, bn_config) = GetParam();
+        std::tie(activ_mode, bn_config, tensor_layout) = GetParam();
 
         // Create tensors
-        input              = tensor<XDataType>{TensorLayout, bn_config.GetInput()};
-        output             = tensor<YDataType>{TensorLayout, bn_config.GetInput()};
-        ref_out            = tensor<YDataType>{TensorLayout, bn_config.GetInput()};
+        input              = tensor<XDataType>{tensor_layout, bn_config.GetInput()};
+        output             = tensor<YDataType>{tensor_layout, bn_config.GetInput()};
+        ref_out            = tensor<YDataType>{tensor_layout, bn_config.GetInput()};
         auto derivedBnDesc = miopen::TensorDescriptor{};
         miopen::DeriveBNTensorDescriptor(derivedBnDesc, input.desc, bn_config.mode);
-        scale       = tensor<ScaleDataType>{TensorLayout, derivedBnDesc.GetLengths()};
-        shift       = tensor<BiasDataType>{TensorLayout, derivedBnDesc.GetLengths()};
-        estMean     = tensor<MeanVarDataType>{TensorLayout, derivedBnDesc.GetLengths()};
-        estVariance = tensor<MeanVarDataType>{TensorLayout, derivedBnDesc.GetLengths()};
+        scale       = tensor<ScaleDataType>{tensor_layout, derivedBnDesc.GetLengths()};
+        shift       = tensor<BiasDataType>{tensor_layout, derivedBnDesc.GetLengths()};
+        estMean     = tensor<MeanVarDataType>{tensor_layout, derivedBnDesc.GetLengths()};
+        estVariance = tensor<MeanVarDataType>{tensor_layout, derivedBnDesc.GetLengths()};
         // Fill tensors
         auto gen_value = [](auto...) {
             return prng::gen_descreet_uniform_sign<XDataType>(1e-2, 100);
@@ -170,6 +170,7 @@ struct BatchNormInferTester
     miopen::Allocator::ManageDataPtr estMean_dev;     // GPU estimated mean data
     miopen::Allocator::ManageDataPtr estVariance_dev; // GPU estimated variance data
     miopenActivationMode_t activ_mode;                // Activation mode
+    miopenTensorLayout_t tensor_layout;               // Tensor layout
     const float activ_alpha = static_cast<float>(0.5f);
     const float activ_beta  = static_cast<float>(0.5f);
     const float activ_gamma = static_cast<float>(0.5f);
