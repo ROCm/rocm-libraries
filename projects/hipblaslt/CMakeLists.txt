@@ -556,6 +556,28 @@ if(HIPBLASLT_ENABLE_COVERAGE)
     target_compile_options(hipblaslt-test PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping -fvisibility=default)
     target_link_options(hipblaslt-test PRIVATE -fprofile-instr-generate)
     target_compile_definitions(hipblaslt-test PRIVATE CODE_COVERAGE)
+    
+    target_link_libraries(hipblaslt-clients-common PRIVATE origami)
+    target_link_libraries(hipblaslt-test PRIVATE origami)
+    # Add the internal header path for coverage builds
+    set(TENSILELITE_DIR ${PROJECT_SOURCE_DIR}/tensilelite)
+    target_include_directories(hipblaslt-test
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite>
+            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
+            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail>
+            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include>
+            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include>
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite"
+    )
+    target_include_directories(hipblaslt-clients-common PRIVATE
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include>
+    )
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
     add_custom_target(
