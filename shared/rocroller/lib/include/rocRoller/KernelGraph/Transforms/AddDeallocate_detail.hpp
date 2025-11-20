@@ -44,24 +44,22 @@ namespace rocRoller
              * @param coordinate The coordinate for which to add the Deallocate operation.
              * @param lastRWOps The last read/write operations for the coordinate.
              * @param original The original kernel graph.
-             * @param compare The topological comparison function (original).
              */
-            void addDownstreamBarrierInLoop(std::set<int>&            dependencies,
-                                            int                       coordinate,
-                                            std::set<int> const&      lastRWOps,
-                                            KernelGraph const&        original,
-                                            TopologicalCompare const& compare);
+            void addDownstreamBarrierInLoop(std::set<int>&       dependencies,
+                                            int                  coordinate,
+                                            std::set<int> const& lastRWOps,
+                                            KernelGraph const&   original);
 
             /**
              * @brief Simplify dependencies by removing unnecessary ones.
-	     *
-	     * For example, if x and y are in the set of dependencies,
-	     * and x is `NodeOrdering::LeftFirst` of y, then x can be
-	     * removed from the dependencies.
-	     *
-	     * The set of dependencies is modified in-place.
-	     *
-	     * All dependencies must have the same body-parent.
+             *
+             * For example, if x and y are in the set of dependencies,
+             * and x is `NodeOrdering::LeftFirst` of y, then x can be
+             * removed from the dependencies.
+             *
+             * The set of dependencies is modified in-place.
+             *
+             * All dependencies must have the same body-parent.
              *
              * @param graph The kernel graph.
              * @param deps The set of dependencies to simplify.

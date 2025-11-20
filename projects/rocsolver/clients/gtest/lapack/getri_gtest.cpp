@@ -59,7 +59,8 @@ const vector<vector<int>> matrix_size_range = {
 
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range
-    = {{192, 192, 1}, {500, 600, 1}, {640, 640, 0}, {1000, 1024, 0}, {1200, 1230, 0}};
+    = {{192, 192, 1},   {500, 600, 1}, {640, 640, 0},  {1000, 1024, 0},
+       {1200, 1230, 0}, {511, 511, 0}, {1023, 1023, 0}};
 
 Arguments getri_setup_arguments(getri_tuple tup, bool outofplace)
 {
