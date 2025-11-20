@@ -81,7 +81,7 @@ TEST_CASE("Origami: best_macro_tile_size", "[origami]") {
       // config A[2]
       configs.push_back(make_config(64, 64, 64, 32, 32, 8, 1, 6, 0, 0));
 
-      auto results = origami::select_config(problem, hardware, configs);
+      auto results = origami::rank_configs(problem, hardware, configs);
 
       REQUIRE(results.size() == configs.size());
       // Results should be ranked, so latencies should be in ascending order (best first)
@@ -148,12 +148,11 @@ TEST_CASE("GEMM: negative_occupancy", "[gemm]") {
       config.push_back(make_config(32, 256, 16, 32, 32, 8, 2, 6, 0, 0));
 
       // Call select_config
-      auto results = origami::select_config(problem, hardware, config);
+      auto best_tile = origami::select_config(problem, hardware, config);
 
-      auto best_tile = results[0];
-      size_t MT_M    = best_tile.config.mt.m;
-      size_t MT_N    = best_tile.config.mt.n;
-      size_t MT_K    = best_tile.config.mt.k;
+      size_t MT_M = best_tile.config.mt.m;
+      size_t MT_N = best_tile.config.mt.n;
+      size_t MT_K = best_tile.config.mt.k;
       REQUIRE(MT_M == 32);   //"MT_M should be 32"
       REQUIRE(MT_N == 256);  //"MT_N should be 256"
       REQUIRE(MT_K == 16);   //"MT_K should be 16"
@@ -188,13 +187,13 @@ TEST_CASE("GEMM: deterministic_tie_breaking", "[gemm]") {
       config_B.push_back(make_config(256, 64, 32, 32, 32, 8, 1, 6, 0, 0));
 
       // Call select_config_mnk with both orderings
-      auto results_A_first = origami::select_config(problem, hardware, config_A);
+      auto best_tile_A_first = origami::select_config(problem, hardware, config_A);
 
-      auto results_B_first = origami::select_config(problem, hardware, config_B);
+      auto best_tile_B_first = origami::select_config(problem, hardware, config_B);
 
       // Extract the best tile from each result
-      auto best_tile_A_first = results_A_first[0];
-      auto best_tile_B_first = results_B_first[0];
+      // auto best_tile_A_first = results_A_first[0];
+      // auto best_tile_B_first = results_B_first[0];
 
       size_t MT_M_A_first = best_tile_A_first.config.mt.m;
       size_t MT_N_A_first = best_tile_A_first.config.mt.n;

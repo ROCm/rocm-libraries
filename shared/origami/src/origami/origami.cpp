@@ -72,9 +72,9 @@ void pick_best_config_by_arithmetic_intensity(std::vector<prediction_result_t>& 
   // 3) Return the tile with the highest arithmetic intensity
 }
 
-std::vector<prediction_result_t> select_config(const problem_t& problem,
-                                               const hardware_t& hardware,
-                                               const std::vector<config_t>& configs) {
+prediction_result_t select_config(const problem_t& problem,
+                                  const hardware_t& hardware,
+                                  const std::vector<config_t>& configs) {
   // Use rank_configs to get configurations with latencies ranked by performance
   auto results = rank_configs(problem, hardware, configs);
 
@@ -169,7 +169,7 @@ std::vector<prediction_result_t> select_config(const problem_t& problem,
                        });
     }
   }
-  return results;
+  return results[0];
 }
 
 /**
@@ -413,11 +413,11 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
   return results;
 }
 
-std::vector<prediction_result_t> select_config_mnk(size_t M,
-                                                   size_t N,
-                                                   size_t K,
-                                                   const hardware_t& hardware,
-                                                   const std::vector<config_t>& configs) {
+prediction_result_t select_config_mnk(size_t M,
+                                      size_t N,
+                                      size_t K,
+                                      const hardware_t& hardware,
+                                      const std::vector<config_t>& configs) {
   // Create a default problem_t with the provided M, N, K and reasonable defaults
   problem_t problem;
   problem.size.m          = M;

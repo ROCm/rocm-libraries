@@ -19,12 +19,11 @@ namespace origami {
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param configs Vector of all possible valid configurations.
- * @return std::vector<prediction_result_t> Configurations with latencies ranked by performance
- * (best first)
+ * @return prediction_result_t Configurations with best latency.
  */
-std::vector<prediction_result_t> select_config(const problem_t& problem,
-                                               const hardware_t& hardware,
-                                               const std::vector<config_t>& configs);
+prediction_result_t select_config(const problem_t& problem,
+                                  const hardware_t& hardware,
+                                  const std::vector<config_t>& configs);
 
 /**
  * @brief Select best workgroup-mapping for the given tile size.
@@ -62,14 +61,13 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
  * @param K Problem dimension K
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param configs List of candidate configurations
- * @return std::vector<prediction_result_t> Configurations with latencies ranked by performance
- * (best first)
+ * @return prediction_result_t Configurations with best latency.
  */
-std::vector<prediction_result_t> select_config_mnk(std::size_t M,
-                                                   std::size_t N,
-                                                   std::size_t K,
-                                                   const hardware_t& hardware,
-                                                   const std::vector<config_t>& configs);
+prediction_result_t select_config_mnk(std::size_t M,
+                                      std::size_t N,
+                                      std::size_t K,
+                                      const hardware_t& hardware,
+                                      const std::vector<config_t>& configs);
 
 /**
  * @brief Select top K configurations based on performance ranking.
