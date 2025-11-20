@@ -142,17 +142,17 @@ namespace rocRoller
 
                 auto dstSize = resultVariableType(expr.rhs).getElementSize() * 8;
                 AssertFatal(expr.dstOffset + expr.width <= dstSize,
-                            "BitfieldCombine out of bounds: dstOffset={} + width={} > dstSize={}",
+                            fmt::format("BitfieldCombine out of bounds: dstOffset={} + width={} > dstSize={}",
                             expr.dstOffset,
                             expr.width,
-                            dstSize);
+                            dstSize));
 
                 auto srcSize = resultVariableType(expr.lhs).getElementSize() * 8;
                 AssertFatal(expr.srcOffset + expr.width <= srcSize,
-                            "BitfieldCombine out of bounds: srcOffset={} + width={} > srcSize={}",
+                            fmt::format("BitfieldCombine out of bounds: srcOffset={} + width={} > srcSize={}",
                             expr.srcOffset,
                             expr.width,
-                            srcSize);
+                            srcSize));
 
                 // No need to split if destination size is less than or equal to 32 bits
                 if(dstSize <= dwordSize && srcSize <= dwordSize)

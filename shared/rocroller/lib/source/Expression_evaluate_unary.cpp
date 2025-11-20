@@ -294,10 +294,10 @@ namespace rocRoller::Expression::EvaluateDetail
                 }
             }
 
-            AssertFatal(expr.width <= sizeof(expr.outputDataType) * 8,
-                        "BitFieldExtract: width {} exceeds output type size {} bits",
+            AssertFatal(expr.width <= DataTypeInfo::Get(expr.outputDataType).elementBits,
+                        fmt::format("BitFieldExtract: width {} exceeds output type size {} bits",
                         expr.width,
-                        sizeof(ARG) * 8);
+                        DataTypeInfo::Get(expr.outputDataType).elementBits));
 
             return reinterpretTruncate(static_cast<ARG>(result), expr.outputDataType);
         }
