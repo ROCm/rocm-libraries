@@ -310,8 +310,9 @@ namespace rocRoller
             uint const numVgpr           = numElements / activeLanesInWave;
             uint const nVgprIndex
                 = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
-            uint const nVgprBlock = 256 / macTile.subTileSizes.at(0) / nSIMDBlock / nVgprIndex;
-            auto       vgprBlock
+            uint const nVgprBlock
+                = numElements / macTile.subTileSizes.at(0) / nSIMDBlock / nVgprIndex;
+            auto vgprBlock
                 = graph.coordinates.addElement(VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
             auto vgprIndex
                 = graph.coordinates.addElement(VGPRBlockIndex(literal(nVgprIndex), literal(1u)));
@@ -396,8 +397,9 @@ namespace rocRoller
             uint const numElements       = waveTile.elements();
             uint       activeLanesInWave = static_cast<uint>(wavefrontSize);
             uint const numVgpr           = numElements / activeLanesInWave;
-            uint const nVgprIndex        = 4;
-            uint const nVgprBlock        = numVgpr / nVgprIndex;
+            uint const nVgprIndex
+                = macTile.subTileSizes.at(2) / (activeLanesInWave / macTile.subTileSizes.at(0));
+            uint const nVgprBlock = numVgpr / nVgprIndex;
             auto       vgprBlock
                 = graph.coordinates.addElement(VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
             auto vgprIndex
@@ -1757,7 +1759,7 @@ namespace rocRoller
                     uint const nVgprIndex
                         = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
                     uint const nVgprBlock
-                        = 256 / macTile.subTileSizes.at(0) / nSIMDBlock / nVgprIndex;
+                        = numElements / macTile.subTileSizes.at(0) / nSIMDBlock / nVgprIndex;
                     auto vgprBlock = graph.coordinates.addElement(
                         VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
                     auto vgprIndex = graph.coordinates.addElement(

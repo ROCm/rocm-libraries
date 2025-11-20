@@ -149,8 +149,11 @@ namespace rocRoller
             uint const numVgpr           = numElements / activeLanesInWave;
             uint const nVgprIndex
                 = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
-            uint const nVgprBlock = 256 / macTile.subTileSizes.at(0) / nSIMDBlock / nVgprIndex;
-            uint const nBlocks    = numVgpr / nVgprBlock / nVgprIndex;
+            // Minimal swizzle tile size 64x4 or 32x8 = 256
+            uint const numElementsPerMinimalSwizzleTile = 256;
+            uint const nVgprBlock = numElementsPerMinimalSwizzleTile / macTile.subTileSizes.at(0)
+                                    / nSIMDBlock / nVgprIndex;
+            uint const nBlocks = numVgpr / nVgprBlock / nVgprIndex;
             auto       vgprBlock
                 = graph.coordinates.addElement(VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
             auto vgprIndex
@@ -378,8 +381,11 @@ namespace rocRoller
             uint const numVgpr           = numElements / activeLanesInWave;
             uint const nVgprIndex
                 = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
-            uint const nVgprBlock = 256 / macTile.subTileSizes.at(0) / nSIMDBlock / nVgprIndex;
-            uint const nBlocks    = numVgpr / nVgprBlock / nVgprIndex;
+            // Minimal swizzle tile size 64x4 or 32x8 = 256
+            uint const numElementsPerMinimalSwizzleTile = 256;
+            uint const nVgprBlock = numElementsPerMinimalSwizzleTile / macTile.subTileSizes.at(0)
+                                    / nSIMDBlock / nVgprIndex;
+            uint const nBlocks = numVgpr / nVgprBlock / nVgprIndex;
             auto       vgprBlock
                 = graph.coordinates.addElement(VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
             auto vgprIndex
@@ -523,7 +529,9 @@ namespace rocRoller
                         "waveSwizzleM is not equal to waveSwizzleN",
                         ShowValue(waveSwizzleM),
                         ShowValue(waveSwizzleN));
-            auto const waveSwizzleK = 256 / waveSwizzleM;
+            // Minimal swizzle tile size 64x4 or 32x8 = 256
+            uint const numElementsPerMinimalSwizzleTile = 256;
+            auto const waveSwizzleK = numElementsPerMinimalSwizzleTile / waveSwizzleM;
 
             return std::make_pair(waveSwizzleM / waveM, waveSwizzleK / waveK);
         }

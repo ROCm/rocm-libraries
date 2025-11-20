@@ -65,6 +65,7 @@ namespace rocRoller
                 }
 
                 waveTileExpr = coords.reverse({waveTileTag})[0];
+                AssertFatal(waveTileExpr != nullptr, "waveTile expr is null");
             }
 
             if(waveMN == 64)
@@ -85,6 +86,7 @@ namespace rocRoller
                     }
 
                     vgprIndexExpr = coords.reverse({vgprIndexTag})[0];
+                    AssertFatal(vgprIndexExpr != nullptr, "vgprIndex expr is null");
                     expectedExpr
                         = (waveTileExpr / (Expression::literal(waveTileSize) / vgprIndex.size));
                     AssertFatal(Expression::identical(m_fastArith(vgprIndexExpr),
@@ -106,7 +108,8 @@ namespace rocRoller
                     }
 
                     simdIndexBlockExpr = coords.reverse({simdIndexBlockTag})[0];
-                    expectedExpr       = waveTileExpr % simdIndexBlock.size;
+                    AssertFatal(simdIndexBlockExpr != nullptr, "simdIndexBlock expr is null");
+                    expectedExpr = waveTileExpr % simdIndexBlock.size;
                     AssertFatal(Expression::identical(m_fastArith(simdIndexBlockExpr),
                                                       m_fastArith(expectedExpr)),
                                 "Exchange: SIMDIndexBlock must be the fastest running dimension");
