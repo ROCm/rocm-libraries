@@ -169,8 +169,8 @@ def main():
                 problem = origami.problem_t()
                 problem.size = origami.dim3_t(M, N, K)
                 problem.batch = B
-                problem.transpose_a = args.trans_a
-                problem.transpose_b = args.trans_b
+                problem.transpose_a = origami.transpose_t.T if args.trans_a else origami.transpose_t.N
+                problem.transpose_b = origami.transpose_t.T if args.trans_b else origami.transpose_t.N
                 problem.a_dtype = origami.string_to_datatype(args.type_a)
                 problem.b_dtype = origami.string_to_datatype(args.type_b) 
                 problem.d_dtype = origami.string_to_datatype(args.type_d)
@@ -195,8 +195,8 @@ def main():
         problem = origami.problem_t()
         problem.size = origami.dim3_t(args.m, args.n, args.k)
         problem.batch = args.b
-        problem.transpose_a =  origami.transpose_t.N
-        problem.transpose_b = origami.transpose_t.T
+        problem.transpose_a = origami.transpose_t.T if args.trans_a else origami.transpose_t.N
+        problem.transpose_b = origami.transpose_t.T if args.trans_b else origami.transpose_t.N
         problem.a_dtype = origami.string_to_datatype(args.type_a)
         problem.b_dtype = origami.string_to_datatype(args.type_b)
         problem.d_dtype = origami.string_to_datatype(args.type_d)

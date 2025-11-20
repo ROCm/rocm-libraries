@@ -76,14 +76,15 @@ def main():
     problem = origami.problem_t()
     problem.size = origami.dim3_t(args.m, args.n, args.k)
     problem.batch = args.batch
-    problem.transpose_a = args.trans_a
-    problem.transpose_b = args.trans_b
+    problem.transpose_a = origami.transpose_t.T if args.trans_a else origami.transpose_t.N
+    problem.transpose_b = origami.transpose_t.T if args.trans_b else origami.transpose_t.N
     problem.a_dtype = origami.string_to_datatype(args.type_a)
     problem.b_dtype = origami.string_to_datatype(args.type_b)
     problem.d_dtype = origami.string_to_datatype(args.type_d)
     problem.c_dtype = problem.d_dtype
     problem.mi_dtype = origami.string_to_datatype(args.type_compute)
-    problem.mx_block_size = 0
+    problem.a_mx_block_size = 0
+    problem.b_mx_block_size = 0
 
     # Create config
     config = origami.config_t()
@@ -111,7 +112,7 @@ def main():
 
     reduction = origami.select_reduction(problem, hardware, config, grid_algorithm)
 
-    winner_grid = origami.select_grid(problem, hardware, config, grid_algorithm, hardware.N_CU)
+    winner_grid = origami.select_grid_size(problem, hardware, config, grid_algorithm, hardware.N_CU)
 
     print(f"Best reduction algo : {reduction}")
     print(f"Best grid : {winner_grid}")
