@@ -161,7 +161,7 @@ private:
     std::vector<T> chost;
 
     T alpha, beta;
-    bool multithreaded;
+    bool parallel;
 
     miopen::GemmDescriptor gemm_desc = {
         false, false, false, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.0f, 0.0f, miopenFloat, false};
@@ -184,7 +184,7 @@ int GemmDriver<T>::AddCmdLineArgs()
     inflags.AddInputFlag("iter", 'i', "10", "Number of Iterations (Default=10)", "int");
     inflags.AddInputFlag("verify", 'V', "1", "Verify Each Layer (Default=1)", "int");
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
-    inflags.AddInputFlag("multithreaded", 'm', "0", "Run CPU part in parallel (Default=0)", "int");
+    inflags.AddInputFlag("parallel", 'p', "0", "Run CPU part in parallel (Default=0)", "int");
 
     return 0;
 }
@@ -199,7 +199,7 @@ int GemmDriver<T>::ParseCmdLineArgs(int argc, char* argv[])
         miopenEnableProfiling(GetHandle(), true);
     }
 
-    multithreaded = static_cast<bool>(inflags.GetValueInt("multithreaded"));
+    parallel = static_cast<bool>(inflags.GetValueInt("parallel"));
 
     return 0;
 }
@@ -412,7 +412,7 @@ int GemmDriver<T>::RunForwardCPU()
                                  gemm_desc.ldc,
                                  gemm_desc.strideC,
                                  gemm_desc.batch_count,
-                                 multithreaded);
+                                 parallel);
 
     return 0;
 }
