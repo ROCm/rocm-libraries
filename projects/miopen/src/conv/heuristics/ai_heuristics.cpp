@@ -481,7 +481,8 @@ std::unique_ptr<Model> GetModel(const std::string& device)
 {
     // 2D models only - 3D models handled separately in PredictSolver
     if(device == "gfx950")
-        return std::make_unique<Gfx942Model>();
+        return std::make_unique<Gfx942Model>(); // use gfx942 model for gfx950 until we have a
+                                                // gfx950 model
     if(device == "gfx942")
         return std::make_unique<Gfx942Model>();
     if(device == "gfx90a")
@@ -980,7 +981,7 @@ std::shared_ptr<Model> GetModel(const std::string& arch, const std::string& solv
 
     auto model_arch = arch;
     if(model_arch == "gfx950")
-        model_arch = "gfx942";
+        model_arch = "gfx942"; // use gfx942 model for gfx950 until we have a gfx950 model
 
     if(it == models.end())
     {
