@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
 #ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
 #include <hip/hip_runtime.h>
 #endif
@@ -44,12 +22,12 @@ inline __device__ FLOAT LogAddExp(const FLOAT* x, const FLOAT* y)
 }
 
 template <class T>
-inline __device__ void NonAtomicLogAddExp(const unsigned int& lid,
-                                          const int& label_length,
+inline __device__ void NonAtomicLogAddExp(const unsigned int& local_id,
+                                          const unsigned int& label_length,
                                           const int* label_prime,
-                                          const int& j1,
+                                          const unsigned int& reverse_input_idx,
                                           const unsigned int& batch_id,
-                                          const int& j,
+                                          const int& input_idx,
                                           T* beta_buff0,
                                           T* beta_buff1,
                                           const unsigned int& label_prime_len,
@@ -60,15 +38,16 @@ inline __device__ void NonAtomicLogAddExp(const unsigned int& lid,
 
     // TODO consider parallelizing loop over multple threads rather than only using a couple of
     // threads in the group.
-    if(lid == 0 || lid == 1)
+    if(local_id == 0 || local_id == 1)
     {
-        for(int k = 0; k < label_length; k++)
+        for(unsigned int label_idx = 0; label_idx < label_length; label_idx++)
         {
-            int klid       = 2 * k + lid;
-            int lb_cur     = lid == 0 ? BLANK_LB : *(label_prime + klid);
-            size_t gidx    = j1 * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + lb_cur;
-            T beta_temp    = j % 2 == 0 ? *(beta_buff0 + klid) : *(beta_buff1 + klid);
-            size_t bidx_ts = j1 * label_prime_len + klid;
+            unsigned int label_offset = 2 * label_idx + local_id;
+            int lb_cur                = (local_id == 0) ? BLANK_LB : *(label_prime + label_offset);
+            size_t gidx = reverse_input_idx * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + lb_cur;
+            T beta_temp =
+                (input_idx % 2) == 0 ? *(beta_buff0 + label_offset) : *(beta_buff1 + label_offset);
+            size_t bidx_ts = reverse_input_idx * label_prime_len + label_offset;
 
             beta_temp += *(alpha_log + bidx_ts);
             T grad_temp = gradients[gidx];
@@ -76,13 +55,13 @@ inline __device__ void NonAtomicLogAddExp(const unsigned int& lid,
             gradients[gidx] = LogAddExp(&grad_temp, &beta_temp);
         }
     }
-    if(lid == 0)
+    if(local_id == 0)
     {
-        int k = 2 * label_length;
-
-        size_t gidx    = j1 * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + BLANK_LB;
-        T beta_temp    = j % 2 == 0 ? *(beta_buff0 + k) : *(beta_buff1 + k);
-        size_t bidx_ts = j1 * label_prime_len + k;
+        unsigned int label_offset = 2 * label_length;
+        size_t gidx = reverse_input_idx * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + BLANK_LB;
+        T beta_temp =
+            (input_idx % 2) == 0 ? *(beta_buff0 + label_offset) : *(beta_buff1 + label_offset);
+        size_t bidx_ts = reverse_input_idx * label_prime_len + label_offset;
 
         beta_temp += *(alpha_log + bidx_ts);
         T grad_temp = gradients[gidx];
@@ -92,11 +71,11 @@ inline __device__ void NonAtomicLogAddExp(const unsigned int& lid,
 }
 
 template <class T>
-inline __device__ void AtomicLogAddExp(const int& j1,
+inline __device__ void AtomicLogAddExp(const unsigned int& reverse_input_idx,
                                        const unsigned int& batch_id,
                                        const unsigned int& lb_cur,
                                        const unsigned int& label_prime_len,
-                                       const int& k1,
+                                       const unsigned int& reverse_label_idx,
                                        const T* alpha_log,
                                        T* gradients,
                                        T& beta_temp)
@@ -105,17 +84,17 @@ inline __device__ void AtomicLogAddExp(const int& j1,
 }
 
 template <>
-inline __device__ void AtomicLogAddExp(const int& j1,
+inline __device__ void AtomicLogAddExp(const unsigned int& reverse_input_idx,
                                        const unsigned int& batch_id,
                                        const unsigned int& lb_cur,
                                        const unsigned int& label_prime_len,
-                                       const int& k1,
+                                       const unsigned int& reverse_label_idx,
                                        const float* alpha_log,
                                        float* gradients,
                                        float& beta_temp)
 {
-    size_t gidx    = j1 * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + lb_cur;
-    size_t bidx_ts = j1 * label_prime_len + k1;
+    size_t gidx    = reverse_input_idx * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + lb_cur;
+    size_t bidx_ts = reverse_input_idx * label_prime_len + reverse_label_idx;
     beta_temp += *(alpha_log + bidx_ts);
 
     float* addr = gradients + gidx;
@@ -147,35 +126,33 @@ inline __device__ void CTCAlpha(const FLOAT* probs_logits,
                                 FLOAT* alpha,
                                 FLOAT* loss)
 {
-    unsigned int label_prime_len = 2 * label_length + 1;
-    const unsigned int lid       = threadIdx.x;
-
-    unsigned int aidx0 = label_length + label_repeat < input_length ? 0 : 1;
-    unsigned int aidx1 = 1;
-    for(unsigned int i = aidx0 + lid; i <= aidx1; i += WORK_PER_GRP)
+    const unsigned int local_id         = threadIdx.x;
+    const unsigned int label_idx_offset = ((label_length + label_repeat) < input_length) ? 0 : 1;
+    for(unsigned int i = label_idx_offset + local_id; i <= 1; i += WORK_PER_GRP)
     {
-        unsigned int lb_cur = i % 2 == 0 ? BLANK_LB : *(label_prime + i);
+        unsigned int lb_cur = (i % 2 == 0) ? BLANK_LB : *(label_prime + i);
         unsigned int pidx   = batch_id * PROBS_STRIDE1 + lb_cur;
         *(alpha + i)        = *(probs_logits + pidx);
     }
     __syncthreads();
 
-    for(unsigned int j = 1; j < input_length; j++)
+    const unsigned int label_prime_len = 2 * label_length + 1;
+    for(unsigned int input_idx = 1; input_idx < input_length; input_idx++)
     {
-
-        for(unsigned int i = lid; i <= label_prime_len - 1; i += WORK_PER_GRP)
+        for(unsigned int label_idx = local_id; label_idx <= label_prime_len - 1;
+            label_idx += WORK_PER_GRP)
         {
-            unsigned int lb_cur = i % 2 == 0 ? BLANK_LB : *(label_prime + i);
-            unsigned int lb_pre = i % 2 == 0 ? BLANK_LB : *(label_prime + i - 2);
-            size_t pidx         = j * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + lb_cur;
-            size_t aidx_ts      = j * label_prime_len + i;
-            size_t aidx_t1s     = (j - 1) * label_prime_len + i;
+            unsigned int lb_cur = (label_idx % 2 == 0) ? BLANK_LB : *(label_prime + label_idx);
+            unsigned int lb_pre = (label_idx % 2 == 0) ? BLANK_LB : *(label_prime + label_idx - 2);
+            size_t pidx         = input_idx * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + lb_cur;
+            size_t aidx_ts      = input_idx * label_prime_len + label_idx;
+            size_t aidx_t1s     = (input_idx - 1) * label_prime_len + label_idx;
 
             FLOAT alpha_t1s1 = *(alpha + aidx_t1s - 1);
             FLOAT alpha_t1s  = *(alpha + aidx_t1s);
 
-            FLOAT alpha_ts = i == 0 ? alpha_t1s : LogAddExp(&alpha_t1s, &alpha_t1s1);
-            if(i >= 2)
+            FLOAT alpha_ts = (label_idx == 0) ? alpha_t1s : LogAddExp(&alpha_t1s, &alpha_t1s1);
+            if(label_idx >= 2)
             {
                 if(lb_cur != BLANK_LB && lb_cur != lb_pre)
                 {
@@ -190,7 +167,7 @@ inline __device__ void CTCAlpha(const FLOAT* probs_logits,
         __syncthreads();
     }
 
-    if(lid == 0)
+    if(local_id == 0)
     {
         unsigned int alpha_size = input_length * label_prime_len;
         FLOAT alp0              = *(alpha + alpha_size - 1);
@@ -211,34 +188,31 @@ inline __device__ void CTCGradient(const FLOAT* probs_logits,
                                    const FLOAT* loss,
                                    FLOAT* gradients)
 {
-    unsigned int label_prime_len = 2 * label_length + 1;
-
-    FLOAT prob_lx_log = -*(loss);
-
-    const unsigned int lid = threadIdx.x;
-
-    unsigned int aidx0 = 1;
-    unsigned int aidx1 = label_length + label_repeat < input_length ? 0 : 1;
-
-    for(unsigned int j = 0; j < input_length; j++)
+    const unsigned int local_id = threadIdx.x;
+    for(unsigned int input_idx = 0; input_idx < input_length; input_idx++)
     {
-        for(unsigned int i = lid; i < CLASS_SZ; i += WORK_PER_GRP)
+        for(unsigned int i = local_id; i < CLASS_SZ; i += WORK_PER_GRP)
         {
-            *(gradients + j * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + i) = negative_cutoff_val;
+            *(gradients + input_idx * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + i) =
+                negative_cutoff_val;
         }
     }
     __syncthreads();
 
-    for(unsigned int k = aidx1 + lid; k <= aidx0; k += WORK_PER_GRP)
+    const unsigned int label_prime_len  = 2 * label_length + 1;
+    const unsigned int label_idx_offset = ((label_length + label_repeat) < input_length) ? 0 : 1;
+    for(unsigned int label_idx = label_idx_offset + local_id; label_idx <= 1;
+        label_idx += WORK_PER_GRP)
     {
-        unsigned int k1     = label_prime_len - 1 - k;
-        unsigned int lb_cur = k1 % 2 == 0 ? BLANK_LB : *(label_prime + k1);
+        unsigned int reverse_label_idx = label_prime_len - 1 - label_idx;
+        unsigned int lb_cur =
+            (reverse_label_idx % 2 == 0) ? BLANK_LB : *(label_prime + reverse_label_idx);
         unsigned int pidx = (input_length - 1) * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + lb_cur;
         unsigned int gidx = (input_length - 1) * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + lb_cur;
-        unsigned int bidx_ts = (input_length - 1) * label_prime_len + k1;
+        unsigned int bidx_ts = (input_length - 1) * label_prime_len + reverse_label_idx;
 
-        FLOAT probs_logits_pidx = *(probs_logits + pidx);
-        *(beta_buff0 + k1)      = probs_logits_pidx;
+        FLOAT probs_logits_pidx           = *(probs_logits + pidx);
+        *(beta_buff0 + reverse_label_idx) = probs_logits_pidx;
 
         FLOAT alpha_temp = *(alpha_log + bidx_ts);
         alpha_temp += probs_logits_pidx;
@@ -248,7 +222,8 @@ inline __device__ void CTCGradient(const FLOAT* probs_logits,
     }
     __syncthreads();
 
-    for(int i = lid; i < CLASS_SZ; i += WORK_PER_GRP)
+    const FLOAT prob_lx_log = -*(loss);
+    for(unsigned int i = local_id; i < CLASS_SZ; i += WORK_PER_GRP)
     {
         unsigned int pidx       = (input_length - 1) * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + i;
         unsigned int gidx       = (input_length - 1) * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + i;
@@ -276,60 +251,70 @@ inline __device__ void CTCGradient(const FLOAT* probs_logits,
     }
     __syncthreads();
 
-    for(unsigned int j = 1; j < input_length; j++)
+    for(unsigned int input_idx = 1; input_idx < input_length; input_idx++)
     {
-        int j1 = input_length - 1 - j;
-
-        for(int k = lid; k <= label_prime_len - 1; k += WORK_PER_GRP)
+        unsigned int reverse_input_idx = input_length - 1 - input_idx;
+        for(int label_idx = local_id; label_idx <= label_prime_len - 1; label_idx += WORK_PER_GRP)
         {
-            int k1     = label_prime_len - 1 - k;
-            int lb_cur = k1 % 2 == 0 ? BLANK_LB : *(label_prime + k1);
-            int lb_pre = k1 % 2 == 0 ? BLANK_LB : *(label_prime + k1 + 2);
+            int reverse_label_idx = label_prime_len - 1 - label_idx;
+            int lb_cur =
+                (reverse_label_idx % 2 == 0) ? BLANK_LB : *(label_prime + reverse_label_idx);
+            int lb_pre =
+                (reverse_label_idx % 2 == 0) ? BLANK_LB : *(label_prime + reverse_label_idx + 2);
 
-            size_t pidx = j1 * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + lb_cur;
+            size_t pidx = reverse_input_idx * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + lb_cur;
 
-            FLOAT beta_temp = j % 2 == 0 ? *(beta_buff1 + k1) : *(beta_buff0 + k1);
+            FLOAT beta_temp = (input_idx % 2 == 0) ? *(beta_buff1 + reverse_label_idx)
+                                                   : *(beta_buff0 + reverse_label_idx);
 
-            if(k1 <= label_prime_len - 2)
+            if(reverse_label_idx <= label_prime_len - 2)
             {
-                FLOAT beta_temp1 = j % 2 == 0 ? *(beta_buff1 + k1 + 1) : *(beta_buff0 + k1 + 1);
+                FLOAT beta_temp1 = (input_idx % 2 == 0) ? *(beta_buff1 + reverse_label_idx + 1)
+                                                        : *(beta_buff0 + reverse_label_idx + 1);
                 beta_temp        = LogAddExp(&beta_temp, &beta_temp1);
             }
-            if(k1 <= label_prime_len - 3)
+            if(reverse_label_idx <= (label_prime_len - 3))
             {
                 if(lb_cur != BLANK_LB && lb_cur != lb_pre)
                 {
-                    FLOAT beta_temp2 = j % 2 == 0 ? *(beta_buff1 + k1 + 2) : *(beta_buff0 + k1 + 2);
+                    FLOAT beta_temp2 = (input_idx % 2) == 0 ? *(beta_buff1 + reverse_label_idx + 2)
+                                                            : *(beta_buff0 + reverse_label_idx + 2);
                     beta_temp        = LogAddExp(&beta_temp, &beta_temp2);
                 }
             }
 
             beta_temp += *(probs_logits + pidx);
             beta_temp = max(beta_temp, negative_cutoff_val);
-            if(j % 2 == 0)
+            if(input_idx % 2 == 0)
             {
-                *(beta_buff0 + k1) = beta_temp;
+                *(beta_buff0 + reverse_label_idx) = beta_temp;
             }
             else
             {
-                *(beta_buff1 + k1) = beta_temp;
+                *(beta_buff1 + reverse_label_idx) = beta_temp;
             }
 
             if constexpr(OPT_ATOMIC_LOGADDEXP == 1)
             {
-                AtomicLogAddExp(
-                    j1, batch_id, lb_cur, label_prime_len, k1, alpha_log, gradients, beta_temp);
+                AtomicLogAddExp(reverse_input_idx,
+                                batch_id,
+                                lb_cur,
+                                label_prime_len,
+                                reverse_label_idx,
+                                alpha_log,
+                                gradients,
+                                beta_temp);
             }
         }
 
         if constexpr(OPT_ATOMIC_LOGADDEXP == 0)
         {
-            NonAtomicLogAddExp(lid,
+            NonAtomicLogAddExp(local_id,
                                label_length,
                                label_prime,
-                               j1,
+                               reverse_input_idx,
                                batch_id,
-                               j,
+                               input_idx,
                                beta_buff0,
                                beta_buff1,
                                label_prime_len,
@@ -339,10 +324,10 @@ inline __device__ void CTCGradient(const FLOAT* probs_logits,
 
         __syncthreads();
 
-        for(int i = lid; i < CLASS_SZ; i += WORK_PER_GRP)
+        for(int i = local_id; i < CLASS_SZ; i += WORK_PER_GRP)
         {
-            size_t pidx = j1 * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + i;
-            size_t gidx = j1 * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + i;
+            size_t pidx = reverse_input_idx * PROBS_STRIDE0 + batch_id * PROBS_STRIDE1 + i;
+            size_t gidx = reverse_input_idx * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + i;
 
             FLOAT probs_logits_pidx = *(probs_logits + pidx);
 
@@ -374,8 +359,8 @@ inline __device__ void CTCGradient(const FLOAT* probs_logits,
 }
 
 template <bool OptLclMemBeta, bool OptLclMemLb>
-__forceinline__ __device__ void CTCLossImpl(const unsigned int lid,
-                                            const unsigned int grp_id,
+__forceinline__ __device__ void CTCLossImpl(const unsigned int local_id,
+                                            const unsigned int group_id,
                                             const FLOAT* probs_logits,
                                             FLOAT* workspace,
                                             int* dim_data,
@@ -385,7 +370,7 @@ __forceinline__ __device__ void CTCLossImpl(const unsigned int lid,
                                             FLOAT* beta1  = nullptr,
                                             int* lb_prime = nullptr)
 {
-    for(unsigned int bid = grp_id; bid < BATCH_SZ; bid += GRP_NUM)
+    for(unsigned int bid = group_id; bid < BATCH_SZ; bid += GRP_NUM)
     {
         unsigned int input_len     = *(dim_data + bid);
         unsigned int label_len     = *(dim_data + BATCH_SZ + bid);
@@ -394,28 +379,28 @@ __forceinline__ __device__ void CTCLossImpl(const unsigned int lid,
 
         if constexpr(OptLclMemLb)
         {
-            for(unsigned int i = lid; i < label_len; i += WORK_PER_GRP)
+            for(unsigned int i = local_id; i < label_len; i += WORK_PER_GRP)
             {
                 lb_prime[2 * i + 1] = dim_data[4 * BATCH_SZ + label_offsets + i];
             }
         }
         else
         {
-            for(unsigned int i = lid; i < label_len; i += WORK_PER_GRP)
+            for(unsigned int i = local_id; i < label_len; i += WORK_PER_GRP)
             {
                 dim_data[LB_PRIME_OFFSET + bid * MAX_S_LEN + 2 * i + 1] =
                     dim_data[4 * BATCH_SZ + label_offsets + i];
             }
         }
 
-        for(unsigned int i = lid; i < MAX_TSTEP * MAX_S_LEN; i += WORK_PER_GRP)
+        for(unsigned int i = local_id; i < MAX_TSTEP * MAX_S_LEN; i += WORK_PER_GRP)
         {
             *(workspace + ALPHA_OFFSET + bid * MAX_TSTEP * MAX_S_LEN + i) = negative_cutoff_val;
         }
 
         if constexpr(!OptLclMemBeta)
         {
-            for(unsigned int i = lid; i < 2 * MAX_S_LEN; i += WORK_PER_GRP)
+            for(unsigned int i = local_id; i < 2 * MAX_S_LEN; i += WORK_PER_GRP)
             {
                 *(workspace + BETA_OFFSET + bid * 2 * MAX_S_LEN + i) = negative_cutoff_val;
             }
@@ -443,7 +428,7 @@ __forceinline__ __device__ void CTCLossImpl(const unsigned int lid,
 
         if constexpr(OptLclMemBeta)
         {
-            for(unsigned int i = lid; i < MAX_S_LEN; i += WORK_PER_GRP)
+            for(unsigned int i = local_id; i < MAX_S_LEN; i += WORK_PER_GRP)
             {
                 *(beta0 + i) = negative_cutoff_val;
                 *(beta1 + i) = negative_cutoff_val;
@@ -478,8 +463,8 @@ __forceinline__ __device__ void CTCLossImpl(const unsigned int lid,
 }
 
 template <bool OptLclMemBeta, bool OptLclMemLb>
-__forceinline__ __device__ void CTCLoss(const unsigned int lid,
-                                        const unsigned int grp_id,
+__forceinline__ __device__ void CTCLoss(const unsigned int local_id,
+                                        const unsigned int group_id,
                                         const FLOAT* probs_logits,
                                         FLOAT* workspace,
                                         int* dim_data,
@@ -487,20 +472,21 @@ __forceinline__ __device__ void CTCLoss(const unsigned int lid,
                                         FLOAT* gradients);
 
 template <>
-__forceinline__ __device__ void CTCLoss<false, false>(const unsigned int lid,
-                                                      const unsigned int grp_id,
+__forceinline__ __device__ void CTCLoss<false, false>(const unsigned int local_id,
+                                                      const unsigned int group_id,
                                                       const FLOAT* probs_logits,
                                                       FLOAT* workspace,
                                                       int* dim_data,
                                                       FLOAT* losses,
                                                       FLOAT* gradients)
 {
-    CTCLossImpl<false, false>(lid, grp_id, probs_logits, workspace, dim_data, losses, gradients);
+    CTCLossImpl<false, false>(
+        local_id, group_id, probs_logits, workspace, dim_data, losses, gradients);
 }
 
 template <>
-__forceinline__ __device__ void CTCLoss<true, false>(const unsigned int lid,
-                                                     const unsigned int grp_id,
+__forceinline__ __device__ void CTCLoss<true, false>(const unsigned int local_id,
+                                                     const unsigned int group_id,
                                                      const FLOAT* probs_logits,
                                                      FLOAT* workspace,
                                                      int* dim_data,
@@ -510,12 +496,12 @@ __forceinline__ __device__ void CTCLoss<true, false>(const unsigned int lid,
     __shared__ FLOAT beta0[MAX_S_LEN];
     __shared__ FLOAT beta1[MAX_S_LEN];
     CTCLossImpl<true, false>(
-        lid, grp_id, probs_logits, workspace, dim_data, losses, gradients, beta0, beta1);
+        local_id, group_id, probs_logits, workspace, dim_data, losses, gradients, beta0, beta1);
 }
 
 template <>
-__forceinline__ __device__ void CTCLoss<false, true>(const unsigned int lid,
-                                                     const unsigned int grp_id,
+__forceinline__ __device__ void CTCLoss<false, true>(const unsigned int local_id,
+                                                     const unsigned int group_id,
                                                      const FLOAT* probs_logits,
                                                      FLOAT* workspace,
                                                      int* dim_data,
@@ -523,8 +509,8 @@ __forceinline__ __device__ void CTCLoss<false, true>(const unsigned int lid,
                                                      FLOAT* gradients)
 {
     __shared__ int lb_prime[MAX_S_LEN];
-    CTCLossImpl<false, true>(lid,
-                             grp_id,
+    CTCLossImpl<false, true>(local_id,
+                             group_id,
                              probs_logits,
                              workspace,
                              dim_data,
@@ -536,8 +522,8 @@ __forceinline__ __device__ void CTCLoss<false, true>(const unsigned int lid,
 }
 
 template <>
-__forceinline__ __device__ void CTCLoss<true, true>(const unsigned int lid,
-                                                    const unsigned int grp_id,
+__forceinline__ __device__ void CTCLoss<true, true>(const unsigned int local_id,
+                                                    const unsigned int group_id,
                                                     const FLOAT* probs_logits,
                                                     FLOAT* workspace,
                                                     int* dim_data,
@@ -547,8 +533,16 @@ __forceinline__ __device__ void CTCLoss<true, true>(const unsigned int lid,
     __shared__ FLOAT beta0[MAX_S_LEN];
     __shared__ FLOAT beta1[MAX_S_LEN];
     __shared__ int lb_prime[MAX_S_LEN];
-    CTCLossImpl<true, true>(
-        lid, grp_id, probs_logits, workspace, dim_data, losses, gradients, beta0, beta1, lb_prime);
+    CTCLossImpl<true, true>(local_id,
+                            group_id,
+                            probs_logits,
+                            workspace,
+                            dim_data,
+                            losses,
+                            gradients,
+                            beta0,
+                            beta1,
+                            lb_prime);
 }
 
 extern "C" __global__ void CTCLossGPU([[maybe_unused]] const FLOAT* probs,
@@ -567,8 +561,8 @@ extern "C" __global__ void CTCLossGPU([[maybe_unused]] const FLOAT* probs,
         probs_logits = probs;
     }
 
-    const unsigned int lid    = threadIdx.x;
-    const unsigned int grp_id = blockIdx.x;
+    const unsigned int local_id = threadIdx.x;
+    const unsigned int group_id = blockIdx.x;
     CTCLoss<OPT_LCL_MEM_BETA, OPT_LCL_MEM_LB>(
-        lid, grp_id, probs_logits, workspace, dim_data, losses, gradients);
+        local_id, group_id, probs_logits, workspace, dim_data, losses, gradients);
 }
