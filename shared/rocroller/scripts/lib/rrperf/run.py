@@ -204,7 +204,7 @@ def run(args):
     run_cli(**args.__dict__)
 
 
-def run_cli(  # noqa: C901
+def run_cli(
     token: str = None,
     suite: str = None,
     submit: bool = False,

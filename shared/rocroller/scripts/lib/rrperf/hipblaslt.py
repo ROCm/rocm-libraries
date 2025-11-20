@@ -44,8 +44,6 @@ TYPE_SIZE_BYTES = {
 
 # Column name mappings from rocRoller to hipblaslt format
 RENAMES = {
-    "hipblaslt-Gflops": "gflops",
-    "hipblaslt-GB/s": "gbs",
     "type_A": "a_type",
     "type_B": "b_type",
     "type_C": "c_type",
