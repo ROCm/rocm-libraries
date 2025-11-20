@@ -431,7 +431,7 @@ try
         ("initialization",
          value<std::string>(&initialization)->default_value("hpl"),
          "Initialize matrix data."
-         "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist")
+         "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01")
 
         ("transA",
          value<char>(&arg.transA)->default_value('N'),

@@ -156,6 +156,23 @@ constexpr double csrmv_gbyte_count(J M, J N, I nnz, bool beta = false)
     return csrmv_gbyte_count<T, T, T>(M, N, nnz, beta);
 }
 
+template <typename A, typename X, typename Y, typename I, typename J>
+constexpr double
+    sellmv_gbyte_count(J M, J N, int64_t nnz, J slice_size, I sell_colval_size, bool beta = false)
+{
+    J nslices = (M - 1) / slice_size + 1;
+    return (sizeof(I) * (nslices + 1) + sizeof(J) * sell_colval_size + sizeof(A) * sell_colval_size
+            + sizeof(Y) * (M + (beta ? M : 0)) + sizeof(X) * N)
+           / 1e9;
+}
+
+template <typename T, typename I, typename J>
+constexpr double
+    sellmv_gbyte_count(J M, J N, int64_t nnz, J slice_size, I sell_colval_size, bool beta = false)
+{
+    return sellmv_gbyte_count<T, T, T>(M, N, nnz, slice_size, sell_colval_size, beta);
+}
+
 template <typename T, typename I>
 constexpr double gemvi_gbyte_count(I m, I nnz, bool beta = false)
 {

@@ -61,7 +61,7 @@ namespace TensileLite
 
             virtual void reportValue_double(std::string const& key, double value) override;
 
-            virtual void preSolution(ContractionSolution const& solution) override;
+            virtual void preSolution(ContractionSolution* const solution) override;
 
             virtual void preProblem(ContractionProblem* const problem) override;
 

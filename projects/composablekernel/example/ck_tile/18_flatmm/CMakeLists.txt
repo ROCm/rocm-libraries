@@ -15,7 +15,15 @@ if(has_supported_gpu)
     add_executable(tile_example_a16w4_moe_flatmm EXCLUDE_FROM_ALL mixed_prec/a16w4_moe_flatmm.cpp)
     add_executable(tile_example_grouped_flatmm EXCLUDE_FROM_ALL grouped_flatmm.cpp)
 
-    set(EXAMPLE_FLATMM_COMPILE_OPTIONS)
+    include(mxgemm/mx_flatmm_instance.cmake)
+    mx_flatmm_instance_generate(EXAMPLE_MX_FLATMM_FILES)
+    message(STATUS "Generated MX FlatMM kernel files: ${EXAMPLE_MX_FLATMM_FILES}")
+    add_executable(tile_example_mx_flatmm EXCLUDE_FROM_ALL mxgemm/mx_flatmm.cpp ${EXAMPLE_MX_FLATMM_FILES})
+    target_include_directories(tile_example_mx_flatmm PRIVATE mxgemm)
+
+    # NOTE: we turn off undefined-func-template to let source compile without explicit declare function specializations
+    #       ... because they are auto-generated
+    set(EXAMPLE_FLATMM_COMPILE_OPTIONS -Wno-undefined-func-template)
     set(EXAMPLE_MOE_FLATMM_COMPILE_OPTIONS)
 
     if(CK_USE_OCP_FP8)
@@ -27,6 +35,6 @@ if(has_supported_gpu)
     target_compile_options(tile_example_moe_flatmm PRIVATE ${EXAMPLE_FLATMM_COMPILE_OPTIONS})
     target_compile_options(tile_example_a16w4_moe_flatmm PRIVATE ${EXAMPLE_FLATMM_COMPILE_OPTIONS})
     target_compile_options(tile_example_grouped_flatmm PRIVATE ${EXAMPLE_FLATMM_COMPILE_OPTIONS})
-
+    target_compile_options(tile_example_mx_flatmm PRIVATE ${EXAMPLE_FLATMM_COMPILE_OPTIONS}) # TODO: 950 only
 endif()
 

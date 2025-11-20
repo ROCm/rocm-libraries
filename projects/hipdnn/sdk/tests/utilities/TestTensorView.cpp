@@ -500,7 +500,7 @@ TEST(TestTensorView, StdCount)
     }
 
     // Count occurrences of 1
-    long count = std::count(view.begin(), view.end(), 1);
+    auto count = std::count(view.begin(), view.end(), 1);
     EXPECT_EQ(count, 3); // Indices 0, 2, 4
 }
 

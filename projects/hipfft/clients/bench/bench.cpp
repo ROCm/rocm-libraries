@@ -258,7 +258,7 @@ int main(int argc, char* argv[])
     }
     catch(ROCFFT_SKIP& e)
     {
-        std::cout << "SKIPPED: " << e.msg << "\n";
+        std::cout << "SKIPPED: " << e.what() << "\n";
         return EXIT_SUCCESS;
     }
     if(!vram_fits_problem(vram_footprint, free))

@@ -168,12 +168,12 @@ namespace rocRoller
             // Index calculation Helpers
             std::shared_ptr<BufferDescriptor> getBufferDesc(int tag);
             Expression::ExpressionPtr         getOffsetExpr(int  opTag,
-                                                            bool isDirect2LDS,
+                                                            bool isStorePartOfGlobalToLDS,
                                                             CoordinateGraph::Transformer const& coords);
             Generator<Instruction>            getOffset(LoadStoreTileInfo&           info,
                                                         CoordinateGraph::Transformer coords,
                                                         bool                         preserveOffset,
-                                                        bool                         direct2LDS = false);
+                                                        bool isStorePartOfGlobalToLDS = false);
 
             /**
              * @brief Generate stride (in bytes).

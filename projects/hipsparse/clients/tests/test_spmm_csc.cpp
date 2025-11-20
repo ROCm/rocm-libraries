@@ -148,7 +148,7 @@ Arguments setup_spmm_csc_arguments(spmm_csc_bin_tuple tup)
     std::string bin_file = std::get<8>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.set_filename(get_filename(bin_file));
+    arg.set_filename(bin_file);
 
     return arg;
 }

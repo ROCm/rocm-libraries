@@ -339,7 +339,7 @@ bool rocsparseio_cmdline_t::get_integer<long long int>(const char* opt_, long lo
     if((k >= 0) && (++k < this->argc))
     {
         j = k - 1;
-        sscanf(this->argv[k], "%Ld", x_);
+        sscanf(this->argv[k], "%lld", x_);
         {
             int i;
             for(i = 0; i < this->argc - k; ++i)
@@ -376,7 +376,7 @@ void rocsparseio_cmdline_t::scan(const char* opt_, long int* v_)
 template <>
 void rocsparseio_cmdline_t::scan(const char* opt_, long long int* v_)
 {
-    sscanf(opt_, "%Ld", v_);
+    sscanf(opt_, "%lld", v_);
 }
 
 template <>

@@ -28,35 +28,41 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
 {
     static const size_t         safe_size = 100;
     rocsparse_const_spmat_descr local_descr{};
-    int64_t                     local_rows          = safe_size;
-    int64_t                     local_cols          = safe_size;
-    int64_t                     local_nnz           = safe_size;
-    rocsparse_direction         local_ell_block_dir = rocsparse_direction_row;
-    int64_t                     local_ell_block_dim = safe_size;
-    int64_t                     local_ell_cols      = safe_size;
-    rocsparse_index_base        local_base          = rocsparse_index_base_zero;
-    rocsparse_format            local_format        = rocsparse_format_csr;
-    rocsparse_indextype         local_itype         = get_indextype<I>();
-    rocsparse_indextype         local_jtype         = get_indextype<J>();
-    rocsparse_datatype          local_ttype         = get_datatype<T>();
-    rocsparse_int               local_batch_count   = safe_size;
+    int64_t                     local_rows             = safe_size;
+    int64_t                     local_cols             = safe_size;
+    int64_t                     local_nnz              = safe_size;
+    rocsparse_direction         local_ell_block_dir    = rocsparse_direction_row;
+    int64_t                     local_ell_block_dim    = safe_size;
+    int64_t                     local_ell_cols         = safe_size;
+    int64_t                     local_sell_slice_size  = safe_size;
+    int64_t                     local_sell_colval_size = safe_size;
+    rocsparse_index_base        local_base             = rocsparse_index_base_zero;
+    rocsparse_format            local_format           = rocsparse_format_csr;
+    rocsparse_indextype         local_itype            = get_indextype<I>();
+    rocsparse_indextype         local_jtype            = get_indextype<J>();
+    rocsparse_datatype          local_ttype            = get_datatype<T>();
+    rocsparse_int               local_batch_count      = safe_size;
 
     {
-        rocsparse_const_spmat_descr* descr         = &local_descr;
-        int64_t                      rows          = local_rows;
-        int64_t                      cols          = local_cols;
-        int64_t                      nnz           = local_nnz;
-        rocsparse_direction          ell_block_dir = local_ell_block_dir;
-        int64_t                      ell_block_dim = local_ell_block_dim;
-        int64_t                      ell_cols      = local_ell_cols;
-        rocsparse_index_base         idx_base      = local_base;
+        rocsparse_const_spmat_descr* descr            = &local_descr;
+        int64_t                      rows             = local_rows;
+        int64_t                      cols             = local_cols;
+        int64_t                      nnz              = local_nnz;
+        rocsparse_direction          ell_block_dir    = local_ell_block_dir;
+        int64_t                      ell_block_dim    = local_ell_block_dim;
+        int64_t                      ell_cols         = local_ell_cols;
+        int64_t                      sell_slice_size  = local_sell_slice_size;
+        int64_t                      sell_colval_size = local_sell_colval_size;
+        rocsparse_index_base         idx_base         = local_base;
 
-        rocsparse_indextype idx_type     = local_itype;
-        rocsparse_datatype  data_type    = local_ttype;
-        rocsparse_indextype row_ptr_type = local_itype;
-        rocsparse_indextype col_ind_type = local_jtype;
-        rocsparse_indextype col_ptr_type = local_itype;
-        rocsparse_indextype row_ind_type = local_jtype;
+        rocsparse_indextype idx_type                = local_itype;
+        rocsparse_datatype  data_type               = local_ttype;
+        rocsparse_indextype row_ptr_type            = local_itype;
+        rocsparse_indextype col_ind_type            = local_jtype;
+        rocsparse_indextype col_ptr_type            = local_itype;
+        rocsparse_indextype row_ind_type            = local_jtype;
+        rocsparse_indextype sell_slice_offsets_type = local_itype;
+        rocsparse_indextype sell_col_ind_type       = local_jtype;
 
         void* coo_row_ind = (void*)0x4;
         void* coo_col_ind = (void*)0x4;
@@ -127,14 +133,72 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
                                                                  data_type),
                                 rocsparse_status_invalid_size);
 
+        void* sell_slice_offsets = (void*)0x4;
+        void* sell_col_ind       = (void*)0x4;
+        void* sell_val           = (void*)0x4;
+
+#define PARAMS_CREATE_SELL                                                                       \
+    descr, rows, cols, nnz, sell_slice_size, sell_colval_size, sell_slice_offsets, sell_col_ind, \
+        sell_val, sell_slice_offsets_type, sell_col_ind_type, idx_base, data_type
+        bad_arg_analysis(rocsparse_create_const_sell_descr, PARAMS_CREATE_SELL);
+#undef PARAMS_CREATE_SELL
+
+        // sell_slice_size = 0
+        EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_sell_descr(descr,
+                                                                  rows,
+                                                                  cols,
+                                                                  nnz,
+                                                                  0,
+                                                                  sell_colval_size,
+                                                                  sell_slice_offsets,
+                                                                  sell_col_ind,
+                                                                  sell_val,
+                                                                  sell_slice_offsets_type,
+                                                                  sell_col_ind_type,
+                                                                  idx_base,
+                                                                  data_type),
+                                rocsparse_status_invalid_size);
+
+        // sell_slice_size > rows
+        EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_sell_descr(descr,
+                                                                  rows,
+                                                                  cols,
+                                                                  nnz,
+                                                                  (rows + 1),
+                                                                  sell_colval_size,
+                                                                  sell_slice_offsets,
+                                                                  sell_col_ind,
+                                                                  sell_val,
+                                                                  sell_slice_offsets_type,
+                                                                  sell_col_ind_type,
+                                                                  idx_base,
+                                                                  data_type),
+                                rocsparse_status_invalid_size);
+
+        // nnz > sell_colval_size
+        EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_sell_descr(descr,
+                                                                  rows,
+                                                                  cols,
+                                                                  (sell_colval_size + 1),
+                                                                  sell_slice_size,
+                                                                  sell_colval_size,
+                                                                  sell_slice_offsets,
+                                                                  sell_col_ind,
+                                                                  sell_val,
+                                                                  sell_slice_offsets_type,
+                                                                  sell_col_ind_type,
+                                                                  idx_base,
+                                                                  data_type),
+                                rocsparse_status_invalid_size);
+
         void* ell_col_ind = (void*)0x4;
         void* ell_val     = (void*)0x4;
 
-#define PARAMS_CREATE_ELL                                                                      \
+#define PARAMS_CREATE_BELL                                                                     \
     descr, rows, cols, ell_block_dir, ell_block_dim, ell_cols, ell_col_ind, ell_val, idx_type, \
         idx_base, data_type
-        bad_arg_analysis(rocsparse_create_const_bell_descr, PARAMS_CREATE_ELL);
-#undef PARAMS_CREATE_ELL
+        bad_arg_analysis(rocsparse_create_const_bell_descr, PARAMS_CREATE_BELL);
+#undef PARAMS_CREATE_BELL
 
         // block_dim = 0
         EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_bell_descr(descr,
@@ -331,33 +395,40 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
     }
 
     {
-        int64_t*              rows          = &local_rows;
-        int64_t*              cols          = &local_cols;
-        int64_t*              nnz           = &local_nnz;
-        rocsparse_direction*  ell_block_dir = &local_ell_block_dir;
-        int64_t*              ell_block_dim = &local_ell_block_dim;
-        int64_t*              ell_cols      = &local_ell_cols;
-        rocsparse_index_base* idx_base      = &local_base;
-        rocsparse_format*     format        = &local_format;
+        int64_t*              rows             = &local_rows;
+        int64_t*              cols             = &local_cols;
+        int64_t*              nnz              = &local_nnz;
+        rocsparse_direction*  ell_block_dir    = &local_ell_block_dir;
+        int64_t*              ell_block_dim    = &local_ell_block_dim;
+        int64_t*              ell_cols         = &local_ell_cols;
+        int64_t*              sell_slice_size  = &local_sell_slice_size;
+        int64_t*              sell_colval_size = &local_sell_colval_size;
+        rocsparse_index_base* idx_base         = &local_base;
+        rocsparse_format*     format           = &local_format;
 
-        rocsparse_indextype* idx_type     = &local_itype;
-        rocsparse_datatype*  data_type    = &local_ttype;
-        rocsparse_indextype* row_ptr_type = &local_itype;
-        rocsparse_indextype* col_ind_type = &local_jtype;
-        rocsparse_indextype* col_ptr_type = &local_itype;
-        rocsparse_indextype* row_ind_type = &local_jtype;
+        rocsparse_indextype* idx_type                = &local_itype;
+        rocsparse_datatype*  data_type               = &local_ttype;
+        rocsparse_indextype* row_ptr_type            = &local_itype;
+        rocsparse_indextype* col_ind_type            = &local_jtype;
+        rocsparse_indextype* col_ptr_type            = &local_itype;
+        rocsparse_indextype* row_ind_type            = &local_jtype;
+        rocsparse_indextype* sell_slice_offsets_type = &local_itype;
+        rocsparse_indextype* sell_col_ind_type       = &local_jtype;
 
-        const void** coo_row_ind = (const void**)0x4;
-        const void** coo_col_ind = (const void**)0x4;
-        const void** coo_val     = (const void**)0x4;
-        const void** csr_row_ptr = (const void**)0x4;
-        const void** csr_col_ind = (const void**)0x4;
-        const void** csr_val     = (const void**)0x4;
-        const void** csc_row_ind = (const void**)0x4;
-        const void** csc_col_ptr = (const void**)0x4;
-        const void** csc_val     = (const void**)0x4;
-        const void** ell_col_ind = (const void**)0x4;
-        const void** ell_val     = (const void**)0x4;
+        const void** coo_row_ind        = (const void**)0x4;
+        const void** coo_col_ind        = (const void**)0x4;
+        const void** coo_val            = (const void**)0x4;
+        const void** csr_row_ptr        = (const void**)0x4;
+        const void** csr_col_ind        = (const void**)0x4;
+        const void** csr_val            = (const void**)0x4;
+        const void** csc_row_ind        = (const void**)0x4;
+        const void** csc_col_ptr        = (const void**)0x4;
+        const void** csc_val            = (const void**)0x4;
+        const void** ell_col_ind        = (const void**)0x4;
+        const void** ell_val            = (const void**)0x4;
+        const void** sell_slice_offsets = (const void**)0x4;
+        const void** sell_col_ind       = (const void**)0x4;
+        const void** sell_val           = (const void**)0x4;
 
         rocsparse_int* batch_count = &local_batch_count;
 
@@ -498,6 +569,54 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
         }
 
         {
+            EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_sell_descr(&local_descr,
+                                                                      local_rows,
+                                                                      local_cols,
+                                                                      local_nnz,
+                                                                      local_sell_slice_size,
+                                                                      local_sell_colval_size,
+                                                                      (const void*)0x4,
+                                                                      (const void*)0x4,
+                                                                      (const void*)0x4,
+                                                                      local_itype,
+                                                                      local_jtype,
+                                                                      local_base,
+                                                                      local_ttype),
+                                    rocsparse_status_success);
+            rocsparse_const_spmat_descr descr = local_descr;
+
+#define PARAMS_GET_SELL                                                                          \
+    descr, rows, cols, nnz, sell_slice_size, sell_colval_size, sell_slice_offsets, sell_col_ind, \
+        sell_val, sell_slice_offsets_type, sell_col_ind_type, idx_base, data_type
+            bad_arg_analysis(rocsparse_const_sell_get, PARAMS_GET_SELL);
+#undef PARAMS_GET_SELL
+
+#define PARAMS_GET_SIZE descr, rows, cols, nnz
+            bad_arg_analysis(rocsparse_spmat_get_size, PARAMS_GET_SIZE);
+#undef PARAMS_GET_SIZE
+
+#define PARAMS_GET_FORMAT descr, format
+            bad_arg_analysis(rocsparse_spmat_get_format, PARAMS_GET_FORMAT);
+#undef PARAMS_GET_FORMAT
+
+#define PARAMS_GET_INDEX_BASE descr, idx_base
+            bad_arg_analysis(rocsparse_spmat_get_index_base, PARAMS_GET_INDEX_BASE);
+#undef PARAMS_GET_INDEX_BASE
+
+            const void** values = (const void**)0x4;
+#define PARAMS_GET_VALUES descr, values
+            bad_arg_analysis(rocsparse_const_spmat_get_values, PARAMS_GET_VALUES);
+#undef PARAMS_GET_VALUES
+
+#define PARAMS_GET_STRIDED_BATCH descr, batch_count
+            bad_arg_analysis(rocsparse_spmat_get_strided_batch, PARAMS_GET_STRIDED_BATCH);
+#undef PARAMS_GET_STRIDED_BATCH
+
+            // Destroy valid descriptors
+            EXPECT_ROCSPARSE_STATUS(rocsparse_destroy_spmat_descr(descr), rocsparse_status_success);
+        }
+
+        {
             EXPECT_ROCSPARSE_STATUS(rocsparse_create_const_bell_descr(&local_descr,
                                                                       local_rows,
                                                                       local_cols,
@@ -512,11 +631,11 @@ void testing_const_spmat_descr_bad_arg(const Arguments& arg)
                                     rocsparse_status_success);
             rocsparse_const_spmat_descr descr = local_descr;
 
-#define PARAMS_GET_ELL                                                                         \
+#define PARAMS_GET_BELL                                                                        \
     descr, rows, cols, ell_block_dir, ell_block_dim, ell_cols, ell_col_ind, ell_val, idx_type, \
         idx_base, data_type
-            bad_arg_analysis(rocsparse_const_bell_get, PARAMS_GET_ELL);
-#undef PARAMS_GET_ELL
+            bad_arg_analysis(rocsparse_const_bell_get, PARAMS_GET_BELL);
+#undef PARAMS_GET_BELL
 
 #define PARAMS_GET_SIZE descr, rows, cols, nnz
             bad_arg_analysis(rocsparse_spmat_get_size, PARAMS_GET_SIZE);

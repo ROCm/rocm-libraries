@@ -8,7 +8,7 @@
 Benchmark protocol
 *************************
 
-To make the Tensile's programability more manageable for the user and developer, the benchmark protocol is divided into several steps encoded in a config.yaml file. Note that the following config.yaml is for demonstration purposes and doesn't represent an ideal benchmark protocol. For good benchmarking config examples, see `Configs <https://github.com/ROCm/Tensile/tree/develop/Tensile/Configs>`_.
+To make the Tensile's programability more manageable for the user and developer, the benchmark protocol is divided into several steps encoded in a config.yaml file. Note that the following config.yaml is for demonstration purposes and doesn't represent an ideal benchmark protocol. For good benchmarking config examples, see `Configs <https://github.com/ROCm/rocm-libraries/tree/develop/shared/tensile/Tensile/Configs>`_.
 
 .. code-block:: yaml
 

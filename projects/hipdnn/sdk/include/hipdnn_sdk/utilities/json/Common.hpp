@@ -82,6 +82,19 @@ NLOHMANN_JSON_SERIALIZE_ENUM(DataType,
                              }
 
 )
+
+NLOHMANN_JSON_SERIALIZE_ENUM(TensorValue,
+                             {
+                                 {TensorValue::NONE, "NONE"},
+                                 {TensorValue::Float32Value, "Float32Value"},
+                                 {TensorValue::Float16Value, "Float16Value"},
+                                 {TensorValue::BFloat16Value, "BFloat16Value"},
+                                 {TensorValue::Float8Value, "Float8Value"},
+                                 {TensorValue::Int32Value, "Int32Value"},
+                                 {TensorValue::Float64Value, "Float64Value"},
+                             }
+
+)
 }
 
 namespace hipdnn_sdk::json

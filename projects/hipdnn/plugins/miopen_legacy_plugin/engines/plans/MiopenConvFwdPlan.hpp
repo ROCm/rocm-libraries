@@ -56,8 +56,8 @@ public:
     ConvFwdPlan(const ConvFwdPlan&) = delete;
     ConvFwdPlan& operator=(const ConvFwdPlan&) = delete;
 
-    ConvFwdPlan(ConvFwdPlan&& other) noexcept;
-    ConvFwdPlan& operator=(ConvFwdPlan&& other) noexcept;
+    ConvFwdPlan(ConvFwdPlan&& other) = default;
+    ConvFwdPlan& operator=(ConvFwdPlan&& other) = default;
 
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
 

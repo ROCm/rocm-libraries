@@ -39,6 +39,8 @@ protected:
 
     void goldenReferenceTestSuite(float absoluteTolerance, float relativeTolerance)
     {
+        SKIP_IF_WINDOWS();
+
         auto tensorMap = _graphAndTensors.hostBufferMap();
         EXPECT_EQ(tensorMap.size(), 6);
 

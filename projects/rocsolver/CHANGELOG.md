@@ -2,12 +2,31 @@
 
 Full documentation for rocSOLVER is available at the [rocSOLVER documentation](https://rocm.docs.amd.com/projects/rocSOLVER/en/latest/index.html).
 
+## rocSOLVER 3.32.0 for ROCm 7.2.0
+
+### Optimized
+
+* Improved the performance of LARFB and downstream functions such as GEQRF and ORMTR.
+
+
+
 ## rocSOLVER 3.31.0 for ROCm 7.1.0
 
 ### Optimized
 
 * Improved the performance of LARF, LARFT, GEQR2, and downstream functions such as GEQRF
 * Improved the performance of STEDC and divide and conquer Eigensolvers
+
+
+
+## rocSOLVER 3.30.1 for ROCm 7.0.2
+
+### Optimized
+
+* Improved the performance of LARFT and downstream functions such as GEQRF and ORMTR.
+* Improved the performance of LARF and downstream functions such as GEQR2.
+* Improved the performance of ORMTR and downstream functions such as SYEVD.
+* Improved the performance of GEQR2 and downstream functions such as GEQRF.
 
 
 

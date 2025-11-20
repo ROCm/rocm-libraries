@@ -556,7 +556,12 @@ struct GroupedConvolutionBackwardDataKernel
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         // clang-format off
-        return concat('_', "grouped_convolution_backward_data", gemm_prec_str<InDataType, WeiDataType>, GemmPipeline::GetName());
+        return concat('_', "grouped_convolution_backward_data", 
+            gemm_prec_str<InDataType, WeiDataType>(), 
+            "gemm",
+            GemmPipeline::GetName(),
+            "epilogue",
+            EpiloguePipeline::GetName());
         // clang-format on
     }
 
@@ -719,8 +724,8 @@ struct GroupedConvolutionBackwardDataKernel
                         const GroupedConvBwdDataKernelArgsSpecialized& kargs,
                         const index_t group_id)
     {
-        static_assert(!TilePartitioner::BlockGemmShape::PermuteA, "Not implemented!");
-        static_assert(!TilePartitioner::BlockGemmShape::PermuteB, "Not implemented!");
+        static_assert(!GemmPipeline::BlockGemmShape::PermuteA, "Not implemented!");
+        static_assert(!GemmPipeline::BlockGemmShape::PermuteB, "Not implemented!");
         const auto& a_tensor_view = [&]() {
             return make_tensor_view<address_space_enum::global>(
                 a_ptr,

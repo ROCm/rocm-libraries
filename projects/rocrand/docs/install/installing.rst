@@ -52,12 +52,6 @@ For Ubuntu and Debian:
 
    sudo apt-get install rocrand
 
-For CentOS-based systems:
-
-.. code-block:: shell
-
-   sudo yum install rocrand
-
 For SLES:
 
 .. code-block:: shell

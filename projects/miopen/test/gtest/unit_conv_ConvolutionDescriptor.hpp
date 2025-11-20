@@ -37,12 +37,14 @@ struct ConvolutionDescriptorParams
                                 std::vector<int>&& strides_in,
                                 std::vector<int>&& dilations_in,
                                 int group_count_in    = 1,
-                                bool deterministic_in = false)
+                                bool deterministic_in = false,
+                                bool tf32_compute_in  = false)
         : pads(std::move(pads_in)),
           strides(std::move(strides_in)),
           dilations(std::move(dilations_in)),
           group_count(group_count_in),
-          deterministic(deterministic_in)
+          deterministic(deterministic_in),
+          tf32_compute(tf32_compute_in)
     {
     }
 
@@ -60,6 +62,10 @@ struct ConvolutionDescriptorParams
         {
             desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1);
         }
+        // SET TF32 COMPUTE ATTRIBUTE
+        miopenMathType_t math_type = tf32_compute ? miopenMathDefault : miopenMathPedantic;
+        desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE, math_type);
+
         return desc;
     }
 
@@ -78,6 +84,7 @@ private:
     std::vector<int> dilations;
     int group_count;
     bool deterministic;
+    bool tf32_compute;
 };
 
 } // namespace unit_tests

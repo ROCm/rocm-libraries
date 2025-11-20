@@ -120,8 +120,9 @@ if(BUILD_TEST)
 endif(BUILD_TEST)
 
 if(BUILD_BENCHMARK)
+  set(BENCHMARK_VERSION 1.8.0)
   if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-    find_package(benchmark CONFIG QUIET)
+    find_package(benchmark ${BENCHMARK_VERSION} CONFIG QUIET)
   endif()
   if(NOT TARGET benchmark::benchmark)
     message(STATUS "Google Benchmark not found. Fetching...")
@@ -130,7 +131,7 @@ if(BUILD_BENCHMARK)
     FetchContent_Declare(
       googlebench
       GIT_REPOSITORY https://github.com/google/benchmark.git
-      GIT_TAG        v1.8.0
+      GIT_TAG        v${BENCHMARK_VERSION}
     )
     set(HAVE_STD_REGEX ON)
     set(RUN_HAVE_STD_REGEX 1)
@@ -144,9 +145,9 @@ if(BUILD_BENCHMARK)
 endif(BUILD_BENCHMARK)
 
 if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-  find_package(ROCM 0.11.0 CONFIG QUIET PATHS "${ROCM_ROOT}") # rocm-cmake
+  find_package(ROCmCMakeBuildTools 0.11.0 CONFIG QUIET PATHS "${ROCM_ROOT}") # rocm-cmake
 endif()
-if(NOT ROCM_FOUND)
+if(NOT ROCmCMakeBuildTools_FOUND)
   message(STATUS "ROCm CMake not found. Fetching...")
   # We don't really want to consume the build and test targets of ROCm CMake.
   # CMake 3.18 allows omitting them, even though there's a CMakeLists.txt in source root.
@@ -159,7 +160,7 @@ if(NOT ROCM_FOUND)
   FetchContent_Declare(
     rocm-cmake
     GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
-    GIT_TAG        rocm-6.1.2
+    GIT_TAG        rocm-6.4.4
     ${SOURCE_SUBDIR_ARG}
   )
   FetchContent_GetProperties(rocm-cmake)
@@ -177,9 +178,9 @@ if(NOT ROCM_FOUND)
     )
   endif()
   FetchContent_MakeAvailable(rocm-cmake)
-  find_package(ROCM CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
+  find_package(ROCmCMakeBuildTools CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
 else()
-  find_package(ROCM 0.11.0 CONFIG REQUIRED PATHS "${ROCM_ROOT}")
+  find_package(ROCmCMakeBuildTools 0.11.0 CONFIG REQUIRED PATHS "${ROCM_ROOT}")
 endif()
 
 

@@ -32,15 +32,15 @@
 
 struct RealComplexSpecs
 {
-    ComputeScheme     scheme;
-    size_t            dim;
-    rocfft_precision  precision;
-    rocfft_array_type inArrayType;
-    rocfft_array_type outArrayType;
-    CallbackType      cbtype;
-    LoadOps           loadOps;
-    StoreOps          storeOps;
-    bool              grid3D;
+    ComputeScheme           scheme;
+    size_t                  dim;
+    rocfft_precision        precision;
+    rocfft_array_type       inArrayType;
+    rocfft_array_type       outArrayType;
+    CallbackType            cbtype;
+    std::optional<LoadOps>  loadOps;
+    std::optional<StoreOps> storeOps;
+    bool                    grid3D;
 };
 
 struct RealComplexEvenSpecs : public RealComplexSpecs

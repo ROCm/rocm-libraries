@@ -24,31 +24,15 @@
 #include <string>
 
 // exception type to throw when we want to skip a problem
-struct ROCFFT_SKIP
+struct ROCFFT_SKIP : public std::runtime_error
 {
-    const std::string msg;
-    ROCFFT_SKIP(std::string&& s)
-        : msg(std::move(s))
-    {
-    }
-    ROCFFT_SKIP(const std::string& s)
-        : msg(s)
-    {
-    }
+    using std::runtime_error::runtime_error;
 };
 
 // exception type to throw when we want to consider a problem failed
-struct ROCFFT_FAIL
+struct ROCFFT_FAIL : public std::runtime_error
 {
-    const std::string msg;
-    ROCFFT_FAIL(std::string&& s)
-        : msg(std::move(s))
-    {
-    }
-    ROCFFT_FAIL(const std::string& s)
-        : msg(s)
-    {
-    }
+    using std::runtime_error::runtime_error;
 };
 
 #endif

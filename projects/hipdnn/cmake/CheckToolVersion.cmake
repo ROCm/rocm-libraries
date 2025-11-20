@@ -131,7 +131,7 @@ function(findAndCheckLlvmSymbolizer)
     )
     
     if(NOT LLVM_SYMBOLIZER_EXE)
-        message(FATAL_ERROR "llvm-symbolizer not found in PATH, /opt/rocm/llvm/bin, or compiler directory")
+        message(WARNING "llvm-symbolizer not found in PATH, /opt/rocm/llvm/bin, or compiler directory.  ASAN tests will be missing symbolized stack traces.")
         return()
     endif()
     

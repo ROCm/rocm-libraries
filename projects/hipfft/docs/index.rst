@@ -1,23 +1,30 @@
 .. meta::
-  :description: hipFFT documentation and API reference library
-  :keywords: FFT, hipFFT, rocFFT, ROCm, API, documentation
+  :description: hipFFT documentation, hipFFTW documentation, and API reference library
+  :keywords: FFT, hipFFT, hipFFTW, rocFFT, ROCm, API, documentation
 
 .. _hipfft-docs-home:
 
 ********************************************************************
-hipFFT documentation
+hipFFT and hipFFTW documentation
 ********************************************************************
 
 hipFFT is an FFT (fast Fourier transform) marshalling library. It supports either :doc:`rocFFT <rocfft:index>` or
 NVIDIA CUDA cuFFT_ as the backend. hipFFT sits between the
 application and the backend FFT library, marshalling inputs into the
 backend and results back to the application.
-For more information, see the :ref:`hipfft-overview`.
+hipFFT requires its computational input and output data to be GPU-visible. Data residing in device memory is
+recommended as it typically delivers the best performance.
 
-.. _rocFFT: https://rocm.docs.amd.com/projects/rocFFT/en/latest/index.html
+hipFFTW is a GPU-aware library for fast Fourier transforms using :doc:`rocFFT <rocfft:index>` as the backend. It
+exports an interface borrowing the most commonly-used symbols of FFTW_. hipFFTW does not require its
+computational input and output to be directly accessible by the GPU.
+
+For more information, see the :ref:`overview-of-hipfft-and-hipfftw`.
+
 .. _cuFFT: https://developer.nvidia.com/cufft
+.. _FFTW: https://www.fftw.org/
 
-The hipFFT public repository is located at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipfft>`_.
+hipFFT and hipFFTW share the same public repository located at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipfft>`_.
 
 .. note::
 
@@ -28,11 +35,11 @@ The hipFFT public repository is located at `<https://github.com/ROCm/rocm-librar
 
   .. grid-item-card:: Install
 
-    * :doc:`Installation guide <./install/building-installing-hipfft>`
+    * :doc:`Installation guide <./install/building-installing-hipfft-and-hipfftw>`
 
   .. grid-item-card:: Conceptual
 
-    * :doc:`hipFFT overview <./conceptual/overview>`
+    * :doc:`Overview of hipFFT and hipFFTW <./conceptual/overview>`
 
   .. grid-item-card:: Examples
 
@@ -40,7 +47,8 @@ The hipFFT public repository is located at `<https://github.com/ROCm/rocm-librar
 
   .. grid-item-card:: API Reference
 
-    * :doc:`API and usage notes <./reference/fft-api-usage>`
+    * :doc:`hipFFT API and usage notes <./reference/hipfft-api-usage>`
+    * :doc:`hipFFTW API and usage notes <./reference/hipfftw-api-usage>`
     * :ref:`API Index <genindex>`
 
 To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

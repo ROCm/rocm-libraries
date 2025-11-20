@@ -96,44 +96,6 @@ hipError_t run_length_encode_impl(void*                     temporary_storage,
 }
 
 template<typename Config,
-         typename OffsetCountPairType,
-         typename InputIterator,
-         typename OffsetsOutputIterator,
-         typename CountsOutputIterator,
-         typename RunsCountOutputIterator,
-         typename LookbackScanState,
-         typename BlockIdWrapper>
-inline hipError_t launch_non_trivial(detail::target_arch           arch,
-                                     const InputIterator           input,
-                                     const OffsetsOutputIterator   offsets_output,
-                                     const CountsOutputIterator    counts_output,
-                                     const RunsCountOutputIterator runs_count_output,
-                                     const LookbackScanState       scan_state,
-                                     const std::size_t             grid_size,
-                                     const std::size_t             size,
-                                     BlockIdWrapper                ordered_bid,
-                                     dim3                          grid,
-                                     dim3                          block,
-                                     size_t                        shmem,
-                                     hipStream_t                   stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        run_length_encode::non_trivial_kernel_impl<decltype(arch_config), OffsetCountPairType>(
-            input,
-            offsets_output,
-            counts_output,
-            runs_count_output,
-            scan_state,
-            grid_size,
-            size,
-            ordered_bid);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
-template<typename Config,
          typename InputIterator,
          typename OffsetsOutputIterator,
          typename CountsOutputIterator,
@@ -245,21 +207,26 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
                                                         grid_size,
                                                         start);
 
-            ROCPRIM_RETURN_ON_ERROR(
-                run_length_encode::launch_non_trivial<config, offset_count_pair_type>(
-                    target_arch,
-                    input + 0,
+            auto non_trivial_kernel = [=](auto arch_config)
+            {
+                run_length_encode::non_trivial_kernel_impl<decltype(arch_config),
+                                                           offset_count_pair_type>(
+                    input,
                     offsets_output,
                     counts_output,
                     runs_count_output,
                     scan_state,
                     grid_size,
                     size,
-                    ordered_bid,
-                    dim3(grid_size),
-                    dim3(block_size),
-                    0,
-                    stream));
+                    ordered_bid);
+            };
+
+            ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                                non_trivial_kernel,
+                                                                dim3(grid_size),
+                                                                dim3(block_size),
+                                                                0,
+                                                                stream));
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("run_length_encode::non_trivial_kernel",
                                                         size,
                                                         start);

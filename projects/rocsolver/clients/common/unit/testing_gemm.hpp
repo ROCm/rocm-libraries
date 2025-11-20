@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 #include "rocblas_utility.hpp"
 #include "rocsolver_run_specialized_kernels.hpp"
@@ -183,7 +184,7 @@ void gemm_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -199,15 +200,15 @@ void gemm_getPerfData(const rocblas_handle handle,
     {
         gemm_initData<false, true, T, I>(handle, dA, hA, dB, hB, dC, hC);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         CHECK_ROCBLAS_ERROR((rocsolver::rocsolver_gemm<T, I>)(handle, transA, transB, m, n, k,
                                                               dalpha.data(), dA.data(), 0, inca,
                                                               lda, stA, dB.data(), 0, incb, ldb,
                                                               stB, dbeta.data(), dC.data(), 0, incc,
                                                               ldc, stC, bc, nullptr));
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename I>
@@ -319,7 +320,7 @@ void testing_gemm(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             gemm_getPerfData<T, I>(handle, transA, transB, m, n, k, dalpha, dA, inca, lda, stA, dB,
                                    incb, ldb, stB, dbeta, dC, incc, ldc, stC, bc, halpha, hbeta, hA,
@@ -354,7 +355,7 @@ void testing_gemm(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             gemm_getPerfData<T, I>(handle, transA, transB, m, n, k, dalpha, dA, inca, lda, stA, dB,
                                    incb, ldb, stB, dbeta, dC, incc, ldc, stC, bc, halpha, hbeta, hA,

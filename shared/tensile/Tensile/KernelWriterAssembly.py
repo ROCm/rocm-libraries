@@ -742,6 +742,9 @@ class KernelWriterAssembly(KernelWriter):
     dkp = kernel["DisableKernelPieces"]
     self.do["NullKernel"]  = dkp >= 9 or dkp == -9
 
+    if "ISA" not in kernel:
+      raise ValueError(f"ISA not found in kernel {kernel}. This is required for assembly kernels.")
+
     self.kernel = kernel
 
     # init these here in case some kernel pieces are disabled for performance exploration:
@@ -842,9 +845,7 @@ class KernelWriterAssembly(KernelWriter):
     self.combineLocalAddresses = 0
 
     # ISA version, such as 803
-    self.version = globalParameters["CurrentISA"]
-    if "ISA" in kernel:
-      self.version = tuple(kernel["ISA"])
+    self.version = kernel["ISA"]
     if not globalParameters["AsmCaps"][self.version]["SupportedISA"]:
       defaultIsa = (9,0,0)
       print("warning: ISA:", self.version, " is not supported; overriding with ", defaultIsa)

@@ -54,84 +54,6 @@ namespace detail
 template<class Config,
          select_method SelectMethod,
          bool          OnlySelected,
-         class KeyIterator,
-         class ValueIterator,
-         class FlagIterator,
-         class OutputKeyIterator,
-         class OutputValueIterator,
-         class InequalityOp,
-         class OffsetLookbackScanState,
-         class BlockIdWrapper,
-         class... UnaryPredicates>
-inline hipError_t launch_partition(detail::target_arch     arch,
-                                   KeyIterator             keys_input,
-                                   ValueIterator           values_input,
-                                   FlagIterator            flags,
-                                   OutputKeyIterator       keys_output,
-                                   OutputValueIterator     values_output,
-                                   size_t*                 selected_count,
-                                   size_t*                 prev_selected_count,
-                                   size_t                  prev_processed,
-                                   const size_t            total_size,
-                                   InequalityOp            inequality_op,
-                                   OffsetLookbackScanState offset_scan_state,
-                                   const unsigned int      number_of_blocks,
-                                   detail::vsmem_t         vsmem,
-                                   BlockIdWrapper          block_id,
-                                   dim3                    grid,
-                                   dim3                    block,
-                                   size_t                  shmem,
-                                   hipStream_t             stream,
-                                   UnaryPredicates... predicates)
-{
-    auto kernel = [=](auto arch_config) mutable
-    {
-        using offset_type = typename OffsetLookbackScanState::value_type;
-        using key_type    = typename std::iterator_traits<KeyIterator>::value_type;
-        using value_type  = typename std::iterator_traits<ValueIterator>::value_type;
-        using flag_type =
-            typename std::conditional<SelectMethod == select_method::predicated_flag,
-                                      typename std::iterator_traits<FlagIterator>::value_type,
-                                      bool>::type;
-
-        using partition_kernel_impl_t = partition_kernel_impl_<decltype(arch_config),
-                                                               SelectMethod,
-                                                               OnlySelected,
-                                                               key_type,
-                                                               value_type,
-                                                               flag_type,
-                                                               offset_type,
-                                                               BlockIdWrapper>;
-
-        using VSmemHelperT = detail::vsmem_helper_impl<partition_kernel_impl_t>;
-        ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
-        // Get temporary storage
-        typename partition_kernel_impl_t::storage_type& storage
-            = VSmemHelperT::get_temp_storage(static_temp_storage, vsmem);
-
-        partition_kernel_impl_t().partition(keys_input,
-                                            values_input,
-                                            flags,
-                                            keys_output,
-                                            values_output,
-                                            selected_count,
-                                            prev_selected_count,
-                                            prev_processed,
-                                            total_size,
-                                            inequality_op,
-                                            offset_scan_state,
-                                            number_of_blocks,
-                                            block_id,
-                                            storage,
-                                            predicates...);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
-template<class Config,
-         select_method SelectMethod,
-         bool          OnlySelected,
          class Key,
          class Value,
          class FlagType,
@@ -390,27 +312,46 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                     start = std::chrono::steady_clock::now();
                 }
 
-                ROCPRIM_RETURN_ON_ERROR(launch_partition<config, method, write_only_selected>(
-                    target_arch,
-                    keys_input + prev_processed,
-                    values_input + prev_processed,
-                    flags + prev_processed,
-                    keys_output,
-                    values_output,
-                    selected_count,
-                    prev_selected_count,
-                    prev_processed,
-                    size,
-                    inequality_op,
-                    scan_state,
-                    current_number_of_blocks,
-                    detail::vsmem_t{vsmem},
-                    block_id,
-                    dim3(current_number_of_blocks),
-                    dim3(block_size),
-                    0,
-                    stream,
-                    predicates...));
+                auto partition_kernel = [=, vsm = detail::vsmem_t{vsmem}](auto arch_config) mutable
+                {
+                    using partition_kernel_impl_t = partition_kernel_impl_<decltype(arch_config),
+                                                                           method,
+                                                                           write_only_selected,
+                                                                           key_type,
+                                                                           value_type,
+                                                                           flag_type,
+                                                                           offset_type,
+                                                                           decltype(block_id)>;
+
+                    using VSmemHelperT = detail::vsmem_helper_impl<partition_kernel_impl_t>;
+                    ROCPRIM_SHARED_MEMORY
+                    typename VSmemHelperT::static_temp_storage_t static_temp_storage;
+                    // Get temporary storage
+                    typename partition_kernel_impl_t::storage_type& storage
+                        = VSmemHelperT::get_temp_storage(static_temp_storage, vsm);
+
+                    partition_kernel_impl_t().partition(keys_input + prev_processed,
+                                                        values_input + prev_processed,
+                                                        flags + prev_processed,
+                                                        keys_output,
+                                                        values_output,
+                                                        selected_count,
+                                                        prev_selected_count,
+                                                        prev_processed,
+                                                        size,
+                                                        inequality_op,
+                                                        scan_state,
+                                                        current_number_of_blocks,
+                                                        block_id,
+                                                        storage,
+                                                        predicates...);
+                };
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                                    partition_kernel,
+                                                                    dim3(current_number_of_blocks),
+                                                                    dim3(block_size),
+                                                                    0,
+                                                                    stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start);
 
                 std::swap(selected_count, prev_selected_count);

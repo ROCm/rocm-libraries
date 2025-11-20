@@ -50,7 +50,12 @@ struct BatchnormBwdParams
     hipdnn_sdk::data_objects::TensorAttributesT dbiasTensor;
 };
 
-template <typename InputDataType, typename ScaleBiasDataType, typename MeanVarianceDataType>
+template <typename DyDataType,
+          typename XDataType,
+          typename ScaleBiasDataType,
+          typename MeanVarianceDataType,
+          typename OutputDataType,
+          typename ComputeDataType>
 class BatchnormBwdPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -61,11 +66,11 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowDyTensor = createShallowTensor<InputDataType>(
+        auto shallowDyTensor = createShallowTensor<DyDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
-        auto shallowXTensor = createShallowTensor<InputDataType>(
-            _params.xTensor, variantPack.at(_params.xTensor.uid));
+        auto shallowXTensor
+            = createShallowTensor<XDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
 
         auto shallowMeanTensor = createShallowTensor<MeanVarianceDataType>(
             _params.meanTensor, variantPack.at(_params.meanTensor.uid));
@@ -76,7 +81,7 @@ public:
         auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
 
-        auto shallowDxTensor = createShallowTensor<InputDataType>(
+        auto shallowDxTensor = createShallowTensor<OutputDataType>(
             _params.dxTensor, variantPack.at(_params.dxTensor.uid));
 
         auto shallowDscaleTensor = createShallowTensor<ScaleBiasDataType>(
@@ -85,36 +90,46 @@ public:
         auto shallowDbiasTensor = createShallowTensor<ScaleBiasDataType>(
             _params.dbiasTensor, variantPack.at(_params.dbiasTensor.uid));
 
-        CpuFpReferenceBatchnormImpl<InputDataType, ScaleBiasDataType, MeanVarianceDataType>::
-            batchnormBwd(*shallowDyTensor,
-                         *shallowXTensor,
-                         *shallowMeanTensor,
-                         *shallowInvVarianceTensor,
-                         *shallowScaleTensor,
-                         *shallowDxTensor,
-                         *shallowDscaleTensor,
-                         *shallowDbiasTensor);
+        CpuFpReferenceBatchnorm::backward(*shallowDyTensor,
+                                          *shallowXTensor,
+                                          *shallowMeanTensor,
+                                          *shallowInvVarianceTensor,
+                                          *shallowScaleTensor,
+                                          *shallowDxTensor,
+                                          *shallowDscaleTensor,
+                                          *shallowDbiasTensor);
     }
 
 private:
     BatchnormBwdParams _params;
 };
 
-template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
+template <hipdnn_sdk::data_objects::DataType DyDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType XDataTypeEnum,
           hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum>
+          hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum>
 class BatchnormBwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
-    using InputDataType = DataTypeToNative<InputDataTypeEnum>;
+    using DyDataType = DataTypeToNative<DyDataTypeEnum>;
+    using XDataType = DataTypeToNative<XDataTypeEnum>;
     using ScaleBiasDataType = DataTypeToNative<ScaleBiasDataTypeEnum>;
     using MeanVarianceDataType = DataTypeToNative<MeanVarianceDataTypeEnum>;
+    using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
+    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
+        if(node.compute_data_type() != ComputeDataTypeEnum)
+        {
+            return false;
+        }
+
         const auto* nodeAttributes = node.attributes_as_BatchnormBackwardAttributes();
         if(nodeAttributes == nullptr)
         {
@@ -138,14 +153,14 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dscale_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dbias_tensor_uid());
 
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), InputDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), DyDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), XDataTypeEnum);
         CHECK_TENSOR_TYPE(
             tensorMap, nodeAttributes->mean_tensor_uid().value(), MeanVarianceDataTypeEnum);
         CHECK_TENSOR_TYPE(
             tensorMap, nodeAttributes->inv_variance_tensor_uid().value(), MeanVarianceDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dx_tensor_uid(), InputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dx_tensor_uid(), OutputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dscale_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dbias_tensor_uid(), ScaleBiasDataTypeEnum);
 
@@ -172,9 +187,12 @@ public:
                                   *tensorMap.at(nodeAttributes->dscale_tensor_uid()),
                                   *tensorMap.at(nodeAttributes->dbias_tensor_uid()));
 
-        return std::make_unique<
-            BatchnormBwdPlan<InputDataType, ScaleBiasDataType, MeanVarianceDataType>>(
-            std::move(params));
+        return std::make_unique<BatchnormBwdPlan<DyDataType,
+                                                 XDataType,
+                                                 ScaleBiasDataType,
+                                                 MeanVarianceDataType,
+                                                 OutputDataType,
+                                                 ComputeDataType>>(std::move(params));
     }
 };
 

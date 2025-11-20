@@ -35,6 +35,16 @@ ptrdiff_t host_bytes_available();
 size_t host_bytes_allocated();
 
 //!
+//! @brief Count external memory towards limits
+//!
+void alloc_ptr_use(void* ptr, size_t size);
+
+//!
+//! @brief Release counted external memory
+//!
+void free_ptr_use(void* ptr, bool call_free = false);
+
+//!
 //! @brief Allocates memory which can be freed with free.  Returns nullptr if swap required.
 //!
 void* host_malloc(size_t size);
@@ -76,7 +86,7 @@ inline void* host_calloc_throw(size_t nmemb, size_t size)
 void host_free(void* ptr);
 
 //!
-//! @brief  Allocator which allocates with host_calloc
+//! @brief  Allocator which allocates with host_malloc_throw
 //!
 template <class T>
 struct host_memory_allocator

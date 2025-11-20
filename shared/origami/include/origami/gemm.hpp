@@ -24,6 +24,32 @@ namespace origami
                                        size_t                  max_timesteps,
                                        size_t                  max_iters);
 
+    // Compute <numActiveCUs, numWaves, splitFactor>
+    std::tuple<size_t, size_t, size_t, size_t> compute_CU_occupancy(const hardware_t& hardware,
+                                                                    size_t            M,
+                                                                    size_t            N,
+                                                                    size_t            K,
+                                                                    size_t            batch,
+                                                                    bool              transA,
+                                                                    bool              transB,
+                                                                    size_t            MT_M,
+                                                                    size_t            MT_N,
+                                                                    size_t            MT_K,
+                                                                    size_t            MI_M,
+                                                                    size_t            MI_N,
+                                                                    size_t            MI_K,
+                                                                    size_t            element_size_A,
+                                                                    size_t            element_size_B,
+                                                                    size_t            element_size_out,
+                                                                    data_type_t       mi_datatype,
+                                                                    int               WGM,
+                                                                    size_t            workspace_size,
+                                                                    size_t            workspace_size_per_elem_c,
+                                                                    int               occupancy,
+                                                                    int               dynamic_grid_version,
+                                                                    size_t            split,
+                                                                    size_t            max_cus = 0);
+
     /* ---------------------------------------------------------------------------------------- */
     /* Compute-related functions                                                                */
     /* ---------------------------------------------------------------------------------------- */
@@ -138,7 +164,7 @@ namespace origami
                                 data_type_t       mi_datatype,
                                 size_t            mx_block_size,
                                 int               WGM,
-                                size_t            occupancy,
+                                int               occupancy,
                                 size_t            numActiveCUs,
                                 size_t            splittingFactor);
 
@@ -163,7 +189,7 @@ namespace origami
                                 data_type_t       mi_datatype,
                                 size_t            mx_block_size,
                                 int               WGM,
-                                size_t            occupancy,
+                                int               occupancy,
                                 size_t            numActiveCUs,
                                 size_t            splittingFactor);
 
@@ -188,9 +214,9 @@ namespace origami
                                  data_type_t       mi_datatype,
                                  size_t            mx_block_size,
                                  int               WGM,
-                                 size_t            non_temporal_a = 0,
-                                 size_t            non_temporal_b = 0,
-                                 size_t            occupancy      = 1,
+                                 int               non_temporal_a = 0,
+                                 int               non_temporal_b = 0,
+                                 int               occupancy      = 1,
                                  size_t            split          = 0,
                                  size_t            max_cus        = 0);
 

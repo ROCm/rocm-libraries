@@ -40,7 +40,7 @@ logger = logging.getLogger("GTest name checker")
 re_prefix = re.compile(r"^((Smoke.*)|(Full.*)|(Perf.*)|(Unit.*))$")
 re_hw = re.compile(r"^((CPU)|(GPU))$")
 re_datatype = re.compile(
-    r"^((FP((8)|(16)|(32)|(64)))|(BFP((8)|(16)))|(I((8)|(16)|(32)|(64)))|(NONE))\.?$"
+    r"^((FP((8)|(16)|(32)|(64)))|(TF(32))|(BFP((8)|(16)))|(I((8)|(16)|(32)|(64)))|(NONE))\.?$"
 )
 
 

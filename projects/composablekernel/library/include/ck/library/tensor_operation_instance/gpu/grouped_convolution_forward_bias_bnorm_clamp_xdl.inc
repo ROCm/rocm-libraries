@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -131,6 +131,21 @@ void add_device_grouped_conv2d_fwd_bias_bn_clamp_xdl_nhwgc_gkyxc_nhwgk_bf16_mem_
                                                         BiasNormalizeInInferClamp>>>& instances);
 
 void add_device_grouped_conv2d_fwd_bias_bn_clamp_xdl_nhwgc_gkyxc_nhwgk_bf16_mem_inter_instances(
+    std::vector<
+        std::unique_ptr<DeviceGroupedConvFwdMultipleABD<2,
+                                                        NHWGC,
+                                                        GKYXC,
+                                                        Tuple<NHWGK, NHWGK, NHWGK, NHWGK, NHWGK>,
+                                                        NHWGK,
+                                                        BF16,
+                                                        BF16,
+                                                        Tuple<BF16, BF16, BF16, BF16, BF16>,
+                                                        BF16,
+                                                        PassThrough,
+                                                        PassThrough,
+                                                        BiasNormalizeInInferClamp>>>& instances);
+
+void add_device_grouped_conv2d_fwd_bias_bn_clamp_xdl_nhwgc_gkyxc_nhwgk_bf16_direct_load_instances(
     std::vector<
         std::unique_ptr<DeviceGroupedConvFwdMultipleABD<2,
                                                         NHWGC,
@@ -405,6 +420,21 @@ void add_device_grouped_conv2d_fwd_bias_bn_clamp_xdl_nhwgc_gkyxc_nhwgk_f16_mem_i
                                                         BiasNormalizeInInferClamp>>>& instances);
 
 void add_device_grouped_conv2d_fwd_bias_bn_clamp_xdl_nhwgc_gkyxc_nhwgk_f16_mem_inter_instances(
+    std::vector<
+        std::unique_ptr<DeviceGroupedConvFwdMultipleABD<2,
+                                                        NHWGC,
+                                                        GKYXC,
+                                                        Tuple<NHWGK, NHWGK, NHWGK, NHWGK, NHWGK>,
+                                                        NHWGK,
+                                                        F16,
+                                                        F16,
+                                                        Tuple<F16, F16, F16, F16, F16>,
+                                                        F16,
+                                                        PassThrough,
+                                                        PassThrough,
+                                                        BiasNormalizeInInferClamp>>>& instances);
+
+void add_device_grouped_conv2d_fwd_bias_bn_clamp_xdl_nhwgc_gkyxc_nhwgk_f16_direct_load_instances(
     std::vector<
         std::unique_ptr<DeviceGroupedConvFwdMultipleABD<2,
                                                         NHWGC,

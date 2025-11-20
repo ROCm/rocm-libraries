@@ -316,7 +316,8 @@ defaultGlobalParameters = deepcopy(globalParameters)
 
 # Translate GPU targets to filter filenames in Tensile_LOGIC directory
 architectureMap = {
-  'all':'_','gfx000':'none', 'gfx803':'r9nano', 'gfx900':'vega10', 'gfx900:xnack-':'vega10',
+  'all':'_', 'gfx000':'none', 'fallback':'hip',
+  'gfx803':'r9nano', 'gfx900':'vega10', 'gfx900:xnack-':'vega10',
   'gfx906':'vega20', 'gfx906:xnack+':'vega20', 'gfx906:xnack-':'vega20',
   'gfx908':'arcturus','gfx908:xnack+':'arcturus', 'gfx908:xnack-':'arcturus',
   'gfx90a':'aldebaran', 'gfx90a:xnack+':'aldebaran', 'gfx90a:xnack-':'aldebaran',
@@ -2189,7 +2190,7 @@ def tryAssembler(isaVersion, asmString, debug=False, *options):
     return False
   return True
 
-def gfxArch(name):
+def gfxArch(name: str) -> Optional[IsaVersion]:
     import re
     match = re.search(r'gfx([0-9a-fA-F]{3,})', name)
     if not match: return None
@@ -2459,7 +2460,8 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
   # read current gfx version
   returncode = detectGlobalCurrentISA()
   if globalParameters["CurrentISA"] == (0,0,0):
-    printWarning("Did not detect SupportedISA: %s; cannot benchmark assembly kernels." % globalParameters["SupportedISA"])
+    printWarning(f"Did not detect SupportedISA: {globalParameters['SupportedISA']}; cannot benchmark assembly kernels."\
+      "This warning can be safely ignored for TensileCreateLibrary builds.")
   if returncode:
     if os.name == "nt":
       globalParameters["CurrentISA"] = (9,0,6)

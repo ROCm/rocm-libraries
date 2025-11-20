@@ -24,8 +24,10 @@
  *
  *******************************************************************************/
 
+#include "rocRoller/Serialization/YAML.hpp"
 #include <filesystem>
-#include <span>
+#include <fstream>
+#include <string>
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -70,11 +72,6 @@ enum ReturnCodes : int
 namespace rocRoller::Client::GEMMClient
 {
     using GEMMSolutionPtr = std::shared_ptr<Client::GEMMClient::GEMMSolution>;
-
-    struct MNKTuple
-    {
-        int m, n, k;
-    };
 
     template <typename A, typename B, typename C, typename D>
     std::pair<bool, double>
@@ -205,11 +202,25 @@ namespace rocRoller::Client::GEMMClient
                       problemParams.types.scaleB == Operations::ScaleMode::Separate,
                       -1.f,
                       1.f,
-                      static_cast<uint>(scaleBlockSize));
+                      static_cast<uint>(scaleBlockSize),
+                      problemParams.initModeA,
+                      problemParams.initModeB,
+                      problemParams.initModeC);
         }
         else
         {
-            DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
+            DGenInput(seed,
+                      hostA,
+                      descA,
+                      hostB,
+                      descB,
+                      hostC,
+                      descC,
+                      -1.f,
+                      1.f,
+                      problemParams.initModeA,
+                      problemParams.initModeB,
+                      problemParams.initModeC);
         }
 
         size_t rotatingSize = benchmarkParams.rotatingBuffSize;
@@ -425,6 +436,15 @@ namespace rocRoller::Client::GEMMClient
 
         result.kernelAssemble = TimerPool::nanoseconds("Assembler::assembleMachineCode");
         result.kernelGenerate = TimerPool::nanoseconds("CommandKernel::generateKernel");
+
+        if(commandKernel->getContext() && commandKernel->getContext()->kernel())
+        {
+            auto assemblyKernel = commandKernel->getContext()->kernel();
+            result.sgprCount    = assemblyKernel->sgpr_count();
+            result.vgprCount    = assemblyKernel->vgpr_count();
+            result.agprCount    = assemblyKernel->agpr_count();
+            result.ldsBytes     = assemblyKernel->group_segment_fixed_size();
+        }
 
         if(benchmarkParams.check)
         {
@@ -1050,109 +1070,6 @@ namespace rocRoller::Client::GEMMClient
 
 namespace rocRoller::Client::GEMMClient::CLI
 {
-
-    constexpr bool PARSE_SUCCESS = true;
-    constexpr bool PARSE_FAILURE = false;
-
-    static bool ParseMI(const std::string&                                 arg,
-                        rocRoller::Client::GEMMClient::SolutionParameters& solution)
-    {
-        if(arg.empty())
-            return PARSE_FAILURE;
-
-        solution.waveB = 1;
-
-        bool fail = false;
-        bool isB  = false;
-        try
-        {
-            std::istringstream iss(arg);
-            std::string        token;
-
-            iss.exceptions(std::ios_base::eofbit | std::ios_base::failbit | std::ios_base::badbit);
-            std::getline(iss, token, 'x');
-            solution.waveM = std::stoi(token);
-            std::getline(iss, token, 'x');
-            solution.waveN = std::stoi(token);
-
-            iss.exceptions(std::ios_base::failbit | std::ios_base::badbit);
-            std::getline(iss, token, 'x');
-            solution.waveK = std::stoi(token);
-
-            isB = true;
-            std::getline(iss, token, 'x');
-            solution.waveB = std::stoi(token);
-        }
-        catch(const std::invalid_argument&)
-        {
-            if(!isB)
-                fail = true;
-        }
-        catch(const std::ios_base::failure&)
-        {
-            if(!isB)
-                fail = true;
-        }
-
-        fail |= (solution.waveM < 1) || (solution.waveN < 1) || (solution.waveK < 1)
-                || (solution.waveB < 1);
-
-        if(fail)
-        {
-            std::cerr << "Invalid format for Matrix Instruction." << std::endl;
-            std::cerr << std::endl;
-            std::cerr << "The MI argument should be formatted like:" << std::endl;
-            std::cerr << std::endl;
-            std::cerr << "    --mi=MxNxKxB" << std::endl;
-            std::cerr << std::endl;
-            std::cerr << "For example: --mi=32x32x2x1" << std::endl;
-
-            return PARSE_FAILURE;
-        }
-
-        return PARSE_SUCCESS;
-    }
-
-    static bool ParseMNK(const std::string& arg, rocRoller::Client::GEMMClient::MNKTuple& mnk)
-    {
-        if(arg.empty())
-            return PARSE_FAILURE;
-
-        bool fail = false;
-        try
-        {
-            std::istringstream iss(arg);
-            std::string        token;
-
-            iss.exceptions(std::ios_base::eofbit | std::ios_base::failbit | std::ios_base::badbit);
-            std::getline(iss, token, 'x');
-            mnk.m = std::stoi(token);
-            std::getline(iss, token, 'x');
-            mnk.n = std::stoi(token);
-            iss.exceptions(std::ios_base::failbit | std::ios_base::badbit);
-            std::getline(iss, token, 'x');
-            mnk.k = std::stoi(token);
-        }
-        catch(const std::invalid_argument&)
-        {
-            fail = true;
-        }
-        catch(const std::ios_base::failure&)
-        {
-            fail = true;
-        }
-
-        fail |= (mnk.m < 1) || (mnk.n < 1) || (mnk.k < 1);
-
-        if(fail)
-        {
-            std::cerr << "Invalid format for M/N/K tuple." << std::endl;
-            return PARSE_FAILURE;
-        }
-
-        return PARSE_SUCCESS;
-    }
-
     constexpr auto SolutionParameterArguments = std::make_tuple(
         std::make_pair("--arch", &SolutionParameters::architecture),
         std::make_pair("--mac_m", &SolutionParameters::macM),
@@ -1170,6 +1087,7 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--loadLDSScale_A", &SolutionParameters::loadLDSScaleA),
         std::make_pair("--loadLDSScale_B", &SolutionParameters::loadLDSScaleB),
         std::make_pair("--swizzleScale", &SolutionParameters::swizzleScale),
+        std::make_pair("--sts", &SolutionParameters::swizzleTileSize),
         std::make_pair("--prefetchScale", &SolutionParameters::prefetchScale),
         std::make_pair("--load_A", &SolutionParameters::loadPathA),
         std::make_pair("--load_B", &SolutionParameters::loadPathB),
@@ -1221,9 +1139,13 @@ namespace rocRoller::Client::GEMMClient::CLI
             return rocRoller::Client::GEMMClient::CLI::getSolutionParameterArgumentName(x);
         };
 
-        auto update = [&](const std::string& optionName, auto& value) {
+        auto update = [&](const std::string& optionName, auto& value) -> bool {
             if(app.get_option(optionName)->count())
+            {
                 value = app.get_option(optionName)->as<std::decay_t<decltype(value)>>();
+                return true;
+            }
+            return false;
         };
 
         // Architecture
@@ -1236,6 +1158,7 @@ namespace rocRoller::Client::GEMMClient::CLI
 
         // Workgroup tile size
 
+        bool wgtsSet = false;
         if(app.get_option("--wgts")->count())
         {
             rocRoller::Client::GEMMClient::MNKTuple mnk{0, 0, 0};
@@ -1244,18 +1167,30 @@ namespace rocRoller::Client::GEMMClient::CLI
             solution.macM = mnk.m;
             solution.macN = mnk.n;
             solution.macK = mnk.k;
+            wgtsSet       = true;
         }
 
-        update(SN(&SP::macM), solution.macM);
-        update(SN(&SP::macN), solution.macN);
-        update(SN(&SP::macK), solution.macK);
+        bool macSet = false;
+        macSet |= update(SN(&SP::macM), solution.macM);
+        macSet |= update(SN(&SP::macN), solution.macN);
+        macSet |= update(SN(&SP::macK), solution.macK);
+        if(wgtsSet && macSet)
+        {
+            Throw<FatalError>("Workgroup tile size was overspecified.  Please use only --wgts or "
+                              "the --mac_M, --mac_N, and --mac_K arguments; but not both.");
+        }
 
         // Matrix instruction
 
         if(app.get_option("--mi")->count())
         {
-            if(!ParseMI(app.get_option("--mi")->as<std::string>(), solution))
+            auto x = rocRoller::Client::GEMMClient::MNKBTuple{0, 0, 0, 1};
+            if(!ParseMNKB(app.get_option("--mi")->as<std::string>(), x))
                 Throw<FatalError>("Failed to parse MI argument.");
+            solution.waveM = x.m;
+            solution.waveN = x.n;
+            solution.waveK = x.k;
+            solution.waveB = x.b;
         }
 
         update(SN(&SP::waveM), solution.waveM);
@@ -1332,6 +1267,7 @@ namespace rocRoller::Client::GEMMClient::CLI
         // Swizzling
 
         update(SN(&SP::swizzleScale), solution.swizzleScale);
+        update(SN(&SP::swizzleTileSize), solution.swizzleTileSize);
         update(SN(&SP::prefetchScale), solution.prefetchScale);
 
         // Prefetching
@@ -1437,6 +1373,10 @@ int main(int argc, const char* argv[])
 
         .scaleValueA = 1.0f,
         .scaleValueB = 1.0f,
+
+        .initModeA = DataInitMode(Bounded{}),
+        .initModeB = DataInitMode(Bounded{}),
+        .initModeC = DataInitMode(Bounded{}),
     };
 
     rocRoller::Client::GEMMClient::TypeParameters types;
@@ -1483,6 +1423,27 @@ int main(int argc, const char* argv[])
     app.add_option("--beta", problem.beta, "Beta scalar.");
     app.add_option("--scaleValue_A", problem.scaleValueA, "Single scale value for A.");
     app.add_option("--scaleValue_B", problem.scaleValueB, "Single scale value for B.");
+    app.add_option(
+        "--initMode_A",
+        [&problem](auto& args) -> bool { return ParseInitMode(args[0], problem.initModeA); },
+        "Data initialization mode for A [Bounded | BoundedAlternatingSign | Unbounded | "
+        "Identity | Ones | Zeros | TrigonometricFromFloat | \"NormalFromFloat(<mean>, "
+        "<std_dev>)\"]. "
+        "Default: Bounded.");
+    app.add_option(
+        "--initMode_B",
+        [&problem](auto& args) -> bool { return ParseInitMode(args[0], problem.initModeB); },
+        "Data initialization mode for B [Bounded | BoundedAlternatingSign | Unbounded | "
+        "Identity | Ones | Zeros | TrigonometricFromFloat | \"NormalFromFloat(<mean>, "
+        "<std_dev>)\"]. "
+        "Default: Bounded.");
+    app.add_option(
+        "--initMode_C",
+        [&problem](auto& args) -> bool { return ParseInitMode(args[0], problem.initModeC); },
+        "Data initialization mode for C [Bounded | BoundedAlternatingSign | Unbounded | "
+        "Identity | Ones | Zeros | TrigonometricFromFloat | \"NormalFromFloat(<mean>, "
+        "<std_dev>)\"]. "
+        "Default: Bounded.");
 
     //
     // Problem types
@@ -1625,6 +1586,9 @@ int main(int argc, const char* argv[])
     app.add_option("--mxlds", "Use LDS for A/B scales.");
 
     app.add_flag(SN(&SP::swizzleScale), "Use Swizzle when loading A and B scale.");
+    app.add_option(SN(&SP::swizzleTileSize),
+                   "Size of swizzle tile in MxK/NxL format.  The A scale swizzle-tile is MxK.  The "
+                   "B scale swizzle-tile is NxL.");
     app.add_flag(SN(&SP::prefetchScale), "Prefetch scale values with using Swizzled scales.");
 
     app.add_option("--workgroupMappingValue",
@@ -1655,7 +1619,7 @@ int main(int argc, const char* argv[])
 
     bool noCheckResult = false;
 
-    std::string loadPath, examplePath;
+    std::string loadPath, examplePath, exampleProblemPath;
 
     app.add_flag(
         "--hgemm",
@@ -1740,6 +1704,16 @@ int main(int argc, const char* argv[])
                        ->fallthrough();
 
     example->add_option("save", examplePath, "Example config path.")->required();
+
+    //
+    // example problem parameters sub-command
+    //
+    auto exampleProblem
+        = app.add_subcommand("exampleProblem", "Save example problem parameters to YAML file.")
+              ->fallthrough();
+
+    exampleProblem->add_option("save", exampleProblemPath, "Example problem config path")
+        ->required();
 
     //
     // Parse and update/validate problem definition
@@ -1948,9 +1922,9 @@ int main(int argc, const char* argv[])
 
     if(arch.target().isRDNA4GPU())
     {
-        // Override default settings for the `example` and `generate` subcommands.
-        if((example->parsed() || generate->parsed()) && typeA == DataType::Float
-           && typeB == DataType::Float)
+        // Override default settings for the `example`, `exampleProblem`, and `generate` subcommands.
+        if((example->parsed() || exampleProblem->parsed() || generate->parsed())
+           && typeA == DataType::Float && typeB == DataType::Float)
         {
             std::cout << "Warning: A and B types and wave sizes have been overridden for RDNA4."
                       << std::endl;
@@ -2051,6 +2025,12 @@ int main(int argc, const char* argv[])
     {
         std::ofstream file(examplePath);
         Serialization::writeYAML(file, solution);
+        return 0;
+    }
+    if(exampleProblem->parsed())
+    {
+        std::ofstream file(exampleProblemPath);
+        Serialization::writeYAML(file, problem);
         return 0;
     }
 

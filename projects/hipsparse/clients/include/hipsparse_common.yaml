@@ -103,6 +103,8 @@ Datatypes:
       bases: [c_int ]
       attr:
         HIPSPARSE_CSR2CSC_ALG_DEFAULT: 0
+        HIPSPARSE_CSR2CSC_ALG1: 1
+        HIPSPARSE_CSR2CSC_ALG2: 2
   - hipsparseDenseToSparseAlg_t:
       bases: [c_int ]
       attr:
@@ -318,6 +320,7 @@ Arguments:
   - boosttol: c_double
   - boostval: c_double
   - boostvali: c_double
+  - slice_size: c_int
   - ell_width: c_int
   - permute: c_int
   - gtsv_alg: c_int
@@ -423,6 +426,7 @@ Defaults:
   boosttol: 0.0
   boostval: 1.0
   boostvali: 0.0
+  slice_size: 2
   ell_width: 0
   permute: 0
   gtsv_alg: 0

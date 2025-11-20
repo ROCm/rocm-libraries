@@ -1,13 +1,17 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#pragma once
+
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_sdk/test_utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_sdk/test_utilities/VectorLoggingUtils.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 #include <hipdnn_sdk/utilities/Workspace.hpp>
@@ -78,6 +82,8 @@ protected:
         ASSERT_GE(outputTensorIds.size(), 1)
             << "At least one output tensor id must be specified for validation.";
 
+        HIPDNN_LOG_INFO("Validating {} output tensors", outputTensorIds);
+
         for(const auto& tensorId : outputTensorIds)
         {
             auto& cpuTensor = cpuBundle.tensors.at(tensorId);
@@ -88,6 +94,12 @@ protected:
             // that the data there is now valid so that it knows to copy from device to host when requested
             // by the validation step.
             gpuTensor->markDeviceModified();
+
+            if(_tensorIdToValidatorMap.find(tensorId) == _tensorIdToValidatorMap.end())
+            {
+                FAIL() << "No validator registered for tensor with id: " << tensorId
+                       << ", name: " << getOutputTensorName(tensorId);
+            }
 
             bool valid = _tensorIdToValidatorMap.at(tensorId)->allClose(*cpuTensor, *gpuTensor);
             ASSERT_TRUE(valid) << "Mismatch found in tensor with id: " << tensorId
@@ -109,6 +121,15 @@ protected:
                                         createAllCloseValidator(toSdkType(attr->get_data_type()),
                                                                 absoluteTolerance,
                                                                 relativeTolerance)});
+        _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
+    }
+
+    void registerRmsValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
+                              float rmsThreshold)
+    {
+        _tensorIdToValidatorMap.insert(
+            {attr->get_uid(), createRmsValidator(toSdkType(attr->get_data_type()), rmsThreshold)});
+        _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
     }
 
     virtual void generateBundles(hipdnn_frontend::graph::Graph& graph,
@@ -191,7 +212,9 @@ private:
 
         if(tensorAttr->get_is_virtual()
            || cpuBundle.tensors.find(tensorId) != cpuBundle.tensors.end())
+        {
             return false;
+        }
 
         cpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
         gpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
@@ -208,6 +231,6 @@ private:
         _tensorIdToValidatorMap;
 };
 
-// NOLINTEND (portability-template-virtual-member-function
+// NOLINTEND (portability-template-virtual-member-function)
 
 } // namespace hipdnn_sdk::test_utilities

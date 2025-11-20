@@ -59,6 +59,7 @@ tests:
   - name: BestMacroTileSize
     inputs:
       - { M: 1024, N: 1024, K: 4096, batch: 1, transA: 1, transB: 0, element_size_A: 16, element_size_B: 16, element_size_out: 32, mx_block_size: 0, H_L2: 0.0, WGM: 1, max_cus: 0, gpu_arch: 942} 
+      - { M: 4, N: 4, K: 0, batch: 1, transA: 1, transB: 0, element_size_A: 16, element_size_B: 16, element_size_out: 32, mx_block_size: 0, H_L2: 0.0, WGM: 1, max_cus: 0, gpu_arch: 942}
 
   - name: BestWGM
     inputs:

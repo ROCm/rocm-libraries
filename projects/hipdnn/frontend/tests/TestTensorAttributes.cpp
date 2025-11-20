@@ -329,3 +329,26 @@ TEST(TestTensorAttributes, ValidateDimsSetAndPositiveWithStridesIgnored)
     tensor.set_stride({0, -1, 2}); // Invalid strides should be ignored
     EXPECT_TRUE(tensor.validate_dims_set_and_positive());
 }
+
+TEST(TestTensorAttributes, ValidateDataType)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 5, 6});
+    tensor.set_stride({0, 1, 2});
+
+    std::vector<std::pair<DataType, ErrorCode>> expectedResults
+        = {{DataType::NOT_SET, ErrorCode::ATTRIBUTE_NOT_SET},
+           {DataType::FLOAT, ErrorCode::OK},
+           {DataType::HALF, ErrorCode::OK},
+           {DataType::BFLOAT16, ErrorCode::OK},
+           {DataType::DOUBLE, ErrorCode::OK},
+           {DataType::UINT8, ErrorCode::OK},
+           {DataType::INT32, ErrorCode::OK}};
+
+    for(auto [dataType, errorCode] : expectedResults)
+    {
+        tensor.set_data_type(dataType);
+        auto result = tensor.validate();
+        EXPECT_EQ(result.code, errorCode) << "For " + std::string(to_string(dataType));
+    }
+}

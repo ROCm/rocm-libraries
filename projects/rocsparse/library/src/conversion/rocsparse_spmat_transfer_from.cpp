@@ -87,6 +87,12 @@ rocsparse_status rocsparse::internal_spmat_transfer_from(rocsparse_handle       
                                   source->format == rocsparse_format_bell);
         break;
     }
+    case rocsparse_format_sell:
+    {
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                                  source->format == rocsparse_format_sell);
+        break;
+    }
     case rocsparse_format_bsr:
     {
         size_row_data = source->rows + 1;

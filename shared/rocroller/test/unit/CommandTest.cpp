@@ -270,6 +270,23 @@ TEST_F(CommandTest, SetCommandArguments)
     EXPECT_THROW({ commandArgs.setArgument(tagScalarB, ArgumentType::Limit, 10); }, FatalError);
 }
 
+TEST_F(CommandTest, FindCommandArguments)
+{
+    auto command    = std::make_shared<rocRoller::Command>();
+    auto tagScalarA = command->addOperation(Operations::Scalar(DataType::Float));
+
+    command->allocateArgument(
+        DataType::Float, tagScalarA, ArgumentType::Value, DataDirection::ReadOnly, "ScalarA");
+
+    // Find an existing arg
+    auto scalarArgA = findArgumentByName(command, "ScalarA");
+    EXPECT_NE(scalarArgA, nullptr);
+
+    // Find a nonexistent arg
+    auto scalarArgB = findArgumentByName(command, "ScalarB");
+    EXPECT_EQ(scalarArgB, nullptr);
+}
+
 TEST_F(CommandTest, GPU_TensorDescriptor)
 {
     auto command = std::make_shared<rocRoller::Command>();

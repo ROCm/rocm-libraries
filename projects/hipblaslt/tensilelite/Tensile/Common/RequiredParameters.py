@@ -35,6 +35,7 @@ def getRequiredParametersMin() -> set:
     return frozenset({
         '1LDSBuffer',
         'ActivationFuncCall',
+        'AdaptiveGemm',
         'AssertFree0ElementMultiple',
         'AssertFree1ElementMultiple',
         'AssertSummationElementMultiple',

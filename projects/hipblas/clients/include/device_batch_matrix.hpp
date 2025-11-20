@@ -24,6 +24,7 @@
 #pragma once
 
 #include "d_vector.hpp"
+#include "host_alloc.hpp"
 
 //
 // Local declaration of the host batch matrix.
@@ -72,6 +73,7 @@ public:
         if(false == this->try_initialize_memory())
         {
             this->free_memory();
+            throw std::bad_alloc{};
         }
     }
 
@@ -263,7 +265,7 @@ private:
         if(success)
         {
             success = (nullptr
-                       != (m_data = !this->use_HMM ? (hipblas_internal_type<T>**)calloc(
+                       != (m_data = !this->use_HMM ? (hipblas_internal_type<T>**)host_calloc(
                                         m_batch_count, sizeof(hipblas_internal_type<T>*))
                                                    : m_device_data));
             if(success)
@@ -332,7 +334,7 @@ private:
 
             if(!this->use_HMM)
             {
-                free(m_data);
+                host_free(m_data);
             }
             // else this is just a copy of m_device_data
 

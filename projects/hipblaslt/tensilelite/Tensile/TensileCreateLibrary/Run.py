@@ -227,10 +227,10 @@ def writeSolutionsAndKernels(
     kernelWriterAssembly,
     splitGSU: bool,
     cmdlineArchs: List[str],
-    disableAsmComments=False,
-    errorTolerant=False,
-    generateSourcesAndExit=False,
-    compress=True,
+    disableAsmComments: bool=False,
+    errorTolerant: bool=False,
+    generateSourcesAndExit: bool=False,
+    compress: bool=True,
 ):
     if globalParameters["PythonProfile"]:
         globalParameters["CpuThreads"] = 0
@@ -288,7 +288,7 @@ def writeSolutionsAndKernels(
     )
 
     def assemble(ret):
-        p, isa, wavefrontsize, result = ret
+        p, isa, wavefrontsize, _ = ret
         asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
@@ -344,8 +344,9 @@ def writeSolutionsAndKernelsTCL(
     kernelHelperObjs,
     kernelWriterAssembly,
     cmdlineArchs: List[str],
-    disableAsmComments=False,
-    compress=True,
+    disableAsmComments: bool=False,
+    compress: bool=True,
+    removeTemporaries: bool=True
 ):
     outputPath = Path(outputPath)
     destLibPath = ensurePath(
@@ -375,10 +376,14 @@ def writeSolutionsAndKernelsTCL(
 
     uniqueAsmKernels = [k for k in asmKernels if not k.duplicate]
 
-    def assemble(ret):
-        p, isa, wavefrontsize, result = ret
-        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
+    def assemble(ret, removeTemporaries: bool):
+        asmPath, isa, wavefrontsize, result = ret
+        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(asmPath), str(asmPath.with_suffix(".o")))
+        if removeTemporaries:
+            asmPath.unlink()
         return result
+
+    unaryAssemble = functools.partial(assemble, removeTemporaries=removeTemporaries)
 
     outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
     outOptions.outputNoComment = not disableAsmComments
@@ -394,7 +399,7 @@ def writeSolutionsAndKernelsTCL(
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
     compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
     ret = ParallelMap2(
-        compose(assemble, unaryWriteAssembly, unaryProcessKernelSource),
+        compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
         uniqueAsmKernels,
         "Generating assembly kernels",
         multiArg=False,
@@ -742,6 +747,7 @@ def run():
         archs,
         arguments["DisableAsmComments"],
         compress=arguments["UseCompression"],
+        removeTemporaries=not arguments["KeepBuildTmp"],
     )
     stop_wsk = timer()
     print(f"Time to generate kernels (s): {(stop_wsk-start_wsk):3.2f}")

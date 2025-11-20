@@ -78,7 +78,7 @@ namespace TensileLite
    ***********/
 
             /// Called at the beginning of each solution.
-            virtual void preSolution(ContractionSolution const& solution) = 0;
+            virtual void preSolution(ContractionSolution* const solution) = 0;
 
             /// Called at end of each solution.
             virtual void postSolution() = 0;

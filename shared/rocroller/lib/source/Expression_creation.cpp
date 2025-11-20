@@ -130,14 +130,16 @@ namespace rocRoller
             return std::make_shared<Expression>(BitFieldExtract{{.arg{a}}, dt, offset, width});
         }
 
-        ExpressionPtr bfc(ExpressionPtr src,
-                          ExpressionPtr dst,
-                          unsigned      srcOffset,
-                          unsigned      dstOffset,
-                          unsigned      width)
+        ExpressionPtr bfc(ExpressionPtr       src,
+                          ExpressionPtr       dst,
+                          uint32_t            srcOffset,
+                          uint32_t            dstOffset,
+                          uint32_t            width,
+                          std::optional<bool> srcIsZero,
+                          std::optional<bool> dstIsZero)
         {
             return std::make_shared<Expression>(
-                BitfieldCombine{{src, dst}, srcOffset, dstOffset, width});
+                BitfieldCombine{{src, dst}, srcOffset, dstOffset, width, srcIsZero, dstIsZero});
         }
 
         ExpressionPtr concat(const std::vector<ExpressionPtr>& ops, VariableType v)

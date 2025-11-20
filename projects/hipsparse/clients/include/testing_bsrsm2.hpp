@@ -39,7 +39,8 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-void testing_bsrsm2_bad_arg(void)
+template <typename T>
+void testing_bsrsm2_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int   mb        = 100;

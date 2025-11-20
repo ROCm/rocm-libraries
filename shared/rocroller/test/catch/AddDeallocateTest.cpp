@@ -73,8 +73,9 @@ namespace AddDeallocateTest
         transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
         transforms.push_back(std::make_shared<Simplify>());
         transforms.push_back(std::make_shared<FuseExpressions>());
-        transforms.push_back(std::make_shared<ConnectWorkgroups>(
-            context.get(), params->workgroupMappingDim, params->workgroupRemapXCC));
+        transforms.push_back(std::make_shared<ConnectWorkgroups>(context.get()));
+        transforms.push_back(
+            std::make_shared<WorkgroupRemapXCC>(context.get(), params->workgroupRemapXCC));
         transforms.push_back(std::make_shared<UnrollLoops>(params, context.get()));
         transforms.push_back(std::make_shared<FuseLoops>());
         transforms.push_back(std::make_shared<RemoveDuplicates>());
@@ -88,9 +89,6 @@ namespace AddDeallocateTest
 
         SECTION("Downstream Barriers")
         {
-            auto topo
-                = TopologicalCompare(std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph));
-
             auto graph  = kgraph;
             auto tracer = LastRWTracer(graph);
 
@@ -102,7 +100,7 @@ namespace AddDeallocateTest
                 if(maybeLDS)
                 {
                     AddDeallocateDetail::addDownstreamBarrierInLoop(
-                        dependencies, coordinate, controls, kgraph, topo);
+                        dependencies, coordinate, controls, kgraph);
                     CHECK(dependencies.size() >= 1);
                     if(dependencies.size() == 1)
                     {

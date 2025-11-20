@@ -211,9 +211,9 @@ namespace TensileLite
 
         void AllSolutionsIterator::postProblem() {}
 
-        void AllSolutionsIterator::preSolution(ContractionSolution const& solution)
+        void AllSolutionsIterator::preSolution(ContractionSolution* const solution)
         {
-            m_reporter->report(ResultKey::SolutionLibraryIndex, solution.libraryLogicIndex);
+            m_reporter->report(ResultKey::SolutionLibraryIndex, solution->libraryLogicIndex);
             m_reporter->report(ResultKey::SolutionIndex, m_currentSolutionIdx);
             m_reporter->report(ResultKey::SolutionProgress,
                                concatenate(m_currentSolutionIdx, "/", m_lastSolutionIdx));
@@ -300,9 +300,9 @@ namespace TensileLite
 
         void BestSolutionIterator::postProblem() {}
 
-        void BestSolutionIterator::preSolution(ContractionSolution const& solution)
+        void BestSolutionIterator::preSolution(ContractionSolution* const solution)
         {
-            m_reporter->report(ResultKey::SolutionLibraryIndex, solution.libraryLogicIndex);
+            m_reporter->report(ResultKey::SolutionLibraryIndex, solution->libraryLogicIndex);
             m_reporter->report(ResultKey::SolutionIndex, 0);
             m_reporter->report(ResultKey::SolutionProgress, "1/1");
         }
@@ -359,9 +359,9 @@ namespace TensileLite
 
         void TopSolutionIterator::postProblem() {}
 
-        void TopSolutionIterator::preSolution(ContractionSolution const& solution)
+        void TopSolutionIterator::preSolution(ContractionSolution* const solution)
         {
-            m_reporter->report(ResultKey::SolutionLibraryIndex, solution.libraryLogicIndex);
+            m_reporter->report(ResultKey::SolutionLibraryIndex, solution->libraryLogicIndex);
             m_reporter->report(ResultKey::SolutionIndex, m_currentSolutionIdx);
             m_reporter->report(ResultKey::SolutionProgress,
                                concatenate(m_currentSolutionIdx, "/", m_solutions.size()));

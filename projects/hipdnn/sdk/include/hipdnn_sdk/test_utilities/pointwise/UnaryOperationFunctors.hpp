@@ -35,20 +35,19 @@ struct ReluForward
     }
 
     template <typename X>
-    auto operator()(const X& x) const -> X
+    auto operator()(const X& x) const -> ComputeType
     {
         auto xCompute = static_cast<ComputeType>(x);
 
         if(xCompute <= lowerClip)
         {
-            ComputeType result = (lowerSlope * (xCompute - lowerClip)) + lowerClip;
-            return safeConvert<X>(result);
+            return (lowerSlope * (xCompute - lowerClip)) + lowerClip;
         }
         if(xCompute >= upperClip)
         {
-            return safeConvert<X>(upperClip);
+            return upperClip;
         }
-        return safeConvert<X>(xCompute);
+        return xCompute;
     }
 };
 
@@ -56,11 +55,10 @@ template <typename ComputeType = float>
 struct SigmoidForward
 {
     template <typename X>
-    auto operator()(const X& x) const -> X
+    auto operator()(const X& x) const -> ComputeType
     {
         auto xCompute = static_cast<ComputeType>(x);
-        ComputeType result = ComputeType{1} / (ComputeType{1} + std::exp(-xCompute));
-        return safeConvert<X>(result);
+        return ComputeType{1} / (ComputeType{1} + std::exp(-xCompute));
     }
 };
 
@@ -68,11 +66,19 @@ template <typename ComputeType = float>
 struct TanhForward
 {
     template <typename X>
-    auto operator()(const X& x) const -> X
+    auto operator()(const X& x) const -> ComputeType
     {
         auto xCompute = static_cast<ComputeType>(x);
-        ComputeType result = std::tanh(xCompute);
-        return safeConvert<X>(result);
+        return std::tanh(xCompute);
+    }
+};
+
+struct Identity
+{
+    template <typename X>
+    auto operator()(const X& x) const -> X
+    {
+        return x;
     }
 };
 

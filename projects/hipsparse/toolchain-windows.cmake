@@ -12,7 +12,6 @@ endif()
 
 set(CMAKE_CXX_COMPILER "${rocm_bin}/clang++.exe")
 set(CMAKE_C_COMPILER "${rocm_bin}/clang.exe")
-set(python "python")
 
 # working
 #set(CMAKE_Fortran_COMPILER "C:/Strawberry/c/bin/gfortran.exe")

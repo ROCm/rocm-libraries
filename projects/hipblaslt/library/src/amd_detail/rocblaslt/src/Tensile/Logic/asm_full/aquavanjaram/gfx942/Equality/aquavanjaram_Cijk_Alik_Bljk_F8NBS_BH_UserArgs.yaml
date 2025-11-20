@@ -210,7 +210,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 0
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT224x256x128_MI16x16x1_SN_GRVWA8_GRVWB8_GSU1_LBSPPA256_LBSPPB128_LPA8_LPB8_LRVW8_MIWT14_4_SU0_SUM0_SUS0_SVW2_VWA2_WG16_16_1_WGM0
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT224x256x128_MI16x16x1_SN_GRVWA8_GRVWB8_GSU1_LBSPPA256_LBSPPB128_LPA8_LPB8_LRVW8_MIWT14_4_SU0_SUM0_SUS0_SVW2_VWA2_WG16_16_1_WGM1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -246,7 +246,7 @@
     WaveSeparateGlobalReadMetadata: 0
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
@@ -397,7 +397,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 1
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT224x256x128_MI16x16x1_SN_GRVWA8_GRVWB8_GSU1_LBSPPA256_LBSPPB128_LPA8_LPB8_LRVW8_MIWT14_4_SU8_SUM0_SUS256_SVW2_VWA2_WG16_16_1_WGM0
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT224x256x128_MI16x16x1_SN_GRVWA8_GRVWB8_GSU1_LBSPPA256_LBSPPB128_LPA8_LPB8_LRVW8_MIWT14_4_SU8_SUM0_SUS256_SVW2_VWA2_WG16_16_1_WGM1
     SourceSwap: true
     StaggerU: 8
     StaggerUMapping: 0
@@ -433,7 +433,7 @@
     WaveSeparateGlobalReadMetadata: 0
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
@@ -1893,7 +1893,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 9
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT64x16x512_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA512_LBSPPB512_LPA32_LPB32_LRVW16_MIWT1_1_PLR1_SU0_SUM0_SUS0_SVW1_VWA1_WG64_4_1_WGM0
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT64x16x512_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA512_LBSPPB512_LPA32_LPB32_LRVW16_MIWT1_1_PLR1_SU0_SUM0_SUS0_SVW1_VWA1_WG64_4_1_WGM1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -1929,7 +1929,7 @@
     WaveSeparateGlobalReadMetadata: 0
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
@@ -2080,7 +2080,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 10
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT64x16x256_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA256_LBSPPB256_LPA32_LPB32_LRVW16_MIWT1_1_PLR1_SU0_SUM0_SUS0_SVW1_VWA1_WG64_4_1_WGM0
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT64x16x256_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA256_LBSPPB256_LPA32_LPB32_LRVW16_MIWT1_1_PLR1_SU0_SUM0_SUS0_SVW1_VWA1_WG64_4_1_WGM1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -2116,7 +2116,7 @@
     WaveSeparateGlobalReadMetadata: 0
     WavefrontSize: 64
     WorkGroup: [64, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
@@ -2267,7 +2267,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 11
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT64x32x256_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA512_LBSPPB256_LPA32_LPB32_LRVW16_MIWT2_1_PLR1_SU0_SUM0_SUS0_SVW2_VWA2_WG32_8_1_WGM0
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT64x32x256_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA512_LBSPPB256_LPA32_LPB32_LRVW16_MIWT2_1_PLR1_SU0_SUM0_SUS0_SVW2_VWA2_WG32_8_1_WGM1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -2303,7 +2303,7 @@
     WaveSeparateGlobalReadMetadata: 0
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
@@ -2454,7 +2454,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 12
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT64x64x256_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA512_LBSPPB256_LPA32_LPB32_LRVW16_MIWT2_2_PLR1_SU4_SUM0_SUS256_SVW2_VWA2_WG32_8_1_WGM0
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT64x64x256_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA512_LBSPPB256_LPA32_LPB32_LRVW16_MIWT2_2_PLR1_SU4_SUM0_SUS256_SVW2_VWA2_WG32_8_1_WGM1
     SourceSwap: true
     StaggerU: 4
     StaggerUMapping: 0
@@ -2490,7 +2490,7 @@
     WaveSeparateGlobalReadMetadata: 0
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
@@ -2641,7 +2641,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 13
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT64x64x256_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA512_LBSPPB256_LPA32_LPB32_LRVW16_MIWT2_2_PLR1_SU8_SUM0_SUS256_SVW2_VWA2_WG32_8_1_WGM0
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT64x64x256_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA512_LBSPPB256_LPA32_LPB32_LRVW16_MIWT2_2_PLR1_SU8_SUM0_SUS256_SVW2_VWA2_WG32_8_1_WGM1
     SourceSwap: true
     StaggerU: 8
     StaggerUMapping: 0
@@ -2677,7 +2677,7 @@
     WaveSeparateGlobalReadMetadata: 0
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
@@ -2828,7 +2828,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 14
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT32x16x512_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA512_LBSPPB512_LPA32_LPB32_LRVW16_MIWT1_1_PLR1_SU0_SUM0_SUS0_SVW1_VWA1_WG32_4_1_WGM0
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT32x16x512_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA512_LBSPPB512_LPA32_LPB32_LRVW16_MIWT1_1_PLR1_SU0_SUM0_SUS0_SVW1_VWA1_WG32_4_1_WGM1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -2864,7 +2864,7 @@
     WaveSeparateGlobalReadMetadata: 0
     WavefrontSize: 64
     WorkGroup: [32, 4, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
@@ -3015,7 +3015,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 15
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT64x64x256_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA512_LBSPPB256_LPA32_LPB32_LRVW16_MIWT2_2_PLR1_SU0_SUM0_SUS0_SVW2_VWA2_WG32_8_1_WGM0
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT64x64x256_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA512_LBSPPB256_LPA32_LPB32_LRVW16_MIWT2_2_PLR1_SU0_SUM0_SUS0_SVW2_VWA2_WG32_8_1_WGM1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -3051,7 +3051,7 @@
     WaveSeparateGlobalReadMetadata: 0
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
@@ -3202,7 +3202,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 16
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT128x64x256_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA1024_LBSPPB256_LPA32_LPB32_LRVW16_MIWT4_2_PLR1_SU0_SUM0_SUS0_SVW4_VWA4_WG32_8_1_WGM0
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT128x64x256_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA1024_LBSPPB256_LPA32_LPB32_LRVW16_MIWT4_2_PLR1_SU0_SUM0_SUS0_SVW4_VWA4_WG32_8_1_WGM1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -3238,7 +3238,7 @@
     WaveSeparateGlobalReadMetadata: 0
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]
@@ -3389,7 +3389,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 17
-    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT32x32x512_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA512_LBSPPB512_LPA32_LPB32_LRVW16_MIWT1_1_PLR1_SU0_SUM0_SUS0_SVW1_VWA1_WG32_8_1_WGM0
+    SolutionNameMin: Cijk_Alik_Bljk_F8NBS_BH_UserArgs_MT32x32x512_MI16x16x1_SN_CLR1_GRVWA16_GRVWB16_GSU1_LBSPPA512_LBSPPB512_LPA32_LPB32_LRVW16_MIWT1_1_PLR1_SU0_SUM0_SUS0_SVW1_VWA1_WG32_8_1_WGM1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -3425,7 +3425,7 @@
     WaveSeparateGlobalReadMetadata: 0
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]

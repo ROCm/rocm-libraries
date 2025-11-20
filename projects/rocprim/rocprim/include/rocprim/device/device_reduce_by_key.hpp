@@ -96,59 +96,6 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
     init_lookback_scan_state(lookback_scan_state, number_of_blocks, ordered_bid, flat_thread_id);
 }
 
-template<typename Config,
-         lookback_scan_determinism Determinism,
-         typename AccumulatorType,
-         typename KeyIterator,
-         typename ValueIterator,
-         typename UniqueIterator,
-         typename ReductionIterator,
-         typename UniqueCountIterator,
-         typename CompareFunction,
-         typename BinaryOp,
-         typename LookbackScanState,
-         typename BlockIdWrapper>
-inline hipError_t launch_reduce_by_key(detail::target_arch          arch,
-                                       const KeyIterator            keys_input,
-                                       const ValueIterator          values_input,
-                                       const UniqueIterator         unique_keys,
-                                       const ReductionIterator      reductions,
-                                       const UniqueCountIterator    unique_count,
-                                       const BinaryOp               reduce_op,
-                                       const CompareFunction        compare,
-                                       const LookbackScanState      scan_state,
-                                       const std::size_t            starting_block,
-                                       const std::size_t            total_number_of_blocks,
-                                       const std::size_t            size,
-                                       const std::size_t* const     global_head_count,
-                                       const AccumulatorType* const previous_accumulated,
-                                       BlockIdWrapper               ordered_bid,
-                                       dim3                         grid,
-                                       dim3                         block,
-                                       size_t                       shmem,
-                                       hipStream_t                  stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        reduce_by_key::kernel_impl<decltype(arch_config), Determinism>(keys_input,
-                                                                       values_input,
-                                                                       unique_keys,
-                                                                       reductions,
-                                                                       unique_count,
-                                                                       reduce_op,
-                                                                       compare,
-                                                                       scan_state,
-                                                                       starting_block,
-                                                                       total_number_of_blocks,
-                                                                       size,
-                                                                       global_head_count,
-                                                                       previous_accumulated,
-                                                                       ordered_bid);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
 template<lookback_scan_determinism Determinism,
          typename config,
          typename KeysInputIterator,
@@ -303,27 +250,30 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key_init_kernel",
                                                             number_of_blocks_launch,
                                                             start);
-
-                ROCPRIM_RETURN_ON_ERROR(launch_reduce_by_key<config, Determinism>(
-                    target_arch,
-                    keys_input + offset,
-                    values_input + offset,
-                    unique_output,
-                    aggregates_output,
-                    unique_count_output,
-                    reduce_op,
-                    key_compare_op,
-                    scan_state,
-                    i * number_of_blocks,
-                    total_number_of_blocks,
-                    size,
-                    i > 0 ? d_global_head_count : nullptr,
-                    i > 0 ? d_previous_accumulated : nullptr,
-                    ordered_bid,
-                    dim3(number_of_blocks_launch),
-                    dim3(block_size),
-                    0,
-                    stream));
+                auto kernel = [=](auto arch_config)
+                {
+                    reduce_by_key::kernel_impl<decltype(arch_config), Determinism>(
+                        keys_input + offset,
+                        values_input + offset,
+                        unique_output,
+                        aggregates_output,
+                        unique_count_output,
+                        reduce_op,
+                        key_compare_op,
+                        scan_state,
+                        i * number_of_blocks,
+                        total_number_of_blocks,
+                        size,
+                        i > 0 ? d_global_head_count : nullptr,
+                        i > 0 ? d_previous_accumulated : nullptr,
+                        ordered_bid);
+                };
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                                    kernel,
+                                                                    dim3(number_of_blocks_launch),
+                                                                    dim3(block_size),
+                                                                    0,
+                                                                    stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key_kernel",
                                                             current_size,
                                                             start);

@@ -67,12 +67,16 @@ extern "C" {
 *  It is executed asynchronously with respect to the host and may return control to the application
 *  on the host before the entire result is ready.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 11.0+) and will be 
+*  removed in CUDA 12.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
 *  handle      handle to the hipsparse library context queue.
 *  @param[in]
-*  m           number of rows of the dense matrix \p A.
+*  m           number of rows of the dense matrix \p A. Must be non-negative.
 *  @param[in]
-*  n           number of columns of the dense matrix \p A.
+*  n           number of columns of the dense matrix \p A. Must be non-negative.
 *  @param[in]
 *  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also
 *              any valid value of the \ref hipsparseIndexBase_t.
@@ -83,13 +87,14 @@ extern "C" {
 *  @param[in]
 *  cscColPtr   integer array of \p n+1 elements that contains the start of every column and the end of the last column plus one.
 *  @param[out]
-*  A           array of dimensions (\p ld, \p n)
-*  @param[out]
-*  ld          leading dimension of dense array \p A.
+*  A           array of dimensions (\p ld, \p n).
+*  @param[in]
+*  ld          leading dimension of dense array \p A. Must be at least \p m.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ld, \p A, \p cscVal \p cscColPtr
-*              or \p cscRowInd pointer is invalid.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p cscVal, \p cscColPtr,
+*          \p cscRowInd or \p A is nullptr, \p m or \p n is negative, or \p ld is invalid.
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

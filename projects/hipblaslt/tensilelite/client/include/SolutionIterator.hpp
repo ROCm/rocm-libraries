@@ -157,7 +157,7 @@ namespace TensileLite
             virtual void preProblem(ContractionProblem* const problem) override;
             virtual void postProblem() override;
 
-            virtual void preSolution(ContractionSolution const& solution) override;
+            virtual void preSolution(ContractionSolution* const solution) override;
             virtual void postSolution() override;
 
             virtual bool                                 moreSolutionsInProblem() const override;
@@ -184,7 +184,7 @@ namespace TensileLite
             virtual void preProblem(ContractionProblem* const problem) override;
             virtual void postProblem() override;
 
-            virtual void preSolution(ContractionSolution const& solution) override;
+            virtual void preSolution(ContractionSolution* const solution) override;
             virtual void postSolution() override;
 
             virtual bool                                 moreSolutionsInProblem() const override;
@@ -207,7 +207,7 @@ namespace TensileLite
             virtual void preProblem(ContractionProblem* const problem) override;
             virtual void postProblem() override;
 
-            virtual void preSolution(ContractionSolution const& solution) override;
+            virtual void preSolution(ContractionSolution* const solution) override;
             virtual void postSolution() override;
 
             virtual bool                                 moreSolutionsInProblem() const override;

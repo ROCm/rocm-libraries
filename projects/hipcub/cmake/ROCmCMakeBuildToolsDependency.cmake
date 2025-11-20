@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -21,9 +21,9 @@
 # SOFTWARE.
 
 if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-  find_package(ROCM 0.7.3 CONFIG QUIET PATHS "${ROCM_ROOT}")
+  find_package(ROCmCMakeBuildTools 0.7.3 CONFIG QUIET PATHS "${ROCM_ROOT}")
 endif()
-if(NOT ROCM_FOUND)
+if(NOT ROCmCMakeBuildTools_FOUND)
   message(STATUS "ROCm CMake not found. Fetching...")
   # We don't really want to consume the build and test targets of ROCm CMake.
   # CMake 3.18 allows omitting them, even though there's a CMakeLists.txt in source root.
@@ -35,13 +35,28 @@ if(NOT ROCM_FOUND)
   include(FetchContent)
   FetchContent_Declare(
     rocm-cmake
-    URL  https://github.com/RadeonOpenCompute/rocm-cmake/archive/refs/tags/rocm-5.2.0.tar.gz
+    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
+    GIT_TAG        rocm-6.4.4
     ${SOURCE_SUBDIR_ARG}
   )
+  FetchContent_GetProperties(rocm-cmake)
+  if(NOT rocm-cmake_POPULATED)
+    # rocm-cmake 0.12.0 and higher needs to built from source
+    FetchContent_Populate(rocm-cmake)
+    message("Populated: ${rocm-cmake_SOURCE_DIR}")
+    execute_process(
+      WORKING_DIRECTORY ${rocm-cmake_SOURCE_DIR}
+      COMMAND ${CMAKE_COMMAND} ${rocm-cmake_SOURCE_DIR} -DCMAKE_INSTALL_PREFIX=.
+    )
+    execute_process(
+      WORKING_DIRECTORY ${rocm-cmake_SOURCE_DIR}
+      COMMAND ${CMAKE_COMMAND} --build ${rocm-cmake_SOURCE_DIR} --target install
+    )
+  endif()
   FetchContent_MakeAvailable(rocm-cmake)
-  find_package(ROCM CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
+  find_package(ROCmCMakeBuildTools CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
 else()
-  find_package(ROCM 0.7.3 CONFIG REQUIRED PATHS "${ROCM_ROOT}")
+  find_package(ROCmCMakeBuildTools 0.7.3 CONFIG REQUIRED PATHS "${ROCM_ROOT}")
 endif()
 
 include(ROCMSetupVersion)

@@ -60,13 +60,10 @@ __device__ uint32_t pseudo_random_device(size_t idx)
     auto s = idx * 1664525 + 1013904223;
     // Run a few extra iterations to make the generators diverge
     // in case the seeds are still poor (consecutive ints)
-    for(int i = 0; i < 3; i++)
-    {
-        // Marsaglia, G. (2003). "Xorshift RNGs". Journal of Statistical Software. 8 (14). doi:10.18637/jss.v008.i14
-        s ^= s << 13;
-        s ^= s >> 17;
-        s ^= s << 5;
-    }
+    // Marsaglia, G. (2003). "Xorshift RNGs". Journal of Statistical Software. 8 (14). doi:10.18637/jss.v008.i14
+    s ^= (s << 13) ^ ( s >> 17) ^ (s << 5);
+    s ^= (s << 13) ^ ( s >> 17) ^ (s << 5);
+    s ^= (s << 13) ^ ( s >> 17) ^ (s << 5);
     return s;
 }
 
@@ -114,6 +111,24 @@ __device__ int8_t random_hpl(size_t idx)
     auto v = nearbyint(double(r) / double(std::numeric_limits<decltype(r)>::max()) * 2. - 1.);
     return int8_t(v > 127.f ? 127.f : v < -128.f ? -128.f : v);
 }
+
+/*! \brief  generate a random number in [0.,1.0]  */
+template <typename T>
+__device__ T uniform_01(size_t idx)
+{
+    auto r = pseudo_random_device(idx);
+    return T(double(r) / double(std::numeric_limits<decltype(r)>::max()));
+}
+
+/*! \brief  generate a random number in [0.,1.0]  */
+template <>
+__device__ int8_t uniform_01(size_t idx)
+{
+    auto r = pseudo_random_device(idx);
+    auto v = nearbyint(double(r) / double(std::numeric_limits<decltype(r)>::max()));
+    return int8_t(v > 127.f ? 127.f : v < -128.f ? -128.f : v);
+}
+
 
 template <typename T>
 void hipblaslt_init_device(ABC_dims                 abc,
@@ -239,6 +254,11 @@ void hipblaslt_init_device(ABC_dims                 abc,
                 });
                 break;
             }
+        case hipblaslt_initialization::uniform_01:
+            fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T {
+                return uniform_01<T>(idx);
+            });
+            break;
         default:
             hipblaslt_cerr << "Error type in hipblaslt_init_device" << std::endl;
             break;

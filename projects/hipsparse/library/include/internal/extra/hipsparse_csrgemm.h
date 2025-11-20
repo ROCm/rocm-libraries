@@ -55,6 +55,10 @@ extern "C" {
 *  \note
 *  Currently, only \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
 *  handle          handle to the hipsparse library context queue.
 *  @param[in]
@@ -62,18 +66,18 @@ extern "C" {
 *  @param[in]
 *  transB          matrix \f$B\f$ operation type.
 *  @param[in]
-*  m               number of rows of the sparse CSR matrix \f$op(A)\f$ and \f$C\f$.
+*  m               number of rows of the sparse CSR matrix \f$op(A)\f$ and \f$C\f$. Must be non-negative.
 *  @param[in]
 *  n               number of columns of the sparse CSR matrix \f$op(B)\f$ and
-*                  \f$C\f$.
+*                  \f$C\f$. Must be non-negative.
 *  @param[in]
 *  k               number of columns of the sparse CSR matrix \f$op(A)\f$ and number of
-*                  rows of the sparse CSR matrix \f$op(B)\f$.
+*                  rows of the sparse CSR matrix \f$op(B)\f$. Must be non-negative.
 *  @param[in]
 *  descrA          descriptor of the sparse CSR matrix \f$A\f$. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
 *  @param[in]
-*  nnzA            number of non-zero entries of the sparse CSR matrix \f$A\f$.
+*  nnzA            number of non-zero entries of the sparse CSR matrix \f$A\f$. Must be non-negative.
 *  @param[in]
 *  csrRowPtrA      array of \p m+1 elements (\f$op(A) == A\f$, \p k+1 otherwise)
 *                  that point to the start of every row of the sparse CSR matrix
@@ -85,7 +89,7 @@ extern "C" {
 *  descrB          descriptor of the sparse CSR matrix \f$B\f$. Currently, only
 *                  \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
 *  @param[in]
-*  nnzB            number of non-zero entries of the sparse CSR matrix \f$B\f$.
+*  nnzB            number of non-zero entries of the sparse CSR matrix \f$B\f$. Must be non-negative.
 *  @param[in]
 *  csrRowPtrB      array of \p k+1 elements (\f$op(B) == B\f$, \p m+1 otherwise)
 *                  that point to the start of every row of the sparse CSR matrix
@@ -104,13 +108,13 @@ extern "C" {
 *                     matrix \f$C\f$. \p nnzTotalDevHostPtr can be a host or device pointer.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p k, \p nnzA, \p nnzB, \p nnzC,
-*          \p descrA, \p csrRowPtrA, \p csrColIndA, \p descrB, \p csrRowPtrB, \p csrColIndB,
-*          \p descrC, \p csrRowPtrC or \p nnzTotalDevHostPtr is invalid.
-*  \retval HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED
-*          \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
-*          \p transB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE, or
-*          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p descrB or \p descrC is nullptr,
+*          \p m, \p n, \p k, \p nnzA or \p nnzB is negative, or \p csrRowPtrA, \p csrColIndA,
+*          \p csrRowPtrB, \p csrColIndB, \p csrRowPtrC or \p nnzTotalDevHostPtr is nullptr.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
+*          \p transB is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE, or
+*          \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 */
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
 HIPSPARSE_EXPORT
@@ -246,9 +250,6 @@ hipsparseStatus_t hipsparseXcsrgemmNnz(hipsparseHandle_t         handle,
 *          \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
 *          \p transB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE, or
 *          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
-*
-*  \par Example
-*  \snippet example_hipsparse_csrgemm.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
@@ -756,9 +757,6 @@ hipsparseStatus_t hipsparseXcsrgemm2Nnz(hipsparseHandle_t         handle,
 *          allocated.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
-*
-*  \par Example
-*  \snippet example_hipsparse_csrgemm2.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

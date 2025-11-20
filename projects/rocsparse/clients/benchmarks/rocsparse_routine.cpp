@@ -231,6 +231,7 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_v2_spmv_csc.hpp"
 #include "testing_v2_spmv_csr.hpp"
 #include "testing_v2_spmv_ell.hpp"
+#include "testing_v2_spmv_sell.hpp"
 
 // Level3
 #include "testing_bsrmm.hpp"
@@ -570,6 +571,7 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_T(doti);
         DEFINE_CASE_T_REAL_VS_COMPLEX(dotci, testing_doti, testing_dotci);
         DEFINE_CASE_IAXYT_X(ellmv, testing_spmv_ell);
+        DEFINE_CASE_IJAXYT_X(sellmv, testing_v2_spmv_sell);
         DEFINE_CASE_T(ell2csr);
         DEFINE_CASE_T(gebsr2csr);
         DEFINE_CASE_T(gebsr2gebsr);
@@ -605,6 +607,7 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_IJAXYT_X(v2_spmv_bsr, testing_v2_spmv_bsr);
         DEFINE_CASE_IJAXYT_X(v2_spmv_csr, testing_v2_spmv_csr);
         DEFINE_CASE_IJAXYT_X(v2_spmv_csc, testing_v2_spmv_csc);
+        DEFINE_CASE_IJAXYT_X(v2_spmv_sell, testing_v2_spmv_sell);
         DEFINE_CASE_IAXYT_X(v2_spmv_coo, testing_v2_spmv_coo);
         DEFINE_CASE_IAXYT_X(v2_spmv_coo_aos, testing_v2_spmv_coo_aos);
         DEFINE_CASE_IAXYT_X(v2_spmv_ell, testing_v2_spmv_ell);

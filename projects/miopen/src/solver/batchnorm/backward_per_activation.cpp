@@ -59,16 +59,9 @@ BnBwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
 
     bool bfpmixparm   = false;
     bool bbfpmixparam = false;
-    bool bfp16parm    = false;
     bool bfp32parm    = true;
 
-    if(problem.GetXDesc().GetType() == miopenHalf && problem.GetBnScale().GetType() == miopenHalf)
-    {
-        bfp16parm = true;
-        bfp32parm = false;
-    }
-    else if(problem.GetXDesc().GetType() == miopenHalf &&
-            problem.GetBnScale().GetType() == miopenFloat)
+    if(problem.GetXDesc().GetType() == miopenHalf && problem.GetBnScale().GetType() == miopenFloat)
     {
         bfpmixparm = true;
         bfp32parm  = false;
@@ -104,17 +97,16 @@ BnBwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
 
         auto kernel = KernelInfo{};
 
-        kernel.kernel_file = "MIOpenBatchNormBwdPerAct.cl";
+        kernel.kernel_file = "MIOpenBatchNormBwdPerActHIP.cpp";
         kernel.kernel_name = "MIOpenBatchNormBwdPerActivation";
 
         if(problem.UseSaved())
             kernel.kernel_name += "Saved";
 
         const auto build_params = KernelBuildParameters{
-            {"MIOPEN_USE_FP16", static_cast<int>(bfp16parm)},
+            {"MIOPEN_USE_FP16", static_cast<int>(bfpmixparm)},
             {"MIOPEN_USE_FP32", static_cast<int>(bfp32parm)},
-            {"MIOPEN_USE_FPMIX", static_cast<int>(bfpmixparm)},
-            {"MIOPEN_USE_BFPMIX", static_cast<int>(bbfpmixparam)},
+            {"MIOPEN_USE_BFP16", static_cast<int>(bbfpmixparam)},
             {"MIO_BN_N", static_cast<int>(n)},
             {"MIO_BN_C", static_cast<int>(c)},
             {"MIO_BN_HW", static_cast<int>(in_cstride)},
@@ -131,7 +123,7 @@ BnBwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
             {"MIO_BN_GFX115X", (StartsWith(handle.GetDeviceName(), "gfx115") ? "1" : "0")},
         };
 
-        kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+        kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
         kernel.l_wk.push_back(xlocalsize);
         kernel.l_wk.push_back(ylocalsize);

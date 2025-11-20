@@ -42,7 +42,29 @@ constexpr T getToleranceInference()
 }
 
 template <typename T>
-constexpr T getToleranceTraining();
+constexpr T getToleranceTraining()
+{
+    if constexpr(std::is_same_v<T, double>)
+    {
+        return 1e-7; // this needs to be changed when double is supported
+    }
+    else if constexpr(std::is_same_v<T, float>)
+    {
+        return 2e-4f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 5e-4_h;
+    }
+    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    {
+        return 5e-3_bf;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
 
 template <typename T>
 constexpr T getToleranceBackward()
@@ -69,7 +91,34 @@ constexpr T getToleranceBackward()
     }
 }
 
-} // namespace bn
+template <typename T>
+constexpr T getRmsToleranceTraining()
+{
+    // RMS tolerance values for use with CpuFpReferenceMiopenRmsValidation
+    // These match MIOpen's relative RMS error tolerance (typically 0.4% = 4e-3)
+    if constexpr(std::is_same_v<T, double>)
+    {
+        return 4e-3; // 0.4% relative RMS error
+    }
+    else if constexpr(std::is_same_v<T, float>)
+    {
+        return 4e-3f; // 0.4% relative RMS error
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 4e-3_h; // 0.4% relative RMS error
+    }
+    else if constexpr(std::is_same_v<T, hip_bfloat16>)
+    {
+        return 8e-3_bf; // 0.8% relative RMS error (more lenient for bfloat16)
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace batchnorm
 
 namespace conv
 {

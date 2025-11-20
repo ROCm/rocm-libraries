@@ -80,7 +80,7 @@ TEST_P(accuracy_test, vs_fftw)
     {
         // Single-proc FFT.
         // Only do round trip for non-field FFTs
-        bool round_trip = params.ifields.empty() && params.ofields.empty();
+        bool round_trip = params.is_forward() && params.ifields.empty() && params.ofields.empty();
 
         try
         {
@@ -94,15 +94,15 @@ TEST_P(accuracy_test, vs_fftw)
         {
             // explicitly clear cache
             last_cpu_fft_data = last_cpu_fft_cache();
-            GTEST_SKIP() << e.msg;
+            GTEST_SKIP() << e.what();
         }
         catch(ROCFFT_SKIP& e)
         {
-            GTEST_SKIP() << e.msg;
+            GTEST_SKIP() << e.what();
         }
         catch(ROCFFT_FAIL& e)
         {
-            GTEST_FAIL() << e.msg;
+            GTEST_FAIL() << e.what();
         }
         break;
     }

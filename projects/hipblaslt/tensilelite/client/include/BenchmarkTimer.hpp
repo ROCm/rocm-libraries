@@ -58,7 +58,7 @@ namespace TensileLite
             virtual void preProblem(ContractionProblem* const problem) override;
             virtual void postProblem() override;
 
-            virtual void preSolution(ContractionSolution const& solution) override;
+            virtual void preSolution(ContractionSolution* const solution) override;
             virtual void postSolution() override;
 
             virtual bool needMoreRunsInSolution() const override;
@@ -112,7 +112,7 @@ namespace TensileLite
 
             Hardware const&     m_hardware;
             ContractionProblem* m_problem;
-            ContractionSolution m_solution;
+            ContractionSolution* m_solution;
 
             int m_numEnqueuesInSolution = 0;
             int m_numSyncsInBenchmark   = 0;

@@ -798,7 +798,9 @@ BenchmarkProblems:
     #   BenchmarkFinalParameters:
     #     - ProblemSizes:
     #       - Range: [ [32, 249, 2048], [32, 249, 2048], [1], [32, 249, 2048] ]
-    - # SGEMM TT - Test WorkGroupMappingXCC: -1
+
+    - # SGEMM TT - Test autoWGMXCC (WorkGroupMappingXCC: [-1])
+      # WorkGroupMappingXCC is set to number of XCDs at runtime
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -829,6 +831,90 @@ BenchmarkProblems:
         - VectorWidthA: [4]
         - VectorWidthB: [4]
         - WorkGroupMapping: [1, 8]
+        - WorkGroupMappingXCC: [-1]
+      
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 512]
+          - Exact: [2055, 2055, 1, 1031]
+    
+    - # SGEMM TT - Test autoWGM (WorkGroupMapping: [0])
+      # WorkGroupMapping is set to default (sqrt(CU/XCD)) at runtime
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [True]
+      ForkParameters:
+        - 1LDSBuffer: [0, 1]
+        - DepthU: [16]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - GlobalSplitU: [0]
+        - LocalReadVectorWidth: [1]
+        - MatrixInstruction:
+          # - [16, 16, 4, 1, 1, 8,8, 2,2]
+          - [16, 16, 4, 1, 1, 4,4, 2,2]
+        - MIArchVgpr: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - StaggerU: [0, 32]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [False, True]
+        - StoreRemapVectorWidth: [0, 4]
+        - StoreVectorWidth: [1]
+        - StreamK: [3]
+        - StreamKFixupTreeReduction: [0, 1]
+        - PrefetchLocalRead: [1, 3]
+        - TransposeLDS: [0, 1]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - WorkGroupMapping: [0]
+        - WorkGroupMappingXCC: [1]
+
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 512]
+          - Exact: [2055, 2055, 1, 1031]
+    
+    - # SGEMM TT - Test autoWGM + autoWGMXCC (WorkGroupMapping: [0] and WorkGroupMappingXCC: [-1])
+      # WorkGroupMapping and WorkGroupMappingXCC values are predicted at runtime. (not default values)
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [True]
+      ForkParameters:
+        - 1LDSBuffer: [0, 1]
+        - DepthU: [16]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - GlobalSplitU: [0]
+        - LocalReadVectorWidth: [1]
+        - MatrixInstruction:
+          # - [16, 16, 4, 1, 1, 8,8, 2,2]
+          - [16, 16, 4, 1, 1, 4,4, 2,2]
+        - MIArchVgpr: [0]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - StaggerU: [0, 32]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [False, True]
+        - StoreRemapVectorWidth: [0, 4]
+        - StoreVectorWidth: [1]
+        - StreamK: [3]
+        - StreamKFixupTreeReduction: [0, 1]
+        - PrefetchLocalRead: [1, 3]
+        - TransposeLDS: [0, 1]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - WorkGroupMapping: [0]
         - WorkGroupMappingXCC: [-1]
 
       BenchmarkForkParameters:

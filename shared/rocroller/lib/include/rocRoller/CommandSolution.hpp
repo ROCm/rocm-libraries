@@ -46,8 +46,9 @@
 
 namespace rocRoller
 {
-    KernelArguments  getKernelArguments(AssemblyKernelPtr kernel, RuntimeArguments const& args);
-    KernelInvocation getKernelInvocation(AssemblyKernelPtr kernel, RuntimeArguments const& args);
+    KernelArguments    getKernelArguments(AssemblyKernelPtr kernel, RuntimeArguments const& args);
+    KernelInvocation   getKernelInvocation(AssemblyKernelPtr kernel, RuntimeArguments const& args);
+    CommandArgumentPtr findArgumentByName(CommandPtr const command, std::string const& argName);
 
     /**
      * CommandParameters - tunable command parameters.

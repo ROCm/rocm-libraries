@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <typename T, typename U>
 void bdsvdx_checkBadArgs(const rocblas_handle handle,
@@ -392,7 +393,7 @@ void bdsvdx_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -408,12 +409,12 @@ void bdsvdx_getPerfData(const rocblas_handle handle,
     {
         bdsvdx_initData<false, true, T>(handle, n, dD, dE, hD, hE);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_bdsvdx(handle, uplo, svect, srange, n, dD.data(), dE.data(), vl, vu, il, iu,
                          dNsv.data(), dS.data(), dZ.data(), ldz, dIfail.data(), dInfo.data());
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <typename T>
@@ -559,7 +560,7 @@ void testing_bdsvdx(Arguments& argus)
                            hIfailRes, hInfo, hInfoRes, &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         bdsvdx_getPerfData<T>(handle, uplo, svect, srange, n, dD, dE, vl, vu, il, iu, dNsv, dS, dZ,
                               ldz, dIfail, dInfo, hD, hE, hNsv, hS, hZ, hInfo, &gpu_time_used,
                               &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels,

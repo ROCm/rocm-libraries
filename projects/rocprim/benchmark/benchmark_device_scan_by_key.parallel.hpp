@@ -328,29 +328,57 @@ struct device_scan_by_key_benchmark_generator
         CREATE_BY_KEY_BENCHMARK(EXCL, T, SCAN_OP, 4096)  \
         CREATE_BY_KEY_BENCHMARK(EXCL, T, SCAN_OP, 65536)
 
-    #define CREATE_BENCHMARK(T, SCAN_OP)              \
-        CREATE_EXCL_INCL_BENCHMARK(false, T, SCAN_OP) \
-        CREATE_EXCL_INCL_BENCHMARK(true, T, SCAN_OP)
+    #define CREATE_BENCHMARK(T)                                \
+        CREATE_EXCL_INCL_BENCHMARK(false, T, rocprim::plus<T>) \
+        CREATE_EXCL_INCL_BENCHMARK(true, T, rocprim::plus<T>)
+
+    #define BENCHMARK_TYPE_TUNING(KEY_TYPE, VALUE_TYPE)                                   \
+        executor.queue_instance(device_scan_by_key_benchmark<false,                       \
+                                                             KEY_TYPE,                    \
+                                                             VALUE_TYPE,                  \
+                                                             rocprim::plus<VALUE_TYPE>,   \
+                                                             rocprim::equal_to<KEY_TYPE>, \
+                                                             1024,                        \
+                                                             false>());
+
+    // All of the limited tuned types
+    #define BENCHMARK_TYPES_TUNING(KEY_TYPE)               \
+        BENCHMARK_TYPE_TUNING(KEY_TYPE, rocprim::int128_t) \
+        BENCHMARK_TYPE_TUNING(KEY_TYPE, int64_t)           \
+        BENCHMARK_TYPE_TUNING(KEY_TYPE, int)               \
+        BENCHMARK_TYPE_TUNING(KEY_TYPE, short)             \
+        BENCHMARK_TYPE_TUNING(KEY_TYPE, int8_t)
 
 template<bool Deterministic>
 void add_benchmarks(benchmark_utils::executor& executor)
 {
+    // Tuned types
+    BENCHMARK_TYPES_TUNING(rocprim::int128_t)
+    BENCHMARK_TYPES_TUNING(int64_t)
+    BENCHMARK_TYPES_TUNING(int)
+    BENCHMARK_TYPES_TUNING(short)
+    BENCHMARK_TYPES_TUNING(int8_t)
+    BENCHMARK_TYPES_TUNING(double)
+    BENCHMARK_TYPES_TUNING(float)
+    BENCHMARK_TYPES_TUNING(rocprim::half)
+
+    #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
+    CREATE_BENCHMARK(float)
+    CREATE_BENCHMARK(double)
+    CREATE_BENCHMARK(float2)
+    CREATE_BENCHMARK(double2)
+    CREATE_BENCHMARK(uint8_t)
+    CREATE_BENCHMARK(rocprim::half)
+    CREATE_BENCHMARK(rocprim::uint128_t)
+
+    // Not tuned custom types
     using custom_float2  = common::custom_type<float, float>;
     using custom_double2 = common::custom_type<double, double>;
 
-    CREATE_BENCHMARK(int, rocprim::plus<int>)
-    CREATE_BENCHMARK(float, rocprim::plus<float>)
-    CREATE_BENCHMARK(double, rocprim::plus<double>)
-    CREATE_BENCHMARK(long long, rocprim::plus<long long>)
-    CREATE_BENCHMARK(float2, rocprim::plus<float2>)
-    CREATE_BENCHMARK(custom_float2, rocprim::plus<custom_float2>)
-    CREATE_BENCHMARK(double2, rocprim::plus<double2>)
-    CREATE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>)
-    CREATE_BENCHMARK(int8_t, rocprim::plus<int8_t>)
-    CREATE_BENCHMARK(uint8_t, rocprim::plus<uint8_t>)
-    CREATE_BENCHMARK(rocprim::half, rocprim::plus<rocprim::half>)
-    CREATE_BENCHMARK(rocprim::int128_t, rocprim::plus<rocprim::int128_t>)
-    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::plus<rocprim::uint128_t>)
+    CREATE_BENCHMARK(custom_float2)
+    CREATE_BENCHMARK(custom_double2)
+    #endif
 }
 
 #endif // BENCHMARK_CONFIG_TUNING

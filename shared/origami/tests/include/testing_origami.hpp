@@ -505,7 +505,7 @@ void BestGridSize(const origami::hardware_t& hardware,
                   size_t                     element_size_out,
                   size_t                     mx_block_size,
                   double                     H_L2,
-                  size_t                     WGM,
+                  int                        WGM,
                   size_t                     biggest_allowable_split,
                   size_t                     max_cus,
                   const std::optional<int>   expected_gt)
@@ -556,7 +556,7 @@ void BestMacroTileSize(const origami::hardware_t& hardware,
                                  size_t, // MI_M
                                  size_t, // MI_N
                                  size_t, // MI_K
-                                 size_t, // Occupancy
+                                 int, // Occupancy
                                  int, // wgm
                                  size_t, // non_temporal_a
                                  size_t // non_temporal_b
@@ -596,40 +596,57 @@ void BestWGM(const origami::hardware_t& hardware,
              size_t                     MT_N,
              size_t                     MT_K)
 {
-    std::vector<size_t> WGM_list = {1, 2, 4, 6, 8, 12};
+    // Assume no nt
+    auto nta = 0;
+    auto ntb = 0;
+    // Assume DP
+    auto skGrid = (M + MT_M - 1) / MT_M * (N + MT_N - 1) / MT_N;
 
-    auto best_wgm_large_tile = select_best_wgm(hardware,
-                                               M,
-                                               N,
-                                               K,
-                                               batch,
-                                               MT_M,
-                                               MT_N,
-                                               MT_K,
-                                               false);
+    auto [best_wgmxcc_large_tile, best_wgm_large_tile] = 
+        select_best_wgm(hardware,
+                        M,
+                        N,
+                        K,
+                        batch,
+                        MT_M,
+                        MT_N,
+                        MT_K,
+                        nta,
+                        ntb,
+                        skGrid,
+                        false);
 
-    auto best_wgm_small_tile = select_best_wgm(hardware,
-                                               M / 4,
-                                               N / 4,
-                                               K,
-                                               batch,
-                                               MT_M,
-                                               MT_N,
-                                               MT_K * 2,
-                                               false);
+    auto [best_wgmxcc_small_tile, best_wgm_small_tile] = 
+        select_best_wgm(hardware,
+                        M / 4,
+                        N / 4,
+                        K,
+                        batch,
+                        MT_M,
+                        MT_N,
+                        MT_K * 2,
+                        nta,
+                        ntb,
+                        skGrid,
+                        false);
 
-    auto best_wgm_nonsquare = select_best_wgm(hardware,
-                                              1024,
-                                              5120,
-                                              K,
-                                              batch,
-                                              MT_M,
-                                              MT_N,
-                                              MT_K,
-                                              false);
+    auto [best_wgmxcc_nonsquare_tile, best_wgm_nonsquare_tile] = 
+        select_best_wgm(hardware,
+                        1024,
+                        5120,
+                        K,
+                        batch,
+                        MT_M,
+                        MT_N,
+                        MT_K,
+                        nta,
+                        ntb,
+                        skGrid,
+                        false);
 
+    EXPECT_EQ(best_wgmxcc_large_tile, best_wgmxcc_small_tile);
     EXPECT_GT(best_wgm_large_tile, best_wgm_small_tile);
-    EXPECT_NE(best_wgm_large_tile, best_wgm_nonsquare);
+    EXPECT_NE(best_wgm_large_tile, best_wgm_nonsquare_tile);
 }
 
 void UtilsTFlopsFromLatency(size_t M, size_t N, size_t K, double latency_cycles, double clock_GHz)

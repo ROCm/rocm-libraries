@@ -79,7 +79,7 @@ public:
     {
         if(nullptr != this->m_data)
         {
-            free(this->m_data);
+            host_free(this->m_data);
             this->m_data = nullptr;
         }
     }

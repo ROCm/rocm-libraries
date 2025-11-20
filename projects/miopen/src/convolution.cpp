@@ -468,6 +468,18 @@ std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
     return workspace_size;
 }
 
+bool ConvolutionDescriptor::EnableTF32() const
+{
+    /* true only when both EnvEnableTF32() and (MathType==Default) are true. */
+    // temporarily disable TF32 until tf32 feature are fully complete validated with database.
+    // TODO:(LYM) change back to &&
+    if((miopen::EnvEnableTF32() ||
+        (static_cast<miopenMathType_t>(attribute.Get(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE)) ==
+         miopenMathDefault)))
+        return true;
+    return false;
+}
+
 std::ostream& operator<<(std::ostream& stream, const ConvolutionDescriptor& c)
 {
     stream << "conv" << c.spatialDim << "d, ";
@@ -540,6 +552,18 @@ void ConvolutionAttribute::Set(miopenConvolutionAttrib_t attr, int value)
         }
         fp8rounding_mode.rounding_mode = rounding_mode;
     }
+    else if(attr == MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE)
+    {
+        const auto math_type_ = static_cast<miopenMathType_t>(value);
+        if(math_type_ != miopenMathDefault && math_type_ != miopenMathPedantic)
+        {
+            MIOPEN_THROW(miopenStatusBadParm,
+                         "[Set conv attribute] Error: Attempt to set invalid value for "
+                         "MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE: " +
+                             std::to_string(value));
+        }
+        math_type.value = math_type_;
+    }
     else
     {
         MIOPEN_THROW(miopenStatusBadParm,
@@ -556,6 +580,8 @@ int ConvolutionAttribute::Get(miopenConvolutionAttrib_t attr) const
         return static_cast<int>(fp8rounding_mode.rounding_mode);
     else if(attr == MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC)
         return deterministic.value;
+    else if(attr == MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE)
+        return math_type.value;
     MIOPEN_THROW(miopenStatusBadParm,
                  "[Get conv attribute] Error: Attribute [" +
                      std::to_string(static_cast<int>(attr)) + "] does not exist.");

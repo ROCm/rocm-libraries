@@ -404,7 +404,7 @@ struct target_config
 
 // trampoline_kernel that is fully specialized at compile-time for a single GPU architecture.
 // By instantiating this template once per supported `target_arch`,the correct tuned config
-// will be derived from the template
+// will be derived from the template.
 template<typename Config,
          target_arch Arch,
          class Kernel,
@@ -451,11 +451,10 @@ auto make_launch_plan(target_arch arch, Kernel kernel) -> launch_plan<Kernel>
     for_each_arch(
         [&](auto arch_tag)
         {
-            constexpr target_arch Arch = decltype(arch_tag)::value;
-            if(Arch != arch || tuned_kernel)
+            if(arch_tag != arch || tuned_kernel)
                 return;
 
-            tuned_kernel = trampoline_kernel<Config, Arch, Kernel, LaunchSelector>;
+            tuned_kernel = trampoline_kernel<Config, arch_tag, Kernel, LaunchSelector>;
         });
 
     if(!tuned_kernel)
@@ -526,12 +525,6 @@ auto dispatch_target_arch([[maybe_unused]] const target_arch target_arch)
         }
     }
     return Config::template architecture_config<target_arch::unknown>::params;
-}
-
-template<typename Config>
-constexpr auto device_params()
-{
-    return Config::template architecture_config<device_target_arch()>::params;
 }
 
 inline target_arch parse_gcn_arch(const char* arch_name)

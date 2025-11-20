@@ -118,11 +118,11 @@ TEST_P(accuracy_test, vs_fftw)
         {
             // explicitly clear cache
             last_cpu_fft_data = last_cpu_fft_cache();
-            GTEST_SKIP() << e.msg;
+            GTEST_SKIP() << e.what();
         }
         catch(ROCFFT_SKIP& e)
         {
-            GTEST_SKIP() << e.msg;
+            GTEST_SKIP() << e.what();
         }
         catch(const fft_params::unimplemented_exception& e)
         {
@@ -130,7 +130,7 @@ TEST_P(accuracy_test, vs_fftw)
         }
         catch(ROCFFT_FAIL& e)
         {
-            GTEST_FAIL() << e.msg;
+            GTEST_FAIL() << e.what();
         }
         break;
     }
@@ -184,14 +184,7 @@ __host__ __device__ Tdata load_callback(Tdata* input, size_t offset, void* cbdat
 {
     auto testdata = static_cast<const callback_test_data*>(cbdata);
     // multiply each element by scalar
-    if(input == testdata->base)
-        return input[offset] * testdata->scalar;
-    // wrong base address passed, return something obviously wrong
-    else
-    {
-        // wrong base address passed, return something obviously wrong
-        return input[0];
-    }
+    return input[offset] * testdata->scalar;
 }
 
 __device__ auto load_callback_dev_half           = load_callback<rocfft_fp16>;
@@ -209,14 +202,7 @@ __host__ __device__ Tdata
 {
     auto testdata = static_cast<const callback_test_data*>(cbdata);
     // subtract each element by scalar
-    if(input == testdata->base)
-        return input[offset] - testdata->scalar;
-    // wrong base address passed, return something obviously wrong
-    else
-    {
-        // wrong base address passed, return something obviously wrong
-        return input[0];
-    }
+    return input[offset] - testdata->scalar;
 }
 
 __device__ auto load_callback_round_trip_inverse_dev_half
@@ -366,11 +352,7 @@ __host__ __device__ static void
 {
     auto testdata = static_cast<callback_test_data*>(cbdata);
     // add scalar to each element
-    if(output == testdata->base)
-    {
-        output[offset] = element + testdata->scalar;
-    }
-    // otherwise, wrong base address passed, just don't write
+    output[offset] = element + testdata->scalar;
 }
 
 __device__ auto store_callback_dev_half           = store_callback<rocfft_fp16>;
@@ -386,11 +368,7 @@ __host__ __device__ static void store_callback_round_trip_inverse(
 {
     auto testdata = static_cast<callback_test_data*>(cbdata);
     // divide each element by scalar
-    if(output == testdata->base)
-    {
-        output[offset] = element / testdata->scalar;
-    }
-    // otherwise, wrong base address passed, just don't write
+    output[offset] = element / testdata->scalar;
 }
 __device__ auto store_callback_round_trip_inverse_dev_half
     = store_callback_round_trip_inverse<rocfft_fp16>;
@@ -541,7 +519,6 @@ void apply_store_callback(const fft_params& params, std::vector<hostbuf>& output
 
     callback_test_data cbdata;
     cbdata.scalar = params.store_cb_scalar;
-    cbdata.base   = output.front().data();
 
     switch(params.otype)
     {
@@ -661,7 +638,6 @@ void apply_load_callback(const fft_params& params, std::vector<hostbuf>& input)
 
     callback_test_data cbdata;
     cbdata.scalar = params.load_cb_scalar;
-    cbdata.base   = input.front().data();
 
     switch(params.itype)
     {

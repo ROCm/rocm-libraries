@@ -16,13 +16,15 @@ namespace plugin_constants
 // Test plugin directory constants relative to backend library location
 inline const std::string& getTestPluginDefaultDir()
 {
-    static const std::string s_defaultDir = "./test_plugins/default";
+    static std::string s_defaultDir
+        = (std::filesystem::path(".") / "test_plugins" / "default").string();
     return s_defaultDir;
 }
 
 inline const std::string& getTestPluginCustomDir()
 {
-    static const std::string s_customDir = "./test_plugins/custom";
+    static std::string s_customDir
+        = (std::filesystem::path(".") / "test_plugins" / "custom").string();
     return s_customDir;
 }
 

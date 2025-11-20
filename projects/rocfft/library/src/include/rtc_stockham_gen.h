@@ -51,8 +51,8 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs&    specs,
                                      BluesteinFuseType                fuseBlue,
                                      PartialPassType                  ppType,
                                      const StockhamPartialPassParams& ppParams,
-                                     const LoadOps&                   loadOps,
-                                     const StoreOps&                  storeOps);
+                                     const std::optional<LoadOps>&    loadOps,
+                                     const std::optional<StoreOps>&   storeOps);
 
 // generate source for RTC stockham kernel.  transforms_per_block may
 // be nullptr, but if non-null, stockham_rtc stores the number of
@@ -78,7 +78,7 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
                          CallbackType                     cbtype,
                          const BluesteinFuseType&         fuseBlue,
                          const PartialPassType&           ppType,
-                         const LoadOps&                   loadOps,
-                         const StoreOps&                  storeOps);
+                         const std::optional<LoadOps>&    loadOps,
+                         const std::optional<StoreOps>&   storeOps);
 
 #endif

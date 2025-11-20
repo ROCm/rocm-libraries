@@ -21,7 +21,7 @@ using namespace hipdnn_sdk::utilities;
 namespace hipdnn_sdk_test_utils
 {
 
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
+inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   PointwiseUnaryTensorBundle,
                   std::unordered_map<int64_t, void*>>
     buildPointwiseUnaryGraph(const std::vector<int64_t>& inputDims,
@@ -31,7 +31,13 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                              hipdnn_sdk::data_objects::DataType outputDataType,
                              hipdnn_frontend::PointwiseMode operation,
                              unsigned int seed = getGlobalTestSeed(),
-                             const TensorLayout& layout = TensorLayout::NCHW)
+                             const TensorLayout& layout = TensorLayout::NCHW,
+                             std::optional<float> reluLowerClip = std::nullopt,
+                             std::optional<float> reluUpperClip = std::nullopt,
+                             std::optional<float> reluLowerClipSlope = std::nullopt,
+                             std::optional<float> swishBeta = std::nullopt,
+                             std::optional<float> eluAlpha = std::nullopt,
+                             std::optional<float> softplusBeta = std::nullopt)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("PointwiseUnaryTest");
@@ -51,6 +57,30 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     hipdnn_frontend::graph::PointwiseAttributes pointwiseAttrs;
     pointwiseAttrs.set_name("PointwiseUnary");
     pointwiseAttrs.set_mode(operation);
+    if(reluLowerClip.has_value())
+    {
+        pointwiseAttrs.set_relu_lower_clip(reluLowerClip.value());
+    }
+    if(reluUpperClip.has_value())
+    {
+        pointwiseAttrs.set_relu_upper_clip(reluUpperClip.value());
+    }
+    if(reluLowerClipSlope.has_value())
+    {
+        pointwiseAttrs.set_relu_lower_clip_slope(reluLowerClipSlope.value());
+    }
+    if(swishBeta.has_value())
+    {
+        pointwiseAttrs.set_swish_beta(swishBeta.value());
+    }
+    if(eluAlpha.has_value())
+    {
+        pointwiseAttrs.set_elu_alpha(eluAlpha.value());
+    }
+    if(softplusBeta.has_value())
+    {
+        pointwiseAttrs.set_softplus_beta(softplusBeta.value());
+    }
 
     auto outputTensorAttr = graph->pointwise(inputTensorAttr, pointwiseAttrs);
 
@@ -61,6 +91,14 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     outputTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(outputDataType));
     outputTensorAttr->set_dim(outputDims);
     outputTensorAttr->set_stride(generateStrides(outputDims, layout.strideOrder));
+    outputTensorAttr->set_output(true);
+
+    // Ensure properties are inferred
+    auto validateResult = graph->validate();
+    if(validateResult.is_bad())
+    {
+        throw std::runtime_error("Graph validation failed: " + validateResult.get_message());
+    }
 
     // Serialize graph and create tensor bundle
     auto serializedGraph = graph->buildFlatbufferOperationGraph();
@@ -73,7 +111,7 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     return std::make_tuple(graph, std::move(tensorBundle), variantPack);
 }
 
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
+inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                   PointwiseBinaryTensorBundle,
                   std::unordered_map<int64_t, void*>>
     buildPointwiseBinaryGraph(const std::vector<int64_t>& input1Dims,
@@ -85,7 +123,13 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                               hipdnn_sdk::data_objects::DataType outputDataType,
                               hipdnn_frontend::PointwiseMode operation,
                               unsigned int seed = getGlobalTestSeed(),
-                              const TensorLayout& layout = TensorLayout::NCHW)
+                              const TensorLayout& layout = TensorLayout::NCHW,
+                              std::optional<float> reluLowerClip = std::nullopt,
+                              std::optional<float> reluUpperClip = std::nullopt,
+                              std::optional<float> reluLowerClipSlope = std::nullopt,
+                              std::optional<float> swishBeta = std::nullopt,
+                              std::optional<float> eluAlpha = std::nullopt,
+                              std::optional<float> softplusBeta = std::nullopt)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("PointwiseBinaryTest");
@@ -113,6 +157,30 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     hipdnn_frontend::graph::PointwiseAttributes pointwiseAttrs;
     pointwiseAttrs.set_name("PointwiseBinary");
     pointwiseAttrs.set_mode(operation);
+    if(reluLowerClip.has_value())
+    {
+        pointwiseAttrs.set_relu_lower_clip(reluLowerClip.value());
+    }
+    if(reluUpperClip.has_value())
+    {
+        pointwiseAttrs.set_relu_upper_clip(reluUpperClip.value());
+    }
+    if(reluLowerClipSlope.has_value())
+    {
+        pointwiseAttrs.set_relu_lower_clip_slope(reluLowerClipSlope.value());
+    }
+    if(swishBeta.has_value())
+    {
+        pointwiseAttrs.set_swish_beta(swishBeta.value());
+    }
+    if(eluAlpha.has_value())
+    {
+        pointwiseAttrs.set_elu_alpha(eluAlpha.value());
+    }
+    if(softplusBeta.has_value())
+    {
+        pointwiseAttrs.set_softplus_beta(softplusBeta.value());
+    }
 
     auto outputTensorAttr = graph->pointwise(input1TensorAttr, input2TensorAttr, pointwiseAttrs);
 
@@ -123,6 +191,14 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     outputTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(outputDataType));
     outputTensorAttr->set_dim(outputDims);
     outputTensorAttr->set_stride(generateStrides(outputDims, layout.strideOrder));
+    outputTensorAttr->set_output(true);
+
+    // Ensure properties are inferred
+    auto validateResult = graph->validate();
+    if(validateResult.is_bad())
+    {
+        throw std::runtime_error("Graph validation failed: " + validateResult.get_message());
+    }
 
     // Serialize graph and create tensor bundle
     auto serializedGraph = graph->buildFlatbufferOperationGraph();

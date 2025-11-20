@@ -692,7 +692,17 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
         }
     }
 
-    CK_TILE_HOST static constexpr auto BlockSize() { return dim3(kBlockSize); }
+    CK_TILE_HOST static dim3 BlockSize()
+    {
+        if(is_wave32())
+        {
+            return dim3(kBlockSize / 2);
+        }
+        else
+        {
+            return dim3(kBlockSize);
+        }
+    }
 
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
@@ -995,7 +1005,7 @@ struct FmhaBatchPrefillWithPagedKVCacheKernel
                             rand_val_ptr,
                             make_tuple(kargs.seqlen_q, kargs.seqlen_k),
                             make_tuple(kargs.stride_randval, 1),
-                            number<1>{},
+                            number<FmhaPipeline::kAlignmentRandVal>{},
                             number<1>{});
 
                     return pad_tensor_view(randval_dram_naive,

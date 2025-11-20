@@ -250,127 +250,23 @@ void search_kernel_shared_impl(InputIterator1 input,
     }
 }
 
-template<class Config, class InputIterator1, class InputIterator2, class BinaryFunction>
-struct search_impl_kernels
+template<class T>
+static ROCPRIM_KERNEL
+void set_output_kernel(T* output, T value)
 {
-    inline static hipError_t launch_search_shared(detail::target_arch arch,
-                                                  InputIterator1      input,
-                                                  InputIterator2      keys,
-                                                  size_t*             output,
-                                                  size_t              size,
-                                                  size_t              keys_size,
-                                                  BinaryFunction      compare_function,
-                                                  dim3                grid,
-                                                  dim3                block,
-                                                  size_t              shmem,
-                                                  hipStream_t         stream)
+    *output = value;
+}
+
+template<class T>
+static ROCPRIM_KERNEL
+void reverse_index_kernel(T* output, T size, T keys_size)
+{
+    // Return the reverse index as long as the index is lower than the size.
+    if(*output < size)
     {
-        auto kernel = [=](auto arch_config)
-        {
-            search_kernel_shared_impl<decltype(arch_config)>(input,
-                                                             keys,
-                                                             output,
-                                                             size,
-                                                             keys_size,
-                                                             compare_function);
-        };
-
-        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
+        *output = size - keys_size - *output;
     }
-
-    inline static hipError_t launch_search(detail::target_arch arch,
-                                           InputIterator1      input,
-                                           InputIterator2      keys,
-                                           size_t*             output,
-                                           size_t              size,
-                                           size_t              keys_size,
-                                           BinaryFunction      compare_function,
-                                           dim3                grid,
-                                           dim3                block,
-                                           size_t              shmem,
-                                           hipStream_t         stream)
-    {
-        auto kernel = [=](auto arch_config)
-        {
-            search_kernel_impl<decltype(arch_config)>(input,
-                                                      keys,
-                                                      output,
-                                                      size,
-                                                      keys_size,
-                                                      compare_function);
-        };
-
-        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-    }
-
-    inline static hipError_t launch_search_shared(detail::target_arch              arch,
-                                                  reverse_iterator<InputIterator1> input,
-                                                  reverse_iterator<InputIterator2> keys,
-                                                  size_t*                          output,
-                                                  size_t                           size,
-                                                  size_t                           keys_size,
-                                                  BinaryFunction                   compare_function,
-                                                  dim3                             grid,
-                                                  dim3                             block,
-                                                  size_t                           shmem,
-                                                  hipStream_t                      stream)
-    {
-        auto kernel = [=](auto arch_config)
-        {
-            search_kernel_shared_impl<decltype(arch_config)>(input,
-                                                             keys,
-                                                             output,
-                                                             size,
-                                                             keys_size,
-                                                             compare_function);
-        };
-
-        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-    }
-
-    inline static hipError_t launch_search(detail::target_arch              arch,
-                                           reverse_iterator<InputIterator1> input,
-                                           reverse_iterator<InputIterator2> keys,
-                                           size_t*                          output,
-                                           size_t                           size,
-                                           size_t                           keys_size,
-                                           BinaryFunction                   compare_function,
-                                           dim3                             grid,
-                                           dim3                             block,
-                                           size_t                           shmem,
-                                           hipStream_t                      stream)
-    {
-        auto kernel = [=](auto arch_config)
-        {
-            search_kernel_impl<decltype(arch_config)>(input,
-                                                      keys,
-                                                      output,
-                                                      size,
-                                                      keys_size,
-                                                      compare_function);
-        };
-
-        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-    }
-
-    template<class T>
-    static ROCPRIM_KERNEL
-    void set_output_kernel(T* output, T value)
-    {
-        *output = value;
-    }
-
-    template<class T>
-    static ROCPRIM_KERNEL
-    void reverse_index_kernel(T* output, T size, T keys_size)
-    {
-        // Return the reverse index as long as the index is lower than the size.
-        if(*output < size)
-        {
-            *output = size - keys_size - *output;
-        }
-    }
-};
+}
 
 template<class Config,
          bool find_first,
@@ -395,8 +291,6 @@ hipError_t search_impl(void*          temporary_storage,
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
 
     using config = wrapped_search_config<Config, input_type>;
-    using search_kernels
-        = search_impl_kernels<config, InputIterator1, InputIterator2, BinaryFunction>;
 
     target_arch target_arch;
     ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
@@ -435,8 +329,7 @@ hipError_t search_impl(void*          temporary_storage,
     size_t* tmp_output = reinterpret_cast<size_t*>(temporary_storage);
 
     start_timer();
-    search_kernels::set_output_kernel<<<1, 1, 0, stream>>>(tmp_output,
-                                                           find_first && keys_size <= 0 ? 0 : size);
+    set_output_kernel<<<1, 1, 0, stream>>>(tmp_output, find_first && keys_size <= 0 ? 0 : size);
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("set_output_kernel", 1, start);
 
     if(size > 0 && keys_size > 0)
@@ -447,34 +340,42 @@ hipError_t search_impl(void*          temporary_storage,
             if constexpr(find_first)
             {
                 start_timer();
-                ROCPRIM_RETURN_ON_ERROR(search_kernels::launch_search_shared(target_arch,
-                                                                             input,
-                                                                             keys,
-                                                                             tmp_output,
-                                                                             size,
-                                                                             keys_size,
-                                                                             compare_function,
-                                                                             num_blocks,
-                                                                             block_size,
-                                                                             0,
-                                                                             stream));
+                auto search_shared_kernel = [=](auto arch_config)
+                {
+                    search_kernel_shared_impl<decltype(arch_config)>(input,
+                                                                     keys,
+                                                                     tmp_output,
+                                                                     size,
+                                                                     keys_size,
+                                                                     compare_function);
+                };
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                                    search_shared_kernel,
+                                                                    num_blocks,
+                                                                    block_size,
+                                                                    0,
+                                                                    stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_kernel_shared", size, start);
             }
             else
             {
                 start_timer();
-                ROCPRIM_RETURN_ON_ERROR(search_kernels::launch_search_shared(
-                    target_arch,
-                    rocprim::make_reverse_iterator(input + size),
-                    rocprim::make_reverse_iterator(keys + keys_size),
-                    tmp_output,
-                    size,
-                    keys_size,
-                    compare_function,
-                    num_blocks,
-                    block_size,
-                    0,
-                    stream));
+                auto search_shared_kernel = [=](auto arch_config)
+                {
+                    search_kernel_shared_impl<decltype(arch_config)>(
+                        rocprim::make_reverse_iterator(input + size),
+                        rocprim::make_reverse_iterator(keys + keys_size),
+                        tmp_output,
+                        size,
+                        keys_size,
+                        compare_function);
+                };
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                                    search_shared_kernel,
+                                                                    num_blocks,
+                                                                    block_size,
+                                                                    0,
+                                                                    stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_kernel_shared", size, start);
             }
         }
@@ -483,34 +384,42 @@ hipError_t search_impl(void*          temporary_storage,
             if constexpr(find_first)
             {
                 start_timer();
-                ROCPRIM_RETURN_ON_ERROR(search_kernels::launch_search(target_arch,
-                                                                      input,
-                                                                      keys,
-                                                                      tmp_output,
-                                                                      size,
-                                                                      keys_size,
-                                                                      compare_function,
-                                                                      num_blocks,
-                                                                      block_size,
-                                                                      0,
-                                                                      stream));
+                auto search_kernel = [=](auto arch_config)
+                {
+                    search_kernel_impl<decltype(arch_config)>(input,
+                                                              keys,
+                                                              tmp_output,
+                                                              size,
+                                                              keys_size,
+                                                              compare_function);
+                };
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                                    search_kernel,
+                                                                    num_blocks,
+                                                                    block_size,
+                                                                    0,
+                                                                    stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_kernel", size, start);
             }
             else
             {
                 start_timer();
-                ROCPRIM_RETURN_ON_ERROR(
-                    search_kernels::launch_search(target_arch,
-                                                  rocprim::make_reverse_iterator(input + size),
-                                                  rocprim::make_reverse_iterator(keys + keys_size),
-                                                  tmp_output,
-                                                  size,
-                                                  keys_size,
-                                                  compare_function,
-                                                  num_blocks,
-                                                  block_size,
-                                                  0,
-                                                  stream));
+                auto search_kernel = [=](auto arch_config)
+                {
+                    search_kernel_impl<decltype(arch_config)>(
+                        rocprim::make_reverse_iterator(input + size),
+                        rocprim::make_reverse_iterator(keys + keys_size),
+                        tmp_output,
+                        size,
+                        keys_size,
+                        compare_function);
+                };
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                                    search_kernel,
+                                                                    num_blocks,
+                                                                    block_size,
+                                                                    0,
+                                                                    stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_kernel", size, start);
             }
         }
@@ -518,7 +427,7 @@ hipError_t search_impl(void*          temporary_storage,
         if constexpr(!find_first)
         {
             start_timer();
-            search_kernels::reverse_index_kernel<<<1, 1, 0, stream>>>(tmp_output, size, keys_size);
+            reverse_index_kernel<<<1, 1, 0, stream>>>(tmp_output, size, keys_size);
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reverse_index_kernel", 1, start);
         }
     }

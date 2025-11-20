@@ -56,7 +56,8 @@ RUN apt-get update && apt-get install -y \
    python3-venv \
    vim \
    wget \
-   xz-utils
+   xz-utils \
+   libdw-dev
 
 # Needed for clang-format from ROCm 4.3.1
 RUN wget -nv --show-progress --progress=dot:mega -O /tmp/libtinfo5.deb http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb \
@@ -140,6 +141,9 @@ RUN ( \
 
 ENV CXX=/usr/bin/g++-13
 ENV CC=/usr/bin/gcc-13
+
+ADD docker/install-rocprof-trace-decoder /tmp
+RUN /tmp/install-rocprof-trace-decoder && rm /tmp/install-rocprof-trace-decoder
 
 # Clean image
 RUN apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*

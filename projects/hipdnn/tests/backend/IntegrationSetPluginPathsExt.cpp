@@ -146,7 +146,8 @@ TEST(IntegrationSetPluginPathsExt, GetLoadedPluginPathsAbsoluteLoadsOnlyCustom)
         = fs::path("hipdnn_plugins/engines") / getLibraryName("test_good_default_plugin");
     const auto& testPluginPath = testGoodPluginPath();
 
-    EXPECT_FALSE(test_util::isPluginLoadedByRelativePath(loadedPlugins, defaultPluginPath));
+    EXPECT_FALSE(
+        test_util::isPluginLoadedByRelativePath(loadedPlugins, defaultPluginPath.string()));
     EXPECT_TRUE(test_util::isPluginLoadedByRelativePath(loadedPlugins, testPluginPath));
 
     EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);

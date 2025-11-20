@@ -2229,6 +2229,60 @@ void ref_syrk(rocblas_fill                  uplo,
                 ldc);
 }
 
+// syrk_ex
+template <typename T, typename U, typename Tc>
+void ref_syrk_ex(rocblas_fill      uplo,
+                 rocblas_operation transA,
+                 int64_t           n,
+                 int64_t           k,
+                 Tc                alpha,
+                 const T*          A,
+                 int64_t           lda,
+                 Tc                beta,
+                 U*                C,
+                 int64_t           ldc)
+{
+    float alpha_float = alpha;
+    float beta_float  = beta;
+
+    host_vector<float> A_float, C_float;
+
+    cast_to_buffer(transA, n, k, lda, A, A_float);
+    cast_to_buffer(rocblas_operation_none, n, n, ldc, C, C_float);
+
+    ref_syrk(uplo,
+             transA,
+             n,
+             k,
+             alpha_float,
+             (const float*)A_float.data(),
+             lda,
+             beta_float,
+             C_float.data(),
+             ldc);
+
+    cast_from_buffer(n, n, ldc, C_float, C);
+}
+
+#define INSTANTIATE_SYRK_EX_TEMPLATE(T_, U_, Tc_)                    \
+    template void ref_syrk_ex<T_, U_, Tc_>(rocblas_fill      uplo,   \
+                                           rocblas_operation transA, \
+                                           int64_t           n,      \
+                                           int64_t           k,      \
+                                           Tc_               alpha,  \
+                                           const T_*         A,      \
+                                           int64_t           lda,    \
+                                           Tc_               beta,   \
+                                           U_*               C,      \
+                                           int64_t           ldc);
+
+INSTANTIATE_SYRK_EX_TEMPLATE(rocblas_half, rocblas_half, float)
+INSTANTIATE_SYRK_EX_TEMPLATE(rocblas_half, float, float)
+// for reference bfloat16 we just keep output always higher precision
+INSTANTIATE_SYRK_EX_TEMPLATE(rocblas_bfloat16, float, float)
+INSTANTIATE_SYRK_EX_TEMPLATE(float, float, double)
+INSTANTIATE_SYRK_EX_TEMPLATE(float, double, double)
+
 // syr2k
 
 template <>

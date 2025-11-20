@@ -10,7 +10,7 @@ include(dependencies)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-set(VERSION_STRING "1.3.0")
+set(VERSION_STRING "1.4.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)

@@ -375,8 +375,8 @@ public:
             break;
         }
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         {
-
             break;
         }
         case rocsparse_format_coo_aos:
@@ -412,6 +412,7 @@ public:
         case rocsparse_format_csc:
         case rocsparse_format_bsr:
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         {
             throw(rocsparse_status_invalid_value);
         }
@@ -450,6 +451,7 @@ public:
         case rocsparse_format_csc:
         case rocsparse_format_bsr:
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         {
             throw(rocsparse_status_invalid_value);
         }
@@ -516,6 +518,7 @@ public:
         case rocsparse_format_csc:
         case rocsparse_format_coo_aos:
         case rocsparse_format_bell:
+        case rocsparse_format_sell:
         case rocsparse_format_coo:
         {
             throw(rocsparse_status_invalid_value);
@@ -557,6 +560,7 @@ void spmat_allocate(
     switch(format)
     {
     case rocsparse_format_bell:
+    case rocsparse_format_sell:
     {
         break;
     }
@@ -808,6 +812,11 @@ void spmat_get_rawsize(rocsparse_spmat_descr descr, int64_t* m_, int64_t* n_, in
         std::cerr << " initialize bell not implemented " << std::endl;
         throw(rocsparse_status_not_implemented);
     }
+    case rocsparse_format_sell:
+    {
+        std::cerr << " initialize sell not implemented " << std::endl;
+        throw(rocsparse_status_not_implemented);
+    }
     case rocsparse_format_ell:
     {
         int64_t              m;
@@ -947,6 +956,11 @@ void spmat_get_types(rocsparse_spmat_descr descr,
     case rocsparse_format_bell:
     {
         std::cerr << " initialize bell not implemented " << std::endl;
+        throw(rocsparse_status_not_implemented);
+    }
+    case rocsparse_format_sell:
+    {
+        std::cerr << " initialize sell not implemented " << std::endl;
         throw(rocsparse_status_not_implemented);
     }
     case rocsparse_format_ell:
@@ -1121,6 +1135,7 @@ void spmat_bsr_get_block_dim(rocsparse_const_spmat_descr descr,
         return;
     }
     case rocsparse_format_bell:
+    case rocsparse_format_sell:
     case rocsparse_format_ell:
     case rocsparse_format_csr:
     case rocsparse_format_csc:
@@ -1272,6 +1287,7 @@ spmat spmat_create_B(spmat& A, const Arguments& arg, rocsparse_format format_B)
     }
 
     case rocsparse_format_bell:
+    case rocsparse_format_sell:
     {
         std::cerr << "not implemented " << std::endl;
         throw(rocsparse_status_internal_error);
@@ -1336,6 +1352,7 @@ spmat spmat_create_C(spmat& A, spmat& B)
         return {format_A, M, N, NNZ, col_type, data_type, baseA};
     }
     case rocsparse_format_bell:
+    case rocsparse_format_sell:
     {
         std::cerr << "not implemented " << std::endl;
         throw(rocsparse_status_internal_error);
@@ -1402,6 +1419,7 @@ spmat spmat_create_A(const Arguments& arg, rocsparse_format format, rocsparse_in
     }
 
     case rocsparse_format_bell:
+    case rocsparse_format_sell:
     {
         std::cerr << "not implemented " << std::endl;
         throw(rocsparse_status_internal_error);
@@ -1605,6 +1623,7 @@ void spmat_compare(rocsparse_const_spmat_descr A, rocsparse_const_spmat_descr B)
     switch(format_A)
     {
     case rocsparse_format_bell:
+    case rocsparse_format_sell:
     {
         break;
     }

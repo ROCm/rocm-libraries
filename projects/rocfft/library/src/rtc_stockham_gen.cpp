@@ -62,8 +62,8 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs&    specs,
                                      BluesteinFuseType                fuseBlue,
                                      PartialPassType                  ppType,
                                      const StockhamPartialPassParams& ppParams,
-                                     const LoadOps&                   loadOps,
-                                     const StoreOps&                  storeOps)
+                                     const std::optional<LoadOps>&    loadOps,
+                                     const std::optional<StoreOps>&   storeOps)
 {
     std::string kernel_name = "fft_rtc";
 
@@ -275,8 +275,8 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
                          CallbackType                     cbtype,
                          const BluesteinFuseType&         fuseBlue,
                          const PartialPassType&           ppType,
-                         const LoadOps&                   loadOps,
-                         const StoreOps&                  storeOps)
+                         const std::optional<LoadOps>&    loadOps,
+                         const std::optional<StoreOps>&   storeOps)
 {
     std::unique_ptr<Function> lds2reg, reg2lds, device;
     std::unique_ptr<Function> lds2reg_pp_steps, reg2lds_pp_steps;

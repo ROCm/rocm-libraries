@@ -3,10 +3,7 @@
 
 #include "MiopenUtils.hpp"
 
-namespace miopen_legacy_plugin
-{
-
-namespace miopen_utils
+namespace miopen_legacy_plugin::miopen_utils
 {
 
 hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
@@ -92,6 +89,7 @@ std::optional<ActivationParams>
         if(attrs.relu_lower_clip() && attrs.relu_upper_clip())
         {
             // CLAMP
+            // act(x) = max(\alpha, min(\beta, x))
             return ActivationParams{miopenActivationCLAMP,
                                     static_cast<double>(*attrs.relu_lower_clip()),
                                     static_cast<double>(*attrs.relu_upper_clip()),
@@ -100,6 +98,7 @@ std::optional<ActivationParams>
         if(attrs.relu_upper_clip())
         {
             // Clipped ReLU
+            // act(x) = max(0, min(\alpha, x))
             return ActivationParams{miopenActivationCLIPPEDRELU,
                                     static_cast<double>(*attrs.relu_upper_clip()),
                                     0.0,
@@ -150,8 +149,6 @@ std::optional<ActivationParams>
     default:
         return std::nullopt;
     }
-}
-
 }
 
 }

@@ -36,7 +36,7 @@ public:
 
 private:
     int64_t _id;
-    std::set<std::unique_ptr<IPlanBuilder>> _planBuilders;
+    std::vector<std::unique_ptr<IPlanBuilder>> _planBuilders;
 };
 
 }

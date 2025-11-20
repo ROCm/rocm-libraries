@@ -14,7 +14,7 @@ performant GEMMs, DLRM, GEMV and hipRTC integration.
 The test suite includes validation and benchmarking projects that focus on unit testing, GEMMs and DLRM.
 
 > [!NOTE]
-> The published rocWMMA documentation is available at [rocWMMA](https://rocm.docs.amd.com/projects/rocWMMA/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the rocWMMA/docs folder of this repository. As with all ROCm projects, the documentation is open source. For more information, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
+> The published rocWMMA documentation is available at [rocWMMA](https://rocm.docs.amd.com/projects/rocWMMA/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `projects/rocwmma/docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
 
 ## Requirements
@@ -90,7 +90,7 @@ pip3 install -r sphinx/requirements.txt
 python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
 ```
 
-The HTML documentation can be viewed in your browser by opening docs/_build/html/index.html result.
+The HTML documentation can be viewed in your browser by opening the `docs/_build/html/index.html` result.
 
 ### Pdf
 

@@ -14,54 +14,73 @@ using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
 using namespace hipdnn_sdk_test_utils;
 
-TEST(TestConvolutionFwdInferenceSignatureKey, EqualityOperator)
+TEST(TestConvolutionFwdSignatureKey, EqualityOperator)
 {
-    ConvolutionFwdSignatureKey key1{DataType::FLOAT, DataType::FLOAT};
-    ConvolutionFwdSignatureKey key2{DataType::FLOAT, DataType::FLOAT};
+    ConvolutionFwdSignatureKey key1{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    ConvolutionFwdSignatureKey key2{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     EXPECT_TRUE(key1 == key2);
 
-    ConvolutionFwdSignatureKey key3{DataType::HALF, DataType::FLOAT};
-    ConvolutionFwdSignatureKey key4{DataType::HALF, DataType::FLOAT};
+    ConvolutionFwdSignatureKey key3{
+        DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
+    ConvolutionFwdSignatureKey key4{
+        DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
     EXPECT_TRUE(key3 == key4);
 
-    ConvolutionFwdSignatureKey key5{DataType::FLOAT, DataType::FLOAT};
-    ConvolutionFwdSignatureKey key6{DataType::HALF, DataType::FLOAT};
+    ConvolutionFwdSignatureKey key5{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    ConvolutionFwdSignatureKey key6{
+        DataType::HALF, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
     EXPECT_FALSE(key5 == key6);
 
-    ConvolutionFwdSignatureKey key7{DataType::FLOAT, DataType::FLOAT};
-    ConvolutionFwdSignatureKey key8{DataType::FLOAT, DataType::HALF};
+    ConvolutionFwdSignatureKey key7{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    ConvolutionFwdSignatureKey key8{
+        DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
     EXPECT_FALSE(key7 == key8);
 }
 
-TEST(TestConvolutionFwdInferenceSignatureKey, HashFunction)
+TEST(TestConvolutionFwdSignatureKey, HashFunction)
 {
-    ConvolutionFwdSignatureKey key1{DataType::FLOAT, DataType::FLOAT};
-    ConvolutionFwdSignatureKey key2{DataType::FLOAT, DataType::FLOAT};
+    ConvolutionFwdSignatureKey key1{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
+    ConvolutionFwdSignatureKey key2{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
 
     EXPECT_EQ(key1.hashSelf(), key2.hashSelf());
 
-    ConvolutionFwdSignatureKey key3{DataType::HALF, DataType::FLOAT};
-    ConvolutionFwdSignatureKey key4{DataType::FLOAT, DataType::HALF};
+    ConvolutionFwdSignatureKey key3{
+        DataType::HALF, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
+    ConvolutionFwdSignatureKey key4{
+        DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT};
+    ConvolutionFwdSignatureKey key5{
+        DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT};
 
     auto hash3 = key3.hashSelf();
     auto hash4 = key4.hashSelf();
+    auto hash5 = key5.hashSelf();
 
-    EXPECT_TRUE(hash3 != hash4);
+    EXPECT_TRUE(hash3 != hash4 && hash3 != hash5 && hash4 != hash5);
 }
 
-TEST(TestConvolutionFwdInferenceSignatureKey, Copy)
+TEST(TestConvolutionFwdSignatureKey, Copy)
 {
-    ConvolutionFwdSignatureKey original{DataType::FLOAT, DataType::HALF};
+    ConvolutionFwdSignatureKey original{
+        DataType::BFLOAT16, DataType::FLOAT, DataType::FLOAT, DataType::HALF};
     ConvolutionFwdSignatureKey copied{original};
 
     EXPECT_TRUE(original == copied);
-    EXPECT_EQ(copied.inputDataType, DataType::FLOAT);
-    EXPECT_EQ(copied.accumulatorDataType, DataType::HALF);
+    EXPECT_EQ(copied.xDataType, DataType::BFLOAT16);
+    EXPECT_EQ(copied.wDataType, DataType::FLOAT);
+    EXPECT_EQ(copied.outputDataType, DataType::FLOAT);
+    EXPECT_EQ(copied.computeDataType, DataType::HALF);
 }
 
-TEST(TestConvolutionFwdInferenceSignatureKey, CreateFromNodeAndTensorMap)
+TEST(TestConvolutionFwdSignatureKey, CreateFromNodeAndTensorMap)
 {
-    ConvolutionFwdSignatureKey expectedKey{DataType::FLOAT, DataType::FLOAT};
+    ConvolutionFwdSignatureKey expectedKey{
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT};
     std::vector<int64_t> xDims = {1, 1, 2, 2};
     std::vector<int64_t> wDims = {1, 1, 1, 1};
     std::vector<int64_t> yDims = {1, 1, 2, 2};

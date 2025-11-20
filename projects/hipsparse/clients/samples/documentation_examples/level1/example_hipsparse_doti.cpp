@@ -21,12 +21,10 @@
  *
  * ************************************************************************ */
 
-#include "utility.hpp"
-
 #include <hip/hip_runtime_api.h>
 #include <hipsparse/hipsparse.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <iostream>
+#include <vector>
 
 #define HIP_CHECK(stat)                                               \
     {                                                                 \
@@ -56,13 +54,13 @@ int main(int argc, char* argv[])
     const int size = 9;
 
     // Sparse index vector
-    int hxInd[nnz] = {0, 3, 5};
+    std::vector<int> hxInd = {0, 3, 5};
 
     // Sparse value vector
-    float hxVal[nnz] = {1.0f, 2.0f, 3.0f};
+    std::vector<float> hxVal = {1.0f, 2.0f, 3.0f};
 
     // Dense vector
-    float hy[size] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
+    std::vector<float> hy = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
 
     // Index base
     hipsparseIndexBase_t idxBase = HIPSPARSE_INDEX_BASE_ZERO;
@@ -76,9 +74,9 @@ int main(int argc, char* argv[])
     HIP_CHECK(hipMalloc((void**)&dxVal, sizeof(float) * nnz));
     HIP_CHECK(hipMalloc((void**)&dy, sizeof(float) * size));
 
-    HIP_CHECK(hipMemcpy(dxInd, hxInd, sizeof(int) * nnz, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dxVal, hxVal, sizeof(float) * nnz, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(dy, hy, sizeof(float) * size, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dxInd, hxInd.data(), sizeof(int) * nnz, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dxVal, hxVal.data(), sizeof(float) * nnz, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dy, hy.data(), sizeof(float) * size, hipMemcpyHostToDevice));
 
     // hipSPARSE handle
     hipsparseHandle_t handle;

@@ -30,3 +30,13 @@ void testing_v2_spmv_csr_bad_arg(const Arguments& arg);
 void testing_v2_spmv_csr_extra(const Arguments& arg);
 template <typename I, typename J, typename A, typename X, typename Y, typename T>
 void testing_v2_spmv_csr(const Arguments& arg);
+template <typename I, typename J, typename A, typename X, typename Y, typename T>
+void testing_v2_spmv_csr_res_bad_arg(const Arguments& arg);
+void testing_v2_spmv_csr_res_extra(const Arguments& arg);
+template <typename I, typename J, typename A, typename X, typename Y, typename T>
+void testing_v2_spmv_csr_res(const Arguments& arg);
+template <typename I, typename J, typename A, typename X, typename Y, typename T>
+void testing_v2_spmv_csr_res_multiple_bad_arg(const Arguments& arg);
+void testing_v2_spmv_csr_res_multiple_extra(const Arguments& arg);
+template <typename I, typename J, typename A, typename X, typename Y, typename T>
+void testing_v2_spmv_csr_res_multiple(const Arguments& arg);

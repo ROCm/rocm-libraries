@@ -143,6 +143,16 @@ constexpr double ellmv_gbyte_count(I M, I N, int64_t nnz, bool beta = false)
            / 1e9;
 }
 
+template <typename A, typename X, typename Y, typename I, typename J>
+constexpr double sellmv_gbyte_count(
+    J M, J N, int64_t nnz, J sell_slice_size, I sell_colval_size, bool beta = false)
+{
+    J nslices = (M - 1) / sell_slice_size + 1;
+    return (sizeof(I) * (nslices + 1) + sizeof(J) * sell_colval_size + sizeof(A) * sell_colval_size
+            + sizeof(Y) * (M + (beta ? M : 0)) + sizeof(X) * N)
+           / 1e9;
+}
+
 template <typename T, typename I>
 constexpr double ellmv_gbyte_count(I M, I N, int64_t nnz, bool beta = false)
 {

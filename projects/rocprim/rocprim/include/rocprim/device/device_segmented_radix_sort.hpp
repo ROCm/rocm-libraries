@@ -51,209 +51,6 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Config,
-         bool Descending,
-         class KeysInputIterator,
-         class KeysOutputIterator,
-         class ValuesInputIterator,
-         class ValuesOutputIterator,
-         class OffsetIterator>
-inline hipError_t launch_segmented_sort(
-    detail::target_arch                                             arch,
-    KeysInputIterator                                               keys_input,
-    typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
-    KeysOutputIterator                                              keys_output,
-    ValuesInputIterator                                             values_input,
-    typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
-    ValuesOutputIterator                                            values_output,
-    bool                                                            to_output,
-    OffsetIterator                                                  begin_offsets,
-    OffsetIterator                                                  end_offsets,
-    unsigned int                                                    iterations,
-    unsigned int                                                    begin_bit,
-    unsigned int                                                    end_bit,
-    dim3                                                            grid,
-    dim3                                                            block,
-    size_t                                                          shmem,
-    hipStream_t                                                     stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        segmented_sort<decltype(arch_config), Descending>(keys_input,
-                                                          keys_tmp,
-                                                          keys_output,
-                                                          values_input,
-                                                          values_tmp,
-                                                          values_output,
-                                                          to_output,
-                                                          begin_offsets,
-                                                          end_offsets,
-                                                          iterations,
-                                                          begin_bit,
-                                                          end_bit);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
-template<class Config,
-         bool Descending,
-         class KeysInputIterator,
-         class KeysOutputIterator,
-         class ValuesInputIterator,
-         class ValuesOutputIterator,
-         class SegmentIndexIterator,
-         class OffsetIterator>
-inline hipError_t launch_segmented_sort_large(
-    detail::target_arch                                             arch,
-    KeysInputIterator                                               keys_input,
-    typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
-    KeysOutputIterator                                              keys_output,
-    ValuesInputIterator                                             values_input,
-    typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
-    ValuesOutputIterator                                            values_output,
-    bool                                                            to_output,
-    SegmentIndexIterator                                            segment_indices,
-    OffsetIterator                                                  begin_offsets,
-    OffsetIterator                                                  end_offsets,
-    unsigned int                                                    iterations,
-    unsigned int                                                    begin_bit,
-    unsigned int                                                    end_bit,
-    dim3                                                            grid,
-    dim3                                                            block,
-    size_t                                                          shmem,
-    hipStream_t                                                     stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        segmented_sort_large<decltype(arch_config), Descending>(keys_input,
-                                                                keys_tmp,
-                                                                keys_output,
-                                                                values_input,
-                                                                values_tmp,
-                                                                values_output,
-                                                                to_output,
-                                                                segment_indices,
-                                                                begin_offsets,
-                                                                end_offsets,
-                                                                iterations,
-                                                                begin_bit,
-                                                                end_bit);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
-template<class Config,
-         bool Descending,
-         class KeysInputIterator,
-         class KeysOutputIterator,
-         class ValuesInputIterator,
-         class ValuesOutputIterator,
-         class SegmentIndexIterator,
-         class OffsetIterator>
-inline hipError_t launch_segmented_sort_small(
-    detail::target_arch                                             arch,
-    KeysInputIterator                                               keys_input,
-    typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
-    KeysOutputIterator                                              keys_output,
-    ValuesInputIterator                                             values_input,
-    typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
-    ValuesOutputIterator                                            values_output,
-    bool                                                            to_output,
-    unsigned int                                                    num_segments,
-    SegmentIndexIterator                                            segment_indices,
-    OffsetIterator                                                  begin_offsets,
-    OffsetIterator                                                  end_offsets,
-    unsigned int                                                    begin_bit,
-    unsigned int                                                    end_bit,
-    dim3                                                            grid,
-    dim3                                                            block,
-    size_t                                                          shmem,
-    hipStream_t                                                     stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        segmented_sort_small<decltype(arch_config), Descending>(keys_input,
-                                                                keys_tmp,
-                                                                keys_output,
-                                                                values_input,
-                                                                values_tmp,
-                                                                values_output,
-                                                                to_output,
-                                                                num_segments,
-                                                                segment_indices,
-                                                                begin_offsets,
-                                                                end_offsets,
-                                                                begin_bit,
-                                                                end_bit);
-    };
-
-    return execute_launch_plan<Config,
-                               decltype(kernel),
-                               segmented_radix_sort_warp_sort_small_config_selector>(arch,
-                                                                                     kernel,
-                                                                                     grid,
-                                                                                     block,
-                                                                                     shmem,
-                                                                                     stream);
-}
-
-template<class Config,
-         bool Descending,
-         class KeysInputIterator,
-         class KeysOutputIterator,
-         class ValuesInputIterator,
-         class ValuesOutputIterator,
-         class SegmentIndexIterator,
-         class OffsetIterator>
-inline hipError_t launch_segmented_sort_medium(
-    detail::target_arch                                             arch,
-    KeysInputIterator                                               keys_input,
-    typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
-    KeysOutputIterator                                              keys_output,
-    ValuesInputIterator                                             values_input,
-    typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
-    ValuesOutputIterator                                            values_output,
-    bool                                                            to_output,
-    unsigned int                                                    num_segments,
-    SegmentIndexIterator                                            segment_indices,
-    OffsetIterator                                                  begin_offsets,
-    OffsetIterator                                                  end_offsets,
-    unsigned int                                                    begin_bit,
-    unsigned int                                                    end_bit,
-    dim3                                                            grid,
-    dim3                                                            block,
-    size_t                                                          shmem,
-    hipStream_t                                                     stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        segmented_sort_medium<decltype(arch_config), Descending>(keys_input,
-                                                                 keys_tmp,
-                                                                 keys_output,
-                                                                 values_input,
-                                                                 values_tmp,
-                                                                 values_output,
-                                                                 to_output,
-                                                                 num_segments,
-                                                                 segment_indices,
-                                                                 begin_offsets,
-                                                                 end_offsets,
-                                                                 begin_bit,
-                                                                 end_bit);
-    };
-
-    return execute_launch_plan<Config,
-                               decltype(kernel),
-                               segmented_radix_sort_warp_sort_meduim_config_selector>(arch,
-                                                                                      kernel,
-                                                                                      grid,
-                                                                                      block,
-                                                                                      shmem,
-                                                                                      stream);
-}
-
 struct Partitioner
 {
     bool three_way_partitioning;
@@ -534,26 +331,34 @@ inline hipError_t segmented_radix_sort_impl(
         {
             std::chrono::steady_clock::time_point start;
             if(debug_synchronous)
+            {
                 start = std::chrono::steady_clock::now();
-            ROCPRIM_RETURN_ON_ERROR(launch_segmented_sort_large<config, Descending>(
-                target_arch,
-                keys_input,
-                keys_tmp,
-                keys_output,
-                values_input,
-                values_tmp,
-                values_output,
-                to_output,
-                large_segment_indices_output,
-                begin_offsets,
-                end_offsets,
-                iterations,
-                begin_bit,
-                end_bit,
-                dim3(large_segment_count),
-                dim3(params.kernel_config.block_size),
-                0,
-                stream));
+            }
+            auto segmented_sort_large_kernel = [=](auto arch_config)
+            {
+                segmented_sort_large<decltype(arch_config), Descending>(
+                    keys_input,
+                    keys_tmp,
+                    keys_output,
+                    values_input,
+                    values_tmp,
+                    values_output,
+                    to_output,
+                    large_segment_indices_output,
+                    begin_offsets,
+                    end_offsets,
+                    iterations,
+                    begin_bit,
+                    end_bit);
+            };
+
+            ROCPRIM_RETURN_ON_ERROR(
+                execute_launch_plan<config>(target_arch,
+                                            segmented_sort_large_kernel,
+                                            dim3(large_segment_count),
+                                            dim3(params.kernel_config.block_size),
+                                            0,
+                                            stream));
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort:large_segments",
                                                         large_segment_count,
                                                         start);
@@ -564,26 +369,37 @@ inline hipError_t segmented_radix_sort_impl(
                 = ::rocprim::detail::ceiling_div(medium_segment_count, medium_segments_per_block);
             std::chrono::steady_clock::time_point start;
             if(debug_synchronous)
+            {
                 start = std::chrono::steady_clock::now();
-            ROCPRIM_RETURN_ON_ERROR(launch_segmented_sort_medium<config, Descending>(
-                target_arch,
-                keys_input,
-                keys_tmp,
-                keys_output,
-                values_input,
-                values_tmp,
-                values_output,
-                is_result_in_output,
-                medium_segment_count,
-                medium_segment_indices_output,
-                begin_offsets,
-                end_offsets,
-                begin_bit,
-                end_bit,
-                dim3(medium_segment_grid_size),
-                dim3(params.warp_sort_config.block_size_medium),
-                0,
-                stream));
+            }
+            auto segmented_sort_medium_kernel = [=](auto arch_config)
+            {
+                segmented_sort_medium<decltype(arch_config), Descending>(
+                    keys_input,
+                    keys_tmp,
+                    keys_output,
+                    values_input,
+                    values_tmp,
+                    values_output,
+                    is_result_in_output,
+                    medium_segment_count,
+                    medium_segment_indices_output,
+                    begin_offsets,
+                    end_offsets,
+                    begin_bit,
+                    end_bit);
+            };
+
+            ROCPRIM_RETURN_ON_ERROR(
+                execute_launch_plan<config,
+                                    decltype(segmented_sort_medium_kernel),
+                                    segmented_radix_sort_warp_sort_meduim_config_selector>(
+                    target_arch,
+                    segmented_sort_medium_kernel,
+                    dim3(medium_segment_grid_size),
+                    dim3(params.warp_sort_config.block_size_medium),
+                    0,
+                    stream));
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort:medium_segments",
                                                         medium_segment_count,
                                                         start);
@@ -594,26 +410,37 @@ inline hipError_t segmented_radix_sort_impl(
                 = ::rocprim::detail::ceiling_div(small_segment_count, small_segments_per_block);
             std::chrono::steady_clock::time_point start;
             if(debug_synchronous)
+            {
                 start = std::chrono::steady_clock::now();
-            ROCPRIM_RETURN_ON_ERROR(launch_segmented_sort_small<config, Descending>(
-                target_arch,
-                keys_input,
-                keys_tmp,
-                keys_output,
-                values_input,
-                values_tmp,
-                values_output,
-                is_result_in_output,
-                small_segment_count,
-                small_segment_indices_output,
-                begin_offsets,
-                end_offsets,
-                begin_bit,
-                end_bit,
-                dim3(small_segment_grid_size),
-                dim3(params.warp_sort_config.block_size_small),
-                0,
-                stream));
+            }
+            auto segmented_sort_small_kernel = [=](auto arch_config)
+            {
+                segmented_sort_small<decltype(arch_config), Descending>(
+                    keys_input,
+                    keys_tmp,
+                    keys_output,
+                    values_input,
+                    values_tmp,
+                    values_output,
+                    is_result_in_output,
+                    small_segment_count,
+                    small_segment_indices_output,
+                    begin_offsets,
+                    end_offsets,
+                    begin_bit,
+                    end_bit);
+            };
+
+            ROCPRIM_RETURN_ON_ERROR(
+                execute_launch_plan<config,
+                                    decltype(segmented_sort_small_kernel),
+                                    segmented_radix_sort_warp_sort_small_config_selector>(
+                    target_arch,
+                    segmented_sort_small_kernel,
+                    dim3(small_segment_grid_size),
+                    dim3(params.warp_sort_config.block_size_small),
+                    0,
+                    stream));
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort:small_segments",
                                                         small_segment_count,
                                                         start);
@@ -623,25 +450,31 @@ inline hipError_t segmented_radix_sort_impl(
     {
         std::chrono::steady_clock::time_point start;
         if(debug_synchronous)
+        {
             start = std::chrono::steady_clock::now();
-        ROCPRIM_RETURN_ON_ERROR(
-            launch_segmented_sort<config, Descending>(target_arch,
-                                                      keys_input,
-                                                      keys_tmp,
-                                                      keys_output,
-                                                      values_input,
-                                                      values_tmp,
-                                                      values_output,
-                                                      to_output,
-                                                      begin_offsets,
-                                                      end_offsets,
-                                                      iterations,
-                                                      begin_bit,
-                                                      end_bit,
-                                                      dim3(segments),
-                                                      dim3(params.kernel_config.block_size),
-                                                      0,
-                                                      stream));
+        }
+        auto segmented_sort_kernel = [=](auto arch_config)
+        {
+            segmented_sort<decltype(arch_config), Descending>(keys_input,
+                                                              keys_tmp,
+                                                              keys_output,
+                                                              values_input,
+                                                              values_tmp,
+                                                              values_output,
+                                                              to_output,
+                                                              begin_offsets,
+                                                              end_offsets,
+                                                              iterations,
+                                                              begin_bit,
+                                                              end_bit);
+        };
+
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                            segmented_sort_kernel,
+                                                            dim3(segments),
+                                                            dim3(params.kernel_config.block_size),
+                                                            0,
+                                                            stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_sort", segments, start);
     }
     return hipSuccess;
