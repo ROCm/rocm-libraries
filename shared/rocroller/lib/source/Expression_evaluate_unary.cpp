@@ -180,73 +180,77 @@ namespace rocRoller::Expression::EvaluateDetail
         }
     };
 
-        template <CIntegral FromType, int Idx = 0>
-        CommandArgumentValue truncateReinterpret(FromType const& value, DataType targetDataType)
+    template <CCommandArgumentValue FromType, int Idx = 0>
+    CommandArgumentValue reinterpretTruncate(FromType const& value, DataType targetDataType)
+    {
+        constexpr auto IdxType = static_cast<DataType>(Idx);
+
+        AssertFatal(
+            std::endian::native == std::endian::little || std::endian::native == std::endian::big,
+            "Unsupported or mixed endianness: only pure little- or big-endian are supported.");
+
+        if constexpr(IdxType == DataType::None || IdxType == DataType::Count)
         {
-            constexpr auto IdxType = static_cast<DataType>(Idx);
+            Throw<FatalError>("Unsupported reinterpretTruncate to type: ", toString(targetDataType));
+            return 0;
+        }
+        else
+        {
+            using ToType = typename EnumTypeInfo<IdxType>::Type;
 
-            AssertFatal(
-                std::endian::native == std::endian::little || std::endian::native == std::endian::big,
-                "Unsupported or mixed endianness: only pure little- or big-endian are supported.");
+            AssertFatal(std::is_trivially_copyable_v<FromType>, "FromType must be trivially copyable");
+            AssertFatal(std::is_trivially_copyable_v<ToType>, "ToType must be trivially copyable");
 
-            if constexpr(IdxType == DataType::None || IdxType == DataType::Count)
+            if(targetDataType == IdxType)
             {
-                Throw<FatalError>("Unsupported truncateReinterpret to type: ", toString(targetDataType));
-                return 0;
-            }
-            else
-            {
-                using ToType = typename EnumTypeInfo<IdxType>::Type;
-
-                if(targetDataType == IdxType)
+                if constexpr(!CCommandArgumentValue<ToType>)
                 {
-                    if constexpr(!CCommandArgumentValue<ToType> || (!std::integral<ToType> && !std::same_as<Raw32, ToType>) || std::same_as<bool, ToType>)
-                    {
-                        Throw<FatalError>("Cannot truncateReinterpret to ", friendlyTypeName<ToType>());
-                        return 0;
-                    }
-                    else
-                    {
-                        if constexpr (sizeof(ToType) == sizeof(FromType))
-                        {
-                            return std::bit_cast<ToType>(value);
-                        }
-                        else if constexpr (sizeof(ToType) < sizeof(FromType))
-                        {
-                            constexpr std::size_t N = sizeof(ToType);
-
-                            // Source and destination as bytes
-                            const auto src_bytes = std::bit_cast<std::array<std::byte, sizeof(FromType)>>(value);
-                            std::array<std::byte, sizeof(ToType)> dst_bytes{};
-                            dst_bytes.fill(std::byte{0});
-
-                            if constexpr (std::endian::native == std::endian::little)
-                            {
-                                // Keep least-significant bytes: at low addresses.
-                                std::copy_n(src_bytes.data(), N, dst_bytes.data());
-                            }
-                            else
-                            {
-                                // Big-endian: least-significant bytes live at high addresses.
-                                std::copy_n(src_bytes.data() + (sizeof(FromType) - N), N,
-                                            dst_bytes.data());
-                            }
-
-                            return std::bit_cast<ToType>(dst_bytes);
-                        }
-                        else
-                        {
-                            Throw<FatalError>("Cannot truncateReinterpret to wider type ", friendlyTypeName<ToType>());
-                            return 0;
-                        }
-                    }
+                    Throw<FatalError>("Cannot reinterpret to ", friendlyTypeName<ToType>());
+                    return 0;
                 }
                 else
                 {
-                    return truncateReinterpret<FromType, Idx + 1>(value, targetDataType);
+                    if constexpr (sizeof(ToType) == sizeof(FromType))
+                    {
+                        return std::bit_cast<ToType>(value);
+                    }
+                    // Truncate
+                    else if constexpr (sizeof(ToType) < sizeof(FromType))
+                    {
+                        constexpr std::size_t N = sizeof(ToType);
+
+                        // Source and destination as bytes
+                        const auto src_bytes = std::bit_cast<std::array<std::byte, sizeof(FromType)>>(value);
+                        std::array<std::byte, sizeof(ToType)> dst_bytes{};
+                        dst_bytes.fill(std::byte{0});
+
+                        if constexpr (std::endian::native == std::endian::little)
+                        {
+                            // Keep least-significant bytes: at low addresses.
+                            std::copy_n(src_bytes.data(), N, dst_bytes.data());
+                        }
+                        else
+                        {
+                            // Big-endian: least-significant bytes live at high addresses.
+                            std::copy_n(src_bytes.data() + (sizeof(FromType) - N), N,
+                                        dst_bytes.data());
+                        }
+
+                        return std::bit_cast<ToType>(dst_bytes);
+                    }
+                    else
+                    {
+                        Throw<FatalError>("Cannot truncate to wider type ", friendlyTypeName<ToType>(), " from ", friendlyTypeName<FromType>());
+                        return 0;
+                    }
                 }
             }
+            else
+            {
+                return reinterpretTruncate<FromType, Idx + 1>(value, targetDataType);
+            }
         }
+    }
 
     template <>
     struct OperationEvaluatorVisitor<BitFieldExtract>
@@ -295,7 +299,7 @@ namespace rocRoller::Expression::EvaluateDetail
                         expr.width,
                         sizeof(ARG) * 8);
 
-            return truncateReinterpret(static_cast<ARG>(result), expr.outputDataType);
+            return reinterpretTruncate(static_cast<ARG>(result), expr.outputDataType);
         }
 
         CommandArgumentValue operator()(Raw32 const& arg) const

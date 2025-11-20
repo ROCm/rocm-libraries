@@ -714,7 +714,7 @@ namespace rocRoller
 
             if constexpr(IdxType == DataType::None || IdxType == DataType::Count)
             {
-                Throw<FatalError>("Unsupported conversion to type: ", toString(targetDataType));
+                Throw<FatalError>("Unsupported reinterpret to type: ", toString(targetDataType));
                 return 0;
             }
             else
@@ -741,6 +741,14 @@ namespace rocRoller
                     return reinterpret<FromType, Idx + 1>(value, targetDataType);
                 }
             }
+        }
+
+        inline CommandArgumentValue reinterpret(CommandArgumentValue const& value, DataType targetDataType)
+        {
+            return std::visit([targetDataType](auto const& val) -> CommandArgumentValue {
+                using FromType = std::decay_t<decltype(val)>;
+                return reinterpret<FromType, 0>(val, targetDataType);
+            }, value);
         }
     }
 }

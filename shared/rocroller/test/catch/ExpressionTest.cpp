@@ -2291,6 +2291,45 @@ namespace ExpressionTest
 
             CHECK(std::get<uint32_t>(evaluate(expr)) == 0x00ff0000u);
         }
+
+        SECTION("Evaluation 5 - UInt32 source to Raw32 destination")
+        {
+            auto const srcOffset = 8u;
+            auto const dstOffset = 4u;
+            auto const width     = 12u;
+            auto       src       = literal(0x00abcd00u);
+            auto       dst       = literal(Raw32(0xffff0000u));
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<Raw32>(evaluate(expr)).value == 0xffffbcd0u);
+        }
+
+        SECTION("Evaluation 6 - UInt64 source to Raw32 destination")
+        {
+            auto const srcOffset = 16u;
+            auto const dstOffset = 8u;
+            auto const width     = 16u;
+            auto       src       = literal(0x123456789abcdef0ull, DataType::UInt64);
+            auto       dst       = literal(Raw32(0x000000ffu));
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<Raw32>(evaluate(splitBitfieldCombine(expr))).value == 0x009abcffu);
+        }
+
+        SECTION("Evaluation 7 - UInt32 to Raw32 full width")
+        {
+            auto const srcOffset = 0u;
+            auto const dstOffset = 0u;
+            auto const width     = 32u;
+            auto       src       = literal(0xdeadbeefu);
+            auto       dst       = literal(Raw32(0u));
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<Raw32>(evaluate(expr)).value == 0xdeadbeefu);
+        }
     }
 
     TEST_CASE("Expression evaluate BitfieldExtract", "[expression]")
