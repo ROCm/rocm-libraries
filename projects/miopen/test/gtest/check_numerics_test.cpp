@@ -1,54 +1,47 @@
-// Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
 
 #include <miopen/handle.hpp>
 #include <miopen/check_numerics.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 #include <miopen/bfloat16.hpp>
-#include <half/half.hpp>
 #include <gtest/gtest.h>
 #include <limits>
 #include <vector>
 #include <stdexcept>
-#include <ostream>
 
 #include "get_handle.hpp"
-#include "tensor_holder.hpp"
+#include "../tensor_holder.hpp"
 
 namespace {
 
-enum class CheckNumericsTestType
-{
-    NormalZero,
-    NormalOne,
-    AbnormalNaN,
-    AbnormalInf
-};
-
+// Normal value tests
 template <class T>
-struct CheckNumericsTestCase
-{
-    CheckNumericsTestType test_type;
-    T value;
-};
-
-template <class T>
-std::vector<CheckNumericsTestCase<T>> GetCheckNumericsTestCases()
-{
-    return {{CheckNumericsTestType::NormalZero, T(0.0f)},
-            {CheckNumericsTestType::NormalOne, T(1.0f)},
-            {CheckNumericsTestType::AbnormalNaN, std::numeric_limits<T>::quiet_NaN()},
-            {CheckNumericsTestType::AbnormalInf, std::numeric_limits<T>::infinity()}};
-}
-
-template <class T>
-struct GPU_CheckNumerics : public ::testing::TestWithParam<CheckNumericsTestCase<T>>
-{
-};
-
-template <class T>
-void RunNormalValueTest(T val)
+void TestNormalValue(T val)
 {
     auto&& handle      = get_handle();
     constexpr int size = 42;
@@ -75,8 +68,9 @@ void RunNormalValueTest(T val)
                                            false));
 }
 
+// Abnormal value tests (NaN, Inf)
 template <class T>
-void RunAbnormalValueTest(T val)
+void TestAbnormalValue(T val)
 {
     auto&& handle      = get_handle();
     constexpr int size = 42;
@@ -137,67 +131,49 @@ void RunAbnormalValueTest(T val)
         std::exception);
 }
 
-} // namespace
+// Float tests
+TEST(GPU_CheckNumerics_FP32, NormalZero) { TestNormalValue<float>(0.0f); }
 
-// FP32 tests
-using GPU_CheckNumerics_FP32 = GPU_CheckNumerics<float>;
+TEST(GPU_CheckNumerics_FP32, NormalOne) { TestNormalValue<float>(1.0f); }
 
-TEST_P(GPU_CheckNumerics_FP32, NormalAndAbnormalValues)
+TEST(GPU_CheckNumerics_FP32, AbnormalNaN)
 {
-    const auto& test_case = this->GetParam();
-    if(test_case.test_type == CheckNumericsTestType::NormalZero ||
-       test_case.test_type == CheckNumericsTestType::NormalOne)
-    {
-        RunNormalValueTest(test_case.value);
-    }
-    else
-    {
-        RunAbnormalValueTest(test_case.value);
-    }
+    TestAbnormalValue<float>(std::numeric_limits<float>::quiet_NaN());
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_CheckNumerics_FP32,
-                         testing::ValuesIn(GetCheckNumericsTestCases<float>()));
-
-// FP16 tests
-using GPU_CheckNumerics_FP16 = GPU_CheckNumerics<half_float::half>;
-
-TEST_P(GPU_CheckNumerics_FP16, NormalAndAbnormalValues)
+TEST(GPU_CheckNumerics_FP32, AbnormalInf)
 {
-    const auto& test_case = this->GetParam();
-    if(test_case.test_type == CheckNumericsTestType::NormalZero ||
-       test_case.test_type == CheckNumericsTestType::NormalOne)
-    {
-        RunNormalValueTest(test_case.value);
-    }
-    else
-    {
-        RunAbnormalValueTest(test_case.value);
-    }
+    TestAbnormalValue<float>(std::numeric_limits<float>::infinity());
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_CheckNumerics_FP16,
-                         testing::ValuesIn(GetCheckNumericsTestCases<half_float::half>()));
+// Half tests
+TEST(GPU_CheckNumerics_FP16, NormalZero) { TestNormalValue<half_float::half>(half_float::half(0.0f)); }
+
+TEST(GPU_CheckNumerics_FP16, NormalOne) { TestNormalValue<half_float::half>(half_float::half(1.0f)); }
+
+TEST(GPU_CheckNumerics_FP16, AbnormalNaN)
+{
+    TestAbnormalValue<half_float::half>(std::numeric_limits<half_float::half>::quiet_NaN());
+}
+
+TEST(GPU_CheckNumerics_FP16, AbnormalInf)
+{
+    TestAbnormalValue<half_float::half>(std::numeric_limits<half_float::half>::infinity());
+}
 
 // BF16 tests
-using GPU_CheckNumerics_BFP16 = GPU_CheckNumerics<bfloat16>;
+TEST(GPU_CheckNumerics_BF16, NormalZero) { TestNormalValue<bfloat16>(bfloat16(0.0f)); }
 
-TEST_P(GPU_CheckNumerics_BFP16, NormalAndAbnormalValues)
+TEST(GPU_CheckNumerics_BF16, NormalOne) { TestNormalValue<bfloat16>(bfloat16(1.0f)); }
+
+TEST(GPU_CheckNumerics_BF16, AbnormalNaN)
 {
-    const auto& test_case = this->GetParam();
-    if(test_case.test_type == CheckNumericsTestType::NormalZero ||
-       test_case.test_type == CheckNumericsTestType::NormalOne)
-    {
-        RunNormalValueTest(test_case.value);
-    }
-    else
-    {
-        RunAbnormalValueTest(test_case.value);
-    }
+    TestAbnormalValue<bfloat16>(std::numeric_limits<bfloat16>::quiet_NaN());
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_CheckNumerics_BFP16,
-                         testing::ValuesIn(GetCheckNumericsTestCases<bfloat16>()));
+TEST(GPU_CheckNumerics_BF16, AbnormalInf)
+{
+    TestAbnormalValue<bfloat16>(std::numeric_limits<bfloat16>::infinity());
+}
+
+} // namespace
