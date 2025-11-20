@@ -25,7 +25,6 @@
  *******************************************************************************/
 #pragma once
 
-#include "timer.hpp"
 #include <cmath>
 #include <cassert>
 #include <algorithm>
@@ -34,7 +33,6 @@
 #include <cfloat>
 #include <vector>
 
-#include "../test/verify.hpp"
 #include <miopen/par_for.hpp>
 
 #define NEGATIVE_CUTOFF_VAL (-1e20)
@@ -300,27 +298,35 @@ void launchCTCLoss(const int class_sz,
               workspace_gpu.begin() + alpha_offset + max_time_step * batch_size * max_S_len,
               Tref(NEGATIVE_CUTOFF_VAL));
 
-    const int tb_count = max_time_step * batch_size;
-    const std::size_t mt_tb =
-        std::min<std::size_t>(tb_count, std::max<unsigned>(1, std::thread::hardware_concurrency()));
-    const std::size_t mt_b = std::min<std::size_t>(
-        batch_size, std::max<unsigned>(1, std::thread::hardware_concurrency()));
+    // total number of work units when softmax is applied
+    const int time_batch_task_count = max_time_step * batch_size;
+
+    const std::size_t max_threads = std::max<unsigned>(1, std::thread::hardware_concurrency());
+
+    // maximum number of threads for logsoftmax
+    const std::size_t time_batch_thread_count =
+        std::min<std::size_t>(time_batch_task_count, max_threads);
+
+    // maximum number of threads for ctc (alpha + gradient)
+    const std::size_t batch_thread_count = std::min<std::size_t>(batch_size, max_threads);
 
     if(is_softmax_applied)
     {
         if(parallel)
         {
-            miopen::par_for(tb_count, miopen::max_threads{mt_tb}, [&](std::size_t tb) {
-                subvec_logsoftmax_gpu(&(probs[0]),
-                                      &(workspace_gpu[problog_offset]),
-                                      tb * size_t(class_sz),
-                                      tb * size_t(class_sz),
-                                      size_t(class_sz));
-            });
+            miopen::par_for(time_batch_task_count,
+                            miopen::max_threads{time_batch_thread_count},
+                            [&](std::size_t tb) {
+                                subvec_logsoftmax_gpu(&(probs[0]),
+                                                      &(workspace_gpu[problog_offset]),
+                                                      tb * size_t(class_sz),
+                                                      tb * size_t(class_sz),
+                                                      size_t(class_sz));
+                            });
         }
         else
         {
-            for(int j = 0; j < max_time_step * batch_size; j++)
+            for(int j = 0; j < time_batch_task_count; j++)
                 subvec_logsoftmax_gpu(&(probs[0]),
                                       &(workspace_gpu[problog_offset]),
                                       j * class_sz,
@@ -372,7 +378,7 @@ void launchCTCLoss(const int class_sz,
 
     if(parallel)
     {
-        miopen::par_for(batch_size, miopen::max_threads{mt_b}, work_per_batch);
+        miopen::par_for(batch_size, miopen::max_threads{batch_thread_count}, work_per_batch);
     }
     else
     {
