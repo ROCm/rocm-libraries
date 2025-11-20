@@ -29,11 +29,13 @@ Tests:
 - name: spmv_csr_bad_arg
   category: pre_checkin
   function: spmv_csr_bad_arg
+  indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
 
 - name: spmv_csr
   category: quick
   function: spmv_csr
+  indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
   M: [50]
   N: [84]
@@ -50,6 +52,7 @@ Tests:
 - name: spmv_csr
   category: pre_checkin
   function: spmv_csr
+  indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
   M: 1
   N: 1
@@ -68,6 +71,25 @@ Tests:
              nos4, 
              nos5,
              nos6,
-             nos7,
-             Chebyshev4,
-             shipsec1]
+             nos7]
+
+- name: spmv_csr
+  category: pre_checkin
+  function: spmv_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  alpha: [2.0]
+  alphai: [0.0]
+  beta: [1.0]
+  betai: [0.0]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 
+             HIPSPARSE_SPMV_CSR_ALG1,
+             HIPSPARSE_SPMV_CSR_ALG2]
+  filename: [Chebyshev4,
+             shipsec1,
+             bibd_22_8,
+             scircuit]

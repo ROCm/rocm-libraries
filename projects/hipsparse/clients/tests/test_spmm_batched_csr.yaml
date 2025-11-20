@@ -29,11 +29,13 @@ Tests:
 - name: spmm_batched_csr_bad_arg
   category: pre_checkin
   function: spmm_batched_csr_bad_arg
+  indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
 
 - name: spmm_batched_csr
   category: quick
   function: spmm_batched_csr
+  indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
   M: [50]
   N: [5]
@@ -52,9 +54,10 @@ Tests:
 - name: spmm_batched_csr
   category: pre_checkin
   function: spmm_batched_csr
-  precision: *single_double_precisions_complex_real
+  indextype: *i32
+  precision: *single_double_precisions
   M: 1
-  N: 1
+  N: [10]
   K: 1
   alpha: [2.0]
   alphai: [0.0]

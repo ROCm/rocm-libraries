@@ -26,14 +26,16 @@ include: hipsparse_common.yaml
 
 
 Tests:
-- name: gather_bad_arg
+- name: scatter_bad_arg
   category: pre_checkin
-  function: gather_bad_arg
+  function: scatter_bad_arg
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
-- name: gather
+- name: scatter
   category: pre_checkin
-  function: gather
+  function: scatter
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   N: [12000, 15332, 22031]
   nnz: [0, 5, 10, 500, 1000, 7111, 10000]

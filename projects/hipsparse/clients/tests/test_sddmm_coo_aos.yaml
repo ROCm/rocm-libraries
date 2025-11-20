@@ -29,11 +29,13 @@ Tests:
 - name: sddmm_coo_aos_bad_arg
   category: pre_checkin
   function: sddmm_coo_aos_bad_arg
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
 - name: sddmm_coo_aos
   category: quick
   function: sddmm_coo_aos
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: [50]
   N: [84]
@@ -52,7 +54,8 @@ Tests:
 - name: sddmm_coo_aos
   category: pre_checkin
   function: sddmm_coo_aos
-  precision: *single_double_precisions_complex_real
+  indextype: *i32_i64
+  precision: *single_double_precisions
   M: 1
   N: 1
   K: [5]
@@ -69,5 +72,24 @@ Tests:
   filename: [nos1, 
              nos3, 
              nos5, 
-             nos7, 
-             shipsec1]
+             nos7]
+
+- name: sddmm_coo_aos
+  category: pre_checkin
+  function: sddmm_coo_aos
+  indextype: *i32
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  K: [6]
+  alpha: [2.0]
+  alphai: [0.0]
+  beta: [1.0]
+  betai: [0.0]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO]
+  sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
+  filename: [shipsec1]

@@ -29,11 +29,13 @@ Tests:
 - name: dense_to_sparse_coo_bad_arg
   category: pre_checkin
   function: dense_to_sparse_coo_bad_arg
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
 - name: dense_to_sparse_coo
   category: quick
   function: dense_to_sparse_coo
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: [100]
   N: [10]

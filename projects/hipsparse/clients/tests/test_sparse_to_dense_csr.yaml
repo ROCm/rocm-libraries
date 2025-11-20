@@ -29,11 +29,13 @@ Tests:
 - name: sparse_to_dense_csr_bad_arg
   category: pre_checkin
   function: sparse_to_dense_csr_bad_arg
+  indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
 
 - name: sparse_to_dense_csr
   category: quick
   function: sparse_to_dense_csr
+  indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
   M: [50]
   N: [5]
@@ -44,6 +46,7 @@ Tests:
 - name: sparse_to_dense_csr
   category: pre_checkin
   function: sparse_to_dense_csr
+  indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
   M: 1
   N: 1
@@ -56,5 +59,16 @@ Tests:
              nos4, 
              nos5,
              nos6, 
-             nos7, 
-             bibd_22_8]
+             nos7]
+
+- name: sparse_to_dense_csr
+  category: nightly
+  function: sparse_to_dense_csr
+  indextype: *i32
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  sparse2dense_alg: [HIPSPARSE_SPARSETODENSE_ALG_DEFAULT]
+  filename: [bibd_22_8]

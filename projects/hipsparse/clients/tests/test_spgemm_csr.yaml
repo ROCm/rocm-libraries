@@ -29,11 +29,13 @@ Tests:
 - name: spgemm_csr_bad_arg
   category: pre_checkin
   function: spgemm_csr_bad_arg
+  indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
 
 - name: spgemm_csr
   category: quick
   function: spgemm_csr
+  indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
   M: [567, 1149]
   K: [649, 2148]
@@ -47,6 +49,7 @@ Tests:
 - name: spgemm_csr
   category: pre_checkin
   function: spgemm_csr
+  indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
   M: 1
   K: 1
@@ -62,5 +65,20 @@ Tests:
              nos4, 
              nos5,
              nos6, 
-             nos7, 
-             bibd_22_8]
+             nos7]
+
+- name: spgemm_csr
+  category: pre_checkin
+  function: spgemm_csr
+  indextype: *i32
+  precision: *single_double_precisions
+  M: 1
+  K: 1
+  alpha: [2.0]
+  alphai: [0.0]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ONE]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO]
+  spgemm_alg: [HIPSPARSE_SPGEMM_DEFAULT]
+  filename: [bibd_22_8,
+             shipsec1]

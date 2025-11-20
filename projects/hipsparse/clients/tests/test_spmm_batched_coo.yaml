@@ -29,11 +29,13 @@ Tests:
 - name: spmm_batched_coo_bad_arg
   category: pre_checkin
   function: spmm_batched_coo_bad_arg
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
 - name: spmm_batched_coo
   category: quick
   function: spmm_batched_coo
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: [50]
   N: [5]
@@ -52,9 +54,10 @@ Tests:
 - name: spmm_batched_coo
   category: pre_checkin
   function: spmm_batched_coo
-  precision: *single_double_precisions_complex_real
+  indextype: *i32
+  precision: *single_double_precisions
   M: 1
-  N: 1
+  N: [15]
   K: 1
   alpha: [2.0]
   alphai: [0.0]

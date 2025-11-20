@@ -29,11 +29,13 @@ Tests:
 - name: spsv_coo_bad_arg
   category: pre_checkin
   function: spsv_coo_bad_arg
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
 - name: spsv_coo
   category: quick
   function: spsv_coo
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: [50]
   N: [50]
@@ -50,6 +52,7 @@ Tests:
 - name: spsv_coo
   category: pre_checkin
   function: spsv_coo
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: 1
   N: 1
@@ -64,5 +67,24 @@ Tests:
   spsv_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
   filename: [nos1,
              nos3, 
-             nos5,
-             scircuit]
+             nos5]
+
+- name: spsv_coo
+  category: pre_checkin
+  function: spsv_coo
+  indextype: *i64
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  alpha: [2.0]
+  alphai: [0.0]
+  beta: [1.0]
+  betai: [0.0]
+  diag_type: [HIPSPARSE_DIAG_TYPE_NON_UNIT]
+  fill_mode: [HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  spsv_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
+  filename: [scircuit,
+             shipsec1,
+             bmwcra_1]

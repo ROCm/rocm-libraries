@@ -29,11 +29,13 @@ Tests:
 - name: spsm_csr_bad_arg
   category: pre_checkin
   function: spsm_csr_bad_arg
+  indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
 
 - name: spsm_csr
   category: quick
   function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
   M: [50]
   N: [50]
@@ -54,6 +56,7 @@ Tests:
 - name: spsm_csr
   category: pre_checkin
   function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
   M: 1
   N: 1
@@ -72,5 +75,28 @@ Tests:
   spsm_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
   filename: [nos1,
              nos3, 
-             nos5,
-             scircuit]
+             nos5]
+
+- name: spsm_csr
+  category: pre_checkin
+  function: spsm_csr
+  indextype: *i64
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  K: [18]
+  alpha: [2.0]
+  alphai: [0.0]
+  beta: [1.0]
+  betai: [0.0]
+  diag_type: [HIPSPARSE_DIAG_TYPE_NON_UNIT]
+  fill_mode: [HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  orderC: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  spsm_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
+  filename: [scircuit,
+             shipsec1,
+             bmwcra_1]
