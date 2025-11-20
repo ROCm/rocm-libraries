@@ -36,8 +36,8 @@ from itertools import chain
 from pathlib import Path
 from typing import Dict, Tuple
 
-import yaml
 import pandas as pd
+import yaml
 
 import rrperf
 import rrperf.hipblaslt
