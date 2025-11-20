@@ -14,9 +14,11 @@ struct GPU_Allocator_FP32 : public ::testing::TestWithParam<int>
     void SetUp() override { buffer = h.Create(size); }
 
     miopen::Handle h{};
-    static const int size = 42;
+    static constexpr int size = 42;
     miopen::Allocator::ManageDataPtr buffer;
 };
+
+constexpr int GPU_Allocator_FP32::size;
 
 TEST_P(GPU_Allocator_FP32, CustomAllocator)
 {
