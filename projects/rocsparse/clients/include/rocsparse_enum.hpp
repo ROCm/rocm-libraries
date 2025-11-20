@@ -153,7 +153,7 @@ struct rocsparse_order_t
 struct rocsparse_format_t
 {
     using value_t                     = rocsparse_format;
-    static constexpr uint32_t nvalues = 7;
+    static constexpr uint32_t nvalues = 8;
     // clang-format off
     static constexpr value_t  values[nvalues] = {rocsparse_format_coo,
                                                  rocsparse_format_coo_aos,
@@ -161,7 +161,8 @@ struct rocsparse_format_t
                                                  rocsparse_format_csc,
                                                  rocsparse_format_ell,
                                                  rocsparse_format_bell,
-                                                 rocsparse_format_bsr};
+                                                 rocsparse_format_bsr,
+                                                 rocsparse_format_sell};
     // clang-format on
 
     static constexpr bool is_invalid(rocsparse_int value_)
@@ -180,6 +181,7 @@ struct rocsparse_format_t
         case rocsparse_format_ell:
         case rocsparse_format_bell:
         case rocsparse_format_bsr:
+        case rocsparse_format_sell:
         {
             return false;
         }

@@ -94,10 +94,21 @@ endif()
 
 if(NOT USE_CUDA)
   # Build documentation examples
-  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
-
-  foreach(file ${DOCUMENTATION_EXAMPLES})
-      message(STATUS "Found .cpp file: ${file}")
+  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_CPP documentation_examples/*.cpp)
+  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_C documentation_examples/*.c)
+  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_F90 documentation_examples/*.f90)
+  
+  foreach(file ${DOCUMENTATION_EXAMPLES_CPP})
       add_hipsparse_example(${file})
   endforeach()
+
+  foreach(file ${DOCUMENTATION_EXAMPLES_C})
+      add_hipsparse_example(${file})
+  endforeach()
+
+  if (NOT WIN32)
+    foreach(file ${DOCUMENTATION_EXAMPLES_F90})
+        add_hipsparse_example(${file})
+    endforeach()
+  endif()
 endif()

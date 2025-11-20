@@ -58,6 +58,7 @@ struct PlanRegistrySignatureKeyEqual
         return a == b;
     }
 
+    // NOLINTNEXTLINE(readability-redundant-casting)
     bool operator()(const PlanRegistrySignatureKey& a,
                     const PlanRegistrySignatureKey& b) const noexcept
     {
@@ -66,3 +67,20 @@ struct PlanRegistrySignatureKeyEqual
 };
 
 }
+
+template <>
+struct fmt::formatter<hipdnn_sdk::test_utilities::PlanRegistrySignatureKey>
+{
+    static constexpr auto parse(format_parse_context& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const hipdnn_sdk::test_utilities::PlanRegistrySignatureKey& key,
+                FormatContext& ctx) const
+    {
+        return std::visit([&ctx](const auto& arg) { return fmt::format_to(ctx.out(), "{}", arg); },
+                          key);
+    }
+};

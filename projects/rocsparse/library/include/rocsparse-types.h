@@ -570,7 +570,8 @@ typedef enum rocsparse_format_
     rocsparse_format_csc     = 3, /**< CSC sparse matrix format. */
     rocsparse_format_ell     = 4, /**< ELL sparse matrix format. */
     rocsparse_format_bell    = 5, /**< BLOCKED ELL sparse matrix format. */
-    rocsparse_format_bsr     = 6 /**< BSR sparse matrix format. */
+    rocsparse_format_bsr     = 6, /**< BSR sparse matrix format. */
+    rocsparse_format_sell    = 7 /**< SLICED ELL sparse matrix format. */
 } rocsparse_format;
 
 /*! \ingroup types_module
@@ -728,7 +729,8 @@ typedef enum rocsparse_spmv_input_
     rocsparse_spmv_input_operation, /**< Select matrix transpose operation for input on SpMV descriptor. */
     rocsparse_spmv_input_scalar_datatype, /**< Select scalar  datatype for input on SpMV descriptor. */
     rocsparse_spmv_input_compute_datatype, /**< Select compute datatype for input on SpMV descriptor. */
-    rocsparse_spmv_input_nnz_use_starting_block_ids
+    rocsparse_spmv_input_nnz_use_starting_block_ids, /**< Configure usage of starting block IDs for non-zero split. */
+    rocsparse_spmv_input_enable_extra /**< Enable/disable extra vectors computation for SpMV descriptor. */
 } rocsparse_spmv_input;
 
 /*! \ingroup types_module
@@ -775,6 +777,7 @@ typedef enum rocsparse_spmv_alg_
     rocsparse_spmv_alg_bsr          = 6, /**< BSR SpMV algorithm 1 for BSR matrices. */
     rocsparse_spmv_alg_csr_lrb      = 7, /**< CSR SpMV algorithm 3 (LRB) for CSR matrices. */
     rocsparse_spmv_alg_csr_nnzsplit = 8, /**< CSR SpMV algorithm 4 (nnzsplit) for CSR matrices. */
+    rocsparse_spmv_alg_sell         = 9, /**< SLICED ELL SpMV algorithm for SLICED ELL matrices. */
     rocsparse_spmv_alg_csr_stream [[deprecated]]
     = rocsparse_spmv_alg_csr_rowsplit /**< CSR SpMV algorithm 2 (stream) for CSR matrices. */
 } rocsparse_spmv_alg;
