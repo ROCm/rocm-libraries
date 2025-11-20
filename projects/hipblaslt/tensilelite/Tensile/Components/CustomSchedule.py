@@ -348,15 +348,17 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
     elif isTN(kernel) and not useLDSTr and TLDS == 1:
         #index and code pair
         syncTable = [-1, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="for LRB1-0"),
-                      6, SWaitCnt(dscnt=6+5, vlcnt=-1, vscnt=-1, comment="for LRB1-1"),
+                      5, SWaitCnt(dscnt=6+4, vlcnt=-1, vscnt=-1, comment="for LRB1-1"),
                       8, SBarrier(comment="for GRA start"),
                      11, SWaitCnt(dscnt=5+8, vlcnt=-1, vscnt=-1, comment="for LRB1-2"),
                      17, SWaitCnt(dscnt=4+11, vlcnt=-1, vscnt=-1, comment="for LRB1-3"),
                      23, SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="for LRB1-4:6"),
                      41, SWaitCnt(dscnt=14, vlcnt=-1, vscnt=-1, comment="for LRB1-7"),
                      46, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="for LRA1"),
+                     47, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="for LRB0-0"),
                      48, SBarrier(comment="for LRA1 start"),
-                     78, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="for LRB1"),
+                     51, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="for LRB1"),
+                     78, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="for LRB0"),
                      78, SBarrier(comment="for LRB1 start"),]
         optSchedule = {
                 'SYNC'  : [syncTable[::2]],
