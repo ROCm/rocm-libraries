@@ -36,14 +36,6 @@ def runCI =
         commonGroovy.runCompileCommand(platform, project, jobName)
     }
 
-    def testCommand =
-    {
-        platform, project->
-
-        def gfilter = 'checkin*'
-        commonGroovy.runTestCommand(platform, project, gfilter)
-    }
-
     def packageCommand =
     {
         platform, project->
