@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -26,19 +27,43 @@ inline void copyMaxSizeWithNullTerminator(char* destination, const char* source,
     destination[maxSize - 1] = '\0';
 }
 
+inline std::string toLower(const std::string& str)
+{
+    std::string lowerStr = str;
+    std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::tolower);
+    return lowerStr;
+}
+
+inline std::string removeNewlines(const std::string& str)
+{
+    std::string result = str;
+    result.erase(std::remove(result.begin(), result.end(), '\r'), result.end());
+    result.erase(std::remove(result.begin(), result.end(), '\n'), result.end());
+    return result;
+}
+
+// Converts a vector of numbers to a string "[1, 2, 3...]".
+template <typename T>
+std::enable_if_t<std::is_arithmetic_v<T>, std::string> // Restrict template to numeric types
+    vecToString(const std::vector<T>& vec)
+{
+    std::string result = "[";
+    if(!vec.empty())
+    {
+        result += std::to_string(vec[0]);
+        for(size_t i = 1; i < vec.size(); ++i)
+        {
+            result += ", " + std::to_string(vec[i]);
+        }
+    }
+    return result + "]";
+}
+
+// Converts a vector of numbers to a. ostream "[1, 2, 3...]".
 template <typename T>
 inline void vecToStream(std::ostream& os, const std::vector<T>& vec)
 {
-    if(vec.empty())
-    {
-        os << "[]";
-        return;
-    }
-
-    os << "[";
-    std::copy(vec.begin(), vec.end() - 1, std::ostream_iterator<T>(os, ", "));
-    os << vec.back();
-    os << "]";
+    os << vecToString(vec);
 }
 
-}
+} // namespace hipdnn_sdk::utilities
