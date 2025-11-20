@@ -282,7 +282,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
     COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
-    COMMAND ctest --output-on-failure --gtest_filter=\"\${GTEST_FILTER}\"
+    COMMAND ctest --output-on-failure -E "rocprim.linking*" --gtest_filter=\"\${GTEST_FILTER}\"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 
