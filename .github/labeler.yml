@@ -116,7 +116,7 @@ documentation:
 
 "ci:docs-only":
 - changed-files:
-  - all-globs-to-all-files:
+  - any-glob-to-all-files:
     - docs/**/*
     - '**/docs/**/*'
     - '**/*.md'
