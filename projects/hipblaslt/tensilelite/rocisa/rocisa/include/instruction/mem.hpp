@@ -109,10 +109,10 @@ namespace rocisa
                     kStr = isa[0] < 11 ? "short_d16_hi" : "d16_hi_b16";
                     break;
                 case InstType::INST_TR8_B64:
-                    kStr = isa <= std::array<int, 3>{12, 0, 1} ? "tr_b64" : "";
+                    kStr = isa <= std::array<int, 3>{12, 0, 1} ? "tr_b64" : "tr8_b64";
                     break;
                 case InstType::INST_TR16_B128:
-                    kStr = isa <= std::array<int, 3>{12, 0, 1} ? "tr_b128" : "";
+                    kStr = isa <= std::array<int, 3>{12, 0, 1} ? "tr_b128" : "tr16_b128";
                     break;
                 default:
                     break;
@@ -1206,6 +1206,27 @@ namespace rocisa
         }
     };
 
+    struct FlatLoadB192 : public FLATReadInstruction
+    {
+        FlatLoadB192(const std::shared_ptr<RegisterContainer>& dst,
+                     const std::shared_ptr<RegisterContainer>& vaddr,
+                     std::optional<FLATModifiers>              flat    = std::nullopt,
+                     const std::string&                        comment = "")
+            : FLATReadInstruction(InstType::INST_B192, dst, vaddr, flat, comment)
+        {
+        }
+
+        FlatLoadB192(const FlatLoadB192& other)
+            : FLATReadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<FlatLoadB192>(*this);
+        }
+    };
+
     struct GlobalLoadTR8B64 : public GLOBALLoadInstruction
     {
         GlobalLoadTR8B64(const std::shared_ptr<RegisterContainer>& dst,
@@ -1247,27 +1268,6 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<GlobalLoadTR16B128>(*this);
-        }
-    };
-
-    struct FlatLoadB192 : public FLATReadInstruction
-    {
-        FlatLoadB192(const std::shared_ptr<RegisterContainer>& dst,
-                     const std::shared_ptr<RegisterContainer>& vaddr,
-                     std::optional<FLATModifiers>              flat    = std::nullopt,
-                     const std::string&                        comment = "")
-            : FLATReadInstruction(InstType::INST_B192, dst, vaddr, flat, comment)
-        {
-        }
-
-        FlatLoadB192(const FlatLoadB192& other)
-            : FLATReadInstruction(other)
-        {
-        }
-
-        std::shared_ptr<Item> clone() const override
-        {
-            return std::make_shared<FlatLoadB192>(*this);
         }
     };
 

@@ -290,6 +290,8 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
         conThInProcDim  = kernel["SourceSwap"] ^ tP["isB"] # continuous threads in processed dimension(Coalesced dimension)
 
         threadInterval  = 1 if conThInProcDim else matrixInstPrep
+        if writer.states.asmCaps["HasWMMA_V4"]:
+            threadInterval = 2 if conThInProcDim else 1
         numThreadInCoal = matrixInstCoal if conThInProcDim else (numThreadInWave // matrixInstPrep)
 
         numContOutCoal  = vectorWidth if conThInProcDim else kernel["MIOutputVectorWidth"] * vectorWidth
@@ -573,6 +575,8 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
         conThInProcDim  = kernel["SourceSwap"] ^ tP["isB"] # continuous threads in processed dimension(Coalesced dimension)
 
         threadInterval  = 1 if conThInProcDim else matrixInstPrep
+        if writer.states.asmCaps["HasWMMA_V4"]:
+            threadInterval = 2 if conThInProcDim else 1
         numThreadInCoal = matrixInstCoal if conThInProcDim else (numThreadInWave // matrixInstPrep)
 
         #numContOutCoal  = 1 if conThInProcDim else kernel["MIOutputVectorWidth"]

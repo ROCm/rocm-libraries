@@ -413,6 +413,8 @@ class Solution(collections.abc.Mapping):
         outputVectorWidth, RegsPerOut = 1, 1
     elif isaInfoMap[isa].asmCaps['HasWMMA_V2'] or isaInfoMap[isa].asmCaps['HasWMMA_V3']:
         outputVectorWidth, RegsPerOut = 8, 1
+    elif isaInfoMap[isa].asmCaps['HasWMMA_V4']:
+        outputVectorWidth, RegsPerOut = 4, 1
     else:
       print("WARNING: unexpect code flow")
 
@@ -2422,7 +2424,7 @@ class Solution(collections.abc.Mapping):
               if state["ProblemType"]["Sparse"] and state["LocalReadVectorWidthA"] * state["ProblemType"]["MacDataTypeA"].numBytes() > Solution.MAX_NUM_DS_LOAD_BYTES:
                 reject(state, printRejectionReason, "LocalReadVectorWidthA * BytePerMacDataTypeA(%s) > %d bytes." % (state["ProblemType"]["MacDataTypeA"].numBytes(), Solution.MAX_NUM_DS_LOAD_BYTES))
           elif not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["MacDataTypeA"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])):
-            if state["LocalReadVectorWidthA"] < state["MIInputPerThread"] and not state["LDSTrInst"] and not isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
+            if state["LocalReadVectorWidthA"] < state["MIInputPerThread"] and not state["LDSTrInst"] and not (isaInfoMap[isa].asmCaps["HasWMMA_V3"] or isaInfoMap[isa].asmCaps["HasWMMA_V4"]):
               reject(state, printRejectionReason, "LocalReadVectorWidthA < %u" %(state["MIInputPerThread"]))
           if state["LocalReadVectorWidthA"] > state["MIInputPerThread"] and not state["TransposeLDS"]:
             reject(state, printRejectionReason, "LocalReadVectorWidth require Transpose LDS")
@@ -2460,7 +2462,7 @@ class Solution(collections.abc.Mapping):
               if state["ProblemType"]["Sparse"] and state["LocalReadVectorWidthB"] * state["ProblemType"]["MacDataTypeB"].numBytes() > Solution.MAX_NUM_DS_LOAD_BYTES:
                 reject(state, printRejectionReason, "LocalReadVectorWidthB * BytePerMacDataTypeB(%s) > %d bytes." % (state["ProblemType"]["MacDataTypeB"].numBytes(), Solution.MAX_NUM_DS_LOAD_BYTES))
           elif not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["MacDataTypeB"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])):
-            if state["LocalReadVectorWidthB"] < state["MIInputPerThread"] and not state["LDSTrInst"] and not isaInfoMap[isa].asmCaps["HasWMMA_V3"]:
+            if state["LocalReadVectorWidthB"] < state["MIInputPerThread"] and not state["LDSTrInst"] and not (isaInfoMap[isa].asmCaps["HasWMMA_V3"] or isaInfoMap[isa].asmCaps["HasWMMA_V4"]):
               reject(state, printRejectionReason, "LocalReadVectorWidthB < %u" %(state["MIInputPerThread"]))
           if state["LocalReadVectorWidthB"] > state["MIInputPerThread"] and not state["TransposeLDS"]:
             reject(state, printRejectionReason, "LocalReadVectorWidthB require Transpose LDS")

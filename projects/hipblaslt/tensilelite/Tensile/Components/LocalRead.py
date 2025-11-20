@@ -608,7 +608,7 @@ class LocalReadMFMA(LocalRead):
         UnrollStride     = kernel["MacroTile%s" % tP["tensorChar"]] + LdsPad
         if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
             tileStride   = kernel["_DepthU%s"%tc] + LdsPad
-            UnrollStride = 1
+            UnrollStride = 2 if writer.states.asmCaps["HasWMMA_V4"] else 1
 
         if "MXS" in tc:
             subTc = tc[3]
@@ -1507,8 +1507,20 @@ class LocalReadMFMA(LocalRead):
                                             or kernel["ProblemType"][MacDataType].isHalf() or kernel["ProblemType"][MacDataType].isFloat4() \
                                                 or kernel["ProblemType"][MacDataType].is6bitFloat() or kernel["ProblemType"][MacDataType].isInt8()):
                                     offset_val = calcGfx1250LdsOffset()
+                                elif writer.states.asmCaps["HasWMMA_V4"]:
+                                    vw = max(8, kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"])
+                                    if kernel["UnrollMajorLDS%s" % tP["tensorChar"]]:
+                                        incOffset = rIdx * numElementPerRead * UnrollStride
+                                        if kernel[f"LocalReadVectorWidth{tc if('MXS' not in tc) else 'MXS'}"] == 4 and rIdx & 1:
+                                            incOffset -= 4
+                                    else:
+                                        incOffset = (rIdx + (rIdx // vw) * vw) * numElementPerRead * UnrollStride
+
+                                    offset_val = int((incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"])
+
                                 else:
                                     offset_val = int((rIdx * numElementPerRead * UnrollStride + offset_val + tP["localReadOffset"]) * tP["bpeDS"])
+
 
                                 if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
                                     offset_val = int(offset_val + (offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])

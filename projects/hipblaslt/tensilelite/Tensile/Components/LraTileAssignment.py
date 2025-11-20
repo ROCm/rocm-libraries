@@ -32,6 +32,7 @@ from rocisa.functions import vectorStaticRemainder, \
 from ..Component import LraTileAssignment, LraTileProperties
 from ..Common import roundUp, log2, ceilDivide
 from ..Common.DataType import DataType
+from ..Common import wmmaV3InputVgprLayout
 from dataclasses import dataclass
 
 @dataclass
@@ -480,7 +481,7 @@ class LraTileAssignmentTransposedMFMAMixMode(LraTileAssignmentTransposedMFMAB8):
     }
     def __call__(self, writer, kernel, tP):
         # TODO: check correctness of this condition
-        MacDataType = f"MacDataType{tP["tensorChar"]}" if(tP["tensorChar"]=="A" or tP["tensorChar"]=="B") else "DataType"
+        MacDataType = f"MacDataType{tP['tensorChar']}" if(tP['tensorChar']=="A" or tP['tensorChar']=="B") else "DataType"
         if not tP["enableLDSTr"]:
             comp = LraTileAssignmentMFMA()
             return comp(writer, kernel, tP)
@@ -837,7 +838,10 @@ class LraTileAssignmentMFMA(LraTileAssignment):
             # GFX1250 Sparse
             if writer.states.asmCaps["HasSWMMAC"] and writer.states.asmCaps["HasSWMMAC_gfx1250"] and (not isSparseTrack or tP["isM"]):
                 strideK *= 2
-                
+        
+        elif writer.states.asmCaps["HasWMMA_V4"]:
+            strideK = max(8, inputPerThread) if umlds else (mt + LdsPad) * max(8, inputPerThread)
+
         # special case for new F8 MFMA, need to exclude wmma_v3
         elif kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32 and (not writer.states.asmCaps["HasWMMA_V3"]):
             if umlds:
@@ -902,7 +906,11 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                                          "1. K1 offset: lrK1Offset = k1Idx * mStride(%u)" % (strideK1)))
 
             else:
-               module.add(vectorStaticRemainder(dummy, tReg, kReg, matrixInstTO, tmpVgprRes, tmpSgprInfo, \
+                if writer.states.asmCaps["HasWMMA_V4"]:
+                    module.add(vectorStaticDivide(tReg, kReg, 2, tmpVgprRes, \
+                        "1. group even and odd: nIdx = wtid / 2"))
+                else:
+                    module.add(vectorStaticRemainder(dummy, tReg, kReg, matrixInstTO, tmpVgprRes, tmpSgprInfo, \
                                              "1. N offset: nIdx = wtid %% MI_N(%u)" % matrixInstTO))
 
             applyVWCalcEarly = perpStride > 1 and kernel["ProblemType"]["TLU%s"%tc] == 0 and kernel["ProblemType"]["DataType"].numBytes() != 2
@@ -947,8 +955,12 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                         module.add(vectorStaticDivide(mReg, mReg, 4, tmpVgprRes, \
                                                      "5.2 thread id in wave: k1Idx = mtid // 4"))
                 if (dividendForKId != waveWidth) or isDTVAB:
-                  # DTVAB case, add this regardless of dividendForKId != waveWidth
-                    module.add(vectorStaticDivide(kReg, kReg, dividendForKId, tmpVgprRes, \
+                    if writer.states.asmCaps["HasWMMA_V4"]:
+                        module.add(vectorStaticRemainder(dummy, kReg, kReg, 2, tmpVgprRes, tmpSgprInfo, \
+                                                "5. K offset: kIdx = wtid % 2"))
+                    else:
+                        # DTVAB case, add this regardless of dividendForKId != waveWidth
+                        module.add(vectorStaticDivide(kReg, kReg, dividendForKId, tmpVgprRes, \
                         "5. K offset: kIdx = wtid / (MIN(%u) * MIBB(%u))" % (matrixInstTO, kernel["MatrixInstB"])))
 
                 if perpBlockSize > 0:

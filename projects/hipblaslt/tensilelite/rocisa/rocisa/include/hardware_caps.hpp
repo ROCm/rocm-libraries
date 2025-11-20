@@ -170,9 +170,9 @@ inline std::map<std::string, int>
                                   "v_smfmac_f32_32x32x16_f16 a[0:15], v[32:33], v[36:39], v[40]",
                                   isDebug);
     rv["HasWMMA"]  = tryAssembler(isaVersion,
-                                 assemblerPath,
-                                 "v_wmma_f32_16x16x16_f16 v[0:3], v[8:15], v[16:23], v[0:3]",
-                                 isDebug)
+                                  assemblerPath,
+                                  "v_wmma_f32_16x16x16_f16 v[0:3], v[8:15], v[16:23], v[0:3]",
+                                  isDebug)
                     || tryAssembler(isaVersion,
                                     assemblerPath,
                                     "v_wmma_f32_16x16x16_f16 v[0:3], v[8:9], v[16:17], v[0:3]",
@@ -184,6 +184,10 @@ inline std::map<std::string, int>
                     || tryAssembler(isaVersion,
                                     assemblerPath,
                                     "v_wmma_f32_16x16x4_f32 v[0:7], v[8:9], v[8:9], v[0:7]",
+                                    isDebug)
+                    || tryAssembler(isaVersion,
+                                    assemblerPath,
+                                    "v_wmma_f32_16x16_fp8_fp8 v[0:7], v[8:9], v[16:17], v[0:7]",
                                     isDebug);
     rv["HasWMMA_V1"] = tryAssembler(isaVersion,
                                     assemblerPath,
@@ -201,6 +205,10 @@ inline std::map<std::string, int>
                                        assemblerPath,
                                        "v_wmma_f32_16x16x4_f32 v[0:7], v[8:9], v[8:9], v[0:7]",
                                        isDebug);
+    rv["HasWMMA_V4"] = tryAssembler(isaVersion,
+                                        assemblerPath,
+                                        "v_wmma_f32_16x16_fp8_fp8 v[0:7], v[8:9], v[16:17], v[0:7]",
+                                        isDebug);
     rv["HasWMMA_V3_f64"]
         = tryAssembler(isaVersion,
                        assemblerPath,
@@ -318,10 +326,14 @@ inline std::map<std::string, int>
         isaVersion, assemblerPath, "ds_read_b64_tr_b16 v[0:1], v0 offset: 0", isDebug);
 
     rv["HasGLTr8B64"] = tryAssembler(
-        isaVersion, assemblerPath, "global_load_tr_b64 v[0], v0, s[0:1], offset:0", isDebug);
+        isaVersion, assemblerPath, "global_load_tr_b64 v[0], v0, s[0:1], offset:0", isDebug)
+        || tryAssembler(
+            isaVersion, assemblerPath, "global_load_tr8_b64 v[0:1], v0, s[0:1], offset:0", isDebug);
 
     rv["HasGLTr16B128"] = tryAssembler(
-        isaVersion, assemblerPath, "global_load_tr_b128 v[0:1], v0, s[0:1], offset:0", isDebug);
+        isaVersion, assemblerPath, "global_load_tr_b128 v[0:1], v0, s[0:1], offset:0", isDebug)
+        || tryAssembler(
+            isaVersion, assemblerPath, "global_load_tr16_b128 v[0:3], v0, s[0:1], offset:0", isDebug);
 
     rv["HasLDSTrB128B16"] = tryAssembler(
         isaVersion, assemblerPath, "ds_load_tr16_b128 v[0:3], v0 offset: 0", isDebug);
@@ -485,12 +497,12 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion, int
     rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
     rv["TransOpWait"]        = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
     rv["SDWAWait"]           = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
-    rv["VgprBank"]           = checkInList(isaVersion[0], {10, 11, 12});
-    rv["DSLow16NotPreserve"] = isaVersion[0] == 12;
-    rv["WorkGroupIdFromTTM"] = isaVersion[0] == 12;
-    rv["NoSDWA"]             = isaVersion[0] == 12;
-    rv["VOP3ByteSel"]        = isaVersion[0] == 12;
-    rv["HasFP8_OCP"]         = isaVersion[0] == 12;
+    rv["VgprBank"]           = checkInList(isaVersion[0], {10, 11, 12}) && !(isaVersion[0] == 12 && isaVersion[1] == 5) ;
+    rv["DSLow16NotPreserve"] = checkInList(isaVersion[0], {12, 13});
+    rv["WorkGroupIdFromTTM"] = checkInList(isaVersion[0], {12, 13});
+    rv["NoSDWA"]             = checkInList(isaVersion[0], {12, 13});
+    rv["VOP3ByteSel"]        = checkInList(isaVersion[0], {12, 13});
+    rv["HasFP8_OCP"]         = checkInList(isaVersion[0], {12, 13});
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
     rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
 
@@ -514,10 +526,10 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
 {
     std::map<std::string, int> rv;
     // 1024 vgpr
-    rv["MaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 256;
+    rv["MaxVgpr"] = (isaVersion[0] == 12 && isaVersion[1] == 5) ? 1024 : 256;
     // max allowed is 112 out of 112 , 6 is used by hardware 4 SGPRs are wasted
     rv["MaxSgpr"] = 102;
-    rv["PhysicalMaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 512;
+    rv["PhysicalMaxVgpr"] = (isaVersion[0] == 12 && isaVersion[1] == 5) ? 1024 : 512;
     rv["PhysicalMaxSgpr"]   = 800;
     rv["maxLDSConstOffset"] = 65536;
 
@@ -529,9 +541,9 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
         else
             rv["PhysicalMaxVgprCU"] = 1536 * 32;
     else if(isaVersion[0] == 12)
-        rv["PhysicalMaxVgprCU"] = isaVersion[1] == 5? 4096 * 32 : 1536 * 32;
+        rv["PhysicalMaxVgprCU"] = isaVersion[1] == 5 ? 4096 * 32 : 1536 * 32;
     else if(isaVersion[0] == 13)
-        rv["PhysicalMaxVgprCU"] = 1024 * 32;
+        rv["PhysicalMaxVgprCU"] = 4096 * 32;
     else if(isaVersion[0] == 9)
         if(archCaps["ArchAccUnifiedRegs"])
             rv["PhysicalMaxVgprCU"] = 2048 * 64;

@@ -182,6 +182,8 @@ namespace TensileLite
             }
             else if(archName.find("gfx1300") != std::string::npos)
             {
+                return Processor::gfx1300;
+            }
             else if(archName.find("gfx1310") != std::string::npos)
             {
                 return Processor::gfx1310;
@@ -189,6 +191,7 @@ namespace TensileLite
             return static_cast<Processor>(0);
         }
 
+        static std::string toString(Processor p)
         {
             switch(p)
             {
@@ -241,9 +244,12 @@ namespace TensileLite
             case AMDGPU::Processor::gfx1250:
                 return "gfx1250";
             case AMDGPU::Processor::gfx1300:
+                return "gfx1300";
+            case AMDGPU::Processor::gfx1310:
                 return "gfx1310";
             case AMDGPU::Processor::gfx000:
                 return "gfx000";
+            }
             return "";
         }
 

@@ -125,7 +125,7 @@ namespace rocisa
             std::string instTypeStr = typeConvert(instType);
             // Affected instructions: v_wmma_f32_16x16x128_f8f6f4, v_wmma_f32_32x16x128_f4
             bool isLowPrecision = (instTypeStr == "f8f6f4") || (instTypeStr == "f4");
-            return isWMMA && (isaVersion == std::array<int, 3>{12, 5, 0}) && isLowPrecision;
+            return isWMMA && (isaVersion == std::array<int, 3>{12, 5, 0} || isaVersion[0] == 13) && isLowPrecision;
         }
 
         std::string typeConvert(InstType iType) const
@@ -199,8 +199,9 @@ namespace rocisa
 
         std::string preStr() const override
         {
-            std::string variantStr = std::to_string(variant[0]) + "x" + std::to_string(variant[1])
-                                     + "x" + std::to_string(variant[2]);
+            std::string variantStr = std::to_string(variant[0]) + "x" + std::to_string(variant[1]);
+            if(not getAsmCaps()["HasWMMA_V4"])
+                variantStr += "x" + std::to_string(variant[2]);
             if(getAsmCaps()["HasMFMA_explictB"] && !mfma1k)
             {
                 std::string strB = variant[3] > 1 ? std::to_string(variant[3]) + "b_" : "";
@@ -215,6 +216,10 @@ namespace rocisa
                 std::string mfma_1k         = mfma1k ? "_1k" : "";
                 if(forceScaledWMMA())
                 {
+                    if(getAsmCaps()["HasWMMA_V4"])
+                    {
+                        throw std::runtime_error("scale must be given as a vgpr");
+                    }
                     return "v_wmma_scale_" + typeConvert(accType) + "_" + variantStr
                            + instructionStep + typeConvert(instType);
                 }
@@ -228,6 +233,8 @@ namespace rocisa
             size_t f4_t = getAsmCaps()["HasWMMA_V3"] ? 32 : 0;
             std::string negStr
                 = !neg ? "" : (getAsmCaps()["HasWMMA_V1"] ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
+            // workaround for sp3 modifier not supported yet
+            negStr = !neg ? "" : (getAsmCaps()["HasWMMA_V4"] ? " signed_a signed_b" : negStr);
             std::string inputPermuteStr = "";
             std::string scaleStr        = "";
             if(getAsmCaps()["HasMFMA_f8f6f4"])
@@ -340,6 +347,7 @@ namespace rocisa
                     scaleStr = ", 0, 0";
                 }
             }
+
             return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
                    + acc2->toString() + scaleStr + negStr + inputPermuteStr;
         }
@@ -438,9 +446,13 @@ namespace rocisa
 
         std::string preStr() const override
         {
-            std::string variantStr = std::to_string(variant[0])
-                                     + "x" + std::to_string(variant[1])
-                                     + "x" + std::to_string(variant[2]);
+            std::string variantStr = std::to_string(variant[0]) + "x" + std::to_string(variant[1]);
+            if(getAsmCaps()["HasWMMA_V4"])
+            {
+                return "v_wmma_f32_" + variantStr + "_" + typeConvert();
+            }
+
+            variantStr += "x" + std::to_string(variant[2]);
             std::string blkStr = (block == 16) ? "16" : "";
             return "v_wmma_scale" + blkStr + "_f32_" + variantStr + "_" + typeConvert();
         }
@@ -448,32 +460,33 @@ namespace rocisa
         std::string getArgStr() const
         {
             constexpr size_t f4_t = 32;
+            size_t f8f6f4_k = getAsmCaps()["HasWMMA_V3"] ? 128 : 64;
             std::string inputPermuteStr = "";
             switch(instType)
             {
             case InstType::INST_F8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP8" : "";
                 break;
             case InstType::INST_BF8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF8" : "";
                 break;
             case InstType::INST_F8_BF8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF8" : "";
                 break;
             case InstType::INST_BF8_F8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP8" : "";
                 break;
             case InstType::INST_F6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP6" : "";
                 break;
             case InstType::INST_BF6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF6" : "";
                 break;
             case InstType::INST_F6_B6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF6" : "";
                 break;
             case InstType::INST_B6_F6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP6" : "";
                 break;
             case InstType::INST_F4:
             {
@@ -482,55 +495,175 @@ namespace rocisa
                 break;
             }
             case InstType::INST_F8_F4:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP4" : "";
                 break;
             case InstType::INST_F4_F8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP8" : "";
                 break;
             case InstType::INST_F6_F4:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP4" : "";
                 break;
             case InstType::INST_F4_F6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP6" : "";
                 break;
             case InstType::INST_F8_F6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP6" : "";
                 break;
             case InstType::INST_F6_F8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP8" : "";
                 break;
             case InstType::INST_F8_B6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF6" : "";
                 break;
             case InstType::INST_B6_F8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP8" : "";
                 break;
             case InstType::INST_B8_F4:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP4" : "";
                 break;
             case InstType::INST_F4_B8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF8" : "";
                 break;
             case InstType::INST_B6_F4:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP4" : "";
                 break;
             case InstType::INST_F4_B6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF6" : "";
                 break;
             case InstType::INST_B8_F6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP6" : "";
                 break;
             case InstType::INST_F6_B8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF8" : "";
                 break;
             case InstType::INST_B8_B6:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF6" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF6" : "";
                 break;
             case InstType::INST_B6_B8:
-                inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF8" : "";
+                inputPermuteStr = variant[2] >= f8f6f4_k ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF8" : "";
                 break;
             default:
                 break;
+            }
+
+            // workaround for modifier not supported yet
+            if(getAsmCaps()["HasWMMA_V4"] && variant[2] == 64)
+            {
+                static const std::string MATRIX_FMT_FP8 = "000";
+                static const std::string MATRIX_FMT_BF8 = "001";
+                static const std::string MATRIX_FMT_FP6 = "010";
+                static const std::string MATRIX_FMT_BF6 = "011";
+                static const std::string MATRIX_FMT_FP4 = "100";
+
+                switch(instType)
+                {
+                case InstType::INST_F8:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_FP8 + "<<6)|(0b" + MATRIX_FMT_FP8 + "<<9))";
+                    break;
+                case InstType::INST_BF8:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_BF8 + "<<6)|(0b" + MATRIX_FMT_BF8 + "<<9))";
+                    break;
+                case InstType::INST_F8_BF8:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_FP8 + "<<6)|(0b" + MATRIX_FMT_BF8 + "<<9))";
+                    break;
+                case InstType::INST_BF8_F8:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_BF8 + "<<6)|(0b" + MATRIX_FMT_FP8 + "<<9))";
+                    break;
+                case InstType::INST_F6:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_FP6 + "<<6)|(0b" + MATRIX_FMT_FP6 + "<<9))";
+                    break;
+                case InstType::INST_BF6:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_BF6 + "<<6)|(0b" + MATRIX_FMT_BF6 + "<<9))";
+                    break;
+                case InstType::INST_F6_B6:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_FP6 + "<<6)|(0b" + MATRIX_FMT_BF6 + "<<9))";
+                    break;
+                case InstType::INST_B6_F6:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_BF6 + "<<6)|(0b" + MATRIX_FMT_FP6 + "<<9))";
+                    break;
+                case InstType::INST_F4:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_FP4 + "<<6)|(0b" + MATRIX_FMT_FP4 + "<<9))";
+                    break;
+                case InstType::INST_F8_F4:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_FP8 + "<<6)|(0b" + MATRIX_FMT_FP4 + "<<9))";
+                    break;
+                case InstType::INST_F4_F8:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_FP4 + "<<6)|(0b" + MATRIX_FMT_FP8 + "<<9))";
+                    break;
+                case InstType::INST_F6_F4:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_FP6 + "<<6)|(0b" + MATRIX_FMT_FP4 + "<<9))";
+                    break;
+                case InstType::INST_F4_F6:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_FP4 + "<<6)|(0b" + MATRIX_FMT_FP6 + "<<9))";
+                    break;
+                case InstType::INST_F8_F6:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_FP8 + "<<6)|(0b" + MATRIX_FMT_FP6 + "<<9))";
+                    break;
+                case InstType::INST_F6_F8:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_FP6 + "<<6)|(0b" + MATRIX_FMT_FP8 + "<<9))";
+                    break;
+                case InstType::INST_F8_B6:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_FP8 + "<<6)|(0b" + MATRIX_FMT_BF6 + "<<9))";
+                    break;
+                case InstType::INST_B6_F8:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_BF6 + "<<6)|(0b" + MATRIX_FMT_FP8 + "<<9))";
+                    break;
+                case InstType::INST_B8_F4:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_BF8 + "<<6)|(0b" + MATRIX_FMT_FP4 + "<<9))";
+                    break;
+                case InstType::INST_F4_B8:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_FP4 + "<<6)|(0b" + MATRIX_FMT_BF8 + "<<9))";
+                    break;
+                case InstType::INST_B6_F4:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_BF6 + "<<6)|(0b" + MATRIX_FMT_FP4 + "<<9))";
+                    break;
+                case InstType::INST_F4_B6:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_FP4 + "<<6)|(0b" + MATRIX_FMT_BF6 + "<<9))";
+                    break;
+                case InstType::INST_B8_F6:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_BF8 + "<<6)|(0b" + MATRIX_FMT_FP6 + "<<9))";
+                    break;
+                case InstType::INST_F6_B8:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_FP6 + "<<6)|(0b" + MATRIX_FMT_BF8 + "<<9))";
+                    break;
+                case InstType::INST_B8_B6:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_BF8 + "<<6)|(0b" + MATRIX_FMT_BF6 + "<<9))";
+                    break;
+                case InstType::INST_B6_B8:
+                    inputPermuteStr
+                        = " aux_data:((0b" + MATRIX_FMT_BF6 + "<<6)|(0b" + MATRIX_FMT_BF8 + "<<9))";
+                    break;
+                default:
+                    break;
+                }
+
+                return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
+                       + acc2->toString() + ", " + mxsa->toString() + ", " + mxsb->toString()
+                       + inputPermuteStr;
             }
 
             switch(mxScaleAType)

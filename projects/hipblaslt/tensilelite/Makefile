@@ -45,7 +45,7 @@
 # points for the assemble and link step respectively.
 # ------------------------------------------------------------------------
 
-ROCM_PATH ?= /opt/gfx13
+ROCM_PATH ?= /opt/rocm
 AS := $(ROCM_PATH)/bin/amdclang++
 LDD := $(ROCM_PATH)/bin/amdclang++
 WAVE ?= 64

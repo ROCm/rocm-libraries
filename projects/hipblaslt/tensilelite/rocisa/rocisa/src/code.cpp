@@ -55,7 +55,11 @@ namespace rocisa
 
     std::shared_ptr<BitfieldUnion> SrdUpperValue(const IsaVersion& isa)
     {
-        if(isa[0] == 12)
+        if(isa[0] == 13)
+        {
+            return std::make_shared<SrdUpperValue13XX>(SrdUpperValue13XX::staticInit());
+        }
+        else if(isa[0] == 12)
         {
             if(isa[1] == 5)
                 return std::make_shared<SrdUpperValue125X>(SrdUpperValue125X::staticInit());

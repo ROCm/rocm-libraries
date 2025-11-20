@@ -2708,6 +2708,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
         module.add(self.initSumUnroll(kernel))
 
+    module.add(self.initBlockScale(kernel))
+
     # open non-unrolled summation loops
     if not forceNoTileCode:
       for i in range(kernel["ProblemType"]["NumIndicesSummation"]-1):
@@ -6943,6 +6945,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.startVgprAmaxOutB = vgprIdx + 1
       vgprIdx += 2
 
+    # wmma_v4 must use vgpr for f8f6f4 k:64 block scale factor
+    if self.states.asmCaps["HasWMMA_V4"] and kernel["EnableMatrixInstruction"] and kernel["MatrixInstK"] == 64:
+      self.states.vgprBlockScaleValu = vgprIdx
+      vgprIdx += 1
+
     self.states.startVgprAddressDbg = vgprIdx
     vgprIdx += numVgprAddressDbg
 
@@ -8151,6 +8158,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   @abc.abstractmethod
   def initSumUnroll(self, kernel):
+    return ""
+
+  ##############################################################################
+  # Initialize block scale
+  ##############################################################################
+  @abc.abstractmethod
+  def initBlockScale(self, kernel):
     return ""
 
   ##############################################################################
