@@ -1146,8 +1146,6 @@ namespace GEMMDriverTest
         gemm.transA = "T";
         gemm.transB = "N";
 
-        // XX prefetching
-
         if(betaZero)
             gemm.beta = 0;
 
