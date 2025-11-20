@@ -38,6 +38,7 @@ from Tensile.Common import IsaVersion
 from Tensile.Utilities.Decorators.Shared import CallableGuard
 
 from copy import deepcopy
+from copy import copy
 
 class ScheduleInfo:
     numCodePaths: int
@@ -633,6 +634,520 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
+
+def _get_schedule_192x320x64_16bit_AAA(kernel, useLDSTr, TLDS):
+    kernel["MfmaInitCVgprs"] = True
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    if isNN(kernel) and useLDSTr and TLDS==1:
+        print("AAAAAAAAAAAAAAAAAAAAAAAA")
+        numMfma = 120
+
+        kernel["SwapGlobalReadOrder"] = False
+
+        # ========== iter start ==========
+        wait   = [-1,]                # wait for LRA0 and the very first LRB0
+        count  = [(12+10-13,-1)]      # 12+10 loads for LRA0, but need onlyt 12+1 here, so 9 are still pending
+        
+        grinca = [0,1,2]
+        grincb = [     3,4,5]
+        
+        wait   +=[             5]       # wait for the rest of LRB0
+        count  +=[             (0,-1)]
+
+        lra0   = [                  7, 9,10,11,12, 13,14,15,16,17, 18,19] # 12 loads
+        lrb0   = [                    8,                               20,21,22,23, 24,25,26,27,28] # 10 loads
+
+        wait   +=[               29,29]   # wait for all LR0s to complete before GR start
+        count  +=[               (0,-1)]  # generally redundant, but the code is generated, so we need it.
+
+        gra    = [                       30,   32, 34, 36, 38, 40] # 6 loads
+        grb    = [                          31,                   42, 44,  46, 48,  50, 52, 54, 56, 58] # 10 loads
+
+        lws    = [                                                                                               57]
+        lrs    = [                                                                                                 58]
+        wait   +=[                                                                                                   59]     # wait for LRA1, LRB1
+        count  +=[                                                                                                   (0,-1)]
+
+        # half iter
+
+        wait   +=[  80,80]  # wait for GR + barrier
+        count  +=[ (-1,16)] # vmcnt=16 
+        lra1   = [       81,   83,84,86,88, 89,90,92,94,96, 98,100] # 12 loads
+        lrb1   = [          82,                                  101,102,104,108, 109,110,112,113,114] # 10 loads
+
+        # ========== iter done ==========
+        total_gra_loads = len(gra) + len(grb)
+
+        def extend_list(input_list, repeat_count):
+            return [item for item in input_list for _ in range(repeat_count)]
+        grinca = extend_list(grinca, 3)
+        grincb = extend_list(grincb, 3)
+        gra    = extend_list(gra, 2)
+        grb    = extend_list(grb, 2)   
+
+        optSchedule = {
+            'SYNC':   [wait],
+            'LRA0':   [lra0],
+            'GRIncA': [grinca],
+            'LRB0':   [lrb0],
+            'GRIncB': [grincb],
+            'GRA':    [gra],
+            'GRB':    [grb],
+            'LRSA':   [lrs],
+            'LRSB':   [copy(lrs)],
+            'LWSA':   [lws],
+            'LWSB':   [copy(lws)],
+            'LRA1':   [lra1],
+            'LRB1':   [lrb1],
+            'LCC':    [[numMfma-2, numMfma-1]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=count[0][0], vlcnt=count[0][1], vscnt=-1, comment="wait for prior local read local write old=0, new=9 newLW=0 newLR=9 for iteration == 0"),
+
+            SWaitCnt(dscnt=count[1][0], vlcnt=count[1][1], vscnt=-1, comment="wait for prior local read local write"),
+
+            SWaitCnt(dscnt=count[2][0], vlcnt=count[2][1], vscnt=-1, comment=""),
+            SBarrier(comment=""),
+
+            SWaitCnt(dscnt=count[3][0], vlcnt=count[3][1], vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+
+            SWaitCnt(dscnt=count[4][0], vlcnt=count[4][1], vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment="")
+            ]
+        nglshift = nllshift = total_gra_loads
+    else:
+        return False, None
+
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
+    kernel["MfmaInitCVgprs"] = True
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    if isNN(kernel) and useLDSTr and TLDS==1:
+        numMfma = 120
+        kernel["SwapGlobalReadOrder"] = False
+
+        # ========== iter start ==========
+        wait   = [-1,]                # wait for LRA0 and the very first LRB0
+        count  = [(12+10-13,-1)]      # 12+10 loads for LRA0, but need onlyt 12+1 here, so 9 are still pending
+        
+        grinca = [                  9,11,13,]
+        grincb = [                                  17,18,19]
+        
+        wait   +=[          5]       # wait for the rest of LRB0
+        count  +=[          (6,-1)]  # 5 LRA0 + 1 LRB0 reads
+
+        lra0   = [0,  2,3,4,5,6,7,8, 10, 12, 15,16] # 12 loads
+        wait   +=[                                                          26,26]   # wait for all LRA0 to complete before GRA start
+        count  +=[                                                         (5,-1)]   # 5 outstanding LRB0 reads
+
+        lrb0   = [  1,                                      20,21,22,23,  25,  27,28,29, 31] # 10 loads
+
+        wait   +=[                                                                             35,35]   # wait for all LRB0 to complete before GRB start
+        count  +=[                                                                             (0,-1)]
+
+        gra    = [                                                        25,   27,   29,31,33,     36] # 6 loads
+        grb    = [                                                                                    53,58,  63,67,     72,     77,     82,   86, 91,  96] # 10 loads
+        lrs    = [                                                                                       58]
+        wait   +=[                                                                                         59]     # wait for LRA1, LRB1
+        count  +=[                                                                                        (0,-1)]
+
+        lws    = [                                                                                                                                      96]
+
+        wait   +=[                                                                                                 71,71]  # wait for GR + barrier before starting LRA1/LRB1
+        count  +=[                                                                                                (-1,16)] # vmcnt=16 
+        lra1   = [                                                                                                       72,74,76, 78,80,82,84,  87,90,92,98,100] # 12 loads
+        lrb1   = [                                                                                                                                          99,   106,107,108,109,110,111,112,113,114] # 10 loads
+        # ========== iter done ==========
+        
+        total_gra_loads = len(gra) + len(grb)
+
+        def extend_list(input_list, repeat_count):
+            """Example: extend_list([1, 2, 3], 3) => [1,1,1, 2,2,2, 3,3,3]"""
+            return [item for item in input_list for _ in range(repeat_count)]
+        grinca = extend_list(grinca, 3)
+        grincb = extend_list(grincb, 3)
+        gra    = extend_list(gra, 2)
+        grb    = extend_list(grb, 2)   
+
+
+        optSchedule = {
+            'SYNC':   [wait],
+            'LRA0':   [lra0],
+            'GRIncA': [grinca],
+            'LRB0':   [lrb0],
+            'GRIncB': [grincb],
+            'GRA':    [gra],
+            'GRB':    [grb],
+            'LRSA':   [lrs],
+            'LRSB':   [copy(lrs)], # copy is need to duplicate the list, otherwise LRSB will be empty
+            'LWSA':   [lws],
+            'LWSB':   [copy(lws)], # copy is need to duplicate the list, otherwise LRSB will be empty
+            'LRA1':   [lra1],
+            'LRB1':   [lrb1],
+            'LCC':    [[numMfma-2, numMfma-1]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=count[0][0], vlcnt=count[0][1], vscnt=-1, comment="wait for all LRA0 and one items from LRB0 before starting the sub-iteration"),
+
+            SWaitCnt(dscnt=count[1][0], vlcnt=count[1][1], vscnt=-1, comment="wait for the rest of LRB0 to complete"),
+
+            SWaitCnt(dscnt=count[2][0], vlcnt=count[2][1], vscnt=-1, comment="wait for all LRA0 to complete before GRA start"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=count[3][0], vlcnt=count[3][1], vscnt=-1, comment="wait for all LRB0 to complete before GRB start"),
+            SBarrier(comment=""),
+
+            SWaitCnt(dscnt=count[4][0], vlcnt=count[4][1], vscnt=-1, comment="wait for LRA1, LRB1 before starting next sub-iteration"),
+
+            SWaitCnt(dscnt=count[5][0], vlcnt=count[5][1], vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment="")
+        ]
+
+        nglshift = nllshift = total_gra_loads
+
+    else:
+        return False, None
+
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+def _get_schedule_192x320x64_16bit_333(kernel, useLDSTr, TLDS):
+    kernel["MfmaInitCVgprs"] = True
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    if isNN(kernel) and useLDSTr and TLDS==1:
+        print("33333 optimized v3: LRA0, LRB0 down;  LRA1 up: 189us")
+        numMfma = 120
+
+        kernel["SwapGlobalReadOrder"] = False
+
+        # ========== iter start ==========
+        wait   = [-1,]                # wait for LRA0 and the very first LRB0
+        count  = [(12+10-13,-1)]      # 12+10 loads for LRA0, but need onlyt 12+1 here, so 9 are still pending
+        
+        grinca = [                  9,11,13,]
+        grincb = [                                   17,18,19]
+        
+        wait   +=[          5]       # wait for the rest of LRB0
+        count  +=[          (6,-1)]
+
+        lra0   = [0,  2,3,4,5,6,7,8, 10, 12, 15,16] # 12 loads
+        lrb0   = [  1,                               17,18,19,20,21,22,23,24,25] # 10 loads
+
+        wait   +=[                                                          30,30]   # wait for all LR0s to complete before GR start
+        count  +=[                                                          (0,-1)]
+
+        gra    = [                                                               31,33,35,39,44,48] # 6 loads
+        grb    = [                                                                       53,58,     63,67,       72,     77,     82,   86, 91,96] # 10 loads
+        lrs    = [                                                                          58]
+        wait   +=[                                                                            59]     # wait for LRA1, LRB1
+        count  +=[                                                                            (0,-1)]
+
+        lws    = [                                                                                                       96]
+
+        wait   +=[                                                                                         71,71]  # wait for GR + barrier
+        count  +=[                                                                                         (-1,16)] # vmcnt=16 
+        lra1   = [                                                                                               72,74,76, 78,80,82,84,87,90,92,98,100] # 12 loads
+        lrb1   = [                                                                                                                                99,   106,107,108,109,110,111,112,113,114] # 10 loads
+
+        # ========== iter done ==========
+        total_gra_loads = len(gra) + len(grb)
+
+        def extend_list(input_list, repeat_count):
+            return [item for item in input_list for _ in range(repeat_count)]
+        grinca = extend_list(grinca, 3)
+        grincb = extend_list(grincb, 3)
+        gra    = extend_list(gra, 2)
+        grb    = extend_list(grb, 2)   
+
+
+        optSchedule = {
+            'SYNC':   [wait],
+            'LRA0':   [lra0],
+            'GRIncA': [grinca],
+            'LRB0':   [lrb0],
+            'GRIncB': [grincb],
+            'GRA':    [gra],
+            'GRB':    [grb],
+            'LRSA':   [lrs],
+            'LRSB':   [copy(lrs)],
+            'LWSA':   [lws],
+            'LWSB':   [copy(lws)],
+            'LRA1':   [lra1],
+            'LRB1':   [lrb1],
+            'LCC':    [[numMfma-1, numMfma-1]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=count[0][0], vlcnt=count[0][1], vscnt=-1, comment="wait for prior local read local write old=0, new=9 newLW=0 newLR=9 for iteration == 0"),
+
+            SWaitCnt(dscnt=count[1][0], vlcnt=count[1][1], vscnt=-1, comment="wait for prior local read local write"),
+
+            SWaitCnt(dscnt=count[2][0], vlcnt=count[2][1], vscnt=-1, comment=""),
+            SBarrier(comment=""),
+
+            SWaitCnt(dscnt=count[3][0], vlcnt=count[3][1], vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+
+            SWaitCnt(dscnt=count[4][0], vlcnt=count[4][1], vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment="")
+        ]
+
+        nglshift = nllshift = total_gra_loads
+        if False:
+            print("Optimized Schedule:")
+            for k,v in optSchedule.items():
+                print(f"  '{k}': {v},")
+            print("Sync Code:")
+            for i in syncCode:
+                print(f"  {i}")
+            print(f"{nglshift=}")
+    else:
+        return False, None
+
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+
+def _get_schedule_192x320x64_16bit_222(kernel, useLDSTr, TLDS):
+    kernel["MfmaInitCVgprs"] = True
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    if isNN(kernel) and useLDSTr and TLDS==1:
+        print("2222222222222222222222 optimized v1 in a new format - moved LRA1 up: 193us")
+        numMfma = 120
+
+        kernel["SwapGlobalReadOrder"] = False
+
+        # ========== iter start ==========
+        wait   = [-1,]                # wait for LRA0 and the very first LRB0
+        count  = [(12+10-13,-1)]      # 12+10 loads for LRA0, but need onlyt 12+1 here, so 9 are still pending
+        
+        grinca = [0,1,2]
+        grincb = [          3,  4,  5]
+        
+        wait   +=[                  5]       # wait for the rest of LRB0
+        count  +=[                  (10,-1)]
+
+        lra0   = [0,  2,2,3,3,4,4,5,5,6,6,7] # 12 loads
+        lrb0   = [  1,                      8,9,10,11,12,13,14,15,16] # 10 loads
+
+        wait   +=[                                                   25,25]   # wait for all LR0s to complete before GR start
+        count  +=[                                                   (0,-1)]
+
+        gra    = [                                                      25,29,34,39,44,48] # 6 loads
+        grb    = [                                                                       53,58,     63,67,       72,     77,     82,   86, 91,96] # 10 loads
+        lrs    = [                                                                          58]
+        wait   +=[                                                                            59]     # wait for LRA1, LRB1
+        count  +=[                                                                            (0,-1)]
+
+        lws    = [                                                                                                       96]
+
+        wait   +=[                                                                                         71,71]  # wait for GR + barrier
+        count  +=[                                                                                         (-1,16)] # vmcnt=16 
+        lra1   = [                                                                                               72,74,76, 78,80,82,84,87,90,92,98,100] # 12 loads
+        lrb1   = [                                                                                                                                99,   106,107,108,109,110,111,112,113,114] # 10 loads
+
+        # ========== iter done ==========
+        total_gra_loads = len(gra) + len(grb)
+
+        def extend_list(input_list, repeat_count):
+            return [item for item in input_list for _ in range(repeat_count)]
+        grinca = extend_list(grinca, 3)
+        grincb = extend_list(grincb, 3)
+        gra    = extend_list(gra, 2)
+        grb    = extend_list(grb, 2)   
+
+
+        optSchedule = {
+            'SYNC':   [wait],
+            'LRA0':   [lra0],
+            'GRIncA': [grinca],
+            'LRB0':   [lrb0],
+            'GRIncB': [grincb],
+            'GRA':    [gra],
+            'GRB':    [grb],
+            'LRSA':   [lrs],
+            'LRSB':   [copy(lrs)],
+            'LWSA':   [lws],
+            'LWSB':   [copy(lws)],
+            'LRA1':   [lra1],
+            'LRB1':   [lrb1],
+            'LCC':    [[numMfma-1, numMfma-1]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=count[0][0], vlcnt=count[0][1], vscnt=-1, comment="wait for prior local read local write old=0, new=9 newLW=0 newLR=9 for iteration == 0"),
+
+            SWaitCnt(dscnt=count[1][0], vlcnt=count[1][1], vscnt=-1, comment="wait for prior local read local write"),
+
+            SWaitCnt(dscnt=count[2][0], vlcnt=count[2][1], vscnt=-1, comment=""),
+            SBarrier(comment=""),
+
+            SWaitCnt(dscnt=count[3][0], vlcnt=count[3][1], vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+
+            SWaitCnt(dscnt=count[4][0], vlcnt=count[4][1], vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment="")
+        ]
+
+        nglshift = nllshift = total_gra_loads
+        if False:
+            print("Optimized Schedule:")
+            for k,v in optSchedule.items():
+                print(f"  '{k}': {v},")
+            print("Sync Code:")
+            for i in syncCode:
+                print(f"  {i}")
+            print(f"{nglshift=}")
+    else:
+        return False, None
+
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+def _get_schedule_192x320x64_16bit_111(kernel, useLDSTr, TLDS):
+    kernel["MfmaInitCVgprs"] = True
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    if isNN(kernel) and useLDSTr and TLDS==1:
+        print("11111111111111111111111 baseline in a new format")
+        numMfma = 120
+
+        kernel["SwapGlobalReadOrder"] = False
+
+        # ========== iter start ==========
+        wait   = [-1,]                # wait for LRA0 and the very first LRB0
+        count  = [(12+10-13,-1)]      # 12+10 loads for LRA0, but need onlyt 12+1 here, so 9 are still pending
+        
+        grinca = [0,1,2]
+        grincb = [          3,  4,  5]
+        
+        wait   +=[                  5]       # wait for the rest of LRB0
+        count  +=[                  (10,-1)]
+
+        lra0   = [0,  2,2,3,3,4,4,5,5,6,6,7] # 12 loads
+        lrb0   = [  1,                      8,9,10,11,12,13,14,15,16] # 10 loads
+
+        wait   +=[                                                   25,25]   # wait for all LR0s to complete before GR start
+        count  +=[                                                   (0,-1)]
+
+        gra    = [                                                      25,29,34,39,44,48] # 6 loads
+        grb    = [                                                                       53,58,     63,67,72,77,82,86,91,96] # 10 loads
+        lrs    = [                                                                          58]
+        wait   +=[                                                                            59]     # wait for LRA1, LRB1
+        count  +=[                                                                            (0,-1)]
+
+        lws    = [                                                                                                       96]
+
+        wait   +=[                                                                                                           98,98]  # wait for GR + barrier
+        count  +=[                                                                                                           (-1,16)] # vmcnt=16 
+        lra1   = [                                                                                                                99,100,100,101,101,102,102,103,103,104,104,105] # 12 loads
+        lrb1   = [                                                                                                                99,                                           106,107,108,109,110,111,112,113,114] # 10 loads
+
+        # ========== iter done ==========
+        total_gra_loads = len(gra) + len(grb)
+
+        def extend_list(input_list, repeat_count):
+            return [item for item in input_list for _ in range(repeat_count)]
+        grinca = extend_list(grinca, 3)
+        grincb = extend_list(grincb, 3)
+        gra    = extend_list(gra, 2)
+        grb    = extend_list(grb, 2)   
+
+
+        optSchedule = {
+            'SYNC':   [wait],
+            'LRA0':   [lra0],
+            'GRIncA': [grinca],
+            'LRB0':   [lrb0],
+            'GRIncB': [grincb],
+            'GRA':    [gra],
+            'GRB':    [grb],
+            'LRSA':   [lrs],
+            'LRSB':   [copy(lrs)],
+            'LWSA':   [lws],
+            'LWSB':   [copy(lws)],
+            'LRA1':   [lra1],
+            'LRB1':   [lrb1],
+            'LCC':    [[numMfma-1, numMfma-1]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=count[0][0], vlcnt=count[0][1], vscnt=-1, comment="wait for prior local read local write old=0, new=9 newLW=0 newLR=9 for iteration == 0"),
+
+            SWaitCnt(dscnt=count[1][0], vlcnt=count[1][1], vscnt=-1, comment="wait for prior local read local write"),
+
+            SWaitCnt(dscnt=count[2][0], vlcnt=count[2][1], vscnt=-1, comment=""),
+            SBarrier(comment=""),
+
+            SWaitCnt(dscnt=count[3][0], vlcnt=count[3][1], vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+
+            SWaitCnt(dscnt=count[4][0], vlcnt=count[4][1], vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment="")
+            ]
+        
+        print("Optimized Schedule:")
+        for k,v in optSchedule.items():
+            print(f"  '{k}': {v},")
+        print("Sync Code:")
+        for i in syncCode:
+            print(f"  {i}")
+
+        nglshift = nllshift = total_gra_loads
+        print(f"{nglshift=}")
+    else:
+        return False, None
+
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+def _get_schedule_192x320x64_16bit_000(kernel, useLDSTr, TLDS):
+    kernel["MfmaInitCVgprs"] = True
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    if isNN(kernel) and useLDSTr and TLDS==1:
+        print("000000000000000000000")
+        numMfma = 120
+
+        kernel["SwapGlobalReadOrder"] = False
+
+        optSchedule = {
+            'SYNC': [[-1, 5, 25, 25, 59, 98, 98]],
+            'LRA0': [[0, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7]],
+            'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
+            'LRB0': [[1, 8, 9, 10, 11, 12, 13, 14, 15, 16]],
+            'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
+            'GRA': [[25, 25, 29, 29, 34, 34, 39, 39, 44, 44, 48, 48]],
+            'GRB': [[53, 53, 58, 58, 63, 63, 67, 67, 72, 72, 77, 77, 82, 82, 86, 86, 91, 91, 96, 96]],
+            'LRSA': [[58]],
+            'LRSB': [[58]],
+            'LWSA': [[96]],
+            'LWSB': [[96]],
+            'LRA1': [[99, 100, 100, 101, 101, 102, 102, 103, 103, 104, 104, 105]],
+            'LRB1': [[99, 106, 107, 108, 109, 110, 111, 112, 113, 114]],
+            'LCC': [[119, 119]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=9, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=9 newLW=0 newLR=9 for iteration == 0"),
+            SWaitCnt(dscnt=10, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+            SWaitCnt(dscnt=-1, vlcnt=16, vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment="")
+        ]
+        nglshift = nllshift = 16
+    else:
+        return False, None
+
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
 def hasCustomSchedule(kernel):
 
     if not kernel["UseCustomMainLoopSchedule"]:
@@ -660,6 +1175,7 @@ def hasCustomSchedule(kernel):
     is256x256x128DTL = [MT0, MT1, DU, PGR, PLR, DTL] == [256, 256, 128, 2, 0, True]
     is160x256x64DTL = [MT0, MT1, DU, PGR, PLR, DTL] == [160, 256, 64, 2, 1, True]
     is256x160x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL] == [256, 160, 64, 2, 1, True]
+    is192x320x64DTL = [MT0, MT1, DU, PGR, PLR, DTL] == [192, 320, 64, 2, 1, True]
 
     if is256x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
         return _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS)
@@ -671,5 +1187,6 @@ def hasCustomSchedule(kernel):
         return _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS)
     elif is256x160x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
         return _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS)
-
+    elif is192x320x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
+        return _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS)
     return False, None
