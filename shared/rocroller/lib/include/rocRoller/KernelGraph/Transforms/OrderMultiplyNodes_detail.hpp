@@ -85,13 +85,46 @@ namespace rocRoller
 
                 bool operator()(int a, int b) const;
 
-                std::optional<bool> existingOrder(int a, int b) const;
+                /**
+                 * Looks for memory nodes downstream of `node` in a breadth-first search of the
+                 * control graph. Returns the first memory node found, or `std::nullopt` if none
+                 * exists.
+                 */
+                std::optional<int> downstreamMemoryNode(int node) const;
+
+                /**
+                 * Looks for memory nodes downstream in a breadth-first search of the control
+                 * graph from `a` and `b`. If these are found and are different from each other,
+                 * it will return an order based on the control graph order of those memory nodes.
+                 *
+                 * For kernels that are not double buffered, this can be used to prioritize
+                 * multiply nodes that will enabled memory nodes to be scheduled earlier in the
+                 * kernel, overlapping with other multiply nodes.
+                 *
+                 * For double-buffered kernels, this will generally be the same memory node for
+                 * both `a` and `b`, so this will return `std::nullopt`.
+                 */
                 std::optional<bool> orderByDownstreamMemoryNodes(int a, int b) const;
+
+                /**
+                 * Looks for data flow tags that are read by `node`. Then looks for control
+                 * nodes that write to those tags, and are before `node`. Returns those nodes in
+                 * reverse topological order (i.e. from latest to earliest).
+                 */
+                std::vector<int> const& reversedTagDependencies(int node) const;
+
+                /**
+                 * Calls `reversedTagDependencies()` on `a` and `b`. Then will do an
+                 * element-wise comparison using `compareNodes()` on those results.
+                 */
                 std::optional<bool> orderByLastTagDependencies(int a, int b) const;
 
             private:
-                std::optional<int>      downstreamMemoryNode(int node) const;
-                std::vector<int> const& reversedTagDependencies(int node) const;
+                /**
+                 * Helper function. Returns the existing order of the two nodes if it is
+                 * defined, otherwise returns std::nullopt.
+                 */
+                std::optional<bool> existingOrder(int a, int b) const;
 
                 KernelGraph const&                                  m_graph;
                 ControlFlowRWTracer                                 m_tracer;
