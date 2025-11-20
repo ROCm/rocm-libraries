@@ -162,16 +162,16 @@ TEST(GPU_CheckNumerics_FP16, AbnormalInf)
 }
 
 // BF16 tests
-TEST(GPU_CheckNumerics_BF16, NormalZero) { TestNormalValue<bfloat16>(bfloat16(0.0f)); }
+TEST(GPU_CheckNumerics_BFP16, NormalZero) { TestNormalValue<bfloat16>(bfloat16(0.0f)); }
 
-TEST(GPU_CheckNumerics_BF16, NormalOne) { TestNormalValue<bfloat16>(bfloat16(1.0f)); }
+TEST(GPU_CheckNumerics_BFP16, NormalOne) { TestNormalValue<bfloat16>(bfloat16(1.0f)); }
 
-TEST(GPU_CheckNumerics_BF16, AbnormalNaN)
+TEST(GPU_CheckNumerics_BFP16, AbnormalNaN)
 {
     TestAbnormalValue<bfloat16>(std::numeric_limits<bfloat16>::quiet_NaN());
 }
 
-TEST(GPU_CheckNumerics_BF16, AbnormalInf)
+TEST(GPU_CheckNumerics_BFP16, AbnormalInf)
 {
     TestAbnormalValue<bfloat16>(std::numeric_limits<bfloat16>::infinity());
 }
