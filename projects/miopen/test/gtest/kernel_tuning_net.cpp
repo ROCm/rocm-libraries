@@ -289,13 +289,10 @@ protected:
         ASSERT_TRUE(
             miopen::conv::IsEnoughWorkspace("GetSolutionsFallback AI", solver_id, ws, &invoke_ctx));
 
-        // clang-format off
         miopen::PerformanceDb db = {
-            miopen::DbKinds::PerfDb,
-            miopen::fs::path{"/tmp/nodb.db.txt"},
-            miopen::fs::path{"/tmp/nodb.udb.txt"}
+            miopen::DbKinds::PerfDb, fs::path{"/tmp/nodb.db.txt"},
+                fs::path{"/tmp/nodb.udb.txt"}
             }; // empty db, force heuristic
-        // clang-format on
         miopen::solver::ConvSolution sol =
             solv.FindSolution(ctx, problem, db, {}); // auto tune is not expected here
 

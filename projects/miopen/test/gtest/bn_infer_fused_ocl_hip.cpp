@@ -120,8 +120,8 @@ void BatchNormFusedInferencGPU(const miopen::Handle& handle,
         (use_hip ? "MIOpenBatchNormActivInferHIP.cpp" : "MIOpenBatchNormActivInfer.cl");
     std::string kernel_name = "MIOpenBatchNormActivInfer";
 
-    std::string params = use_hip ? build_params.GenerateFor(miopen::kbp::OpenCL{})
-                                 : build_params.GenerateFor(miopen::kbp::HIP{});
+    std::string params = use_hip ? build_params.GenerateFor(miopen::kbp::HIP{})
+                                 : build_params.GenerateFor(miopen::kbp::OpenCL{});
 
     if(bn_mode == miopenBNSpatial)
     {
@@ -315,7 +315,8 @@ protected:
             {miopenActivationPOWER, "power"},
             {miopenActivationCLIPPEDRELU, "clippedrelu"},
             {miopenActivationLEAKYRELU, "leakyrelu"},
-            {miopenActivationELU, "elu"}};
+            {miopenActivationELU, "elu"},
+        };
 
         auto it = activation_map.find(activ_mode);
         if(it != activation_map.end())
@@ -402,7 +403,25 @@ std::vector<BNTestCase> BNFusedInferTestConfigs(miopenBatchNormMode_t mode)
 {
 #if PERF_ENABLE
     std::vector<BNTestCase> configs;
-    size_t maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
+
+    size_t maxTotalSize = 0;
+    // HIP L2 cache query
+    int dev = -1;
+    if(hipSuccess == hipGetDevice(&dev))
+    {
+        int L2_bytes = 0;
+        if(hipSuccess == hipDeviceGetAttribute(&L2_bytes, hipDeviceAttributeL2CacheSize, dev) &&
+           L2_bytes > 0)
+        {
+            // Use 2x L2 as a working-set heuristic
+            maxTotalSize = 2ul * static_cast<size_t>(L2_bytes);
+            // Convert bytes -> elements of type T
+            maxTotalSize = maxTotalSize / sizeof(T);
+        }
+    }
+    // Fallback table by architecture family
+    if(maxTotalSize == 0)
+        maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
 
     for(size_t N = 1; N <= maxTotalSize; N *= 2)
     {

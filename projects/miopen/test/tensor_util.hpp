@@ -31,6 +31,8 @@
 #include <miopen/stringutils.hpp>
 #include <miopen/filesystem.hpp>
 
+namespace fs = miopen::fs;
+
 // unary operation
 template <class DataOp, typename Container>
 void operate_over_subtensor(DataOp&& dataOp,
@@ -161,7 +163,7 @@ void operate_over_subtensor(DataOp&& dataOp,
 }
 
 template <typename T>
-void output_tensor_to_csv(const tensor<T>& x, const miopen::fs::path& filename)
+void output_tensor_to_csv(const tensor<T>& x, const fs::path& filename)
 {
     int dim = x.desc.GetSize();
     std::vector<int> index(dim);
@@ -190,7 +192,7 @@ void output_tensor_to_csv(const tensor<T>& x, const miopen::fs::path& filename)
 }
 
 template <typename T>
-void output_tensor_to_bin(const miopen::fs::path& fileName, T* data, size_t dataNumItems)
+void output_tensor_to_bin(const fs::path& fileName, T* data, size_t dataNumItems)
 {
     std::ofstream outFile(fileName, std::ios::binary);
     if(outFile.is_open())
