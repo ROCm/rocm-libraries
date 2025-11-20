@@ -359,34 +359,43 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
     syncCode = []
 
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
-    if isNT(kernel) and TLDS == 0:
+    if isNT(kernel) and useLDSTr and TLDS == 0:
         optSchedule = {
-                'SYNC'   : [[0, 21,21, 48, 79,79]],
-                'LRA0'   : [[1, 2,2, 3,3, 4,4, 5,5, 6,6, 7,7, 8,8, 9]],
-                'LRB0'   : [[1, 9, 10,10, 11,11, 12,12, 13,13, 14,14]],
-                'GRIncA' : [[1,1,1, 2,2,2, 3,3,3]],
-                'GRIncB' : [[4,4,4, 5,5,5, 6,6,6]],
-                'GRA'    : [[21,21, 25,25, 29,29, 34,34, 38,38, 42,42, 47,47, 51,51]],
-                'LRSA'   : [[47]],
-                'LRSB'   : [[47]],
-                'GRB'    : [[55,55, 60,60, 64,64, 68,68, 73,73, 77,77]],
-                'LWSA'   : [[77]],
-                'LWSB'   : [[77]],
-                'LRA1'   : [[80, 81,81, 82,82, 83,83, 84,84, 85,85, 86,86, 87,87, 88]],
-                'LRB1'   : [[80, 88, 89,89, 90,90, 91,91, 92,92, 93,93]],
-                'LCC'    : [[95, 95]],
-            }
+            'SYNC'   : [[16,16, 47,47, 79,79]],
+            
+            'GRIncA' : [[0,0,0, 1,1,1, 2,2,2]],
+            'GRIncB' : [[3,3,3, 4,4,4, 5,5,5]],
+            
+            'LRA0'   : [[0, 2,2, 4,4, 6,6, 8,8, 10,10, 12,12, 14,14, 16],
+                        [1, 3,3, 5,5, 7,7, 9,9, 11,11, 13,13, 15,15, 17]],
+            'LRB0'   : [[16, 18, 20,20, 22,22, 24,24, 26,26, 28,28],
+                        [17, 19, 21,21, 23,23, 25,25, 27,27, 29,29]],
+          
+            'GRA'    : [[16,16, 18,18, 20,20, 22,22, 24,24, 26,26, 28,28, 30,30],
+                        [17,17, 19,19, 21,21, 23,23, 25,25, 27,27, 29,29, 31,31]],  # originally has a 4 index gap b/w each pair
+            'GRB'    : [[35,35, 37,37, 39,39, 41,41, 43,43, 45,45],
+                        [36,36, 38,38, 40,40, 42,42, 44,44, 46,46]], # originally has a 4 index gap b/w each pair
 
+            'LRA1'   : [[48, 50,50, 52,52, 54,54, 56,56, 58,58, 60,60, 62,62, 64],
+                        [49, 51,51, 53,53, 55,55, 57,57, 59,59, 61,61, 63,63, 65]],
+            'LRB1'   : [[66, 68, 70,70, 72,72, 74,74, 76,76, 78,78],
+                        [67, 69, 71,71, 73,73, 75,75, 77,77, 79,79]],
+            
+            'LRSA'   : [[48]],
+            'LRSB'   : [[48]],
+            'LWSA'   : [[77]],
+            'LWSB'   : [[77]],
+            'LCC'    : [[95, 95]],
+        }
         syncCode = [
-                SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0"),
-                SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
-                SBarrier(comment=""),
-                SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
-                SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="wait for previous set of global reads"),
-                SBarrier(comment="")
-            ]
-        
-        nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment="")
+        ]
+        nglshift = nllshift = 14
     else:
         return False, None
 
@@ -663,5 +672,7 @@ def hasCustomSchedule(kernel):
         return _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS)
     elif is256x160x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
         return _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS)
+    elif is256x192x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
+        return _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS)
 
     return False, None
