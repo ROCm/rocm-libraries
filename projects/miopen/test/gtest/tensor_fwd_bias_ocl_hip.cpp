@@ -33,10 +33,11 @@
 #define PERF_ENABLE 0
 #if PERF_ENABLE
 #include "perf_helper.hpp"
+
+#define POW_2 1
 #endif
 
 #define MAX_TENSOR_ELEM 17
-#define POW_2 1
 
 struct TensorsConfig
 {
@@ -90,52 +91,47 @@ std::vector<TensorsConfig> TensorsConfigs()
 
     // Generate all NCHW tensors that are limited by L3 cache size
     // or 2xL2 cache size when L3 is not available
-    if constexpr(POW_2)
+#if POW_2
+    for(size_t N = 1; N <= maxTotalSize; N *= 2)
     {
-        for(size_t N = 1; N <= maxTotalSize; N *= 2)
+        for(size_t C = 1; C <= maxTotalSize / N; C *= 2)
         {
-            for(size_t C = 1; C <= maxTotalSize / N; C *= 2)
+            for(size_t H = 1; H <= maxTotalSize / (N * C); H *= 2)
             {
-                for(size_t H = 1; H <= maxTotalSize / (N * C); H *= 2)
+                for(size_t W = 1; W <= maxTotalSize / (N * C * H); W *= 2)
                 {
-                    for(size_t W = 1; W <= maxTotalSize / (N * C * H); W *= 2)
+                    size_t totalSize = N * C * H * W;
+                    // Ensure the total size does not exceed the maximum limit
+                    if(totalSize <= maxTotalSize)
                     {
-                        size_t totalSize = N * C * H * W;
-                        // Ensure the total size does not exceed the maximum limit
-                        if(totalSize <= maxTotalSize)
-                        {
-                            insertTestCase(N, C, H, W);
-                        }
+                        insertTestCase(N, C, H, W);
                     }
                 }
             }
         }
     }
-    else
+#else
+    for(size_t N = 1; N <= maxTotalSize; N *= 2)
     {
-        for(size_t N = 1; N <= maxTotalSize; N *= 2)
+        for(size_t C = 1; C <= maxTotalSize / N; C *= 2)
         {
-            for(size_t C = 1; C <= maxTotalSize / N; C *= 2)
+            for(size_t H = 1; H <= maxTotalSize / (N * C); H *= 2)
             {
-                for(size_t H = 1; H <= maxTotalSize / (N * C); H *= 2)
+                for(size_t W = 1; W <= maxTotalSize / (N * C * W); W *= 2)
                 {
-                    for(size_t W = 1; W <= maxTotalSize / (N * C * W); W *= 2)
+                    for(int dn = -1; dn <= 1; dn += 2)
                     {
-                        for(int dn = -1; dn <= 1; dn += 2)
+                        for(int dc = -1; dc <= 1; dc += 2)
                         {
-                            for(int dc = -1; dc <= 1; dc += 2)
+                            for(int dh = -1; dh <= 1; dh += 2)
                             {
-                                for(int dh = -1; dh <= 1; dh += 2)
+                                for(int dw = -1; dw <= 1; dw += 2)
                                 {
-                                    for(int dw = -1; dw <= 1; dw += 2)
+                                    size_t totalSize = (N + dn) * (C + dc) * (H + dh) * (W + dw);
+                                    // Ensure the total size does not exceed the maximum limit
+                                    if(totalSize <= maxTotalSize)
                                     {
-                                        size_t totalSize =
-                                            (N + dn) * (C + dc) * (H + dh) * (W + dw);
-                                        // Ensure the total size does not exceed the maximum limit
-                                        if(totalSize <= maxTotalSize)
-                                        {
-                                            insertTestCase((N + dn), (C + dc), (H + dh), (W + dw));
-                                        }
+                                        insertTestCase((N + dn), (C + dc), (H + dh), (W + dw));
                                     }
                                 }
                             }
@@ -145,8 +141,7 @@ std::vector<TensorsConfig> TensorsConfigs()
             }
         }
     }
-
-    return configs;
+#endif //POW2
 #else
     size_t N = 1;
     size_t C = 1;
@@ -161,8 +156,9 @@ std::vector<TensorsConfig> TensorsConfigs()
     H = 20;
     W = 20;
     insertTestCase(N, C, H, W);
+#endif //PERF_ENABLE
+
     return configs;
-#endif
 }
 
 template <typename T>
