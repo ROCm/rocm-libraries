@@ -51,7 +51,7 @@ def getDstValueType(kernel):
         dstValueType = "BF8"
     else:
         dstValueType = kernel["ProblemType"]["DataType"].toNameAbbrev().upper()
-    
+
     dstValueType = dstValueType.lower()
     return dstValueType
 

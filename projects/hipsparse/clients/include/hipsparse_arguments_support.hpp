@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -732,7 +732,7 @@ struct routine_support
 
 struct csr2csc_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseCsr2CscAlg_t get_default_algorithm()
     {
 #if(!defined(CUDART_VERSION))
         return HIPSPARSE_CSR2CSC_ALG_DEFAULT;
@@ -783,7 +783,7 @@ struct csr2csc_alg_support
 
 struct dense2sparse_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseDenseToSparseAlg_t get_default_algorithm()
     {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
         return HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT;
@@ -805,7 +805,7 @@ struct dense2sparse_alg_support
 
 struct sparse2dense_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseSparseToDenseAlg_t get_default_algorithm()
     {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
         return HIPSPARSE_SPARSETODENSE_ALG_DEFAULT;
@@ -827,7 +827,7 @@ struct sparse2dense_alg_support
 
 struct sddmm_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseSDDMMAlg_t get_default_algorithm()
     {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11022)
         return HIPSPARSE_SDDMM_ALG_DEFAULT;
@@ -849,7 +849,7 @@ struct sddmm_alg_support
 
 struct spgemm_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseSpGEMMAlg_t get_default_algorithm()
     {
 #if(!defined(CUDART_VERSION))
         return HIPSPARSE_SPGEMM_DEFAULT;
@@ -890,7 +890,7 @@ struct spgemm_alg_support
 
 struct spmm_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseSpMMAlg_t get_default_algorithm()
     {
 #if(!defined(CUDART_VERSION))
         return HIPSPARSE_SPMM_ALG_DEFAULT;
@@ -940,7 +940,7 @@ struct spmm_alg_support
 
 struct spmv_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseSpMVAlg_t get_default_algorithm()
     {
 #if(!defined(CUDART_VERSION))
         return HIPSPARSE_SPMV_ALG_DEFAULT;
@@ -981,7 +981,7 @@ struct spmv_alg_support
 
 struct spsm_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseSpSMAlg_t get_default_algorithm()
     {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
         return HIPSPARSE_SPSM_ALG_DEFAULT;
@@ -1003,7 +1003,7 @@ struct spsm_alg_support
 
 struct spsv_alg_support
 {
-    static int get_default_algorithm()
+    static hipsparseSpSVAlg_t get_default_algorithm()
     {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
         return HIPSPARSE_SPSV_ALG_DEFAULT;

@@ -110,6 +110,19 @@ namespace rocRoller
                 return std::make_shared<Expression>(cpy);
             }
 
+            template <CNary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                auto cpy = expr;
+                std::ranges::for_each(cpy.operands, [this](auto& op) {
+                    if(op)
+                    {
+                        op = call(op);
+                    }
+                });
+                return std::make_shared<Expression>(std::move(cpy));
+            }
+
             ExpressionPtr operator()(Register::ValuePtr const& value) const
             {
                 return equivalent(value->expression(), m_target->expression())
@@ -212,6 +225,19 @@ namespace rocRoller
                     cpy.r2hs = call(expr.r2hs);
                 }
                 return std::make_shared<Expression>(cpy);
+            }
+
+            template <CNary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                auto cpy = expr;
+                std::ranges::for_each(cpy.operands, [this](auto& op) {
+                    if(op)
+                    {
+                        op = call(op);
+                    }
+                });
+                return std::make_shared<Expression>(std::move(cpy));
             }
 
             ExpressionPtr operator()(Register::ValuePtr const& value) const
@@ -447,6 +473,82 @@ namespace rocRoller
                                                       : tree.at(r2hsLoc).expr,
                     }
                                                      .copyParams(expr)),
+                    deps,
+                    consolidationCount,
+                });
+
+                setComment(tree.back().expr, getComment(expr));
+
+                return tree;
+            }
+
+            ExpressionTree operator()(BitfieldCombine const& expr) const
+            {
+                AssertFatal(
+                    false,
+                    "BitfieldCombine should be lowered to shift and bitwise AND/OR epxressions");
+                return {};
+            }
+
+            template <CNary Expr>
+            ExpressionTree operator()(Expr const& expr) const
+            {
+                std::vector<ExpressionTree> operandTrees;
+                std::set<int>               deps;
+                std::vector<int>            operandLocs;
+                int                         consolidationCount = 0;
+
+                if(expr.operands.empty())
+                {
+                    return {};
+                }
+
+                operandTrees.reserve(expr.operands.size());
+                operandLocs.reserve(expr.operands.size());
+
+                for(auto const& operand : expr.operands)
+                {
+                    ExpressionTree operandTree = generateTree(operand);
+                    if(operandTree.empty())
+                    {
+                        return {};
+                    }
+                    operandTrees.push_back(std::move(operandTree));
+                }
+
+                ExpressionTree tree = operandTrees.at(0);
+                operandLocs.push_back(tree.size() - 1);
+                deps.insert(tree.size() - 1);
+
+                for(size_t i = 1; i < expr.operands.size(); ++i)
+                {
+                    auto combo = combine(tree, operandTrees.at(i));
+                    tree       = std::get<0>(combo);
+                    int loc    = std::get<1>(combo);
+                    operandLocs.push_back(loc);
+                    deps.insert(loc);
+                    consolidationCount += std::get<2>(combo);
+                }
+
+                for(size_t i = 0; i < expr.operands.size(); ++i)
+                {
+                    int loc = operandLocs.at(i);
+                    consolidationCount += tree.at(loc).consolidationCount;
+                }
+
+                std::vector<ExpressionPtr> nodeOperands;
+                nodeOperands.reserve(expr.operands.size());
+                for(size_t i = 0; i < expr.operands.size(); ++i)
+                {
+                    int loc = operandLocs.at(i);
+                    nodeOperands.push_back(canUseAsReg(tree.at(loc))
+                                               ? tree.at(loc).reg->expression()
+                                               : tree.at(loc).expr);
+                }
+
+                tree.push_back(ExpressionNode{
+                    nullptr,
+                    std::make_shared<Expression>(Expr{std::move(nodeOperands)}.copyParams(expr)),
                     deps,
                     consolidationCount,
                 });

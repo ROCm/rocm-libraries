@@ -231,6 +231,11 @@ static void gather_field_p2p(MPI_Comm                                  mpi_comm,
         const auto& brick       = bricks[i];
         size_t      brick_elems = compute_ptrdiff(brick.length(), brick.stride, 0, 0);
 
+        // The rank that this brick is on needs to send to rank 0,
+        // and rank 0 needs to receive all bricks
+        if(brick.rank != mpi_rank && mpi_rank != 0)
+            continue;
+
         void* brick_ptr   = nullptr;
         auto  local_brick = local_bricks.find(brick.device);
         if(local_brick != local_bricks.end())
@@ -603,6 +608,8 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
             fft_params params_inplace = params;
             params_inplace.placement  = fft_placement_inplace;
 
+            params.apply_host_load_ops(cpu_data);
+
             switch(params_inplace.precision)
             {
             case fft_precision_half:
@@ -615,6 +622,8 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
                 execute_reference_fft<double>(params_inplace, cpu_data);
                 break;
             }
+
+            params.apply_host_store_ops(cpu_data);
 
             cpu_output_norm = norm(cpu_data,
                                    params_inplace.ilength(),

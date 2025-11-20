@@ -71,10 +71,14 @@ endif()
 
 if(BUILD_CODE_COVERAGE)
   target_compile_options(rocsolver-common INTERFACE
-    -fprofile-arcs
-    -ftest-coverage
+    -g
+    -O0
+    -fprofile-instr-generate
+    -fcoverage-mapping
   )
-  target_link_options(rocsolver-common INTERFACE --coverage)
+  target_link_options(rocsolver-common INTERFACE
+    -fprofile-instr-generate
+  )
 endif()
 
 if(BUILD_COMPRESSED_DBG)

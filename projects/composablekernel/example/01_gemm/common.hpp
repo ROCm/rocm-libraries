@@ -25,6 +25,11 @@
 #include "ck/library/utility/literals.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_gemm.hpp"
 #include "ck/library/reference_tensor_operation/gpu/reference_gemm.hpp"
+#include "ck/host_utility/kernel_launch.hpp"
+
+using ::ck::DeviceMem;
+using ::ck::HostTensorDescriptor;
+using ::ck::Tensor;
 
 struct ProblemSize final
 {
@@ -310,10 +315,14 @@ bool parse_cmd_args<ProblemSizeSplitK>(int argc,
     return true;
 }
 
-template <typename DataType>
+template <typename DataType, typename ComputeDataType = DataType>
 inline __host__ __device__ constexpr double get_rtol()
 {
-    if constexpr(std::is_same_v<DataType, float>)
+    if constexpr(std::is_same_v<DataType, float> && std::is_same_v<ComputeDataType, ck::tf32_t>)
+    {
+        return 1e-3;
+    }
+    else if constexpr(std::is_same_v<DataType, float>)
     {
         return 1e-3;
     }
@@ -351,10 +360,14 @@ inline __host__ __device__ constexpr double get_rtol()
     }
 }
 
-template <typename DataType>
+template <typename DataType, typename ComputeDataType = DataType>
 inline __host__ __device__ constexpr double get_atol()
 {
-    if constexpr(std::is_same_v<DataType, float>)
+    if constexpr(std::is_same_v<DataType, float> && std::is_same_v<ComputeDataType, ck::tf32_t>)
+    {
+        return 1e-3;
+    }
+    else if constexpr(std::is_same_v<DataType, float>)
     {
         return 1e-3;
     }

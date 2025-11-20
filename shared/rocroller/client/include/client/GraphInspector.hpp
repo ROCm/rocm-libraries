@@ -199,6 +199,8 @@ namespace rocRoller
             using T = std::decay_t<decltype(val)>;
             if constexpr(std::is_pointer_v<T>)
                 Throw<FatalError>("Unexpected pointer!");
+            else if constexpr(std::is_same_v<T, Buffer>)
+                Throw<FatalError>("Unexpected Buffer!");
             else
                 return static_cast<size_t>(val);
         };

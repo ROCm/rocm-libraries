@@ -95,7 +95,17 @@ typedef hiprandDiscreteDistribution_st * hiprandDiscreteDistribution_t;
 typedef __half half;
 /// \endcond
 
+/**
+ * \def HIPRAND_DEFAULT_MAX_BLOCK_SIZE
+ * \brief Legacy macro for default maximum block size.
+ * \deprecated May be removed in a future version.
+ */
 #define HIPRAND_DEFAULT_MAX_BLOCK_SIZE 256
+
+/**
+ * \def HIPRAND_DEFAULT_MIN_WARPS_PER_EU
+ * \brief Default minimum number of warps per execution unit for kernel launches.
+ */
 #define HIPRAND_DEFAULT_MIN_WARPS_PER_EU 1
 
 #if defined(__cplusplus)
@@ -780,14 +790,50 @@ hiprandCreatePoissonDistribution(double lambda, hiprandDiscreteDistribution_t * 
 hiprandStatus_t HIPRANDAPI
 hiprandDestroyDistribution(hiprandDiscreteDistribution_t discrete_distribution);
 
+/**
+ * \brief Retrieves the Sobol 32 direction vector array specified by \p set.
+ *
+ * \param vectors Pointer to the Sobol 32 direction vector array.
+ * \param set Specifies which hipRAND vector set for quasirandom generators to retrieve.
+ *
+ * \return
+ * - HIPRAND_STATUS_OUT_OF_RANGE if \p set is invalid \n
+ * - HIPRAND_STATUS_SUCCESS if \p vectors was set successfully \n
+ */
 hiprandStatus_t HIPRANDAPI hiprandGetDirectionVectors32(hiprandDirectionVectors32_t** vectors,
                                                         hiprandDirectionVectorSet_t   set);
 
+/**
+ * \brief Retrieves the Sobol 64 direction vector array specified by \p set.
+ *
+ * \param vectors Pointer to the Sobol 64 direction vector array.
+ * \param set Specifies which hipRAND vector set for quasirandom generators to retrieve.
+ *
+ * \return
+ * - HIPRAND_STATUS_OUT_OF_RANGE if \p set is invalid \n
+ * - HIPRAND_STATUS_SUCCESS if \p vectors was set successfully \n
+ */
 hiprandStatus_t HIPRANDAPI hiprandGetDirectionVectors64(hiprandDirectionVectors64_t** vectors,
                                                         hiprandDirectionVectorSet_t   set);
 
+/**
+ * \brief Retrieves the scramble constants for 32-bit scrambled Sobol generation.
+ *
+ * \param constants Pointer to the constants pointer.
+ *
+ * \return
+ * - HIPRAND_STATUS_SUCCESS if the pointer was set successfully
+ */
 hiprandStatus_t HIPRANDAPI hiprandGetScrambleConstants32(const unsigned int** constants);
 
+/**
+ * \brief Retrieves the scramble constants for 64-bit scrambled Sobol generation.
+ *
+ * \param constants Pointer to the constants pointer.
+ *
+ * \return
+ * - HIPRAND_STATUS_SUCCESS if the pointer was set successfully
+ */
 hiprandStatus_t HIPRANDAPI hiprandGetScrambleConstants64(const unsigned long long** constants);
 
 #if defined(__cplusplus)

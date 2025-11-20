@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 
 #include "../../shared/fft_hash.h"
+#include "../../shared/params_gen.h"
 #include "../../shared/rocfft_params.h"
 #include <algorithm>
 #include <chrono>
@@ -29,7 +30,7 @@
 
 static void set_params(const fft_precision precision, fft_params& param)
 {
-    std::vector<size_t> blengths = {16777216};
+    std::vector<size_t> blengths = {131072};
 
     std::vector<size_t> unit_strides = {1};
 
@@ -357,6 +358,12 @@ static void run_test(const rocfft_params& params)
 
 TEST(rocfft_UnitTest, buffer_hashing_half)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     rocfft_params params;
     set_params(fft_precision_half, params);
 
@@ -366,12 +373,19 @@ TEST(rocfft_UnitTest, buffer_hashing_half)
     }
     catch(HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
 }
 
 TEST(rocfft_UnitTest, buffer_hashing_single)
 {
+
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     rocfft_params params;
     set_params(fft_precision_single, params);
 
@@ -381,12 +395,19 @@ TEST(rocfft_UnitTest, buffer_hashing_single)
     }
     catch(HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
 }
 
 TEST(rocfft_UnitTest, buffer_hashing_double)
 {
+
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+
     rocfft_params params;
     set_params(fft_precision_double, params);
 
@@ -396,6 +417,6 @@ TEST(rocfft_UnitTest, buffer_hashing_double)
     }
     catch(HOSTBUF_MEM_USAGE& e)
     {
-        GTEST_SKIP() << e.msg;
+        GTEST_SKIP() << e.what();
     }
 }

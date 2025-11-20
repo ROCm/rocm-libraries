@@ -29,14 +29,24 @@
 namespace rocsparse
 {
     template <typename I, typename T, typename U>
-    rocsparse_status dense_transpose(rocsparse_handle handle,
-                                     I                m,
-                                     I                n,
-                                     U                alpha_device_host,
-                                     const T*         A,
-                                     int64_t          lda,
-                                     T*               B,
-                                     int64_t          ldb);
+    rocsparse_status dense_transpose_template(rocsparse_handle handle,
+                                              I                m,
+                                              I                n,
+                                              U                alpha_device_host,
+                                              const T*         A,
+                                              int64_t          lda,
+                                              T*               B,
+                                              int64_t          ldb);
+
+    rocsparse_status dense_transpose(rocsparse_handle   handle,
+                                     int64_t            m,
+                                     int64_t            n,
+                                     rocsparse_datatype source_datatype,
+                                     const void*        source,
+                                     int64_t            source_ld,
+                                     rocsparse_datatype target__datatype,
+                                     void*              target,
+                                     int64_t            target_ld);
 
     template <typename I, typename T>
     rocsparse_status dense_transpose_back(
@@ -56,7 +66,16 @@ namespace rocsparse
     rocsparse_status
         scale_array(rocsparse_handle handle, I length, const T* scalar_device_host, A* array);
 
-    template <typename I, typename T>
+    template <typename I, typename X, typename Y, typename T>
+    rocsparse_status axpby_array_batched(rocsparse_handle handle,
+                                         I                length,
+                                         rocsparse_int    num_extra,
+                                         const T*         gamma_device_array,
+                                         const X**        x_arrays,
+                                         const T*         beta_device_host,
+                                         Y*               y_array);
+
+    template <typename I, typename A, typename T>
     rocsparse_status scale_2d_array(rocsparse_handle handle,
                                     I                m,
                                     I                n,
@@ -64,7 +83,7 @@ namespace rocsparse
                                     int64_t          batch_count,
                                     int64_t          stride,
                                     const T*         scalar_device_host,
-                                    T*               array,
+                                    A*               array,
                                     rocsparse_order  order);
 
     template <typename I, typename J>

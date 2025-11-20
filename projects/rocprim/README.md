@@ -42,12 +42,13 @@ You can build and install rocPRIM on Linux or Windows.
 
   # Configure rocPRIM, setup options for your system.
   # Build options:
-  #   ONLY_INSTALL - OFF by default, If this flag is on, the build ignore the BUILD_* flags
-  #   BUILD_TEST - OFF by default,
-  #   BUILD_EXAMPLE - OFF by default,
+  #   ONLY_INSTALL - OFF by default. If this flag is on, the build ignores the BUILD_* flags.
+  #   BUILD_TEST - OFF by default.
+  #   BUILD_EXAMPLE - OFF by default.
   #   BUILD_BENCHMARK - OFF by default.
   #   BENCHMARK_CONFIG_TUNING - OFF by default. The purpose of this flag to find the best kernel config parameters.
   #     At ON the compilation time can be increased significantly.
+  #   BENCHMARK_USE_AMDSMI - OFF by default. Set to ON to let benchmarks use AMD SMI to output more GPU statistics.
   #   AMDGPU_TARGETS - list of AMD architectures, default: gfx803;gfx900;gfx906;gfx908.
   #     You can make compilation faster if you want to test/benchmark only on one architecture,
   #     for example, add -DAMDGPU_TARGETS=gfx906 to 'cmake' parameters.
@@ -55,6 +56,7 @@ You can build and install rocPRIM on Linux or Windows.
   #     If you want to detect failures on a per GFX IP basis, setting it to some set of ips will create
   #     separate tests with the ip name embedded into the test name. Building for all, but selecting
   #     tests only of a specific architecture is possible for eg: ctest -R gfx803|gfx900
+  #   USE_SYSTEM_LIB - OFF by default. Setting this flag to ON will build tests from the installed ROCm libs provided by the system. This only takes effect when BUILD_TEST is ON.
   #
   # ! IMPORTANT !
   # Set C++ compiler to HIP-clang. You can do it by adding 'CXX=<path-to-compiler>'
@@ -275,7 +277,7 @@ based on the input types and the target architecture from the stream used.
 [CUB](https://github.com/NVlabs/cub). You can use it to port projects that use the CUB library to the
 [HIP](https://github.com/ROCm/HIP) layer and run them on AMD hardware. In the
 [ROCm](https://rocm.docs.amd.com/en/latest/) environment, hipCUB uses the rocPRIM library as a
-backend; on CUDA platforms, it uses CUB as a backend.
+backend.
 
 ## Building the documentation locally
 

@@ -45,124 +45,138 @@ namespace rocrand_impl::host
 
 typedef ::rocrand_device::lfsr113_engine lfsr113_device_engine;
 
-__host__ __device__ inline void init_lfsr113_engines(dim3 block_idx,
-                                                     dim3 thread_idx,
-                                                     dim3 /*grid_dim*/,
-                                                     dim3                   block_dim,
-                                                     lfsr113_device_engine* engines,
-                                                     const unsigned int     start_engine_id,
-                                                     const unsigned int     engines_size,
-                                                     const uint4            seeds,
-                                                     const unsigned int     offset)
+struct init_lfsr113_engines
 {
-    const unsigned int engine_id = block_idx.x * block_dim.x + thread_idx.x;
-    if(engine_id < engines_size)
+    template<host::target_arch Arch = host::target_arch::unknown>
+    __host__
+    __device__
+    __inline__ static void generate(dim3 block_idx,
+                                    dim3 thread_idx,
+                                    dim3 /*grid_dim*/,
+                                    dim3                   block_dim,
+                                    lfsr113_device_engine* engines,
+                                    const unsigned int     start_engine_id,
+                                    const unsigned int     engines_size,
+                                    const uint4            seeds,
+                                    const unsigned int     offset)
     {
-        engines[engine_id] = lfsr113_device_engine(seeds,
-                                                   engine_id,
-                                                   offset + (engine_id < start_engine_id ? 1 : 0));
+        const unsigned int engine_id = block_idx.x * block_dim.x + thread_idx.x;
+        if(engine_id < engines_size)
+        {
+            engines[engine_id]
+                = lfsr113_device_engine(seeds,
+                                        engine_id,
+                                        offset + (engine_id < start_engine_id ? 1 : 0));
+        }
     }
-}
+};
 
 template<class ConfigProvider, bool IsDynamic, class T, class Distribution>
-__host__ __device__ __forceinline__ void generate_lfsr113(dim3 block_idx,
-                                                          dim3 thread_idx,
-                                                          dim3 grid_dim,
-                                                          dim3 /*block_dim*/,
-                                                          lfsr113_device_engine* engines,
-                                                          const unsigned int     start_engine_id,
-                                                          T*                     data,
-                                                          const size_t           n,
-                                                          Distribution           distribution)
+struct generate_lfsr113
 {
-    static_assert(is_single_tile_config<ConfigProvider, T>(IsDynamic),
-                  "This kernel should only be used with single tile configs");
-    constexpr unsigned int BlockSize    = get_block_size<ConfigProvider, T>(IsDynamic);
-    constexpr unsigned int input_width  = Distribution::input_width;
-    constexpr unsigned int output_width = Distribution::output_width;
-
-    using vec_type = aligned_vec_type<T, output_width>;
-
-    const unsigned int id          = block_idx.x * BlockSize + thread_idx.x;
-    const unsigned int num_engines = grid_dim.x * BlockSize;
-
-    const unsigned int    engine_id = (id + start_engine_id) & (num_engines - 1);
-    lfsr113_device_engine engine    = engines[engine_id];
-
-    unsigned int input[input_width];
-    T            output[output_width];
-
-    const uintptr_t uintptr   = reinterpret_cast<uintptr_t>(data);
-    const size_t misalignment = (output_width - uintptr / sizeof(T) % output_width) % output_width;
-    const unsigned int head_size    = cpp_utils::min(n, misalignment);
-    const unsigned int tail_size = (n - head_size) % output_width;
-    const size_t       vec_n     = (n - head_size) / output_width;
-
-    vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
-    size_t    index    = id;
-
-    while(index < vec_n)
+    template<host::target_arch Arch = host::target_arch::unknown>
+    __host__ __device__ __forceinline__
+    static void generate(dim3 block_idx,
+                         dim3 thread_idx,
+                         dim3 grid_dim,
+                         dim3 /*block_dim*/,
+                         lfsr113_device_engine* engines,
+                         const unsigned int     start_engine_id,
+                         T*                     data,
+                         const size_t           n,
+                         Distribution           distribution)
     {
-        for(unsigned int i = 0; i < input_width; i++)
-        {
-            input[i] = engine();
-        }
+        static_assert(is_single_tile_config<ConfigProvider, T, Arch>(IsDynamic),
+                      "This kernel should only be used with single tile configs");
+        constexpr unsigned int BlockSize    = get_block_size<ConfigProvider, T, Arch>(IsDynamic);
+        constexpr unsigned int input_width  = Distribution::input_width;
+        constexpr unsigned int output_width = Distribution::output_width;
 
-        distribution(input, output);
+        using vec_type = aligned_vec_type<T, output_width>;
+
+        const unsigned int id          = block_idx.x * BlockSize + thread_idx.x;
+        const unsigned int num_engines = grid_dim.x * BlockSize;
+
+        const unsigned int    engine_id = (id + start_engine_id) & (num_engines - 1);
+        lfsr113_device_engine engine    = engines[engine_id];
+
+        unsigned int input[input_width];
+        T            output[output_width];
+
+        const uintptr_t uintptr = reinterpret_cast<uintptr_t>(data);
+        const size_t    misalignment
+            = (output_width - uintptr / sizeof(T) % output_width) % output_width;
+        const unsigned int head_size = cpp_utils::min(n, misalignment);
+        const unsigned int tail_size = (n - head_size) % output_width;
+        const size_t       vec_n     = (n - head_size) / output_width;
+
+        vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
+        size_t    index    = id;
+
+        while(index < vec_n)
+        {
+            for(unsigned int i = 0; i < input_width; i++)
+            {
+                input[i] = engine();
+            }
+
+            distribution(input, output);
 
 #if defined(__gfx90a__)
-        // Workaround: The compiler hoists s_waitcnt vmcnt(..) out of the loops.
-        // For some reason this optimization decreases performance of uniform distributions
-        // on MI200. MI100 and MI300 are not affected.
-        // Here we add s_waitcnt vmcnt(0)
-        __builtin_amdgcn_s_waitcnt(/*vmcnt*/ 0 | (/*exp_cnt*/ 0x7 << 4) | (/*lgkmcnt*/ 0xf << 8));
+            // Workaround: The compiler hoists s_waitcnt vmcnt(..) out of the loops.
+            // For some reason this optimization decreases performance of uniform distributions
+            // on MI200. MI100 and MI300 are not affected.
+            // Here we add s_waitcnt vmcnt(0)
+            __builtin_amdgcn_s_waitcnt(/*vmcnt*/ 0 | (/*exp_cnt*/ 0x7 << 4)
+                                       | (/*lgkmcnt*/ 0xf << 8));
 #endif
-        vec_data[index] = *reinterpret_cast<vec_type*>(output);
-        index += num_engines;
-    }
+            vec_data[index] = *reinterpret_cast<vec_type*>(output);
+            index += num_engines;
+        }
 
-    if(output_width > 1 && index == vec_n)
-    {
-        if(head_size > 0)
+        if(output_width > 1 && index == vec_n)
         {
-            for(unsigned int i = 0; i < input_width; i++)
+            if(head_size > 0)
             {
-                input[i] = engine();
+                for(unsigned int i = 0; i < input_width; i++)
+                {
+                    input[i] = engine();
+                }
+
+                distribution(input, output);
+
+                for(unsigned int o = 0; o < output_width; o++)
+                {
+                    if(o < head_size)
+                    {
+                        data[o] = output[o];
+                    }
+                }
             }
 
-            distribution(input, output);
-
-            for(unsigned int o = 0; o < output_width; o++)
+            if(tail_size > 0)
             {
-                if(o < head_size)
+                for(unsigned int i = 0; i < input_width; i++)
                 {
-                    data[o] = output[o];
+                    input[i] = engine();
+                }
+
+                distribution(input, output);
+
+                for(unsigned int o = 0; o < output_width; o++)
+                {
+                    if(o < tail_size)
+                    {
+                        data[n - tail_size + o] = output[o];
+                    }
                 }
             }
         }
 
-        if(tail_size > 0)
-        {
-            for(unsigned int i = 0; i < input_width; i++)
-            {
-                input[i] = engine();
-            }
-
-            distribution(input, output);
-
-            for(unsigned int o = 0; o < output_width; o++)
-            {
-                if(o < tail_size)
-                {
-                    data[n - tail_size + o] = output[o];
-                }
-            }
-        }
+        // Save engine with its state
+        engines[engine_id] = engine;
     }
-
-    // Save engine with its state
-    engines[engine_id] = engine;
-}
+};
 
 template<class System, class ConfigProvider>
 class lfsr113_generator_template : public generator_impl_base
@@ -252,7 +266,7 @@ public:
         if(seeds.y < ROCRAND_LFSR113_DEFAULT_SEED_Y)
             seeds.y += ROCRAND_LFSR113_DEFAULT_SEED_Y;
 
-        m_seed                = seeds;
+        m_seed = seeds;
         reset();
     }
 
@@ -270,7 +284,7 @@ public:
         if(seed.w < ROCRAND_LFSR113_DEFAULT_SEED_W)
             seed.w += ROCRAND_LFSR113_DEFAULT_SEED_W;
 
-        m_seed                = seed;
+        m_seed = seed;
         reset();
         return ROCRAND_STATUS_SUCCESS;
     }
@@ -332,6 +346,13 @@ public:
             return ROCRAND_STATUS_INTERNAL_ERROR;
         }
 
+        host::target_arch target_arch;
+        hipError_t        result = host::get_device_arch(m_stream, target_arch);
+        if(result != hipSuccess)
+        {
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
+
         m_start_engine_id = m_offset % m_engines_size;
 
         if(m_engines != nullptr)
@@ -349,6 +370,7 @@ public:
 
         status = system_type::template launch<init_lfsr113_engines,
                                               static_block_size_config_provider<init_threads>>(
+            target_arch,
             dim3(init_blocks),
             dim3(init_threads),
             0,
@@ -389,6 +411,13 @@ public:
             return ROCRAND_STATUS_INTERNAL_ERROR;
         }
 
+        host::target_arch target_arch;
+        hipError_t        result = host::get_device_arch(m_stream, target_arch);
+        if(result != hipSuccess)
+        {
+            return ROCRAND_STATUS_INTERNAL_ERROR;
+        }
+
         if(data == nullptr)
         {
             return ROCRAND_STATUS_SUCCESS;
@@ -402,7 +431,8 @@ public:
                     generate_lfsr113<ConfigProvider, is_dynamic, T, Distribution>,
                     ConfigProvider,
                     T,
-                    is_dynamic>(dim3(config.blocks),
+                    is_dynamic>(target_arch,
+                                dim3(config.blocks),
                                 dim3(config.threads),
                                 0,
                                 m_stream,

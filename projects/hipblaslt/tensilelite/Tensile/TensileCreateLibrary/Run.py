@@ -96,13 +96,13 @@ class KernelMinResult(NamedTuple):
     pgr: int
     mathclk: int
 
-def processKernelSource(kernelWriterAssembly, data, splitGSU, kernel) -> KernelCodeGenResult:
+def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel) -> KernelCodeGenResult:
     """
     Generate source for a single kernel.
     Returns (error, source, header, kernelName).
     """
     kernelWriter = kernelWriterAssembly
-    kernelWriter.setRocIsa(data)
+    kernelWriter.setRocIsa(data, outOptions)
     asmFilename = getKernelFileBase(splitGSU, kernel)
     err, src = kernelWriter.getSourceFileString(kernel)
     header = kernelWriter.getHeaderFileString(kernel)
@@ -227,9 +227,10 @@ def writeSolutionsAndKernels(
     kernelWriterAssembly,
     splitGSU: bool,
     cmdlineArchs: List[str],
-    errorTolerant=False,
-    generateSourcesAndExit=False,
-    compress=True,
+    disableAsmComments: bool=False,
+    errorTolerant: bool=False,
+    generateSourcesAndExit: bool=False,
+    compress: bool=True,
 ):
     if globalParameters["PythonProfile"]:
         globalParameters["CpuThreads"] = 0
@@ -265,12 +266,16 @@ def writeSolutionsAndKernels(
         visited.add(base)
     print1(f"Number of duplicate kernels: {duplicates}")
 
+    outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
+    outOptions.outputNoComment = disableAsmComments
+
     numAsmKernels = len(asmKernels)
     numKernels = len(asmKernels)
     assert numKernels == numAsmKernels, "Only assembly kernels are supported in TensileLite"
     asmIter = zip(
         itertools.repeat(kernelWriterAssembly),
         itertools.repeat(rocisa.rocIsa.getInstance().getData()),
+        itertools.repeat(outOptions),
         itertools.repeat(splitGSU),
         asmKernels
     )
@@ -283,7 +288,7 @@ def writeSolutionsAndKernels(
     )
 
     def assemble(ret):
-        p, isa, wavefrontsize, result = ret
+        p, isa, wavefrontsize, _ = ret
         asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
@@ -339,7 +344,9 @@ def writeSolutionsAndKernelsTCL(
     kernelHelperObjs,
     kernelWriterAssembly,
     cmdlineArchs: List[str],
-    compress=True,
+    disableAsmComments: bool=False,
+    compress: bool=True,
+    removeTemporaries: bool=True
 ):
     outputPath = Path(outputPath)
     destLibPath = ensurePath(
@@ -369,22 +376,30 @@ def writeSolutionsAndKernelsTCL(
 
     uniqueAsmKernels = [k for k in asmKernels if not k.duplicate]
 
-    def assemble(ret):
-        p, isa, wavefrontsize, result = ret
-        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
+    def assemble(ret, removeTemporaries: bool):
+        asmPath, isa, wavefrontsize, result = ret
+        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(asmPath), str(asmPath.with_suffix(".o")))
+        if removeTemporaries:
+            asmPath.unlink()
         return result
+
+    unaryAssemble = functools.partial(assemble, removeTemporaries=removeTemporaries)
+
+    outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
+    outOptions.outputNoComment = not disableAsmComments
 
     unaryProcessKernelSource = functools.partial(
         processKernelSource,
         kernelWriterAssembly,
         rocisa.rocIsa.getInstance().getData(),
+        outOptions,
         splitGSU,
     )
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
     compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
     ret = ParallelMap2(
-        compose(assemble, unaryWriteAssembly, unaryProcessKernelSource),
+        compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
         uniqueAsmKernels,
         "Generating assembly kernels",
         multiArg=False,
@@ -730,7 +745,9 @@ def run():
         kernelHelperObjs,
         kernelWriterAssembly,
         archs,
+        arguments["DisableAsmComments"],
         compress=arguments["UseCompression"],
+        removeTemporaries=not arguments["KeepBuildTmp"],
     )
     stop_wsk = timer()
     print(f"Time to generate kernels (s): {(stop_wsk-start_wsk):3.2f}")

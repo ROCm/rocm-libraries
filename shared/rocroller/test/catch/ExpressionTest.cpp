@@ -2236,6 +2236,126 @@ namespace ExpressionTest
         CHECK(std::get<float>(evaluate(exp7)) == static_cast<float>(d));
     }
 
+    TEST_CASE("Expression evaluate BitfieldCombine", "[expression]")
+    {
+        using namespace Expression;
+
+        SECTION("Evaluation 1")
+        {
+            auto const srcOffset = 0u;
+            auto const dstOffset = 0u;
+            auto const width     = 32u;
+            auto       src       = literal(1222u);
+            auto       dst       = literal(0u);
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 1222u);
+        }
+
+        SECTION("Evaluation 2")
+        {
+            auto const srcOffset = 0u;
+            auto const dstOffset = 16u;
+            auto const width     = 8u;
+            auto       src       = literal(0u);
+            auto       dst       = literal(0xffffffffu);
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0xff00ffffu);
+        }
+
+        SECTION("Evaluation 3")
+        {
+            auto const srcOffset = 16u;
+            auto const dstOffset = 0;
+            auto const width     = 16u;
+            auto       src       = literal(0xffff0000u);
+            auto       dst       = literal(0u);
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x0000ffffu);
+        }
+
+        SECTION("Evaluation 4")
+        {
+            auto const srcOffset = 8u;
+            auto const dstOffset = 16u;
+            auto const width     = 8u;
+            auto       src       = literal(0x0000ff00u);
+            auto       dst       = literal(0u);
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x00ff0000u);
+        }
+    }
+
+    TEST_CASE("Expression evaluate BitfieldExtract", "[expression]")
+    {
+        using namespace Expression;
+
+        SECTION("Evaluation 1")
+        {
+            auto const offset = 0u;
+            auto const width  = 32u;
+            auto       src    = literal(1222u);
+
+            auto expr = bfe(DataType::UInt32, src, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 1222u);
+        }
+
+        SECTION("Evaluation 2")
+        {
+            auto const offset = 0u;
+            auto const width  = 8u;
+            auto       src    = literal(0x000000ffu);
+
+            auto expr = bfe(DataType::UInt32, src, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x000000ffu);
+        }
+
+        SECTION("Evaluation 3")
+        {
+            auto const offset = 16u;
+            auto const width  = 8u;
+            auto       src    = literal(0x00ff0000u);
+
+            auto expr = bfe(DataType::UInt32, src, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x000000ffu);
+        }
+
+        SECTION("Evaluation 4")
+        {
+            auto const offset = 48u;
+            auto const width  = 8u;
+            auto       src    = literal(0x00ff000000000000ul);
+
+            auto expr = bfe(DataType::UInt32, src, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x000000ffu);
+        }
+
+        SECTION("Evaluation 5")
+        {
+            auto const offset = 2u;
+            auto const width  = 30u;
+            auto       src1   = literal(4u);
+            auto       src2   = literal(-4);
+
+            auto expr1 = bfe(DataType::UInt32, src1, offset, width);
+            auto expr2 = bfe(DataType::Int32, src2, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr1)) == 1u);
+            CHECK(std::get<int32_t>(evaluate(expr2)) == -1);
+        }
+    }
+
     TEST_CASE("Expression generate dataflow tags", "[expression][codegen]")
     {
         auto context = TestContext::ForDefaultTarget();
@@ -2544,4 +2664,223 @@ namespace ExpressionTest
         }
     }
 
+    TEST_CASE("Raw32 expression and evaluation", "[expression][raw32]")
+    {
+        using Expression::literal;
+
+        auto raw32One    = literal(rocRoller::Raw32(1u));
+        auto unsignedOne = literal(uint32_t(1u));
+        auto unsignedTwo = literal(uint32_t(2u));
+        auto signedOne   = literal(int32_t(1));
+        auto floatOne    = literal(1.0f);
+
+        CHECK_THROWS_AS(unsignedOne << raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne >> raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne + raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne - raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne * raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne % raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne >= raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne <= raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne > raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne < raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne == raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne != raw32One, FatalError);
+        CHECK_THROWS_AS(Expression::exp(raw32One), FatalError);
+        CHECK_THROWS_AS(Expression::exp2(raw32One), FatalError);
+
+        auto raw32Two = literal(rocRoller::Raw32(2u));
+        CHECK_NOTHROW(raw32Two == raw32One);
+        CHECK_NOTHROW(raw32Two != raw32One);
+
+        {
+            // Test shift left
+            auto expr = raw32One << unsignedOne;
+            CHECK_NOTHROW(evaluate(expr));
+        }
+
+        {
+            // Test shift right
+            auto expr = raw32One >> unsignedOne;
+            CHECK_NOTHROW(evaluate(expr));
+        }
+
+        {
+            // Test bitwise OR
+            auto expr = unsignedOne | raw32One;
+            CHECK_NOTHROW(evaluate(expr));
+
+            auto expr2 = raw32One | unsignedOne;
+            CHECK_NOTHROW(evaluate(expr2));
+        }
+
+        {
+            // Test bitwise AND
+            auto expr = unsignedOne & raw32One;
+            CHECK_NOTHROW(evaluate(expr));
+
+            auto expr2 = raw32One & unsignedOne;
+            CHECK_NOTHROW(evaluate(expr2));
+        }
+
+        {
+            // Test bitwise negate
+            auto expr = ~raw32One;
+            CHECK_NOTHROW(evaluate(expr));
+        }
+
+        {
+            // Test conversion
+            auto expr = std::make_shared<Expression::Expression>(
+                Expression::Convert{raw32One, "", rocRoller::DataType::UInt32});
+            CHECK_NOTHROW(evaluate(expr + unsignedOne));
+        }
+
+        SECTION("multiplyHigh")
+        {
+            CHECK_THROWS_AS(Expression::multiplyHigh(raw32One, unsignedOne), FatalError);
+            CHECK_THROWS_AS(Expression::multiplyHigh(unsignedOne, raw32One), FatalError);
+            CHECK_THROWS_AS(Expression::multiplyHigh(raw32One, raw32Two), FatalError);
+            CHECK_NOTHROW(evaluate(Expression::multiplyHigh(unsignedOne, unsignedTwo)));
+        }
+
+        SECTION("multiplyAdd")
+        {
+            CHECK_THROWS_AS(Expression::multiplyAdd(raw32One, unsignedOne, unsignedTwo),
+                            FatalError);
+            CHECK_THROWS_AS(Expression::multiplyAdd(unsignedOne, raw32One, unsignedTwo),
+                            FatalError);
+            CHECK_THROWS_AS(Expression::multiplyAdd(unsignedOne, unsignedTwo, raw32One),
+                            FatalError);
+            CHECK_THROWS_AS(Expression::multiplyAdd(raw32One, raw32Two, unsignedOne), FatalError);
+            CHECK_NOTHROW(evaluate(Expression::multiplyAdd(unsignedOne, unsignedTwo, unsignedOne)));
+        }
+
+        SECTION("addShiftL")
+        {
+            CHECK_THROWS_AS(Expression::addShiftL(raw32One, unsignedOne, unsignedTwo), FatalError);
+            CHECK_THROWS_AS(Expression::addShiftL(unsignedOne, raw32One, unsignedTwo), FatalError);
+            CHECK_THROWS_AS(Expression::addShiftL(unsignedOne, unsignedTwo, raw32One), FatalError);
+            CHECK_NOTHROW(evaluate(Expression::addShiftL(unsignedOne, unsignedTwo, unsignedOne)));
+        }
+
+        SECTION("shiftLAdd")
+        {
+            CHECK_THROWS_AS(evaluate(Expression::shiftLAdd(raw32One, unsignedOne, unsignedTwo)),
+                            FatalError); // Type mismatch after shift
+            CHECK_THROWS_AS(Expression::shiftLAdd(unsignedOne, raw32One, unsignedTwo), FatalError);
+            CHECK_THROWS_AS(Expression::shiftLAdd(unsignedOne, unsignedTwo, raw32One), FatalError);
+            CHECK_NOTHROW(evaluate(Expression::shiftLAdd(unsignedOne, unsignedTwo, unsignedOne)));
+        }
+
+        SECTION("magicMultiple")
+        {
+            CHECK_THROWS_AS(Expression::magicMultiple(raw32One), FatalError);
+            CHECK_NOTHROW(evaluate(Expression::magicMultiple(unsignedTwo)));
+        }
+
+        SECTION("magicShifts")
+        {
+            CHECK_THROWS_AS(Expression::magicShifts(raw32One), FatalError);
+            CHECK_NOTHROW(evaluate(Expression::magicShifts(unsignedTwo)));
+        }
+
+        SECTION("magicShiftAndSign")
+        {
+            CHECK_THROWS_AS(Expression::magicShiftAndSign(raw32One), FatalError);
+            CHECK_NOTHROW(evaluate(Expression::magicShiftAndSign(signedOne)));
+        }
+    }
+
+    TEST_CASE("Code gen for BitfieldCombine", "[expression][codegen]")
+    {
+        auto context = TestContext::ForDefaultTarget();
+
+        auto ra = std::make_shared<Register::Value>(
+            context.get(), Register::Type::Vector, DataType::Int32, 1);
+        ra->setName("ra");
+        ra->allocateNow();
+
+        auto rb = std::make_shared<Register::Value>(
+            context.get(), Register::Type::Vector, DataType::Int32, 1);
+        rb->setName("rb");
+        rb->allocateNow();
+
+        auto srcExpr = ra->expression();
+        auto dstExpr = rb->expression();
+
+        auto const srcOffset = 10u;
+        auto const dstOffset = 4u;
+        auto const width     = 7u;
+
+        SECTION("Lowering Basic")
+        {
+            auto bfc = std::make_shared<Expression::Expression>(
+                Expression::BitfieldCombine{srcExpr, dstExpr, "", srcOffset, dstOffset, width});
+
+            Register::ValuePtr dest;
+            context.get()->schedule(Expression::generate(dest, bfc, context.get()));
+
+            // 130048     = 00000000000000011111110000000000
+            // 4294965263 = 11111111111111111111100000001111
+            std::string expected = R"(
+                v_and_b32 v2, 130048, v0
+                v_and_b32 v3, 4294965263, v1
+                v_lshrrev_b32 v4, 6, v2
+                v_or_b32 v2, v4, v3
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+        }
+
+        SECTION("Lowering with srcIsZero")
+        {
+            auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+                srcExpr, dstExpr, "", srcOffset, dstOffset, width, true});
+
+            Register::ValuePtr dest;
+            context.get()->schedule(Expression::generate(dest, bfc, context.get()));
+
+            std::string expected = R"(
+                v_lshrrev_b32 v2, 6, v0
+                v_and_b32 v3, 4294965263, v1
+                v_or_b32 v4, v2, v3
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+        }
+
+        SECTION("Lowering with dstIsZero")
+        {
+            auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+                srcExpr, dstExpr, "", srcOffset, dstOffset, width, std::nullopt, true});
+
+            Register::ValuePtr dest;
+            context.get()->schedule(Expression::generate(dest, bfc, context.get()));
+
+            std::string expected = R"(
+                v_and_b32 v2, 130048, v0
+                v_lshrrev_b32 v3, 6, v2
+                v_or_b32 v2, v3, v1
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+        }
+
+        SECTION("Lowering with srcIsZero & dstIsZero")
+        {
+            auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+                srcExpr, dstExpr, "", srcOffset, dstOffset, width, true, true});
+
+            Register::ValuePtr dest;
+            context.get()->schedule(Expression::generate(dest, bfc, context.get()));
+
+            std::string expected = R"(
+                v_lshrrev_b32 v2, 6, v0
+                v_or_b32 v3, v2, v1
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+        }
+    }
 }

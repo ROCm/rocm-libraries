@@ -430,6 +430,70 @@ hipsparseStatus_t hipsparseCreateConstBlockedEll(hipsparseConstSpMatDescr_t* spM
 }
 #endif
 
+#if(CUDART_VERSION >= 12011)
+hipsparseStatus_t hipsparseCreateSlicedEll(hipsparseSpMatDescr_t* spMatDescr,
+                                           int64_t                rows,
+                                           int64_t                cols,
+                                           int64_t                nnz,
+                                           int64_t                sellValuesSize,
+                                           int64_t                sliceSize,
+                                           void*                  sellSliceOffsets,
+                                           void*                  sellColInd,
+                                           void*                  sellValues,
+                                           hipsparseIndexType_t   sellSliceOffsetsType,
+                                           hipsparseIndexType_t   sellColIndType,
+                                           hipsparseIndexBase_t   idxBase,
+                                           hipDataType            valueType)
+{
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(
+        cusparseCreateSlicedEll((cusparseSpMatDescr_t*)spMatDescr,
+                                rows,
+                                cols,
+                                nnz,
+                                sellValuesSize,
+                                sliceSize,
+                                sellSliceOffsets,
+                                sellColInd,
+                                sellValues,
+                                hipsparse::hipIndexTypeToCudaIndexType(sellSliceOffsetsType),
+                                hipsparse::hipIndexTypeToCudaIndexType(sellColIndType),
+                                hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
+                                hipsparse::hipDataTypeToCudaDataType(valueType)));
+}
+#endif
+
+#if(CUDART_VERSION >= 12011)
+hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMatDescr,
+                                                int64_t                     rows,
+                                                int64_t                     cols,
+                                                int64_t                     nnz,
+                                                int64_t                     sellValuesSize,
+                                                int64_t                     sliceSize,
+                                                const void*                 sellSliceOffsets,
+                                                const void*                 sellColInd,
+                                                const void*                 sellValues,
+                                                hipsparseIndexType_t        sellSliceOffsetsType,
+                                                hipsparseIndexType_t        sellColIndType,
+                                                hipsparseIndexBase_t        idxBase,
+                                                hipDataType                 valueType)
+{
+    return hipsparse::hipCUSPARSEStatusToHIPStatus(
+        cusparseCreateConstSlicedEll((cusparseConstSpMatDescr_t*)spMatDescr,
+                                     rows,
+                                     cols,
+                                     nnz,
+                                     sellValuesSize,
+                                     sliceSize,
+                                     sellSliceOffsets,
+                                     sellColInd,
+                                     sellValues,
+                                     hipsparse::hipIndexTypeToCudaIndexType(sellSliceOffsetsType),
+                                     hipsparse::hipIndexTypeToCudaIndexType(sellColIndType),
+                                     hipsparse::hipIndexBaseToCudaIndexBase(idxBase),
+                                     hipsparse::hipDataTypeToCudaDataType(valueType)));
+}
+#endif
+
 #if(CUDART_VERSION >= 12000)
 hipsparseStatus_t hipsparseDestroySpMat(hipsparseConstSpMatDescr_t spMatDescr)
 {

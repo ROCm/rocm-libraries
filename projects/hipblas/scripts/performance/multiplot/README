@@ -53,7 +53,3 @@
 # to plot performance of data in blas1/my_arch1/*.csv files relative to blas1/my_arch2/*.csv files and output
 # plots in blas1/my_arch1_my_arch2/plots_perf_vs_perf/*.png
 ./benchmark_plot.sh --benchmark false --plot true  --level1 true --level2 false --level3 false --tag1 my_arch1 --tag2 my_arch2 --perf_vs_perf true
-
-
-
-

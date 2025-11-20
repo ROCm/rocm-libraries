@@ -1406,7 +1406,7 @@ module hipsparse
             type(c_ptr), intent(in), value :: beta
             type(c_ptr), value :: y
         end function hipsparseCbsrxmv
-      
+
         function hipsparseZbsrxmv(handle, dir, trans, sizeOfMask, &
                 mb, nb, nnzb, alpha, descr, bsrVal, &
                 bsrMaskPtr, bsrRowPtr, bsrEndPtr, bsrColInd, blockDim, x, beta, y) &
@@ -1434,7 +1434,7 @@ module hipsparse
             type(c_ptr), intent(in), value :: beta
             type(c_ptr), value :: y
         end function hipsparseZbsrxmv
-      
+
         function hipsparseSgemvi_bufferSize(handle, transA, m, n, nnz, pBufferSizeInBytes) &
                 bind(c, name = 'hipsparseSgemvi_bufferSize')
             use hipsparse_enums
@@ -5190,7 +5190,7 @@ module hipsparse
             type(c_ptr), intent(in), value :: p_buffer
         end function hipsparseDgebsr2gebsc
 
-      
+
         function hipsparseCgebsr2gebsc( &
         handle, &
         mb,&
@@ -5272,12 +5272,12 @@ module hipsparse
         end function hipsparseZgebsr2gebsc
 
 
-      
 
 
 
-      
-      
+
+
+
 !     hipsparseXcsr2gebsr_bufferSize
         function hipsparseScsr2gebsr_bufferSize( &
                 handle, &
@@ -5608,8 +5608,8 @@ module hipsparse
             integer(c_int), value :: col_block_dim
             type(c_ptr), intent(in), value :: p_buffer
         end function hipsparseZcsr2gebsr
-      
-      
+
+
 !       hipsparseXcsr2bsrNnz
         function hipsparseXcsr2bsrNnz(handle, dirA, m, n, descrA, csrRowPtrA, &
                 csrColIndA, blockDim, descrC, bsrRowPtrC, bsrNnzb) &
@@ -5904,9 +5904,9 @@ module hipsparse
             type(c_ptr), value :: csrColIndC
         end function hipsparseZgebsr2csr
 
-      
 
-      
+
+
 !       hipsparseXcsr2csr_compress
         function hipsparseScsr2csr_compress(handle, m, n, descrA, csrValA, csrColIndA, &
                 csrRowPtrA, nnzA, nnzPerRow, csrValC, csrColIndC, csrRowPtrC, tol) &

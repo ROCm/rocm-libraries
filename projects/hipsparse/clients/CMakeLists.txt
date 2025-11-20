@@ -41,6 +41,10 @@ endif()
 # This project may compile dependencies for clients
 project(hipsparse-clients LANGUAGES CXX)
 
+if (BUILD_CLIENTS_ONLY)
+  find_package(hipsparse 4.0.0 REQUIRED)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 # This option only works for make/nmake and the ninja generators, but no reason it shouldn't be on all the time
@@ -101,30 +105,57 @@ if(BUILD_CLIENTS_TESTS)
   if(STATUS AND NOT STATUS EQUAL 0)
     message(FATAL_ERROR "mtx2csr.exe failed to build, aborting.")
   endif()
-  
-  set(HIPSPARSE_CLIENTMATRICES "${CMAKE_SOURCE_DIR}/cmake/hipsparse_clientmatrices.cmake")
-  set(HIPSPARSE_CONVERT "${PROJECT_BINARY_DIR}/hipsparse_mtx2csr")
 
+  set(HIPSPARSE_CLIENTMATRICES "${CMAKE_SOURCE_DIR}/cmake/hipsparse_clientmatrices.cmake")
+
+  set(HIPSPARSE_CONVERT "${PROJECT_BINARY_DIR}/hipsparse_mtx2csr")
   add_custom_command(OUTPUT "${HIPSPARSE_CONVERT}"
-    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_BINARY_DIR}/mtx2csr.exe" "${HIPSPARSE_CONVERT}"
-    DEPENDS "${PROJECT_BINARY_DIR}/mtx2csr.exe"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
-  
-  add_custom_target(hipsparse-common DEPENDS "${HIPSPARSE_CLIENTMATRICES}" "${HIPSPARSE_CONVERT}")
+                    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_BINARY_DIR}/mtx2csr.exe" "${HIPSPARSE_CONVERT}"
+                    DEPENDS "${PROJECT_BINARY_DIR}/mtx2csr.exe"
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+  set(HIPSPARSE_COMMON "${PROJECT_BINARY_DIR}/staging/hipsparse_common.yaml")
+  add_custom_command(OUTPUT "${HIPSPARSE_COMMON}"
+                    COMMAND ${CMAKE_COMMAND} -E copy include/hipsparse_common.yaml "${HIPSPARSE_COMMON}"
+                    DEPENDS include/hipsparse_common.yaml
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+  set(HIPSPARSE_TEMPLATE "${PROJECT_BINARY_DIR}/staging/hipsparse_template.yaml")
+  add_custom_command(OUTPUT "${HIPSPARSE_TEMPLATE}"
+                    COMMAND ${CMAKE_COMMAND} -E copy include/hipsparse_template.yaml "${HIPSPARSE_TEMPLATE}"
+                    DEPENDS include/hipsparse_template.yaml
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+  set(HIPSPARSE_GENTEST "${PROJECT_BINARY_DIR}/staging/hipsparse_gentest.py")
+  add_custom_command(OUTPUT "${HIPSPARSE_GENTEST}"
+                    COMMAND ${CMAKE_COMMAND} -E copy common/hipsparse_gentest.py "${HIPSPARSE_GENTEST}"
+                    DEPENDS common/hipsparse_gentest.py
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+  add_custom_target(hipsparse-common DEPENDS "${HIPSPARSE_COMMON}" "${HIPSPARSE_TEMPLATE}" "${HIPSPARSE_CLIENTMATRICES}" "${HIPSPARSE_GENTEST}" "${HIPSPARSE_CONVERT}")
+
+  rocm_install(
+    FILES "${HIPSPARSE_COMMON}" "${HIPSPARSE_TEMPLATE}"
+    COMPONENT clients-common
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test"
+    )
+  #
+  rocm_install(
+    PROGRAMS "${HIPSPARSE_GENTEST}"
+    COMPONENT clients-common
+    DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipsparse/test"
+    )
 
   rocm_install(
     PROGRAMS "${HIPSPARSE_CONVERT}"
     COMPONENT clients-common
     DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
-  
+
   rocm_install(
     FILES "${HIPSPARSE_CLIENTMATRICES}"
     COMPONENT clients-common
     DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test"
     )
-  
-
-
 
 endif()

@@ -31,6 +31,23 @@ namespace rocRoller
 {
     namespace Scheduling
     {
+        void BufferStoreDwordXXRead::observeHazard(Instruction const& inst)
+        {
+            if(trigger(inst))
+            {
+                auto reg = inst.getSrcs().at(0);
+                AssertFatal(reg != nullptr);
+                if(reg)
+                {
+                    for(auto const& regId : reg->getRegisterIds())
+                    {
+                        (*m_hazardMap)[regId].push_back(
+                            WaitStateHazardCounter(getMaxNops(inst), writeTrigger()));
+                    }
+                }
+            }
+        }
+
         int BufferStoreDwordXXRead::getMaxNops(Instruction const& inst) const
         {
             return m_maxNops;
@@ -41,7 +58,8 @@ namespace rocRoller
             if(inst.getOpCode().starts_with("buffer_store_dwordx3")
                || inst.getOpCode().starts_with("buffer_store_dwordx4"))
             {
-                AssertFatal(inst.getSrcs().size() != 4,
+                auto srcs = inst.getSrcs();
+                AssertFatal(srcs.size() - std::count(srcs.begin(), srcs.end(), nullptr) == 4,
                             "Unexpected arguments",
                             ShowValue(inst.toString(LogLevel::Debug)));
                 return inst.getSrcs()[3]->regType() != Register::Type::Scalar;

@@ -104,7 +104,7 @@ Arguments setup_csrgemm_arguments(csrgemm_bin_tuple tup)
     std::string bin_file = std::get<5>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    arg.set_filename(bin_file);
 
     return arg;
 }

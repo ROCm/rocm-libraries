@@ -415,8 +415,21 @@ class TaskPredicate(Properties.Predicate):
         return None
 
     @classmethod
+    def ExtraPredicates(cls, state):
+        rv = []
+
+        # LaunchLimits predicate checks that launch grid will not overflow hip API limits
+        # TODO This predicate could also verify limits on some kernel arguments
+        # Stream-k kernels currently do not need limit check since launch grid should be limited by the grid model
+        if ('StreamK' not in state) or (state['StreamK'] == 0):
+            rv += [cls('LaunchLimits')]
+
+        return rv
+
+    @classmethod
     def FromOriginalState(cls, d, problemType, morePreds=[]):
-        predicates = [p for p in map(cls.FromOriginalKeyPair, d.items()) if p is not None]
+        extraPredicates = cls.ExtraPredicates(d)
+        predicates = [p for p in map(cls.FromOriginalKeyPair, d.items()) if p is not None] + extraPredicates
         return cls.And(predicates)
 
 class ProblemPredicate(Properties.Predicate):
@@ -469,7 +482,7 @@ class ProblemPredicate(Properties.Predicate):
                 if state["NumElementsPerBatchStore"] != 0:
                     valuepredicates.append(int((state["NumElementsPerThread"])/state["NumElementsPerBatchStore"]))
                 else:
-                    valuepredicates.append(1)
+                    valuepredicates.append(state["NumElementsPerThread"])
                 valuepredicates.append(ceil(state["NumThreads"] / state["WavefrontSize"]))
                 valuepredicates.append(state["GlobalSplitU"])
 
@@ -592,7 +605,9 @@ class SizeMapping:
                  'CUOccupancy',
                  'PrefetchGlobalRead',
                  'MathClocksUnrolledLoop',
-                 'synchronizerSizePerWG'
+                 'synchronizerSizePerWG',
+                 'nonTemporalA',
+                 'nonTemporalB',
                  ]
 
     @classmethod
@@ -607,9 +622,24 @@ class SizeMapping:
         if d['_GlobalAccumulation'] == 'PartialsBuffer':
             globalAccum = 4
         pgr = int(d['PrefetchGlobalRead'])
-        synchronizerSizePerWG = ceil((d['MIWaveTile'][0]*d['MIWaveTile'][1] if d['EnableMatrixInstruction'] else d['ThreadTile0']*d['ThreadTile1']        \
-                                    * ceil((d['NumElementsPerThread'])/d['NumElementsPerBatchStore']) if d['NumElementsPerBatchStore'] != 0 else 1        \
-                                    * ceil(d["NumThreads"] / d["WavefrontSize"])))
+        synchronizerSizePerWG = ceil((d['MIWaveTile'][0]*d['MIWaveTile'][1] if d['EnableMatrixInstruction'] else d['ThreadTile0']*d['ThreadTile1'])        \
+                                    * (ceil((d['NumElementsPerThread'])/d['NumElementsPerBatchStore']) if d['NumElementsPerBatchStore'] != 0 else d['NumElementsPerThread'])        \
+                                    * ceil(d["NumThreads"] / d["WavefrontSize"]))
+
+
+        # Converts list of list specified in SFCWGM to a 32bit signed integer that is passed to the WGM arg
+        # Input: nested list in the form [[GridDimM_L1, GridDimN_L1], [GridDimM_L2, GridDimN_L2]], all values are 8bit unsigned
+        # Output: to be stored in 32bit WGM kernel arg - (msb)[GridDimN_L2, GridDimM_L2, GridDimN_L1, GridDimM_L1](lsb)
+        def convertSFCWGMListToHex(value):
+            import ctypes
+            output = 0
+            for idx in range(len(value)):
+                gridDims = value[idx]
+                output = output | gridDims[0] << (16 * idx)
+                output = output | (gridDims[1] << (8 + 16 * idx))
+            # WGM kernel param is interpreted as int so, 32bit output to 32b int
+            return ctypes.c_int(output & 0xFFFFFFFF).value
+
 
         return cls(waveNum                  = d['NumThreads'] // d['WavefrontSize'],
                    workGroup                = d['WorkGroup'],
@@ -620,7 +650,7 @@ class SizeMapping:
                    grvwB                    = d['GlobalReadVectorWidthB'],
                    gwvwC                    = d['StoreVectorWidth'],
                    gwvwD                    = d['StoreVectorWidth'],
-                   workGroupMapping         = d['WorkGroupMapping'],
+                   workGroupMapping         = d['WorkGroupMapping'] if len(d['SpaceFillingAlgo']) == 0 else convertSFCWGMListToHex(d['SFCWGM']),
                    staggerU                 = d['StaggerU'] if 'StaggerU' in d else 0,
                    staggerUMapping          = d['StaggerUMapping'] if 'StaggerUMapping' in d else 0,
                    depthU                   = d['DepthU'],
@@ -644,7 +674,9 @@ class SizeMapping:
                    CUOccupancy              = d['CUOccupancy'],
                    PrefetchGlobalRead       = pgr,
                    MathClocksUnrolledLoop   = d['MathClocksUnrolledLoop'],
-                   synchronizerSizePerWG    = synchronizerSizePerWG
+                   synchronizerSizePerWG    = synchronizerSizePerWG,
+                   nonTemporalA             = d['NonTemporalA'],
+                   nonTemporalB             = d['NonTemporalB'],
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):
@@ -662,7 +694,9 @@ class InternalArgsSupport:
                  'gsu',
                  'wgm',
                  'staggerU',
-                 'useUniversalArgs']
+                 'useUniversalArgs',
+                 'useSFC'
+                 ]
 
     @classmethod
     def FromOriginalState(cls, d):
@@ -670,7 +704,8 @@ class InternalArgsSupport:
                    gsu = d['InternalSupportParams']['SupportUserGSU'],
                    wgm = d['InternalSupportParams']['SupportCustomWGM'],
                    staggerU = d['InternalSupportParams']['SupportCustomStaggerU'],
-                   useUniversalArgs = d['InternalSupportParams']['UseUniversalArgs'])
+                   useUniversalArgs = d['InternalSupportParams']['UseUniversalArgs'],
+                   useSFC = d['InternalSupportParams']['UseSFC'])
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):

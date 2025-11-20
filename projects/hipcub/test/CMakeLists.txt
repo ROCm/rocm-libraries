@@ -20,6 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+set(PROFILE_DIR "${CMAKE_BINARY_DIR}/coverage-report")
+set_property(GLOBAL PROPERTY LLVM_COV_OBJECT_ARGS "")
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
 file(WRITE "${INSTALL_TEST_FILE}"
 [=[
@@ -41,11 +43,20 @@ function(add_relative_test test_name test_target)
             set(EXE_NAME "${test_target}")
         endif()
     endif()
+    if(BUILD_CODE_COVERAGE)
+	 set(ABS_EXE "${EXE_PATH}/${EXE_NAME}")
+        set_property(GLOBAL APPEND PROPERTY LLVM_COV_OBJECT_ARGS -object "${ABS_EXE}")
+    endif()
     file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
     if(BUILD_COMPUTE_SANITIZER)
         add_test(NAME "${test_name}" COMMAND "compute-sanitizer" "./${rel_path}")
     else()
         add_test(NAME "${test_name}" COMMAND "./${rel_path}")
+    endif()
+    if(BUILD_CODE_COVERAGE)
+      set_tests_properties(${test_name} PROPERTIES
+        ENVIRONMENT "LLVM_PROFILE_FILE=${PROFILE_DIR}/profraw/hipcub-coverage_%m.profraw"
+      )
     endif()
     rocm_install(TARGETS ${test_target} COMPONENT tests)
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
@@ -53,6 +64,43 @@ endfunction()
 
 # hipCUB tests
 add_subdirectory(hipcub)
+
+if(BUILD_CODE_COVERAGE)
+  add_custom_target(
+    coverage_analysis
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${PROFILE_DIR}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${PROFILE_DIR}/profraw
+    COMMAND ctest --output-on-failure
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+
+  find_program(
+    LLVM_PROFDATA
+    llvm-profdata
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  find_program(
+    LLVM_COV
+    llvm-cov
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  get_property(LLVM_COV_OBJECT_ARGS GLOBAL PROPERTY LLVM_COV_OBJECT_ARGS)
+  add_custom_target(
+    coverage
+    DEPENDS coverage_analysis
+    COMMAND ${LLVM_PROFDATA} merge -sparse ${PROFILE_DIR}/profraw/hipcub-coverage_*.profraw -o ${PROFILE_DIR}/hipcub.profdata
+    COMMAND ${LLVM_COV} report ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=${PROFILE_DIR}/hipcub.profdata
+    COMMAND ${LLVM_COV} show ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=${PROFILE_DIR}/hipcub.profdata -format=html -output-dir=${PROFILE_DIR}
+    COMMAND ${LLVM_COV} export ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=./coverage-report/hipcub.profdata -format=lcov > ./coverage-report/coverage.info
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+endif()
 
 rocm_install(
     FILES "${INSTALL_TEST_FILE}"

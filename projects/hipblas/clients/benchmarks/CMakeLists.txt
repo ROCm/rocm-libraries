@@ -22,14 +22,7 @@
 set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )
 
-# Linking lapack library requires fortran flags
-enable_language( Fortran )
-
 set(hipblas_bench_source client.cpp)
-
-if( NOT TARGET hipblas )
-  find_package( hipblas REQUIRED CONFIG PATHS /opt/rocm/hipblas )
-endif( )
 
 set( hipblas_benchmark_common
       ../common/utility.cpp
@@ -47,7 +40,11 @@ set( hipblas_benchmark_common
       ${BLIS_CPP}
     )
 
-add_executable( hipblas-bench ${hipblas_bench_source} ${hipblas_benchmark_common} )
+if(BUILD_FORTRAN_CLIENTS)
+  add_executable( hipblas-bench ${hipblas_bench_source} ${hipblas_benchmark_common} $<TARGET_OBJECTS:hipblas_fortran_client>)
+else()
+  add_executable( hipblas-bench ${hipblas_bench_source} ${hipblas_benchmark_common} )
+endif()
 
 target_compile_features( hipblas-bench PRIVATE cxx_static_assert cxx_nullptr cxx_auto_type )
 # Internal header includes
@@ -67,10 +64,6 @@ target_include_directories( hipblas-bench
 )
 
 target_link_libraries( hipblas-bench PRIVATE roc::hipblas GTest::gtest GTest::gtest_main )
-
-if (NOT WIN32)
-    target_link_libraries( hipblas-bench PRIVATE hipblas_fortran_client )
-endif()
 
 # need mf16c flag for float->half convertion
 target_compile_options( hipblas-bench PRIVATE -mf16c ) # -Wno-deprecated-declarations )

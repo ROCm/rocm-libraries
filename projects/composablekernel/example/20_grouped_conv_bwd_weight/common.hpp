@@ -20,6 +20,10 @@
 #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_conv_bwd_weight.hpp"
 
+using ::ck::DeviceMem;
+using ::ck::HostTensorDescriptor;
+using ::ck::Tensor;
+
 using BF16 = ck::bhalf_t;
 using F16  = ck::half_t;
 using F32  = float;
@@ -123,7 +127,9 @@ inline bool parse_cmd_args(int argc,
 
         const ck::index_t num_dim_spatial = std::stoi(argv[4]);
         conv_param                        = ck::utils::conv::parse_conv_param(
-            num_dim_spatial, threshold_to_catch_partial_args, argv);
+            num_dim_spatial,
+            threshold_to_catch_partial_args + 1, // +1 because we already parsed num_dim_spatial
+            argv);
     }
     else
     {

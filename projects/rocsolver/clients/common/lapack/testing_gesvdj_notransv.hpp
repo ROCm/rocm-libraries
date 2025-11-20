@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T, typename S, typename SS, typename U, typename I>
 void gesvdj_notransv_checkBadArgs(const rocblas_handle handle,
@@ -515,7 +516,7 @@ void gesvdj_notransv_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -532,13 +533,13 @@ void gesvdj_notransv_getPerfData(const rocblas_handle handle,
         gesvdj_notransv_initData<false, true, T>(handle, left_svect, right_svect, m, n, dA, lda, bc,
                                                  hA, A, 0);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_gesvdj_notransv(STRIDED, handle, left_svect, right_svect, m, n, dA.data(), lda, stA,
                                   abstol, dResidual.data(), max_sweeps, dSweeps.data(), dS.data(),
                                   stS, dU.data(), ldu, stU, dV.data(), ldv, stV, dinfo.data(), bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
@@ -807,7 +808,7 @@ void testing_gesvdj_notransv(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             gesvdj_notransv_getPerfData<STRIDED, T>(
                 handle, leftv, rightv, m, n, dA, lda, stA, abstol, dResidual, max_sweeps, dSweeps,
@@ -850,7 +851,7 @@ void testing_gesvdj_notransv(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             gesvdj_notransv_getPerfData<STRIDED, T>(
                 handle, leftv, rightv, m, n, dA, lda, stA, abstol, dResidual, max_sweeps, dSweeps,

@@ -100,7 +100,7 @@ Arguments setup_coosort_arguments(coosort_bin_tuple tup)
     std::string bin_file = std::get<3>(tup);
 
     // Matrices are stored at the same path in matrices directory
-    arg.filename = get_filename(bin_file);
+    arg.set_filename(bin_file);
 
     return arg;
 }

@@ -40,13 +40,15 @@
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <rocRoller/Utilities/EnumBitset.hpp>
 #include <rocRoller/Utilities/HIPTimer.hpp>
 
 namespace rocRoller
 {
-    KernelArguments  getKernelArguments(AssemblyKernelPtr kernel, RuntimeArguments const& args);
-    KernelInvocation getKernelInvocation(AssemblyKernelPtr kernel, RuntimeArguments const& args);
+    KernelArguments    getKernelArguments(AssemblyKernelPtr kernel, RuntimeArguments const& args);
+    KernelInvocation   getKernelInvocation(AssemblyKernelPtr kernel, RuntimeArguments const& args);
+    CommandArgumentPtr findArgumentByName(CommandPtr const command, std::string const& argName);
 
     /**
      * CommandParameters - tunable command parameters.
@@ -133,16 +135,15 @@ namespace rocRoller
         int  prefetchLDSFactor = 0;
         bool prefetchMixMemOps = false;
 
-        bool streamK        = false;
-        bool streamKTwoTile = false;
+        StreamKConfig streamK{StreamKMode::None};
 
         std::vector<int>  loopOverOutputTilesDimensions    = {};
         std::string       loopOverOutputTilesTopLoop       = XLOOP;
         std::vector<uint> loopOverOutputTilesCoordSizes    = {};
         uint              loopOverOutputTilesIteratedTiles = 0;
 
-        std::optional<std::pair<int, Expression::ExpressionPtr>> workgroupMapping  = {};
-        std::optional<int>                                       workgroupRemapXCC = {};
+        std::optional<int> workgroupMappingDim = {};
+        std::optional<int> workgroupRemapXCC   = {};
 
     private:
         std::map<Operations::OperationTag, KernelGraph::CoordinateGraph::Dimension> m_dimInfo;

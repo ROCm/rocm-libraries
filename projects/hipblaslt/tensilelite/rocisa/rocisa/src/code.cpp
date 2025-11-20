@@ -101,13 +101,18 @@ void init_code(nb::module_ m)
     auto m_code = m.def_submodule("code", "rocIsa code submodule.");
 
     nb::class_<rocisa::Label, rocisa::Item>(m_code, "Label")
-        .def(nb::init<int, const std::string&>(), nb::arg("label"), nb::arg("comment"))
-        .def(nb::init<const std::string&, const std::string&>(),
+        .def(nb::init<int, const std::string&, int>(),
              nb::arg("label"),
-             nb::arg("comment"))
+             nb::arg("comment"),
+             nb::arg("alignment") = 1)
+        .def(nb::init<const std::string&, const std::string&, int>(),
+             nb::arg("label"),
+             nb::arg("comment"),
+             nb::arg("alignment") = 1)
         .def_static("getFormatting", &rocisa::Label::getFormatting)
         .def_rw("label", &rocisa::Label::label)
         .def_rw("comment", &rocisa::Label::comment)
+        .def_rw("alignment", &rocisa::Label::alignment)
         .def("getLabelName", &rocisa::Label::getLabelName)
         .def("__str__", &rocisa::Label::toString)
         .def("__deepcopy__",
@@ -117,12 +122,13 @@ void init_code(nb::module_ m)
              })
         .def("__getstate__",
              [](const rocisa::Label& self) {
-                 return std::make_tuple(self.name, self.label, self.comment);
+                 return std::make_tuple(self.name, self.label, self.comment, self.alignment);
              })
         .def("__setstate__",
-             [](rocisa::Label&                                                       self,
-                std::tuple<std::string, std::variant<std::string, int>, std::string> state) {
-                 new(&self) rocisa::Label(std::get<1>(state), std::get<2>(state));
+             [](rocisa::Label&                                                            self,
+                std::tuple<std::string, std::variant<std::string, int>, std::string, int> state) {
+                 new(&self)
+                     rocisa::Label(std::get<1>(state), std::get<2>(state), std::get<3>(state));
                  self.name = std::get<0>(state);
              });
 
@@ -243,13 +249,26 @@ void init_code(nb::module_ m)
         });
 
     nb::class_<rocisa::ValueIf, rocisa::Item>(m_code, "ValueIf")
-        .def(nb::init<int>(), nb::arg("value"))
+        .def(nb::init<const std::string&>(), nb::arg("value"))
         .def("__str__", &rocisa::ValueIf::toString)
         .def("__deepcopy__",
              [](const rocisa::ValueIf& self, nb::dict&) { return new rocisa::ValueIf(self); })
         .def("__getstate__", [](const rocisa::ValueIf& self) { return self.value; })
-        .def("__setstate__",
-             [](rocisa::ValueIf& self, int value) { new(&self) rocisa::ValueIf(value); });
+        .def("__setstate__", [](rocisa::ValueIf& self, const std::string& value) {
+            new(&self) rocisa::ValueIf(value);
+        });
+
+    nb::class_<rocisa::ValueElseIf, rocisa::Item>(m_code, "ValueElseIf")
+        .def(nb::init<const std::string&>(), nb::arg("value"))
+        .def("__str__", &rocisa::ValueElseIf::toString)
+        .def("__deepcopy__",
+             [](const rocisa::ValueElseIf& self, nb::dict&) {
+                 return new rocisa::ValueElseIf(self);
+             })
+        .def("__getstate__", [](const rocisa::ValueElseIf& self) { return self.value; })
+        .def("__setstate__", [](rocisa::ValueElseIf& self, const std::string& value) {
+            new(&self) rocisa::ValueElseIf(value);
+        });
 
     nb::class_<rocisa::ValueSet, rocisa::Item>(m_code, "ValueSet")
         .def(nb::init<const std::string&, int, int, int>(),

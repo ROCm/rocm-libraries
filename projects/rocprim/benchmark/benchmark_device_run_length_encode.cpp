@@ -36,39 +36,36 @@
 #include <string>
 #include <vector>
 
-#define CREATE_ENCODE_BENCHMARK(T, ML) \
-    executor.queue_instance(device_run_length_encode_benchmark<T, ML>());
-
-template<size_t MaxLength>
-void add_encode_benchmarks(benchmark_utils::executor& executor)
-{
-    using custom_float2  = common::custom_type<float, float>;
-    using custom_double2 = common::custom_type<double, double>;
-
-    // all tuned types
-    CREATE_ENCODE_BENCHMARK(int8_t, MaxLength)
-    CREATE_ENCODE_BENCHMARK(int16_t, MaxLength)
-    CREATE_ENCODE_BENCHMARK(int32_t, MaxLength)
-    CREATE_ENCODE_BENCHMARK(int64_t, MaxLength)
-    CREATE_ENCODE_BENCHMARK(rocprim::int128_t, MaxLength)
-    CREATE_ENCODE_BENCHMARK(rocprim::uint128_t, MaxLength)
-    CREATE_ENCODE_BENCHMARK(rocprim::half, MaxLength)
-    CREATE_ENCODE_BENCHMARK(float, MaxLength)
-    CREATE_ENCODE_BENCHMARK(double, MaxLength)
-    // custom types
-    CREATE_ENCODE_BENCHMARK(custom_float2, MaxLength)
-    CREATE_ENCODE_BENCHMARK(custom_double2, MaxLength)
-}
+#define CREATE_BENCHMARK(T)                                               \
+    executor.queue_instance(device_run_length_encode_benchmark<T, 10>()); \
+    executor.queue_instance(device_run_length_encode_benchmark<T, 1000>());
 
 int main(int argc, char* argv[])
 {
     benchmark_utils::executor executor(argc, argv, 2 * benchmark_utils::GiB, 10, 10);
 
 #ifndef BENCHMARK_CONFIG_TUNING
+    // Tuned types
+    CREATE_BENCHMARK(rocprim::int128_t)
+    CREATE_BENCHMARK(int64_t)
+    CREATE_BENCHMARK(int32_t)
+    CREATE_BENCHMARK(int16_t)
+    CREATE_BENCHMARK(int8_t)
+    CREATE_BENCHMARK(double)
+    CREATE_BENCHMARK(float)
+    CREATE_BENCHMARK(rocprim::half)
 
-    add_encode_benchmarks<1000>(executor);
-    add_encode_benchmarks<10>(executor);
+    #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
+    CREATE_BENCHMARK(rocprim::uint128_t)
 
+    // Not tuned custom types
+    using custom_float2  = common::custom_type<float, float>;
+    using custom_double2 = common::custom_type<double, double>;
+
+    CREATE_BENCHMARK(custom_float2)
+    CREATE_BENCHMARK(custom_double2)
+    #endif
 #endif
 
     executor.run();

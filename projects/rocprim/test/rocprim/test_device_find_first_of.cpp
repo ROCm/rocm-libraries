@@ -159,7 +159,7 @@ TYPED_TEST(RocprimDeviceFindFirstOfTests, FindFirstOf)
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             const size_t keys_size
-                = std::sqrt(test_utils::get_random_value<size_t>(0, size, seed_value));
+                = std::sqrt(test_utils::get_random_value<size_t>(common::use_hmm() ? 1 : 0, size, seed_value));
 
             // Starting point is an appoximate position of the first match we want to test for
             for(double starting_point : {0.0, 0.234, 0.876, 1.0, 100.0})

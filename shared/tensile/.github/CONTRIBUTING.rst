@@ -27,7 +27,7 @@ To notify us of any existing issue, use the GitHub *Issues* tab.
 Acceptance criteria
 ===================
 
-Pull Requests (PR) are reviewed by the members of `CODEOWNERS.md <https://github.com/ROCm/Tensile/blob/develop/.github/CODEOWNERS>`_.
+Pull Requests (PR) are reviewed by the members of `CODEOWNERS.md <https://github.com/ROCm/rocm-libraries/blob/develop/shared/tensile/.github/CODEOWNERS>`_.
 Depending on the PR, the reviewers might post comments or request changes. This might require several iterations.
 The PR is approved only when all the changes requested by the reviewers are marked complete.
 When a Pull Request is submitted, it undergoes a standard suite of continuous integration tests.
@@ -43,7 +43,7 @@ By creating a PR, you agree to the statements made in the `Code License`_ sectio
 
 a. **Forking the repository and making changes:**
 
-   1. Create a fork of Tensile. Don't create feature branches directly in https://github.com/ROCm/Tensile.
+   1. Create a fork of Tensile. Don't create feature branches directly in `<https://github.com/ROCm/rocm-libraries/tree/develop/shared/tensile>`_.
    2. Clone your fork locally and set up your :ref:`development-environment`.
    3. Create your feature branch from **develop** and make changes to the code.
    4. Issue ``tox run -m precommit`` and ensure that all checks pass.
@@ -59,7 +59,7 @@ b. **Creating the PR:**
 
    1. Ensure that **your develop** branch is up-to-date with the **upstream develop** branch. This might require a rebase or a merge.
    2. Verify that your changes pass static analysis checks and all pre-checkin, host library, and unit tests by running ``tox run -m prepr``.
-   3. Create the PR against the https://github.com/ROCm/Tensile **develop** branch.
+   3. Create the PR against the `<https://github.com/ROCm/rocm-libraries/tree/develop/shared/tensile>`_  **develop** branch.
    4. Fill in as many details as possible. Include description, outcomes, notable changes, and environment information. The availability of information makes the PR review process easier, increasing the likelihood of the PR getting merged in a timely manner.
    5. Title the PR in present imperative tense. For example, "*Update* kernel parameters", not "Updates" or "Updated".
 
@@ -122,7 +122,7 @@ Commit messages
 Code license
 ============
 
-All code contributed to this project will be licensed under the given `LICENSE <https://github.com/ROCm/Tensile/blob/develop/LICENSE.md>`_. Your contribution will be accepted under the same license.
+All code contributed to this project will be licensed under the given `LICENSE <https://github.com/ROCm/rocm-libraries/blob/develop/shared/tensile/LICENSE.md>`_. Your contribution will be accepted under the same license.
 
 For each new file, include the following licensing header:
 

@@ -65,6 +65,8 @@ public:
         , m_batch_count(batch_count)
     {
         m_data = this->device_vector_setup();
+        if(!m_data)
+            throw std::bad_alloc{};
     }
 
     //!

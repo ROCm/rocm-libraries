@@ -1134,5 +1134,3 @@ def getBiasDataTypeListDefault(problem: ProblemType) -> List[DataType]:
   biasDataTypeList = list(set(bList))
   biasDataTypeList.sort() # Make name unique
   return biasDataTypeList
-
-

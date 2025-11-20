@@ -15,22 +15,37 @@
  *  limitations under the License.
  */
 
-#include <thrust/device_vector.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/transform_reduce.h>
+#include <thrust/universal_vector.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
+
+using VectorTestsParams = ::testing::Types<
+  Params<thrust::host_vector<signed char>>,
+  Params<thrust::host_vector<short>>,
+  Params<thrust::host_vector<int>>,
+  Params<thrust::host_vector<float>>,
+  Params<thrust::host_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::host_memory_resource>>>,
+  Params<thrust::device_vector<signed char>>,
+  Params<thrust::device_vector<short>>,
+  Params<thrust::device_vector<int>>,
+  Params<thrust::device_vector<float>>,
+  Params<thrust::device_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::device_memory_resource>>>,
+  Params<thrust::universal_vector<int>>,
+  Params<thrust::universal_host_pinned_vector<int>>>;
 
 TESTS_DEFINE(TransformReduceTests, FullTestsParams);
 TESTS_DEFINE(TransformReduceIntegerTests, VectorSignedIntegerTestsParams);
 TESTS_DEFINE(TransformReduceIntegerPrimitiveTests, IntegerTestsParams);
+TESTS_DEFINE(TransformReduceVectorTests, VectorTestsParams);
 
 template <typename InputIterator, typename UnaryFunction, typename OutputType, typename BinaryFunction>
-__host__ __device__ OutputType
+OutputType
 transform_reduce(my_system& system, InputIterator, InputIterator, UnaryFunction, OutputType init, BinaryFunction)
 {
   system.validate_dispatch();
@@ -50,8 +65,7 @@ TEST(TransformReduceTests, TestTransformReduceDispatchExplicit)
 }
 
 template <typename InputIterator, typename UnaryFunction, typename OutputType, typename BinaryFunction>
-__host__ __device__ OutputType
-transform_reduce(my_tag, InputIterator first, InputIterator, UnaryFunction, OutputType init, BinaryFunction)
+OutputType transform_reduce(my_tag, InputIterator first, InputIterator, UnaryFunction, OutputType init, BinaryFunction)
 {
   *first = 13;
   return init;
@@ -68,23 +82,19 @@ TEST(TransformReduceTests, TestTransformReduceDispatchImplicit)
   ASSERT_EQ(13, vec.front());
 }
 
-TYPED_TEST(TransformReduceTests, TestTransformReduceSimple)
+TYPED_TEST(TransformReduceVectorTests, TestTransformReduceSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using Policy = typename TestFixture::execution_policy;
   using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data(3);
-  data[0] = T(1);
-  data[1] = T(-2);
-  data[2] = T(3);
+  Vector data{1, -2, 3};
 
-  T init   = T(10);
-  T result = thrust::transform_reduce(Policy{}, data.begin(), data.end(), thrust::negate<T>(), init, thrust::plus<T>());
+  T init   = 10;
+  T result = thrust::transform_reduce(data.begin(), data.end(), thrust::negate<T>(), init, thrust::plus<T>());
 
-  ASSERT_EQ(result, T(8));
+  ASSERT_EQ(result, 8);
 }
 
 TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduce)
@@ -103,10 +113,9 @@ TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduce)
 
       thrust::host_vector<T> h_data =
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::device_vector<T> d_data = h_data;
 
-      T init = T(13);
+      T init = 13;
 
       T cpu_result =
         thrust::transform_reduce(h_data.begin(), h_data.end(), thrust::negate<T>(), init, thrust::plus<T>());
@@ -134,10 +143,9 @@ TYPED_TEST(TransformReduceIntegerPrimitiveTests, TestTransformReduceFromConst)
 
       thrust::host_vector<T> h_data =
         get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::device_vector<T> d_data = h_data;
 
-      T init = T(13);
+      T init = 13;
 
       T cpu_result =
         thrust::transform_reduce(h_data.cbegin(), h_data.cend(), thrust::negate<T>(), init, thrust::plus<T>());
@@ -157,12 +165,9 @@ TYPED_TEST(TransformReduceIntegerTests, TestTransformReduceCountingIterator)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  if (std::is_signed<T>::value)
-  {
-    thrust::counting_iterator<T, space> first(1);
+  thrust::counting_iterator<T, space> first(1);
 
-    T result = thrust::transform_reduce(first, first + 3, thrust::negate<short>(), 0, thrust::plus<short>());
+  T result = thrust::transform_reduce(first, first + 3, thrust::negate<short>(), 0, thrust::plus<short>());
 
-    ASSERT_EQ(result, -6);
-  }
+  ASSERT_EQ(result, -6);
 }

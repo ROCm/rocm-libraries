@@ -44,14 +44,14 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_bsrsv2_bad_arg(void)
+void testing_bsrsv2_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int                    m         = 100;
     int                    nnz       = 100;
     int                    block_dim = 2;
     int                    safe_size = 100;
-    T                      h_alpha   = 0.6;
+    T                      h_alpha   = make_DataType<T>(0.6);
     hipsparseDirection_t   dirA      = HIPSPARSE_DIRECTION_COLUMN;
     hipsparseOperation_t   transA    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
     hipsparseSolvePolicy_t policy    = HIPSPARSE_SOLVE_POLICY_USE_LEVEL;

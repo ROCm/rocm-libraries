@@ -83,22 +83,27 @@
  *  \brief Specify the enum type to set the postprocessing options for the epilogue.
  */
 typedef enum {
-  HIPBLASLT_EPILOGUE_DEFAULT = 1,               /**<No special postprocessing, just scale and quantize the results if necessary.*/
-  HIPBLASLT_EPILOGUE_RELU = 2,                  /**<Apply ReLU point-wise transform to the results:(x:=max(x, 0))*/
-  HIPBLASLT_EPILOGUE_BIAS = 4,                  /**<Apply (broadcast) bias from the bias vector. Bias vector length must match matrix D rows, and it must be packed (such as stride between vector elements is 1). Bias vector is broadcast to all columns and added before applying the final postprocessing.*/
-  HIPBLASLT_EPILOGUE_RELU_BIAS = 6,             /**<Apply bias and then ReLU transform.*/
-  HIPBLASLT_EPILOGUE_GELU = 32,                 /**<Apply GELU point-wise transform to the results (x:=GELU(x)).*/
-  HIPBLASLT_EPILOGUE_GELU_BIAS = 36,            /**<Apply Bias and then GELU transform.*/
-  HIPBLASLT_EPILOGUE_GELU_AUX = 160,            /**<Output GEMM results before applying GELU transform.*/
-  HIPBLASLT_EPILOGUE_GELU_AUX_BIAS = 164,       /**<Output GEMM results after applying bias but before applying GELU transform.*/
-  HIPBLASLT_EPILOGUE_DGELU = 192,               /**<Apply gradient GELU transform. Requires additional aux input. */
-  HIPBLASLT_EPILOGUE_DGELU_BGRAD = 208,         /**<Apply gradient GELU transform and bias gradient to the results. Requires additional aux input. */
-  HIPBLASLT_EPILOGUE_BGRADA = 256,              /**<Apply bias gradient to A and output gemm result. */
-  HIPBLASLT_EPILOGUE_BGRADB = 512,              /**<Apply bias gradient to B and output gemm result. */
-  HIPBLASLT_EPILOGUE_SWISH_EXT = 65536,         /**<Apply Swish point-wise transform to the results (x:=Swish(x, 1)).*/
-  HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT = 65540,    /**<Apply Bias and then Swish transform.*/
-  HIPBLASLT_EPILOGUE_CLAMP_EXT = 131072,        /**<Apply point-wise clamp to the results (x:=max(alpha, min(x, beta))).*/
-  HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT = 131076,   /**<Apply Bias and then clamp.*/
+  HIPBLASLT_EPILOGUE_DEFAULT = 1,                 /**<No special postprocessing, just scale and quantize the results if necessary.*/
+  HIPBLASLT_EPILOGUE_RELU = 2,                    /**<Apply ReLU point-wise transform to the results:(x:=max(x, 0))*/
+  HIPBLASLT_EPILOGUE_BIAS = 4,                    /**<Apply (broadcast) bias from the bias vector. Bias vector length must match matrix D rows, and it must be packed (such as stride between vector elements is 1). Bias vector is broadcast to all columns and added before applying the final postprocessing.*/
+  HIPBLASLT_EPILOGUE_RELU_BIAS = 6,               /**<Apply bias and then ReLU transform.*/
+  HIPBLASLT_EPILOGUE_GELU = 32,                   /**<Apply GELU point-wise transform to the results (x:=GELU(x)).*/
+  HIPBLASLT_EPILOGUE_GELU_BIAS = 36,              /**<Apply Bias and then GELU transform.*/
+  HIPBLASLT_EPILOGUE_RELU_AUX = 130,              /**<Output GEMM results before applying RELU transform.*/
+  HIPBLASLT_EPILOGUE_RELU_AUX_BIAS = 134,         /**<Output GEMM results after applying bias but before applying RELU transform.*/
+  HIPBLASLT_EPILOGUE_GELU_AUX = 160,              /**<Output GEMM results before applying GELU transform.*/
+  HIPBLASLT_EPILOGUE_GELU_AUX_BIAS = 164,         /**<Output GEMM results after applying bias but before applying GELU transform.*/
+  HIPBLASLT_EPILOGUE_DGELU = 192,                 /**<Apply gradient GELU transform. Requires additional aux input. */
+  HIPBLASLT_EPILOGUE_DGELU_BGRAD = 208,           /**<Apply gradient GELU transform and bias gradient to the results. Requires additional aux input. */
+  HIPBLASLT_EPILOGUE_BGRADA = 256,                /**<Apply bias gradient to A and output gemm result. */
+  HIPBLASLT_EPILOGUE_BGRADB = 512,                /**<Apply bias gradient to B and output gemm result. */
+  HIPBLASLT_EPILOGUE_SIGMOID = 1024,              /**<Apply sigmoid activation function pointwise. */
+  HIPBLASLT_EPILOGUE_SWISH_EXT = 65536,           /**<Apply Swish point-wise transform to the results (x:=Swish(x, 1)).*/
+  HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT = 65540,      /**<Apply Bias and then Swish transform.*/
+  HIPBLASLT_EPILOGUE_CLAMP_EXT = 131072,          /**<Apply point-wise clamp to the results (x:=max(alpha, min(x, beta))).*/
+  HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT = 131076,     /**<Apply Bias and then clamp.*/
+  HIPBLASLT_EPILOGUE_CLAMP_AUX_EXT = 131200,      /**<Output GEMM results before applying clamp transform.*/
+  HIPBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT = 131204, /**<Output GEMM results after applying bias but before applying clamp transform.*/
 } hipblasLtEpilogue_t;
 
 /*! \ingroup types_module
@@ -161,12 +166,12 @@ typedef enum {
  *  \brief Block scale mode for A and B.
  */
 typedef enum {
-    HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F = 0,    /** Scaling factors are single-precision scalars applied to the whole tensors (this mode is the default for fp8). */
-    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3 = 1,   /** Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit HIP_R_8F_E4M3 value for each 16-element block in the innermost dimension of the corresponding data tensor. */
-    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0 = 2,   /** Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit R_8F_UE8M0 value for each 32-element block in the innermost dimension of the corresponding data tensor. */
-    HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F = 3, /** Scaling factors are single-precision vectors. This mode is only applicable to matrices A and B, in which case the vectors are expected to have M and N elements respectively, and each (i, j)-th element of product of A and B is multiplied by i-th element of A scale and j-th element of B scale. */
-    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F = 4,    /** Not supported yet. Scaling factors are tensors that contain a dedicated FP32 scaling factor for each 128-element block in the innermost dimension of the corresponding data tensor */
-    HIPBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F = 5,/** Not supported yet. Scaling factors are tensors that contain a dedicated FP32 scaling factor for each 128x128-element block in the corresponding data tensor */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F = 0,    /**<Scaling factors are single-precision scalars applied to the whole tensors (this mode is the default for fp8). */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3 = 1,   /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit HIP_R_8F_E4M3 value for each 16-element block in the innermost dimension of the corresponding data tensor. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0 = 2,   /**<Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit R_8F_UE8M0 value for each 32-element block in the innermost dimension of the corresponding data tensor. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F = 3, /**<Scaling factors are single-precision vectors. This mode is only applicable to matrices A and B, in which case the vectors are expected to have M and N elements respectively, and each (i, j)-th element of product of A and B is multiplied by i-th element of A scale and j-th element of B scale. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F = 4,    /**<Not supported yet. Scaling factors are tensors that contain a dedicated FP32 scaling factor for each 128-element block in the innermost dimension of the corresponding data tensor */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F = 5, /**<Not supported yet. Scaling factors are tensors that contain a dedicated FP32 scaling factor for each 128x128-element block in the corresponding data tensor */
     HIPBLASLT_MATMUL_MATRIX_SCALE_END
 } hipblasLtMatmulMatrixScale_t;
 

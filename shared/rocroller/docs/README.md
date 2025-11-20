@@ -92,7 +92,3 @@ add_custom_target(<copyover_some_readme>
 ```
 
 Where `sed -i 's;mermaid::;{mermaid};g'` is the command that replaces the string.
-
-
-
-

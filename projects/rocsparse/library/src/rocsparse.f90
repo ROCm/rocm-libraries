@@ -5284,7 +5284,7 @@ module rocsparse
             type(c_ptr), value :: buffer_size
         end function rocsparse_zgebsr2gebsc_buffer_size
 
-      
+
 !       rocsparse_gebsr2gebsc
         function rocsparse_sgebsr2gebsc(handle, mb, nb, nnzb, bsr_val, bsr_row_ptr, &
                 bsr_col_ind, row_block_dim, col_block_dim, bsc_val, bsc_row_ind, bsc_col_ptr, copy_values, &
@@ -5311,7 +5311,7 @@ module rocsparse
             type(c_ptr), value :: temp_buffer
         end function rocsparse_sgebsr2gebsc
 
-       
+
        function rocsparse_dgebsr2gebsc(handle, mb, nb, nnzb, bsr_val, bsr_row_ptr, &
                 bsr_col_ind, row_block_dim, col_block_dim, bsc_val, bsc_row_ind, bsc_col_ptr, copy_values, &
                 idx_base, temp_buffer) &
@@ -5507,7 +5507,7 @@ module rocsparse
             type(c_ptr), value :: nnz_total_dev_host_ptr
             type(c_ptr), value :: temp_buffer
         end function rocsparse_gebsr2gebsr_nnz
-      
+
 !       rocsparse_gebsr2gebsr
         function rocsparse_sgebsr2gebsr(handle, dir, mb, nb, nnzb, descr_A, bsr_val_A, bsr_row_ptr_A, &
                 bsr_col_ind_A, row_block_dim_A, col_block_dim_A, descr_C, bsr_val_C, bsr_row_ptr_C, &
@@ -5537,7 +5537,7 @@ module rocsparse
             type(c_ptr), value :: temp_buffer
         end function rocsparse_sgebsr2gebsr
 
-       
+
        function rocsparse_dgebsr2gebsr(handle, dir, mb, nb, nnzb, descr_A, bsr_val_A, bsr_row_ptr_A, &
                 bsr_col_ind_A, row_block_dim_A, col_block_dim_A, descr_C, bsr_val_C, bsr_row_ptr_C, &
                 bsr_col_ind_C, row_block_dim_C, col_block_dim_C, temp_buffer) &
@@ -5947,7 +5947,7 @@ module rocsparse
             type(c_ptr), value :: bsr_row_ptr
             type(c_ptr), value :: bsr_col_ind
         end function rocsparse_scsr2bsr
-      
+
         function rocsparse_dcsr2bsr(handle, dir, m, n, csr_descr, csr_val, csr_row_ptr, &
                 csr_col_ind, block_dim, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind) &
                 bind(c, name = 'rocsparse_dcsr2bsr')
@@ -6129,10 +6129,10 @@ module rocsparse
             type(c_ptr), value :: buffer_size
         end function rocsparse_zcsr2gebsr_buffer_size
 
-      
+
 !     rocsparse_csr2gebsr
         function rocsparse_scsr2gebsr(handle, dir, m, n, csr_descr, csr_val, csr_row_ptr, &
-                csr_col_ind, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind, & 
+                csr_col_ind, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind, &
                 row_block_dim, col_block_dim, temp_buffer) &
                 bind(c, name = 'rocsparse_scsr2gebsr')
             use rocsparse_enums
@@ -6158,7 +6158,7 @@ module rocsparse
 
 
         function rocsparse_dcsr2gebsr(handle, dir, m, n, csr_descr, csr_val, csr_row_ptr, &
-                csr_col_ind, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind, & 
+                csr_col_ind, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind, &
                 row_block_dim, col_block_dim, temp_buffer) &
                 bind(c, name = 'rocsparse_dcsr2gebsr')
             use rocsparse_enums
@@ -6184,7 +6184,7 @@ module rocsparse
 
 
       function rocsparse_ccsr2gebsr(handle, dir, m, n, csr_descr, csr_val, csr_row_ptr, &
-                csr_col_ind, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind, & 
+                csr_col_ind, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind, &
                 row_block_dim, col_block_dim, temp_buffer) &
                 bind(c, name = 'rocsparse_ccsr2gebsr')
             use rocsparse_enums
@@ -6210,7 +6210,7 @@ module rocsparse
 
 
       function rocsparse_zcsr2gebsr(handle, dir, m, n, csr_descr, csr_val, csr_row_ptr, &
-                csr_col_ind, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind, & 
+                csr_col_ind, bsr_descr, bsr_val, bsr_row_ptr, bsr_col_ind, &
                 row_block_dim, col_block_dim, temp_buffer) &
                 bind(c, name = 'rocsparse_zcsr2gebsr')
             use rocsparse_enums
@@ -6234,7 +6234,7 @@ module rocsparse
             type(c_ptr), value :: temp_buffer
         end function rocsparse_zcsr2gebsr
 
-      
+
 !       rocsparse_csr2csr_compress
         function rocsparse_scsr2csr_compress(handle, m, n, descr_A, csr_val_A, &
                 csr_col_ind_A, csr_row_ptr_A, nnz_A, nnz_per_row, csr_val_C, &
@@ -6869,7 +6869,7 @@ module rocsparse
         end function rocsparse_dprune_dense2csr
 
 !       rocsparse_prune_dense2csr_by_percentage_buffer_size
-        function rocsparse_sprune_dense2csr_by_percentage_buffer_size(handle, m, n, A, lda, percentage, descr, & 
+        function rocsparse_sprune_dense2csr_by_percentage_buffer_size(handle, m, n, A, lda, percentage, descr, &
                 csr_val, csr_row_ptr, csr_col_ind, info, buffer_size) &
                 bind(c, name = 'rocsparse_sprune_dense2csr_by_percentage_buffer_size')
             use rocsparse_enums

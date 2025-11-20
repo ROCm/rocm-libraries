@@ -39,6 +39,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <rocRoller/GPUArchitecture/GPUCapability.hpp>
+
 namespace rocRoller
 {
     inline std::string GPUCapability::toString() const
@@ -48,7 +50,7 @@ namespace rocRoller
 
     inline std::ostream& operator<<(std::ostream& stream, GPUCapability::Value v)
     {
-        return stream << toString(v);
+        return stream << GPUCapability::toString(v);
     }
 
     inline std::string GPUCapability::toString(GPUCapability::Value value)

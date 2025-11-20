@@ -684,7 +684,6 @@ void rocsparse_matrix_factory<T, I, J>::init_bsr(std::vector<I>&      bsr_row_pt
 template <typename T, typename I, typename J, class FILTER = void>
 struct traits_init_bsr
 {
-
     static void init(rocsparse_matrix_factory<T, I, J>& factory,
                      host_gebsr_matrix<T, I, J>&        that,
                      device_gebsr_matrix<T, I, J>&      that_on_device,
@@ -889,6 +888,62 @@ void rocsparse_matrix_factory<T, I, J>::init_ell(host_ell_matrix<T, I>& that,
     ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     traits_init_ell<T, I, J>::init(*this, that, M, N, base);
+}
+
+//
+// SLICED ELL
+//
+template <typename T, typename I, typename J, class FILTER = void>
+struct traits_init_sell
+{
+    static void init(rocsparse_matrix_factory<T, I, J>& factory,
+                     host_sell_matrix<T, I, J>&         that,
+                     J&                                 M,
+                     J&                                 N,
+                     J                                  sell_slice_size,
+                     rocsparse_index_base               base)
+    {
+        std::cerr << "non reachable " << __LINE__ << std::endl;
+        exit(1);
+    };
+};
+
+template <typename T, typename I, typename J>
+struct traits_init_sell<T, I, J, std::enable_if_t<std::is_same<I, J>{}>>
+{
+    static void init(rocsparse_matrix_factory<T, I, J>& factory,
+                     host_sell_matrix<T, I, J>&         that,
+                     J&                                 M,
+                     J&                                 N,
+                     J                                  sell_slice_size,
+                     rocsparse_index_base               base)
+    {
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+        host_csr_matrix<T, I, J> hA;
+        factory.init_csr(hA, M, N, base);
+        that.define(hA.m, hA.n, hA.nnz, sell_slice_size, 0, hA.base);
+        host_csr_to_sell(hA.m,
+                         sell_slice_size,
+                         hA.ptr,
+                         hA.ind,
+                         hA.val,
+                         that.ptr,
+                         that.ind,
+                         that.val,
+                         that.sell_colval_size,
+                         hA.base,
+                         that.base);
+    };
+};
+
+template <typename T, typename I, typename J>
+void rocsparse_matrix_factory<T, I, J>::init_sell(
+    host_sell_matrix<T, I, J>& that, J& M, J& N, J sell_slice_size, rocsparse_index_base base)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    traits_init_sell<T, I, J>::init(*this, that, M, N, sell_slice_size, base);
 }
 
 //

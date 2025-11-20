@@ -19,7 +19,7 @@
 # THE SOFTWARE.
 
 from copy import deepcopy
-from generator import Problem, ProblemSet
+from generator import Problem, ProblemSet, SuiteProblemGenerator
 
 amax_def_args = {'--type'  : 'H',
                  '--dtype' : 'S',
@@ -101,7 +101,23 @@ def matmul_set_2():
 def all():
     """all routine benchmarks"""
 
+    target_arch = SuiteProblemGenerator.target_arch_static
+    # if --targetArch is not set, we have to query it with rocm_agent_enumerator
+    if target_arch is None:
+        print(f'Info: targetArch is not set, auto-detecting...')
+        SuiteProblemGenerator.detectISA()
+        target_arch = SuiteProblemGenerator.target_arch_static
+
+    print(f'Info: bench with --suite all with --targetArch {target_arch}')
+
+    # general suites for all arches
     yield from api_overhead()
     yield from amax_set_1()
-    yield from matmul_set_1()
-    yield from matmul_set_2()
+
+    if "942" in target_arch:
+        yield from matmul_set_1() # this problemset is an initial test example for gfx942
+        yield from matmul_set_2()
+        # Can put any other interested set for gfx942
+    elif "950" in target_arch:
+        yield from matmul_set_2()
+        # Can put any other interested set for gfx950

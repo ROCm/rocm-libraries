@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testset failure-regex="$.^">
+    <var name="SMOKE_PARAMS">--gtest_filter="*Emulation*Smoke*" --gtest_output=xml --gtest_color=yes </var>
+    <var name="REGRESSION_PARAMS">--gtest_filter="*Emulation*Regression*" --gtest_output=xml --gtest_color=yes </var>
+    <emulation sets="smoke">
+        <run name="smoke04"> ./test/gemm/gemm_PGR0_LB0_MP0_SB_NC-validate {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke05"> ./test/gemm/gemm_PGR0_LB0_MP0_MB_NC-validate {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke06"> ./test/gemm/gemm_PGR1_LB2_MP0_MB_CP_WV-validate {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke07"> ./test/gemm/gemm_PGR1_LB2_MP0_MB_CP_WG-validate {SMOKE_PARAMS} </run>
+    </emulation>
+	<emulation sets="smoke">
+		<run name="smoke08"> ./test/gemm/gemm_PGR1_LB2_MP0_MB_CP_BLK-validate {SMOKE_PARAMS} </run>
+	</emulation>
+    <emulation sets="smoke">
+        <run name="smoke09"> ./test/dlrm/dlrm_dot_lds_test-validate {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke10"> ./test/dlrm/dlrm_dot_test-validate {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke11"> ./test/unit/contamination_test/contamination_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke12"> ./test/unit/cross_lane_ops_test/cross_lane_ops_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke13"> ./test/unit/fill_fragment_test/fill_fragment_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke14"> ./test/unit/io_shape_test/io_shape_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke15"> ./test/unit/io_traits_test/io_traits_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke16"> ./test/unit/layout_test/layout_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke17"> ./test/unit/load_store_matrix_coop_sync_test/load_store_matrix_coop_sync_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke18"> ./test/unit/load_store_matrix_sync_test/load_store_matrix_sync_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke19"> ./test/unit/map_util_test/map_util_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke20"> ./test/unit/pack_util_test/pack_util_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke21"> ./test/unit/transforms_test/transforms_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke22"> ./test/unit/tuple_test/tuple_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke23"> ./test/unit/unpack_util_test/unpack_util_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke24"> ./test/unit/vector_iterator_test/vector_iterator_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke25"> ./test/unit/vector_test/vector_test {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke26"> ./test/unit/vector_util_test/vector_util_test {SMOKE_PARAMS} </run>
+    </emulation>
+
+    <emulation sets="regression">
+        <run name="regression04"> ./test/gemm/gemm_PGR0_LB0_MP0_SB_NC-validate {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression05"> ./test/gemm/gemm_PGR0_LB0_MP0_MB_NC-validate {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression06"> ./test/gemm/gemm_PGR1_LB2_MP0_MB_CP_WV-validate {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression07"> ./test/gemm/gemm_PGR1_LB2_MP0_MB_CP_WG-validate {REGRESSION_PARAMS} </run>
+    </emulation>
+	<emulation sets="regression">
+		<run name="regression08"> ./test/gemm/gemm_PGR1_LB2_MP0_MB_CP_BLK-validate {REGRESSION_PARAMS} </run>
+	</emulation>
+    <emulation sets="regression">
+        <run name="regression09"> ./test/dlrm/dlrm_dot_lds_test-validate {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression10"> ./test/dlrm/dlrm_dot_test-validate {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression11"> ./test/unit/contamination_test/contamination_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression12"> ./test/unit/cross_lane_ops_test/cross_lane_ops_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression13"> ./test/unit/fill_fragment_test/fill_fragment_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression14"> ./test/unit/io_shape_test/io_shape_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression15"> ./test/unit/io_traits_test/io_traits_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression16"> ./test/unit/layout_test/layout_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression17"> ./test/unit/load_store_matrix_coop_sync_test/load_store_matrix_coop_sync_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression18"> ./test/unit/load_store_matrix_sync_test/load_store_matrix_sync_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression19"> ./test/unit/map_util_test/map_util_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression20"> ./test/unit/pack_util_test/pack_util_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression21"> ./test/unit/transforms_test/transforms_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression22"> ./test/unit/tuple_test/tuple_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression23"> ./test/unit/unpack_util_test/unpack_util_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression24"> ./test/unit/vector_iterator_test/vector_iterator_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression25"> ./test/unit/vector_test/vector_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="regression">
+        <run name="regression26"> ./test/unit/vector_util_test/vector_util_test {REGRESSION_PARAMS} </run>
+    </emulation>
+
+    <emulation sets="extended">
+        <run name="extended04"> ./test/gemm/gemm_PGR0_LB0_MP0_SB_NC-validate {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended05"> ./test/gemm/gemm_PGR0_LB0_MP0_MB_NC-validate {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended06"> ./test/gemm/gemm_PGR1_LB2_MP0_MB_CP_WV-validate {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended07"> ./test/gemm/gemm_PGR1_LB2_MP0_MB_CP_WG-validate {REGRESSION_PARAMS} </run>
+    </emulation>
+	<emulation sets="extended">
+		<run name="extended08"> ./test/gemm/gemm_PGR1_LB2_MP0_MB_CP_BLK-validate {REGRESSION_PARAMS} </run>
+	</emulation>
+    <emulation sets="extended">
+        <run name="extended09"> ./test/dlrm/dlrm_dot_lds_test-validate {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended10"> ./test/dlrm/dlrm_dot_test-validate {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended11"> ./test/unit/contamination_test/contamination_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended12"> ./test/unit/cross_lane_ops_test/cross_lane_ops_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended13"> ./test/unit/fill_fragment_test/fill_fragment_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended14"> ./test/unit/io_shape_test/io_shape_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended15"> ./test/unit/io_traits_test/io_traits_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended16"> ./test/unit/layout_test/layout_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended17"> ./test/unit/load_store_matrix_coop_sync_test/load_store_matrix_coop_sync_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended18"> ./test/unit/load_store_matrix_sync_test/load_store_matrix_sync_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended19"> ./test/unit/map_util_test/map_util_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended20"> ./test/unit/pack_util_test/pack_util_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended21"> ./test/unit/transforms_test/transforms_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended22"> ./test/unit/tuple_test/tuple_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended23"> ./test/unit/unpack_util_test/unpack_util_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended24"> ./test/unit/vector_iterator_test/vector_iterator_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended25"> ./test/unit/vector_test/vector_test {REGRESSION_PARAMS} </run>
+    </emulation>
+    <emulation sets="extended">
+        <run name="extended26"> ./test/unit/vector_util_test/vector_util_test {REGRESSION_PARAMS} </run>
+    </emulation>
+</testset>

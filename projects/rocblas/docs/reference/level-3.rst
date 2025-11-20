@@ -413,5 +413,3 @@ rocblas_Xtrtri + batched, strided_batched
 .. doxygenfunction:: rocblas_strtri_strided_batched
    :outline:
 .. doxygenfunction:: rocblas_dtrtri_strided_batched
-
-

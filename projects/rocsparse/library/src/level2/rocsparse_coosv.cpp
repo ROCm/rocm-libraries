@@ -151,6 +151,7 @@ rocsparse_status rocsparse::coosv_analysis_template(rocsparse_handle          ha
                                                     rocsparse_mat_info        info,
                                                     rocsparse_analysis_policy analysis,
                                                     rocsparse_solve_policy    solve,
+                                                    rocsparse_csrsv_info*     p_csrsv_info,
                                                     void*                     temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -173,6 +174,7 @@ rocsparse_status rocsparse::coosv_analysis_template(rocsparse_handle          ha
                          (const void*&)info,
                          solve,
                          analysis,
+                         p_csrsv_info,
                          (const void*&)temp_buffer);
 
     ROCSPARSE_CHECKARG_ENUM(1, trans);
@@ -245,6 +247,7 @@ rocsparse_status rocsparse::coosv_analysis_template(rocsparse_handle          ha
                                                                      info,
                                                                      analysis,
                                                                      solve,
+                                                                     p_csrsv_info,
                                                                      temp_buffer));
     }
     else
@@ -261,6 +264,7 @@ rocsparse_status rocsparse::coosv_analysis_template(rocsparse_handle          ha
                                                                      info,
                                                                      analysis,
                                                                      solve,
+                                                                     p_csrsv_info,
                                                                      temp_buffer));
     }
 
@@ -280,6 +284,7 @@ rocsparse_status rocsparse::coosv_analysis_template(rocsparse_handle          ha
         rocsparse_mat_info        info,                           \
         rocsparse_analysis_policy analysis,                       \
         rocsparse_solve_policy    solve,                          \
+        rocsparse_csrsv_info*     p_csrsv_info,                   \
         void*                     temp_buffer);
 
 INSTANTIATE(int32_t, float);
@@ -306,6 +311,7 @@ rocsparse_status rocsparse::coosv_solve_template(rocsparse_handle          handl
                                                  const T*                  x,
                                                  T*                        y,
                                                  rocsparse_solve_policy    policy,
+                                                 rocsparse_csrsv_info      csrsv_info,
                                                  void*                     temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -330,6 +336,7 @@ rocsparse_status rocsparse::coosv_solve_template(rocsparse_handle          handl
                          (const void*&)x,
                          (const void*&)y,
                          policy,
+                         csrsv_info,
                          (const void*&)temp_buffer);
 
     ROCSPARSE_CHECKARG_ENUM(1, trans);
@@ -397,6 +404,7 @@ rocsparse_status rocsparse::coosv_solve_template(rocsparse_handle          handl
                                                                   static_cast<int64_t>(1),
                                                                   y,
                                                                   policy,
+                                                                  csrsv_info,
                                                                   temp_buffer));
         return rocsparse_status_success;
     }
@@ -416,6 +424,7 @@ rocsparse_status rocsparse::coosv_solve_template(rocsparse_handle          handl
                                                                   static_cast<int64_t>(1),
                                                                   y,
                                                                   policy,
+                                                                  csrsv_info,
                                                                   temp_buffer));
         return rocsparse_status_success;
     }
@@ -436,6 +445,7 @@ rocsparse_status rocsparse::coosv_solve_template(rocsparse_handle          handl
         const TTYPE*              x,                                         \
         TTYPE*                    y,                                         \
         rocsparse_solve_policy    policy,                                    \
+        rocsparse_csrsv_info      csrsv_info,                                \
         void*                     temp_buffer);
 
 INSTANTIATE(int32_t, float);

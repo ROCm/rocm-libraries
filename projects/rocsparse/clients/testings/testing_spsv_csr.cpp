@@ -198,6 +198,11 @@ void testing_spsv_csr(const Arguments& arg)
     CHECK_ROCSPARSE_ERROR(rocsparse_spsv(
         handle, trans_A, dalpha, A, x, y2, ttype, alg, preprocess, nullptr, dbuffer));
 
+    //
+    // The buffer must be be non persistent, let's put garbage in it.
+    //
+    CHECK_HIP_ERROR(hipMemset(dbuffer, 255 - 1, buffer_size));
+
     if(arg.unit_check)
     {
         // Solve on host

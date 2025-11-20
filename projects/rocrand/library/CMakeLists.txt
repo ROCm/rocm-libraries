@@ -50,18 +50,7 @@ configure_file(
     @ONLY
 )
 
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-    rocm_wrap_header_file(
-        rocrand_version.h
-        GUARDS SYMLINK WRAPPER
-        WRAPPER_LOCATIONS include rocrand/include
-        OUTPUT_LOCATIONS library/include library/rocrand/include
-        HEADER_LOCATION include/rocrand
-    )
-endif()
-
 add_library(rocrand ${rocRAND_HIP_SRCS})
-add_library(roc::rocrand ALIAS rocrand)
 
 set(SOBOL_PRECOMPUTED_SOURCES
     "src/rocrand_scrambled_sobol32_precomputed"
@@ -153,13 +142,6 @@ else()
         NAMESPACE roc::
         DEPENDS PACKAGE hip
         INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/rocrand-fortran-config.cmake"
-    )
-endif()
-
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-    rocm_install(
-        DIRECTORY "${PROJECT_BINARY_DIR}/library/rocrand"
-        DESTINATION "."
     )
 endif()
 

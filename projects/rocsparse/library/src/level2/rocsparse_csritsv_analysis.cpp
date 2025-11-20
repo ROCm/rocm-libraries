@@ -38,7 +38,7 @@ namespace rocsparse
                                        const J* __restrict__ ind_,
                                        rocsparse_index_base base_,
                                        J* __restrict__ count,
-                                       rocsparse_int* __restrict__ position)
+                                       J* __restrict__ position)
     {
         const J tid = BLOCKSIZE * hipBlockIdx_x + hipThreadIdx_x;
         if(tid < m)
@@ -46,7 +46,7 @@ namespace rocsparse
             const J c = (((ind_[ptr_diag_[tid] - base_ + ptr_shift_] - base_) != tid) ? 1 : 0);
             if(c > 0)
             {
-                const rocsparse_int p = (tid + base_);
+                const J p = (tid + base_);
                 rocsparse::atomic_min(position, p);
                 rocsparse::atomic_add(count, c);
             }
@@ -60,7 +60,7 @@ namespace rocsparse
                                         const J* __restrict__ ind_,
                                         rocsparse_index_base base_,
                                         J* __restrict__ count,
-                                        rocsparse_int* __restrict__ position)
+                                        J* __restrict__ position)
     {
         const J tid = BLOCKSIZE * hipBlockIdx_x + hipThreadIdx_x;
         if(tid < m)
@@ -69,7 +69,7 @@ namespace rocsparse
             const J c = (((ind_[ptr_[tid + shift] - shift - base_] - base_) != tid) ? 1 : 0);
             if(c > 0)
             {
-                const rocsparse_int p = (tid + base_);
+                const J p = (tid + base_);
                 rocsparse::atomic_min(position, p);
                 rocsparse::atomic_add(count, c);
             }
@@ -152,36 +152,25 @@ namespace rocsparse
                                            const I*                  csr_row_ptr,
                                            const J*                  csr_col_ind,
                                            rocsparse_csritsv_info    info,
-                                           rocsparse_int**           zero_pivot,
                                            void*                     temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        // Allocate buffer to hold zero pivot
-        if(zero_pivot[0] == nullptr)
-        {
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMallocAsync(zero_pivot, sizeof(rocsparse_int), handle->stream));
-        }
+        //
+        // Create zero pivot.
+        //
+        info->create_zero_pivot_async(rocsparse::get_indextype<J>(), handle->stream);
 
-        // Initialize zero pivot
-        rocsparse_int max = std::numeric_limits<rocsparse_int>::max();
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-            zero_pivot[0], &max, sizeof(rocsparse_int), hipMemcpyHostToDevice, handle->stream));
-
-        const rocsparse_fill_mode fill_mode = descr->fill_mode;
-        const rocsparse_diag_type diag_type = descr->diag_type;
-
+        const rocsparse_fill_mode fill_mode  = descr->fill_mode;
+        const rocsparse_diag_type diag_type  = descr->diag_type;
+        J*                        zero_pivot = (J*)info->get_zero_pivot();
         if(nnz == 0)
         {
             if(diag_type == rocsparse_diag_type_non_unit)
             {
-                const rocsparse_int b = (rocsparse_int)descr->base;
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(zero_pivot[0],
-                                                   &b,
-                                                   sizeof(rocsparse_int),
-                                                   hipMemcpyHostToDevice,
-                                                   handle->stream));
+                const J b = (J)descr->base;
+                RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                    zero_pivot, &b, sizeof(J), hipMemcpyHostToDevice, handle->stream));
                 return rocsparse_status_success;
             }
         }
@@ -295,7 +284,7 @@ namespace rocsparse
                     csr_col_ind,
                     descr->base,
                     (J*)temp_buffer,
-                    zero_pivot[0]);
+                    zero_pivot);
             }
             else
             {
@@ -315,7 +304,7 @@ namespace rocsparse
                         csr_col_ind,
                         descr->base,
                         (J*)temp_buffer,
-                        zero_pivot[0]);
+                        zero_pivot);
                 }
                 else
                 {
@@ -331,7 +320,7 @@ namespace rocsparse
                         csr_col_ind,
                         descr->base,
                         (J*)temp_buffer,
-                        zero_pivot[0]);
+                        zero_pivot);
                 }
             }
             J count_missing_diagonal;
@@ -465,14 +454,14 @@ rocsparse_status rocsparse::csritsv_analysis_template(rocsparse_handle          
 
     // User is explicitly asking to force a re-analysis, or no valid data has been
     // found to be re-used.
-
     // Clear csritsv info
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_csritsv_info(info->csritsv_info));
+    if(info->csritsv_info != nullptr)
+    {
+        delete info->csritsv_info;
+        info->csritsv_info = nullptr;
+    }
+    info->csritsv_info = new _rocsparse_csritsv_info();
 
-    // Create csritsv info
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_csritsv_info(&info->csritsv_info));
-
-    // Analyze the structure.
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csritsv_info_analysis(handle,
                                                                trans,
                                                                m,
@@ -482,7 +471,6 @@ rocsparse_status rocsparse::csritsv_analysis_template(rocsparse_handle          
                                                                csr_row_ptr,
                                                                csr_col_ind,
                                                                info->csritsv_info,
-                                                               (rocsparse_int**)&info->zero_pivot,
                                                                temp_buffer));
 
     //

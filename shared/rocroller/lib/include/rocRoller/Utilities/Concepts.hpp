@@ -120,4 +120,12 @@ namespace rocRoller
     static_assert(CPointer<int const*>);
     static_assert(CPointer<char const*>);
     static_assert(CPointer<char*>);
+
+    template <typename T>
+    concept CHashable = requires(T a)
+    {
+        {
+            std::hash<T>{}(a)
+            } -> std::convertible_to<std::size_t>;
+    };
 }

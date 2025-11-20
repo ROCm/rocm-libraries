@@ -46,7 +46,7 @@ IGNORE_LIST = {
 
 # Valid enums and Regex for validation
 VALID_HW_TYPES = {"CPU", "GPU"}
-VALID_DATATYPES = {"FP8", "FP16", "FP32", "FP64", "BFP16", "BFP8", "I64", "I32", "I16", "I8", "NONE"}
+VALID_DATATYPES = {"FP8", "FP16", "FP32", "TF32", "FP64", "BFP16", "BFP8", "I64", "I32", "I16", "I8", "NONE"}
 # Our suite (or fixture) naming convention: must start with CPU or GPU, followed by one or more alphanum groups, and end with a valid datatype.
 TESTSUITE_REGEX = re.compile(
     r"^(CPU|GPU)_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*_(" + "|".join(VALID_DATATYPES) + r")$"

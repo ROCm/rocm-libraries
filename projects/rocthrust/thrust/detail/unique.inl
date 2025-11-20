@@ -390,4 +390,3 @@ THRUST_HOST_DEVICE
 } // end unique_count()
 
 THRUST_NAMESPACE_END
-

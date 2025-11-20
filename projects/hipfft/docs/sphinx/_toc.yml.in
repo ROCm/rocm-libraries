@@ -5,23 +5,25 @@ subtrees:
 
 - caption: Install
   entries:
-  - file: install/building-installing-hipfft
+  - file: install/building-installing-hipfft-and-hipfftw
     title: Installation guide
 
 - caption: Conceptual
   entries:
   - file: conceptual/overview
-    title: hipFFT overview
+    title: Overview of hipFFT and hipFFTW
 
 - caption: Examples
   entries:
-  - url: https://github.com/ROCm/hipFFT/tree/develop/clients/samples
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipfft/clients/samples
     title: hipFFT examples
 
 - caption: API reference
   entries:
-  - file: reference/fft-api-usage
-    title: API and usage notes
+  - file: reference/hipfft-api-usage
+    title: hipFFT API and usage notes
+  - file: reference/hipfftw-api-usage
+    title: hipFFTW API and usage notes
 
 - caption: About
   entries:

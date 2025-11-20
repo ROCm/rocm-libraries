@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
 
 #include "../../../shared/rocfft_hip.h"
 
+#include "callback_map.h"
+
 struct rocfft_execution_info_t
 {
     void*       workBuffer;
@@ -33,13 +35,22 @@ struct rocfft_execution_info_t
         , workBufferSize(0)
     {
     }
-    UserCallbacks callbacks;
+    // User-supplied load/store callback function pointers and data.
+    // If specified, there is one function+data per brick in the
+    // input/output.
+    void** load_cb_fns        = nullptr;
+    void** load_cb_data       = nullptr;
+    size_t load_cb_lds_bytes  = 0;
+    void** store_cb_fns       = nullptr;
+    void** store_cb_data      = nullptr;
+    size_t store_cb_lds_bytes = 0;
 };
 
-void TransformPowX(const ExecPlan&       execPlan,
-                   void*                 in_buffer[],
-                   void*                 out_buffer[],
-                   rocfft_execution_info info,
-                   size_t                multiPlanIdx);
+void TransformPowX(const ExecPlan&                         execPlan,
+                   void*                                   in_buffer[],
+                   void*                                   out_buffer[],
+                   rocfft_execution_info                   info,
+                   size_t                                  multiPlanIdx,
+                   const std::map<int, device_callback_t>& callbacks);
 
 #endif // TRANSFORM_H

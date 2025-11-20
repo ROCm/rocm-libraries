@@ -99,3 +99,15 @@ struct testing_matrix_type_traits<rocsparse_format_ell, I, I, T>
     template <typename U>
     using device_sparse_matrix = device_ell_matrix<U, I>;
 };
+
+//
+// TRAITS FOR SLICED ELL FORMAT.
+//
+template <typename I, typename J, typename T>
+struct testing_matrix_type_traits<rocsparse_format_sell, I, J, T>
+{
+    template <typename U>
+    using host_sparse_matrix = host_sell_matrix<U, I, J>;
+    template <typename U>
+    using device_sparse_matrix = device_sell_matrix<U, I, J>;
+};

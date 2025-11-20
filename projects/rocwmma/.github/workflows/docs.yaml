@@ -1,0 +1,58 @@
+name: Upload to the upload server
+
+# Controls when the workflow will run
+on:
+  push:
+    branches: [develop, master]
+    tags:
+      - rocm-5.*
+  release:
+    types: [published]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+
+      - name: getting branch name
+        shell: bash
+        run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+        id: branch_name
+      - name: getting tag name
+        shell: bash
+        run: echo "##[set-output name=tag;]$(echo ${GITHUB_REF_NAME})"
+        id: tag_name
+      - name: zipping files
+        run: zip -r ${{ github.event.repository.name }}_${{ steps.tag_name.outputs.tag }}.zip . -x '*.git*' '*.idea*'
+      - name: echo-step
+        run: echo "${{ github.event.release.target_commitish }}"
+      - name: uploading archive to prod
+        if: ${{ steps.branch_name.outputs.branch == 'master' || github.event.release.target_commitish == 'master'}}
+        uses: wlixcc/SFTP-Deploy-Action@v1.0
+        with:
+          username: ${{ secrets.USERNAME }}
+          server: ${{ secrets.SERVER }}
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          local_path: ${{ github.event.repository.name }}_${{ steps.tag_name.outputs.tag }}.zip
+          remote_path: '${{ secrets.PROD_UPLOAD_URL }}'
+          args: '-o ConnectTimeout=5'
+      - name: uploading archive to staging
+        if: ${{ steps.branch_name.outputs.branch == 'develop' || github.event.release.target_commitish == 'develop' }}
+        uses: wlixcc/SFTP-Deploy-Action@v1.0
+        with:
+          username: ${{ secrets.USERNAME }}
+          server: ${{ secrets.SERVER }}
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          local_path: ${{ github.event.repository.name }}_${{ steps.tag_name.outputs.tag }}.zip
+          remote_path: '${{ secrets.STG_UPLOAD_URL }}'
+          args: '-o ConnectTimeout=5'

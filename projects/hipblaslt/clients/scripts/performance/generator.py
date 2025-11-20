@@ -21,6 +21,7 @@
 import logging
 
 from dataclasses import dataclass, field
+from subprocess import run, PIPE
 from pathlib import Path as path
 from typing import Dict, List, Mapping, Generator
 
@@ -67,6 +68,24 @@ class SuiteProblemGenerator:
     suites: Mapping[str, Generator[ProblemSet, None,
                                    None]] = field(default_factory=dict)
 
+    # default arch is gfx942 when no argument is set and query is failed
+    target_arch_static: str = "gfx942"
+
+    @staticmethod
+    def detectISA():
+        # TODO- currently this is for PTS only. If we'd like to make it generic,
+        # we need to select correct exec from "rocm_agent_enumerator", "amdgpu-arch", "hipinfo"
+        enumerator = "/opt/rocm/bin/rocm_agent_enumerator"
+        process = run([enumerator], stdout=PIPE)
+        for line in process.stdout.decode().split("\n"):
+            archStr = line.strip()
+            if "gfx" in archStr:
+                print(f"Info: Auto Detected GPU with ISA: {archStr}")
+                SuiteProblemGenerator.target_arch_static = archStr
+                break
+        if process.returncode:
+            print(f"{enumerator} exited with code {process.returncode}, using default arch gfx942")
+
     def __post_init__(self):
         for name in self.suite_names:
             self.suites[name] = load_suite(name)
@@ -96,10 +115,6 @@ class ShellScriptProblemGenerator:
                     # --verfiy will output other values, not supported yet
                     if cmd.count("verfiy") > 0 or cmd.count("-v") > 0:
                         print(f'--verify or -v is not supported, skip bench.')
-                        continue
-                    # TODO- not supported for offline tuning
-                    if cmd.count("requested_solution") > 0:
-                        print(f'--requested_solution is not supported, skip bench.')
                         continue
 
                     cmd = cmd.replace("./hipblaslt-bench", str(self.bench_exec))

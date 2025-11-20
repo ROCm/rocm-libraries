@@ -42,8 +42,8 @@ BenchmarkProblems:
         - EdgeType: ["ShiftPtr"]
         - LoopTail: [True]
       ForkParameters:
-        # Specify parameters with a set of values, yielding a 
-        # solution space spanning the cartesian product of all 
+        # Specify parameters with a set of values, yielding a
+        # solution space spanning the cartesian product of all
         # parameter sets.
         - PrefetchLocalRead: [False, True]
         - PrefetchGlobalRead: [False, True]

@@ -212,6 +212,7 @@ rocblaslt_status rocblaslt_makeArgument_cpp(rocblaslt_handle              handle
                                             const rocblaslt_matmul_algo&  algo,
                                             const rocblaslt::RocTuningV2* tuning,
                                             void*                         workspace,
+                                            size_t                        workspaceSizeInBytes,
                                             bool                          useUserArgs,
                                             hipStream_t                   stream,
                                             std::shared_ptr<void>         gemmData);

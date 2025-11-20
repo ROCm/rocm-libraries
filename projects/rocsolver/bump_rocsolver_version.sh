@@ -4,8 +4,8 @@
 # Edit script to bump versions for new development cycle/release.
 
 # for rocSOLVER version string
-OLD_ROCSOLVER_VERSION="3\.31\.0"
-NEW_ROCSOLVER_VERSION="3.32.0"
+OLD_ROCSOLVER_VERSION="3\.32\.0"
+NEW_ROCSOLVER_VERSION="3.33.0"
 sed -i "s/${OLD_ROCSOLVER_VERSION}/${NEW_ROCSOLVER_VERSION}/g" CMakeLists.txt
 
 # for rocSOLVER library name

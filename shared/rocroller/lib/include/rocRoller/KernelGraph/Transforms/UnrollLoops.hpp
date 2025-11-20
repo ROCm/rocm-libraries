@@ -35,16 +35,6 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-
-        /**
-         * @brief Gets the name of the given for loop.
-         *
-         * @param graph
-         * @param start
-         * @return std::string
-         */
-        std::string getForLoopName(KernelGraph& graph, int start);
-
         /**
          * @brief Determine how many times to unroll the loop.
          *

@@ -231,7 +231,7 @@ hipsparseStatus_t testing_csrcolor()
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     // Determine absolute path of test matrix
     // Matrices are stored at the same path in matrices directory
-    std::string filename = get_filename("nos3.bin");
+    std::string filename = "nos3.bin";
 
     // hipSPARSE handle
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
@@ -253,10 +253,9 @@ hipsparseStatus_t testing_csrcolor()
     int m;
     int k;
     int nnz;
-
-    if(read_bin_matrix(filename.c_str(), m, k, nnz, hrow_ptr, hcol_ind, hval, idx_base) != 0)
+    if(!generate_csr_matrix(filename, m, k, nnz, hrow_ptr, hcol_ind, hval, idx_base))
     {
-        fprintf(stderr, "Cannot open [read] %s\n", filename.c_str());
+        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
         return HIPSPARSE_STATUS_INTERNAL_ERROR;
     }
 

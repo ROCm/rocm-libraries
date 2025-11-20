@@ -26,11 +26,10 @@
 
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Conditional.hpp>
+#include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
 {
-    RegisterComponent(ConditionalGenerator);
-
     template <>
     std::shared_ptr<TernaryArithmeticGenerator<Expression::Conditional>>
         GetGenerator<Expression::Conditional>(Register::ValuePtr dst,

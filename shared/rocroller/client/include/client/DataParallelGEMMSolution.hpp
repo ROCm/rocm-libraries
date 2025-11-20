@@ -239,7 +239,7 @@ namespace rocRoller
                         = command->addOperation(Operations::Tensor(2, typeD, {(size_t)1})); // D
                     command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
 
-                    if(solutionParams.workgroupMapping.first != -1)
+                    if(solutionParams.workgroupMappingDim != -1)
                     {
                         m_tagWGM = command->allocateTag();
                         command->allocateArgument(DataType::Int32,
@@ -379,19 +379,32 @@ namespace rocRoller
                                             solutionParams.architecture.toString(),
                                             toString(solutionParams.types.scaleTypeB)));
 
+                    if(solutionParams.swizzleScale)
+                    {
+                        if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
+                        {
+                            AssertFatal(solutionParams.swizzleTileSize.m > 0
+                                            && solutionParams.swizzleTileSize.k > 0,
+                                        "Invalid SwizzleTileSize for A.",
+                                        ShowValue(solutionParams.swizzleTileSize.m),
+                                        ShowValue(solutionParams.swizzleTileSize.k));
+                        }
+
+                        if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
+                        {
+                            AssertFatal(solutionParams.swizzleTileSize.n > 0
+                                            && solutionParams.swizzleTileSize.l > 0,
+                                        "Invalid SwizzleTileSize for B.",
+                                        ShowValue(solutionParams.swizzleTileSize.n),
+                                        ShowValue(solutionParams.swizzleTileSize.l));
+                        }
+                    }
+
                     params->setManualKernelDimension(2);
                     params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
-                    auto memoryTypeA = MemoryType::WAVE;
-                    auto memoryTypeB = MemoryType::WAVE;
-                    if(solutionParams.direct2LDSA)
-                        memoryTypeA = MemoryType::WAVE_Direct2LDS;
-                    else if(solutionParams.loadLDSA)
-                        memoryTypeA = MemoryType::LDS;
-                    if(solutionParams.direct2LDSA)
-                        memoryTypeB = MemoryType::WAVE_Direct2LDS;
-                    else if(solutionParams.loadLDSB)
-                        memoryTypeB = MemoryType::LDS;
+                    auto memoryTypeA = GetMemoryType(solutionParams.loadPathA);
+                    auto memoryTypeB = GetMemoryType(solutionParams.loadPathB);
 
                     auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macK},
@@ -428,7 +441,12 @@ namespace rocRoller
                              solutionParams.waveN,
                              solutionParams.waveK / solutionParams.types.scaleBlockSize,
                              solutionParams.waveB},
-                            solutionParams.loadLDSScaleA ? MemoryType::LDS : MemoryType::WAVE);
+                            solutionParams.loadLDSScaleA ? MemoryType::LDS : MemoryType::WAVE,
+                            {},
+                            {solutionParams.swizzleTileSize.m,
+                             solutionParams.swizzleTileSize.n,
+                             solutionParams.swizzleTileSize.k,
+                             1});
                         params->setDimensionInfo(*m_tagLoadScaleA, macTileAScale);
                     }
                     if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
@@ -441,7 +459,12 @@ namespace rocRoller
                              solutionParams.waveN,
                              solutionParams.waveK / solutionParams.types.scaleBlockSize,
                              solutionParams.waveB},
-                            solutionParams.loadLDSScaleB ? MemoryType::LDS : MemoryType::WAVE);
+                            solutionParams.loadLDSScaleB ? MemoryType::LDS : MemoryType::WAVE,
+                            {},
+                            {solutionParams.swizzleTileSize.m,
+                             solutionParams.swizzleTileSize.n,
+                             solutionParams.swizzleTileSize.l,
+                             1});
                         params->setDimensionInfo(*m_tagLoadScaleB, macTileBScale);
                     }
 
@@ -477,9 +500,9 @@ namespace rocRoller
 
                     params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
 
-                    if(solutionParams.workgroupMapping.first != -1)
+                    if(solutionParams.workgroupMappingDim != -1)
                     {
-                        auto dim = solutionParams.workgroupMapping.first;
+                        auto dim = solutionParams.workgroupMappingDim;
 
                         AssertFatal(
                             dim == 0 || dim == 1,
@@ -487,8 +510,8 @@ namespace rocRoller
                             ShowValue(dim));
 
                         // CommandSolution::generateKernelGraph creates the size Expression
-                        // and initializes the workgroupMapping.second
-                        params->workgroupMapping = {dim, nullptr};
+                        // and initializes the workgroupMappingValue
+                        params->workgroupMappingDim = dim;
                     }
 
                     if(solutionParams.workgroupRemapXCC)
@@ -549,21 +572,23 @@ namespace rocRoller
                         fromString<DataType>(problemParams.types.typeD), {M, N}, "N");
                     setCommandTensorArg(commandArgs, m_tagTensorD, descD, (float*)nullptr);
 
-                    if(problemParams.workgroupMapping.first != -1)
+                    if(problemParams.workgroupMappingDim != -1)
                     {
-                        auto const dim  = problemParams.workgroupMapping.first;
-                        auto const size = problemParams.workgroupMapping.second;
+                        auto const workgroupMappingDim   = problemParams.workgroupMappingDim;
+                        auto const workgroupMappingValue = runParams.workgroupMappingValue;
 
-                        AssertFatal(
-                            dim == 0 || dim == 1,
-                            "Only 0 (M) or 1 (N) are supported dimensions for workgroup mapping.",
-                            ShowValue(dim));
+                        AssertFatal(workgroupMappingDim == 0 || workgroupMappingDim == 1,
+                                    "Only 0 (M) or 1 (N) are supported dimensions for workgroup "
+                                    "mapping dim.",
+                                    ShowValue(workgroupMappingDim));
 
-                        AssertFatal(size > 0,
-                                    "Workgroup mapping size must be a positive non-zero integer.",
-                                    ShowValue(size));
+                        AssertFatal(workgroupMappingValue > 0,
+                                    "Workgroup mapping value must be a positive integer "
+                                    "when work group dimension is specified.",
+                                    ShowValue(workgroupMappingValue));
 
-                        commandArgs.setArgument(m_tagWGM, ArgumentType::Value, size);
+                        commandArgs.setArgument(
+                            m_tagWGM, ArgumentType::Value, workgroupMappingValue);
                     }
 
                     return commandArgs;

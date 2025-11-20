@@ -1,0 +1,52 @@
+{
+    "fallback_cases": [
+        {
+            "based_on_type": "double",
+            "sizeof_max_inclusive": 8,
+            "sizeof_min_exclusive": 4,
+            "is_floating_point": true
+        },
+        {
+            "based_on_type": "float",
+            "sizeof_max_inclusive": 4,
+            "sizeof_min_exclusive": 2,
+            "is_floating_point": true
+        },
+        {
+            "based_on_type": "rocprim::half",
+            "sizeof_max_inclusive": 2,
+            "sizeof_min_exclusive": 0,
+            "is_floating_point": true
+        },
+        {
+            "based_on_type": "rocprim::int128_t",
+            "sizeof_max_inclusive": 16,
+            "sizeof_min_exclusive": 8,
+            "is_floating_point": false
+        },
+        {
+            "based_on_type": "int64_t",
+            "sizeof_max_inclusive": 8,
+            "sizeof_min_exclusive": 4,
+            "is_floating_point": false
+        },
+        {
+            "based_on_type": "int",
+            "sizeof_max_inclusive": 4,
+            "sizeof_min_exclusive": 2,
+            "is_floating_point": false
+        },
+        {
+            "based_on_type": "short",
+            "sizeof_max_inclusive": 2,
+            "sizeof_min_exclusive": 1,
+            "is_floating_point": false
+        },
+        {
+            "based_on_type": "int8_t",
+            "sizeof_max_inclusive": 1,
+            "sizeof_min_exclusive": 0,
+            "is_floating_point": false
+        }
+    ]
+}

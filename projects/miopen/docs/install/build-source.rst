@@ -97,10 +97,16 @@ both database files to the source directory:
 
   cmake -DMIOPEN_BACKEND=HIP -DBUILD_DEV=On ..
 
-To customize the database paths, use the ``MIOPEN_SYSTEM_DB_PATH`` (for the System PerfDb)
-and ``MIOPEN_USER_DB_PATH`` (for the User PerfDb) CMake variables.
+To customize the database paths, use the ``MIOPEN_SYSTEM_DB_PATH`` (for the System PerfDb and FindDb)
+and ``MIOPEN_USER_DB_PATH`` (for the User PerfDb and FindDb) CMake variables.
+These db location variables are also settable at runtime through the environment.
 
-To learn more, see :doc:`using the performance database <../conceptual/perfdb>`.
+It is safe to share the User Db location on a networked file system, however it is required that the machines
+accessing the shared files have unique hostnames for the file sharing implemented in MIOpen to function correctly.
+
+To learn more, see
+:doc:`using the performance database <../conceptual/perfdb>`
+:doc:`using the find database <../conceptual/finddb>`
 
 Persistent program cache
 --------------------------------------------------------------------------------------------------------
@@ -151,7 +157,7 @@ You can build the library from the ``build`` directory using the ``Release`` con
 .. code:: shell
 
    cmake --build . --config Release
-   
+
 or
 
 .. code:: shell
@@ -183,7 +189,7 @@ To build the driver, use the ``MIOpenDriver`` target:
 .. code:: shell
 
    cmake --build . --config Release --target MIOpenDriver
-   
+
 or
 
 .. code:: shell
@@ -198,7 +204,7 @@ To run tests, use the ``check`` target:
 .. code:: shell
 
    cmake --build . --config Release --target check
-   
+
 or
 
 .. code:: shell
@@ -230,44 +236,27 @@ To format the code per commit, install githooks:
 Storing large file using Git Large File Storage
 =========================================================
 
-Git Large File Storage (LFS) replaces large files, such as audio samples, videos, datasets, and graphics
-with text pointers inside Git, while storing the file contents on a remote server. MIOpen uses Git
-LFS to store large files, such as kernel database files (``*.kdb``), which are normally > 0.5 GB.
+`Data Versioning System (DVS) <https://dvc.org/>`_ replaces large files, such as audio samples, videos, datasets, and 
+graphics with text pointers inside Git, while storing the file contents on a remote server. MIOpen uses DVC to 
+store large files, such as kernel database files (``*.kdb``), which are normally > 0.5 GB.
 
-To install Git LFS, use these commands:
+To install DVC, use the `instructions provided for your platform here <https://dvc.org/doc/install>`_.
 
-.. code:: shell
-
-   sudo apt install git-lfs
-   git lfs install
-
-In the Git repository where you want to use Git LFS, track the file type using the following code. If the
-file type is already being tracked, you can skip this step:
+You can `pull <https://dvc.org/doc/command-reference/pull>`_ all large files or a single large file using:
 
 .. code:: shell
 
-   git lfs track "*.file_type"
-   git add .gitattributes
+   dvc pull
 
-To pull all files or a single large file, use:
-
-.. code:: shell
-
-   git lfs pull --exclude=
- 
 or
 
 .. code:: shell
 
-   git lfs pull --exclude= --include "filename"
+   dvc pull "filename"
 
-Update the large files and push to GitHub using the following sequence of commands:
 
-.. code:: shell
-
-   git add my_large_files
-   git commit -m "the message"
-   git push
+If you are familiar with using Git LFS, a key difference with DVC is that you must manually run ``dvc pull`` after you 
+switch branches or merge changes in Git to ensure any large binaries are kept in sync with your checkout.
 
 Installing the dependencies manually
 ===============================================================

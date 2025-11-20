@@ -463,7 +463,7 @@ def write_test(test):
             else:
                 arg.append(ctype(test[name]))
         except TypeError as err:
-            sys.exit("TypeError: " + str(err) + " for " + name +
+            raise TypeError(str(err) + " for " + name +
                      ", which has type " + str(type(test[name])) + "\n")
 
     for name in test:

@@ -18,6 +18,11 @@
 #include "ck/library/reference_tensor_operation/cpu/reference_batched_gemm.hpp"
 #include "ck/library/utility/literals.hpp"
 
+using ::ck::DeviceMem;
+using ::ck::hip_check_error;
+using ::ck::HostTensorDescriptor;
+using ::ck::Tensor;
+
 template <ck::index_t... Is>
 using S = ck::Sequence<Is...>;
 
@@ -74,10 +79,10 @@ using DeviceGemmInstance = ck::tensor_operation::device::DeviceBatchedGemmMultiD
     64,             // KPerBlock
     16,             // AK1
     16,             // BK1
-    32,             // MPerXDL
-    32,             // NPerXDL
-    4,              // MXdlPerWave
-    2,              // NXdlPerWave
+    16,             // MPerXDL
+    16,             // NPerXDL
+    8,              // MXdlPerWave
+    4,              // NXdlPerWave
     S<4, 64, 1>,    // ABlockTransferThreadClusterLengths_AK0_M_AK1
     S<1, 0, 2>,     // ABlockTransferThreadClusterArrangeOrder
     S<1, 0, 2>,     // ABlockTransferSrcAccessOrder
@@ -95,7 +100,7 @@ using DeviceGemmInstance = ck::tensor_operation::device::DeviceBatchedGemmMultiD
     1,              // CShuffleMXdlPerWavePerShuffle
     1,              // CShuffleNXdlPerWavePerShuffle
     S<1, 32, 1, 8>, // CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock
-    S<8, 8, 1>,     // CDEShuffleBlockTransferScalarPerVectors
+    S<4, 4, 1>,     // CDEShuffleBlockTransferScalarPerVectors
     ck::BlockGemmPipelineScheduler::Interwave, // BlockGemmPipelineScheduler
     ck::BlockGemmPipelineVersion::v1,          // BlockGemmPipelineVersion
     F8                                         // ComputeTypeA
@@ -103,4 +108,4 @@ using DeviceGemmInstance = ck::tensor_operation::device::DeviceBatchedGemmMultiD
 
 #include "run_batched_gemm_example_rowwise.inc"
 
-int main(int argc, char* argv[]) { return !run_batched_gemm_rowwise_example(argc, argv); }
+int main(int argc, char* argv[]) { return run_batched_gemm_rowwise_example(argc, argv); }

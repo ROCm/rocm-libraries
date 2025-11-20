@@ -1,0 +1,14 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_sdk.data_objects;
+
+// The long attributes are keys to the tensor_attributes->uid 
+table BatchnormInferenceAttributes {
+    x_tensor_uid: long;
+    mean_tensor_uid: long;
+    inv_variance_tensor_uid: long;
+    scale_tensor_uid: long;
+    bias_tensor_uid: long;
+    y_tensor_uid: long;
+}

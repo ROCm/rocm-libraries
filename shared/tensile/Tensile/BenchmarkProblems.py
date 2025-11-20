@@ -54,6 +54,9 @@ def generateForkedSolutions(problemType, constantParams, forkPermutations):
         solution.update(constantParams)
         solution.update(perm)
 
+        # When benchmarking, we need to set the ISA to the ISA found from the device enumerator
+        solution["ISA"] = globalParameters["CurrentISA"]
+
         # TODO check if solution matches problem size for exact tile kernels
         solutionObject = Solution(solution)
         if solutionObject["Valid"]:

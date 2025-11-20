@@ -1,72 +1,37 @@
-# ########################################################################
-# Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
-# ########################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
-add_executable( example_spmm_strided_batched example_spmm_strided_batched.cpp)
-add_executable( example_prune_strip example_prune_strip.cpp)
-add_executable( example_compress example_compress.cpp)
+set(SAMPLE_EXECUTABLES example_spmm_strided_batched example_prune_strip example_compress)
 
-set( sample_list_tensile example_spmm_strided_batched example_prune_strip example_compress)
+foreach(sample_name ${SAMPLE_EXECUTABLES})
+  add_executable(${sample_name})
 
-set( sample_list_all ${sample_list_tensile})
+  target_compile_features(${sample_name} PRIVATE cxx_std_17)
 
-foreach( exe ${sample_list_all} )
-  target_link_libraries( ${exe} PRIVATE roc::hipsparselt )
+  if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(${sample_name} PRIVATE -mf16c)
+    target_compile_definitions(${sample_name} PRIVATE HIPSPARSELT_INTERNAL_API)
+  endif()
 
-  set_target_properties( ${exe} PROPERTIES
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+  target_sources(${sample_name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/${sample_name}.cpp")
+
+  target_include_directories(
+    ${sample_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+                           $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
   )
 
-  target_include_directories( ${exe}
-    PRIVATE
-      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
-      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
-      )
+  target_link_libraries(${sample_name} PRIVATE roc::hipsparselt)
 
-  target_include_directories( ${exe}
-    SYSTEM PRIVATE
-      $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}>
-      )
-
-  if( CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # GCC or hip-clang needs specific flags to turn on f16c intrinsics
-    target_compile_options( ${exe} PRIVATE -mf16c )
-    target_compile_definitions( ${exe} PRIVATE HIPSPARSELT_INTERNAL_API )
-  endif( )
-
-  if( NOT BUILD_CUDA )
-    target_compile_definitions( ${exe} PRIVATE ROCM_USE_FLOAT16 )
-    target_link_libraries( ${exe} PRIVATE hip::host hip::device  )
-  else( )
-    target_compile_definitions( ${exe} PRIVATE __HIP_PLATFORM_NVIDIA__ )
-    target_include_directories( ${exe}
-      PRIVATE
-        $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-
+  if(HIPSPARSELT_ENABLE_HIP)
+    target_compile_definitions(${sample_name} PRIVATE __HIP_PLATFORM_AMD__ ROCM_USE_FLOAT16)
+    target_link_libraries(${sample_name} PRIVATE hip::host hip::device)
+  elseif(HIPSPARSELT_ENABLE_CUDA)
+    target_compile_definitions(${sample_name} PRIVATE __HIP_PLATFORM_NVIDIA__)
+    target_include_directories(
+      ${sample_name} PRIVATE $<BUILD_INTERFACE:${CUDAToolkit_INCLUDE_DIRS}>
     )
-    target_link_libraries( ${exe} PRIVATE ${CUDA_LIBRARIES} )
-  endif( )
-  rocm_install(TARGETS ${exe} COMPONENT samples)
-endforeach( )
+    target_link_libraries(
+      ${sample_name} PRIVATE ${cusparselt_LIBRARY} CUDA::cudart CUDA::cuda_driver
+    )
+  endif()
+endforeach()

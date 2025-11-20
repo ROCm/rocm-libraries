@@ -87,7 +87,7 @@ include(ROCMInstallSymlinks)
 include(ROCMClients)
 include(ROCMHeaderWrapper)
 
-set(VERSION_STRING "3.1.0")
+set(VERSION_STRING "3.2.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 if(NOT DEFINED ENV{HIP_PATH})
@@ -239,7 +239,7 @@ endif()
 # Package specific CPACK vars
 if(NOT USE_CUDA)
   set(rocblas_minimum 4.2.0)
-  set(rocsolver_minimum 3.31.0)
+  set(rocsolver_minimum 3.32.0)
   rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}")
   rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${rocblas_minimum}" "rocsolver-static-devel >= ${rocsolver_minimum}")
   rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${rocblas_minimum}" "rocsolver-static-dev >= ${rocsolver_minimum}")
@@ -342,6 +342,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hipSOLVER-coverage_*.profraw -o ./coverage-report/hipSOLVER.profdata
     COMMAND ${LLVM_COV} report -object ./library/src/libhipsolver.so -instr-profile=./coverage-report/hipSOLVER.profdata
     COMMAND ${LLVM_COV} show -object ./library/src/libhipsolver.so -instr-profile=./coverage-report/hipSOLVER.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/libhipsolver.so -instr-profile=./coverage-report/hipSOLVER.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 

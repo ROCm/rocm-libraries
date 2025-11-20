@@ -222,6 +222,7 @@ Tests:
     - spmv_csc: *level2_shared_mixed_index
     - spmv_csr: *level2_shared_mixed_index
     - spmv_ell: *level2_shared
+    - spmv_sell: *level2_shared
     - spsv_csr: *level2_shared_mixed_index
     - spsv_coo: *level2_shared
 
@@ -355,4 +356,3 @@ Tests:
     - gtsv_interleaved_batch: *conversion_shared
     - gtsv_no_pivot: *conversion_shared
     - gtsv_no_pivot_strided_batch: *conversion_shared
-

@@ -35,31 +35,39 @@ def test_containers():
     # Test Container
     container = rocisa.container.Container()
     assert isinstance(container, rocisa.container.Container)
-    
+
     # Test DSModifiers
     ds_modifiers = rocisa.container.DSModifiers(1, 2, gds=True)
     assert str(ds_modifiers) == " offset:2 gds"
-    
+
     # Test FLATModifiers
-    flat_modifiers = rocisa.container.FLATModifiers(8, True, False, True, False)
+    flat_modifiers = rocisa.container.FLATModifiers(
+        offset12=8, glc=True, slc=False, dlc=False,
+        scope=rocisa.enum.CacheScope.SCOPE_NONE,
+        lds=True, isStore=False)
     assert str(flat_modifiers) == " offset:8 glc lds"
-    
+
     # Test MUBUFModifiers
-    mubuf_modifiers = rocisa.container.MUBUFModifiers(True, 12, True, False, True, False, True)
-    assert str(mubuf_modifiers) == " offen offset:12, glc"
-    
+    mubuf_modifiers = rocisa.container.MUBUFModifiers(
+        offen=True, offset12=12, glc=True, slc=False,
+        dlc=False, scope=rocisa.enum.CacheScope.SCOPE_NONE,
+        nt=True, lds=False, isStore=True)
+    assert str(mubuf_modifiers) == " offen offset:12 glc"
+
     # Test SMEMModifiers
-    smem_modifiers = rocisa.container.SMEMModifiers(True, False, 8)
+    smem_modifiers = rocisa.container.SMEMModifiers(
+        glc=True, dlc=False, scope=rocisa.enum.CacheScope.SCOPE_NONE,
+        nv=False, offset=8)
     assert str(smem_modifiers) == " offset:8 glc"
-    
+
     # Test SDWAModifiers
     sdwa_modifiers = rocisa.container.SDWAModifiers(
-        dst_sel=rocisa.enum.SelectBit.WORD_0, 
-        src0_sel=rocisa.enum.SelectBit.WORD_0, 
+        dst_sel=rocisa.enum.SelectBit.WORD_0,
+        src0_sel=rocisa.enum.SelectBit.WORD_0,
         src1_sel=rocisa.enum.SelectBit.WORD_1
     )
     assert str(sdwa_modifiers) == " dst_sel:WORD_0 src0_sel:WORD_0 src1_sel:WORD_1"
-    
+
     # Test VOP3PModifiers
     vop3p_modifiers = rocisa.container.VOP3PModifiers([0, 0], [0, 1], [0, 0])
     assert str(vop3p_modifiers) == " op_sel:[0,0] op_sel_hi:[0,1] byte_sel:[0,0]"
@@ -67,15 +75,15 @@ def test_containers():
     # Test EXEC
     exec_modifiers = rocisa.container.EXEC(True)
     assert str(exec_modifiers) == "exec"
-    
+
     # Test VCC
     vcc_modifiers = rocisa.container.VCC(True)
     assert str(vcc_modifiers) == "vcc"
-    
+
     # Test HWRegContainer
     hwreg_container = rocisa.container.HWRegContainer("reg", [1, 1])
     assert str(hwreg_container) == "hwreg(reg,1,1)"
-    
+
     # Test RegName
     reg_name = rocisa.container.RegName("GSUIndex", [4, 4])
     assert reg_name.getTotalOffsets() == 8
@@ -84,7 +92,7 @@ def test_containers():
     assert reg_name.getTotalOffsets() == 12
     reg_name.setOffset(0, 8)
     assert reg_name.getTotalOffsets() == 16
-    
+
     # Test RegisterContainer
     reg_container = rocisa.container.RegisterContainer("v", reg_name, 4, 2)
     assert reg_container.getRegNameWithType() == "vgprGSUIndex"
@@ -96,7 +104,7 @@ def test_containers():
     reg1, reg2 = reg_container.splitRegContainer()
     assert str(reg1) == "v[vgprGSUIndex+8+4+4]"
     assert str(reg2) == "v[vgprGSUIndex+8+4+4+1]"
-    
+
     # Test HolderContainer
     holder_container = rocisa.container.HolderContainer("v", 4, 2)
     assert holder_container.getCopiedRC() == holder_container
@@ -104,11 +112,11 @@ def test_containers():
 
     # Test Holder
     from rocisa.container import vgpr, sgpr, accvgpr, mgpr, Holder
-    holder = Holder("holder");
+    holder = Holder("holder")
     assert holder.idx == -1
     assert str(holder.name) == "holder"
     assert isinstance(holder, Holder)
-    
+
     # Test xgpr
     testGpr = vgpr("TestGpr", 2)
     assert str(testGpr) == "v[vgprTestGpr:vgprTestGpr+1]"
@@ -120,6 +128,8 @@ def test_containers():
     assert str(testGpr) == "acc4"
     testGpr = mgpr(holder)
     assert str(testGpr) == "m[mgprholder]"
+    testGpr = vgpr("off", isOff=True)
+    assert str(testGpr) == "off"
 
 def test_containers_copy():
     def copy_test(name, obj):
@@ -133,13 +143,18 @@ def test_containers_copy():
     copy_test("DSModifiers", ds)
     flat = rocisa.container.FLATModifiers(lds=True)
     copy_test("FLATModifiers", flat)
-    mubuf = rocisa.container.MUBUFModifiers(True, 12, True, False, True, False, True)
+    mubuf = rocisa.container.MUBUFModifiers(
+        offen=True, offset12=12, glc=True, slc=False,
+        dlc=False, scope=rocisa.enum.CacheScope.SCOPE_NONE,
+        nt=True, lds=False, isStore=True)
     copy_test("MUBUFModifiers", mubuf)
-    smem = rocisa.container.SMEMModifiers(True, False, 8)
+    smem = rocisa.container.SMEMModifiers(
+        glc=True, dlc=False, scope=rocisa.enum.CacheScope.SCOPE_NONE,
+        nv=False, offset=8)
     copy_test("SMEMModifiers", smem)
     sdwa = rocisa.container.SDWAModifiers(
-        dst_sel=rocisa.enum.SelectBit.WORD_0, 
-        src0_sel=rocisa.enum.SelectBit.WORD_0, 
+        dst_sel=rocisa.enum.SelectBit.WORD_0,
+        src0_sel=rocisa.enum.SelectBit.WORD_0,
         src1_sel=rocisa.enum.SelectBit.WORD_1
     )
     copy_test("SDWAModifiers", sdwa)

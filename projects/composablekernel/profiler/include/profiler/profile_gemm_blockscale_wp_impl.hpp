@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -69,35 +69,40 @@ template <typename A0DataType,
           typename ALayout,
           typename BLayout,
           typename ELayout>
-bool profile_gemm_blockscale_weighpreshuffle_impl(int do_verification,
-                                                  int init_method,
-                                                  bool do_log,
-                                                  bool time_kernel,
-                                                  int M,
-                                                  int N,
-                                                  int K,
-                                                  int StrideA,
-                                                  int StrideB,
-                                                  int StrideE,
-                                                  int n_warmup,
-                                                  int n_iter,
-                                                  uint64_t rotating = 0)
+bool profile_gemm_blockscale_weightpreshuffle_impl(int do_verification,
+                                                   int init_method,
+                                                   bool do_log,
+                                                   bool time_kernel,
+                                                   int M,
+                                                   int N,
+                                                   int K,
+                                                   int StrideA,
+                                                   int StrideB,
+                                                   int StrideE,
+                                                   int n_warmup,
+                                                   int n_iter,
+                                                   uint64_t rotating = 0)
 {
     bool pass = true;
 
-    auto f_host_tensor_descriptor =
-        [](std::size_t row, std::size_t col, std::size_t stride, auto layout) {
-            using namespace ck::literals;
+    auto f_host_tensor_descriptor = [](std::size_t row, std::size_t col, int& stride, auto layout) {
+        using namespace ck::literals;
 
-            if(is_same<decltype(layout), tensor_layout::gemm::RowMajor>::value)
-            {
-                return HostTensorDescriptor({row, col}, {stride, 1_uz});
-            }
-            else
-            {
-                return HostTensorDescriptor({row, col}, {1_uz, stride});
-            }
-        };
+        if(is_same<decltype(layout), tensor_layout::gemm::RowMajor>::value)
+        {
+            auto desc = HostTensorDescriptor({row, col}, {static_cast<std::size_t>(stride), 1_uz});
+            if(stride <= 0)
+                stride = desc.GetStrides()[0];
+            return desc;
+        }
+        else
+        {
+            auto desc = HostTensorDescriptor({row, col}, {1_uz, static_cast<std::size_t>(stride)});
+            if(stride <= 0)
+                stride = desc.GetStrides()[1];
+            return desc;
+        }
+    };
 
     ck::index_t Scale_Stride_AM = ((M + ScaleBlockM - 1) / ScaleBlockM);
     ck::index_t Scale_Stride_BN = ck::is_same_v<BLayout, ck::tensor_layout::gemm::ColumnMajor>
@@ -120,6 +125,26 @@ bool profile_gemm_blockscale_weighpreshuffle_impl(int do_verification,
                                                        BLayout{}));
     Tensor<EDataType> e_m_n_host_result(f_host_tensor_descriptor(M, N, StrideE, ELayout{}));
     Tensor<EDataType> e_m_n_device_result(f_host_tensor_descriptor(M, N, StrideE, ELayout{}));
+
+    // Update strides based on tensor properties if they are <= 0
+    auto get_stride = [](auto& tensor, auto layout, ck::index_t current_stride) -> ck::index_t {
+        if(current_stride <= 0)
+        {
+            if constexpr(std::is_same_v<decltype(layout), tensor_layout::gemm::RowMajor>)
+            {
+                return tensor.GetStrides()[0];
+            }
+            else
+            {
+                return tensor.GetStrides()[1];
+            }
+        }
+        return current_stride;
+    };
+
+    StrideA = get_stride(a0_m_k, ALayout{}, StrideA);
+    StrideB = get_stride(b0_k_n, BLayout{}, StrideB);
+    StrideE = get_stride(e_m_n_host_result, ELayout{}, StrideE);
 
     int total_gemm_needed =
         a0_m_k.GetElementSpaceSizeInBytes() + b0_k_n.GetElementSpaceSizeInBytes() +

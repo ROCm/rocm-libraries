@@ -77,4 +77,3 @@ THRUST_HOST_DEVICE void shuffle_copy(RandomIterator first, RandomIterator last,
 }
 
 THRUST_NAMESPACE_END
-

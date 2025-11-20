@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -139,7 +139,6 @@ void testing_spitsv_csr(const Arguments& arg)
     // Sample matrix
     I nnz_A;
     matrix_factory.init_csr(hcsr_row_ptr, hcsr_col_ind, hcsr_val, M, N, nnz_A, base);
-
     // Non-squared matrices are not supported
     if(M != N)
     {
@@ -303,7 +302,6 @@ void testing_spitsv_csr(const Arguments& arg)
         // Copy output to host
         CHECK_HIP_ERROR(hipMemcpy(hy_1, dy_1, sizeof(T) * M, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hy_2, dy_2, sizeof(T) * M, hipMemcpyDeviceToHost));
-
         // CPU csrsv
         J analysis_pivot = -1;
         J solve_pivot    = -1;

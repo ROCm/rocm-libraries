@@ -45,6 +45,10 @@ target_compile_options(hipsparse-bench PRIVATE -Wno-deprecated -Wno-unused-comma
 # Internal common header
 target_include_directories(hipsparse-bench PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
 
+if (BUILD_CLIENTS_ONLY)
+  target_include_directories(hipsparse-bench PRIVATE ${hipsparse_INCLUDE_DIRS}/hipsparse)
+endif()
+
 # Target link libraries
 target_link_libraries(hipsparse-bench PRIVATE roc::hipsparse)
 
