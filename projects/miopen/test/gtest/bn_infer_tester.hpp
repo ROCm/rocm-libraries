@@ -211,3 +211,47 @@ std::vector<BNTestCase> BNInferTestConfigs(miopenBatchNormMode_t mode)
 
     return test_cases;
 }
+
+struct TestNameGenerator
+{
+    std::string
+    operator()(const testing::TestParamInfo<
+               std::tuple<miopenActivationMode_t, BNTestCase, miopenTensorLayout_t>>& info) const
+    {
+        // activation mode
+        std::unordered_map<miopenActivationMode_t, std::string> activation_map = {
+            {miopenActivationPASTHRU, "pasthru"},
+            {miopenActivationLOGISTIC, "logistic"},
+            {miopenActivationTANH, "tanh"},
+            {miopenActivationRELU, "relu"},
+            {miopenActivationSOFTRELU, "softrelu"},
+            {miopenActivationABS, "abs"},
+            {miopenActivationPOWER, "power"},
+            {miopenActivationCLIPPEDRELU, "clippedrelu"},
+            {miopenActivationLEAKYRELU, "leakyrelu"},
+            {miopenActivationELU, "elu"},
+            {miopenActivationCLAMP, "clamp"}};
+        auto activation_it = activation_map.find(std::get<0>(info.param));
+        std::string activation_mode_str =
+            (activation_it != activation_map.end()) ? activation_it->second : "unknown";
+
+        // bn configuration
+        auto bn_config = std::get<1>(info.param);
+        std::string bn_mode_str =
+            (bn_config.mode == miopenBNSpatial) ? "BNSpatial" : "BNPerActivation";
+        std::string tensor_dims = "N" + std::to_string(bn_config.N) + "_C" +
+                                  std::to_string(bn_config.C) + "_H" + std::to_string(bn_config.H) +
+                                  "_W" + std::to_string(bn_config.W);
+
+        // tensor layout
+        miopenTensorLayout_t tensor_layout = std::get<2>(info.param);
+        std::string tensor_layout_str      = (tensor_layout == miopenTensorNCHW)   ? "NCHW"
+                                             : (tensor_layout == miopenTensorNHWC) ? "NHWC"
+                                                                                   : "UnknownLayout";
+
+        std::ostringstream oss;
+        oss << bn_mode_str + "_" + tensor_layout_str + "_" + tensor_dims + "_" +
+                   activation_mode_str + "_test_id_" + std::to_string(info.index);
+        return oss.str();
+    }
+};

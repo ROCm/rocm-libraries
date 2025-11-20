@@ -368,22 +368,26 @@ INSTANTIATE_TEST_SUITE_P(
     GPU_bn_activ_infer_spatial_FP32,
     testing::Combine(testing::ValuesIn(ActivationConfigs()),
                      testing::ValuesIn(BNInferTestConfigs<float>(miopenBNSpatial)),
-                     testing::ValuesIn({miopenTensorNCHW})));
+                     testing::ValuesIn({miopenTensorNCHW})),
+    TestNameGenerator());
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_activ_infer_per_act_FP32,
     testing::Combine(testing::ValuesIn(ActivationConfigs()),
                      testing::ValuesIn(BNInferTestConfigs<float>(miopenBNPerActivation)),
-                     testing::ValuesIn({miopenTensorNCHW})));
+                     testing::ValuesIn({miopenTensorNCHW})),
+    TestNameGenerator());
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_activ_infer_spatial_FP16,
     testing::Combine(testing::ValuesIn(ActivationConfigs()),
                      testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNSpatial)),
-                     testing::ValuesIn({miopenTensorNCHW})));
+                     testing::ValuesIn({miopenTensorNCHW})),
+    TestNameGenerator());
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_bn_activ_infer_per_act_FP16,
     testing::Combine(testing::ValuesIn(ActivationConfigs()),
                      testing::ValuesIn(BNInferTestConfigs<half_float::half>(miopenBNPerActivation)),
-                     testing::ValuesIn({miopenTensorNCHW})));
+                     testing::ValuesIn({miopenTensorNCHW})),
+    TestNameGenerator());
