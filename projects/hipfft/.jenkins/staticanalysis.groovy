@@ -26,5 +26,7 @@ ci: {
     String urlJobName = auxiliary.getTopJobName(env.BUILD_URL)
 
     properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 1 * * 7')])]))
-    runCI([ubuntu22:['any']], urlJobName)
+    stage(urlJobName) {
+        runCI([ubuntu22:['any']], urlJobName)
+    }
 }

@@ -177,6 +177,8 @@ ci: {
     if(!jobNameList.keySet().contains(urlJobName))
     {
         properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 1 * * 6')])]))
-        runCI(["rocroller-ubuntu20-clang":['rocroller-compile']], urlJobName)
+        stage(urlJobName) {
+            runCI(["rocroller-ubuntu20-clang":['rocroller-compile']], urlJobName)
+        }
     }
 }

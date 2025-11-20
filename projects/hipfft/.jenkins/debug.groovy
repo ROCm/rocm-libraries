@@ -42,7 +42,9 @@ def setupCI(urlJobName, jobNameList, buildCommand, runCI, label)
     {
         jobName, nodeDetails->
         if (urlJobName == jobName)
-            runCI(nodeDetails, jobName, buildCommand, label)
+            stage(label + ' ' + jobName) {
+                runCI(nodeDetails, jobName, buildCommand, label)
+            }
     }
 
     // For url job names that are not listed by the jobNameList i.e. compute-rocm-dkms-no-npi-1901

@@ -127,6 +127,8 @@ ci: {
     {
         jobName, nodeDetails->
         if (urlJobName == jobName)
-            runCI(nodeDetails, jobName)
+            stage(jobName) {
+                runCI(nodeDetails, jobName)
+            }
     }
 }
