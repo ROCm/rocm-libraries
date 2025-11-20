@@ -3,6 +3,7 @@
 
 #include "MiopenBatchnormFwdTrainingPlan.hpp"
 #include "MiopenUtils.hpp"
+#include <hipdnn_sdk/utilities/ScopedResource.hpp>
 
 namespace miopen_legacy_plugin
 {
@@ -70,6 +71,64 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
             "Running statistics should have been rejected by plan builder");
     }
 #endif
+}
+
+BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
+    const hipdnn_sdk::data_objects::BatchnormAttributes& attributes,
+    const hipdnn_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+    : _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
+    , _y(miopen_utils::createTensor(tensorMap, attributes.y_tensor_uid()))
+    , _scale(miopen_utils::createTensor(tensorMap, attributes.scale_tensor_uid()))
+    , _bias(miopen_utils::createTensor(tensorMap, attributes.bias_tensor_uid()))
+    , _activationOut(miopen_utils::createTensor(tensorMap, pointwiseAttributes.out_0_tensor_uid()))
+{
+    // Extract epsilon value from pass-by-value tensor (cast to double for MIOpen compatibility)
+    auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
+    _epsilonValue = miopen_utils::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
+
+    // Validate that activation input matches batchnorm output
+    if(pointwiseAttributes.in_0_tensor_uid() != attributes.y_tensor_uid())
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "BatchnormFwdTrainingParams: Activation input must match batchnorm output");
+    }
+
+    // Get activation parameters
+    const auto activParams = miopen_utils::mapPointwiseModeToMiopenActivation(pointwiseAttributes);
+    if(!activParams.has_value())
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "BatchnormFwdTrainingParams: Unsupported activation mode");
+    }
+    _optActivation = activParams.value();
+
+    // Save mean and inv_variance are optional (controlled by MIO_SAVE_MEAN_VARIANCE)
+    if(attributes.mean_tensor_uid().has_value())
+    {
+        _mean = miopen_utils::createTensor(tensorMap, attributes.mean_tensor_uid().value());
+    }
+
+    if(attributes.inv_variance_tensor_uid().has_value())
+    {
+        _invVariance
+            = miopen_utils::createTensor(tensorMap, attributes.inv_variance_tensor_uid().value());
+    }
+
+    // Running statistics not supported - API mismatch between hipDNN and MIOpen
+    // Defensive check: should have been rejected by plan builder
+    if(attributes.prev_running_mean_tensor_uid().has_value()
+       || attributes.prev_running_variance_tensor_uid().has_value()
+       || attributes.momentum_tensor_uid().has_value()
+       || attributes.next_running_mean_tensor_uid().has_value()
+       || attributes.next_running_variance_tensor_uid().has_value())
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "Running statistics should have been rejected by plan builder");
+    }
 }
 
 const MiopenTensor& BatchnormFwdTrainingParams::x() const
@@ -142,6 +201,17 @@ const MiopenTensor& BatchnormFwdTrainingParams::nextRunningVariance() const
     return _nextRunningVariance.value();
 }
 
+const std::optional<miopen_utils::ActivationParams>&
+    BatchnormFwdTrainingParams::optActivation() const
+{
+    return _optActivation;
+}
+
+const std::optional<MiopenTensor>& BatchnormFwdTrainingParams::activationOut() const
+{
+    return _activationOut;
+}
+
 BatchnormFwdTrainingPlan::BatchnormFwdTrainingPlan(BatchnormFwdTrainingParams&& trainingParams)
     : _trainingParams(std::move(trainingParams))
 {
@@ -176,8 +246,6 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
     // Get all required device buffers
     auto xBuffer = miopen_utils::findDeviceBuffer(
         _trainingParams.x().uid(), deviceBuffers, numDeviceBuffers);
-    auto yBuffer = miopen_utils::findDeviceBuffer(
-        _trainingParams.y().uid(), deviceBuffers, numDeviceBuffers);
     auto scaleBuffer = miopen_utils::findDeviceBuffer(
         _trainingParams.scale().uid(), deviceBuffers, numDeviceBuffers);
     auto biasBuffer = miopen_utils::findDeviceBuffer(
@@ -186,6 +254,8 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
     // Handle save mean/variance if provided (optional)
     void* resultSaveMeanPtr = nullptr;
     void* resultSaveInvVariancePtr = nullptr;
+    miopenTensorDescriptor_t savedMeanDesc = nullptr;
+    miopenTensorDescriptor_t savedVarDesc = nullptr;
 
     if(_trainingParams.hasSaveMeanVariance())
     {
@@ -196,6 +266,8 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
 
         resultSaveMeanPtr = meanBuffer.ptr;
         resultSaveInvVariancePtr = invVarianceBuffer.ptr;
+        savedMeanDesc = _trainingParams.mean().tensorDescriptor();
+        savedVarDesc = _trainingParams.invVariance().tensorDescriptor();
     }
 
     // Running statistics should have been rejected by plan builder
@@ -209,24 +281,82 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnEnginePluginHandle& handle,
     void* resultRunningMeanPtr = nullptr;
     void* resultRunningVariancePtr = nullptr;
 
-    THROW_ON_MIOPEN_FAILURE(
-        miopenBatchNormalizationForwardTraining(handle.miopenHandle,
-                                                MIOPEN_BATCHNORM_MODE_TRAINING,
-                                                &alpha,
-                                                &beta,
-                                                _trainingParams.x().tensorDescriptor(),
-                                                xBuffer.ptr,
-                                                _trainingParams.y().tensorDescriptor(),
-                                                yBuffer.ptr,
-                                                _trainingParams.scale().tensorDescriptor(),
-                                                scaleBuffer.ptr,
-                                                biasBuffer.ptr,
-                                                expAvgFactor,
-                                                resultRunningMeanPtr,
-                                                resultRunningVariancePtr,
-                                                epsilon,
-                                                resultSaveMeanPtr,
-                                                resultSaveInvVariancePtr));
+    // Check if activation fusion is enabled
+    if(_trainingParams.optActivation().has_value())
+    {
+        // Use activation fusion API
+        auto yBuffer = miopen_utils::findDeviceBuffer(
+            _trainingParams.activationOut().value().uid(), deviceBuffers, numDeviceBuffers);
+
+        // Create activation descriptor
+        miopenActivationDescriptor_t activationDesc;
+        THROW_ON_MIOPEN_FAILURE(miopenCreateActivationDescriptor(&activationDesc));
+        auto activationDescRes
+            = hipdnn_sdk::utilities::ScopedResource<miopenActivationDescriptor_t>(
+                activationDesc, [](miopenActivationDescriptor_t desc) {
+                    auto status = miopenDestroyActivationDescriptor(desc);
+                    if(status != miopenStatusSuccess)
+                    {
+                        HIPDNN_LOG_ERROR("miopenDestroyActivationDescriptor failed in "
+                                         "BatchnormFwdTrainingPlan::execute");
+                    }
+                });
+
+        const auto& activParams = _trainingParams.optActivation().value();
+        THROW_ON_MIOPEN_FAILURE(miopenSetActivationDescriptor(activationDesc,
+                                                              activParams.mode,
+                                                              activParams.alpha,
+                                                              activParams.beta,
+                                                              activParams.gamma));
+
+        THROW_ON_MIOPEN_FAILURE(miopenBatchNormForwardTrainingActivation(
+            handle.miopenHandle,
+            MIOPEN_BATCHNORM_MODE_TRAINING,
+            &alpha,
+            &beta,
+            _trainingParams.x().tensorDescriptor(),
+            xBuffer.ptr,
+            _trainingParams.activationOut().value().tensorDescriptor(),
+            yBuffer.ptr,
+            _trainingParams.scale().tensorDescriptor(),
+            _trainingParams.bias().tensorDescriptor(),
+            savedMeanDesc,
+            savedVarDesc,
+            scaleBuffer.ptr,
+            biasBuffer.ptr,
+            expAvgFactor,
+            resultRunningMeanPtr,
+            resultRunningVariancePtr,
+            epsilon,
+            resultSaveMeanPtr,
+            resultSaveInvVariancePtr,
+            activationDesc));
+    }
+    else
+    {
+        // Use standard batchnorm training API (no activation)
+        auto yBuffer = miopen_utils::findDeviceBuffer(
+            _trainingParams.y().uid(), deviceBuffers, numDeviceBuffers);
+
+        THROW_ON_MIOPEN_FAILURE(
+            miopenBatchNormalizationForwardTraining(handle.miopenHandle,
+                                                    MIOPEN_BATCHNORM_MODE_TRAINING,
+                                                    &alpha,
+                                                    &beta,
+                                                    _trainingParams.x().tensorDescriptor(),
+                                                    xBuffer.ptr,
+                                                    _trainingParams.y().tensorDescriptor(),
+                                                    yBuffer.ptr,
+                                                    _trainingParams.scale().tensorDescriptor(),
+                                                    scaleBuffer.ptr,
+                                                    biasBuffer.ptr,
+                                                    expAvgFactor,
+                                                    resultRunningMeanPtr,
+                                                    resultRunningVariancePtr,
+                                                    epsilon,
+                                                    resultSaveMeanPtr,
+                                                    resultSaveInvVariancePtr));
+    }
 }
 
 }
