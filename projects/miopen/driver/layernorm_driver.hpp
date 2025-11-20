@@ -535,6 +535,8 @@ private:
     float eps;
     int dim;
     miopenNormMode_t mode;
+
+    bool use_multithread;
 };
 
 template <typename Tgpu, typename Tref>
@@ -546,6 +548,9 @@ int LayerNormDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
     {
         miopenEnableProfiling(GetHandle(), true);
     }
+
+    use_multithread = (inflags.GetValueInt("mt") != 0);
+
     return miopenStatusSuccess;
 }
 
@@ -641,6 +646,7 @@ int LayerNormDriver<Tgpu, Tref>::AddCmdLineArgs()
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
     inflags.AddInputFlag(
         "wall", 'w', "0", "Wall-clock Time Each Layer, Requires time == 1 (Default=0)", "int");
+    inflags.AddInputFlag("mt", 'u', "0", "Use multithreaded version (Default=0)", "int");
 
     return miopenStatusSuccess;
 }
@@ -692,28 +698,22 @@ int LayerNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     db_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, db_sz, sizeof(Tgpu)));
     workspace_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, ws_sizeInBytes, sizeof(std::byte)));
 
-    in          = std::vector<Tgpu>(in_sz, Tgpu0val);
-    weight      = std::vector<Tgpu>(weight_sz, Tgpu0val);
-    bias        = std::vector<Tgpu>(bias_sz, Tgpu0val);
-    out         = std::vector<Tgpu>(out_sz, Tgpu0val);
-    mean        = std::vector<Tgpu>(mean_sz, Tgpu0val);
-    rstd        = std::vector<Tgpu>(rstd_sz, Tgpu0val);
-    dy          = std::vector<Tgpu>(dy_sz, Tgpu0val);
-    dx          = std::vector<Tgpu>(dx_sz, Tgpu0val);
-    dw          = std::vector<Tgpu>(dw_sz, Tgpu0val);
-    db          = std::vector<Tgpu>(db_sz, Tgpu0val);
-    outhost     = std::vector<Tref>(out_sz, Tref0ref);
-    meanhost    = std::vector<Tref>(mean_sz, Tref0ref);
-    rstdhost    = std::vector<Tref>(rstd_sz, Tref0ref);
-    outhost_mt  = std::vector<Tref>(out_sz, Tref0ref);
-    meanhost_mt = std::vector<Tref>(mean_sz, Tref0ref);
-    rstdhost_mt = std::vector<Tref>(rstd_sz, Tref0ref);
-    dxhost      = std::vector<Tref>(dx_sz, Tref0ref);
-    dwhost      = std::vector<Tref>(dw_sz, Tref0ref);
-    dbhost      = std::vector<Tref>(db_sz, Tref0ref);
-    dxhost_mt   = std::vector<Tref>(dx_sz, Tref0ref);
-    dwhost_mt   = std::vector<Tref>(dw_sz, Tref0ref);
-    dbhost_mt   = std::vector<Tref>(db_sz, Tref0ref);
+    in       = std::vector<Tgpu>(in_sz, Tgpu0val);
+    weight   = std::vector<Tgpu>(weight_sz, Tgpu0val);
+    bias     = std::vector<Tgpu>(bias_sz, Tgpu0val);
+    out      = std::vector<Tgpu>(out_sz, Tgpu0val);
+    mean     = std::vector<Tgpu>(mean_sz, Tgpu0val);
+    rstd     = std::vector<Tgpu>(rstd_sz, Tgpu0val);
+    dy       = std::vector<Tgpu>(dy_sz, Tgpu0val);
+    dx       = std::vector<Tgpu>(dx_sz, Tgpu0val);
+    dw       = std::vector<Tgpu>(dw_sz, Tgpu0val);
+    db       = std::vector<Tgpu>(db_sz, Tgpu0val);
+    outhost  = std::vector<Tref>(out_sz, Tref0ref);
+    meanhost = std::vector<Tref>(mean_sz, Tref0ref);
+    rstdhost = std::vector<Tref>(rstd_sz, Tref0ref);
+    dxhost   = std::vector<Tref>(dx_sz, Tref0ref);
+    dwhost   = std::vector<Tref>(dw_sz, Tref0ref);
+    dbhost   = std::vector<Tref>(db_sz, Tref0ref);
 
     for(int i = 0; i < in_sz; i++)
     {
@@ -834,27 +834,32 @@ int LayerNormDriver<Tgpu, Tref>::RunForwardGPU()
 template <typename Tgpu, typename Tref>
 int LayerNormDriver<Tgpu, Tref>::RunForwardCPU()
 {
-    mloLayerNormForwardRunHost<Tgpu, Tref>(inputDesc,
-                                           in.data(),
-                                           weight.data(),
-                                           bias.data(),
-                                           outhost.data(),
-                                           meanhost.data(),
-                                           rstdhost.data(),
-                                           eps,
-                                           dim,
-                                           mode);
-
-    mloLayerNormForwardRunHost_mt<Tgpu, Tref>(inputDesc,
-                                              in.data(),
-                                              weight.data(),
-                                              bias.data(),
-                                              outhost_mt.data(),
-                                              meanhost_mt.data(),
-                                              rstdhost_mt.data(),
-                                              eps,
-                                              dim,
-                                              mode);
+    if(use_multithread)
+    {
+        mloLayerNormForwardRunHost_mt<Tgpu, Tref>(inputDesc,
+                                                  in.data(),
+                                                  weight.data(),
+                                                  bias.data(),
+                                                  outhost.data(),
+                                                  meanhost.data(),
+                                                  rstdhost.data(),
+                                                  eps,
+                                                  dim,
+                                                  mode);
+    }
+    else
+    {
+        mloLayerNormForwardRunHost<Tgpu, Tref>(inputDesc,
+                                               in.data(),
+                                               weight.data(),
+                                               bias.data(),
+                                               outhost.data(),
+                                               meanhost.data(),
+                                               rstdhost.data(),
+                                               eps,
+                                               dim,
+                                               mode);
+    }
 
     return miopenStatusSuccess;
 }
@@ -928,43 +933,48 @@ int LayerNormDriver<Tgpu, Tref>::RunBackwardGPU()
 template <typename Tgpu, typename Tref>
 int LayerNormDriver<Tgpu, Tref>::RunBackwardCPU()
 {
-    mloLayerNormBackwardRunHost<Tgpu, Tref>(dyDesc,
-                                            dy.data(),
-                                            in.data(),
-                                            weight.data(),
-                                            meanhost.data(),
-                                            rstdhost.data(),
-                                            dxhost.data(),
-                                            dim,
-                                            mode);
+    if(use_multithread)
+    {
+        mloLayerNormBackwardRunHost_mt<Tgpu, Tref>(dyDesc,
+                                                   dy.data(),
+                                                   in.data(),
+                                                   weight.data(),
+                                                   meanhost.data(),
+                                                   rstdhost.data(),
+                                                   dxhost.data(),
+                                                   dim,
+                                                   mode);
 
-    mloLayerNormBackwardWeightBiasRunHost<Tgpu, Tref>(dyDesc,
-                                                      dy.data(),
-                                                      in.data(),
-                                                      meanhost.data(),
-                                                      rstdhost.data(),
-                                                      dwhost.data(),
-                                                      dbhost.data(),
-                                                      dim);
+        mloLayerNormBackwardWeightBiasRunHost_mt<Tgpu, Tref>(dyDesc,
+                                                             dy.data(),
+                                                             in.data(),
+                                                             meanhost.data(),
+                                                             rstdhost.data(),
+                                                             dwhost.data(),
+                                                             dbhost.data(),
+                                                             dim);
+    }
+    else
+    {
+        mloLayerNormBackwardRunHost<Tgpu, Tref>(dyDesc,
+                                                dy.data(),
+                                                in.data(),
+                                                weight.data(),
+                                                meanhost.data(),
+                                                rstdhost.data(),
+                                                dxhost.data(),
+                                                dim,
+                                                mode);
 
-    mloLayerNormBackwardRunHost_mt<Tgpu, Tref>(dyDesc,
-                                               dy.data(),
-                                               in.data(),
-                                               weight.data(),
-                                               meanhost_mt.data(),
-                                               rstdhost_mt.data(),
-                                               dxhost_mt.data(),
-                                               dim,
-                                               mode);
-
-    mloLayerNormBackwardWeightBiasRunHost_mt<Tgpu, Tref>(dyDesc,
-                                                         dy.data(),
-                                                         in.data(),
-                                                         meanhost_mt.data(),
-                                                         rstdhost_mt.data(),
-                                                         dwhost_mt.data(),
-                                                         dbhost_mt.data(),
-                                                         dim);
+        mloLayerNormBackwardWeightBiasRunHost<Tgpu, Tref>(dyDesc,
+                                                          dy.data(),
+                                                          in.data(),
+                                                          meanhost.data(),
+                                                          rstdhost.data(),
+                                                          dwhost.data(),
+                                                          dbhost.data(),
+                                                          dim);
+    }
 
     return miopenStatusSuccess;
 }
@@ -986,85 +996,46 @@ template <typename Tgpu, typename Tref>
 int LayerNormDriver<Tgpu, Tref>::VerifyForward()
 {
     RunForwardCPU();
-    const Tref tolerance = GetTolerance();
-    auto error           = miopen::rms_range(outhost, out);
+    const Tref tolerance    = GetTolerance();
+    auto error              = miopen::rms_range(outhost, out);
+    std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Single-threaded forward LayerNorm FAILED: " << error << " > " << tolerance
-                  << std::endl;
+        std::cout << "Forward LayerNorm FAILED against " << solver_type
+                  << " CPU reference: " << error << " > " << tolerance << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
-        std::cout << "Single-threaded forward LayerNorm Verifies OK on CPU reference (" << error
-                  << " < " << tolerance << ')' << std::endl;
+        std::cout << "Forward LayerNorm Verifies OK against " << solver_type << " CPU reference ("
+                  << error << " < " << tolerance << ')' << std::endl;
     }
 
     auto meanerror = miopen::rms_range(meanhost, mean);
     if(!std::isfinite(meanerror) || meanerror > tolerance)
     {
-        std::cout << "Single-threaded forward Layernorm mean FAILED: " << meanerror << " > "
-                  << tolerance << std::endl;
+        std::cout << "Forward LayerNorm mean FAILED against " << solver_type
+                  << " CPU reference: " << error << " > " << tolerance << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
-        std::cout << "Single-threaded forward LayerNorm mean Verifies OK on CPU reference ("
-                  << meanerror << " < " << tolerance << ')' << std::endl;
+        std::cout << "Forward LayerNorm mean Verifies OK against " << solver_type
+                  << " CPU reference (" << error << " < " << tolerance << ')' << std::endl;
     }
 
     auto rstderror = miopen::rms_range(rstdhost, rstd);
     if(!std::isfinite(rstderror) || rstderror > tolerance)
     {
-        std::cout << "Single-threaded forward LayerNorm rstd FAILED: " << rstderror << " > "
-                  << tolerance << std::endl;
+        std::cout << "Forward LayerNorm rstd FAILED against " << solver_type
+                  << " CPU reference: " << error << " > " << tolerance << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
-        std::cout << "Single-threaded forward LayerNorm rstd Verifies OK on CPU reference ("
-                  << rstderror << " < " << tolerance << ')' << std::endl;
-    }
-
-    auto error_mt = miopen::rms_range(outhost_mt, out);
-
-    if(!std::isfinite(error_mt) || error_mt > tolerance)
-    {
-        std::cout << "Multi-threaded forward LayerNorm FAILED: " << error_mt << " > " << tolerance
-                  << std::endl;
-        return EC_VerifyFwd;
-    }
-    else
-    {
-        std::cout << "Multi-threaded forward LayerNorm Verifies OK on CPU reference (" << error_mt
-                  << " < " << tolerance << ')' << std::endl;
-    }
-
-    auto meanerror_mt = miopen::rms_range(meanhost_mt, mean);
-    if(!std::isfinite(meanerror_mt) || meanerror_mt > tolerance)
-    {
-        std::cout << "Multi-threaded forward Layernorm mean FAILED: " << meanerror_mt << " > "
-                  << tolerance << std::endl;
-        return EC_VerifyFwd;
-    }
-    else
-    {
-        std::cout << "Multi-threaded forward LayerNorm mean Verifies OK on CPU reference ("
-                  << meanerror_mt << " < " << tolerance << ')' << std::endl;
-    }
-
-    auto rstderror_mt = miopen::rms_range(rstdhost_mt, rstd);
-    if(!std::isfinite(rstderror_mt) || rstderror_mt > tolerance)
-    {
-        std::cout << "Multi-threaded forward LayerNorm rstd FAILED: " << rstderror_mt << " > "
-                  << tolerance << std::endl;
-        return EC_VerifyFwd;
-    }
-    else
-    {
-        std::cout << "Multi-threaded forward LayerNorm rstd Verifies OK on CPU reference ("
-                  << rstderror_mt << " < " << tolerance << ')' << std::endl;
+        std::cout << "Forward LayerNorm rstd Verifies OK against " << solver_type
+                  << " CPU reference (" << error << " < " << tolerance << ')' << std::endl;
     }
 
     return miopenStatusSuccess;
@@ -1074,86 +1045,46 @@ template <typename Tgpu, typename Tref>
 int LayerNormDriver<Tgpu, Tref>::VerifyBackward()
 {
     RunBackwardCPU();
-    const Tref tolerance = GetTolerance();
-
-    auto error = miopen::rms_range(dxhost, dx);
+    const Tref tolerance    = GetTolerance();
+    auto error              = miopen::rms_range(dxhost, dx);
+    std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Single-threaded backward LayerNorm FAILED: " << error << " > " << tolerance
-                  << std::endl;
+        std::cout << "Backward LayerNorm FAILED against " << solver_type
+                  << " CPU reference: " << error << " > " << tolerance << std::endl;
         return EC_VerifyBwd;
     }
     else
     {
-        std::cout << "Single-threaded backward LayerNorm Verifies OK on CPU reference (" << error
-                  << " < " << tolerance << ')' << std::endl;
+        std::cout << "Backward LayerNorm Verifies OK against " << solver_type << " CPU reference ("
+                  << error << " < " << tolerance << ')' << std::endl;
     }
 
     auto dwerror = miopen::rms_range(dwhost, dw);
     if(!std::isfinite(dwerror) || dwerror > tolerance)
     {
-        std::cout << "Single-threaded backward LayerNorm dw FAILED: " << dwerror << " > "
-                  << tolerance << std::endl;
+        std::cout << "Backward LayerNorm dw FAILED against " << solver_type
+                  << " CPU reference: " << error << " > " << tolerance << std::endl;
         return EC_VerifyBwd;
     }
     else
     {
-        std::cout << "Single-threaded backward LayerNorm dw Verifies OK on CPU reference ("
-                  << dwerror << " < " << tolerance << ')' << std::endl;
+        std::cout << "Backward LayerNorm Verifies dw OK against " << solver_type
+                  << " CPU reference (" << error << " < " << tolerance << ')' << std::endl;
     }
 
     auto dberror = miopen::rms_range(dbhost, db);
     if(!std::isfinite(dberror) || dberror > tolerance)
     {
-        std::cout << "Single-threaded backward LayerNorm db FAILED: " << dberror << " > "
-                  << tolerance << std::endl;
+        std::cout << "Backward LayerNorm db FAILED against " << solver_type
+                  << " CPU reference: " << error << " > " << tolerance << std::endl;
         return EC_VerifyBwd;
     }
     else
     {
-        std::cout << "Single-threaded backward LayerNorm db Verifies OK on CPU reference ("
-                  << dberror << " < " << tolerance << ')' << std::endl;
-    }
-
-    auto error_mt = miopen::rms_range(dxhost_mt, dx);
-
-    if(!std::isfinite(error_mt) || error_mt > tolerance)
-    {
-        std::cout << "Multi-threaded backward LayerNorm FAILED: " << error_mt << " > " << tolerance
-                  << std::endl;
-        return EC_VerifyBwd;
-    }
-    else
-    {
-        std::cout << "Multi-threaded backward LayerNorm Verifies OK on CPU reference (" << error_mt
-                  << " < " << tolerance << ')' << std::endl;
-    }
-
-    auto dwerror_mt = miopen::rms_range(dwhost_mt, dw);
-    if(!std::isfinite(dwerror_mt) || dwerror_mt > tolerance)
-    {
-        std::cout << "Multi-threaded backward LayerNorm dw FAILED: " << dwerror_mt << " > "
-                  << tolerance << std::endl;
-        return EC_VerifyBwd;
-    }
-    else
-    {
-        std::cout << "Multi-threaded backward LayerNorm dw Verifies OK on CPU reference ("
-                  << dwerror_mt << " < " << tolerance << ')' << std::endl;
-    }
-
-    auto dberror_mt = miopen::rms_range(dbhost_mt, db);
-    if(!std::isfinite(dberror_mt) || dberror_mt > tolerance)
-    {
-        std::cout << "Multi-threaded backward LayerNorm db FAILED: " << dberror_mt << " > "
-                  << tolerance << std::endl;
-        return EC_VerifyBwd;
-    }
-    else
-    {
-        std::cout << "Multi-threaded backward LayerNorm db Verifies OK on CPU reference ("
-                  << dberror_mt << " < " << tolerance << ')' << std::endl;
+        std::cout << "Backward LayerNorm Verifies db OK against " << solver_type
+                  << " CPU reference (" << error << " < " << tolerance << ')' << std::endl;
     }
 
     return miopenStatusSuccess;
