@@ -449,8 +449,6 @@ namespace rocRollerTest
 
     TEST_P(F6Test, GPU_F6TiledLoadStore)
     {
-        auto const& arch = m_context->targetArchitecture().target();
-
         int workitemsPerWorkgroup = 64;
         int elementsPerWorkitem   = 16;
 

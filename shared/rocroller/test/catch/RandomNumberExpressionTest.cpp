@@ -55,7 +55,6 @@ namespace ExpressionTest
             : AssemblyTestKernel(context)
             , m_numWorkItems(numWorkItems)
         {
-            auto const& arch = m_context->targetArchitecture().target();
         }
 
         void generate() override

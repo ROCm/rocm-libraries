@@ -79,8 +79,6 @@ namespace ArithmeticTest
 
             auto k = m_context->kernel();
 
-            auto const& gpu = m_context->targetArchitecture().target();
-
             auto numBoolRegs = k->wavefront_size() / 32;
 
             k->setKernelDimensions(1);

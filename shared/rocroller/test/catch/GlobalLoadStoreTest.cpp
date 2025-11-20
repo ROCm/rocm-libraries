@@ -58,7 +58,6 @@ namespace GlobalLoadStoreInstructionsTest
             , m_numBytes(numBytes)
 
         {
-            auto const& arch = m_context->targetArchitecture().target();
         }
 
         void generate() override

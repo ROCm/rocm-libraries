@@ -69,7 +69,6 @@ namespace ExpressionTest
             , m_bType(bType)
 
         {
-            auto const& arch = m_context->targetArchitecture().target();
         }
 
         void generate() override

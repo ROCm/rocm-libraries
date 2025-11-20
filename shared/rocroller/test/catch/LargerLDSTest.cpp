@@ -46,8 +46,6 @@ namespace largerLDSTest
             , m_numBytes(numBytes)
             , m_numLoads(numLoads)
         {
-            auto const& arch = m_context->targetArchitecture().target();
-
             auto maxLDS  = context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize);
             auto ldsSize = m_numBytes * m_numLoads;
             if(ldsSize > maxLDS)
