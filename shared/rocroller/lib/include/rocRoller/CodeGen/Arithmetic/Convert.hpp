@@ -77,6 +77,8 @@ namespace rocRoller
                                         Register::ValuePtr         arg,
                                         Expression::Convert const& expr) override;
 
+        inline static const std::string Name = "ConvertGenerator";
+
     private:
         Generator<Instruction> generateFloat(Register::ValuePtr dest, Register::ValuePtr arg);
 
@@ -113,9 +115,6 @@ namespace rocRoller
         Generator<Instruction> generateUInt64(Register::ValuePtr dest, Register::ValuePtr arg);
 
         Generator<Instruction> generateDouble(Register::ValuePtr dest, Register::ValuePtr arg);
-
-    public:
-        inline static const std::string Name = "ConvertGenerator";
     };
 
     /**
@@ -177,7 +176,8 @@ namespace rocRoller
                                         Register::ValuePtr rhs,
                                         Expression::SRConvert<DATATYPE> const&) override;
 
-        inline static const std::string Name = concatenate("SRConvert<", toString(DATATYPE), ">");
+        inline static const std::string Name
+            = concatenate("SRConvertGenerator<", toString(DATATYPE), ">");
     };
 
 }

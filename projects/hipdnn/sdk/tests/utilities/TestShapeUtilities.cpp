@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <gtest/gtest.h>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 using namespace hipdnn_sdk::utilities;
@@ -30,11 +30,9 @@ std::ostream& operator<<(std::ostream& os, const ExtractStrideOrderTestCase& tc)
 class TestShapeUtilsExtractStrideOrder : public ::testing::TestWithParam<ExtractStrideOrderTestCase>
 {
 protected:
-
     const std::string _testLoggerName = COMPONENT_NAME;
     static std::vector<std::string> sCapturedLogs;
     static std::mutex sLogMutex;
-
 
     void SetUp() override
     {
@@ -500,7 +498,8 @@ TEST(TestShapeUtils, GenerateDefaultPackedStridesAllOnes)
     EXPECT_EQ(strides, (std::vector<int64_t>{1, 1, 1, 1}));
 }
 
-TEST_P(TestShapeUtilsExtractStrideOrder, VerifyExtractedStrideOrder) {
+TEST_P(TestShapeUtilsExtractStrideOrder, VerifyExtractedStrideOrder)
+{
     auto& testCase = GetParam();
 
     // Sanity-check test data
@@ -513,10 +512,9 @@ TEST_P(TestShapeUtilsExtractStrideOrder, VerifyExtractedStrideOrder) {
     {
         ASSERT_EQ(logs.size(), 1);
         std::string expectedLog = "extractStrideOrder(): Stride lengths "
-            + vecToString(testCase.strides)
-            + " are not unique, the deduced stride order "
-            + vecToString(deducedStrideOrder)
-            + " may not be correct";
+                                  + vecToString(testCase.strides)
+                                  + " are not unique, the deduced stride order "
+                                  + vecToString(deducedStrideOrder) + " may not be correct";
         EXPECT_THAT(logs[0], ::testing::EndsWith(expectedLog));
     }
     else
@@ -525,33 +523,34 @@ TEST_P(TestShapeUtilsExtractStrideOrder, VerifyExtractedStrideOrder) {
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(
+    ,
     TestShapeUtilsExtractStrideOrder,
     ::testing::Values(
         // NHWC tests
         ExtractStrideOrderTestCase{{24, 1, 8, 2}, {3, 0, 2, 1}, false, {10, 2, 3, 4}},
-        ExtractStrideOrderTestCase{{2, 1, 2, 1},  {3, 0, 2, 1}, true,  {10, 1, 1, 2}},
-        ExtractStrideOrderTestCase{{2, 1, 2, 2},  {3, 0, 2, 1}, true,  {10, 2, 1, 1}},
+        ExtractStrideOrderTestCase{{2, 1, 2, 1}, {3, 0, 2, 1}, true, {10, 1, 1, 2}},
+        ExtractStrideOrderTestCase{{2, 1, 2, 2}, {3, 0, 2, 1}, true, {10, 2, 1, 1}},
 
         // NDHWC tests
         ExtractStrideOrderTestCase{{120, 1, 40, 10, 2}, {4, 0, 3, 2, 1}, false, {10, 2, 3, 4, 5}},
-        ExtractStrideOrderTestCase{{4, 1, 4, 4, 4},     {4, 0, 3, 2, 1}, true,  {10, 4, 1, 1, 1}},
-        ExtractStrideOrderTestCase{{4, 1, 4, 1, 1},     {4, 0, 3, 2, 1}, true,  {10, 1, 1, 4, 1}},
-        ExtractStrideOrderTestCase{{2, 1, 2, 2, 1},     {4, 0, 3, 2, 1}, true,  {10, 1, 1, 1, 2}},
+        ExtractStrideOrderTestCase{{4, 1, 4, 4, 4}, {4, 0, 3, 2, 1}, true, {10, 4, 1, 1, 1}},
+        ExtractStrideOrderTestCase{{4, 1, 4, 1, 1}, {4, 0, 3, 2, 1}, true, {10, 1, 1, 4, 1}},
+        ExtractStrideOrderTestCase{{2, 1, 2, 2, 1}, {4, 0, 3, 2, 1}, true, {10, 1, 1, 1, 2}},
 
         // NCHW tests
         ExtractStrideOrderTestCase{{24, 12, 4, 1}, {3, 2, 1, 0}, false, {10, 2, 3, 4}},
-        ExtractStrideOrderTestCase{{4, 4, 1, 1},   {3, 2, 1, 0}, true,  {10, 1, 4, 1}},
-        ExtractStrideOrderTestCase{{4, 4, 4, 1},   {3, 2, 1, 0}, true,  {10, 1, 1, 4}},
+        ExtractStrideOrderTestCase{{4, 4, 1, 1}, {3, 2, 1, 0}, true, {10, 1, 4, 1}},
+        ExtractStrideOrderTestCase{{4, 4, 4, 1}, {3, 2, 1, 0}, true, {10, 1, 1, 4}},
 
         // NCDHW tests
         ExtractStrideOrderTestCase{{120, 60, 20, 5, 1}, {4, 3, 2, 1, 0}, false, {1, 2, 3, 4, 5}},
-        ExtractStrideOrderTestCase{{4, 4, 4, 1, 1},     {4, 3, 2, 1, 0}, true,  {10, 1, 1, 4, 1}},
-        ExtractStrideOrderTestCase{{4, 4, 1, 1, 1},     {4, 3, 2, 1, 0}, true,  {10, 1, 4, 1, 1}},
-        ExtractStrideOrderTestCase{{4, 4, 4, 4, 1},     {4, 3, 2, 1, 0}, true,  {10, 1, 1, 1, 4}},
+        ExtractStrideOrderTestCase{{4, 4, 4, 1, 1}, {4, 3, 2, 1, 0}, true, {10, 1, 1, 4, 1}},
+        ExtractStrideOrderTestCase{{4, 4, 1, 1, 1}, {4, 3, 2, 1, 0}, true, {10, 1, 4, 1, 1}},
+        ExtractStrideOrderTestCase{{4, 4, 4, 4, 1}, {4, 3, 2, 1, 0}, true, {10, 1, 1, 1, 4}},
 
         // All ones --> NC...W
-        ExtractStrideOrderTestCase{{1, 1, 1, 1},    {3, 2, 1, 0},    true, {1, 1, 1, 1}},
+        ExtractStrideOrderTestCase{{1, 1, 1, 1}, {3, 2, 1, 0}, true, {1, 1, 1, 1}},
         ExtractStrideOrderTestCase{{1, 1, 1, 1, 1}, {4, 3, 2, 1, 0}, true, {1, 1, 1, 1, 1}},
 
         // Uncommon
@@ -560,34 +559,36 @@ INSTANTIATE_TEST_SUITE_P(,
 
         ExtractStrideOrderTestCase{{1}, {0}, false, {1}},
 
-        ExtractStrideOrderTestCase{{1,1}, {1,0}, true, {1,1}},
-        ExtractStrideOrderTestCase{{2,1}, {1,0}, false, {1,2}},
-        ExtractStrideOrderTestCase{{1,2}, {0,1}, false, {2,1}},
+        ExtractStrideOrderTestCase{{1, 1}, {1, 0}, true, {1, 1}},
+        ExtractStrideOrderTestCase{{2, 1}, {1, 0}, false, {1, 2}},
+        ExtractStrideOrderTestCase{{1, 2}, {0, 1}, false, {2, 1}},
 
-        ExtractStrideOrderTestCase{{1,1,1}, {2,1,0}, true,  {1,1,1}},
-        ExtractStrideOrderTestCase{{4,2,1}, {2,1,0}, false, {1,2,2}},
-        ExtractStrideOrderTestCase{{4,1,2}, {2,0,1}, false, {1,2,2}},
-        ExtractStrideOrderTestCase{{1,2,4}, {0,1,2}, false, {2,2,1}},
-        ExtractStrideOrderTestCase{{1,1,2}, {1,0,2}, true,  {2,1,1}},
-        ExtractStrideOrderTestCase{{2,1,2}, {2,0,1}, true,  {1,2,1}}, // NWC
-        ExtractStrideOrderTestCase{{2,1,1}, {2,1,0}, true,  {1,2,1}}, // NCW
+        ExtractStrideOrderTestCase{{1, 1, 1}, {2, 1, 0}, true, {1, 1, 1}},
+        ExtractStrideOrderTestCase{{4, 2, 1}, {2, 1, 0}, false, {1, 2, 2}},
+        ExtractStrideOrderTestCase{{4, 1, 2}, {2, 0, 1}, false, {1, 2, 2}},
+        ExtractStrideOrderTestCase{{1, 2, 4}, {0, 1, 2}, false, {2, 2, 1}},
+        ExtractStrideOrderTestCase{{1, 1, 2}, {1, 0, 2}, true, {2, 1, 1}},
+        ExtractStrideOrderTestCase{{2, 1, 2}, {2, 0, 1}, true, {1, 2, 1}}, // NWC
+        ExtractStrideOrderTestCase{{2, 1, 1}, {2, 1, 0}, true, {1, 2, 1}}, // NCW
 
-        ExtractStrideOrderTestCase{{1,2,4,8}, {0,1,2,3}, false, {2,2,2,1}},
-        ExtractStrideOrderTestCase{{1,4,2,2}, {0,3,2,1}, true,  {2,1,2,1}},
-        ExtractStrideOrderTestCase{{1,1,4,8}, {1,0,2,3}, true,  {4,1,2,1}},
-        ExtractStrideOrderTestCase{{1,4,8,1}, {1,2,3,0}, true,  {4,2,1,1}},
+        ExtractStrideOrderTestCase{{1, 2, 4, 8}, {0, 1, 2, 3}, false, {2, 2, 2, 1}},
+        ExtractStrideOrderTestCase{{1, 4, 2, 2}, {0, 3, 2, 1}, true, {2, 1, 2, 1}},
+        ExtractStrideOrderTestCase{{1, 1, 4, 8}, {1, 0, 2, 3}, true, {4, 1, 2, 1}},
+        ExtractStrideOrderTestCase{{1, 4, 8, 1}, {1, 2, 3, 0}, true, {4, 2, 1, 1}},
 
-        ExtractStrideOrderTestCase{{1,4,2,16,8}, {0,2,1,4,3}, false, {2,2,2,1,2}},
-        ExtractStrideOrderTestCase{{1,4,2,2,2},  {0,4,3,2,1}, true,  {2,1,2,1,1}},
-        ExtractStrideOrderTestCase{{1,1,1,4,8},  {2,1,0,3,4}, true,  {4,1,1,2,1}},
-        ExtractStrideOrderTestCase{{1,4,8,8,1},  {1,2,4,3,0}, true,  {4,2,1,1,1}},
+        ExtractStrideOrderTestCase{{1, 4, 2, 16, 8}, {0, 2, 1, 4, 3}, false, {2, 2, 2, 1, 2}},
+        ExtractStrideOrderTestCase{{1, 4, 2, 2, 2}, {0, 4, 3, 2, 1}, true, {2, 1, 2, 1, 1}},
+        ExtractStrideOrderTestCase{{1, 1, 1, 4, 8}, {2, 1, 0, 3, 4}, true, {4, 1, 1, 2, 1}},
+        ExtractStrideOrderTestCase{{1, 4, 8, 8, 1}, {1, 2, 4, 3, 0}, true, {4, 2, 1, 1, 1}},
 
-        ExtractStrideOrderTestCase{{1,4,2,32,16,8}, {0,2,1,5,4,3}, false, {2,2,2,1,2,2}},
-        ExtractStrideOrderTestCase{{1,4,2,2,2,2},   {0,5,4,3,2,1}, true,  {2,1,2,1,1,1}},
-        ExtractStrideOrderTestCase{{1,1,1,4,4,8},   {2,1,0,4,3,5}, true,  {4,1,1,2,1,1}},
-        ExtractStrideOrderTestCase{{1,4,8,8,8,1},   {1,2,5,4,3,0}, true,  {4,2,1,1,1,1}}
-    )
-);
+        ExtractStrideOrderTestCase{
+            {1, 4, 2, 32, 16, 8}, {0, 2, 1, 5, 4, 3}, false, {2, 2, 2, 1, 2, 2}},
+        ExtractStrideOrderTestCase{
+            {1, 4, 2, 2, 2, 2}, {0, 5, 4, 3, 2, 1}, true, {2, 1, 2, 1, 1, 1}},
+        ExtractStrideOrderTestCase{
+            {1, 1, 1, 4, 4, 8}, {2, 1, 0, 4, 3, 5}, true, {4, 1, 1, 2, 1, 1}},
+        ExtractStrideOrderTestCase{
+            {1, 4, 8, 8, 8, 1}, {1, 2, 5, 4, 3, 0}, true, {4, 2, 1, 1, 1, 1}}));
 
 TEST(TestShapeUtils, GetDerivedShape5DValid)
 {
