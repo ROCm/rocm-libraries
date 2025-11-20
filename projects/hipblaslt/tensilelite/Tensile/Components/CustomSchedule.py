@@ -816,7 +816,7 @@ def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
     syncCode = []
     if isTN(kernel) and TLDS==1:
         optSchedule = {
-            'SYNC'   : [[ 18,  18,  51,  51,  51,  90,  90]],
+            'SYNC'   : [[ -1,  18,  18,  51,  51,  90,  90]],
             'GRIncA' : [[  1,   1,   3,   3,   5,   5,   7,   7,   9],
                         [  0,   0,   2,   2,   4,   4,   6,   6,   8]],
             'GRIncB' : [[  9,  11,  11,  13,  13,  15,  15,  17,  17],
@@ -843,12 +843,12 @@ def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
             'LCC'    : [[110, 111]]
         }
         syncCode = [
+            SWaitCnt(dscnt= 0, vlcnt=-1, vscnt=-1, comment="Wait for LRBs"),
             SWaitCnt(dscnt= 2, vlcnt=-1, vscnt=-1, comment="Wait for LRAs"),
             SBarrier(comment=""),
-            SWaitCnt(dscnt= 0, vlcnt=-1, vscnt=-1, comment="Wait for LRBs"),
-            SWaitCnt(dscnt=-1, vlcnt=15, vscnt=-1, comment="Wait for previous set of GRs"),
+            SWaitCnt(dscnt= 0, vlcnt=15, vscnt=-1, comment="Wait for LRBs and previous set of GRs"),
             SBarrier(comment=""),
-            SWaitCnt(dscnt= 0, vlcnt=15, vscnt=-1, comment="Wait for previous set of GRs"),
+            SWaitCnt(dscnt=-1, vlcnt=15, vscnt=-1, comment="Wait for previous set of GRs"),
             SBarrier(comment=""),
         ]
         nglshift = nllshift = 15
