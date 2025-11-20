@@ -141,7 +141,7 @@ std::vector<TensorsConfig> TensorsConfigs()
             }
         }
     }
-#endif //POW2
+#endif
 #else
     size_t N = 1;
     size_t C = 1;
@@ -156,7 +156,7 @@ std::vector<TensorsConfig> TensorsConfigs()
     H = 20;
     W = 20;
     insertTestCase(N, C, H, W);
-#endif //PERF_ENABLE
+#endif
 
     return configs;
 }
