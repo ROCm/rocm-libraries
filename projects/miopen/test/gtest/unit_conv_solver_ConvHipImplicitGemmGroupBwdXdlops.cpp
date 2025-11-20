@@ -104,11 +104,6 @@ auto GetTestParams(miopenDataType_t datatype)
 #endif
     auto params = miopen::unit_tests::UnitTestConvSolverParams(supportedDevices);
     params.Tunable(5);
-    if(datatype == miopenHalf)
-    {
-        // Enable the backward solver on MI200 for fp16 by disabling the alternate implementation
-        params.SetConvAttrFp16Alt(0);
-    }
 
     return params;
 }
