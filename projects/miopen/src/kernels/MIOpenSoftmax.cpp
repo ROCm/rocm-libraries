@@ -34,6 +34,9 @@ template <typename T>
 constexpr T NEGATIVE_CUTOFF_VAL = T{-1e20};
 
 template <typename T>
+constexpr T EPSILON = T{1e-12};
+
+template <typename T>
 __device__ T logaddexp(T x, T y)
 {
     T a = max(x, y);
@@ -176,7 +179,7 @@ __forceinline__ __device__ void softmaxfwd(const TI* __restrict__ x,
     if constexpr(NUM_BATCH == 1) // CSR-Vector like approach
     {
         /* Entire workgroup works on one spatial_dim.
-         * We use logarthmic reductions to compute max and sum per channel.
+         * We use logarithmic reductions to compute max and sum per channel.
          * This approach reads in the same data thrice from DRAM but is still better
          * than launching three different kernels.
          * The workgroup begins by computing the nth image and s (spatial_dim) it
@@ -272,9 +275,9 @@ __forceinline__ __device__ void softmaxfwd(const TI* __restrict__ x,
                 else
                 {
                     // Multiply by approximate reciprocal of channel_sum. The approximate reciprocal
-                    // is somewhat less accurate (1 ULP) than a full division, but is noticably more
-                    // performant.
-                    value *= __builtin_amdgcn_rcpf(channel_sum);
+                    // is somewhat less accurate (1 ULP) than a full division, but is noticeably
+                    // more performant.
+                    value *= __builtin_amdgcn_rcpf(channel_sum + EPSILON<FLOAT_ACCUM>);
                 }
 
                 value = value * FLOAT_ACCUM(alpha) + CVT_FLOAT2ACCUM(y[y_idx]) * FLOAT_ACCUM(beta);
@@ -399,9 +402,9 @@ __forceinline__ __device__ void softmaxfwd(const TI* __restrict__ x,
                 else
                 {
                     // Multiply by approximate reciprocal of channel_sum. The approximate reciprocal
-                    // is somewhat less accurate (1 ULP) than a full division, but is noticably more
-                    // performant.
-                    values[v_idx] *= __builtin_amdgcn_rcpf(channel_sum);
+                    // is somewhat less accurate (1 ULP) than a full division, but is noticeably
+                    // more performant.
+                    values[v_idx] *= __builtin_amdgcn_rcpf(channel_sum + EPSILON<FLOAT_ACCUM>);
                 }
 
                 values[v_idx] = values[v_idx] * FLOAT_ACCUM(alpha) +
