@@ -66,7 +66,7 @@ macro(rocm_setup_posix_gfortran_packages)
 endmacro()
 
 # Macro to set up all client package variables
-macro(rocm_setup_client_packages)
+macro(rocm_set_client_package_prerequisites)
     _rocm_detect_os()
     message(STATUS "Detected OS: ${HOST_OS} ${HOST_OS_VERSION}")
 
@@ -76,10 +76,3 @@ macro(rocm_setup_client_packages)
     message(STATUS "OpenMP packages: RPM=${OPENMP_RPM}, DEB=${OPENMP_DEB}")
     message(STATUS "GFortran packages: RPM=${GFORTRAN_RPM}, DEB=${GFORTRAN_DEB}")
 endmacro()
-
-# Convenience function that also sets up standard components
-function(rocm_setup_client_components component_name client_component_name)
-    rocm_setup_client_packages()
-    rocm_package_setup_component(${component_name})
-    rocm_package_setup_client_component(${client_component_name})
-endfunction()
