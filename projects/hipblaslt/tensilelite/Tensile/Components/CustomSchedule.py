@@ -363,12 +363,17 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
         syncTable = [-1, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for LRB1-0"),
                      7, SWaitCnt(dscnt=10, vlcnt=-1, vscnt=-1, comment="wait for LRB1-1"),
                      10, SBarrier(comment="for GRA"),
-                     15, SWaitCnt(dscnt=14, vlcnt=-1, vscnt=-1, comment="wait for LRB1-2"),
+                     14, SWaitCnt(dscnt=14, vlcnt=-1, vscnt=-1, comment="wait for LRB1-2"),
                      23, SWaitCnt(dscnt=14, vlcnt=-1, vscnt=-1, comment="wait for LRB1 remaining"),
+                     47, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for LRB0-0"),
                      50, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="for LRA1"),
                      50, SBarrier(comment="for LRA1"),
+                     55, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRB0-1"),
+                     63, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRB0-2"),
                      70, SWaitCnt(dscnt=-1, vlcnt=12, vscnt=-1, comment="for LRB1"),
-                     70, SBarrier(comment="for LRB1"),]
+                     71, SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="wait for LRB0-3"),
+                     70, SBarrier(comment="for LRB1"),
+                     79, SWaitCnt(dscnt=13, vlcnt=-1, vscnt=-1, comment="wait for LRB0 remaining"),]
         optSchedule = {
                 'SYNC'  : [syncTable[::2]],
                 'GRIncA': [[0,1,2,3,4,5,6,7,8]],
