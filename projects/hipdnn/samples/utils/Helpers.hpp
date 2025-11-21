@@ -56,7 +56,8 @@ inline void printSampleHelp(const std::string& sampleName)
     std::cout << "Usage: " << sampleName << " [OPTIONS]\n"
               << "Options:\n"
               << "  --verify-cpu, -vc           Enable CPU reference validation\n"
-              << "  --activation-type TYPE      Set activation type (relu, relu6, clamp) [default: relu]\n"
+              << "  --activation-type TYPE      Set activation type (relu, relu6, clamp) [default: "
+                 "relu]\n"
               << "  --help, -h                  Show this help message\n"
               << std::endl;
 }
