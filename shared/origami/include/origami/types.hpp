@@ -253,7 +253,7 @@ struct config_t {
   dim3_t mi;
 
   /// Occupancy (number of waves resident per CU).
-  std::size_t occupancy;
+  int occupancy;
 
   /// Reorder workgroup id for L2 reuse.
   int workgroup_mapping{};

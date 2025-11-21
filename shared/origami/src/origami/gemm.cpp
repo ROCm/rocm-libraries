@@ -800,9 +800,9 @@ double compute_tile_latency(const problem_t& problem,
   int grid_n = static_cast<int>(math::safe_ceil_div(problem.size.n, MT_N));
 
   size_t real_occupancy =
-      std::min(config.occupancy,
-               static_cast<size_t>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor,
-                                                       hardware.N_CU)));  // Number of WGs per CU.
+      std::min(std::max(config.occupancy,static_cast<int>(1)),
+               static_cast<int>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor,
+                                                    hardware.N_CU)));  // Number of WGs per CU.
 
   L_prologue = L_prologue * pow(0.95, real_occupancy);  // Factor chosen empirically
   L_epilogue = L_epilogue * pow(0.95, real_occupancy);  // Factor chosen empirically
@@ -1004,8 +1004,6 @@ double compute_total_latency(const problem_t& problem,
 
   // 1-1) config.workgroup_mapping
   auto WGM = std::max(config.workgroup_mapping, 1);  // WGM can't be less than one.
-  auto occupancy =
-      std::max(config.occupancy, static_cast<size_t>(1));  // occupancy can't be less than one.
 
   // 1-2) Find CU occupancy
   auto [num_wgs, num_active_cus, numWaves, splitting_factor] =
