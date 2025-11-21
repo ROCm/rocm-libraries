@@ -74,7 +74,7 @@ endif()
 find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
 if(HIPSPARSE_ENABLE_CUDA)
-    find_package(HIP MODULE REQUIRED)
+    find_package(HIP REQUIRED CONFIG)
     list(APPEND HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include")
     find_package(CUDA REQUIRED)
 elseif(HIPSPARSE_ENABLE_HIP)
