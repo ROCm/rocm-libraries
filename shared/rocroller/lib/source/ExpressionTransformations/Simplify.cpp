@@ -826,10 +826,8 @@ namespace rocRoller
 
                 // Extracting the entire arg with no offset (same type)
                 auto argVarType = resultVariableType(cpy.arg);
-                if(cpy.offset == 0 && cpy.width == argVarType.getElementSize() * 8 && argVarType.dataType == cpy.outputDataType){
-                    std::cout << "[Simplify] BitFieldExtract - After (full extraction): " << cpy.arg << "\n";
+                if(cpy.offset == 0 && cpy.width == argVarType.getElementSize() * 8 && argVarType.dataType == cpy.outputDataType)
                     return call(cpy.arg);
-                }
 
                 // TODO: Enable this simplification with a reinterpret_cast expression
                 // // Extracting the entire arg with no offset
