@@ -321,30 +321,40 @@ Unzip the downloaded tarball to a path with no spaces. E.g. after unzipped to `C
 
 #### 8. Setup Environment Variables
 
-It isn't necessary to add the toolchain to your system PATH as these can be specified using the `-D` option to cmake (see example below).
-* ROCK_PATH -- specifies the folder where TheRock was installed.
-* CMAKE_PROGRAM_PATH -- specifies the folder that CMake can use to find additional tools such as clang-format.
+* Add TheRock bin folder to the system PATH so that applications can find and load the DLL files. E.g.:  
+   ```cmd
+   set PATH=C:\dist\therock\bin;%PATH%
+   ```  
+   It isn't necessary to add the clang toolchain to your system PATH to perform the build as these can be specified using the `-D` option to cmake (see example below).
+   * ROCM_PATH -- Used by the hipDNN CMake project to determine where TheRock was installed (defaults to `c:/dist/therock`).
+   * CMAKE_PROGRAM_PATH -- Specifies the folder that CMake can use to find additional tools such as clang-format.
 
+* Set the HIP_PLATFORM environment varilable:
+   ```cmd
+   set HIP_PLATFORM=amd
+   ```
 
-Set the HIP_PLATFORM environment varilable:
+* If desired, set Ninja as the default generator so that `-g Ninja` doesn't need to be explicitly added to the `cmake` command line:
+   ```cmd
+   set CMAKE_GENERATOR=Ninja
+   ```
+
+Use `hipconfig` to check that TheRock is installed correctly and the PATH is setup correctly. The output from the command, as shown below, will show the detected ROCm path and ROCm clang path (`c:\dist\therock\` will be replaced with the folder TheRock was instlled to on your system). This command requires that TheRock bin directory is in your system PATH.
 ```cmd
-set HIP_PLATFORM=amd
+hipconfig -rocmpath -n --hipclangpath
+c:\dist\therock
+c:\dist\therock\lib\llvm\bin
 ```
 
-If desired, set Ninja as the default generator so that `-g Ninja` doesn't need to be explicitly added to the `cmake` command line:
-```cmd
-set CMAKE_GENERATOR=Ninja
-```
-
-Example CMake configure command:
+Example CMake configure command (including `ROCM_PATH` for completeness even though it is not required when using the default value):
 ```
 projects\hipdnn\build>set CMAKE_GENERATOR=Ninja
-projects\hipdnn\build>cmake -DROCM_PATH=c:/dist/therock -DCMAKE_PROGRAM_PATH=c:/dist/clang/bin ..
+projects\hipdnn\build>cmake -DGPU_TARGETS=gfx1103 -DROCM_PATH=c:/dist/therock -DCMAKE_PROGRAM_PATH=c:/dist/clang/bin ..
 -- Building for: Ninja
 -- Using ROCm Clang compilers from c:/dist/therock/lib/llvm/bin
 ```
 
-Also see the note on setting `GPU_TARGETS` in the following section.
+See the note on setting `GPU_TARGETS` in the following section.
 
 If using custom paths, you may need to modify [ClangToolChain.cmake](../cmake/ClangToolChain.cmake).
 
