@@ -472,6 +472,8 @@ using data_type = double;
 #define _OpTensorFwdBiasGenericTest GPU_OpTensorFwdBiasGenericTest_FP64
 #endif
 
+using _OpTensorFwdBiasGenericTest = OpTensorFwdBiasGenericTest<data_type>;
+
 TEST_P(_OpTensorFwdBiasGenericTest, PortTest)
 {
     runOCL();
