@@ -47,7 +47,9 @@ using mio_bn_config = miopen::batchnorm::config;
 
 //==================== PER ACTIVATION =======================
 
-extern "C" __global__ void MIOpenBatchNormFwdTrainPerActivation(
+#define BLOCK_SIZE (MIO_BN_GRP0 * MIO_BN_GRP1 * MIO_BN_GRP2)
+
+extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrainPerActivation(
     const typename mio_bn_config::fp_type* __restrict__ in,          /* x input */
     unsigned int in_nstride,                                         /* C*H*W */
     unsigned int in_cstride,                                         /* H*W */
@@ -81,9 +83,9 @@ extern "C" __global__ void MIOpenBatchNormFwdTrainPerActivation(
     fp_prec_type pvt_scale   = fp_prec_type(0);
     fp_prec_type pvt_bias    = fp_prec_type(0);
 
-    unsigned int xgid    = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int ygid    = blockIdx.y * blockDim.y + threadIdx.y;
-    unsigned int yglb_sz = gridDim.y * blockDim.y;
+    unsigned int xgid    = blockIdx.x * MIO_BN_GRP0 + threadIdx.x;
+    unsigned int ygid    = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
+    unsigned int yglb_sz = gridDim.y * MIO_BN_GRP1;
     int cidx             = MIO_BN_HW * static_cast<int>(xgid);
     int adjIndex, index;
 
@@ -98,15 +100,15 @@ extern "C" __global__ void MIOpenBatchNormFwdTrainPerActivation(
         adjIndex = cidx + idx; // gamma and beta tensor index
         for(int n = 0; n < MIO_BN_N; n++)
         {
-            index = static_cast<int>(in_nstride) * n + adjIndex;
-            mean += static_cast<fp_prec_type>(in[index]);
+            // index = static_cast<int>(in_nstride) * n + adjIndex;
+            mean += static_cast<fp_prec_type>(in[adjIndex + static_cast<int>(in_nstride) * n]);
         }
         mean *= invN;
 
         for(int n = 0; n < MIO_BN_N; n++)
         {
-            index                = static_cast<int>(in_nstride) * n + adjIndex;
-            const fp_prec_type x = static_cast<fp_prec_type>(in[index]);
+            // index                = static_cast<int>(in_nstride) * n + adjIndex;
+            const fp_prec_type x = static_cast<fp_prec_type>(in[adjIndex + static_cast<int>(in_nstride) * n]);
             const fp_prec_type d = x - mean;
             variance += d * d;
         }
@@ -137,8 +139,7 @@ extern "C" __global__ void MIOpenBatchNormFwdTrainPerActivation(
 
         for(int n = 0; n < MIO_BN_N; n++)
         {
-            index = static_cast<int>(in_nstride) * n + adjIndex;
-            const fp_prec_type x = static_cast<fp_prec_type>(in[index]);
+            const fp_prec_type x = static_cast<fp_prec_type>(in[static_cast<int>(in_nstride) * n + adjIndex]);
             inhat                = (x - mean) * invVariance;
 
             // fma(a,b,c) = a*b + c (HIP provides float/double overloads)
