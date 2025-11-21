@@ -210,6 +210,7 @@ TEST_P(IntegrationGpuConvFwdBiasActivNdhwcFp16, Correctness)
     runGraphTest(conv::getToleranceFwd<half>(), TensorLayout::NDHWC);
 }
 
+// Smoke test cases
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuConvFwdBiasActivNchwFp32,
@@ -293,3 +294,88 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases5D()),
                      testing::Bool(),
                      testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
+
+// Full test cases
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuConvFwdBiasActivNchwFp32,
+    testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases4D()),
+                     testing::Bool(),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuConvFwdBiasActivNchwBfp16,
+    testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases4D()),
+                     testing::Bool(),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuConvFwdBiasActivNchwFp16,
+    testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases4D()),
+                     testing::Bool(),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuConvFwdBiasActivNhwcFp32,
+    testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases4D()),
+                     testing::Bool(),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuConvFwdBiasActivNhwcBfp16,
+    testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases4D()),
+                     testing::Bool(),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuConvFwdBiasActivNhwcFp16,
+    testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases4D()),
+                     testing::Bool(),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuConvFwdBiasActivNcdhwFp32,
+    testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases5D()),
+                     testing::Bool(),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuConvFwdBiasActivNcdhwBfp16,
+    testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases5D()),
+                     testing::Bool(),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuConvFwdBiasActivNcdhwFp16,
+    testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases5D()),
+                     testing::Bool(),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuConvFwdBiasActivNdhwcFp32,
+    testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases5D()),
+                     testing::Bool(),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuConvFwdBiasActivNdhwcBfp16,
+    testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases5D()),
+                     testing::Bool(),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuConvFwdBiasActivNdhwcFp16,
+    testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases5D()),
+                     testing::Bool(),
+                     testing::ValuesIn(test_activation_common::createFwdActivationFullCases())));
