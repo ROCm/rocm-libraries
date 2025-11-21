@@ -3210,7 +3210,7 @@ namespace TensileLite
     size_t ContractionSolution::getSKGrid(Problem const&  problem,
                                           Hardware const& hardware,
                                           size_t          tiles,
-                                          ReductionType reductionStrat) const
+                                          ReductionType& reductionStrat) const
     {
         size_t skGrid = tiles; // Fallback
         const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
@@ -3299,6 +3299,16 @@ namespace TensileLite
         else
         {
             skGrid = cuCount;
+        }
+
+        // For tree-reduction there are some limits for divisions to avoid overflow
+        // If we hit one of the limits, fallback to DP
+        size_t itersPerTile = problem.getItersPerTile(sizeMapping);
+        size_t itersPerWG = tiles * itersPerTile / skGrid;
+        if(itersPerTile >=65536 || itersPerWG >= 65536 || (tiles * itersPerTile) >= 16777216)
+        {
+            reductionStrat = ReductionType::Tree;
+            skGrid = tiles;
         }
 
         return skGrid;

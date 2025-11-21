@@ -290,7 +290,7 @@ namespace TensileLite
                            dim3& numWorkGroups,
                            ContractionSolution::Problem const& problem) const;
         origami::streamk::reduction_type getSKReduction(Problem const& problem, Hardware const& hardware) const;
-        size_t getSKGrid(Problem const& problem, Hardware const& hardware, size_t tiles, origami::streamk::reduction_type reductionStrat) const;
+        size_t getSKGrid(Problem const& problem, Hardware const& hardware, size_t tiles, origami::streamk::reduction_type& reductionStrat) const;
         size_t partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);
