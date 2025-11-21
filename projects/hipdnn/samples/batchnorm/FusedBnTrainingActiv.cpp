@@ -91,9 +91,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     // Mark BN output as virtual to enable fusion with activation
     y->set_is_virtual(true);
-    y->set_data_type(inputType);
-    y->set_dim({n, c, h, w});
-    y->set_stride(utilities::generateStrides({n, c, h, w}, layout.strideOrder));
 
     // Step 2: Pointwise Activation
     auto pwAttributes = graph::PointwiseAttributes();
@@ -118,33 +115,16 @@ void SampleRunner::operator()(const TensorLayout& layout)
     activatedY->set_name("activated_y");
     activatedY->set_output(true);
     activatedY->set_is_virtual(false);
-    activatedY->set_data_type(inputType);
-    activatedY->set_dim({n, c, h, w});
-    activatedY->set_stride(utilities::generateStrides({n, c, h, w}, layout.strideOrder));
 
     // Configure output tensors for batch statistics
     savedMean->set_output(true);
-    savedMean->set_data_type(intermediateType);
-    savedMean->set_dim({1, c, 1, 1});
-    savedMean->set_stride(utilities::generateStrides({1, c, 1, 1}));
-
     savedInvVariance->set_output(true);
-    savedInvVariance->set_data_type(intermediateType);
-    savedInvVariance->set_dim({1, c, 1, 1});
-    savedInvVariance->set_stride(utilities::generateStrides({1, c, 1, 1}));
 
     // Configure running statistics output tensors
     if(config.useRunningStats)
     {
         nextRunningMean->set_output(true);
-        nextRunningMean->set_data_type(intermediateType);
-        nextRunningMean->set_dim({1, c, 1, 1});
-        nextRunningMean->set_stride(utilities::generateStrides({1, c, 1, 1}));
-
         nextRunningVariance->set_output(true);
-        nextRunningVariance->set_data_type(intermediateType);
-        nextRunningVariance->set_dim({1, c, 1, 1});
-        nextRunningVariance->set_stride(utilities::generateStrides({1, c, 1, 1}));
     }
 
     HIPDNN_FE_CHECK(graph->validate());
