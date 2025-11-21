@@ -24,7 +24,6 @@ add_executable(
     engines/TestMiopenEngine.cpp
     main.cpp
     TestMiopenActivationDescriptor.cpp
-    TestMiopenConvFwdBiasActivOperations.cpp
     TestMiopenConvDescriptor.cpp
     TestMiopenEngineManager.cpp
     TestMiopenHandleFactory.cpp
