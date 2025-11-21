@@ -31,6 +31,8 @@ protected:
         graphObj.set_name(doBias ? "ConvFwdBiasActivTest" : "ConvFwdActivTest");
         graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
+        int64_t uid = 1;
+
         auto dataType = getDataTypeEnumFromType<DataType>();
 
         auto xAttr
@@ -38,6 +40,7 @@ protected:
                                           dataType,
                                           convTestCase.xDims,
                                           generateStrides(convTestCase.xDims, layout.strideOrder));
+        xAttr.set_uid(uid++);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto wAttr
@@ -45,6 +48,7 @@ protected:
                                           dataType,
                                           convTestCase.wDims,
                                           generateStrides(convTestCase.wDims, layout.strideOrder));
+        wAttr.set_uid(uid++);
         auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
         graph::ConvFpropAttributes convAttrs;
@@ -59,6 +63,7 @@ protected:
         yConvTensorAttr->set_data_type(dataType);
         yConvTensorAttr->set_dim(convTestCase.yDims);
         yConvTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
+        yConvTensorAttr->set_uid(uid++);
 
         std::shared_ptr<graph::TensorAttributes> yBiasTensorAttr;
         if(doBias)
@@ -67,6 +72,7 @@ protected:
 
             auto biasAttr = graph::makeTensorAttributes(
                 "bias", dataType, biasDims, generateStrides(biasDims, layout.strideOrder));
+            biasAttr.set_uid(uid++);
             auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
             graph::PointwiseAttributes biasAttrs;
@@ -78,6 +84,7 @@ protected:
             yBiasTensorAttr->set_data_type(dataType);
             yBiasTensorAttr->set_dim(convTestCase.yDims);
             yBiasTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
+            yBiasTensorAttr->set_uid(uid++);
         }
 
         graph::PointwiseAttributes activAttrs;
@@ -115,6 +122,7 @@ protected:
         yTensorAttr->set_dim(convTestCase.yDims);
         yTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
         yTensorAttr->set_output(true);
+        yTensorAttr->set_uid(uid);
 
         this->registerValidator(yTensorAttr, tolerance);
 
