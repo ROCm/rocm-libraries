@@ -67,7 +67,7 @@ elseif(HIPSPARSE_ENABLE_HIP)
 endif()
 
 # Enable POSITION_INDEPENDENT_CODE for OBJECT library if building shared libs
-if(BUILD_SHARED_LIBS)
+if(HIPSPARSE_BUILD_SHARED_LIBS)
     set_target_properties(hipsparse-clients-common PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 
@@ -100,6 +100,6 @@ elseif(HIPSPARSE_ENABLE_HIP)
 endif()
 
 # Enable POSITION_INDEPENDENT_CODE for OBJECT library if building shared libs
-if(BUILD_SHARED_LIBS)
+if(HIPSPARSE_BUILD_SHARED_LIBS)
     set_target_properties(hipsparse-samples-common PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()

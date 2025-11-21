@@ -89,6 +89,7 @@ set(_HIPSPARSE_LEGACY_OPTIONS_USED "")
 set(_HIPSPARSE_CURRENT_OPTIONS "")
 
 # Apply mappings using consolidated function
+shim_mapping(BUILD_SHARED_LIBS HIPSPARSE_BUILD_SHARED_LIBS "Build hipSPARSE as a shared library.")
 shim_mapping(BUILD_CLIENTS_TESTS HIPSPARSE_BUILD_TESTING "Build test client; master switch.")
 shim_mapping(BUILD_CLIENTS_BENCHMARKS HIPSPARSE_ENABLE_BENCHMARKS "Build benchmark client.")
 shim_mapping(BUILD_CLIENTS_SAMPLES HIPSPARSE_ENABLE_SAMPLES "Build client samples.")

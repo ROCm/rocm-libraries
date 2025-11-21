@@ -21,7 +21,7 @@ endif()
 # Set cpack license file here to avoid rocm-cmake warning
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 
-include(FetchROCmCMake)
+include(fetch_rocm_cmake)
 include(GNUInstallDirs)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
@@ -43,7 +43,7 @@ if(HIPSPARSE_ENABLE_CUDA AND HIPSPARSE_ENABLE_HIP)
     message(FATAL_ERROR "Cannot enable both CUDA and HIP backends simultaneously.")
 endif()
 
-option(BUILD_SHARED_LIBS "Build hipSPARSE as a shared library." ON)
+option(HIPSPARSE_BUILD_SHARED_LIBS "Build hipSPARSE as a shared library." ON)
 option(HIPSPARSE_BUILD_CLIENTS_ONLY "Build only clients." OFF)
 option(HIPSPARSE_BUILD_TESTING "Build tests (requires googletest)." OFF)
 option(HIPSPARSE_ENABLE_BENCHMARKS "Build benchmarks." ON)
