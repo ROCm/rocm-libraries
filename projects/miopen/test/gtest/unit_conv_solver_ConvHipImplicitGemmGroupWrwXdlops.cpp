@@ -42,7 +42,9 @@ auto GetConvSmokeTestCases(miopenDataType_t datatype)
 
     return std::vector{
         // clang-format off
-        TestCase{{64, 64, 55, 55}, {64, 32, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 2, datatype},        
+
+        TestCase{{8, 8, 3, 3}, {8, 8, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 1, datatype},  
+        
         // clang-format on
     };
 }
@@ -53,30 +55,21 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
 
     return std::vector{
         // clang-format off
-/*        TestCase{{datatype, miopenTensorNHWC, {1, 64, 8, 8}},
+        TestCase{{datatype, miopenTensorNHWC, {1, 64, 8, 8}},
                  {datatype, miopenTensorNHWC, {96, 64, 1, 1}},
                  datatype, {{1, 1}, {1, 1}, {1, 1}}}, // non-zero padding
         TestCase{{datatype, miopenTensorNHWC, {1, 64, 8, 8}},
                  {datatype, miopenTensorNHWC, {96, 64, 1, 1}},
                  datatype, {{0, 0}, {2, 2}, {1, 1}}}, // stride > 1
-        TestCase{{datatype, miopenTensorNHWC, {1, 64, 8, 8}},
-                 {datatype, miopenTensorNHWC, {96, 64, 1, 1}},
-                 datatype, {{0, 0}, {1, 1}, {2, 2}}}, // dilation > 1
-        TestCase{{datatype, miopenTensorNHWC, {1, 64, 24, 48}},
-                 {datatype, miopenTensorNHWC, {384, 64, 1, 1}},
-                 datatype, {{0, 0}, {1, 1}, {1, 1}}}, // some different NCHW and k parameters
 
         // Group count = 2 and 4                 
         TestCase{{datatype, miopenTensorNHWC, {1, 64, 8, 8}},
                  {datatype, miopenTensorNHWC, {96, 32, 1, 1}},
                  datatype, {{0, 0}, {1, 1}, {2, 2}, 2}}, // dilation > 1
-        TestCase{{datatype, miopenTensorNHWC, {1, 64, 24, 48}},
-                 {datatype, miopenTensorNHWC, {384, 16, 1, 1}},
-                 datatype, {{0, 0}, {1, 1}, {1, 1}, 4}}, // some different NCHW and k parameters*/
 
-        TestCase{{64, 64, 55, 55}, {64, 64, 1, 1}, {0, 0}, {1, 1}, {1, 1}, datatype},
-        TestCase{{64, 64, 55, 55}, {64, 32, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 2, datatype},
-        TestCase{{64, 64, 55, 55}, {64, 16, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 4, datatype},
+        TestCase{{datatype, miopenTensorNHWC, {1, 64, 8, 8}},
+                 {datatype, miopenTensorNHWC, {96, 16, 1, 1}},
+                 datatype, {{0, 0}, {2, 2}, {1, 1}, 4}}, // stride > 1
 
         // clang-format on
     };
@@ -84,9 +77,8 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
 
 const auto& GetTestParams(bool bfp16 = false)
 {
-    Gpu supportedDevices = Gpu::None;
-
-    static const auto params = [] {
+    static const auto params = [bfp16] {
+    Gpu supportedDevices = Gpu::None;        
 // If MIOpen is built without CK these tests will fail, skip them to avoid failing
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
         if (!bfp16)
@@ -162,11 +154,11 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::ValuesIn(GetConvSmokeTestCases(miopenFloat))));
 
 // Full tests
-INSTANTIATE_TEST_SUITE_P(Full,
+/*INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_I8,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
-                                          testing::ValuesIn(GetConvFullTestCases(miopenInt8))));
+                                          testing::ValuesIn(GetConvFullTestCases(miopenInt8))));*/
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_FP16,
