@@ -26,8 +26,6 @@
 
 #define UNUSED __attribute__((__unused__))
 
-#define MIOPEN_NRN_GROUP_SZ2 1
-
 #ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
@@ -82,6 +80,7 @@ extern "C" __global__ void MIOpenActiveFwdLite(const FP_TYPE* bot,
 extern "C" __global__ void MIOpenActiveFwd2DLite(const FP_TYPE* bot,
                                                  FP_TYPE* top,
                                                  const int map_size_aligned,
+                                                 const int height,
                                                  FP_TYPE gamma,
                                                  FP_TYPE beta,
                                                  FP_TYPE alpha,
@@ -96,8 +95,11 @@ extern "C" __global__ void MIOpenActiveFwd2DLite(const FP_TYPE* bot,
     if(x_id >= map_size_aligned)
         return;
 
-    uint bot_index = y * bot_stride + x_id * MIOPEN_READ_UNIT;
-    uint top_index = y * top_stride + x_id * MIOPEN_READ_UNIT;
+    if(y >= height)
+        return;
+
+    size_t bot_index = y * bot_stride + x_id * MIOPEN_READ_UNIT;
+    size_t top_index = y * top_stride + x_id * MIOPEN_READ_UNIT;
 
     FP_TYPE data[MIOPEN_READ_UNIT];
     FP_TYPE response[MIOPEN_READ_UNIT];
@@ -156,6 +158,7 @@ extern "C" __global__ void MIOpenActiveBwd2DLite(FP_TYPE* bot_diff,
                                                  const FP_TYPE* bot,
                                                  const FP_TYPE* top,
                                                  const int map_size_aligned,
+                                                 const int height,
                                                  FP_TYPE diff_scale,
                                                  FP_TYPE gamma,
                                                  FP_TYPE beta,
@@ -173,6 +176,9 @@ extern "C" __global__ void MIOpenActiveBwd2DLite(FP_TYPE* bot_diff,
     const unsigned int y    = blockIdx.y * blockDim.y + threadIdx.y;
 
     if(x_id >= map_size_aligned)
+        return;
+
+    if(y >= height)
         return;
 
     uint bot_diff_index = y * bot_diff_stride + x_id * MIOPEN_READ_UNIT;
@@ -225,17 +231,15 @@ __launch_bounds__(
             if constexpr(MIOPEN_N_IN_STRIDE > MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN &&
                          MIOPEN_C_IN != 0 && MIOPEN_H_IN != 0 && MIOPEN_W_IN != 0)
             {
-                int loc, n_loc, c_loc, h_loc, w_loc;
-                loc   = x * MIOPEN_READ_UNIT + i;
-                n_loc = loc / (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN);
-                c_loc =
-                    (loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) / (MIOPEN_H_IN * MIOPEN_W_IN);
-                h_loc = ((loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) %
-                         (MIOPEN_H_IN * MIOPEN_W_IN)) /
-                        MIOPEN_W_IN;
-                w_loc = ((loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) %
-                         (MIOPEN_H_IN * MIOPEN_W_IN)) %
-                        MIOPEN_W_IN;
+                const int in_hw      = MIOPEN_H_IN * MIOPEN_W_IN;
+                const int in_chw     = MIOPEN_C_IN * in_hw;
+                const int loc        = x * MIOPEN_READ_UNIT + i;
+                const int loc_in_chw = loc % in_chw;
+                const int loc_in_hw  = loc_in_chw % in_hw;
+                const int n_loc      = loc / in_chw;
+                const int c_loc      = loc_in_chw / in_hw;
+                const int h_loc      = loc_in_hw / MIOPEN_W_IN;
+                const int w_loc      = loc_in_hw % MIOPEN_W_IN;
 
                 return bot[xOffset + n_loc * MIOPEN_N_IN_STRIDE + c_loc * MIOPEN_C_IN_STRIDE +
                            h_loc * MIOPEN_H_IN_STRIDE + w_loc * MIOPEN_W_IN_STRIDE];
@@ -257,7 +261,7 @@ __launch_bounds__(
 #pragma unroll
             for(; i < MIOPEN_READ_UNIT; ++i)
             {
-                data[i] = (FP_TYPE)1.f;
+                data[i] = (FP_TYPE)0.f;
             }
         }
         else
@@ -286,17 +290,15 @@ __launch_bounds__(
             if constexpr(MIOPEN_N_OUT_STRIDE > MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT &&
                          MIOPEN_C_OUT != 0 && MIOPEN_H_OUT != 0 && MIOPEN_W_OUT != 0)
             {
-                int loc, n_loc, c_loc, h_loc, w_loc;
-                loc   = x * MIOPEN_READ_UNIT + i;
-                n_loc = loc / (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT);
-                c_loc = (loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) /
-                        (MIOPEN_H_OUT * MIOPEN_W_OUT);
-                h_loc = ((loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) %
-                         (MIOPEN_H_OUT * MIOPEN_W_OUT)) /
-                        MIOPEN_W_OUT;
-                w_loc = ((loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) %
-                         (MIOPEN_H_OUT * MIOPEN_W_OUT)) %
-                        MIOPEN_W_OUT;
+                const int out_hw     = MIOPEN_H_OUT * MIOPEN_W_OUT;
+                const int out_chw    = MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT;
+                const int loc        = x * MIOPEN_READ_UNIT + i;
+                const int loc_in_chw = loc % out_chw;
+                const int loc_in_hw  = loc_in_chw % out_hw;
+                const int n_loc      = loc / out_chw;
+                const int c_loc      = loc_in_chw / out_hw;
+                const int h_loc      = loc_in_hw / MIOPEN_W_OUT;
+                const int w_loc      = loc_in_hw % MIOPEN_W_OUT;
 
                 top[yOffset + n_loc * MIOPEN_N_OUT_STRIDE + c_loc * MIOPEN_C_OUT_STRIDE +
                     h_loc * MIOPEN_H_OUT_STRIDE + w_loc * MIOPEN_W_OUT_STRIDE] = value;
@@ -358,16 +360,15 @@ __launch_bounds__(
             if constexpr(MIOPEN_N_DOUT_STRIDE > MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT &&
                          MIOPEN_C_DOUT != 0 && MIOPEN_H_DOUT != 0 && MIOPEN_W_DOUT != 0)
             {
-                int loc   = x * MIOPEN_READ_UNIT + i;
-                int n_loc = loc / (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT);
-                int c_loc = (loc % (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT)) /
-                            (MIOPEN_H_DOUT * MIOPEN_W_DOUT);
-                int h_loc = ((loc % (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT)) %
-                             (MIOPEN_H_DOUT * MIOPEN_W_DOUT)) /
-                            MIOPEN_W_DOUT;
-                int w_loc = ((loc % (MIOPEN_C_DOUT * MIOPEN_H_DOUT * MIOPEN_W_DOUT)) %
-                             (MIOPEN_H_DOUT * MIOPEN_W_DOUT)) %
-                            MIOPEN_W_DOUT;
+                const int dout_hw    = MIOPEN_H_DOUT * MIOPEN_W_DOUT;
+                const int dout_chw   = MIOPEN_C_DOUT * dout_hw;
+                const int loc        = x * MIOPEN_READ_UNIT + i;
+                const int loc_in_chw = loc % dout_chw;
+                const int loc_in_hw  = loc_in_chw % dout_hw;
+                const int n_loc      = loc / dout_chw;
+                const int c_loc      = loc_in_chw / dout_hw;
+                const int h_loc      = loc_in_hw / MIOPEN_W_DOUT;
+                const int w_loc      = loc_in_hw % MIOPEN_W_DOUT;
 
                 return top_diff[dyOffset + n_loc * MIOPEN_N_DOUT_STRIDE +
                                 c_loc * MIOPEN_C_DOUT_STRIDE + h_loc * MIOPEN_H_DOUT_STRIDE +
@@ -383,16 +384,15 @@ __launch_bounds__(
             if constexpr(MIOPEN_N_IN_STRIDE > MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN &&
                          MIOPEN_C_IN != 0 && MIOPEN_H_IN != 0 && MIOPEN_W_IN != 0)
             {
-                int loc   = x * MIOPEN_READ_UNIT + i;
-                int n_loc = loc / (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN);
-                int c_loc =
-                    (loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) / (MIOPEN_H_IN * MIOPEN_W_IN);
-                int h_loc = ((loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) %
-                             (MIOPEN_H_IN * MIOPEN_W_IN)) /
-                            MIOPEN_W_IN;
-                int w_loc = ((loc % (MIOPEN_C_IN * MIOPEN_H_IN * MIOPEN_W_IN)) %
-                             (MIOPEN_H_IN * MIOPEN_W_IN)) %
-                            MIOPEN_W_IN;
+                const int in_hw      = MIOPEN_H_IN * MIOPEN_W_IN;
+                const int in_chw     = MIOPEN_C_IN * in_hw;
+                const int loc        = x * MIOPEN_READ_UNIT + i;
+                const int loc_in_chw = loc % in_chw;
+                const int loc_in_hw  = loc_in_chw % in_hw;
+                const int n_loc      = loc / in_chw;
+                const int c_loc      = loc_in_chw / in_hw;
+                const int h_loc      = loc_in_hw / MIOPEN_W_IN;
+                const int w_loc      = loc_in_hw % MIOPEN_W_IN;
 
                 return bot_data[xOffset + n_loc * MIOPEN_N_IN_STRIDE + c_loc * MIOPEN_C_IN_STRIDE +
                                 h_loc * MIOPEN_H_IN_STRIDE + w_loc * MIOPEN_W_IN_STRIDE];
@@ -407,16 +407,15 @@ __launch_bounds__(
             if constexpr(MIOPEN_N_OUT_STRIDE > MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT &&
                          MIOPEN_C_OUT != 0 && MIOPEN_H_OUT != 0 && MIOPEN_W_OUT != 0)
             {
-                int loc   = x * MIOPEN_READ_UNIT + i;
-                int n_loc = loc / (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT);
-                int c_loc = (loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) /
-                            (MIOPEN_H_OUT * MIOPEN_W_OUT);
-                int h_loc = ((loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) %
-                             (MIOPEN_H_OUT * MIOPEN_W_OUT)) /
-                            MIOPEN_W_OUT;
-                int w_loc = ((loc % (MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT)) %
-                             (MIOPEN_H_OUT * MIOPEN_W_OUT)) %
-                            MIOPEN_W_OUT;
+                const int out_hw     = MIOPEN_H_OUT * MIOPEN_W_OUT;
+                const int out_chw    = MIOPEN_C_OUT * MIOPEN_H_OUT * MIOPEN_W_OUT;
+                const int loc        = x * MIOPEN_READ_UNIT + i;
+                const int loc_in_chw = loc % out_chw;
+                const int loc_in_hw  = loc_in_chw % out_hw;
+                const int n_loc      = loc / out_chw;
+                const int c_loc      = loc_in_chw / out_hw;
+                const int h_loc      = loc_in_hw / MIOPEN_W_OUT;
+                const int w_loc      = loc_in_hw % MIOPEN_W_OUT;
 
                 return top_data[yOffset + n_loc * MIOPEN_N_OUT_STRIDE +
                                 c_loc * MIOPEN_C_OUT_STRIDE + h_loc * MIOPEN_H_OUT_STRIDE +
@@ -441,9 +440,9 @@ __launch_bounds__(
 #pragma unroll
             for(; i < MIOPEN_READ_UNIT; ++i)
             {
-                top_diff_dat[i] = (FP_TYPE)1.f;
-                bot_dat[i]      = (FP_TYPE)1.f;
-                top_dat[i]      = (FP_TYPE)1.f;
+                top_diff_dat[i] = (FP_TYPE)0.f;
+                bot_dat[i]      = (FP_TYPE)0.f;
+                top_dat[i]      = (FP_TYPE)0.f;
             }
         }
         else
@@ -477,16 +476,15 @@ __launch_bounds__(
             if constexpr(MIOPEN_N_DIN_STRIDE > MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN &&
                          MIOPEN_C_DIN != 0 && MIOPEN_H_DIN != 0 && MIOPEN_W_DIN != 0)
             {
-                int loc   = x * MIOPEN_READ_UNIT + i;
-                int n_loc = loc / (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN);
-                int c_loc = (loc % (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN)) /
-                            (MIOPEN_H_DIN * MIOPEN_W_DIN);
-                int h_loc = ((loc % (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN)) %
-                             (MIOPEN_H_DIN * MIOPEN_W_DIN)) /
-                            MIOPEN_W_DIN;
-                int w_loc = ((loc % (MIOPEN_C_DIN * MIOPEN_H_DIN * MIOPEN_W_DIN)) %
-                             (MIOPEN_H_DIN * MIOPEN_W_DIN)) %
-                            MIOPEN_W_DIN;
+                const int din_hw     = MIOPEN_H_DIN * MIOPEN_W_DIN;
+                const int din_chw    = MIOPEN_C_DIN * din_hw;
+                const int loc        = x * MIOPEN_READ_UNIT + i;
+                const int loc_in_chw = loc % din_chw;
+                const int loc_in_hw  = loc_in_chw % din_hw;
+                const int n_loc      = loc / din_chw;
+                const int c_loc      = loc_in_chw / din_hw;
+                const int h_loc      = loc_in_hw / MIOPEN_W_DIN;
+                const int w_loc      = loc_in_hw % MIOPEN_W_DIN;
 
                 bot_diff[dxOffset + n_loc * MIOPEN_N_DIN_STRIDE + c_loc * MIOPEN_C_DIN_STRIDE +
                          h_loc * MIOPEN_H_DIN_STRIDE + w_loc * MIOPEN_W_DIN_STRIDE] = value;

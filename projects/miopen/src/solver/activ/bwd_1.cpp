@@ -263,6 +263,7 @@ ConvSolution ActivBwdSolver1::GetSolution(const ExecutionContext&,
     const auto grp_tile0 =
         std::min(static_cast<int>((glbl_wk + hw_wave_sz - 1) / hw_wave_sz) * hw_wave_sz, 256);
     const auto grp_tile1 = 1;
+    const auto grp_tile2 = 1;
 
     auto compiler_options = KernelBuildParameters{
         {"MIOPEN_N_IN", nIn},
@@ -303,6 +304,7 @@ ConvSolution ActivBwdSolver1::GetSolution(const ExecutionContext&,
         {"MIOPEN_DOUT_BLOCK_SZ", cdOut * hdOut * wdOut},
         {"MIOPEN_NRN_GROUP_SZ0", grp_tile0},
         {"MIOPEN_NRN_GROUP_SZ1", grp_tile1},
+        {"MIOPEN_NRN_GROUP_SZ2", grp_tile2},
         {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_mode)},
         {"MIOPEN_N_PIXS_OFF", N_PIXS_OFF},
         {"MIOPEN_MAP_SZ", map_size},
