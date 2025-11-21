@@ -196,6 +196,11 @@ endif()
 # Target link libraries
 target_link_libraries(hipsparse-test PRIVATE GTest::gtest roc::hipsparse)
 
+# Link against stdc++fs for std::experimental::filesystem support
+if(NOT WIN32)
+  target_link_libraries(hipsparse-test PRIVATE stdc++fs)
+endif()
+
 # Add OpenMP if available
 if(OPENMP_FOUND AND THREADS_FOUND)
   target_link_libraries(hipsparse-test PRIVATE OpenMP::OpenMP_CXX ${OpenMP_CXX_FLAGS})
@@ -227,12 +232,22 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
                          test_csrsv2.yaml
                          test_gemvi.yaml
                          test_hybmv.yaml
-                         
+
                          test_bsrmm.yaml
                          test_bsrsm2.yaml
                          test_csrmm.yaml
                          test_csrsm2.yaml
                          test_gemmi.yaml
+
+                         test_csric02.yaml
+                         test_csrilu02.yaml
+                         test_bsric02.yaml
+                         test_bsrilu02.yaml
+                         test_gtsv.yaml
+                         test_gtsv2_nopivot.yaml
+                         test_gtsv2_strided_batch.yaml
+                         test_gtsv_interleaved_batch.yaml
+                         test_gpsv_interleaved_batch.yaml
 
                          test_bsr2csr.yaml
                          test_coo2csr.yaml
