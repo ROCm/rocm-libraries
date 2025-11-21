@@ -171,7 +171,7 @@ inline std::vector<ActivTestCase> createFwdActivationFullCases()
     return cases;
 }
 
-inline std::vector<ActivTestCase> createBwdActivationTestCases()
+inline std::vector<ActivTestCase> createBatchnormBwdActivationTestCases()
 {
     return {// ReLU Backward: d/dx Max(0, x) = 1 * (x > 0)
             ActivTestCase(hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,

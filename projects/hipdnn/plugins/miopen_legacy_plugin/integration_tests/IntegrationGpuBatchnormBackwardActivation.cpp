@@ -256,13 +256,13 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormBackwardActivationNchwFp32,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
     IntegrationGpuBatchnormBackwardActivationNchwFp32,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdFullTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNchwBfp16, Correctness)
 {
@@ -273,13 +273,13 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormBackwardActivationNchwBfp16,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
     IntegrationGpuBatchnormBackwardActivationNchwBfp16,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdFullTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNchwFp16, Correctness)
 {
@@ -290,13 +290,13 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormBackwardActivationNchwFp16,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
     IntegrationGpuBatchnormBackwardActivationNchwFp16,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdFullTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp32, Correctness)
 {
@@ -307,13 +307,13 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormBackwardActivationNhwcFp32,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
     IntegrationGpuBatchnormBackwardActivationNhwcFp32,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdFullTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcBfp16, Correctness)
 {
@@ -324,13 +324,13 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormBackwardActivationNhwcBfp16,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
     IntegrationGpuBatchnormBackwardActivationNhwcBfp16,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdFullTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNhwcFp16, Correctness)
 {
@@ -341,13 +341,13 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormBackwardActivationNhwcFp16,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Full,
     IntegrationGpuBatchnormBackwardActivationNhwcFp16,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwdFullTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp32, Correctness)
 {
@@ -358,7 +358,7 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormBackwardActivationNcdhwFp32,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwd3dTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwBfp16, Correctness)
 {
@@ -369,7 +369,7 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormBackwardActivationNcdhwBfp16,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwd3dTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNcdhwFp16, Correctness)
 {
@@ -380,7 +380,7 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormBackwardActivationNcdhwFp16,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwd3dTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp32, Correctness)
 {
@@ -391,7 +391,7 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormBackwardActivationNdhwcFp32,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwd3dTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcBfp16, Correctness)
 {
@@ -402,7 +402,7 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormBackwardActivationNdhwcBfp16,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwd3dTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
 
 TEST_P(IntegrationGpuBatchnormBackwardActivationNdhwcFp16, Correctness)
 {
@@ -413,4 +413,4 @@ INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuBatchnormBackwardActivationNdhwcFp16,
     testing::Combine(testing::ValuesIn(test_bn_common::getBnBwd3dTestCases()),
-                     testing::ValuesIn(test_activation_common::createBwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createBatchnormBwdActivationTestCases())));
