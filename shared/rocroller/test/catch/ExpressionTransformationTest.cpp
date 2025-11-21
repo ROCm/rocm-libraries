@@ -182,8 +182,9 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
     SECTION("bitFieldExtract")
     {
         CHECK_THAT(simplify(bfe(DataType::Int32, v, 0, 32)), IdenticalTo(v));
-        CHECK_THAT(simplify(bfe(DataType::UInt32, v, 0, 32)),
-                   IdenticalTo(convert(DataType::UInt32, v)));
+        // TODO: Enable this simplification with a reinterpret_cast expression
+        // CHECK_THAT(simplify(bfe(DataType::UInt32, v, 0, 32)),
+        //            IdenticalTo(reinterpret(DataType::UInt32, v)));
 
         auto expr  = bfe(DataType::Int32, v, 16, 16);
         auto expr2 = bfe(DataType::Int32, expr, 0, 16);
@@ -984,21 +985,15 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
     SECTION("Combine into the first dword of 64 bit dst and fold to constant")
     {
         auto expr = bfc(ones32, zero64, 0, 16, 8);
-
-        std::vector<Expression::ExpressionPtr> operands{
-            Expression::literal(0x00ff0000ul, DataType::Raw32), zero32};
-        auto expected = concat(operands, DataType::UInt64);
+        auto expected = Expression::literal(0x0000000000ff0000ull, DataType::UInt64);
 
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
 
-    SECTION("Combine into thesecond dword of 64 bit dst and fold to constant")
+    SECTION("Combine into the second dword of 64 bit dst and fold to constant")
     {
         auto expr = bfc(ones32, zero64, 0, 48, 8);
-
-        std::vector<Expression::ExpressionPtr> operands{
-            zero32, Expression::literal(0x00ff0000ul, DataType::Raw32)};
-        auto expected = concat(operands, DataType::UInt64);
+        auto expected = Expression::literal(0x00ff000000000000ull, DataType::UInt64);
 
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
@@ -1006,11 +1001,7 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
     SECTION("Combine into the first and second dwords of 64 bit dst and fold to constant")
     {
         auto expr = bfc(ones32, zero64, 0, 24, 16);
-
-        std::vector<Expression::ExpressionPtr> operands{
-            Expression::literal(0xff000000ul, DataType::Raw32),
-            Expression::literal(0x000000fful, DataType::Raw32)};
-        auto expected = concat(operands, DataType::UInt64);
+        auto expected = Expression::literal(0x000000ffff000000ull, DataType::UInt64);
 
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
     }
@@ -1097,11 +1088,7 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
     {
         auto expr  = bfc(ones32, zero64, 0, 16, 8);
         auto expr2 = bfc(ones32, expr, 0, 40, 8);
-
-        std::vector<Expression::ExpressionPtr> operands{
-            Expression::literal(0x00ff0000ul, DataType::Raw32),
-            Expression::literal(0x0000ff00ul, DataType::Raw32)};
-        auto expected = concat(operands, DataType::UInt64);
+        auto expected = Expression::literal(0x0000ff0000ff0000ull, DataType::UInt64);
 
         CHECK_THAT(splitBitfieldCombine(expr2), IdenticalTo(expected));
     }
