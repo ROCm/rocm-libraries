@@ -26,14 +26,14 @@ protected:
     {
         const auto& [convTestCase, doBias, activTestCase] = this->GetParam();
 
+        auto dataType = getDataTypeEnumFromType<DataType>();
+
         graph::Graph graphObj;
 
         graphObj.set_name(doBias ? "ConvFwdBiasActivTest" : "ConvFwdActivTest");
         graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType)
             .set_intermediate_data_type(dataType);
-
-        auto dataType = getDataTypeEnumFromType<DataType>();
 
         auto xAttr
             = graph::makeTensorAttributes("x",
