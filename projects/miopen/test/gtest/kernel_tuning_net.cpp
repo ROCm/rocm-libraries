@@ -290,7 +290,7 @@ protected:
             miopen::conv::IsEnoughWorkspace("GetSolutionsFallback AI", solver_id, ws, &invoke_ctx));
 
         miopen::PerformanceDb db = {
-            miopen::DbKinds::PerfDb, fs::path{"/tmp/nodb.db.txt"}, fs::path{"/tmp/nodb.udb.txt"}
+            miopen::DbKinds::PerfDb, fs::path("/tmp/nodb.db.txt"), fs::path("/tmp/nodb.udb.txt")
         }; // empty db, force heuristic
         miopen::solver::ConvSolution sol =
             solv.FindSolution(ctx, problem, db, {}); // auto tune is not expected here
