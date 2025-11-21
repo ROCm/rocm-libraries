@@ -116,10 +116,6 @@ class ShellScriptProblemGenerator:
                     if cmd.count("verfiy") > 0 or cmd.count("-v") > 0:
                         print(f'--verify or -v is not supported, skip bench.')
                         continue
-                    # TODO- not supported for offline tuning
-                    if cmd.count("requested_solution") > 0:
-                        print(f'--requested_solution is not supported, skip bench.')
-                        continue
 
                     cmd = cmd.replace("./hipblaslt-bench", str(self.bench_exec))
                     # print("parsed cmd: " + cmd)

@@ -30,9 +30,9 @@ from typing import List
 from rrperf.problems import (
     CodeGenRun,
     GEMMRun,
+    MKNLTuple,
     TensileRun,
     TypeParameters,
-    MKNLTuple,
 )
 from rrperf.utils import rocm_gfx
 
@@ -133,6 +133,10 @@ HGEMM_7680x8448x8448 = dict(
     workgroup_size_x=128,
     workgroup_size_y=2,
     types=TypeParameters(fp16, trans_A="N", trans_B="T"),
+)
+
+SGEMM_256x256x16384 = dict(
+    M=256, N=256, K=16384, mac_m=64, mac_n=64, mac_k=64, types=fp32
 )
 
 
@@ -616,6 +620,24 @@ def streamk():
                 trans_B="T",
             ),
         )
+
+
+def smallMN_largeK_fp32():
+    yield mkGEMM(
+        SGEMM_256x256x16384,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        visualize=False,
+        prefetch=False,  # TODO: Fix k loop unrolling with stream k
+        # prefetchInFlight=2,
+        # prefetchLDSFactor=2,
+        streamK=False,
+        types=TypeParameters(
+            SGEMM_256x256x16384["types"],
+            trans_A="T",
+            trans_B="N",
+        ),
+    )
 
 
 def scalar_is_zero():
@@ -1738,14 +1760,15 @@ def all():
         yield from fp8_kernels()
         yield from mxfp8_kernels()
         yield from mx_gemms_f8f6f4()
-    else:
-        yield from sgemm()
-        yield from hgemm()
-        yield from hgemm_no_store_LDS()
-        yield from streamk()
-        yield from streamk_sweep()
-        yield from scalar_is_zero()
-        yield from codegen()
+
+    yield from sgemm()
+    yield from hgemm()
+    yield from hgemm_no_store_LDS()
+    yield from streamk()
+    yield from streamk_sweep()
+    yield from scalar_is_zero()
+    yield from smallMN_largeK_fp32()
+    yield from codegen()
 
 
 def all_gfx120X():

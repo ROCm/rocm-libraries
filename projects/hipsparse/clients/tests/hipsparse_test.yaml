@@ -29,6 +29,7 @@ include: test_roti.yaml
 include: test_sctr.yaml
 include: test_gthr.yaml
 include: test_gthrz.yaml
+
 #level2
 include: test_bsrmv.yaml
 include: test_bsrsv2.yaml
@@ -37,3 +38,44 @@ include: test_csrsv2.yaml
 include: test_gemvi.yaml
 include: test_hybmv.yaml
 
+# level3
+include: test_bsrmm.yaml
+include: test_bsrsm2.yaml
+include: test_csrmm.yaml
+include: test_csrsm2.yaml
+include: test_gemmi.yaml
+
+#precond
+include: test_csric02.yaml
+include: test_csrilu02.yaml
+include: test_bsric02.yaml
+include: test_bsrilu02.yaml
+include: test_gtsv.yaml
+include: test_gtsv2_nopivot.yaml
+include: test_gtsv2_strided_batch.yaml
+include: test_gtsv_interleaved_batch.yaml
+include: test_gpsv_interleaved_batch.yaml
+
+# conversion
+include: test_bsr2csr.yaml
+include: test_coo2csr.yaml
+include: test_csc2dense.yaml
+include: test_csr2bsr.yaml
+include: test_csr2coo.yaml
+include: test_csr2csc.yaml
+include: test_csr2csc_ex2.yaml
+include: test_csr2csr_compress.yaml
+include: test_csr2dense.yaml
+include: test_csr2gebsr.yaml
+include: test_csr2hyb.yaml
+include: test_csru2csr.yaml
+include: test_dense2csc.yaml
+include: test_dense2csr.yaml
+include: test_gebsr2csr.yaml
+include: test_gebsr2gebsc.yaml
+include: test_gebsr2gebsr.yaml
+include: test_hyb2csr.yaml
+include: test_prune_csr2csr.yaml
+include: test_prune_csr2csr_by_percentage.yaml
+include: test_prune_dense2csr.yaml
+include: test_prune_dense2csr_by_percentage.yaml
