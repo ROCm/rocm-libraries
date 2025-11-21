@@ -555,7 +555,7 @@ ConvSolution ConvHipImplicitGemmGroupFwdXdlops::GetSolution(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     return MakeSolutionGroupConvImplicitGemmXdlops(
         problem,
-        [&](auto data_type_val) {
+        [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
             using T = decltype(data_type_val);
             return InitInvokerFactoryFwdNCHW<2,
                                              false,
@@ -564,7 +564,7 @@ ConvSolution ConvHipImplicitGemmGroupFwdXdlops::GetSolution(
                                              miopen::conv::DataInvokeParams>(
                 ctx, problem, config.kernel_id);
         },
-        [&](auto data_type_val) {
+        [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
             using T = decltype(data_type_val);
             return InitInvokerFactoryNHWC<false,
                                           DeviceOpGFwdPtrs<T>,

@@ -42,7 +42,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csrilu02_bad_arg(void)
+void testing_csrilu02_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int                    m         = 100;

@@ -4,7 +4,9 @@ This directory contains the Dockerfile for building hipDNN development environme
 
 ## 📋 Prerequisites
 
-- Docker installed on your system
+- Docker installed on your system (17.05+ for multi-stage support)
+    - Docker Buildx is required to properly select build stages with the `--target` flag (`docker buildx version` to verify it's available)
+    - Without buildx, Docker may attempt to build all stages instead of only the selected target, which can cause build failures
 - ROCm-compatible GPU (for running with GPU support)
 - Sufficient disk space for Docker images
 
@@ -33,7 +35,8 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 
 #### 📦 Prebuilt-Only Arguments
 
-> **Note**: Prebuilt mode downloads pre-compiled binaries from TheRock nightly builds (much faster)
+> [!NOTE]
+> Prebuilt mode downloads pre-compiled binaries from TheRock nightly builds (much faster)
 
 | Argument | Default | Description |
 |----------|---------|-------------|
@@ -44,7 +47,8 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 
 #### 🏗️ Fullbuild-Only Arguments
 
-> **Note**: Fullbuild mode clones and compiles TheRock from source (will take several hours to complete but more flexible)
+> [!NOTE]
+> Fullbuild mode clones and compiles TheRock from source (will take several hours to complete but more flexible)
 
 | Argument | Default | Description |
 |----------|---------|-------------|
@@ -192,5 +196,16 @@ Follow the [quick start steps in the build guide](./docs/Building.md#quick-start
 - Ensure all submodules are initialized: `git submodule update --init --recursive`
 - Check that the ROCm version in the container matches your GPU requirements
 
-### fullbuild not updating to latest version of TheRock
+### Fullbuild not updating to latest version of TheRock
 - Since the docker build doesn't change when the cloned source is updated, you will need to either provide a new hash for the docker build to rebuild `--build-arg THEROCK_GIT_HASH=abcd1234`, or provide `--no-cache` option when building to force rebuild
+
+### Build issues
+
+**Missing or old Docker version:**
+- Ensure the installed docker version is 17.05 or newer to support multi-stage builds
+- Check version with: `docker --version`
+
+**Missing Docker Buildx:**
+- Buildx is required for proper multi-stage build target selection
+- Verify buildx is available: `docker buildx version`
+- If buildx is missing, Docker will attempt to build ALL stages in the Dockerfile and fail due to argument mismatches between the different types of build

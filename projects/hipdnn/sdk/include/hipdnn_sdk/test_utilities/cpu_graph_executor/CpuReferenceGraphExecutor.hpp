@@ -78,7 +78,9 @@ private:
         const auto& planBuilder = _planRegistry.getPlanBuilder(key);
         if(!planBuilder.isApplicable(node, graph.getTensorMap()))
         {
-            throw std::runtime_error("Plan builder is not applicable for the given node");
+            std::string nodeName = node.name() == nullptr ? "" : " " + node.name()->str();
+            throw std::runtime_error("Plan builder is not applicable for the given node: "
+                                     + nodeName);
         }
 
         return planBuilder.buildNodePlan(graph, node);
