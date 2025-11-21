@@ -181,10 +181,7 @@ def main():
 
                 # Select best config
                 best_config = origami.select_config(problem, hardware, configs)
-
-                # Compute latency
-                latency = origami.compute_total_latency(hardware, problem, best_config, hardware.N_CU)
-                best_config.latency = latency
+                latency = best_config.latency
 
                 #MxNxBxK, MT0xMT1xDU, MI0xMI1xMI2, latency/cycles
                 print(f"{M},{N},{B},{K},{best_config.mt.m},{best_config.mt.n},{best_config.mt.k},{best_config.mi.m},{best_config.mi.n},{best_config.mi.k},{latency:0.3f}")
@@ -207,8 +204,6 @@ def main():
 
         # Select best config
         best_config = origami.select_config(problem, hardware, configs)
-
-        # Compute latency
         latency = best_config.latency
 
         print(f"The best config for [{args.m}, {args.n}, {args.b}, {args.k}] is: MT=({best_config.config.mt.m},{best_config.config.mt.n},{best_config.config.mt.k}), MI=({best_config.config.mi.m},{best_config.config.mi.n},{best_config.config.mi.k}), latency={latency:0.3f}")
