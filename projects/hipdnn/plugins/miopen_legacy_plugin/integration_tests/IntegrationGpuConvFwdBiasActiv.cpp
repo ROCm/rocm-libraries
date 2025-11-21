@@ -29,7 +29,9 @@ protected:
         graph::Graph graphObj;
 
         graphObj.set_name(doBias ? "ConvFwdBiasActivTest" : "ConvFwdActivTest");
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(dataType)
+            .set_intermediate_data_type(dataType);
 
         auto dataType = getDataTypeEnumFromType<DataType>();
 
@@ -56,7 +58,6 @@ protected:
 
         auto yConvTensorAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
         yConvTensorAttr->set_name("y_conv");
-        yConvTensorAttr->set_data_type(dataType);
         yConvTensorAttr->set_dim(convTestCase.yDims);
         yConvTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
 
@@ -75,7 +76,6 @@ protected:
 
             yBiasTensorAttr = graphObj.pointwise(yConvTensorAttr, biasTensorAttr, biasAttrs);
             yBiasTensorAttr->set_name("y_bias");
-            yBiasTensorAttr->set_data_type(dataType);
             yBiasTensorAttr->set_dim(convTestCase.yDims);
             yBiasTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
         }
@@ -111,7 +111,6 @@ protected:
         auto yTensorAttr
             = graphObj.pointwise(doBias ? yBiasTensorAttr : yConvTensorAttr, activAttrs);
         yTensorAttr->set_name("y");
-        yTensorAttr->set_data_type(dataType);
         yTensorAttr->set_dim(convTestCase.yDims);
         yTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
         yTensorAttr->set_output(true);
