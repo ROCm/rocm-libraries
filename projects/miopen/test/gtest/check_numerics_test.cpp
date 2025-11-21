@@ -131,6 +131,8 @@ void TestAbnormalValue(T val)
         std::exception);
 }
 
+} // namespace
+
 // Float tests
 TEST(GPU_CheckNumerics_FP32, NormalZero) { TestNormalValue<float>(0.0f); }
 
@@ -181,5 +183,3 @@ TEST(GPU_CheckNumerics_BFP16, AbnormalInf)
 {
     TestAbnormalValue<bfloat16>(std::numeric_limits<bfloat16>::infinity());
 }
-
-} // namespace
