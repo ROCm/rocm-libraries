@@ -253,7 +253,29 @@ if(NOT WIN32 AND HIPSPARSE_ENABLE_HIP AND NOT HIPSPARSE_BUILD_CLIENTS_ONLY)
     )
 endif()
 
+<<<<<<< HEAD
 # Documentation examples (HIP only)
 if(HIPSPARSE_ENABLE_HIP)
     add_subdirectory(documentation_examples)
+=======
+if(NOT USE_CUDA)
+  # Build documentation examples
+  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_CPP documentation_examples/*.cpp)
+  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_C documentation_examples/*.c)
+  FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES_F90 documentation_examples/*.f90)
+  
+  foreach(file ${DOCUMENTATION_EXAMPLES_CPP})
+      add_hipsparse_example(${file})
+  endforeach()
+
+  foreach(file ${DOCUMENTATION_EXAMPLES_C})
+      add_hipsparse_example(${file})
+  endforeach()
+
+  if (NOT WIN32)
+    foreach(file ${DOCUMENTATION_EXAMPLES_F90})
+        add_hipsparse_example(${file})
+    endforeach()
+  endif()
+>>>>>>> upstream/develop
 endif()

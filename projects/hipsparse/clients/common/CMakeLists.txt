@@ -46,6 +46,11 @@ if(TARGET OpenMP::OpenMP_CXX)
     target_link_libraries(hipsparse-clients-common PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
+# Link against stdc++fs for std::experimental::filesystem support
+if(NOT WIN32)
+    target_link_libraries(hipsparse-clients-common PUBLIC stdc++fs)
+endif()
+
 # Backend-specific settings
 if(HIPSPARSE_ENABLE_CUDA)
     target_compile_definitions(hipsparse-clients-common PUBLIC __HIP_PLATFORM_NVIDIA__)
@@ -74,6 +79,11 @@ target_include_directories(hipsparse-samples-common PUBLIC
 )
 
 target_link_libraries(hipsparse-samples-common PUBLIC roc::hipsparse)
+
+# Link against stdc++fs for std::experimental::filesystem support
+if(NOT WIN32)
+    target_link_libraries(hipsparse-samples-common PUBLIC stdc++fs)
+endif()
 
 if(HIPSPARSE_ENABLE_CUDA)
     target_compile_definitions(hipsparse-samples-common PUBLIC __HIP_PLATFORM_NVIDIA__)

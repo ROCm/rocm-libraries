@@ -47,6 +47,15 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
+
+#ifdef __cpp_lib_filesystem
+#include <filesystem>
+namespace fs = std::filesystem;
+#else
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
+#endif
+
 /*! \brief Return path of this executable */
 std::string hipsparse_exepath();
 /*! \brief Return path where the test data file (hipsparse_test.data) is located */
@@ -104,20 +113,20 @@ inline std::string get_filename(const std::string& matrix_filename)
         matrices_dir = getenv("HIPSPARSE_CLIENTS_MATRICES_DIR");
     }
 
-    std::string r;
+    fs::path r;
     if(matrices_dir != nullptr)
     {
-        r = std::string(matrices_dir) + "/" + matrix_filename_with_ext;
+        r = fs::path(matrices_dir) / matrix_filename_with_ext;
     }
     else
     {
-        r = hipsparse_exepath() + "../matrices/" + matrix_filename_with_ext;
+        r = fs::path(hipsparse_exepath()) / ".." / "matrices" / matrix_filename_with_ext;
     }
 
-    FILE* tmpf = fopen(r.c_str(), "r");
+    FILE* tmpf = fopen(r.string().c_str(), "r");
     if(!tmpf)
     {
-        missing_file_error_message(r.c_str());
+        missing_file_error_message(r.string().c_str());
         std::cerr << "exit(HIPSPARSE_STATUS_INTERNAL_ERROR)" << std::endl;
         exit(HIPSPARSE_STATUS_INTERNAL_ERROR);
     }
@@ -125,7 +134,7 @@ inline std::string get_filename(const std::string& matrix_filename)
     {
         fclose(tmpf);
     }
-    return r;
+    return r.string();
 }
 
 /*!\file
