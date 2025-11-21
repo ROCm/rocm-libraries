@@ -217,81 +217,81 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuConvFwdBiasActivNchwFp32,
     testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases4D()),
                      testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuConvFwdBiasActivNchwBfp16,
     testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases4D()),
                      testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuConvFwdBiasActivNchwFp16,
     testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases4D()),
                      testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuConvFwdBiasActivNhwcFp32,
     testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases4D()),
                      testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuConvFwdBiasActivNhwcBfp16,
     testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases4D()),
                      testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuConvFwdBiasActivNhwcFp16,
     testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases4D()),
                      testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuConvFwdBiasActivNcdhwFp32,
     testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases5D()),
                      testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuConvFwdBiasActivNcdhwBfp16,
     testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases5D()),
                      testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuConvFwdBiasActivNcdhwFp16,
     testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases5D()),
                      testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuConvFwdBiasActivNdhwcFp32,
     testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases5D()),
                      testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuConvFwdBiasActivNdhwcBfp16,
     testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases5D()),
                      testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     IntegrationGpuConvFwdBiasActivNdhwcFp16,
     testing::Combine(testing::ValuesIn(test_conv_common::getConvTestCases5D()),
                      testing::Bool(),
-                     testing::ValuesIn(test_activation_common::createFwdActivationTestCases())));
+                     testing::ValuesIn(test_activation_common::createFwdActivationSmokeCases())));
