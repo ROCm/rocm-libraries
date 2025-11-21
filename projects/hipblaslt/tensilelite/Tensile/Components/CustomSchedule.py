@@ -922,7 +922,7 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
             # last index of producer <SYNC> first index of consumer
             # SYNC[0] = -1 to align all waves at the start of the loop
             # A fence at 23, annd B fence at 36, final vmem fence at 81
-            'SYNC': [[-1, 23, 23, 36, 36, 81, 81]],
+            'SYNC': [[-1, 12, 23, 23, 36, 36, 81, 81]],
 
             # Avoid interleaving of LRA0 and LRB0
             # LRA0: tightly packed at the beginning
@@ -955,18 +955,17 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
             'LRSB': [[50]],
             'LWSA': [[80]],
             'LWSB': [[80]],
-            'LRA1': [[82, 84, 84, 85, 85, 86, 86, 87]],
-            'LRB1': [[83, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]],
+            'LRA1': [[82, 84, 84, 85, 85, 86, 86, 87]], # 8
+            'LRB1': [[83, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]], # 13
             'LCC':  [[100, 100]],
         }
         
         syncCode = [
-            # loop start barrier 
-            # SBarrier(comment="wavefront sync at loop start"),
             SWaitCnt(dscnt=12, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LR/LW"),
-
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="ensure all previous LRA1/LRB1 done before early MFMA use"),
+            
             # A fence: all LRA0 are done before DTL writes from the first GR stream startign at 23 (swapped)
-            SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before first DTL writes"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before first DTL writes"),
             # barrier after LRA0, before first global DTL phase at 23
             SBarrier(comment="barrier after LRA0 , before GR at 23"),
 
