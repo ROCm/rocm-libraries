@@ -74,6 +74,23 @@ Plugins extend hipDNN's computational capabilities. See [Design.md](./Design.md#
 - **Batchnorm Running Stats**: Add support for running statistics in Batchnorm operations
 - **Code Refactoring**: Extract common MIOpen plugin code into reusable SDK components
 
+### Fusilli IREE plugin
+
+#### Near-Term Priorities
+
+- **Batchnorm inference**: Batchnorm inference & fusion support
+- **Convolution**: Forward convolution & fusion operation support
+
+#### Mid-Term Priorities
+
+- **Batchnorm training**: Batchnorm training & fusion support
+- **Convolution**: Backward convolutions (data & weight) & fusion support
+- **GEMM**: GEMM & Fusions support
+
+#### Long-Term Priorities
+
+- **Attention**: Attention & fusion support
+
 ### General Plugin Ecosystem
 
 #### Future Goals
