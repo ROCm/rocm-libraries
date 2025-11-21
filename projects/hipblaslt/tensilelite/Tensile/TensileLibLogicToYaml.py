@@ -40,6 +40,7 @@ import yaml
 class Quoted(str):
     pass
 
+
 # print ""
 def quoted_presenter(dumper, data):
     return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
@@ -63,6 +64,7 @@ def flow_seq(dumper, value):
 # ignore null
 def represent_none(self, _):
     return self.represent_scalar("tag:yaml.org,2002:null", "")
+
 
 yaml.add_representer(Quoted, quoted_presenter)
 yaml.add_representer(FlowList, flow_seq)
@@ -168,7 +170,7 @@ def form9BitMIInst(currentSolutionState):
             )
         )
 
-    MIBlock1 = MIBlock1[0:5]
+    MIBlock1 = MIBlock[0:5]
 
     MIInstruction9Bits = MIBlock1 + MIWaveTile + MIWaveGroup
 
@@ -223,7 +225,6 @@ def formForkParams(currentIndexSolution, skipMI):
 
     # Iterate over MIs in Group
     if skipMI != True and isMatrixInsEnabled:
-        checkMacroTileThreadTileWorkGroupMatches(currentIndexSolution)
         temp = form9BitMIInst(currentIndexSolution)
     else:
         temp = "None"
@@ -248,8 +249,10 @@ def formProblemSize(
     # for origami exactLogic is not present so we need to create it
 
     if exactLogic == None:
-        tPrint(1, "Warning: For Origami liblogics, Exact logic needs to be set manually")
-        temp["ProblemSizes"] = [{"Exact": FlowList([1,1,1,1])}]
+        tPrint(
+            1, "Warning: For Origami liblogics, Exact logic needs to be set manually"
+        )
+        temp["ProblemSizes"] = [{"Exact": FlowList([1, 1, 1, 1])}]
     else:
         for size, mapping in exactLogic:
             if mapping[0] == solutionIndex:
