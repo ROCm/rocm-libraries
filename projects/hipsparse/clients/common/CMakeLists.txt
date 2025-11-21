@@ -35,8 +35,14 @@ target_compile_options(hipsparse-clients-common PUBLIC
 # Common compile definitions
 target_compile_definitions(hipsparse-clients-common PUBLIC GOOGLE_TEST)
 
+# GTest is required for arg_check.cpp and unit.cpp
+find_package(GTest REQUIRED)
+
 # Link common dependencies
-target_link_libraries(hipsparse-clients-common PUBLIC roc::hipsparse)
+target_link_libraries(hipsparse-clients-common PUBLIC 
+    roc::hipsparse
+    GTest::gtest
+)
 
 if(TARGET Threads::Threads)
     target_link_libraries(hipsparse-clients-common PUBLIC Threads::Threads)
