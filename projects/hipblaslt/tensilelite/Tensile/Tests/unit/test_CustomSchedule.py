@@ -50,6 +50,40 @@ class TestCustomSchedule:
         assert not has_schedule
         assert schedule_info is None
 
+    def test_schedule_validation_non_descending_order(self):
+        """
+        Test of the rule that instructions in each instruction category appear in non-descending order
+        """
+
+        sched = ScheduleInfo(None, None,  {'P' : [[3, 2, 1]]}, None, None, None, None, None)
+        output = sched.ruleNonDescendingOrder()
+
+        expected = "Non-descending-order rule violated, schedule key 'P', sequence [3, 2, 1]: value 2 at index 1 is less than 3 at index 0."
+        print(output in expected)
+        print(expected in output)
+        assert output == expected
+
+        sched = ScheduleInfo(None, None,  {'P' : [[1, 1, 2]]}, None, None, None, None, None)
+        output = sched.ruleNonDescendingOrder()
+        assert not output
+
+    def test_schedule_validation_is_known_valid(self):
+        """
+        Test of the flag that expect custom mainloop schedule (CMS) developers can use to override the
+        validation checks.
+        """
+        kernel = create_base_kernel()
+        invalid_schedule = {'P' : [[3, 2, 1]]}
+
+        # No verification message means that the schedule info is considered valid.
+        sched = ScheduleInfo(None, None, invalid_schedule, None, None, None, None, isKnownValid = True)
+        assert not sched.getValidationMessage({})
+
+        # A non-empty verification message means that the schedule info is considered invalid.
+        sched = ScheduleInfo(None, None,  invalid_schedule, None, None, None, None, isKnownValid = False)
+        assert sched.getValidationMessage({})
+
+
     def test_schedule_256x256x64_16bit_TN(self):
         """Tests the 256x256x64 16-bit TN schedule."""
         kernel = create_base_kernel()
@@ -172,9 +206,9 @@ class TestCustomSchedule:
         })
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
-
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
         assert schedule_info.numMfma == 96
         assert kernel["SwapGlobalReadOrder"]
+

@@ -38,11 +38,18 @@ from Tensile.Common import IsaVersion
 from Tensile.Utilities.Decorators.Shared import CallableGuard
 
 from copy import deepcopy
+from typing import Dict
+
 
 class ScheduleInfo:
     numCodePaths: int
     numMfma: int
-    def __init__(self, numCodePaths, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder = []):
+    isKnownValid : bool
+    def __init__(self, numCodePaths, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder = [], isKnownValid = False):
+        """
+        isKnownValid : if True, an expert should have verified that the schedule is valid (no race conditions, etc) and
+                       that no validation checks should be run.
+        """
         self.numCodePaths = numCodePaths
         self.numMfma = numMfma
         self.optSchedule = optSchedule
@@ -50,6 +57,71 @@ class ScheduleInfo:
         self.nglshift = nglshift # vmcnt shift for noglobalload loop
         self.nllshift = nllshift # vmcnt shift for nolocalload loop
         self.mfmaReorder = mfmaReorder
+        self.isKnownValid = isKnownValid
+        self.rules = [self.ruleNonDescendingOrder] # The set of validation rules to run when this object calls `getValidationMessage`.
+
+    def ruleNonDescendingOrder(self, context: Dict = {}):
+        """
+        Ensure that all sequences of optSchedule are non-decreasing.
+
+        Context and example: There will be a sequence of N 'GRIncA' instructions for
+        incrementing the memory address that the A macro tile is read from.
+        The CMS developer has the freedom to insert these N instructions into
+        'slots' of their choice. A slot is a sequence of instructions between
+        2 consecutive mfma instructions. Example: 'GRIncA' : [[0,1,1,3]] would
+        mean that the N=4 instructions to increment the pointer appear as follows:
+
+        instruction 1    : between mfma 0 and mfma 1.
+        instructions 2,3 : between mfma 1 and mfma 2.
+        instruction 4    : between mfma 3 and mfma 4.
+
+        However, there is a strict requirement that the N slots for these instructions
+        are non-decreasing. This rule is true for all groups of instructions, not
+        just the 'GRIncA' instructions (to be verified).
+        """
+
+        for k, sequences in self.optSchedule.items():
+            for seq in sequences:
+                print(k)
+                print(seq)
+                # Ensure seq is non-decreasing
+                for i in range(1, len(seq)):
+                    print(seq[i])
+                    if seq[i] < seq[i - 1]:
+                        return (f"Non-descending-order rule violated, "
+                                f"schedule key '{k}', sequence {seq}: "
+                                f"value {seq[i]} at index {i} is less than "
+                                f"{seq[i-1]} at index {i-1}.")
+        return ""
+
+
+    def getValidationMessage(self, context: Dict):
+        """
+        Returns the empty string if this schedule is considered to be
+        valid for `kernel`. If the returned string is not empty, it
+        contains the reason that this schedule is considered invalid.
+
+        Note 1: An empty string is not proof that this schedule is valid.
+        i.e: it may be a false negative.
+
+        Note 2: if a non-empty string is returned, and the reason is
+        considered by an expert developer to be incorrect, you can create a
+        ScheduleInfo with `isKnownValid = True`. This is a workaround
+        for possible false positives.
+        """
+
+        if self.isKnownValid:
+            # All rules bypassed, considered valid.
+            return ""
+
+        for rule in self.rules:
+            result = rule(context)
+            if result:
+                return result
+
+        # All rules passed, considered valid.
+        return ""
+
 
 
 def removeComments(module):
@@ -118,6 +190,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
     numCodePath = opt1.numCodePaths
     assert opt1.numMfma == len(mfmaCode)
 
+
     for _, indexList in opt1.optSchedule.items():
         assert len(indexList) <= opt1.numCodePaths
 
@@ -160,6 +233,9 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             addToStream(key, stream, idMap[key])
 
         return InstStreams
+
+    verificationMessage = opt1.getValidationMessage({'kernel' : kernel})
+    assert not verificationMessage, f"Validation failed: {verificationMessage}"
 
     InstStreams = convOptToStream(opt1)
 
@@ -402,7 +478,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     elif isNT(kernel) and not useLDSTr and TLDS == 0:
         kernel["UsePLRPack"] = True
-        
+
         optSchedule = {
             'SYNC'  : [[25, 25, 46, 46, 55, 55]],
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
@@ -429,7 +505,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
             'PackA0': [[47, 47, 47, 47, 47, 47, 48, 48, 48, 48, 48, 48, 48, 48, 49, 49, 49, 49, 49, 49, 49, 49, 50, 50]],
             'LCC'   : [[95, 95]],
         }
-        
+
         syncCode = [SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete") ,
                     SBarrier(comment="") ,
                     SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete") ,
@@ -753,7 +829,7 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
             'LRB0'   : [[0,1,2,3,4,5,6,7]],
             # Buffer loads.
             'GRB'    : [[51,51, 55,55, 59,61, 76,77, 78,78]],
-            'GRA'    : [[11,12, 16,16, 20,20, 24,24, 28, 28, 32,32, 36, 36, 40, 40]], 
+            'GRA'    : [[11,12, 16,16, 20,20, 24,24, 28, 28, 32,32, 36, 36, 40, 40]],
             # Prefetch next iteration.
             'LRA1'   : [[62,63,64,65,66,67,68,69,70,71]],
             'LRB1'   : [[41,42,43,44,45,46,47,49]],
@@ -828,7 +904,7 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
             'LRB0'   : [[0,0,1,2,3]],
             # Buffer loads.
             'GRB'    : [[30,30, 33,33, 36,36, 52,52, 56,56, 60,61, 76,77, 78,78]],
-            'GRA'    : [[11,12, 16,16, 20,20, 23,25, 26, 28]], 
+            'GRA'    : [[11,12, 16,16, 20,20, 23,25, 26, 28]],
             # Prefetch next iteration.
             'LRA1'   : [[62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77]],
             'LRB1'   : [[41,42,43,44,45]],
@@ -1379,7 +1455,7 @@ def hasCustomSchedule(kernel):
     elif is256x240x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,2,8]) and MI == [16,16,32,1] and MIWG == [4,1]:
         return _get_schedule_256x240x64_16bit(kernel, useLDSTr, TLDS)
     elif is256x208x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 2, 8]) and MI == [16, 16, 32, 1] and MIWG == [4, 1]:
-        return _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS) 
+        return _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS)
     elif is224x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [2, 2]:
         return _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS)
     elif is256x224x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [2, 2]:
