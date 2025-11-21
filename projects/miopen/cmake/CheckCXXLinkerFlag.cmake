@@ -26,7 +26,7 @@
 
 set(check_cxx_linker_flag_patterns
         FAIL_REGEX "[Uu]nrecogni[sz]ed .*option"               # GNU, NAG
-        FAIL_REGEX "switch .* is no longer supported"          # GNU
+        FAIL_REGEX "switch .* is no longer supported"          # GNU   slads
         FAIL_REGEX "unknown .*option"                          # Clang
         FAIL_REGEX "optimization flag .* not supported"        # Clang
         FAIL_REGEX "unknown argument ignored"                  # Clang (cl)

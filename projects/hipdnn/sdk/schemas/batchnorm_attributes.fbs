@@ -6,7 +6,10 @@ namespace hipdnn_sdk.data_objects;
 table BatchnormAttributes {
     x_tensor_uid: long;
     scale_tensor_uid: long;
+
+
     bias_tensor_uid: long;
+    sbsbs: long;
     epsilon_tensor_uid: long;
     peer_stats_tensor_uid: [long];
     prev_running_mean_tensor_uid: long = null;

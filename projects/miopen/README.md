@@ -13,11 +13,13 @@ MIOpen supports these programming models (backends):
 * [HIP](https://rocm.docs.amd.com/projects/HIP/en/latest/)
 * OpenCL (deprecated)
 
-## Building our documentation
+## Building our documentation 
 
-To build the MIOpen documentation locally, run the following code from within the `docs` folder of the MIOpen project:
+ To build the MIOpen documentation locally, run the following code from within the `docs` folder of the MIOpen project:
 
-``` shell
+
+
+``` shell    
 sudo apt install doxygen
 
 cd docs
