@@ -221,6 +221,7 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
     SECTION("concatenate")
     {
         CHECK_THAT(simplify(concat({v}, {DataType::Int32})), IdenticalTo(v));
+        CHECK_THAT(simplify(concat({literal(1u), literal(0u)}, {DataType::UInt64})), IdenticalTo(literal(1ull, DataType::UInt64)));
         CHECK_THAT(
             simplify(concat({bfe(DataType::UInt32, v3, 0, 32), bfe(DataType::UInt32, v3, 32, 32)},
                             {DataType::UInt64})),
@@ -1269,6 +1270,52 @@ TEST_CASE("LowerUnsignedArithmeticShiftR ExpressionTransformation works",
         auto expr = std::make_shared<rocRoller::Expression::Expression>(
             rocRoller::Expression::ArithmeticShiftR{v, a});
         CHECK_THAT(lowerUnsignedArithmeticShiftR(expr), IdenticalTo(expr));
+    }
+}
+
+TEST_CASE("SplitConcatenate ExpressionTransformation works",
+          "[expression][expression-transformation]")
+{
+    using namespace rocRoller;
+    using namespace Expression;
+    auto context = TestContext::ForDefaultTarget();
+
+    auto r
+        = Register::Value::Placeholder(context.get(), Register::Type::Vector, DataType::UInt64, 1);
+    r->allocateNow();
+    auto v = r->expression();
+
+    SECTION("Split uint64_t literal into two Raw32 operands")
+    {
+        auto uint64Literal = literal(0x0123456789ABCDEFull, DataType::UInt64);
+        std::vector<ExpressionPtr> operands{uint64Literal, v};
+        auto                       concatExpr = Concatenate{{operands}, {DataType::None, PointerType::Buffer}};
+
+        Concatenate result = splitConcatenate(concatExpr);
+
+        std::vector<ExpressionPtr> expectedOperands{
+            literal(Raw32(0x89ABCDEF)), literal(Raw32(0x01234567)), v};
+        auto  expectedExpr = Concatenate{{expectedOperands}, {DataType::None, PointerType::Buffer}};
+
+        CHECK_THAT(std::make_shared<rocRoller::Expression::Expression>(result), IdenticalTo(std::make_shared<rocRoller::Expression::Expression>(expectedExpr)));
+    }
+
+    SECTION("Multiple uint64_t literals are all split")
+    {
+        auto uint64Literal1 = literal(0xFFFFFFFF00000000ull, DataType::UInt64);
+        auto uint64Literal2 = literal(0x00000000FFFFFFFFull, DataType::UInt64);
+
+        std::vector<ExpressionPtr> operands{uint64Literal1, uint64Literal2};
+        auto                       concatExpr = Concatenate{{operands}, {DataType::None, PointerType::Buffer}};
+
+        Concatenate result = splitConcatenate(concatExpr);
+
+        std::vector<ExpressionPtr> expectedOperands{
+            literal(Raw32(0x00000000)), literal(Raw32(0xFFFFFFFF)),
+            literal(Raw32(0xFFFFFFFF)), literal(Raw32(0x00000000))};
+        auto expectedExpr = Concatenate{{expectedOperands}, {DataType::None, PointerType::Buffer}};
+
+        CHECK_THAT(std::make_shared<rocRoller::Expression::Expression>(result), IdenticalTo(std::make_shared<rocRoller::Expression::Expression>(expectedExpr)));
     }
 }
 
