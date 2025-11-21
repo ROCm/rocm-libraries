@@ -83,7 +83,7 @@ namespace rocRoller
                                     int                               numBytes,
                                     std::string                       comment  = "",
                                     bool                              high     = false,
-                                    std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
+                                    Register::ValuePtr buffDesc = nullptr,
                                     BufferInstructionOptions buffOpts = BufferInstructionOptions());
 
         /**
@@ -107,7 +107,7 @@ namespace rocRoller
                                      int                               numBytes,
                                      std::string const                 comment  = "",
                                      bool                              high     = false,
-                                     std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
+                                     Register::ValuePtr buffDesc = nullptr,
                                      BufferInstructionOptions          buffOpts
                                      = BufferInstructionOptions());
 
@@ -133,7 +133,7 @@ namespace rocRoller
                                         int                               numBytes,
                                         std::string const                 comment  = "",
                                         bool                              high     = false,
-                                        std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
+                                        Register::ValuePtr buffDesc = nullptr,
                                         BufferInstructionOptions          buffOpts
                                         = BufferInstructionOptions());
 
@@ -158,7 +158,7 @@ namespace rocRoller
                                            Register::ValuePtr                addr2,
                                            Register::ValuePtr                offset2,
                                            std::string const                 comment  = "",
-                                           std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
+                                           Register::ValuePtr buffDesc = nullptr,
                                            BufferInstructionOptions          buffOpts
                                            = BufferInstructionOptions());
 
@@ -310,13 +310,13 @@ namespace rocRoller
          * @param numBytes The number of bytes to load.
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
-        Generator<Instruction> loadBuffer(Register::ValuePtr                dest,
-                                          Register::ValuePtr                addr,
-                                          int                               offset,
-                                          std::shared_ptr<BufferDescriptor> buffDesc,
-                                          BufferInstructionOptions          buffOpts,
-                                          int                               numBytes,
-                                          bool                              high = false);
+        Generator<Instruction> loadBuffer(Register::ValuePtr       dest,
+                                          Register::ValuePtr       addr,
+                                          int                      offset,
+                                          Register::ValuePtr       buffDesc,
+                                          BufferInstructionOptions buffOpts,
+                                          int                      numBytes,
+                                          bool                     high = false);
 
         /**
          * @brief Generate the instructions required to perform a buffer store.
@@ -333,7 +333,7 @@ namespace rocRoller
         Generator<Instruction> storeBuffer(Register::ValuePtr                data,
                                            Register::ValuePtr                addr,
                                            int                               offset,
-                                           std::shared_ptr<BufferDescriptor> buffDesc,
+                                           Register::ValuePtr buffDesc,
                                            BufferInstructionOptions          buffOpts,
                                            int                               numBytes,
                                            bool                              high = false);
@@ -349,7 +349,7 @@ namespace rocRoller
          * @param numBytes The number of bytes to load.
          */
         Generator<Instruction> bufferLoad2LDS(Register::ValuePtr                data,
-                                              std::shared_ptr<BufferDescriptor> buffDesc,
+                                              Register::ValuePtr buffDesc,
                                               BufferInstructionOptions          buffOpts,
                                               int                               numBytes,
                                               Register::ValuePtr                soffset);

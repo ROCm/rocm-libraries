@@ -150,7 +150,7 @@ namespace rocRoller
                 Register::ValuePtr                colStrideReg = nullptr;
                 RegisterExpressionAttributes      colStrideAttributes;
                 Register::ValuePtr                offset           = nullptr;
-                std::shared_ptr<BufferDescriptor> bufDesc          = nullptr;
+                Register::ValuePtr                bufDesc          = nullptr;
                 BufferInstructionOptions          bufOpts          = {};
                 bool                              isTransposedTile = false;
                 bool                              isPadded         = false;
@@ -166,7 +166,7 @@ namespace rocRoller
                                                    Expression::ExpressionPtr expr) const;
 
             // Index calculation Helpers
-            std::shared_ptr<BufferDescriptor> getBufferDesc(int tag);
+            Register::ValuePtr                getBufferDesc(int tag);
             Expression::ExpressionPtr         getOffsetExpr(int  opTag,
                                                             bool isStorePartOfGlobalToLDS,
                                                             CoordinateGraph::Transformer const& coords);

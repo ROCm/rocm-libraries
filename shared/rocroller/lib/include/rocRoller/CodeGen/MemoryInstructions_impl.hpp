@@ -48,7 +48,7 @@ namespace rocRoller
                                  int                               numBytes,
                                  std::string const                 comment,
                                  bool                              high,
-                                 std::shared_ptr<BufferDescriptor> bufDesc,
+                                 Register::ValuePtr bufDesc,
                                  BufferInstructionOptions          buffOpts)
     {
         auto               context   = m_context.lock();
@@ -117,7 +117,7 @@ namespace rocRoller
                                   int                               numBytes,
                                   std::string const                 comment,
                                   bool                              high,
-                                  std::shared_ptr<BufferDescriptor> bufDesc,
+                                  Register::ValuePtr bufDesc,
                                   BufferInstructionOptions          buffOpts)
     {
         auto               context   = m_context.lock();
@@ -178,7 +178,7 @@ namespace rocRoller
                                      int                               numBytes,
                                      std::string const                 comment,
                                      bool                              high,
-                                     std::shared_ptr<BufferDescriptor> buffDesc,
+                                     Register::ValuePtr buffDesc,
                                      BufferInstructionOptions          buffOpts)
     {
         if constexpr(Dir == MemoryDirection::Load)
@@ -591,7 +591,7 @@ namespace rocRoller
         MemoryInstructions::loadBuffer(Register::ValuePtr                dest,
                                        Register::ValuePtr                addr,
                                        int                               offset,
-                                       std::shared_ptr<BufferDescriptor> buffDesc,
+                                       Register::ValuePtr buffDesc,
                                        BufferInstructionOptions          buffOpts,
                                        int                               numBytes,
                                        bool                              high)
@@ -634,7 +634,7 @@ namespace rocRoller
         {
             lds += "lds";
         }
-        auto sgprSrd = buffDesc->allRegisters();
+        auto sgprSrd = buffDesc;
 
         if(numBytes < m_wordSize)
         {
@@ -696,7 +696,7 @@ namespace rocRoller
 
     inline Generator<Instruction>
         MemoryInstructions::bufferLoad2LDS(Register::ValuePtr                data,
-                                           std::shared_ptr<BufferDescriptor> buffDesc,
+                                           Register::ValuePtr buffDesc,
                                            BufferInstructionOptions          buffOpts,
                                            int                               numBytes,
                                            Register::ValuePtr                soffset)
@@ -730,7 +730,7 @@ namespace rocRoller
             slc += "slc";
         }
 
-        auto sgprSrd = buffDesc->allRegisters();
+        auto sgprSrd = buffDesc;
 
         std::string opEnd = "";
         if(numBytes == 1)
@@ -776,7 +776,7 @@ namespace rocRoller
         MemoryInstructions::storeBuffer(Register::ValuePtr                data,
                                         Register::ValuePtr                addr,
                                         int                               offset,
-                                        std::shared_ptr<BufferDescriptor> buffDesc,
+                                        Register::ValuePtr buffDesc,
                                         BufferInstructionOptions          buffOpts,
                                         int                               numBytes,
                                         bool                              high)
@@ -817,7 +817,7 @@ namespace rocRoller
         {
             lds += "lds";
         }
-        auto sgprSrd = buffDesc->allRegisters();
+        auto sgprSrd = buffDesc;
 
         // TODO Use UInt32 offset register for StoreTiled operations
         // that use an offset modifier.

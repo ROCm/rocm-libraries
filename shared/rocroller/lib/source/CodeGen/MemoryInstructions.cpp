@@ -256,7 +256,7 @@ namespace rocRoller
                                         Register::ValuePtr                addr2,
                                         Register::ValuePtr                offset2,
                                         std::string const                 comment,
-                                        std::shared_ptr<BufferDescriptor> buffDesc,
+                                        Register::ValuePtr buffDesc,
                                         BufferInstructionOptions          buffOpts)
     {
         AssertFatal(dest && dest->regType() == Register::Type::Vector
