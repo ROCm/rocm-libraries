@@ -39,10 +39,12 @@ from Tensile.Utilities.Decorators.Shared import CallableGuard
 
 from copy import deepcopy
 
+
 class ScheduleInfo:
     numCodePaths: int
     numMfma: int
-    def __init__(self, numCodePaths, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder = []):
+    isKnownValid : bool
+    def __init__(self, numCodePaths, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder = [], isKnownValid = False):
         self.numCodePaths = numCodePaths
         self.numMfma = numMfma
         self.optSchedule = optSchedule
@@ -50,6 +52,70 @@ class ScheduleInfo:
         self.nglshift = nglshift # vmcnt shift for noglobalload loop
         self.nllshift = nllshift # vmcnt shift for nolocalload loop
         self.mfmaReorder = mfmaReorder
+        self.isKnownValid = isKnownValid
+        self.rules = [self.ruleAscendingOrder]
+
+    def ruleAscendingOrder(self, context = {}):
+        """ 
+        Ensure that all sequences of optSchedule are non-decreasing. 
+
+        Context and example: There will be sequence of N 'GRIncA' instructions for 
+        incrementing the global memory address to read the next A macro tile from. 
+        The CMS developer has the freedom to insert these N instructions into 
+        'slots' of their choice. A slot is a sequence of instructions between 
+        2 consecutive mfma instructions. Example: 'GRIncA' : [[0,1,1,3]] would 
+        mean that the N=4 instructions to increment the pointer appear as follows:
+
+        instruction 1    : between mfma 0 and mfma 1. 
+        instructions 2,3 : between mfma 1 and mfma 2.
+        instruction 4    : between mfma 3 and mfma 4.
+
+        It is a strict requirement that the N slots for these instructions are 
+        non-decreasing. This rule is true for all groups of instructions, not 
+        just the 'GRIncA' instructions (to be verified).
+        """
+
+        for k, sequences in self.optSchedule.items():
+            for seq in sequences:
+                print(k)
+                print(seq)
+                # Ensure seq is non-decreasing
+                for i in range(1, len(seq)):
+                    print(seq[i])
+                    if seq[i] < seq[i - 1]:
+                        return (f"Ascending-order rule violated, "
+                                f"schedule key '{k}', sequence {seq}: "
+                                f"value {seq[i]} at index {i} is less than "
+                                f"{seq[i-1]} at index {i-1}.")
+        return ""
+
+
+    def isValid(self, kernel):
+        """
+        Returns the empty string if this schedule is considered to be 
+        valid for `kernel`. If the returned string is not empty, it
+        contains a reason that this kernel is considered invalid. 
+
+        Note 1: An empty string should not be considered as proof that this
+        schedule is valid. i.e: it may be a false negative.
+
+        Note 2: if a non-empty string is returned, and the reason is
+        considered by an expert developer to be incorrect, you can create a 
+        ScheduleInfo with `isKnownValid = True`. i.e. this is a workaround
+        for known false positives.
+        """
+
+        if self.isKnownValid:
+            return ""
+
+        context = {"kernel" : kernel}
+        for rule in self.rules:
+            result = rule(context)
+            if result:
+                return result
+
+        return ""
+
 
 
 def removeComments(module):
@@ -118,6 +184,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
     numCodePath = opt1.numCodePaths
     assert opt1.numMfma == len(mfmaCode)
 
+
     for _, indexList in opt1.optSchedule.items():
         assert len(indexList) <= opt1.numCodePaths
 
@@ -160,6 +227,10 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
             addToStream(key, stream, idMap[key])
 
         return InstStreams
+
+    statusString = opt1.isValid(kernel)
+    if statusString:
+        assert False, f"Invalid schedule: {statusString}"
 
     InstStreams = convOptToStream(opt1)
 
