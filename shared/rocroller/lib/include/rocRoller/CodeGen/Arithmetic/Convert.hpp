@@ -90,7 +90,7 @@ namespace rocRoller
 
         Generator<Instruction> generateBFloat16x2(Register::ValuePtr dest, Register::ValuePtr arg);
 
-        Generator<Instruction> generateUInt8x4(Register::ValuePtr dest, Register::ValuePtr arg);
+        Generator<Instruction> generateE8M0x4(Register::ValuePtr dest, Register::ValuePtr arg);
 
         Generator<Instruction> generateFP8x4(Register::ValuePtr dest, Register::ValuePtr arg);
 

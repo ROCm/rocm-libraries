@@ -69,11 +69,11 @@ namespace PermLanesTest
         rocRoller::KernelGraph::KernelGraph kgraph;
 
         auto kernel = kgraph.control.addElement(Kernel());
-        auto load   = kgraph.control.addElement(LoadTiled(DataType::UInt8));
+        auto load   = kgraph.control.addElement(LoadTiled(DataType::E8M0));
         kgraph.control.addElement(Body(), {kernel}, {load});
-        auto exchange = kgraph.control.addElement(Exchange(DataType::UInt8));
+        auto exchange = kgraph.control.addElement(Exchange(DataType::E8M0));
         kgraph.control.addElement(Sequence(), {load}, {exchange});
-        auto store = kgraph.control.addElement(StoreTiled(DataType::UInt8));
+        auto store = kgraph.control.addElement(StoreTiled(DataType::E8M0));
         kgraph.control.addElement(Sequence(), {exchange}, {store});
 
         auto user0 = kgraph.coordinates.addElement(
@@ -112,9 +112,9 @@ namespace PermLanesTest
         auto k = context->kernel();
 
         k->addArgument(
-            {"a", {DataType::UInt8, PointerType::PointerGlobal}, DataDirection::ReadOnly});
+            {"a", {DataType::E8M0, PointerType::PointerGlobal}, DataDirection::ReadOnly});
         k->addArgument(
-            {"result", {DataType::UInt8, PointerType::PointerGlobal}, DataDirection::WriteOnly});
+            {"result", {DataType::E8M0, PointerType::PointerGlobal}, DataDirection::WriteOnly});
 
         k->setKernelDimensions(2);
         auto one               = Expression::literal(1u);
