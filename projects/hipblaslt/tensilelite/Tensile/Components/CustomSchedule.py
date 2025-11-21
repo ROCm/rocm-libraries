@@ -56,22 +56,22 @@ class ScheduleInfo:
         self.rules = [self.ruleAscendingOrder]
 
     def ruleAscendingOrder(self, context = {}):
-        """ 
-        Ensure that all sequences of optSchedule are non-decreasing. 
+        """
+        Ensure that all sequences of optSchedule are non-decreasing.
 
-        Context and example: There will be sequence of N 'GRIncA' instructions for 
-        incrementing the global memory address to read the next A macro tile from. 
-        The CMS developer has the freedom to insert these N instructions into 
-        'slots' of their choice. A slot is a sequence of instructions between 
-        2 consecutive mfma instructions. Example: 'GRIncA' : [[0,1,1,3]] would 
+        Context and example: There will be sequence of N 'GRIncA' instructions for
+        incrementing the global memory address to read the next A macro tile from.
+        The CMS developer has the freedom to insert these N instructions into
+        'slots' of their choice. A slot is a sequence of instructions between
+        2 consecutive mfma instructions. Example: 'GRIncA' : [[0,1,1,3]] would
         mean that the N=4 instructions to increment the pointer appear as follows:
 
-        instruction 1    : between mfma 0 and mfma 1. 
+        instruction 1    : between mfma 0 and mfma 1.
         instructions 2,3 : between mfma 1 and mfma 2.
         instruction 4    : between mfma 3 and mfma 4.
 
-        It is a strict requirement that the N slots for these instructions are 
-        non-decreasing. This rule is true for all groups of instructions, not 
+        It is a strict requirement that the N slots for these instructions are
+        non-decreasing. This rule is true for all groups of instructions, not
         just the 'GRIncA' instructions (to be verified).
         """
 
@@ -92,15 +92,15 @@ class ScheduleInfo:
 
     def isValid(self, kernel):
         """
-        Returns the empty string if this schedule is considered to be 
+        Returns the empty string if this schedule is considered to be
         valid for `kernel`. If the returned string is not empty, it
-        contains a reason that this kernel is considered invalid. 
+        contains a reason that this kernel is considered invalid.
 
         Note 1: An empty string should not be considered as proof that this
         schedule is valid. i.e: it may be a false negative.
 
         Note 2: if a non-empty string is returned, and the reason is
-        considered by an expert developer to be incorrect, you can create a 
+        considered by an expert developer to be incorrect, you can create a
         ScheduleInfo with `isKnownValid = True`. i.e. this is a workaround
         for known false positives.
         """
@@ -418,7 +418,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     elif isNT(kernel) and not useLDSTr and TLDS == 0:
         kernel["UsePLRPack"] = True
-        
+
         optSchedule = {
             'SYNC'  : [[25, 25, 46, 46, 55, 55]],
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
@@ -445,7 +445,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
             'PackA0': [[47, 47, 47, 47, 47, 47, 48, 48, 48, 48, 48, 48, 48, 48, 49, 49, 49, 49, 49, 49, 49, 49, 50, 50]],
             'LCC'   : [[95, 95]],
         }
-        
+
         syncCode = [SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete") ,
                     SBarrier(comment="") ,
                     SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete") ,
@@ -666,7 +666,7 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
             'LRB0'   : [[0,1,2,3,4,5,6,7]],
             # Buffer loads.
             'GRB'    : [[51,51, 55,55, 59,61, 76,77, 78,78]],
-            'GRA'    : [[11,12, 16,16, 20,20, 24,24, 28, 28, 32,32, 36, 36, 40, 40]], 
+            'GRA'    : [[11,12, 16,16, 20,20, 24,24, 28, 28, 32,32, 36, 36, 40, 40]],
             # Prefetch next iteration.
             'LRA1'   : [[62,63,64,65,66,67,68,69,70,71]],
             'LRB1'   : [[41,42,43,44,45,46,47,49]],
@@ -742,7 +742,7 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
             'LRB0'   : [[0,0,1,2,3]],
             # Buffer loads.
             'GRB'    : [[30,30, 33,33, 36,36, 52,52, 56,56, 60,61, 76,77, 78,78]],
-            'GRA'    : [[11,12, 16,16, 20,20, 23,25, 26, 28]], 
+            'GRA'    : [[11,12, 16,16, 20,20, 23,25, 26, 28]],
             # Prefetch next iteration.
             'LRA1'   : [[62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77]],
             'LRB1'   : [[41,42,43,44,45]],
@@ -1029,7 +1029,7 @@ def hasCustomSchedule(kernel):
     elif is256x240x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,2,8]) and MI == [16,16,32,1] and MIWG == [4,1]:
         return _get_schedule_256x240x64_16bit(kernel, useLDSTr, TLDS)
     elif is256x208x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 2, 8]) and MI == [16, 16, 32, 1] and MIWG == [4, 1]:
-        return _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS) 
+        return _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS)
     elif is224x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [2, 2]:
         return _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS)
 
