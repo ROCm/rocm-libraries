@@ -31,12 +31,6 @@
 #include "CustomSections.hpp"
 #include "TestContext.hpp"
 #include "TestKernels.hpp"
-#include "rocRoller/Scheduling/Observers/WaitState/MFMA/CMPXWriteExec.hpp"
-#include "rocRoller/Scheduling/Observers/WaitState/OPSEL94x.hpp"
-#include "rocRoller/Scheduling/Observers/WaitState/VALUTransWrite94x.hpp"
-#include "rocRoller/Scheduling/Observers/WaitState/VALUWriteReadlane94x.hpp"
-#include "rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVMEM.hpp"
-#include "rocRoller/Scheduling/Observers/WaitState/VALUWriteVCCVDIVFMAS.hpp"
 
 #include <common/SourceMatcher.hpp>
 #include <common/TestValues.hpp>
@@ -48,6 +42,12 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/MFMA/CMPXWriteExec.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/OPSEL94x.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/VALUTransWrite94x.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteReadlane94x.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVMEM.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteVCCVDIVFMAS.hpp>
 
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -100,8 +100,7 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            auto observer = Scheduling::VALUWriteVCCVDIVFMAS();
-            if(!observer.required(arch))
+            if(!arch.isCDNAGPU())
             {
                 SKIP("Architecture " + arch.toString()
                      + " does not meet requirements for this observer");
@@ -339,8 +338,7 @@ namespace HazardObserverTest
                         "v_mul_f32", {v[0]}, {Register::Value::Literal(0x4f7ffffe), v[0]}, {}, ""),
                     Instruction("s_endpgm", {}, {}, {}, "")};
 
-                auto observer = Scheduling::VALUTransWrite94x();
-                if(observer.required(arch))
+                if(arch.isCDNA3GPU() || arch.isCDNA35GPU())
                 {
                     peekAndSchedule(context, insts[0]);
                     peekAndSchedule(context, insts[1], 1);
@@ -432,8 +430,7 @@ namespace HazardObserverTest
                            "v_readlane_b32", {s[1]}, {v[0], Register::Value::Literal(0)}, {}, ""),
                        Instruction("s_endpgm", {}, {}, {}, "")};
 
-                auto observer = Scheduling::VALUWriteReadlane94x();
-                if(observer.required(arch))
+                if(arch.isCDNA3GPU() || arch.isCDNA35GPU())
                 {
                     peekAndSchedule(context, insts[0]);
                     peekAndSchedule(context, insts[1], 1);
@@ -525,8 +522,7 @@ namespace HazardObserverTest
 
         SUPPORTED_ARCH_SECTION(arch)
         {
-            auto observer = Scheduling::CMPXWriteExec();
-            if(!observer.required(arch))
+            if(!arch.isCDNAGPU())
             {
                 SKIP("Architecture " + arch.toString()
                      + " does not meet requirements for this observer");
@@ -649,8 +645,7 @@ namespace HazardObserverTest
                    Instruction("v_mov_b32", {v[0]}, {v[1]}, {}, ""),
                    Instruction("s_endpgm", {}, {}, {}, "")};
 
-            auto observer = Scheduling::OPSEL94x();
-            if(observer.required(arch))
+            if(arch.isCDNA3GPU() || arch.isCDNA35GPU())
             {
                 peekAndSchedule(context, insts[0]);
                 peekAndSchedule(context, insts[1], 1);
@@ -671,8 +666,7 @@ namespace HazardObserverTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            auto observer = Scheduling::VALUWriteSGPRVMEM();
-            if(!observer.required(arch))
+            if(!arch.isCDNAGPU())
             {
                 SKIP("Architecture " + arch.toString()
                      + " does not meet requirements for this observer");

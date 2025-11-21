@@ -28,13 +28,13 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CodeGen/Utils.hpp>
 #include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/GPUArchitecture/GPUCapability.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
 #include "CustomMatchers.hpp"
 #include "TestContext.hpp"
 #include "TestKernels.hpp"
 #include "common/Utilities.hpp"
-#include "rocRoller/GPUArchitecture/GPUCapability.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -607,13 +607,10 @@ namespace TransposeLoadsTest
 
         auto wavetile = GENERATE(std::make_pair(16, 128), std::make_pair(32, 64));
         auto context  = TestContext::ForTestDevice();
-        if(!context->targetArchitecture().HasCapability(GPUCapability::ds_read_b64_tr_b16)
-           && !context->targetArchitecture().HasCapability(GPUCapability::ds_read_b64_tr_b8)
-           && !context->targetArchitecture().HasCapability(GPUCapability::ds_read_b96_tr_b6)
-           && !context->targetArchitecture().HasCapability(GPUCapability::ds_read_b64_tr_b4))
-        {
-            SKIP("Transpose loads not supported");
-        }
+        REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::ds_read_b64_tr_b16,
+                                GPUCapability::ds_read_b64_tr_b8,
+                                GPUCapability::ds_read_b96_tr_b6,
+                                GPUCapability::ds_read_b64_tr_b4);
 
         SECTION("For each datatype and unalignedVGPRs option")
         {
