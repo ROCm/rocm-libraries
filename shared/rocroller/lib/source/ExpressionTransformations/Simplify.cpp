@@ -440,7 +440,7 @@ namespace rocRoller
             ExpressionPtr operator()(BitFieldExtract const& expr1,
                                      BitFieldExtract const& expr2) const
             {
-                if(expr1.arg == expr2.arg && resultVariableType(expr1.arg).getElementSize() == 8
+                if(identical(expr1.arg, expr2.arg) && resultVariableType(expr1.arg).getElementSize() == 8
                    && expr1.offset == 0 && expr1.width == 32 && expr2.offset == 32
                    && expr2.width == 32)
                 {
@@ -823,6 +823,13 @@ namespace rocRoller
                 auto result = tryEvaluate(cpy);
                 if(result.has_value())
                     return literal(result.value());
+
+                // Extracting the entire arg with no offset (same type)
+                auto argVarType = resultVariableType(cpy.arg);
+                if(cpy.offset == 0 && cpy.width == argVarType.getElementSize() * 8 && argVarType.dataType == cpy.outputDataType){
+                    std::cout << "[Simplify] BitFieldExtract - After (full extraction): " << cpy.arg << "\n";
+                    return call(cpy.arg);
+                }
 
                 // TODO: Enable this simplification with a reinterpret_cast expression
                 // // Extracting the entire arg with no offset
