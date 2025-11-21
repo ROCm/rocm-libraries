@@ -2478,6 +2478,102 @@ namespace ExpressionTest
         }
     }
 
+    TEST_CASE("Expression evaluate reinterpret", "[expression]")
+    {
+        using namespace Expression;
+
+        SECTION("Int32 to UInt32")
+        {
+            int32_t value = -1;
+            auto result = reinterpret(CommandArgumentValue(value), DataType::UInt32);
+            CHECK(std::get<uint32_t>(result) == 0xFFFFFFFFu);
+        }
+
+        SECTION("UInt32 to Int32")
+        {
+            uint32_t value = 0xFFFFFFFFu;
+            auto result = reinterpret(CommandArgumentValue(value), DataType::Int32);
+            CHECK(std::get<int32_t>(result) == -1);
+        }
+
+        SECTION("Int32 to Raw32")
+        {
+            int32_t value = -1;
+            auto result = reinterpret(CommandArgumentValue(value), DataType::Raw32);
+            CHECK(std::get<Raw32>(result).value == 0xFFFFFFFFu);
+        }
+
+        SECTION("Raw32 to UInt32")
+        {
+            Raw32 value(0xDEADBEEFu);
+            auto result = reinterpret(CommandArgumentValue(value), DataType::UInt32);
+            CHECK(std::get<uint32_t>(result) == 0xDEADBEEFu);
+        }
+
+        SECTION("Raw32 to Int32")
+        {
+            Raw32 value(0x80000000u);
+            auto result = reinterpret(CommandArgumentValue(value), DataType::Int32);
+            CHECK(std::get<int32_t>(result) == static_cast<int32_t>(0x80000000));
+        }
+
+        SECTION("UInt32 to Raw32")
+        {
+            uint32_t value = 0x12345678u;
+            auto result = reinterpret(CommandArgumentValue(value), DataType::Raw32);
+            CHECK(std::get<Raw32>(result).value == 0x12345678u);
+        }
+
+        SECTION("Int64 to UInt64")
+        {
+            int64_t value = -1LL;
+            auto result = reinterpret(CommandArgumentValue(value), DataType::UInt64);
+            CHECK(std::get<uint64_t>(result) == 0xFFFFFFFFFFFFFFFFull);
+        }
+
+        SECTION("UInt64 to Int64")
+        {
+            uint64_t value = 0x8000000000000000ull;
+            auto result = reinterpret(CommandArgumentValue(value), DataType::Int64);
+            CHECK(std::get<int64_t>(result) == static_cast<int64_t>(0x8000000000000000ull));
+        }
+
+        SECTION("Float to UInt32")
+        {
+            float value = 1.0f;
+            auto result = reinterpret(CommandArgumentValue(value), DataType::UInt32);
+            // 1.0f in IEEE 754
+            CHECK(std::get<uint32_t>(result) == 0x3F800000u);
+        }
+
+        SECTION("UInt32 to Float")
+        {
+            uint32_t value = 0x40000000u; // 2.0f in IEEE 754
+            auto result = reinterpret(CommandArgumentValue(value), DataType::Float);
+            CHECK(std::get<float>(result) == 2.0f);
+        }
+
+        SECTION("Double to UInt64")
+        {
+            double value = 1.0;
+            auto result = reinterpret(CommandArgumentValue(value), DataType::UInt64);
+            // 1.0 in IEEE 754 double
+            CHECK(std::get<uint64_t>(result) == 0x3FF0000000000000ull);
+        }
+
+        SECTION("Invalid reinterpret - different sizes")
+        {
+            int32_t value = 42;
+            CHECK_THROWS_AS(reinterpret(CommandArgumentValue(value), DataType::Int64), FatalError);
+        }
+
+        SECTION("Invalid reinterpret - unsupported type")
+        {
+            int32_t value = 42;
+            CHECK_THROWS_AS(reinterpret(CommandArgumentValue(value), DataType::None), FatalError);
+        }
+    }
+
     TEST_CASE("Expression generate dataflow tags", "[expression][codegen]")
     {
         auto context = TestContext::ForDefaultTarget();
