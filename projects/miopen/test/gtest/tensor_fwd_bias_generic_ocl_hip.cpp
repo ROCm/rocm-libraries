@@ -458,21 +458,21 @@ protected:
 // #define CHECK_DOUBLE
 
 #ifdef CHECK_HALF
-using GPU_OpTensorFwdBiasGenericTest = OpTensorFwdBiasGenericTest<half_float::half>;
-static auto tensorsConfigs           = TensorsConfigs<half_float::half>();
+using data_type = half_float::half;
+#define _OpTensorFwdBiasGenericTest GPU_OpTensorFwdBiasGenericTest_FP16
 #endif
 
 #ifdef CHECK_FLOAT
-using GPU_OpTensorFwdBiasGenericTest = OpTensorFwdBiasGenericTest<float>;
-static auto tensorsConfigs           = TensorsConfigs<float>();
+using data_type = float;
+#define _OpTensorFwdBiasGenericTest GPU_OpTensorFwdBiasGenericTest_FP32
 #endif
 
 #ifdef CHECK_DOUBLE
-using GPU_OpTensorFwdBiasGenericTest = OpTensorFwdBiasGenericTest<double>;
-static auto tensorsConfigs           = TensorsConfigs<double>();
+using data_type = double;
+#define _OpTensorFwdBiasGenericTest GPU_OpTensorFwdBiasGenericTest_FP64
 #endif
 
-TEST_P(GPU_OpTensorFwdBiasGenericTest, PortTest)
+TEST_P(_OpTensorFwdBiasGenericTest, PortTest)
 {
     runOCL();
     runHIP();
@@ -480,8 +480,8 @@ TEST_P(GPU_OpTensorFwdBiasGenericTest, PortTest)
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_OpTensorFwdBiasGenericTest,
-                         testing::Combine(testing::ValuesIn(tensorsConfigs),
+                         _OpTensorFwdBiasGenericTest,
+                         testing::Combine(testing::ValuesIn(TensorsConfigs<data_type>()),
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
