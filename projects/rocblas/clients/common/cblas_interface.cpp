@@ -2253,15 +2253,15 @@ void ref_syrk_ex(rocblas_fill      uplo,
         cast_to_buffer(rocblas_operation_none, n, n, ldc, C, C_float);
 
         ref_syrk(uplo,
-                transA,
-                n,
-                k,
-                alpha_float,
-                (const float*)A_float.data(),
-                lda,
-                beta_float,
-                C_float.data(),
-                ldc);
+                 transA,
+                 n,
+                 k,
+                 alpha_float,
+                 (const float*)A_float.data(),
+                 lda,
+                 beta_float,
+                 C_float.data(),
+                 ldc);
 
         cast_from_buffer(n, n, ldc, C_float, C);
     }
@@ -2276,15 +2276,15 @@ void ref_syrk_ex(rocblas_fill      uplo,
         cast_to_buffer(rocblas_operation_none, n, n, ldc, C, C_double);
 
         ref_syrk(uplo,
-                transA,
-                n,
-                k,
-                alpha_double,
-                (const double*)A_double.data(),
-                lda,
-                beta_double,
-                C_double.data(),
-                ldc);
+                 transA,
+                 n,
+                 k,
+                 alpha_double,
+                 (const double*)A_double.data(),
+                 lda,
+                 beta_double,
+                 C_double.data(),
+                 ldc);
 
         cast_from_buffer(n, n, ldc, C_double, C);
     }
