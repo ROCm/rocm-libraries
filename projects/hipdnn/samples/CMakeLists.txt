@@ -20,6 +20,7 @@ endfunction()
 #add_hipdnn_sample(bn_inference batchnorm/BnInference.cpp)
 add_hipdnn_sample(bn_training batchnorm/BnTraining.cpp)
 add_hipdnn_sample(bn_backward batchnorm/BnBackward.cpp)
+add_hipdnn_sample(fused_bn_inference_activ batchnorm/FusedBnInferenceActiv.cpp)
 add_hipdnn_sample(fused_bn_inference_drelu_bn_backward batchnorm/FusedBnInfDReluBnBwd.cpp)
 
 add_hipdnn_sample(conv_dgrad convolution/ConvDgrad.cpp)
