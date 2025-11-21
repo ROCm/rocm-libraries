@@ -60,14 +60,16 @@ namespace rocRoller
             AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
                         "Buffer expression must be of buffer pointer type.");
 
-            bufferExpr = buffDescriptor::setSize(bufferExpr, literal(2147483548u, DataType::UInt32));
+            bufferExpr
+                = buffDescriptor::setSize(bufferExpr, literal(2147483548u, DataType::UInt32));
             bufferExpr = buffDescriptor::setOptions(bufferExpr, getDefaultOptions(ctx));
             return bufferExpr;
         }
 
         ExpressionPtr setBasePointer(ExpressionPtr bufferExpr, ExpressionPtr addressExpr)
         {
-            AssertFatal(bufferExpr && addressExpr, "Buffer and address expressions cannot be null.");
+            AssertFatal(bufferExpr && addressExpr,
+                        "Buffer and address expressions cannot be null.");
             AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
                         "Buffer expression must be of buffer pointer type.");
 

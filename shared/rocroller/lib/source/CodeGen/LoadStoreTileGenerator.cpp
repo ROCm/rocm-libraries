@@ -457,21 +457,24 @@ namespace rocRoller
                     if(bufferReg->allocationState() == Register::AllocationState::Unallocated)
                     {
                         Register::ValuePtr basePointer;
-                        auto bufferExpr = bufferReg->expression();
+                        auto               bufferExpr = bufferReg->expression();
                         co_yield m_context->argLoader()->getValue(user->argumentName, basePointer);
                         if(user->offset && !Expression::canEvaluateTo(0u, user->offset))
                         {
                             Register::ValuePtr tmpRegister;
                             co_yield generate(tmpRegister,
                                               simplify(basePointer->expression() + user->offset));
-                            bufferExpr = buffDescriptor::setBasePointer(bufferExpr, tmpRegister->expression());
+                            bufferExpr = buffDescriptor::setBasePointer(bufferExpr,
+                                                                        tmpRegister->expression());
                         }
                         else
                         {
-                            bufferExpr = buffDescriptor::setBasePointer(bufferExpr, basePointer->expression());
+                            bufferExpr = buffDescriptor::setBasePointer(bufferExpr,
+                                                                        basePointer->expression());
                         }
 
-                        bufferExpr = buffDescriptor::setOptions(bufferExpr, buffDescriptor::getDefaultOptions(m_context));
+                        bufferExpr = buffDescriptor::setOptions(
+                            bufferExpr, buffDescriptor::getDefaultOptions(m_context));
                         Register::ValuePtr limitValue;
                         co_yield generate(limitValue, toBytes(user->size));
                         // TODO: Handle sizes larger than 32 bits
