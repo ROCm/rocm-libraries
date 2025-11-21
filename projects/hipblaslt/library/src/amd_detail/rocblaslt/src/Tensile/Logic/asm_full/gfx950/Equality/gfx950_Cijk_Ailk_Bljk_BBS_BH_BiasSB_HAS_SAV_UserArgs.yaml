@@ -129920,21 +129920,21 @@
     MIOutputVectorWidth: 4
     MIRegPerOut: 1
     MIWaveGroup: [4, 1]
+<<<<<<< HEAD
     MIWaveTile: [4, 15]
     MIWaveTileA: 4
     MIWaveTileB: 15
     MIWaveTileMetadata: 0
     MacroTile0: 256
     MacroTile1: 240
-    MacroTileA: 256
     MacroTileB: 240
-    MagicDivAlg: 2
-    MathClocksUnrolledLoop: 0
-    MatrixInstB: 1
-    MatrixInstBM: 1
-    MatrixInstBN: 1
-    MatrixInstK: 32
-    MatrixInstM: 16
+=======
+    MIWaveTile: [4, 13]
+    MIWaveTileA: 4
+    MIWaveTileB: 13
+    MIWaveTileMetadata: 0
+    MacroTile0: 256
+    MacroTile1: 208
     MatrixInstN: 16
     MatrixInstruction: [16, 16, 32, 1]
     MaxLDS: 163840
