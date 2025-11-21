@@ -872,6 +872,9 @@ def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
                         [  8,  10,  10,  12,  12,  14,  14,  16,  16]],
             'LRA0'   : [[  0,   2,   4,   6,   8,  10,  12,  14],
                         [  1,   3,   5,   7,   9,  11,  13,  15]],
+            # schduling GRIncA/B and LRA0 as follow,
+            # SIMD 0 | ... | MFMA | GRInc  | GRInc  | MFMA | LDS Load            | MFMA | GRInc  | GRInc  | MFMA | ...
+            # SIMD 1 | ... | MFMA | LDS Load        | MFMA | GRInc  | GRInc      | MFMA | LDS Load        | MFMA | ...
 
             'LRB0'   : [[ 16,      19,  21,  23,  25,  27,      29],
                         [ 17,      20,  22,  24,  26,  28,      30]],
@@ -895,9 +898,9 @@ def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
             SWaitCnt(dscnt= 0, vlcnt=-1, vscnt=-1, comment="Wait for LRBs"),
             SWaitCnt(dscnt= 1, vlcnt=-1, vscnt=-1, comment="Wait for LRAs"),
             SBarrier(comment=""),
-            SWaitCnt(dscnt= 0, vlcnt=15, vscnt=-1, comment="Wait for LRBs and previous set of GRs"),
+            SWaitCnt(dscnt= 0, vlcnt=14, vscnt=-1, comment="Wait for LRBs and previous set of GRAs"),
             SBarrier(comment=""),
-            SWaitCnt(dscnt=-1, vlcnt=15, vscnt=-1, comment="Wait for previous set of GRs"),
+            SWaitCnt(dscnt=-1, vlcnt=15, vscnt=-1, comment="Wait for previous set of GRBs"),
             SBarrier(comment=""),
         ]
         nglshift = nllshift = 15
