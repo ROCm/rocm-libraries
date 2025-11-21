@@ -34,14 +34,6 @@
 #define strSUITEcmp(A, B) _stricmp(A, B)
 #endif
 
-#ifdef __cpp_lib_filesystem
-#include <filesystem>
-namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
-
 /* ============================================================================================ */
 // Return path of this executable
 std::string hipsparse_exepath()
@@ -197,12 +189,12 @@ int query_device_property()
         {
             printf("Device ID %d : %s\n", i, props.name);
             printf("-------------------------------------------------------------------------\n");
-            printf("with %ldMB memory, clock rate %dMHz @ computing capability %d.%d \n",
+            printf("with %zuMB memory, clock rate %dMHz @ computing capability %d.%d \n",
                    props.totalGlobalMem >> 20,
-                   (int)(props.clockRate / 1000),
+                   (props.clockRate / 1000),
                    props.major,
                    props.minor);
-            printf("maxGridDimX %d, sharedMemPerBlock %ldKB, maxThreadsPerBlock %d, warpSize %d\n",
+            printf("maxGridDimX %d, sharedMemPerBlock %zuKB, maxThreadsPerBlock %d, warpSize %d\n",
                    props.maxGridSize[0],
                    props.sharedMemPerBlock >> 10,
                    props.maxThreadsPerBlock,
@@ -222,7 +214,7 @@ void set_device(int device_id)
     if(status != HIPSPARSE_STATUS_SUCCESS)
     {
         printf("Set device error: cannot set device ID %d, there may not be such device ID\n",
-               (int)device_id);
+               device_id);
     }
 }
 /* ============================================================================================ */

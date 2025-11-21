@@ -7,8 +7,11 @@ endif()
 
 hipdnn_add_dependency(GTest VERSION ${HIPDNN_GTEST_VERSION})
 include(GoogleTest)
+include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
 
 find_package(Python3 COMPONENTS Interpreter)
+
+findAndCheckLlvmSymbolizer()
 
 # Set executable prefix based on platform
 if(WIN32)

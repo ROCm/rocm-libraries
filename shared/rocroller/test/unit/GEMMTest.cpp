@@ -957,6 +957,14 @@ namespace GEMMDriverTest
     {
     };
 
+    class GEMMTestStreamKGPU
+        : public BaseGEMMContextFixture<std::tuple<StreamKMode,
+                                                   SolutionParams::LoadPath, /* loadPathA */
+                                                   SolutionParams::LoadPath, /* loadPathB */
+                                                   bool /* storeLDSD */>>
+    {
+    };
+
     // This test is to ensure each scheduler properly yields insts for a basic GEMM
     TEST_P(GEMMTestGPU, GPU_BasicGEMM_Schedulers)
     {
@@ -1110,7 +1118,7 @@ namespace GEMMDriverTest
         for(auto twoTile : {true, false})
         {
             gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
-            basicGEMM<float>(gemm);
+            basicGEMM<float>(gemm, false, false, 1, true);
         }
     }
 
@@ -1171,7 +1179,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
+    TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamK)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1205,28 +1213,13 @@ namespace GEMMDriverTest
         //gemm.prefetch         = true;
         //gemm.prefetchInFlight = 2;
 
-        for(auto twoTile : {true, false})
-        {
-            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
-            for(auto loadPathA : {SolutionParams::LoadPath::BufferToVGPR,
-                                  SolutionParams::LoadPath::BufferToLDSViaVGPR})
-            {
-                gemm.loadPathA = loadPathA;
-                for(auto loadPathB : {SolutionParams::LoadPath::BufferToVGPR,
-                                      SolutionParams::LoadPath::BufferToLDSViaVGPR})
-                {
-                    gemm.loadPathB = loadPathA;
-                    for(auto storeLDSD : {false, true})
-                    {
-                        gemm.storeLDSD = storeLDSD;
-                        basicGEMM<Half>(gemm);
-                    }
-                }
-            }
-        }
+        std::tie(gemm.streamK, gemm.loadPathA, gemm.loadPathB, gemm.storeLDSD)
+            = std::get<1>(GetParam());
+
+        basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
+    TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamKSmall)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1252,14 +1245,54 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = StreamKMode::Standard;
-        gemm.k       = gemm.macK * 8;
+        gemm.k = gemm.macK * 8;
 
-        for(auto twoTile : {true, false})
+        std::tie(gemm.streamK, gemm.loadPathA, gemm.loadPathB, gemm.storeLDSD)
+            = std::get<1>(GetParam());
+
+        basicGEMM<Half>(gemm);
+    }
+
+    TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamK_MultipleFixups)
+    {
+        if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
-            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
-            basicGEMM<Half>(gemm);
+            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
+
+        GEMMProblem gemm;
+
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+
+        gemm.macM = 128;
+        gemm.macN = 128;
+        gemm.macK = 16;
+
+        gemm.waveK = 8;
+
+        gemm.workgroupSizeX = 128;
+        gemm.workgroupSizeY = 2;
+
+        gemm.numWGs = 128;
+
+        auto numTilesM = 1;
+        auto numTilesN = 2;
+        auto numTilesK = 249;
+
+        gemm.m = numTilesM * gemm.macM;
+        gemm.n = numTilesN * gemm.macN;
+        gemm.k = numTilesK * gemm.macK;
+
+        // assert that the number of output tiles is smaller than number of WGs
+        // which means there is not enough data-parallel tiles, and has to split
+        // K dimension into multiple tiles
+        ASSERT_GE(gemm.numWGs, gemm.m * gemm.n / gemm.macM / gemm.macN);
+
+        std::tie(gemm.streamK, gemm.loadPathA, gemm.loadPathB, gemm.storeLDSD)
+            = std::get<1>(GetParam());
+
+        basicGEMM<Half>(gemm);
     }
 
     TEST_P(GEMMTestStreamKWGMGPU, GPU_BasicGEMMStreamKWorkgroupMapping)
@@ -4147,4 +4180,18 @@ namespace GEMMDriverTest
                                                  StreamKMode::TwoTile,
                                                  StreamKMode::TwoTileDPFirst))));
 
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMTestStreamK,
+        GEMMTestStreamKGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(
+                ::testing::Values(
+                    StreamKMode::Standard, StreamKMode::TwoTile, StreamKMode::TwoTileDPFirst),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::BufferToVGPR), /* loadPathA */
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::BufferToVGPR), /* loadPathB */
+                ::testing::Values(true, false) /* storeLDSD */
+                )));
 }

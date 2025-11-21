@@ -26,12 +26,11 @@ rocRoller is a software library for generating AMDGPU kernels.
   - [GEMM Client](#gemm-client)
   - [Development](#development)
     - [File Structure](#file-structure)
-    - [Coding Practices](#coding-practices)
-      - [Style](#style)
-      - [ISO C++ Standard](#iso-c-standard)
-      - [Documentation](#documentation)
-      - [PR submissions](#pr-submissions)
-      - [Testing](#testing)
+    - [Coding Style](#coding-style)
+    - [ISO C++ Standard](#iso-c-standard)
+    - [Documentation](#documentation)
+    - [PR submissions](#pr-submissions)
+    - [Testing](#testing)
   - [Logging and Debugging](#logging-and-debugging)
     - [Logging](#logging)
     - [Debugging](#debugging)
@@ -274,7 +273,7 @@ Generally, we prioritize inlining.
  - Before submitting code as a PR for review all sources need to be formatted with `clang-format`, version 13.
 
 
-Code should be writing in a clearly descriptive fashion. [Good resource for expressing ideas in code.](https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md#p1-express-ideas-directly-in-code)
+Code should be written in a clearly descriptive fashion. [Good resource for expressing ideas in code.](https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md#p1-express-ideas-directly-in-code)
 
 ### ISO C++ Standard
 
@@ -316,19 +315,21 @@ This will generate an HTML website from the markdown readme files and Doxygen co
 ### Testing
 
 Each new feature is required to have a test.
-- Test sources are placed in the `test` folder.
-- CPP Files for Unit Tests should be included in the `rocroller-tests` executable in [CMakeLists.txt](https://github.com/ROCm/rocm-libraries/shared/rocroller/blob/develop/test/CMakeLists.txt).
+- Test sources are placed in one of the `test` folders.
+- Newer tests should be added to the sources listed in [test/catch/CMakeLists.txt](test/catch/CMakeLists.txt), which builds the `rocroller-tests-catch` executable.
+- CPP Files for older Unit Tests are included in the `rocroller-tests` executable.
 
 Some tests require multiple threads for properly testing a desired or undesired behaviour (e.g. thread-safety) or to benefit from faster execution. Therefore, it is recommended to set `OMP_NUM_THREADS` appropriately. A value between `[NUM_PHYSICAL_CORES/2, NUM_PHYSICAL_CORES)` is recommended. Setting `OMP_NUM_THREADS` to the number of available cores or higher can cause test to run slower due to oversubscription (e.g. increased contention).
 
-Note a few conditions:
+If your test needs to run against different option values, use `Settings::set()` to run the test with those values (overwriting previous values in memory). Once a test is completed, the context fixture calls `Settings::reset()`, which resets the settings to the env vars (if set) or default settings.
+
+Notes for working with older tests relying on GTest:
 - If your test requires a context but does not actually need to run on a GPU, inherit from `GenericContextFixture`.
 - If your test needs to run on an actual GPU, inherit from `CurrentGPUContextFixture`. This:
   - provides functionality to assemble a kernel
   - sets up `targetArchitecture()` to reflect a real GPU.
   - will include functionality to run a kernel in the future.
   - Name your test starting with `GPU_`.  This ensures that it is can be filtered out when running on a CPU-only node.
-- If your test needs to run against different option values, use `Settings::set()` to run the test with those values (overwriting previous values in memory). Once a test is completed, the context fixture calls `Settings::reset()`, which resets the settings to the env vars (if set) or default settings.
 
 [Catch2](https://github.com/catchorg/Catch2) is the preferred unit testing framework for new unit tests.  GTest information for working with older unit tests can be found in the [GoogleTest User's Guide](https://google.github.io/googletest/).
 
@@ -395,6 +396,9 @@ You can also use `Throw<FatalError>("message")` to catch and report incorrect co
 To run performance tests, use the `rrperf` tool. The `autoperf` command benchmarks multiple commits as well as your current workspace. For usage details, refer to the help documentation:
 
 ```bash
+./scripts/rrperf --help
+
+# e.g. For help with particular functionality
 ./scripts/rrperf autoperf --help
 ```
 
