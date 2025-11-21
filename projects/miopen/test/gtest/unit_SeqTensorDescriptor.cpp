@@ -28,7 +28,8 @@
 #include <miopen/logger.hpp>
 #include <miopen/seq_tensor.hpp>
 
-namespace miopen {
+namespace {
+
 namespace unit_tests {
 
 struct SeqTensorDescriptorParams
@@ -45,25 +46,11 @@ struct SeqTensorDescriptorParams
     {
     }
 
-    size_t GetNumDims() const { return lens.size(); }
-
-    const std::vector<size_t>& GetLens() const { return lens; }
-
-    miopenDataType_t GetDataType() const { return datatype; }
-
-    SeqTensorDescriptor GetSeqTensorDescriptor() const
+    miopen::SeqTensorDescriptor GetSeqTensorDescriptor() const
     {
         std::vector<unsigned int> layout_default(lens.size());
         std::iota(layout_default.begin(), layout_default.end(), 0);
         return {datatype, layout_default, lens, padded_seq_layout};
-    }
-
-    friend std::ostream& operator<<(std::ostream& os, const SeqTensorDescriptorParams& tp)
-    {
-        os << tp.datatype << ", ";
-        miopen::LogRange(os << "{", tp.lens, ",") << "}, ";
-        os << tp.padded_seq_layout;
-        return os;
     }
 
 private:
@@ -73,70 +60,30 @@ private:
 };
 
 } // namespace unit_tests
-} // namespace miopen
 
-struct TestCaseGetMaxCountOfSequence
+struct TestCase
 {
-    miopen::unit_tests::SeqTensorDescriptorParams tp;
+    unit_tests::SeqTensorDescriptorParams tp;
+    size_t max_sequence_length;
+    size_t total_sequence_length;
     size_t actual_count_of_sequence;
-
-    friend std::ostream& operator<<(std::ostream& os, const TestCaseGetMaxCountOfSequence& tc)
-    {
-        os << "(";
-        os << "(" << tc.tp << "), ";
-        os << tc.actual_count_of_sequence;
-        os << ")";
-        return os;
-    }
 };
 
-struct TestCaseGetMaxSequenceLength
-{
-    miopen::unit_tests::SeqTensorDescriptorParams tp;
-    size_t actual_sequence_length;
-
-    friend std::ostream& operator<<(std::ostream& os, const TestCaseGetMaxSequenceLength& tc)
-    {
-        os << "(";
-        os << "(" << tc.tp << "), ";
-        os << tc.actual_sequence_length;
-        os << ")";
-        return os;
-    }
-};
-
-struct TestCaseGetTotalSequenceLength
-{
-    miopen::unit_tests::SeqTensorDescriptorParams tp;
-    size_t actual_sequence_length;
-
-    friend std::ostream& operator<<(std::ostream& os, const TestCaseGetTotalSequenceLength& tc)
-    {
-        os << "(";
-        os << "(" << tc.tp << "), ";
-        os << tc.actual_sequence_length;
-        os << ")";
-        return os;
-    }
-};
-
-struct TestGetMaxCountOfSequence : public ::testing::TestWithParam<TestCaseGetMaxCountOfSequence>
+struct TestTensorSequence : testing::TestWithParam<TestCase>
 {
     static auto GetTestCases()
     {
-        using TestCase = TestCaseGetMaxCountOfSequence;
-
         return std::vector{
             // clang-format off
-            TestCase{{miopenHalf, {2, 2, 2}}, 2},
-            TestCase{{miopenHalf, {2, 2, 2}, true}, 2},
-            TestCase{{miopenHalf, {2, 2, 2, 2}}, 2},
-            TestCase{{miopenHalf, {2, 2, 2, 2}, true}, 2},
+            TestCase{{miopenHalf, {2, 2, 2}}, 2, 4, 2},
+            TestCase{{miopenHalf, {2, 2, 2}, true}, 2, 4, 2},
+            TestCase{{miopenHalf, {2, 2, 2, 2}}, 2, 4, 2},
+            TestCase{{miopenHalf, {2, 2, 2, 2}, true}, 2, 4, 2},
 
-            TestCase{{miopenHalf, {2, 8, 2, 2}}, 2},
-            TestCase{{miopenHalf, {2, 8, 2, 2}, true}, 2},
-            TestCase{{miopenHalf, {2, 16, 8, 2, 2}}, 2},
-            TestCase{{miopenHalf, {2, 16, 8, 2, 2}, true}, 2},
+            TestCase{{miopenHalf, {2, 8, 2, 2}}, 8, 16, 2},
+            TestCase{{miopenHalf, {2, 8, 2, 2}, true}, 8, 16, 2},
+            TestCase{{miopenHalf, {2, 16, 8, 2, 2}}, 16, 32, 2},
+            TestCase{{miopenHalf, {2, 16, 8, 2, 2}, true}, 16, 32, 2},
             // clang-format on
         };
     }
@@ -145,84 +92,17 @@ struct TestGetMaxCountOfSequence : public ::testing::TestWithParam<TestCaseGetMa
     {
         const auto p  = GetParam();
         const auto td = p.tp.GetSeqTensorDescriptor();
+        ASSERT_EQ(td.GetTotalSequenceLen(), p.total_sequence_length);
+        ASSERT_EQ(td.GetMaxSequenceLength(), p.max_sequence_length);
         ASSERT_EQ(td.GetMaxCountOfSequences(), p.actual_count_of_sequence);
     }
 };
 
-struct TestGetMaxSequenceLength : public ::testing::TestWithParam<TestCaseGetMaxSequenceLength>
-{
-    static auto GetTestCases()
-    {
-        using TestCase = TestCaseGetMaxSequenceLength;
+using CPU_TestTensorSequence_FP16 = TestTensorSequence;
 
-        return std::vector{
-            // clang-format off
-            TestCase{{miopenHalf, {2, 2, 2}}, 2},
-            TestCase{{miopenHalf, {2, 2, 2}, true}, 2},
-            TestCase{{miopenHalf, {2, 2, 2, 2}}, 2},
-            TestCase{{miopenHalf, {2, 2, 2, 2}, true}, 2},
-
-            TestCase{{miopenHalf, {2, 8, 2, 2}}, 8},
-            TestCase{{miopenHalf, {2, 8, 2, 2}, true}, 8},
-            TestCase{{miopenHalf, {2, 16, 8, 2, 2}}, 16},
-            TestCase{{miopenHalf, {2, 16, 8, 2, 2}, true}, 16},
-            // clang-format on
-        };
-    }
-
-    void RunTest()
-    {
-        const auto p  = GetParam();
-        const auto td = p.tp.GetSeqTensorDescriptor();
-        ASSERT_EQ(td.GetMaxSequenceLength(), p.actual_sequence_length);
-    }
-};
-
-struct TestGetTotalSequenceLength : public ::testing::TestWithParam<TestCaseGetTotalSequenceLength>
-{
-    static auto GetTestCases()
-    {
-        using TestCase = TestCaseGetTotalSequenceLength;
-
-        return std::vector{
-            // clang-format off
-            TestCase{{miopenHalf, {2, 2, 2}}, 4},
-            TestCase{{miopenHalf, {2, 2, 2}, true}, 4},
-            TestCase{{miopenHalf, {2, 2, 2, 2}}, 4},
-            TestCase{{miopenHalf, {2, 2, 2, 2}, true}, 4},
-
-            TestCase{{miopenHalf, {2, 8, 2, 2}}, 16},
-            TestCase{{miopenHalf, {2, 8, 2, 2}, true}, 16},
-            TestCase{{miopenHalf, {2, 16, 8, 2, 2}}, 32},
-            TestCase{{miopenHalf, {2, 16, 8, 2, 2}, true}, 32},
-            // clang-format on
-        };
-    }
-
-    void RunTest()
-    {
-        const auto p  = GetParam();
-        const auto td = p.tp.GetSeqTensorDescriptor();
-        ASSERT_EQ(td.GetTotalSequenceLen(), p.actual_sequence_length);
-    }
-};
-
-using CPU_TestGetMaxCountOfSequence_FP16  = TestGetMaxCountOfSequence;
-using CPU_TestGetMaxSequenceLength_FP16   = TestGetMaxSequenceLength;
-using CPU_TestGetTotalSequenceLength_FP16 = TestGetTotalSequenceLength;
-
-TEST_P(CPU_TestGetMaxCountOfSequence_FP16, SeqTensorDescriptor) { this->RunTest(); };
-TEST_P(CPU_TestGetMaxSequenceLength_FP16, SeqTensorDescriptor) { this->RunTest(); };
-TEST_P(CPU_TestGetTotalSequenceLength_FP16, SeqTensorDescriptor) { this->RunTest(); };
+TEST_P(CPU_TestTensorSequence_FP16, SeqTensorDescriptor) { RunTest(); };
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         CPU_TestGetMaxCountOfSequence_FP16,
-                         testing::ValuesIn(TestGetMaxCountOfSequence::GetTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Full,
-                         CPU_TestGetMaxSequenceLength_FP16,
-                         testing::ValuesIn(TestGetMaxSequenceLength::GetTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Full,
-                         CPU_TestGetTotalSequenceLength_FP16,
-                         testing::ValuesIn(TestGetTotalSequenceLength::GetTestCases()));
+                         CPU_TestTensorSequence_FP16,
+                         testing::ValuesIn(TestTensorSequence::GetTestCases()));
+} // anonymous namespace
