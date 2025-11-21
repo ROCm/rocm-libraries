@@ -723,12 +723,18 @@ namespace rocRoller
 
                 if(targetDataType == IdxType)
                 {
-                    AssertFatal(std::is_trivially_copyable_v<FromType>, "FromType must be trivially copyable");
-                    AssertFatal(std::is_trivially_copyable_v<ToType>, "ToType must be trivially copyable");
+                    AssertFatal(std::is_trivially_copyable_v<FromType>,
+                                "FromType must be trivially copyable");
+                    AssertFatal(std::is_trivially_copyable_v<ToType>,
+                                "ToType must be trivially copyable");
 
-                    if constexpr(!CCommandArgumentValue<ToType> || sizeof(ToType) != sizeof(FromType))
+                    if constexpr(!CCommandArgumentValue<
+                                     ToType> || sizeof(ToType) != sizeof(FromType))
                     {
-                        Throw<FatalError>("Cannot reinterpret to ", friendlyTypeName<ToType>(), " from ", friendlyTypeName<FromType>());
+                        Throw<FatalError>("Cannot reinterpret to ",
+                                          friendlyTypeName<ToType>(),
+                                          " from ",
+                                          friendlyTypeName<FromType>());
                         return 0;
                     }
                     else
@@ -743,12 +749,15 @@ namespace rocRoller
             }
         }
 
-        inline CommandArgumentValue reinterpret(CommandArgumentValue const& value, DataType targetDataType)
+        inline CommandArgumentValue reinterpret(CommandArgumentValue const& value,
+                                                DataType                    targetDataType)
         {
-            return std::visit([targetDataType](auto const& val) -> CommandArgumentValue {
-                using FromType = std::decay_t<decltype(val)>;
-                return reinterpret<FromType, 0>(val, targetDataType);
-            }, value);
+            return std::visit(
+                [targetDataType](auto const& val) -> CommandArgumentValue {
+                    using FromType = std::decay_t<decltype(val)>;
+                    return reinterpret<FromType, 0>(val, targetDataType);
+                },
+                value);
         }
     }
 }

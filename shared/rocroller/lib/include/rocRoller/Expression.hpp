@@ -949,7 +949,8 @@ namespace rocRoller
          */
         template <CCommandArgumentValue FromType, int Idx = 0>
         CommandArgumentValue reinterpret(FromType const& value, DataType targetDataType);
-        CommandArgumentValue reinterpret(CommandArgumentValue const& value, DataType targetDataType);
+        CommandArgumentValue reinterpret(CommandArgumentValue const& value,
+                                         DataType                    targetDataType);
 
         /**
          * Splits an expression and returns its operands in a tuple.

@@ -221,7 +221,8 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
     SECTION("concatenate")
     {
         CHECK_THAT(simplify(concat({v}, {DataType::Int32})), IdenticalTo(v));
-        CHECK_THAT(simplify(concat({literal(1u), literal(0u)}, {DataType::UInt64})), IdenticalTo(literal(1ull, DataType::UInt64)));
+        CHECK_THAT(simplify(concat({literal(1u), literal(0u)}, {DataType::UInt64})),
+                   IdenticalTo(literal(1ull, DataType::UInt64)));
         CHECK_THAT(
             simplify(concat({bfe(DataType::UInt32, v3, 0, 32), bfe(DataType::UInt32, v3, 32, 32)},
                             {DataType::UInt64})),
@@ -985,7 +986,7 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
 
     SECTION("Combine into the first dword of 64 bit dst and fold to constant")
     {
-        auto expr = bfc(ones32, zero64, 0, 16, 8);
+        auto expr     = bfc(ones32, zero64, 0, 16, 8);
         auto expected = Expression::literal(0x0000000000ff0000ull, DataType::UInt64);
 
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
@@ -993,7 +994,7 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
 
     SECTION("Combine into the second dword of 64 bit dst and fold to constant")
     {
-        auto expr = bfc(ones32, zero64, 0, 48, 8);
+        auto expr     = bfc(ones32, zero64, 0, 48, 8);
         auto expected = Expression::literal(0x00ff000000000000ull, DataType::UInt64);
 
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
@@ -1001,7 +1002,7 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
 
     SECTION("Combine into the first and second dwords of 64 bit dst and fold to constant")
     {
-        auto expr = bfc(ones32, zero64, 0, 24, 16);
+        auto expr     = bfc(ones32, zero64, 0, 24, 16);
         auto expected = Expression::literal(0x000000ffff000000ull, DataType::UInt64);
 
         CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
@@ -1087,8 +1088,8 @@ TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]
 
     SECTION("Chain two BitfieldCombines into 64 bit dst and fold to constant")
     {
-        auto expr  = bfc(ones32, zero64, 0, 16, 8);
-        auto expr2 = bfc(ones32, expr, 0, 40, 8);
+        auto expr     = bfc(ones32, zero64, 0, 16, 8);
+        auto expr2    = bfc(ones32, expr, 0, 40, 8);
         auto expected = Expression::literal(0x0000ff0000ff0000ull, DataType::UInt64);
 
         CHECK_THAT(splitBitfieldCombine(expr2), IdenticalTo(expected));
@@ -1287,17 +1288,18 @@ TEST_CASE("SplitConcatenate ExpressionTransformation works",
 
     SECTION("Split uint64_t literal into two Raw32 operands")
     {
-        auto uint64Literal = literal(0x0123456789ABCDEFull, DataType::UInt64);
+        auto                       uint64Literal = literal(0x0123456789ABCDEFull, DataType::UInt64);
         std::vector<ExpressionPtr> operands{uint64Literal, v};
-        auto                       concatExpr = Concatenate{{operands}, {DataType::None, PointerType::Buffer}};
+        auto concatExpr = Concatenate{{operands}, {DataType::None, PointerType::Buffer}};
 
         Concatenate result = splitConcatenate(concatExpr);
 
         std::vector<ExpressionPtr> expectedOperands{
             literal(Raw32(0x89ABCDEF)), literal(Raw32(0x01234567)), v};
-        auto  expectedExpr = Concatenate{{expectedOperands}, {DataType::None, PointerType::Buffer}};
+        auto expectedExpr = Concatenate{{expectedOperands}, {DataType::None, PointerType::Buffer}};
 
-        CHECK_THAT(std::make_shared<rocRoller::Expression::Expression>(result), IdenticalTo(std::make_shared<rocRoller::Expression::Expression>(expectedExpr)));
+        CHECK_THAT(std::make_shared<rocRoller::Expression::Expression>(result),
+                   IdenticalTo(std::make_shared<rocRoller::Expression::Expression>(expectedExpr)));
     }
 
     SECTION("Multiple uint64_t literals are all split")
@@ -1306,16 +1308,18 @@ TEST_CASE("SplitConcatenate ExpressionTransformation works",
         auto uint64Literal2 = literal(0x00000000FFFFFFFFull, DataType::UInt64);
 
         std::vector<ExpressionPtr> operands{uint64Literal1, uint64Literal2};
-        auto                       concatExpr = Concatenate{{operands}, {DataType::None, PointerType::Buffer}};
+        auto concatExpr = Concatenate{{operands}, {DataType::None, PointerType::Buffer}};
 
         Concatenate result = splitConcatenate(concatExpr);
 
-        std::vector<ExpressionPtr> expectedOperands{
-            literal(Raw32(0x00000000)), literal(Raw32(0xFFFFFFFF)),
-            literal(Raw32(0xFFFFFFFF)), literal(Raw32(0x00000000))};
+        std::vector<ExpressionPtr> expectedOperands{literal(Raw32(0x00000000)),
+                                                    literal(Raw32(0xFFFFFFFF)),
+                                                    literal(Raw32(0xFFFFFFFF)),
+                                                    literal(Raw32(0x00000000))};
         auto expectedExpr = Concatenate{{expectedOperands}, {DataType::None, PointerType::Buffer}};
 
-        CHECK_THAT(std::make_shared<rocRoller::Expression::Expression>(result), IdenticalTo(std::make_shared<rocRoller::Expression::Expression>(expectedExpr)));
+        CHECK_THAT(std::make_shared<rocRoller::Expression::Expression>(result),
+                   IdenticalTo(std::make_shared<rocRoller::Expression::Expression>(expectedExpr)));
     }
 }
 

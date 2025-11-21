@@ -191,14 +191,16 @@ namespace rocRoller::Expression::EvaluateDetail
 
         if constexpr(IdxType == DataType::None || IdxType == DataType::Count)
         {
-            Throw<FatalError>("Unsupported reinterpretTruncate to type: ", toString(targetDataType));
+            Throw<FatalError>("Unsupported reinterpretTruncate to type: ",
+                              toString(targetDataType));
             return 0;
         }
         else
         {
             using ToType = typename EnumTypeInfo<IdxType>::Type;
 
-            AssertFatal(std::is_trivially_copyable_v<FromType>, "FromType must be trivially copyable");
+            AssertFatal(std::is_trivially_copyable_v<FromType>,
+                        "FromType must be trivially copyable");
             AssertFatal(std::is_trivially_copyable_v<ToType>, "ToType must be trivially copyable");
 
             if(targetDataType == IdxType)
@@ -210,21 +212,22 @@ namespace rocRoller::Expression::EvaluateDetail
                 }
                 else
                 {
-                    if constexpr (sizeof(ToType) == sizeof(FromType))
+                    if constexpr(sizeof(ToType) == sizeof(FromType))
                     {
                         return std::bit_cast<ToType>(value);
                     }
                     // Truncate
-                    else if constexpr (sizeof(ToType) < sizeof(FromType))
+                    else if constexpr(sizeof(ToType) < sizeof(FromType))
                     {
                         constexpr std::size_t N = sizeof(ToType);
 
                         // Source and destination as bytes
-                        const auto src_bytes = std::bit_cast<std::array<std::byte, sizeof(FromType)>>(value);
+                        const auto src_bytes
+                            = std::bit_cast<std::array<std::byte, sizeof(FromType)>>(value);
                         std::array<std::byte, sizeof(ToType)> dst_bytes{};
                         dst_bytes.fill(std::byte{0});
 
-                        if constexpr (std::endian::native == std::endian::little)
+                        if constexpr(std::endian::native == std::endian::little)
                         {
                             // Keep least-significant bytes: at low addresses.
                             std::copy_n(src_bytes.data(), N, dst_bytes.data());
@@ -232,15 +235,18 @@ namespace rocRoller::Expression::EvaluateDetail
                         else
                         {
                             // Big-endian: least-significant bytes live at high addresses.
-                            std::copy_n(src_bytes.data() + (sizeof(FromType) - N), N,
-                                        dst_bytes.data());
+                            std::copy_n(
+                                src_bytes.data() + (sizeof(FromType) - N), N, dst_bytes.data());
                         }
 
                         return std::bit_cast<ToType>(dst_bytes);
                     }
                     else
                     {
-                        Throw<FatalError>("Cannot truncate to wider type ", friendlyTypeName<ToType>(), " from ", friendlyTypeName<FromType>());
+                        Throw<FatalError>("Cannot truncate to wider type ",
+                                          friendlyTypeName<ToType>(),
+                                          " from ",
+                                          friendlyTypeName<FromType>());
                         return 0;
                     }
                 }
@@ -258,8 +264,7 @@ namespace rocRoller::Expression::EvaluateDetail
         BitFieldExtract expr;
 
         template <CCommandArgumentValue ARG>
-        requires(CIntegral<ARG>)
-        CommandArgumentValue operator()(ARG const& arg) const
+        requires(CIntegral<ARG>) CommandArgumentValue operator()(ARG const& arg) const
         {
             auto argBits = resultVariableType(arg).getElementSize() * 8u;
             AssertFatal(argBits >= expr.offset + expr.width,
@@ -296,8 +301,8 @@ namespace rocRoller::Expression::EvaluateDetail
 
             AssertFatal(expr.width <= DataTypeInfo::Get(expr.outputDataType).elementBits,
                         fmt::format("BitFieldExtract: width {} exceeds output type size {} bits",
-                        expr.width,
-                        DataTypeInfo::Get(expr.outputDataType).elementBits));
+                                    expr.width,
+                                    DataTypeInfo::Get(expr.outputDataType).elementBits));
 
             return reinterpretTruncate(static_cast<ARG>(result), expr.outputDataType);
         }

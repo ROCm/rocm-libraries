@@ -76,14 +76,14 @@ namespace rocRoller
             CommandArgumentValue operator()(BitfieldCombine const& expr)
             {
                 BitfieldCombine cpy = expr;
-                cpy.lhs = std::make_shared<Expression>(call(expr.lhs));
-                cpy.rhs = std::make_shared<Expression>(call(expr.rhs));
+                cpy.lhs             = std::make_shared<Expression>(call(expr.lhs));
+                cpy.rhs             = std::make_shared<Expression>(call(expr.rhs));
 
                 auto result = evaluate(lowerBitfieldCombine(std::make_shared<Expression>(cpy)));
 
                 auto resultType = resultVariableType(result);
-                auto cpyType = resultVariableType(cpy);
-                if (resultType != cpyType)
+                auto cpyType    = resultVariableType(cpy);
+                if(resultType != cpyType)
                     return reinterpret(result, cpyType.dataType);
 
                 return result;
