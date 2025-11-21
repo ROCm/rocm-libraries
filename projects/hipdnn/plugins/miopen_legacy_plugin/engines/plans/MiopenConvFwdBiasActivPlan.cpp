@@ -10,17 +10,10 @@
 // MIOpen's fusion API does not calculate the workspace size correctly
 #define WORKAROUND_LWPMIOPEN_1815 1
 
-// MIOpen skips ConvCKIgemmGrpFwdBiasActivFused for MIOPEN_FIND_MODE_FUSION=normal
-#define WORKAROUND_LWPMIOPEN_1882 1
-
 #if WORKAROUND_LWPMIOPEN_1815
 #include <algorithm>
 #include <array>
 #include <numeric>
-#endif
-
-#if WORKAROUND_LWPMIOPEN_1882
-#include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #endif
 
 namespace miopen_legacy_plugin
@@ -189,13 +182,6 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
             static_cast<miopenConvFwdAlgorithm_t>(-1))); // Algo is not used in MIOpen
 #endif
     }
-
-#if WORKAROUND_LWPMIOPEN_1882
-    const auto findMode = hipdnn_sdk::utilities::getEnv("MIOPEN_FIND_MODE");
-    const auto findModeFusion = hipdnn_sdk::utilities::getEnv("MIOPEN_FIND_MODE_FUSION");
-    std::cerr << "\nMIOPEN_FIND_MODE: " << findMode
-              << ", MIOPEN_FIND_MODE_FUSION: " << findModeFusion << "\n\n";
-#endif
 }
 
 size_t ConvFwdBiasActivPlan::getWorkspaceSize(
