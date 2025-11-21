@@ -7,18 +7,22 @@ import hipdnn_frontend as hipdnn
 def run_batch_norm_inference():
     """
     Demonstrates building and executing a batch normalization inference graph using hipdnn_frontend.
+    Uses exact test values from TestCpuFpReferenceBatchnormFp64::BatchnormFwdInferenceSanityValidationNchw
+    to verify Python bindings correctness.
     """
     
-    print("Creating batch normalization inference graph...")
+    print("=" * 70)
+    print("Batch Normalization Inference Test")
+    print("Using values from C++ test: BatchnormFwdInferenceSanityValidationNchw")
+    print("=" * 70)
     
-    # Define input dimensions
-    n, c, h, w = 16, 16, 16, 16  # Batch size, channels, height, width
-    print(f"Input dimensions: N={n}, C={c}, H={h}, W={w}")
+    # Define input dimensions matching the C++ test
+    n, c, h, w = 1, 1, 2, 2  # Batch size=1, channels=1, height=2, width=2
+    print(f"\nInput dimensions: N={n}, C={c}, H={h}, W={w}")
 
     # Create a handle for backend operations
     print("\nCreating hipdnn handle...")
     handle = hipdnn.Handle()
-    #print(f"Handle created: {handle}")
 
     # Create a graph
     graph = hipdnn.Graph()
@@ -83,7 +87,6 @@ def run_batch_norm_inference():
 
     # Create execution plans
     print("\nCreating execution plans...")
-    # Uses FALLBACK heuristic mode by default
     plan_result = graph.create_execution_plans()
     if plan_result.is_good():
         print("✓ Execution plans created successfully")
@@ -100,13 +103,6 @@ def run_batch_norm_inference():
         print(f"✗ Backend support check failed: {support_result.get_message()}")
         return
 
-    print(f"  Input tensor: shape={[n, c, h, w]}, uid={x.get_uid()}")
-    print(f"  Output tensor: uid={y.get_uid()}")
-    print(f"  Scale tensor: shape={[1, c, 1, 1]}, uid={scale.get_uid()}")
-    print(f"  Bias tensor: shape={[1, c, 1, 1]}, uid={bias.get_uid()}")
-    print(f"  Mean tensor: shape={[1, c, 1, 1]}, uid={mean.get_uid()}")
-    print(f"  Inv variance tensor: shape={[1, c, 1, 1]}, uid={inv_variance.get_uid()}")
-
     # Build plans
     print("\nBuilding execution plans...")
     build_plans_result = graph.build_plans()
@@ -116,33 +112,38 @@ def run_batch_norm_inference():
         print(f"✗ Failed to build plans: {build_plans_result.get_message()}")
         return
 
-    # Get workspace size
-    # print("\nQuerying workspace requirements...")
-    # workspace_result, workspace_size = graph.get_workspace_size()
-    # if workspace_result.is_good():
-    #     print(f"✓ Workspace size: {workspace_size} bytes")
-    # else:
-    #     print(f"✗ Failed to get workspace size: {workspace_result.get_message()}")
-    #     return
-
-    # Prepare input data
+    # Prepare test data matching the C++ test
     print("\n" + "="*50)
-    print("Preparing data for execution...")
+    print("Preparing Test Data (from C++ test)")
     print("="*50)
     
-    # Create host arrays with random data
-    x_data = np.random.randn(n, c, h, w).astype(np.float32)
-    scale_data = np.random.randn(1, c, 1, 1).astype(np.float32)
-    bias_data = np.random.randn(1, c, 1, 1).astype(np.float32)
-    mean_data = np.random.randn(1, c, 1, 1).astype(np.float32)
-    inv_variance_data = np.abs(np.random.randn(1, c, 1, 1).astype(np.float32)) + 0.1  # Ensure positive
+    # Input data: x = [1, 2, 3, 4]
+    x_data = np.array([[[[1.0, 2.0],
+                         [3.0, 4.0]]]], dtype=np.float32)
     
-    print(f"Created random input tensors")
-    print(f"  x shape: {x_data.shape}, dtype: {x_data.dtype}")
-    print(f"  scale shape: {scale_data.shape}, dtype: {scale_data.dtype}")
-    print(f"  bias shape: {bias_data.shape}, dtype: {bias_data.dtype}")
-    print(f"  mean shape: {mean_data.shape}, dtype: {mean_data.dtype}")
-    print(f"  inv_variance shape: {inv_variance_data.shape}, dtype: {inv_variance_data.dtype}")
+    # Scale = 2.0
+    scale_data = np.array([[[[2.0]]]], dtype=np.float32)
+    
+    # Bias = 0.5
+    bias_data = np.array([[[[0.5]]]], dtype=np.float32)
+    
+    # Mean = 2.5
+    mean_data = np.array([[[[2.5]]]], dtype=np.float32)
+    
+    # Inv variance = 0.8
+    inv_variance_data = np.array([[[[0.8]]]], dtype=np.float32)
+    
+    # Expected output from C++ test
+    expected_output = np.array([[[[-1.9, -0.3],
+                                   [1.29, 2.90]]]], dtype=np.float32)
+    
+    print(f"\nTest Values:")
+    print(f"  Input: {x_data.flatten()}")
+    print(f"  Scale: {scale_data.flatten()[0]}")
+    print(f"  Bias: {bias_data.flatten()[0]}")
+    print(f"  Mean: {mean_data.flatten()[0]}")
+    print(f"  Inv_variance: {inv_variance_data.flatten()[0]}")
+    print(f"\nExpected Output: {expected_output.flatten()}")
     
     # Allocate device memory
     print("\nAllocating device memory...")
@@ -164,13 +165,6 @@ def run_batch_norm_inference():
     inv_variance_buffer.copy_from_host(inv_variance_data.tobytes())
     print("✓ Data copied to device")
     
-    # Allocate workspace if needed
-    workspace_buffer = None
-    # if workspace_size > 0:
-    #     print(f"\nAllocating workspace of {workspace_size} bytes...")
-    #     workspace_buffer = hipdnn.DeviceBuffer(workspace_size)
-    #     print("✓ Workspace allocated")
-    
     # Create variant pack mapping tensor UIDs to device pointers
     print("\nPreparing variant pack...")
     variant_pack = {
@@ -189,7 +183,7 @@ def run_batch_norm_inference():
     print("Executing graph...")
     print("="*50)
     
-    workspace_ptr = workspace_buffer.ptr() if workspace_buffer else 0
+    workspace_ptr = 0  # No workspace needed for this test
     exec_result = graph.execute(handle, variant_pack, workspace_ptr)
     
     if exec_result.is_good():
@@ -204,26 +198,51 @@ def run_batch_norm_inference():
     y_data = np.frombuffer(y_bytes, dtype=np.float32).reshape(x_data.shape)
     print("✓ Results copied to host")
     
-    # Display some results
+    # Display and verify results
     print("\n" + "="*50)
-    print("Execution Results")
+    print("Test Results")
     print("="*50)
-    print(f"Output shape: {y_data.shape}")
-    print(f"Output dtype: {y_data.dtype}")
-    print(f"First 10 output values: {y_data.flat[:10]}")
-    print(f"Output min: {y_data.min():.6f}, max: {y_data.max():.6f}, mean: {y_data.mean():.6f}")
     
-    # Verify batch normalization formula (optional)
-    print("\nVerifying batch normalization formula (first element):")
-    expected = (x_data.flat[0] - mean_data.flat[0]) * inv_variance_data.flat[0] * scale_data.flat[0] + bias_data.flat[0]
-    actual = y_data.flat[0]
-    print(f"  Expected: {expected:.6f}")
-    print(f"  Actual:   {actual:.6f}")
-    print(f"  Difference: {abs(expected - actual):.9f}")
+    print(f"\nActual output: {y_data.flatten()}")
+    print(f"Expected output: {expected_output.flatten()}")
     
+    # Compute differences
+    differences = np.abs(y_data.flatten() - expected_output.flatten())
+    max_diff = np.max(differences)
+    
+    print(f"\nElement-wise comparison:")
+    print("-" * 50)
+    for i, (actual, expected, diff) in enumerate(zip(y_data.flatten(), 
+                                                     expected_output.flatten(), 
+                                                     differences)):
+        print(f"  Element[{i}]: Actual={actual:10.8f}, Expected={expected:10.8f}, Diff={diff:.9e}")
+    
+    # Check tolerance
+    tolerance = 1e-6
+    print(f"\nTolerance check (tolerance = {tolerance}):")
+    if max_diff < tolerance:
+        print(f"✓ TEST PASSED! Maximum difference ({max_diff:.9e}) is within tolerance")
+    else:
+        print(f"✗ TEST FAILED! Maximum difference ({max_diff:.9e}) exceeds tolerance")
+    
+    # Manual verification of batch norm formula for first element
     print("\n" + "="*50)
-    print("Batch normalization inference complete!")
+    print("Manual Formula Verification (first element)")
     print("="*50)
+    print("Formula: y = scale * (x - mean) * inv_variance + bias")
+    print(f"         y = {scale_data.flat[0]} * ({x_data.flat[0]} - {mean_data.flat[0]}) * {inv_variance_data.flat[0]} + {bias_data.flat[0]}")
+    
+    manual_result = scale_data.flat[0] * (x_data.flat[0] - mean_data.flat[0]) * inv_variance_data.flat[0] + bias_data.flat[0]
+    print(f"         y = {manual_result:.8f}")
+    print(f"Actual output[0]: {y_data.flat[0]:.8f}")
+    print(f"Difference: {abs(manual_result - y_data.flat[0]):.9e}")
+    
+    print("\n" + "="*70)
+    if max_diff < tolerance:
+        print("SUCCESS: Python bindings produce correct results!")
+    else:
+        print("FAILURE: Results do not match C++ test values")
+    print("="*70)
 
 if __name__ == "__main__":
     try:

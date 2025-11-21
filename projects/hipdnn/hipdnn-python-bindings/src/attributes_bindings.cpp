@@ -68,31 +68,108 @@ void attributes_bindings(nb::module_& m)
         .def("get_y", &graph::BatchnormInferenceAttributes::get_y);
 
     // ConvolutionDgradAttributes (using typedef)
-    nb::class_<graph::ConvDgradAttributes>(m, "ConvolutionDgradAttributes")
-        .def(nb::init<>())
-        .def("set_name", &graph::ConvDgradAttributes::set_name, nb::rv_policy::reference_internal)
-        .def("set_padding",
-             &graph::ConvDgradAttributes::set_padding,
-             nb::rv_policy::reference_internal)
-        .def("get_name", &graph::ConvDgradAttributes::get_name);
+    auto convDgradClass = nb::class_<graph::ConvDgradAttributes>(m, "ConvolutionDgradAttributes")
+                              .def(nb::init<>())
+                              .def(
+                                  "set_name",
+                                  [](graph::ConvDgradAttributes& self,
+                                     const std::string& name) -> graph::ConvDgradAttributes& {
+                                      return self.set_name(name);
+                                  },
+                                  nb::arg("name"),
+                                  nb::rv_policy::reference_internal)
+                              .def("set_padding",
+                                   &graph::ConvDgradAttributes::set_padding,
+                                   nb::rv_policy::reference_internal)
+                              .def("set_pre_padding",
+                                   static_cast<graph::ConvDgradAttributes& (
+                                       graph::ConvDgradAttributes::*)(const std::vector<int64_t>&)>(
+                                       &graph::ConvDgradAttributes::set_pre_padding),
+                                   nb::rv_policy::reference_internal)
+                              .def("set_post_padding",
+                                   static_cast<graph::ConvDgradAttributes& (
+                                       graph::ConvDgradAttributes::*)(const std::vector<int64_t>&)>(
+                                       &graph::ConvDgradAttributes::set_post_padding),
+                                   nb::rv_policy::reference_internal)
+                              .def("set_stride",
+                                   static_cast<graph::ConvDgradAttributes& (
+                                       graph::ConvDgradAttributes::*)(const std::vector<int64_t>&)>(
+                                       &graph::ConvDgradAttributes::set_stride),
+                                   nb::rv_policy::reference_internal)
+                              .def("set_dilation",
+                                   static_cast<graph::ConvDgradAttributes& (
+                                       graph::ConvDgradAttributes::*)(const std::vector<int64_t>&)>(
+                                       &graph::ConvDgradAttributes::set_dilation),
+                                   nb::rv_policy::reference_internal)
+                              .def("get_name", &graph::ConvDgradAttributes::get_name);
+    // Add alias for shorter name
+    m.attr("ConvDgradAttributes") = convDgradClass;
 
     // ConvolutionFpropAttributes (using typedef)
-    nb::class_<graph::ConvFpropAttributes>(m, "ConvolutionFpropAttributes")
-        .def(nb::init<>())
-        .def("set_name", &graph::ConvFpropAttributes::set_name, nb::rv_policy::reference_internal)
-        .def("set_padding",
-             &graph::ConvFpropAttributes::set_padding,
-             nb::rv_policy::reference_internal)
-        .def("get_name", &graph::ConvFpropAttributes::get_name);
+    auto convFpropClass = nb::class_<graph::ConvFpropAttributes>(m, "ConvolutionFpropAttributes")
+                              .def(nb::init<>())
+                              .def(
+                                  "set_name",
+                                  [](graph::ConvFpropAttributes& self,
+                                     const std::string& name) -> graph::ConvFpropAttributes& {
+                                      return self.set_name(name);
+                                  },
+                                  nb::arg("name"),
+                                  nb::rv_policy::reference_internal)
+                              .def("set_padding",
+                                   &graph::ConvFpropAttributes::set_padding,
+                                   nb::rv_policy::reference_internal)
+                              .def("set_stride",
+                                   static_cast<graph::ConvFpropAttributes& (
+                                       graph::ConvFpropAttributes::*)(const std::vector<int64_t>&)>(
+                                       &graph::ConvFpropAttributes::set_stride),
+                                   nb::rv_policy::reference_internal)
+                              .def("set_dilation",
+                                   static_cast<graph::ConvFpropAttributes& (
+                                       graph::ConvFpropAttributes::*)(const std::vector<int64_t>&)>(
+                                       &graph::ConvFpropAttributes::set_dilation),
+                                   nb::rv_policy::reference_internal)
+                              .def("get_name", &graph::ConvFpropAttributes::get_name);
+    // Add alias for shorter name
+    m.attr("ConvFpropAttributes") = convFpropClass;
 
     // ConvolutionWgradAttributes (using typedef)
-    nb::class_<graph::ConvWgradAttributes>(m, "ConvolutionWgradAttributes")
-        .def(nb::init<>())
-        .def("set_name", &graph::ConvWgradAttributes::set_name, nb::rv_policy::reference_internal)
-        .def("set_padding",
-             &graph::ConvWgradAttributes::set_padding,
-             nb::rv_policy::reference_internal)
-        .def("get_name", &graph::ConvWgradAttributes::get_name);
+    auto convWgradClass = nb::class_<graph::ConvWgradAttributes>(m, "ConvolutionWgradAttributes")
+                              .def(nb::init<>())
+                              .def(
+                                  "set_name",
+                                  [](graph::ConvWgradAttributes& self,
+                                     const std::string& name) -> graph::ConvWgradAttributes& {
+                                      return self.set_name(name);
+                                  },
+                                  nb::arg("name"),
+                                  nb::rv_policy::reference_internal)
+                              .def("set_padding",
+                                   &graph::ConvWgradAttributes::set_padding,
+                                   nb::rv_policy::reference_internal)
+                              .def("set_pre_padding",
+                                   static_cast<graph::ConvWgradAttributes& (
+                                       graph::ConvWgradAttributes::*)(const std::vector<int64_t>&)>(
+                                       &graph::ConvWgradAttributes::set_pre_padding),
+                                   nb::rv_policy::reference_internal)
+                              .def("set_post_padding",
+                                   static_cast<graph::ConvWgradAttributes& (
+                                       graph::ConvWgradAttributes::*)(const std::vector<int64_t>&)>(
+                                       &graph::ConvWgradAttributes::set_post_padding),
+                                   nb::rv_policy::reference_internal)
+                              .def("set_stride",
+                                   static_cast<graph::ConvWgradAttributes& (
+                                       graph::ConvWgradAttributes::*)(const std::vector<int64_t>&)>(
+                                       &graph::ConvWgradAttributes::set_stride),
+                                   nb::rv_policy::reference_internal)
+                              .def("set_dilation",
+                                   static_cast<graph::ConvWgradAttributes& (
+                                       graph::ConvWgradAttributes::*)(const std::vector<int64_t>&)>(
+                                       &graph::ConvWgradAttributes::set_dilation),
+                                   nb::rv_policy::reference_internal)
+                              .def("get_name", &graph::ConvWgradAttributes::get_name);
+    // Add alias for shorter name
+    m.attr("ConvWgradAttributes") = convWgradClass;
 
     // PointwiseAttributes
     nb::class_<graph::PointwiseAttributes>(m, "PointwiseAttributes")
