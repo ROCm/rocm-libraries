@@ -2,7 +2,7 @@
 
 Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hiptensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).
 
-## (Unreleased) hipTensor 2.2.0 for ROCm 7.2.0
+## hipTensor 2.2.0 for ROCm 7.2.0
 
 ### Added
 
@@ -12,8 +12,8 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Added `simple_contraction_plan_cache` to demonstrate plan cache usages.
 * Added `plan_cache_test` to test the plan cache across various tensor ranks.
 * Added C API headers to enable compatibility with C programs.
-* Added cmake function to allow projects querying about architecture support.
-* Added option to configure memory layout for tests and benchmarks.
+* Added a CMake function to allow projects to query architecture support.
+* Added an option to configure the memory layout for tests and benchmarks.
 
 ### Changed
 
@@ -29,7 +29,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 
 ### Added
 
-* Added large tensor lengths in benchmark yaml files.
+* Added large tensor lengths in benchmark YAML files.
 * Added a new "-l" option to tests for redirecting logs to a file.
 
 ### Changed
