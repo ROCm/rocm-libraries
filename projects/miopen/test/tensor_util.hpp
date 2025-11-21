@@ -271,19 +271,17 @@ void print_tensor(const tensor<T>& tensor_val,
 template <typename T>
 size_t getCacheSizeLimit(const std::string& deviceName)
 {
-    size_t mb = 0;
-    if(miopen::StartsWith(deviceName, "gfx90a") || miopen::StartsWith(deviceName, "gfx908"))
-        mb = 16; // twice the available L2 (8MB)
-    else if(miopen::StartsWith(deviceName, "gfx803"))
+    size_t mb = 4; // default: 2x L2 size (2MB)
+    if(miopen::StartsWith(deviceName, "gfx803"))
         mb = 4; // twice the available L2 (2MB)
     else if(miopen::StartsWith(deviceName, "gfx900") || miopen::StartsWith(deviceName, "gfx906"))
         mb = 8; // twice the available L2 (4MB)
+    else if(miopen::StartsWith(deviceName, "gfx90a") || miopen::StartsWith(deviceName, "gfx908"))
+        mb = 16; // twice the available L2 (8MB)
     else if(miopen::StartsWith(deviceName, "gfx942"))
         mb = 256; // L3 size (256MB)
     else if(miopen::StartsWith(deviceName, "gfx103"))
         mb = 128; // L3 size (128MB)
-    else
-        mb = 4; // default: twice the available L2 (2MB)
 
     mb = (mb * 1024ul * 1024ul); // convert to MiB
     return (mb / sizeof(T));     // returning number of elements of type T
