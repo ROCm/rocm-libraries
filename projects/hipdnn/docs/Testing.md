@@ -8,12 +8,9 @@ Prior to running tests, follow the [Quick Start Guide](./Building.md#quick-start
 
 Afterwards, proceed to run the tests:
 ```bash
-cmake -GNinja .. 
+cmake -GNinja ..
 
-# Run all tests with CTest (recommended)
-ninja check_ctest
-
-# Alternatively, run with GTest
+# Run all tests
 ninja check
 
 # Run specific test categories
@@ -22,7 +19,7 @@ ninja integration-check # Integration tests only
 
 # Run with Address Sanitizer
 cmake -GNinja -DBUILD_ADDRESS_SANITIZER=ON ..
-ninja check_ctest
+ninja check
 ```
 
 ## Testing Documentation

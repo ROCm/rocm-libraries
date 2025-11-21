@@ -33,7 +33,7 @@ The following table lists all operations currently supported by the MIOpen Legac
 > **Fused Operations:** The Batchnorm Inference + Activation Backward operation is a fused graph pattern that combines three operations: (1) Batchnorm Inference, (2) Activation Backward (DReLU), and (3) Batchnorm Backward.
 
 > [!NOTE]
-> **Sparse Support:** All operations currently work with dense tensors only. Sparse tensor support is planned for future releases.
+> **Sparse Support:** All operations currently work with dense tensors only.
 
 ## Legend
 
