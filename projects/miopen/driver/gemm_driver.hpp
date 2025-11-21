@@ -182,7 +182,7 @@ int GemmDriver<T>::AddCmdLineArgs()
     inflags.AddInputFlag("transA", 'u', "0", "Transpose A matrix (Default=0)", "int");
     inflags.AddInputFlag("transB", 'v', "0", "Transpose B matrix (Default=0)", "int");
     inflags.AddInputFlag("iter", 'i', "10", "Number of Iterations (Default=10)", "int");
-    inflags.AddInputFlag("verify", 'V', "1", "Verify Each Layer (Default=1)", "int");
+    inflags.AddInputFlag("verify", 'V', "0", "Verify Each Layer (Default=0)", "int");
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
     inflags.AddInputFlag("parallel", 'p', "0", "Run CPU part in parallel (Default=0)", "int");
 
