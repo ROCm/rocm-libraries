@@ -59,7 +59,6 @@ protected:
         yConvTensorAttr->set_data_type(dataType);
         yConvTensorAttr->set_dim(convTestCase.yDims);
         yConvTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
-        yConvTensorAttr->set_is_virtual(true);
 
         std::shared_ptr<graph::TensorAttributes> yBiasTensorAttr;
         if(doBias)
@@ -79,7 +78,6 @@ protected:
             yBiasTensorAttr->set_data_type(dataType);
             yBiasTensorAttr->set_dim(convTestCase.yDims);
             yBiasTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
-            yBiasTensorAttr->set_is_virtual(true);
         }
 
         graph::PointwiseAttributes activAttrs;
