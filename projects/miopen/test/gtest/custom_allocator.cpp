@@ -20,6 +20,8 @@ struct GPU_Allocator_FP32 : public ::testing::TestWithParam<int>
 
 constexpr int GPU_Allocator_FP32::size;
 
+}
+
 TEST_P(GPU_Allocator_FP32, CustomAllocator)
 {
     h.SetAllocator(
@@ -88,5 +90,3 @@ TEST_P(GPU_Allocator_FP32, Deallocator2)
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Allocator_FP32, testing::ValuesIn({0}));
-
-} // namespace
