@@ -20,7 +20,7 @@ struct GPU_Allocator_FP32 : public ::testing::TestWithParam<int>
 
 constexpr int GPU_Allocator_FP32::size;
 
-}
+} // namespace
 
 TEST_P(GPU_Allocator_FP32, CustomAllocator)
 {
