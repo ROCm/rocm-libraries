@@ -68,6 +68,8 @@ struct GPU_BnDerive_FP32 : public ::testing::TestWithParam<BNDeriveTestCase>
     miopenTensorDescriptor_t derivedTensor{};
 };
 
+} // namespace
+
 TEST_P(GPU_BnDerive_FP32, Test)
 {
     const auto& test_case = this->GetParam();
@@ -98,5 +100,3 @@ TEST_P(GPU_BnDerive_FP32, Test)
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnDerive_FP32, testing::ValuesIn(GetBNDeriveTestCases()));
-
-} // namespace
