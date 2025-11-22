@@ -35,7 +35,9 @@
 #include "CustomMatchers.hpp"
 #include "TestContext.hpp"
 
+#include <common/CommonGraphs.hpp>
 #include <common/Utilities.hpp>
+
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CommandSolution_fwd.hpp>
@@ -529,6 +531,93 @@ TEST_CASE("AddStreamK BasicStreamKLoad", "[streamk][kernel-graph][gpu]")
         {
             std::vector<char> assembledKernel = context->instructions()->assemble();
             CHECK(assembledKernel.size() > 0);
+        }
+    }
+}
+
+TEST_CASE("AddStreamK with unroll K", "[streamk][kernel-graph]")
+{
+    using namespace rocRoller;
+    using namespace KernelGraph;
+    using namespace ControlGraph;
+    using namespace CoordinateGraph;
+
+    auto context = TestContext::ForTestDevice();
+    auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
+
+    auto unrollK = GENERATE(1u, 2u, 4u);
+    auto mode = GENERATE(StreamKMode::Standard, StreamKMode::TwoTile, StreamKMode::TwoTileDPFirst);
+
+    example.setTileSize(128, 256, 8);
+    example.setMFMA(32, 32, 2, 1);
+    example.setUseLDS(false, false, false);
+    example.setPrefetch(false, 0, 0, false);
+    example.setUnroll(0, 0, unrollK);
+    example.setStreamK(mode);
+
+    auto numWGs     = example.getFlattenedWorkgroupSize();
+    auto numWGsExpr = std::make_shared<Expression::Expression>(numWGs);
+
+    auto applyGraphTransforms
+        = [&numWGsExpr, &context](CommandParametersPtr                 params,
+                                  rocRoller::KernelGraph::KernelGraph& kgraph) {
+              std::vector<GraphTransformPtr> transforms;
+              transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
+              transforms.push_back(std::make_shared<OrderMemory>(false));
+              transforms.push_back(std::make_shared<UpdateParameters>(params));
+              transforms.push_back(std::make_shared<AddLDS>(params, context.get()));
+              transforms.push_back(std::make_shared<LowerLinear>(context.get()));
+              transforms.push_back(std::make_shared<LowerTile>(params, context.get()));
+              transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
+              transforms.push_back(std::make_shared<Simplify>());
+              transforms.push_back(std::make_shared<FuseExpressions>());
+              transforms.push_back(std::make_shared<AddStreamK>(
+                  context.get(), params, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
+              transforms.push_back(std::make_shared<ConnectWorkgroups>(context.get()));
+              for(auto& t : transforms)
+                  kgraph = kgraph.transform(t);
+          };
+
+    auto kgraph = example.getKernelGraph();
+    auto params = example.getCommandParameters();
+
+    applyGraphTransforms(params, kgraph);
+
+    auto loopPredicate = [&](int tag) {
+        auto maybeForLoop = kgraph.control.get<ForLoopOp>(tag);
+        if(maybeForLoop)
+            return maybeForLoop->loopName == rocRoller::KLOOP;
+        return false;
+    };
+
+    // In two-tile mode, we should have two K loops: one for the SK
+    // tiles and one for the DP tiles.
+    auto expectForKLoops = mode == StreamKMode::Standard ? 1 : 2;
+
+    SECTION("Pre unroll")
+    {
+        auto forLoopTags = kgraph.control.findElements(loopPredicate).to<std::vector>();
+
+        CHECK(forLoopTags.size() == expectForKLoops);
+        for(auto& tag : forLoopTags)
+        {
+            auto [lhs, rhs] = getForLoopIncrement(kgraph, tag);
+            auto increment  = getUnsignedInt(evaluate(rhs));
+            CHECK(increment == 1);
+        }
+    }
+
+    kgraph = kgraph.transform(std::make_shared<UnrollLoops>(params, context.get()));
+
+    SECTION("Post unroll")
+    {
+        auto forLoopTags = kgraph.control.findElements(loopPredicate).to<std::vector>();
+
+        for(auto& tag : forLoopTags)
+        {
+            auto [lhs, rhs] = getForLoopIncrement(kgraph, tag);
+            auto increment  = getUnsignedInt(evaluate(rhs));
+            CHECK(increment == unrollK);
         }
     }
 }
