@@ -393,13 +393,14 @@ double estimate_l2_hit(const problem_t& problem,
       std::max(math::safe_ceil_div(effective_cus, hardware.NUM_XCD), static_cast<size_t>(1));
 
   // Initial guess for the L2 tile dimensions (a tile of workgroups).
-  size_t l2_tile_n = std::min(static_cast<size_t>(config.workgroup_mapping), workgroups_n);
+  size_t WGM = std::ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD));
+  size_t l2_tile_n = std::min(static_cast<size_t>(WGM), workgroups_n);
   size_t l2_tile_m = math::safe_ceil_div(cu_per_xcd, l2_tile_n);
 
   // Handle wrap-around case: if the tile is taller than the grid, wrap it to be wider.
   if (l2_tile_m > workgroups_m) {
     size_t num_wraps = (l2_tile_m / workgroups_m);
-    l2_tile_n += (num_wraps * config.workgroup_mapping);
+    l2_tile_n += (num_wraps * WGM);
     l2_tile_m = workgroups_m;
   }
 
@@ -466,17 +467,18 @@ double estimate_mall_hit(const problem_t& problem,
   const size_t workgroups_n = math::safe_ceil_div(problem.size.n, config.mt.n);
 
   if (num_active_cus == 0) throw std::runtime_error("Number of Active CUs was 0");
-
+  
   // --- Initial Tile Sizing based on Concurrency ---
   // Use ceiling division for a more accurate initial guess.
+  size_t WGM = std::ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD));
   size_t mall_tile_m =
-      math::safe_ceil_div(num_active_cus, static_cast<size_t>(config.workgroup_mapping));
-  size_t mall_tile_n = std::min(static_cast<size_t>(config.workgroup_mapping), workgroups_n);
+      math::safe_ceil_div(num_active_cus, static_cast<size_t>(WGM));
+  size_t mall_tile_n = std::min(static_cast<size_t>(WGM), workgroups_n);
 
   // Handle wrap-around case if the tile is taller than the grid.
   if (mall_tile_m > workgroups_m) {
     size_t num_wraps = mall_tile_m / workgroups_m;
-    mall_tile_n += (num_wraps * config.workgroup_mapping);
+    mall_tile_n += (num_wraps * WGM);
     mall_tile_m = workgroups_m;
   }
 
@@ -671,15 +673,16 @@ double compute_memory_latency(const problem_t& problem,
 
   // 9) enforce whole‐problem minimum loads when we can fit M/N in the CUs.
   // Calculate the tile of workgroups that can run concurrently (logic from estimate_mall_hit).
+  size_t WGM = std::ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD));
   size_t grid_m = math::safe_ceil_div(problem.size.m, MT_M);
   size_t grid_n = math::safe_ceil_div(problem.size.n, MT_N);
   size_t mall_m =
-      math::safe_ceil_div(num_active_cus, static_cast<size_t>(config.workgroup_mapping));
-  size_t mall_n = std::min(static_cast<size_t>(config.workgroup_mapping), grid_n);
+      math::safe_ceil_div(num_active_cus, static_cast<size_t>(WGM));
+  size_t mall_n = std::min(static_cast<size_t>(WGM), grid_n);
   // Handle wrap-around case
   if (mall_m > grid_m) {
     size_t num_wraps = (mall_m / grid_m);
-    mall_n += (num_wraps * config.workgroup_mapping);
+    mall_n += (num_wraps * WGM);
     mall_m = grid_m;
   }
   // Clamp tile dimensions
@@ -1003,7 +1006,7 @@ double compute_total_latency(const problem_t& problem,
   }
 
   // 1-1) config.workgroup_mapping
-  auto WGM = std::max(config.workgroup_mapping, 1);  // WGM can't be less than one.
+  // auto WGM = std::max(config.workgroup_mapping, 1);  // WGM can't be less than one.
 
   // 1-2) Find CU occupancy
   auto [num_wgs, num_active_cus, numWaves, splitting_factor] =

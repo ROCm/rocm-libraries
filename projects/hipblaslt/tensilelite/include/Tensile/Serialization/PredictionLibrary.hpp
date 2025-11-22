@@ -102,7 +102,7 @@ namespace TensileLite
                                     solution->sizeMapping.depthU
                                 },
                                 .mi = origami_mi,
-                                .occupancy = static_cast<size_t>(solution->sizeMapping.CUOccupancy),
+                                .occupancy = solution->sizeMapping.CUOccupancy,
                                 .workgroup_mapping = solution->sizeMapping.workGroupMapping,
                                 .cache_hints_a = solution->sizeMapping.nonTemporalA,
                                 .cache_hints_b = solution->sizeMapping.nonTemporalB,

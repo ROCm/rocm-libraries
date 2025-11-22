@@ -33,12 +33,12 @@
 int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
                           const RocblasltContractionProblem& prob)
 {
-    const origami::hardware_t analaytical_hardware = origami::hardware_t::get_hardware_for_device(0);
+    const origami::hardware_t analytical_hardware = origami::hardware_t::get_hardware_for_device(0);
 
     const origami::grid_selection_t DEFAULT_DYNAMIC_MODE = origami::grid_selection_t::k_split_aware;
 
     //setting max_cu's
-    size_t max_cus = analaytical_hardware.N_CU;
+    size_t max_cus = analytical_hardware.N_CU;
 
     size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeA).elementBits;
     size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeB).elementBits;
@@ -57,20 +57,20 @@ int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
             static_cast<size_t>(gemm->params->workgroupTile.n), 
             static_cast<size_t>(gemm->params->workgroupTile.k)
         },
-        .occupancy = static_cast<size_t>(gemm->occupancy),
+        .occupancy = gemm->occupancy,
         .workspace_size = prob.workspaceSize,
         .workspace_size_per_elem_c = elementSizeAcc,
     };
 
     auto reduction_type = origami::streamk::select_reduction(origami_problem,
-                                                            analaytical_hardware,
+                                                            analytical_hardware,
                                                             origami_config,
                                                             DEFAULT_DYNAMIC_MODE);
 
     origami_config.reduction_strategy = reduction_type;
 
     auto result = origami::streamk::select_grid_size(origami_problem,
-                                                    analaytical_hardware,
+                                                    analytical_hardware,
                                                     origami_config,
                                                     DEFAULT_DYNAMIC_MODE,
                                                     max_cus);

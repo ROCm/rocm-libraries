@@ -179,11 +179,10 @@ namespace TensileLite
                 .b_mx_block_size = 0,   // MX Data types come from rocroller
             };
 
-            auto prediction_result = origami::select_topk_configs(
+            auto prediction_result = origami::select_ranked_configs(
                 origami_problem,
                 *(pAMDGPU->analyticalHardware),
-                origami_config_list,
-                numSolutions
+                origami_config_list
             );
 
             for(const auto& r : prediction_result)
@@ -197,6 +196,10 @@ namespace TensileLite
                        && (*solution->problemPredicate)(problem))
                     {
                         rv.emplace_back(solution);
+                        if(rv.size() == numSolutions)
+                        {
+                            break;
+                        }
                     }
                 }
             }

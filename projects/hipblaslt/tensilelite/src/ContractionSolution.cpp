@@ -3227,7 +3227,7 @@ namespace TensileLite
                 .mi                        = {static_cast<size_t>(sizeMapping.matrixInstruction[0]),
                                               static_cast<size_t>(sizeMapping.matrixInstruction[1]),
                                               static_cast<size_t>(sizeMapping.matrixInstruction[2])},
-                .occupancy                 = static_cast<size_t>(sizeMapping.CUOccupancy),
+                .occupancy                 = std::max(sizeMapping.CUOccupancy, static_cast<int>(1)),
                 .workgroup_mapping         = sizeMapping.workGroupMapping,
                 .workspace_size            = problem.workspaceSize(),
                 .workspace_size_per_elem_c = sizeMapping.workspaceSizePerElemC,

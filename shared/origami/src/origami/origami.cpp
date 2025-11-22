@@ -72,7 +72,7 @@ void pick_best_config_by_arithmetic_intensity(std::vector<prediction_result_t>& 
   // 3) Return the tile with the highest arithmetic intensity
 }
 
-prediction_result_t select_config(const problem_t& problem,
+std::vector<prediction_result_t> select_ranked_configs(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const std::vector<config_t>& configs) {
   // Use rank_configs to get configurations with latencies ranked by performance
@@ -169,7 +169,7 @@ prediction_result_t select_config(const problem_t& problem,
                        });
     }
   }
-  return results[0];
+  return results;
 }
 
 /**
@@ -438,18 +438,13 @@ prediction_result_t select_config_mnk(size_t M,
   return select_config(problem, hardware, configs);
 }
 
-std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
-                                                     const hardware_t& hardware,
-                                                     const std::vector<config_t>& configs,
-                                                     int topk) {
-  auto ranked_configs = rank_configs(problem, hardware, configs);
+prediction_result_t select_config(const problem_t& problem,
+                                  const hardware_t& hardware,
+                                  const std::vector<config_t>& configs) {
+  auto ranked_configs = select_ranked_configs(problem, hardware, configs);
 
-  // Return only the top K configurations
-  std::vector<prediction_result_t> topk_configs;
-  size_t count = topk < 0 ? ranked_configs.size() : std::min(static_cast<size_t>(topk), ranked_configs.size());
-  topk_configs.reserve(count);
-  for (size_t i = 0; i < count; ++i) { topk_configs.push_back(ranked_configs[i]); }
-  return topk_configs;
+  // Return the top configuration
+  return ranked_configs[0];
 }
 
 double compute_perf_gflops(const hardware_t& hardware,
