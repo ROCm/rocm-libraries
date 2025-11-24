@@ -372,9 +372,9 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
            "Ndiv4.\n";
 
     Variable half_N{"half_N", "const unsigned int"};
-    Variable idist1D{"idist1D", "const unsigned int"};
-    Variable odist1D{"odist1D", "const unsigned int"};
-    Variable higherFFTLengths{"higherFFTLengths", "unsigned int"};
+    Variable stride_in1{"stride_in1", "const unsigned int"};
+    Variable stride_out1{"stride_out1", "const unsigned int"};
+    Variable length1{"length1", "unsigned int"};
     Variable nbatch{"nbatch", "unsigned int"};
     Variable input{"input", "scalar_type", true, true};
     Variable idist{"idist", "const unsigned int"};
@@ -388,10 +388,10 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     func.arguments.append(half_N);
     if(specs.dim > 1)
     {
-        func.arguments.append(idist1D);
-        func.arguments.append(odist1D);
+        func.arguments.append(stride_in1);
+        func.arguments.append(stride_out1);
     }
-    func.arguments.append(higherFFTLengths);
+    func.arguments.append(length1);
     func.arguments.append(nbatch);
     func.arguments.append(input);
     func.arguments.append(idist);
@@ -407,7 +407,7 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     Variable idx_p{"idx_p", "const auto"};
     Variable idx_q{"idx_q", "const auto"};
     Variable idx_batch{"idx_batch", "const unsigned int"};
-    Variable idx_batch1D{"idx_batch1D", "const unsigned int"};
+    Variable idx_length1{"idx_length1", "const unsigned int"};
 
     func.body += Declaration{idx_p, global_idx % half_N};
     func.body += Declaration{idx_q, half_N - idx_p};
@@ -425,16 +425,12 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     guard.body += Declaration(output_offset, idx_batch * odist);
     if(specs.dim > 1)
     {
-        guard.body += AddAssign(input_offset, idx_batch1D * idist1D);
-        guard.body += AddAssign(output_offset, idx_batch1D * odist1D);
+        guard.body += AddAssign(input_offset, idx_length1 * stride_in1);
+        guard.body += AddAssign(output_offset, idx_length1 * stride_out1);
     }
 
-    func.body += CommentLines{
-        "this kernel treats all rows as batched 1D (it does not tolerate differing",
-        "strides between higher FFT dimensions), but user-provided batch is tracked",
-        "separately"};
-    func.body += Declaration{idx_batch1D, global_idx % higherFFTLengths};
-    func.body += Declaration{idx_batch, global_idx / higherFFTLengths};
+    func.body += Declaration{idx_length1, global_idx % length1};
+    func.body += Declaration{idx_batch, global_idx / length1};
 
     func.body += CommentLines{"any excess threads will be past the end of batch"};
     func.body += If{idx_batch >= nbatch, {Return{}}};
