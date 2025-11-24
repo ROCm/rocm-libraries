@@ -41,7 +41,6 @@ hipdnn-python-bindings
 - Python 3.8 or higher
 - ROCm/HIP runtime and libraries
 - hipDNN frontend library (built and installed)
-- NumPy (for running samples)
 
 ## Getting Started
 
@@ -61,9 +60,6 @@ source hipdnn_env/bin/activate
 
 # Upgrade pip
 pip install --upgrade pip
-
-# Install required Python packages
-pip install numpy
 ```
 
 ### 2. Building and Installing the Python Bindings
@@ -74,56 +70,36 @@ The Python bindings use scikit-build to handle the CMake build process automatic
 # Navigate to the hipdnn-python-bindings directory
 cd hipdnn-python-bindings
 
-# Install the package with verbose output to see build progress
-pip install -v .
-```
-
-If you encounter issues with finding the hipDNN library, you may need to set environment variables:
-
-```bash
 export CMAKE_PREFIX_PATH=/path/to/hipdnn/install:$CMAKE_PREFIX_PATH
 pip install -v .
+
+or
+
+pip install -v . --config-settings=cmake.define.CMAKE_PREFIX_PATH=/path/to/hipdnn/install
 ```
 
 ### 3. Development Installation
 
-For development work where you want changes to Python files to take effect immediately:
+For development work where you want to rebuild and apply the changes you have two options:
 
-#### Editable Installation (Recommended for Development)
+#### Editable Installation
 ```bash
-# Install in editable/development mode
+# from within the hipdnn-python-bindings directory
 pip install -e .
 ```
 
-This creates a link to your development directory so changes to Python files are immediately available without reinstalling.
+#### Uninstall and Reinstall Flow
+Instead of doing an editable install, if you prefer a full reinstall after C++ changes:
 
-#### Reinstalling After C++ Changes
 ```bash
-# If you make changes to C++ bindings, rebuild and reinstall:
+# from within the hipdnn-python-bindings directory
 pip uninstall hipdnn-frontend -y
 pip install -v .
-```
-
-#### Quick Rebuild for Testing
-```bash
-# For rapid testing during development:
-pip uninstall hipdnn-frontend -y && pip install -e .
 ```
 
 ### 4. Running the Sample Applications
 
 The repository includes several sample applications demonstrating different operations:
-
-#### Batch Normalization Inference
-```bash
-cd python/hipdnn_frontend/samples
-python bn_inference.py
-```
-
-This sample demonstrates:
-- Building a batch normalization inference graph
-- Executing the graph with test data
-- Verifying results against expected values
 
 #### Convolution Forward Propagation
 ```bash
@@ -152,100 +128,3 @@ python conv_wgrad.py
 This sample demonstrates:
 - Computing weight gradients (dw) given output gradients (dy) and input (x)
 - Used for updating convolution filter weights during training
-
-## Usage Example
-
-Here's a simple example of using the bindings in your own Python code:
-
-```python
-import numpy as np
-import hipdnn_frontend as hipdnn
-
-# Create a handle for backend operations
-handle = hipdnn.Handle()
-
-# Create a computation graph
-graph = hipdnn.Graph()
-graph.set_name("my_graph")
-graph.set_io_data_type(hipdnn.DataType.FLOAT)
-
-# Create tensors
-input_tensor = hipdnn.Tensor.create([1, 3, 224, 224], hipdnn.DataType.FLOAT)
-input_tensor.set_name("input")
-
-# Build and execute your operations...
-# See the samples directory for complete examples
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **ImportError: No module named 'hipdnn_frontend_python'**
-   - Ensure the build completed successfully
-   - Check that the module is in your PYTHONPATH or installed via pip
-
-2. **Runtime errors about missing libraries**
-   - Ensure ROCm/HIP libraries are in your LD_LIBRARY_PATH:
-     ```bash
-     export LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH
-     ```
-
-3. **CUDA/HIP device not found**
-   - Verify your GPU is properly configured:
-     ```bash
-     rocm-smi  # Check if ROCm recognizes your GPU
-     ```
-
-4. **Memory allocation errors**
-   - Ensure you have sufficient GPU memory available
-   - Check that workspace allocation is properly handled (fixed in latest version)
-
-## Development
-
-### Running Tests
-
-To run the sample tests as a validation suite:
-
-```bash
-# From the samples directory
-python -m pytest . -v  # Requires pytest to be installed
-```
-
-### Debugging
-
-For debugging Python bindings issues:
-
-```bash
-# Enable verbose output from hipDNN
-export HIPDNN_LOG_LEVEL=5
-
-# Run with Python debugger
-python -m pdb conv_fprop.py
-```
-
-## Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-When adding new bindings:
-- Update the appropriate binding file in `src/`
-- Add corresponding Python tests/samples
-- Update this README if adding new functionality
-
-## License
-
-This project is licensed under the MIT License. See the LICENSE file for more details.
-
-## Support
-
-For issues and questions:
-- Open an issue on the GitHub repository
-- Check existing issues for solutions to common problems
-- Provide detailed error messages and system configuration when reporting issues

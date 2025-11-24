@@ -32,6 +32,9 @@ classifiers = [
     "Topic :: Scientific/Engineering",
     "Topic :: Software Development :: Libraries",
 ]
+dependencies = [
+    "numpy>=1.19.0",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -55,8 +58,9 @@ wheel.packages = ["python/hipdnn_frontend"]
 
 [tool.scikit-build.cmake.define]
 # Pass any additional CMake definitions if needed
-CMAKE_PREFIX_PATH = "/home/AMD/addickin/rocm-libraries/projects/hipdnn/install"
-CMAKE_CXX_COMPILER="/opt/rocm/llvm/bin/clang++"
+CMAKE_PREFIX_PATH = "${CMAKE_PREFIX_PATH}"
+CMAKE_CXX_COMPILER = "/opt/rocm/llvm/bin/clang++"
+
 
 hip_DIR = "${hip_DIR}"
 hipdnn_frontend_DIR = "${hipdnn_frontend_DIR}"
