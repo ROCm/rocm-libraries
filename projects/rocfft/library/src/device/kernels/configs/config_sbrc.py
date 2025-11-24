@@ -19,6 +19,7 @@
 # THE SOFTWARE.
 
 from kernels.configs import config_lds
+from kernels.configs import config_arch
 from types import SimpleNamespace as NS
 
 # for SBRC, if direct_to_from_reg is True, we do store-from-reg, but will not do load-to-reg

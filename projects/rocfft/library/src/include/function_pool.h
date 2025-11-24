@@ -24,6 +24,7 @@
 #define FUNCTION_POOL_H
 
 #include "../../../shared/arithmetic.h"
+#include "../../../shared/device_properties.h"
 #include "../../../shared/rocfft_complex.h"
 #include "../device/kernels/common.h"
 #include "function_map_key.h"
@@ -38,7 +39,8 @@ inline std::string PrintMissingKernelInfoBase(const FMKeyBase& key)
     msg << "Kernel not found: \n"
         << "\tlength: " << key.lengths[0] << "," << key.lengths[1] << "\n"
         << "\tprecision: " << key.precision << "\n"
-        << "\tscheme: " << PrintScheme(key.scheme) << "\n";
+        << "\tscheme: " << PrintScheme(key.scheme) << "\n"
+        << "\tGCN Arch Name: " << key.gcn_arch_name << "\n";
     return msg.str();
 }
 
@@ -398,6 +400,9 @@ static void insert_default_entry(const FMKey&     def_key,
     FMKey def_key_with_lds          = def_key;
     def_key_with_lds.lds_size_bytes = lds_size_bytes;
 
+    if(def_key_with_lds.gcn_arch_name == generic_gcn_arch_name)
+        def_key_with_lds.gcn_arch_name = get_curr_gcn_arch_name();
+
     // simple_key means the same thing as def_key, but we just remove kernel-config
     // so we don't need to know the exact config when we're lookin' for the default kernel
     FMKey simple_key{def_key_with_lds};
@@ -418,6 +423,9 @@ static void insert_default_entry(const PPFMKey&   def_key,
 {
     PPFMKey def_key_with_lds        = def_key;
     def_key_with_lds.lds_size_bytes = lds_size_bytes;
+
+    if(def_key_with_lds.gcn_arch_name == generic_gcn_arch_name)
+        def_key_with_lds.gcn_arch_name = get_curr_gcn_arch_name();
 
     PPFMKey simple_key(def_key_with_lds);
 

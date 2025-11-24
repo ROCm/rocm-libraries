@@ -19,6 +19,7 @@
 # THE SOFTWARE.
 
 from kernels.configs import config_lds
+from kernels.configs import config_arch
 from types import SimpleNamespace as NS
 
 # Note: Default half_lds is True and default direct_to_from_reg is True as well.

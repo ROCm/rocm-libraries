@@ -40,6 +40,7 @@ import kernels.configs.config_sbcc as config_sbcc
 import kernels.configs.config_sbcr as config_sbcr
 import kernels.configs.config_2d_single as config_2d_single
 import kernels.configs.config_pp_3d as config_pp_3d
+import kernels.configs.config_arch as config_arch
 
 from pathlib import Path
 from types import SimpleNamespace as NS
@@ -98,32 +99,48 @@ def get_kernel_key(kernel):
 
 
 def merge_kernel_list(kernels, all_precisions):
-    """Merge precision list with kernel list. Check for duplicated kernel and invalid precision entries."""
+    """Merge precision and architecture lists with kernel list. 
+    Check for duplicated kernel and invalid precision/arch entries."""
     r, s = list(), set()
+    all_archs = [member.value for member in config_arch.supported_arch]
+
     for kernel in kernels:
         if hasattr(kernel, 'precision'):
             precisions = kernel.precision
         else:
             precisions = all_precisions
 
-        for p in precisions:
-            if p not in all_precisions:
-                print("Error: invalid precision in kernel configuration: \n" +
-                      str(kernel))
+        if hasattr(kernel, 'gcn_arch_name'):
+            archs = [member.value for member in kernel.gcn_arch_name]
+        else:
+            archs = [config_arch.supported_arch.GFX_GENERIC.value]
+        for a in archs:
+            if a not in all_archs:
+                print(
+                    "Error: invalid architecture in kernel configuration: \n" +
+                    str(kernel))
                 sys.exit(1)
+            for p in precisions:
+                if p not in all_precisions:
+                    print(
+                        "Error: invalid precision in kernel configuration: \n"
+                        + str(kernel))
+                    sys.exit(1)
 
-            kernel_cpy = copy.copy(kernel)
-            kernel_cpy.precision = p
+                kernel_cpy = copy.copy(kernel)
+                kernel_cpy.precision = p
+                kernel_cpy.gcn_arch_name = a
 
-            key = (get_kernel_key(kernel_cpy), kernel_cpy.precision)
+                key = (get_kernel_key(kernel_cpy), kernel_cpy.precision,
+                       kernel_cpy.gcn_arch_name)
 
-            if key not in s:
-                s.add(key)
-                r.append(kernel_cpy)
-            else:
-                print("Error: duplicated entry in kernel configuration: " +
-                      str(kernel))
-                sys.exit(1)
+                if key not in s:
+                    s.add(key)
+                    r.append(kernel_cpy)
+                else:
+                    print("Error: duplicated entry in kernel configuration: " +
+                          str(kernel))
+                    sys.exit(1)
     return r
 
 
@@ -264,16 +281,17 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
     curr_func, curr_file = 0, 0
     while curr_func < len(functions):
         f = functions[curr_func]
-        length, precision, scheme, transpose = f.meta.length, f.meta.precision, f.meta.scheme, f.meta.transpose
+        length, precision, arch, scheme, transpose = f.meta.length, f.meta.precision, f.meta.gcn_arch_name, f.meta.scheme, f.meta.transpose
 
         if isinstance(length, (int, str)):
             length = [length, 0]
         piece_contents[curr_file] += Assign(var_kernel, FFTKernel(f))
-        key = Call(
-            name='FMKey',
-            arguments=ArgumentList(length[0], length[1], precisions[precision],
-                                   scheme, transpose or 'NONE',
-                                   'kernel.get_kernel_config()')).inline()
+        key = Call(name='FMKey',
+                   arguments=ArgumentList(length[0], length[1],
+                                          precisions[precision], scheme,
+                                          transpose or 'NONE',
+                                          'kernel.get_kernel_config()',
+                                          ''.join(['"', arch, '"']))).inline()
         piece_contents[curr_file] += function_map.insert(
             key, var_kernel, 'std::get<0>(def_keys)',
             'std::get<0>(function_maps)', f.meta.lds_size_bytes)
@@ -335,7 +353,9 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
                            length[0], length[1], length[2],
                            precisions[precision], scheme,
                            'pp_kernel_1.get_kernel_config()',
-                           'pp_kernel_2.get_kernel_config()')).inline()
+                           'pp_kernel_2.get_kernel_config()',
+                           ''.join(['"', f_pp_1.meta.gcn_arch_name,
+                                    '"']))).inline()
             piece_contents[curr_file] += function_map.insert_pp(
                 key, var_pp_kernel_1, var_pp_kernel_2, 'std::get<1>(def_keys)',
                 'std::get<1>(function_maps)', f_pp_1.meta.lds_size_bytes)
@@ -505,6 +525,7 @@ def generate_kernel_functions(precisions_type_dict, kernels, launchers_json):
             pp_off_dim = launcher.pp_off_dim
             sbrc_transpose_type = launcher.sbrc_transpose_type
             precision = precisions_type_dict[launcher.precision_type]
+            gcn_arch_name = launcher.gcn_arch_name
             runtime_compile = kernel.runtime_compile
             use_3steps_large_twd = getattr(kernel, 'use_3steps_large_twd',
                                            None)
@@ -523,6 +544,7 @@ def generate_kernel_functions(precisions_type_dict, kernels, launchers_json):
                                  length=length,
                                  params=params,
                                  precision=precision,
+                                 gcn_arch_name=gcn_arch_name,
                                  runtime_compile=runtime_compile,
                                  scheme=scheme,
                                  workgroup_size=workgroup_size,
@@ -589,7 +611,9 @@ def generate_kernels(precisions_dict, kernels, stockham_gen):
                                            for f in k.factors[0]]) + " ")
                 proc.stdin.write(','.join([str(f) for f in k.factors[1]]))
 
-                proc.stdin.write(f' {str(precisions_dict[k.precision])}' + " ")
+                proc.stdin.write(f' {str(precisions_dict[k.precision])}')
+
+                proc.stdin.write(f' {k.gcn_arch_name}' + " ")
 
                 proc.stdin.write(','.join(
                     [str(f) for f in k.threads_per_transform]))
@@ -597,6 +621,8 @@ def generate_kernels(precisions_dict, kernels, stockham_gen):
                 proc.stdin.write(','.join([str(f) for f in k.factors]))
 
                 proc.stdin.write(f' {precisions_dict[k.precision]}')
+
+                proc.stdin.write(f' {k.gcn_arch_name}')
 
                 # 1D kernels might not, and need to default to 'uwide'
                 threads_per_transform = getattr(

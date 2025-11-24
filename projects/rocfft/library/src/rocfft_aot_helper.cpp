@@ -246,6 +246,7 @@ void build_stockham_function_pool(CompileQueue& queue)
         StockhamGeneratorSpecs specs{factors,
                                      {},
                                      static_cast<unsigned int>(precision),
+                                     get_curr_gcn_arch_name(),
                                      static_cast<unsigned int>(i.second.workgroup_size),
                                      PrintScheme(scheme)};
         specs.threads_per_transform = i.second.threads_per_transform[0];
@@ -664,6 +665,7 @@ void build_solution_kernels(CompileQueue& queue)
                 StockhamGeneratorSpecs specs{factors,
                                              {},
                                              static_cast<unsigned int>(precision),
+                                             get_curr_gcn_arch_name(),
                                              static_cast<unsigned int>(config.workgroup_size),
                                              PrintScheme(scheme)};
                 specs.threads_per_transform = config.threads_per_transform[0];

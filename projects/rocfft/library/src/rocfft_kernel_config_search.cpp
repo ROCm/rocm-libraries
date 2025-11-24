@@ -31,6 +31,7 @@
 
 #include "../../shared/CLI11.hpp"
 #include "../../shared/arithmetic.h"
+#include "../../shared/device_properties.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/hip_object_wrapper.h"
 #include "device/generator/stockham_gen.h"
@@ -160,6 +161,7 @@ std::string test_kernel_src(const std::string&               kernel_name,
     StockhamGeneratorSpecs specs{factorization,
                                  {},
                                  static_cast<unsigned int>(rocfft_precision_single),
+                                 get_curr_gcn_arch_name(),
                                  wgs,
                                  PrintScheme(compute_scheme)};
 

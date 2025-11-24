@@ -19,6 +19,7 @@
 # THE SOFTWARE.
 
 from kernels.configs import config_lds
+from kernels.configs import config_arch
 from types import SimpleNamespace as NS
 
 # Note: Default direct_to_from_reg is True

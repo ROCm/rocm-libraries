@@ -18,26 +18,22 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from kernels.configs import config_lds
-from kernels.configs import config_arch
-from types import SimpleNamespace as NS
+from enum import Enum
 
-# NB:
-# Technically, we could have SBCR kernels the same amount as SBCC.
-#
-# sbcr_kernels = copy.deepcopy(sbcc_kernels)
-# for k in sbcr_kernels:
-#     k.scheme = 'CS_KERNEL_STOCKHAM_BLOCK_CR'
-#
 
-# for SBCR, if direct_to_from_reg is True, we do load-to-reg, but will not do store-from-reg
-#           And since sbcr is dir-to-reg BUT NOT dir-from-reg, the global store part requires full LDS
-#           So, we can't satifly half_lds in SBCR !
-
-# yapf: disable
-sbcr_kernels = [
-    NS(length=56,  factors=[7, 8], direct_to_from_reg=False),
-    NS(length=100, factors=[10, 10], workgroup_size=100),
-    NS(length=200, factors=[8, 5, 5]),
-    NS(length=336, factors=[6, 7, 8])
-]
+class supported_arch(Enum):
+    GFX_GENERIC = "gfx_generic"
+    GFX_803 = "gfx803"
+    GFX_900 = "gfx900"
+    GFX_906 = "gfx906"
+    GFX_908 = "gfx908"
+    GFX_90A = "gfx90a"
+    GFX_942 = "gfx942"
+    GFX_950 = "gfx950"
+    GFX_1030 = "gfx1030"
+    GFX_1100 = "gfx1100"
+    GFX_1101 = "gfx1101"
+    GFX_1102 = "gfx1102"
+    GFX_1151 = "gfx1151"
+    GFX_1200 = "gfx1200"
+    GFX_1201 = "gfx1201"

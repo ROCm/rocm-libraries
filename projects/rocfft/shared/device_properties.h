@@ -26,6 +26,10 @@
 #include <stdexcept>
 #include <string>
 
+// Generic GCN arch name for configuration entries that
+// do not report a specific name in kernel_generator.py
+static const std::string generic_gcn_arch_name("gfx_generic");
+
 // get device properties
 static hipDeviceProp_t get_curr_device_prop()
 {
@@ -39,6 +43,12 @@ static hipDeviceProp_t get_curr_device_prop()
                                  + std::to_string(deviceId));
 
     return prop;
+}
+
+// get device GCN arch name
+static std::string get_curr_gcn_arch_name()
+{
+    return get_curr_device_prop().gcnArchName;
 }
 
 // check that the given grid/block dims will fit into the limits in
