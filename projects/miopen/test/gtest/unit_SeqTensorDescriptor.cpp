@@ -100,7 +100,7 @@ struct TestTensorSequence : testing::TestWithParam<TestCase>
 
 using CPU_TestTensorSequence_FP16 = TestTensorSequence;
 
-TEST_P(CPU_TestTensorSequence_FP16, SeqTensorDescriptor) { RunTest(); };
+TEST_P(CPU_TestTensorSequence_FP16, SeqTensorDescriptor) { this->RunTest(); };
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          CPU_TestTensorSequence_FP16,
