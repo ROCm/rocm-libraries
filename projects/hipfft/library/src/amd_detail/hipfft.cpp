@@ -2226,7 +2226,14 @@ static hipfftResult hipfftXtExecDescriptorBase(hipfftHandle  plan,
 
         // FIXME: if the direction is forward and the transform is complex/complex, can we take a
         // CUFFT_XT_FORMAT_INPLACE_SHUFFLED?
-        
+
+        if(inplace)
+        {
+            // FIXME: if batch=1, then toggle between HIPFFT_XT_FORMAT_INPLACE and
+            // HIPFFT_XT_FORMAT_INPLACE_SHUFFLE .
+
+            // FIXME: what happens if batch > 1?
+        }
         
         return ret == rocfft_status_success ? HIPFFT_SUCCESS : HIPFFT_EXEC_FAILED;
     }
