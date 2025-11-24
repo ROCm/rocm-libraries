@@ -45,7 +45,6 @@
 #include <fstream>
 #include <ios>
 #include <mutex>
-#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <thread>

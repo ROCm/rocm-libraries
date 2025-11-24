@@ -905,7 +905,7 @@ bool ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC::IsApplicable(
 
     const auto& target = ctx.GetStream().GetTargetProperties();
     if(target.isXnackEnabled())
-        return false; // NOLINT (readability-simplify-boolean-expr)
+        return false;
 
     if(0 ==
        igemm_split_batch_size(ProblemInterpreter::GetInputHeightHi(problem),

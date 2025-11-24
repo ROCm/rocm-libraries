@@ -176,7 +176,8 @@ struct SolverBaseNonTunable : SolverInterfaceNonTunable<Context, Problem>
     InvokerFactory GetInvokerFactory(const Context& ctx, const Problem& problem) const
     {
         const auto solution = this->GetSolution(ctx, problem);
-        return solution.invoker_factory.value(); // NOLINT (bugprone-unchecked-optional-access)
+        // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
+        return solution.invoker_factory.value();
     }
 };
 

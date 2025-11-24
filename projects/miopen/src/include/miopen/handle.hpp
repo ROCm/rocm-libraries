@@ -159,7 +159,7 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     void AddProgram(Program prog, const fs::path& program_name, const std::string& params) const;
 
     void Finish() const;
-    void Flush() const; // TODO checkme
+    void Flush() const;
 
     std::size_t GetLocalMemorySize() const;
     std::size_t GetGlobalMemorySize() const;

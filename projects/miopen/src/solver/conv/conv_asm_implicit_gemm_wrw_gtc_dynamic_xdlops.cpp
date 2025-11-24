@@ -865,7 +865,7 @@ bool ConvAsmImplicitGemmGTCDynamicWrwXdlops::IsApplicable(const ExecutionContext
 
     const auto& target = ctx.GetStream().GetTargetProperties();
     if(target.isXnackEnabled())
-        return false; // NOLINT (readability-simplify-boolean-expr)
+        return false;
 
     bool is_valid;
     std::tie(is_valid, std::ignore, std::ignore, std::ignore, std::ignore) =

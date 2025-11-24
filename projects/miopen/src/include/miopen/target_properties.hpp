@@ -74,7 +74,7 @@ class TargetProperties
         bool isDisabled() const
         {
             CheckInit();
-            return !reported && enabled;
+            return !(reported && enabled);
         }
 
         void Init(const std::string& raw_name, const std::string& dev_name)
@@ -134,9 +134,6 @@ public:
     const std::string& DbId() const { return dbId; }
 
     virtual bool isXnackEnabled() const { return xnack.isEnabled(); }
-
-    // bool Sramecc() const { return sramecc.isEnabled(); }
-    // bool SrameccReported() const { return sramecc.isReported(); }
 
     static std::size_t GetMaxWaveScratchSize() { return MaxWaveScratchSize; }
     static std::size_t GetMaxLocalMemorySize() { return MaxLocalMemorySize; }

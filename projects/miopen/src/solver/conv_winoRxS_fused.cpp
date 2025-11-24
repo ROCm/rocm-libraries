@@ -34,7 +34,6 @@
 #include <miopen/fusion/solvers.hpp>
 #include <miopen/fusion/utils.hpp>
 
-#include <optional>
 #include <tuple>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1)

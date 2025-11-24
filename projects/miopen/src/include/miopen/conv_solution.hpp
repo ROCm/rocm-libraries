@@ -31,8 +31,8 @@
 #include <miopen/kernel_info.hpp>
 #include <miopen/invoker.hpp>
 
-#include <ostream>
 #include <optional>
+#include <ostream>
 #include <string>
 #include <vector>
 
