@@ -253,12 +253,16 @@ int main()
                                      + std::to_string(hipfft_rt));
     }
 
+
+    std::cout << "inoutdesc->subFormat: " << inoutdesc->subFormat << "\n";
     
     // Execute the plan
     hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, direction);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftXtExecDescriptor failed.");
 
+    std::cout << "inoutdesc->subFormat: " << inoutdesc->subFormat << "\n";
+    
     std::cout << "Distributed output data on the GPUs:\n";
     for(size_t idx = 0; idx < ngpus; ++idx)
     {
@@ -302,6 +306,8 @@ int main()
         std::cout << "\n";
     }
 
+
+    
     // Move result to the host
     hipfft_rt = hipfftXtMemcpy(plan,
                                reinterpret_cast<void*>(cinput.data()),
