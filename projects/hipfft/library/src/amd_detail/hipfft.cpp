@@ -410,7 +410,7 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                                      size_t*                    workSize,
                                      bool                       re_calc_strides_in_desc)
 {
-    // magic static to handle rocfft setup/cleanup
+    // Magic static to handle rocfft setup/cleanup
     struct rocfft_initializer
     {
         rocfft_initializer()
@@ -675,7 +675,7 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
     }
     else
     {
-        // no caller-specified strides - compute default strides
+        // No caller-specified strides - compute default strides
         size_t iDist = 1;
         size_t oDist = 1;
         for(size_t i = 0; i < plan->inLength.size(); ++i)
@@ -689,13 +689,12 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         plan->oDist = oDist;
     }
 
-    // problem dimensions and strides are known, set up the bricks
-    // for single-proc multi-GPU
+    // Problem dimensions and strides are known, set up the bricks for single-proc multi-GPU
     if(plan->singleProcMultiDevice)
         set_io_bricks(
             plan->inLength, plan->outLength, plan->batch, plan->inBricks, plan->outBricks);
 
-    // create fields for the bricks
+    // Create fields for the bricks
     if(!plan->inBricks.empty())
     {
         rocfft_field inField = nullptr;
@@ -727,6 +726,7 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
 
         (void)rocfft_field_destroy(inField);
     }
+    
     if(!plan->outBricks.empty())
     {
         rocfft_field outField = nullptr;
@@ -773,7 +773,7 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         }
     }
 
-    // set comm handle on the plans
+    // Set comm handle on the plans
     if(plan->comm_type != rocfft_comm_none)
     {
         for(auto rocfft_desc : {ip_forward_desc, op_forward_desc, ip_inverse_desc, op_inverse_desc})
@@ -782,10 +782,9 @@ hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
         }
     }
 
-    // count the number of plans that got created - it's possible to
-    // have parameters that are valid for out-place but not for
-    // in-place, so some of these rocfft_plan_creates could
-    // legitimately fail.
+    // Count the number of plans that got created - it's possible to have parameters that are valid
+    // for out-place but not for in-place, so some of these rocfft_plan_creates could legitimately
+    // fail.
     unsigned int plans_created = 0;
     for(auto t : iotype.transform_types())
     {
@@ -1903,17 +1902,24 @@ static size_t hipDataType_bytes(hipDataType t, size_t numElems)
     return hipDataType_bits(t) * numElems / 8;
 }
 
-struct hipFFTXtState
-{
-    bool inplace_transformed = false;
-};
-
-hipfftResult hipfftXtMalloc(hipfftHandle plan, hipLibXtDesc** desc, hipfftXtSubFormat format)
+hipfftResult hipfftXtMalloc(hipfftHandle plan, hipLibXtDesc** libxtdesc, hipfftXtSubFormat format)
 try
 {
-    if(!plan || !desc)
+    if(!plan || !libxtdesc)
         return HIPFFT_INVALID_VALUE;
 
+    if(plan->batch == 1)
+    {
+        if(plan->type.is_real_to_complex() && format != HIPFFT_XT_FORMAT_INPLACE)
+        {
+            return HIPFFT_INVALID_PLAN;
+        }
+        if(plan->type.is_complex_to_real() && format != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
+        {
+            return HIPFFT_INVALID_PLAN;
+        }
+    }
+    
     auto lib_desc = std::make_unique<hipLibXtDesc>();
     memset(lib_desc.get(), 0, sizeof(hipLibXtDesc));
 
@@ -1925,11 +1931,13 @@ try
     auto xt_desc = std::make_unique<hipXtDesc>();
     memset(xt_desc.get(), 0, sizeof(hipXtDesc));
     xt_desc->version = 0;
-    xt_desc-> hipXtState = std::make_unique<hipFFTXtState>();
 
     std::vector<hipfft_brick>* bricks           = nullptr;
     size_t                     bits_per_element = 0;
 
+
+            
+    
     switch(format)
     {
     case HIPFFT_XT_FORMAT_INPUT:
@@ -1964,7 +1972,7 @@ try
     }
 
     lib_desc->descriptor = xt_desc.release();
-    *desc                = lib_desc.release();
+    *libxtdesc           = lib_desc.release();
     return HIPFFT_SUCCESS;
 }
 catch(...)
@@ -2009,8 +2017,7 @@ try
     if(!plan || !dest || !src)
         return HIPFFT_INVALID_VALUE;
 
-    // get pointer into buf, at the index pointed to by lower
-    // assuming lengths are strided by stride
+    // get pointer into buf, at the index pointed to by lower assuming lengths are strided by stride
     auto offset_buffer = [](void*                      buf,
                             hipDataType                dtype,
                             const std::vector<size_t>& lower,
@@ -2160,19 +2167,20 @@ catch(...)
     return handle_exception();
 }
 
-hipfftResult hipfftXtFree(hipLibXtDesc* desc)
+hipfftResult hipfftXtFree(hipLibXtDesc* libxtdesc)
 try
 {
-    if(desc && desc->descriptor)
+    if(libxtdesc && libxtdesc->descriptor)
     {
-        for(size_t i = 0; i < static_cast<size_t>(desc->descriptor->nGPUs); ++i)
+        for(size_t i = 0; i < static_cast<size_t>(libxtdesc->descriptor->nGPUs); ++i)
         {
-            rocfft_scoped_device dev(desc->descriptor->GPUs[i]);
-            (void)hipFree(desc->descriptor->data[i]);
+            rocfft_scoped_device dev(libxtdesc->descriptor->GPUs[i]);
+            (void)hipFree(libxtdesc->descriptor->data[i]);
         }
-        delete desc->descriptor;
+        delete libxtdesc->descriptor;
     }
-    delete desc;
+    delete libxtdesc;
+    libxtdesc = nullptr;
     return HIPFFT_SUCCESS;
 }
 catch(...)
@@ -2180,140 +2188,98 @@ catch(...)
     return handle_exception();
 }
 
-static hipfftResult hipfftXtExecDescriptorBase(const rocfft_plan&           rplan,
-                                               const rocfft_execution_info& rinfo,
+static hipfftResult hipfftXtExecDescriptorBase(hipfftHandle  plan,
                                                hipLibXtDesc*                input,
-                                               hipLibXtDesc*                output)
+                                               hipLibXtDesc*                output,
+                                               int           direction)
 {
-    if(!rplan)
-        return HIPFFT_EXEC_FAILED;
-    if(!input || !output)
-        return HIPFFT_EXEC_FAILED;
+    try
+    {
+        if(!plan)
+            return HIPFFT_INVALID_PLAN;
+        if(!input || !output)
+            return HIPFFT_EXEC_FAILED;
+        const bool inplace = input == output;
+        if(plan->batch == 1)
+        {
+            if(plan->type.is_real_to_complex() || plan->type.is_complex_to_real())
+            {
+                if(!inplace)
+                {
+                    return HIPFFT_EXEC_FAILED;
+                }
+            }
+        }
+        
+        if(inplace)
+        {
+            // FIXME: pass null for output if in-place.
+        }
 
-    const auto ret
-        = rocfft_execute(rplan, input->descriptor->data, output->descriptor->data, rinfo);
-    return ret == rocfft_status_success ? HIPFFT_SUCCESS : HIPFFT_EXEC_FAILED;
+        // FIXME: handle 1D case.
+        
+        const auto rplan = get_exec_plan(plan, inplace, direction);
+        const auto ret
+            = rocfft_execute(rplan, input->descriptor->data, output->descriptor->data, plan->info);
+
+        // FIXME: if in-place, change the enum for the descriptor format.
+
+        // FIXME: if the direction is forward and the transform is complex/complex, can we take a
+        // CUFFT_XT_FORMAT_INPLACE_SHUFFLED?
+        
+        
+        return ret == rocfft_status_success ? HIPFFT_SUCCESS : HIPFFT_EXEC_FAILED;
+    }
+    catch(...)
+    {
+        return handle_exception();
+    }
 }
 
 hipfftResult hipfftXtExecDescriptorC2C(hipfftHandle  plan,
                                        hipLibXtDesc* input,
                                        hipLibXtDesc* output,
                                        int           direction)
-try
 {
-    if(!plan)
-        return HIPFFT_INVALID_PLAN;
-
-    const bool inplace = input == output;
-    const auto rplan   = get_exec_plan(plan, inplace, direction);
-
-    return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftXtExecDescriptorBase(plan, input, output, direction);
 }
 
 hipfftResult hipfftXtExecDescriptorR2C(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
-try
 {
-    if(!plan)
-        return HIPFFT_INVALID_PLAN;
-
-    const bool inplace = input == output;
-    const auto rplan   = get_exec_plan(plan, inplace, HIPFFT_FORWARD);
-
-    return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftXtExecDescriptorBase(plan, input, output, HIPFFT_FORWARD);
 }
 
 hipfftResult hipfftXtExecDescriptorC2R(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
-try
 {
-    if(!plan)
-        return HIPFFT_INVALID_PLAN;
-
-    const bool inplace = input == output;
-    const auto rplan   = get_exec_plan(plan, inplace, HIPFFT_BACKWARD);
-
-    return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftXtExecDescriptorBase(plan, input, output, HIPFFT_BACKWARD);
 }
 
 hipfftResult hipfftXtExecDescriptorZ2Z(hipfftHandle  plan,
                                        hipLibXtDesc* input,
                                        hipLibXtDesc* output,
                                        int           direction)
-try
 {
-    if(!plan)
-        return HIPFFT_INVALID_PLAN;
-
-    const bool inplace = input == output;
-    const auto rplan   = get_exec_plan(plan, inplace, direction);
-
-    return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftXtExecDescriptorBase(plan, input, output, direction);
 }
 
 hipfftResult hipfftXtExecDescriptorD2Z(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
-try
 {
-    if(!plan)
-        return HIPFFT_INVALID_PLAN;
-
-    const bool inplace = input == output;
-    const auto rplan   = get_exec_plan(plan, inplace, HIPFFT_FORWARD);
-
-    return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
-}
-catch(...)
-{
-    return handle_exception();
+    return hipfftXtExecDescriptorBase(plan,input, output, HIPFFT_FORWARD);
 }
 
 hipfftResult hipfftXtExecDescriptorZ2D(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
-try
-{
-    if(!plan)
-        return HIPFFT_INVALID_PLAN;
 
-    const bool inplace = input == output;
-    const auto rplan   = get_exec_plan(plan, inplace, HIPFFT_BACKWARD);
-
-    return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
-}
-catch(...)
 {
-    return handle_exception();
+    return hipfftXtExecDescriptorBase(plan, input, output, HIPFFT_BACKWARD);
 }
 
 hipfftResult hipfftXtExecDescriptor(hipfftHandle  plan,
                                     hipLibXtDesc* input,
                                     hipLibXtDesc* output,
                                     int           direction)
-try
-{
-    if(!plan)
-        return HIPFFT_INVALID_PLAN;
 
-    const bool inplace = input == output;
-    const auto rplan   = get_exec_plan(plan, inplace, direction);
-
-    return hipfftXtExecDescriptorBase(rplan, plan->info, input, output);
-}
-catch(...)
 {
-    return handle_exception();
+    return hipfftXtExecDescriptorBase(plan, input, output, direction);
 }
 
 #ifdef HIPFFT_MPI_ENABLE
