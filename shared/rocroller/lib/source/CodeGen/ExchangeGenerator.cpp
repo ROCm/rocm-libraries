@@ -53,18 +53,23 @@ namespace rocRoller
 
             Expression::ExpressionPtr waveTileExpr, expectedExpr;
 
-            {
+            auto setCoordinates = [&](int tag) {
                 auto [required, path]
-                    = findRequiredCoordinates(waveTileTag, Graph::Direction::Downstream, *m_graph);
+                    = findRequiredCoordinates(tag, Graph::Direction::Downstream, *m_graph);
 
+                auto tmpCoords = coords;
                 for(auto r : required)
                 {
                     auto expr = std::make_shared<Expression::Expression>(
                         Expression::DataFlowTag{r, Register::Type::Vector, DataType::UInt32});
-                    coords.setCoordinate(r, expr);
+                    tmpCoords.setCoordinate(r, expr);
                 }
+                return tmpCoords;
+            };
 
-                waveTileExpr = coords.reverse({waveTileTag})[0];
+            {
+                auto tmpCoords = setCoordinates(waveTileTag);
+                waveTileExpr   = tmpCoords.reverse({waveTileTag})[0];
                 AssertFatal(waveTileExpr != nullptr, "waveTile expr is null");
             }
 
@@ -75,17 +80,8 @@ namespace rocRoller
                 auto [simdIndexBlockTag, simdIndexBlock] = m_graph->getDimension<Adhoc>(tag, 2);
 
                 {
-                    auto [required, path] = findRequiredCoordinates(
-                        vgprIndexTag, Graph::Direction::Downstream, *m_graph);
-
-                    for(auto r : required)
-                    {
-                        auto expr = std::make_shared<Expression::Expression>(
-                            Expression::DataFlowTag{r, Register::Type::Vector, DataType::UInt32});
-                        coords.setCoordinate(r, expr);
-                    }
-
-                    vgprIndexExpr = coords.reverse({vgprIndexTag})[0];
+                    auto tmpCoords = setCoordinates(vgprIndexTag);
+                    vgprIndexExpr  = tmpCoords.reverse({vgprIndexTag})[0];
                     AssertFatal(vgprIndexExpr != nullptr, "vgprIndex expr is null");
                     expectedExpr
                         = (waveTileExpr / (Expression::literal(waveTileSize) / vgprIndex.size));
@@ -97,17 +93,8 @@ namespace rocRoller
                 }
 
                 {
-                    auto [required, path] = findRequiredCoordinates(
-                        simdIndexBlockTag, Graph::Direction::Downstream, *m_graph);
-
-                    for(auto r : required)
-                    {
-                        auto expr = std::make_shared<Expression::Expression>(
-                            Expression::DataFlowTag{r, Register::Type::Vector, DataType::UInt32});
-                        coords.setCoordinate(r, expr);
-                    }
-
-                    simdIndexBlockExpr = coords.reverse({simdIndexBlockTag})[0];
+                    auto tmpCoords     = setCoordinates(simdIndexBlockTag);
+                    simdIndexBlockExpr = tmpCoords.reverse({simdIndexBlockTag})[0];
                     AssertFatal(simdIndexBlockExpr != nullptr, "simdIndexBlock expr is null");
                     expectedExpr = waveTileExpr % simdIndexBlock.size;
                     AssertFatal(Expression::identical(m_fastArith(simdIndexBlockExpr),
