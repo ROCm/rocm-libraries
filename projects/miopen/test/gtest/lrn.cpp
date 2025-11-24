@@ -65,7 +65,7 @@ struct verify_lrn_forward
         {
             const auto alphaoverarea = alpha / lrn_n;
 
-            miopen::par_for(n_batch)([&](int b) {
+            miopen::par_ford(n_batch)([&](int b) {
                 for(int c = 0; c < channels; ++c)
                 {
                     const int start = c < radius_lower ? 0 : (c - radius_lower);
@@ -96,7 +96,7 @@ struct verify_lrn_forward
         {
             const double alphaoverarea = radius_upper == 0 ? 1 : alpha / (lrn_n * lrn_n);
 
-            miopen::par_for(n_batch)([&](int b) {
+            miopen::par_ford(n_batch)([&](int b) {
                 for(int c = 0; c < channels; ++c)
                 {
                     for(int h = 0; h < height; ++h)
@@ -272,11 +272,6 @@ struct verify_lrn_bwd
         inputDY = pdout;
         inputX  = pin;
         scale   = pscale;
-
-        int n_batch, channels, height, width;
-        std::tie(n_batch, channels, height, width) = miopen::tien<4>(inputY.desc.GetLengths());
-        const auto lrn_n                           = lrn.GetN();
-        const auto mode                            = lrn.GetMode();
     }
 
     tensor<T> cpu() const
@@ -297,7 +292,7 @@ struct verify_lrn_bwd
             const auto adjust_area       = lrn_n * lrn_n;
             const auto cache_ratio_value = 2 * alpha * beta / adjust_area;
 
-            miopen::par_for(n_batch)([&](int b) {
+            miopen::par_ford(n_batch)([&](int b) {
                 for(int c = 0; c < channels; ++c)
                 {
                     for(int h = 0; h < height; ++h)
@@ -335,7 +330,7 @@ struct verify_lrn_bwd
         {
             const auto cache_ratio_value = 2 * alpha * beta / lrn_n;
 
-            miopen::par_for(n_batch)([&](int b) {
+            miopen::par_ford(n_batch)([&](int b) {
                 for(int c = 0; c < channels; ++c)
                 {
                     const int start = c < radius_upper ? 0 : (c - radius_upper);

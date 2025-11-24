@@ -671,7 +671,7 @@ int64_t mloLRNBackwardRunHost_mt(int norm_region,
     {
         const Tcheck_ ratio_dta_bwd = double_alpa_beta / static_cast<Tcheck_>(local_area);
 
-        par_ford(n_batchs)([&](int b) {
+        miopen::par_ford(n_batchs)([&](int b) {
             const int b_by_top_df_batch_stride   = b * top_df_batch_stride;
             const int b_by_top_batch_stride      = b * top_batch_stride;
             const int b_by_scale_batch_stride    = b * scale_batch_stride;
@@ -860,7 +860,7 @@ int64_t mloLRNBackwardRunHost_mt(int norm_region,
     }             // if (norm_region == MLO_LRN_ACROSS_CHANNELS)
     else
     {
-        par_ford(n_batchs)([&](int b) {
+        miopen::par_ford(n_batchs)([&](int b) {
             const int b_by_top_df_batch_stride   = b * top_df_batch_stride;
             const int b_by_top_batch_stride      = b * top_batch_stride;
             const int b_by_scale_batch_stride    = b * scale_batch_stride;
@@ -979,7 +979,7 @@ int64_t mloLRNForwardRunHost_mt(bool do_scale,
 
     if(norm_region == MLO_LRN_ACROSS_CHANNELS)
     {
-        par_ford(n_batchs)([&](int b) {
+        miopen::par_ford(n_batchs)([&](int b) {
             const int b_by_bot_batch_stride     = b * bot_batch_stride;
             const int b_by_scale_v_batch_stride = b * scale_v_batch_stride;
             const int b_by_top_v_batch_stride   = b * top_v_batch_stride;
@@ -1108,11 +1108,11 @@ int64_t mloLRNForwardRunHost_mt(bool do_scale,
                     }
                 } // for (int i = 0; i < top_width; i++)
             }     // for (int j = 0; j < top_height; j++)
-        });       // par_ford(n_batchs)([&](int b) {
+        });       // miopen::par_ford(n_batchs)([&](int b) {
     }
     else
     {
-        par_ford(n_batchs)([&](int b) {
+        miopen::par_ford(n_batchs)([&](int b) {
             const int b_by_bot_batch_stride     = b * bot_batch_stride;
             const int b_by_scale_v_batch_stride = b * scale_v_batch_stride;
             const int b_by_top_v_batch_stride   = b * top_v_batch_stride;
@@ -1179,7 +1179,7 @@ int64_t mloLRNForwardRunHost_mt(bool do_scale,
                     } // for (int i = 0; i < top_width; i++)
                 }     // for (int j = 0; j < top_height; j++)
             }         // for (int o = 0; o < outputs; o++)
-        });           // par_ford(n_batchs)([&](int b) {
+        });           // miopen::par_ford(n_batchs)([&](int b) {
     }                 // (norm_region == ACROSS_CHANNELS)
 
     return ret;
