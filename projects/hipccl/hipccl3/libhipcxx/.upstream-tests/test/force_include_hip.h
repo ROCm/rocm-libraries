@@ -56,6 +56,8 @@
         } \
     } while (false)
 
+#define CUDA_CALL HIP_CALL
+
 void list_devices()
 {
     cudaError_t err;
