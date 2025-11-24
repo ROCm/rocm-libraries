@@ -17,6 +17,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/AssignComputeIndex.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CleanArguments.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CleanLoops.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ClusterParallelChains.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ConnectWorkgroups.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ConstantPropagation.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/FuseExpressions.cpp"

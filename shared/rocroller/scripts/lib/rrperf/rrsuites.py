@@ -1253,6 +1253,58 @@ def fp4_target_d2lds_mi16x16x128_pf4x1_both():
     yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
 
 
+def fp4_target_d2lds_mi16x16x128_pf2x1():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        beta=0.0,
+        mac_m=128,
+        mac_n=128,
+        mac_k=256,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        unroll_x=0,
+        unroll_y=0,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadLDSScale_A=False,
+        loadLDSScale_B=False,
+        storeLDS_D=False,
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=1,
+        prefetchScale=True,
+        swizzleScale=True,
+        prefetchMixMemOps=True,
+        betaInFma=True,
+        scheduler="Priority",
+        schedulerCost="LinearWeightedSimple",
+        matchMemoryAccess=True,
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleBlockSize=32,
+        ),
+        # swizzleTileSize=MKNLTuple(64, 128 // 32 * 1 * 4, 64, 128 // 32 * 1 * 4),
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
+
 def does_this_fail():
     yield GEMMRun(
         M=4096,
@@ -1297,6 +1349,63 @@ def does_this_fail():
         numWarmUp=1000,
         numInner=1000,
     )
+
+
+def fp4_fast_example():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        beta=0.0,
+        mac_m=256,
+        mac_n=256,
+        mac_k=256,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        unroll_x=0,
+        unroll_y=0,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadLDSScale_A=False,
+        loadLDSScale_B=False,
+        storeLDS_D=False,
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=1,
+        prefetchScale=False,
+        swizzleScale=False,
+        prefetchMixMemOps=True,
+        betaInFma=True,
+        scaleValue_A=1e-2,
+        scaleValue_B=1e-2,
+        scheduler="Priority",
+        schedulerCost="LinearWeightedSimple",
+        matchMemoryAccess=True,
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="SingleScale",
+            scaleType_A="E8M0",
+            scale_B="SingleScale",
+            scaleType_B="E8M0",
+        ),
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
+
+
+def fp4_fast_example_wgm():
+    yield from add_wgm((0, 2), fp4_fast_example())
 
 
 def fp4_single_scale_target_d2lds_mi16x16x128_pf4x1():

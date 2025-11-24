@@ -39,6 +39,7 @@
 #include <rocRoller/KernelGraph/Transforms/AssignComputeIndex.hpp>
 #include <rocRoller/KernelGraph/Transforms/CleanArguments.hpp>
 #include <rocRoller/KernelGraph/Transforms/CleanLoops.hpp>
+#include <rocRoller/KernelGraph/Transforms/ClusterParallelChains.hpp>
 #include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups.hpp>
 #include <rocRoller/KernelGraph/Transforms/ConstantPropagation.hpp>
 #include <rocRoller/KernelGraph/Transforms/FuseExpressions.hpp>
