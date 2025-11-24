@@ -75,14 +75,14 @@ template<typename Config, class Selector, class Target>
 struct segmented_radix_sort_warp_sort_small_config_static_selector
 {
     static constexpr auto block_size
-        = target_config2<Config, Selector, Target>::params.warp_sort_config.block_size_small;
+        = target_config<Config, Selector, Target>::params.warp_sort_config.block_size_small;
 };
 
 template<typename Config, class Selector, class Target>
 struct segmented_radix_sort_warp_sort_medium_config_static_selector
 {
     static constexpr auto block_size
-        = target_config2<Config, Selector, Target>::params.warp_sort_config.block_size_medium;
+        = target_config<Config, Selector, Target>::params.warp_sort_config.block_size_medium;
 };
 
 } // end namespace detail

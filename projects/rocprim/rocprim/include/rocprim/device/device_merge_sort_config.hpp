@@ -90,13 +90,13 @@ template<class Config, class Selector, class Target>
 struct merge_oddeven_config_static_selector
 {
     static constexpr auto block_size
-        = target_config2<Config, Selector, Target>::params.merge_oddeven_config.block_size;
+        = target_config<Config, Selector, Target>::params.merge_oddeven_config.block_size;
 };
 
 template<class Config, class Selector, class Target>
 struct merge_mergepath_partition_config_static_selector
 {
-    static constexpr auto block_size = target_config2<Config, Selector, Target>::params
+    static constexpr auto block_size = target_config<Config, Selector, Target>::params
                                            .merge_mergepath_partition_config.block_size;
 };
 
@@ -104,7 +104,7 @@ template<class Config, class Selector, class Target>
 struct merge_mergepath_config_static_selector
 {
     static constexpr auto block_size
-        = target_config2<Config, Selector, Target>::params.merge_mergepath_config.block_size;
+        = target_config<Config, Selector, Target>::params.merge_mergepath_config.block_size;
 };
 
 template<class Key, class Value>

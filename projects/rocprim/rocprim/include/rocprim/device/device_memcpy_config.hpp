@@ -43,14 +43,14 @@ namespace detail
 template<class Config, class Selector, class Target>
 struct non_blev_batch_memcpy_config_static_selector
 {
-    static constexpr auto block_size = target_config2<Config, Selector, Target>::params
+    static constexpr auto block_size = target_config<Config, Selector, Target>::params
                                            .non_blev_batch_memcpy_kernel_config.block_size;
 };
 
 template<class Config, class Selector, class Target>
 struct blev_batch_memcpy_config_static_selector
 {
-    static constexpr auto block_size = target_config2<Config, Selector, Target>::params
+    static constexpr auto block_size = target_config<Config, Selector, Target>::params
                                            .blev_batch_memcpy_kernel_config.block_size;
 };
 

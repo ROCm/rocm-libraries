@@ -569,8 +569,8 @@ template<class BlockSortTarget,
 ROCPRIM_KERNEL
 void device_merge_sort_compile_time_verifier_arch()
 {
-    using BSArchConfig = target_config2<BlockSortConfig, BlockSortSelector, BlockSortTarget>;
-    using BMArchConfig = target_config2<BlockMergeConfig, BlockMergeSelector, BlockMergeTarget>;
+    using BSArchConfig = target_config<BlockSortConfig, BlockSortSelector, BlockSortTarget>;
+    using BMArchConfig = target_config<BlockMergeConfig, BlockMergeSelector, BlockMergeTarget>;
 
     static constexpr auto bs_params = BSArchConfig::params;
     static constexpr auto bm_params = BMArchConfig::params;
@@ -643,8 +643,8 @@ template<class BlockSortTarget,
          class Value>
 inline size_t merge_sort_vsmem_size_for_target(size_t size)
 {
-    using BSArchConfig = target_config2<BlockSortConfig, BlockSortSelector, BlockSortTarget>;
-    using BMArchConfig = target_config2<BlockMergeConfig, BlockMergeSelector, BlockMergeTarget>;
+    using BSArchConfig = target_config<BlockSortConfig, BlockSortSelector, BlockSortTarget>;
+    using BMArchConfig = target_config<BlockMergeConfig, BlockMergeSelector, BlockMergeTarget>;
 
     static constexpr auto bs_params = BSArchConfig::params;
     static constexpr auto bm_params = BMArchConfig::params;

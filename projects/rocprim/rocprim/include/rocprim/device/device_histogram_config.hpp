@@ -36,14 +36,14 @@ template<class Config, class Selector, class Target>
 struct histogram_config_static_selector
 {
     static constexpr auto block_size
-        = target_config2<Config, Selector, Target>::params.histogram_config.block_size;
+        = target_config<Config, Selector, Target>::params.histogram_config.block_size;
 };
 
 template<class Config, class Selector, class Target>
 struct histogram_global_config_static_selector
 {
     static constexpr auto block_size
-        = target_config2<Config, Selector, Target>::params.histogram_global_config.block_size;
+        = target_config<Config, Selector, Target>::params.histogram_global_config.block_size;
 };
 
 template<class Sample, unsigned int Channels, unsigned int ActiveChannels>

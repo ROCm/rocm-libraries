@@ -72,7 +72,7 @@ inline size_t get_partition_vsmem_size_per_block(detail::target t)
         {
             if(target{candidate} == most_common_config<targets>(t))
             {
-                using ArchConfig = target_config2<Config, Selector, decltype(candidate)>;
+                using ArchConfig = target_config<Config, Selector, decltype(candidate)>;
                 using partition_kernel_impl_t = partition_kernel_impl_<ArchConfig,
                                                                        SelectMethod,
                                                                        OnlySelected,

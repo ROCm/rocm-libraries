@@ -54,7 +54,7 @@ inline size_t get_merge_vsmem_size_per_block(detail::target t)
         {
             if(target{candidate} == most_common_config<targets>(t))
             {
-                using ArchConfig           = target_config2<Config, Selector, decltype(candidate)>;
+                using ArchConfig           = target_config<Config, Selector, decltype(candidate)>;
                 using merge_kernel_impl_t  = merge_kernel_impl_<ArchConfig, Key, Value>;
                 using merge_vsmem_helper_t = detail::vsmem_helper_impl<merge_kernel_impl_t>;
 

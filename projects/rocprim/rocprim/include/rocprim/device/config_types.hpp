@@ -426,42 +426,6 @@ constexpr target_arch device_target_arch()
 #endif
 }
 
-template<typename Config, target_arch Arch>
-struct default_config_selector
-{
-    static constexpr unsigned int block_size
-        = Config::template architecture_config<Arch>::params.kernel_config.block_size;
-};
-
-template<class Config, target_arch Arch>
-struct target_config
-{
-    constexpr static auto params    = Config::template architecture_config<Arch>::params;
-    constexpr static auto wavefront = arch_wavefront_size(Arch);
-    constexpr static auto arch      = Arch;
-};
-
-// trampoline_kernel that is fully specialized at compile-time for a single GPU architecture.
-// By instantiating this template once per supported `target_arch`,the correct tuned config
-// will be derived from the template.
-template<typename Config,
-         target_arch Arch,
-         class Kernel,
-         template<typename, target_arch>
-         class LaunchSelector>
-ROCPRIM_KERNEL __launch_bounds__((LaunchSelector<Config, Arch>::block_size))
-void trampoline_kernel(Kernel kernel)
-{
-    using ArchConfig = target_config<Config, Arch>;
-
-#if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
-    if constexpr(Arch == device_target_arch())
-#endif
-    {
-        kernel(ArchConfig{});
-    }
-}
-
 template<typename Kernel>
 struct launch_plan
 {
@@ -479,30 +443,6 @@ struct launch_plan
                            device_callback);
     }
 };
-
-template<class Config,
-         class Kernel,
-         template<typename, target_arch> class LaunchSelector = default_config_selector>
-auto make_launch_plan(target_arch arch, Kernel kernel) -> launch_plan<Kernel>
-{
-    std::optional<void (*)(Kernel)> tuned_kernel = std::nullopt;
-
-    for_each_arch(
-        [&](auto arch_tag)
-        {
-            if(arch_tag != arch || tuned_kernel)
-                return;
-
-            tuned_kernel = trampoline_kernel<Config, arch_tag, Kernel, LaunchSelector>;
-        });
-
-    if(!tuned_kernel)
-    {
-        tuned_kernel = trampoline_kernel<Config, target_arch::unknown, Kernel, LaunchSelector>;
-    }
-
-    return {tuned_kernel.value(), kernel};
-}
 
 template<class Targets>
 constexpr target most_common_config(target target_current)
@@ -574,7 +514,7 @@ constexpr typename Selector::param_type get_config(Config config, target t)
 };
 
 template<class Config, class Selector, class Target>
-struct target_config2
+struct target_config
 {
     constexpr static auto params    = get_config<Selector>(Config{}, target{Target{}});
     constexpr static auto wavefront = arch_wavefront_size(Target::i);
@@ -585,7 +525,7 @@ template<class Config, class Selector, class Target>
 struct default_config_static_selector
 {
     static constexpr auto block_size
-        = target_config2<Config, Selector, Target>::params.kernel_config.block_size;
+        = target_config<Config, Selector, Target>::params.kernel_config.block_size;
 };
 
 // trampoline_kernel that is fully specialized at compile-time for a single GPU architecture.
@@ -601,7 +541,7 @@ template<class Config,
 ROCPRIM_KERNEL __launch_bounds__((LaunchSelector<Config, Selector, Target>::block_size))
 void trampoline_kernel(Kernel kernel)
 {
-    using ArchConfig = target_config2<Config, Selector, Target>;
+    using ArchConfig = target_config<Config, Selector, Target>;
 
 #if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
     using Targets = typename Selector::targets;
@@ -658,23 +598,6 @@ auto make_launch_plan(target target_current, Kernel kernel) -> launch_plan<Kerne
     return {tuned_kernel.value(), kernel};
 }
 
-// Host-side helper running at run-time, picking the trampoline_kernel whose template
-// argument `Arch` matches the actual GPU we are executing on.
-template<class Config,
-         class Kernel,
-         template<typename, target_arch> class LaunchSelector = default_config_selector>
-hipError_t execute_launch_plan(target_arch arch,
-                               Kernel      kernel,
-                               dim3        grid_size,
-                               dim3        block_size,
-                               size_t      shmem,
-                               hipStream_t stream)
-{
-    const auto launch_plan = make_launch_plan<Config, Kernel, LaunchSelector>(arch, kernel);
-    launch_plan.launch(grid_size, block_size, shmem, stream);
-    return hipGetLastError();
-}
-
 template<class Config,
          class ConfigSelector,
          template<class, class, class> class LaunchSelector = default_config_static_selector,
@@ -687,42 +610,6 @@ hipError_t execute_launch_plan(
         = make_launch_plan<Config, ConfigSelector, LaunchSelector, PassTarget>(t, kernel);
     launch_plan.launch(grid_size, block_size, shmem, stream);
     return hipGetLastError();
-}
-
-#ifdef ROCPRIM_EXPERIMENTAL_SPIRV
-template<class Config, bool ForceUnknownArch = true>
-#else
-template<class Config, bool ForceUnknownArch = false>
-#endif
-auto dispatch_target_arch([[maybe_unused]] const target_arch target_arch)
-{
-    if constexpr(!ForceUnknownArch)
-    {
-        switch(target_arch)
-        {
-        case target_arch::invalid:
-            assert(false && "Invalid target architecture selected at runtime.");
-            break;
-#define X(ID) case target_arch::ID: return Config::template architecture_config<target_arch::ID>::params
-            X(unknown);
-            X(gfx803);
-            X(gfx900);
-            X(gfx906);
-            X(gfx908);
-            X(gfx90a);
-            X(gfx942);
-            X(gfx950);
-            X(gfx1030);
-            X(gfx1100);
-            X(gfx1102);
-            X(gfx1152);
-            X(gfx1153);
-            X(gfx1200);
-            X(gfx1201);
-#undef X
-        }
-    }
-    return Config::template architecture_config<target_arch::unknown>::params;
 }
 
 inline target_arch parse_gcn_arch(const char* arch_name)

@@ -83,14 +83,14 @@ struct radix_sort_onesweep_config_selector
 template<class Config, class Selector, class Target>
 struct radix_sort_onesweep_histogram_config_static_selector
 {
-    static constexpr auto block_size = target_config2<Config, Selector, Target>::params
+    static constexpr auto block_size = target_config<Config, Selector, Target>::params
                                            .radix_sort_onesweep_config_params::histogram.block_size;
 };
 
 template<class Config, class Selector, class Target>
 struct radix_sort_onesweep_sort_config_static_selector
 {
-    static constexpr auto block_size = target_config2<Config, Selector, Target>::params
+    static constexpr auto block_size = target_config<Config, Selector, Target>::params
                                            .radix_sort_onesweep_config_params::sort.block_size;
 };
 
@@ -111,7 +111,7 @@ struct radix_sort_block_sort_config_selector
 template<typename Config, class Selector, class Target>
 struct radix_sort_block_sort_config_static_selector
 {
-    static constexpr auto block_size = target_config2<Config, Selector, Target>::params.block_size;
+    static constexpr auto block_size = target_config<Config, Selector, Target>::params.block_size;
 };
 
 } // namespace detail
