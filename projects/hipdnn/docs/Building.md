@@ -126,8 +126,11 @@ ninja check
 # Build without plugins
 cmake -GNinja -DHIP_DNN_BUILD_PLUGINS=OFF ..
 
-# Build only the backend
+# Build without frontend
 cmake -GNinja -DHIP_DNN_BUILD_FRONTEND=OFF ..
+
+# Build without backend
+cmake -GNinja -DHIP_DNN_BUILD_BACKEND=OFF ..
 ```
 
 ### ROCM_PATH & CMAKE_INSTALL_PREFIX
@@ -158,7 +161,6 @@ All targets support parallel builds with ninja.
 |--------|-------------|
 | \<no target\> | Build all components |
 | `check` | Build and run all tests (see [Testing](./Testing.md)) |
-| `check-ctest` | Build and run all tests with CTest |
 | `unit-check` | Build and run exclusively the unit tests and API tests (minimal version of `check`) |
 | `integration-check` | Build and run exclusively the E2E integration tests (this is the bulk of the testing time) |
 | `install` | Install libraries and headers |
