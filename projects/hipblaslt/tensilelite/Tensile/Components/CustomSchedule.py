@@ -1101,91 +1101,40 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     if isNN(kernel) and useLDSTr and TLDS==1:
         numMfma = 120
         kernel["SwapGlobalReadOrder"] = False
-
-        # fmt: off
-        # ========== iter start ==========
-        wait   = [-1,]                # wait for LRA0 and the very first LRB0
-        count  = [(12+10-13,-1)]      # 12+10 loads for LRA0, but need onlyt 12+1 here, so 9 are still pending
-        
-        grinca = [                  9,11,13,]
-        grincb = [                                  17,18,19]
-        
-        wait   +=[          5]       # wait for the rest of LRB0
-        count  +=[          (6,-1)]  # 5 LRA0 + 1 LRB0 reads
-
-        lra0   = [0,  2,3,4,5,6,7,8, 10, 12, 15,16] # 12 loads
-        wait   +=[                                                          26,26]   # wait for all LRA0 to complete before GRA start
-        count  +=[                                                         (5,-1)]   # 5 outstanding LRB0 reads
-
-        lrb0   = [  1,                                      20,21,22,23,  25,  27,28,29, 31] # 10 loads
-
-        wait   +=[                                                                             35,35]   # wait for all LRB0 to complete before GRB start
-        count  +=[                                                                             (0,-1)]
-
-        gra    = [                                                        25,   27,   29,31,33,     36] # 6 loads
-        grb    = [                                                                                    53,58,  63,67,     72,     77,     82,   86, 91,  96] # 10 loads
-        lrs    = [                                                                                       58]
-        wait   +=[                                                                                         59]     # wait for LRA1, LRB1
-        count  +=[                                                                                        (0,-1)]
-
-        lws    = [                                                                                                                                      96]
-
-        wait   +=[                                                                                                 71,71]  # wait for GR + barrier before starting LRA1/LRB1
-        count  +=[                                                                                                (-1,16)] # vmcnt=16 
-        lra1   = [                                                                                                       72,74,76, 78,80,82,84,  87,90,92,98,100] # 12 loads
-        lrb1   = [                                                                                                                                          99,   106,107,108,109,110,111,112,113,114] # 10 loads
-        # ========== iter done ==========
-        # fmt: on
-        
-        total_gra_loads = len(gra) + len(grb)
-
-        def extend_list(input_list, repeat_count):
-            """Example: extend_list([1, 2, 3], 3) => [1,1,1, 2,2,2, 3,3,3]"""
-            return [item for item in input_list for _ in range(repeat_count)]
-        grinca = extend_list(grinca, 3)
-        grincb = extend_list(grincb, 3)
-        gra    = extend_list(gra, 2)
-        grb    = extend_list(grb, 2)   
-
-
         optSchedule = {
-            'SYNC':   [wait],
-            'LRA0':   [lra0],
-            'GRIncA': [grinca],
-            'LRB0':   [lrb0],
-            'GRIncB': [grincb],
-            'GRA':    [gra],
-            'GRB':    [grb],
-            'LRSA':   [lrs],
-            'LRSB':   [copy(lrs)], # copy is need to duplicate the list, otherwise no LRSB instructions will be scheduled
-            'LWSA':   [lws],
-            'LWSB':   [copy(lws)], # copy is need to duplicate the list, otherwise no LRSB instructions will be scheduled
-            'LRA1':   [lra1],
-            'LRB1':   [lrb1],
-            'LCC':    [[numMfma-2, numMfma-1]],
+            'SYNC': [[-1, 5, 26, 26, 35, 35, 59, 71, 71]],
+            'LRA0': [[0, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 16]],
+            'GRIncA': [[9, 9, 9, 11, 11, 11, 13, 13, 13]],
+            'LRB0': [[1, 20, 21, 22, 23, 25, 27, 28, 29, 31]],
+            'GRIncB': [[17, 17, 17, 18, 18, 18, 19, 19, 19]],
+            'GRA': [[25, 25, 27, 27, 29, 29, 31, 31, 33, 33, 36, 36]],
+            'GRB': [[53, 53, 58, 58, 63, 63, 67, 67, 72, 72, 77, 77, 82, 82, 86, 86, 91, 91, 96, 96]],
+            'LRSA': [[58]],
+            'LRSB': [[58]],
+            'LWSA': [[96]],
+            'LWSB': [[96]],
+            'LRA1': [[72, 74, 76, 78, 80, 82, 84, 87, 90, 92, 98, 100]],
+            'LRB1': [[99, 106, 107, 108, 109, 110, 111, 112, 113, 114]],
+            'LCC': [[118, 119]]
         }
-
         syncCode = [
-            SWaitCnt(dscnt=count[0][0], vlcnt=count[0][1], vscnt=-1, comment="wait for all LRA0 and one items from LRB0 before starting the sub-iteration"),
+            SWaitCnt(dscnt=9, vlcnt=-1, vscnt=-1, comment="wait for all LRA0 and one items from LRB0 before starting the sub-iteration"),
 
-            SWaitCnt(dscnt=count[1][0], vlcnt=count[1][1], vscnt=-1, comment="wait for the rest of LRB0 to complete"),
+            SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for the rest of LRB0 to complete"),
 
-            SWaitCnt(dscnt=count[2][0], vlcnt=count[2][1], vscnt=-1, comment="wait for all LRA0 to complete before GRA start"),
+            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for all LRA0 to complete before GRA start"),
             SBarrier(comment=""),
-            SWaitCnt(dscnt=count[3][0], vlcnt=count[3][1], vscnt=-1, comment="wait for all LRB0 to complete before GRB start"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRB0 to complete before GRB start"),
             SBarrier(comment=""),
 
-            SWaitCnt(dscnt=count[4][0], vlcnt=count[4][1], vscnt=-1, comment="wait for LRA1, LRB1 before starting next sub-iteration"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA1, LRB1 before starting next sub-iteration"),
 
-            SWaitCnt(dscnt=count[5][0], vlcnt=count[5][1], vscnt=-1, comment="wait for previous set of global reads"),
+            SWaitCnt(dscnt=-1, vlcnt=16, vscnt=-1, comment="wait for previous set of global reads"),
             SBarrier(comment="")
         ]
-
-        nglshift = nllshift = total_gra_loads
-
+        nglshift = nllshift = 16
     else:
         return False, None
-
 
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
