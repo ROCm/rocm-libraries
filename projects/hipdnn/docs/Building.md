@@ -17,13 +17,13 @@
 
 ### System Requirements
 - **GPU**: AMD GPU with ROCm support
-- **Operating System**: 
+- **Operating System**:
   - Linux: Any distribution supported by [TheRock](https://github.com/ROCm/TheRock), such as Ubuntu 24
   - Windows: Windows 11 (limited support, see [Windows section](#windows))
 
 ### Dependencies
 > [!TIP]
-> 💡 Prebuilt binaries and Docker files are available to provide a consistent development environment with all dependencies pre-installed. This is the recommended approach for most users. For more details about thees Docker images, see the [Docker README](../dockerfiles/README.md). Dockerfile development environments are not availble for Windows. Refer to the [Windoows](#windows) section for details on building under Windows.
+> 💡 Prebuilt binaries and Docker files are available to provide a consistent development environment with all dependencies pre-installed. This is the recommended approach for most users. For more details about these Docker images, see the [Docker README](../dockerfiles/README.md). Dockerfile development environments are not availble for Windows. Refer to the [Windows](#windows) section for details on building under Windows.
 
 #### Required Dependencies
 | Dependency | Version | Description |
@@ -41,7 +41,7 @@
 |------------|---------|-------------|
 | Ninja | 1.12.1+ | Faster build system (recommended) |
 | Docker | Latest | For containerized build environment |
-| Python3 | Latest | For test name validation | 
+| Python3 | Latest | For test name validation |
 
 #### Third-Party Libraries
 The following libraries are automatically managed by CMake (see [Dependencies.cmake](../cmake/Dependencies.cmake)):
@@ -78,10 +78,10 @@ git clone https://github.com/ROCm/rocm-libraries.git
    ```bash
    cd rocm-libraries/projects/hipdnn
    mkdir build && cd build
-   
+
    # Configure with Ninja (recommended)
    cmake -GNinja ..
-   
+
    # Build and run all tests
    # Note that this may take several minutes to complete
    ninja check
@@ -89,7 +89,7 @@ git clone https://github.com/ROCm/rocm-libraries.git
    Refer to the [Build Targets](#build-targets) section below for additional build targets that can be used.
 
 #### 3. Install hipDNN
-   
+
    Refer to the [Build Configurations](#build-configurations) section below for details on using an install path other than the default `/opt/rocm`.
    ```bash
    sudo ninja install
@@ -296,7 +296,7 @@ Tip: you can use `git config --show-scope --show-origin core.symlinks` and `git 
 
 Though TheRock toolchain is used to build hipDNN, utilities such as clang-format are currently provided by Clang.
 
-Download and unzip a recent 20.x.x version of the Clang Toolchain: https://github.com/llvm/llvm-project/releases?q=20. 
+Download and unzip a recent 20.x.x version of the Clang Toolchain: https://github.com/llvm/llvm-project/releases?q=20.
 
 Unzip it to a path with no spaces. E.g. after being unzipped to `C:\dist\clang` the bin folder will be located at `C:\dist\clang\bin`.
 
@@ -321,10 +321,10 @@ Unzip the downloaded tarball to a path with no spaces. E.g. after unzipped to `C
 
 #### 8. Setup Environment Variables
 
-* Add TheRock bin folder to the system PATH so that applications can find and load the DLL files. E.g.:  
+* Add TheRock bin folder to the system PATH so that applications can find and load the DLL files. E.g.:
    ```cmd
    set PATH=C:\dist\therock\bin;%PATH%
-   ```  
+   ```
    It isn't necessary to add the clang toolchain to your system PATH to perform the build as these can be specified using the `-D` option to cmake (see example below).
    * ROCM_PATH -- Used by the hipDNN CMake project to determine where TheRock was installed (defaults to `c:/dist/therock`).
    * CMAKE_PROGRAM_PATH -- Specifies the folder that CMake can use to find additional tools such as clang-format.
@@ -389,4 +389,3 @@ From here, follow the instructions in the [Quick Start Guide](#quick-start-guide
 ## Verifying Installation
 
 See [samples README](../samples/README.md) for detailed instructions on building test sample programs using hipDNN.
-
