@@ -151,9 +151,8 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
             }
         }
 
-        auto dtype        = input_desc.GetType();
-        auto input_dtype  = miopen::GetDataType(input_desc.GetType());
-        auto output_dtype = miopen::GetDataType(bn_problem.GetYDesc().GetType());
+        auto dtype     = input_desc.GetType();
+        auto data_type = miopen::GetDataType(input_desc.GetType());
 
         const auto& activ_op =
             dynamic_cast<ActivBwdFusionOpDescriptor&>(*problem.fusion_plan_desc->op_map[1]);
@@ -175,8 +174,7 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
             {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_op.activMode)},
             {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
             {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
-            {"INPUT_TYPE", input_dtype},
-            {"OUTPUT_TYPE", output_dtype}};
+            {"DATA_TYPE", data_type}};
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
         result.construction_params.push_back(kernel);

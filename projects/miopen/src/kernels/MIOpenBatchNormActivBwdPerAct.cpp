@@ -32,15 +32,15 @@
 
 #include "activation_functions.hpp"
 
-template <typename TI, typename TO>
-__forceinline__ __device__ void activbwdperactivation(const TI* __restrict__ x,
-                                                      const TI* __restrict__ y,
-                                                      const TI* __restrict__ dy,
-                                                      TO* __restrict__ dx,
-                                                      const TI diff_scale,
-                                                      const TI gamma,
-                                                      const TI beta,
-                                                      const TI alpha,
+template <typename T>
+__forceinline__ __device__ void activbwdperactivation(const T* __restrict__ x,
+                                                      const T* __restrict__ y,
+                                                      const T* __restrict__ dy,
+                                                      T* __restrict__ dx,
+                                                      const T diff_scale,
+                                                      const T gamma,
+                                                      const T beta,
+                                                      const T alpha,
                                                       const float* __restrict__ bn_scale,
                                                       const float* __restrict__ bn_bias,
                                                       float* __restrict__ dscale,
@@ -48,8 +48,8 @@ __forceinline__ __device__ void activbwdperactivation(const TI* __restrict__ x,
                                                       const float* __restrict__ saved_mean,
                                                       const float* __restrict__ saved_inv_variance)
 {
-    const int ygid      = blockIdx.y * LOCAL_SIZE_Y + threadIdx.y;
-    const int adj_index = H * W * blockIdx.x + ygid;
+    const unsigned int ygid      = blockIdx.y * LOCAL_SIZE_Y + threadIdx.y;
+    const unsigned int adj_index = H * W * blockIdx.x + ygid;
 
     if(adj_index < CHANNELS * H * W)
     {
@@ -62,14 +62,14 @@ __forceinline__ __device__ void activbwdperactivation(const TI* __restrict__ x,
         FLOAT_ACCUM dxhat{0};
         FLOAT_ACCUM dxhathat{0};
 
-        for(int n = 0; n < BATCH_SIZE; ++n)
+        for(unsigned int n = 0; n < BATCH_SIZE; ++n)
         {
             // per (x-dims) channel load a block of data into LDS
-            int index             = n * CHANNELS * H * W + adj_index;
-            FLOAT_ACCUM xhat      = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_var;
-            FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
-            FLOAT_ACCUM act_y[1]  = {CVT_FLOAT2ACCUM(y[index])};
-            FLOAT_ACCUM bn_y[1]   = {xhat * pvt_scale + pvt_bias};
+            unsigned int index          = n * CHANNELS * H * W + adj_index;
+            const FLOAT_ACCUM xhat      = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_var;
+            const FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
+            const FLOAT_ACCUM act_y[1]  = {CVT_FLOAT2ACCUM(y[index])};
+            const FLOAT_ACCUM bn_y[1]   = {xhat * pvt_scale + pvt_bias};
             FLOAT_ACCUM bn_dy[1];
             ActivationFunction_Diff(bn_dy,
                                     act_dy,
@@ -86,14 +86,14 @@ __forceinline__ __device__ void activbwdperactivation(const TI* __restrict__ x,
             dxhathat += tmp * xhat;
         }
 
-        for(int n = 0; n < BATCH_SIZE; ++n)
+        for(unsigned int n = 0; n < BATCH_SIZE; ++n)
         {
-            int index             = n * CHANNELS * H * W + adj_index;
-            FLOAT_ACCUM xhat      = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_var;
-            FLOAT_ACCUM tmp       = xhat * dxhathat + dxhat;
-            FLOAT_ACCUM bn_y[1]   = {xhat * pvt_scale + pvt_bias};
-            FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
-            FLOAT_ACCUM act_y[1]  = {CVT_FLOAT2ACCUM(y[index])};
+            unsigned int index          = n * CHANNELS * H * W + adj_index;
+            const FLOAT_ACCUM xhat      = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_var;
+            FLOAT_ACCUM tmp             = xhat * dxhathat + dxhat;
+            const FLOAT_ACCUM bn_y[1]   = {xhat * pvt_scale + pvt_bias};
+            const FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
+            const FLOAT_ACCUM act_y[1]  = {CVT_FLOAT2ACCUM(y[index])};
             FLOAT_ACCUM bn_dy[1];
             ActivationFunction_Diff(bn_dy,
                                     act_dy,
@@ -103,7 +103,9 @@ __forceinline__ __device__ void activbwdperactivation(const TI* __restrict__ x,
                                     CVT_FLOAT2ACCUM(gamma),
                                     CVT_FLOAT2ACCUM(beta),
                                     CVT_FLOAT2ACCUM(alpha));
-            dx[index] = CVT_ACCUM2FLOAT((bn_dy[0] * pvt_scale - tmp * static_cast<FLOAT_ACCUM>(1.0f / BATCH_SIZE)) * inv_var);
+            dx[index] = CVT_ACCUM2FLOAT(
+                (bn_dy[0] * pvt_scale - tmp * static_cast<FLOAT_ACCUM>(1.0f / BATCH_SIZE)) *
+                inv_var);
         }
 
         // Write out data
@@ -113,14 +115,14 @@ __forceinline__ __device__ void activbwdperactivation(const TI* __restrict__ x,
 }
 
 extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) //
-    void ActivBwdPerActivation(const INPUT_TYPE* __restrict__ x,
-                               const INPUT_TYPE* __restrict__ y,
-                               const INPUT_TYPE* __restrict__ dy,
-                               OUTPUT_TYPE* __restrict__ dx,
-                               const INPUT_TYPE diff_scale,
-                               const INPUT_TYPE gamma,
-                               const INPUT_TYPE beta,
-                               const INPUT_TYPE alpha,
+    void ActivBwdPerActivation(const DATA_TYPE* __restrict__ x,
+                               const DATA_TYPE* __restrict__ y,
+                               const DATA_TYPE* __restrict__ dy,
+                               DATA_TYPE* __restrict__ dx,
+                               const DATA_TYPE diff_scale,
+                               const DATA_TYPE gamma,
+                               const DATA_TYPE beta,
+                               const DATA_TYPE alpha,
                                const float* __restrict__ bn_scale,
                                const float* __restrict__ bn_bias,
                                float* __restrict__ dscale,
@@ -128,18 +130,18 @@ extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) //
                                const float* __restrict__ saved_mean,
                                const float* __restrict__ saved_inv_variance)
 {
-    activbwdperactivation<INPUT_TYPE, OUTPUT_TYPE>(x,
-                                                   y,
-                                                   dy,
-                                                   dx,
-                                                   diff_scale,
-                                                   gamma,
-                                                   beta,
-                                                   alpha,
-                                                   bn_scale,
-                                                   bn_bias,
-                                                   dscale,
-                                                   dbias,
-                                                   saved_mean,
-                                                   saved_inv_variance);
+    activbwdperactivation<DATA_TYPE>(x,
+                                     y,
+                                     dy,
+                                     dx,
+                                     diff_scale,
+                                     gamma,
+                                     beta,
+                                     alpha,
+                                     bn_scale,
+                                     bn_bias,
+                                     dscale,
+                                     dbias,
+                                     saved_mean,
+                                     saved_inv_variance);
 }

@@ -45,39 +45,33 @@ using TYPE4 = std::conditional<
     ushort4,
     typename std::conditional<std::is_same<TYPE, double>::value, double4, float4>::type>::type;
 
-using FLOAT_ACCUM4 = TYPE4<FLOAT_ACCUM>;
+constexpr static unsigned int SEGTMP  = H * W * (LOCAL_SIZE_X / (H * W));
+constexpr static unsigned int SEGMENT = SEGTMP > BATCH_SIZE* H* W ? BATCH_SIZE* H* W : SEGTMP;
+constexpr static unsigned int NLOOP  = SEGMENT > 0 ? (BATCH_SIZE* H* W + SEGMENT - 1) / SEGMENT : 1;
+constexpr static unsigned int SEGIHW = SEGMENT / (H * W);
+constexpr static unsigned int NLOOPM = NLOOP - 1;
+constexpr static unsigned int SNHW   = NLOOPM * SEGIHW;
+constexpr static unsigned int LDS_SIZE = MIOPEN_USE_AMDGCN ? LDSGCN_SIZE : LDSNOGCN_SIZE;
 
-constexpr static auto SEGTMP   = H * W * (LOCAL_SIZE_X / (H * W));
-constexpr static auto SEGMENT  = SEGTMP > BATCH_SIZE* H* W ? BATCH_SIZE* H* W : SEGTMP;
-constexpr static auto NLOOP    = SEGMENT > 0 ? (BATCH_SIZE* H* W + SEGMENT - 1) / SEGMENT : 1;
-constexpr static auto SEGIHW   = SEGMENT / (H * W);
-constexpr static auto NLOOPM   = NLOOP - 1;
-constexpr static auto SNHW     = NLOOPM * SEGIHW;
-constexpr static auto LDS_SIZE = MIOPEN_USE_AMDGCN ? LDSGCN_SIZE : LDSNOGCN_SIZE;
+constexpr static unsigned int MAX_READ = 2;
+constexpr static unsigned int GRPRD    = LOCAL_SIZE_X * 4;
+constexpr static unsigned int REM4     = BATCH_SIZE * H * W - (BATCH_SIZE * H * W / GRPRD) * GRPRD;
+constexpr static unsigned int LESS4    = BATCH_SIZE * H * W - REM4;
+constexpr static unsigned int CHUNK    = MAX_READ * LOCAL_SIZE_X;
+constexpr static unsigned int REMOUT   = BATCH_SIZE * H * W - (BATCH_SIZE * H * W / CHUNK) * CHUNK;
+constexpr static unsigned int LESSOUT  = BATCH_SIZE * H * W - REMOUT;
 
-constexpr static auto MAX_READ = 2;
-constexpr static auto GRPRD    = LOCAL_SIZE_X * 4;
-constexpr static auto REM4     = BATCH_SIZE * H * W - (BATCH_SIZE * H * W / GRPRD) * GRPRD;
-constexpr static auto LESS4    = BATCH_SIZE * H * W - REM4;
-constexpr static auto CHUNK    = MAX_READ * LOCAL_SIZE_X;
-constexpr static auto REMOUT   = BATCH_SIZE * H * W - (BATCH_SIZE * H * W / CHUNK) * CHUNK;
-constexpr static auto LESSOUT  = BATCH_SIZE * H * W - REMOUT;
+constexpr static unsigned int MAX_N = 65;
 
-constexpr static auto MAX_N = 65;
-
-constexpr static auto VALUES_BUFFER_SIZE = VARIANT == 0                         ? NLOOP
-                                           : VARIANT == 3 && BATCH_SIZE < MAX_N ? BATCH_SIZE
-                                                                                : 1;
-
-template <typename TI, typename TO>
-__forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
-                                                const TI* __restrict__ y,
-                                                const TI* __restrict__ dy,
-                                                TO* __restrict__ dx,
-                                                const TI diff_scale,
-                                                const TI gamma,
-                                                const TI beta,
-                                                const TI alpha,
+template <typename T>
+__forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
+                                                const T* __restrict__ y,
+                                                const T* __restrict__ dy,
+                                                T* __restrict__ dx,
+                                                const T diff_scale,
+                                                const T gamma,
+                                                const T beta,
+                                                const T alpha,
                                                 const float* __restrict__ bn_scale,
                                                 const float* __restrict__ bn_bias,
                                                 float* __restrict__ dscale,
@@ -85,52 +79,42 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
                                                 const float* __restrict__ saved_mean,
                                                 const float* __restrict__ saved_inv_variance)
 {
-    using TI4 = TYPE4<TI>;
+    const unsigned int lid   = threadIdx.x;
+    const unsigned int gid   = blockIdx.x;
+    const unsigned int chwid = gid * H * W + (VARIANT == 0 ? lid % (H * W) : 0);
 
-    FLOAT_ACCUM mean{0};
-    FLOAT_ACCUM inv_variance{0};
-    FLOAT_ACCUM p_scale{0};
-    FLOAT_ACCUM ds{0};
-    FLOAT_ACCUM db{0};
-    FLOAT_ACCUM xhat{0};
-
-    FLOAT_ACCUM batch_values[VALUES_BUFFER_SIZE];
-    FLOAT_ACCUM dy_values[VALUES_BUFFER_SIZE];
-    __shared__ FLOAT_ACCUM lscale, lbias;
-    __shared__ FLOAT_ACCUM lmean, lvar;
-
-    auto index  = 0;
-    auto lid    = threadIdx.x;
-    auto gid    = blockIdx.x;
-    auto chwid  = gid * H * W + (VARIANT == 0 ? lid % (H * W) : 0);
-    auto lidihw = lid / (H * W);
-    auto nidx   = 0;
-    auto hwidx  = 0;
-    FLOAT_ACCUM tmp1{0}, tmp2{0}, tmp3{0};
-
+    __shared__ FLOAT_ACCUM scale, bias, mean, inv_variance;
     if(lid == 0)
     {
-        lscale = CVT_FP32_2ACCUM(bn_scale[gid]);
-        lbias  = CVT_FP32_2ACCUM(bn_bias[gid]);
-        lmean  = CVT_FP32_2ACCUM(saved_mean[gid]);
-        lvar   = CVT_FP32_2ACCUM(saved_inv_variance[gid]);
+        scale        = CVT_FP32_2ACCUM(bn_scale[gid]);
+        bias         = CVT_FP32_2ACCUM(bn_bias[gid]);
+        mean         = CVT_FP32_2ACCUM(saved_mean[gid]);
+        inv_variance = CVT_FP32_2ACCUM(saved_inv_variance[gid]);
     }
     __syncthreads();
-    mean         = lmean;
-    inv_variance = lvar;
+
+    FLOAT_ACCUM tmp3 = scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (BATCH_SIZE * H * W));
+
+    FLOAT_ACCUM ds{0};
+    FLOAT_ACCUM db{0};
 
     if constexpr(VARIANT == 0)
     {
+        FLOAT_ACCUM batch_values[NLOOP];
+        FLOAT_ACCUM dy_values[NLOOP];
+
+        const unsigned int lidihw = lid / (H * W);
+
         if(lid < SEGMENT)
         {
-            for(auto n = 0; n < NLOOPM; ++n)
+            for(unsigned int n = 0; n < NLOOPM; ++n)
             {
-                nidx  = n * SEGIHW + lidihw;
-                index = nidx * CHANNELS * H * W + chwid;
-                xhat  = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance;
+                unsigned int nidx  = n * SEGIHW + lidihw;
+                unsigned int index = nidx * CHANNELS * H * W + chwid;
+                FLOAT_ACCUM xhat   = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance;
                 FLOAT_ACCUM bn_dy[1];
                 FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
-                FLOAT_ACCUM bn_y[1]   = {xhat * lscale + lbias};
+                FLOAT_ACCUM bn_y[1]   = {xhat * scale + bias};
                 FLOAT_ACCUM act_y[1]  = {CVT_FLOAT2ACCUM(y[index])};
                 ActivationFunction_Diff(bn_dy,
                                         act_dy,
@@ -143,16 +127,18 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
                 dy_values[n] = bn_dy[0];
                 db += dy_values[n];
                 batch_values[n] = xhat;
-                ds              = batch_values[n] * dy_values[n] + ds;
+                ds += xhat * dy_values[n];
             }
-            nidx  = SNHW + lidihw;
-            index = nidx * CHANNELS * H * W + chwid;
+            unsigned int nidx  = SNHW + lidihw;
+            unsigned int index = nidx * CHANNELS * H * W + chwid;
+            FLOAT_ACCUM xhat   = index < BATCH_SIZE * CHANNELS * H * W
+                                     ? (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance
+                                     : CVT_FP32_2ACCUM(0);
             if(index < BATCH_SIZE * CHANNELS * H * W)
             {
-                xhat = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance;
                 FLOAT_ACCUM bn_dy[1];
                 FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
-                FLOAT_ACCUM bn_y[1]   = {xhat * lscale + lbias};
+                FLOAT_ACCUM bn_y[1]   = {xhat * scale + bias};
                 FLOAT_ACCUM act_y[1]  = {CVT_FLOAT2ACCUM(y[index])};
                 ActivationFunction_Diff(bn_dy,
                                         act_dy,
@@ -169,13 +155,8 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
                 dy_values[NLOOPM] = CVT_FP32_2ACCUM(0);
             }
             db += dy_values[NLOOPM];
-
-            batch_values[NLOOPM] = index < BATCH_SIZE * CHANNELS * H * W
-                                       ? (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance
-                                       : CVT_FP32_2ACCUM(0);
-
-            // batchvalues is now xhat
-            ds = batch_values[NLOOPM] * dy_values[NLOOPM] + ds;
+            ds += xhat * dy_values[NLOOPM];
+            batch_values[NLOOPM] = xhat;
         }
         __syncthreads();
 
@@ -194,63 +175,54 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
 
         if(lid < SEGMENT)
         {
-            p_scale = lscale;
-
-            for(auto n = 0; n < NLOOPM; ++n)
+            for(unsigned int n = 0; n < NLOOPM; ++n)
             {
-                nidx      = n * SEGIHW + lidihw;
-                index     = nidx * CHANNELS * H * W + chwid;
-                tmp1      = BATCH_SIZE * H * W * dy_values[n] - db;
-                tmp2      = -batch_values[n] * ds;
-                tmp3      = p_scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (BATCH_SIZE * H * W));
-                dx[index] = CVT_ACCUM2FLOAT(tmp3 * (tmp2 + tmp1));
+                unsigned int nidx  = n * SEGIHW + lidihw;
+                unsigned int index = nidx * CHANNELS * H * W + chwid;
+                FLOAT_ACCUM tmp1   = BATCH_SIZE * H * W * dy_values[n] - db;
+                FLOAT_ACCUM tmp2   = -batch_values[n] * ds;
+                dx[index]          = CVT_ACCUM2FLOAT(tmp3 * (tmp2 + tmp1));
             }
-            nidx  = SNHW + lidihw;
-            index = nidx * CHANNELS * H * W + chwid;
+            unsigned int nidx  = SNHW + lidihw;
+            unsigned int index = nidx * CHANNELS * H * W + chwid;
             if(index < BATCH_SIZE * CHANNELS * H * W)
             {
-                tmp1      = BATCH_SIZE * H * W * dy_values[NLOOPM] - db;
-                tmp2      = -batch_values[NLOOPM] * ds;
-                tmp3      = p_scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (BATCH_SIZE * H * W));
-                dx[index] = CVT_ACCUM2FLOAT(tmp3 * (tmp2 + tmp1));
+                FLOAT_ACCUM tmp1 = BATCH_SIZE * H * W * dy_values[NLOOPM] - db;
+                FLOAT_ACCUM tmp2 = -batch_values[NLOOPM] * ds;
+                dx[index]        = CVT_ACCUM2FLOAT(tmp3 * (tmp2 + tmp1));
             }
-        }
-        if(lid == 0)
-        {
-            dbias[gid]  = CVT_ACCUM2FP32(db);
-            dscale[gid] = CVT_ACCUM2FP32(ds);
         }
     }
     else if constexpr(VARIANT == 1)
     {
-        TI4 xread4;
-        FLOAT_ACCUM4 xhat4;
-        TI4 act_dy4, act_y4;
-        FLOAT_ACCUM4 bn_y4;
+        using T4           = TYPE4<T>;
+        using FLOAT_ACCUM4 = TYPE4<FLOAT_ACCUM>;
 
-        for(auto k = lid << 2; k < LESS4; k += GRPRD)
+        for(unsigned int k = lid << 2; k < LESS4; k += GRPRD)
         {
-            nidx    = k / (H * W);
-            hwidx   = k - nidx * H * W;
-            index   = nidx * CHANNELS * H * W + chwid + hwidx;
-            xread4  = *reinterpret_cast<const TI4*>(&x[index]);
-            act_dy4 = *reinterpret_cast<const TI4*>(&dy[index]);
-            act_y4  = *reinterpret_cast<const TI4*>(&y[index]);
+            unsigned int nidx  = k / (H * W);
+            unsigned int hwidx = k - nidx * H * W;
+            unsigned int index = nidx * CHANNELS * H * W + chwid + hwidx;
+            T4 xread4          = *reinterpret_cast<const T4*>(&x[index]);
+            T4 act_dy4         = *reinterpret_cast<const T4*>(&dy[index]);
+            T4 act_y4          = *reinterpret_cast<const T4*>(&y[index]);
 
-            xhat4.x = (CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&xread4.x)) - mean) * inv_variance;
-            xhat4.y = (CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&xread4.y)) - mean) * inv_variance;
-            xhat4.z = (CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&xread4.z)) - mean) * inv_variance;
-            xhat4.w = (CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&xread4.w)) - mean) * inv_variance;
+            FLOAT_ACCUM4 xhat4;
+            xhat4.x = (CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&xread4.x)) - mean) * inv_variance;
+            xhat4.y = (CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&xread4.y)) - mean) * inv_variance;
+            xhat4.z = (CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&xread4.z)) - mean) * inv_variance;
+            xhat4.w = (CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&xread4.w)) - mean) * inv_variance;
 
-            bn_y4.x = xhat4.x * lscale + lbias;
-            bn_y4.y = xhat4.y * lscale + lbias;
-            bn_y4.z = xhat4.z * lscale + lbias;
-            bn_y4.w = xhat4.w * lscale + lbias;
+            FLOAT_ACCUM4 bn_y4;
+            bn_y4.x = xhat4.x * scale + bias;
+            bn_y4.y = xhat4.y * scale + bias;
+            bn_y4.z = xhat4.z * scale + bias;
+            bn_y4.w = xhat4.w * scale + bias;
 
             FLOAT_ACCUM p_bn_dy[1];
-            FLOAT_ACCUM p_act_dy[1] = {CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_dy4.x))};
+            FLOAT_ACCUM p_act_dy[1] = {CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_dy4.x))};
             FLOAT_ACCUM p_bn_y[1]   = {bn_y4.x};
-            FLOAT_ACCUM p_act_y[1]  = {CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_y4.x))};
+            FLOAT_ACCUM p_act_y[1]  = {CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_y4.x))};
             ActivationFunction_Diff(p_bn_dy,
                                     p_act_dy,
                                     p_bn_y,
@@ -262,9 +234,9 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
             db += p_bn_dy[0];
             ds += xhat4.x * p_bn_dy[0];
 
-            p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_dy4.y));
+            p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_dy4.y));
             p_bn_y[0]   = bn_y4.y;
-            p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_y4.y));
+            p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_y4.y));
             ActivationFunction_Diff(p_bn_dy,
                                     p_act_dy,
                                     p_bn_y,
@@ -276,9 +248,9 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
             db += p_bn_dy[0];
             ds += xhat4.y * p_bn_dy[0];
 
-            p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_dy4.z));
+            p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_dy4.z));
             p_bn_y[0]   = bn_y4.z;
-            p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_y4.z));
+            p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_y4.z));
             ActivationFunction_Diff(p_bn_dy,
                                     p_act_dy,
                                     p_bn_y,
@@ -290,9 +262,9 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
             db += p_bn_dy[0];
             ds += xhat4.z * p_bn_dy[0];
 
-            p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_dy4.w));
+            p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_dy4.w));
             p_bn_y[0]   = bn_y4.w;
-            p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_y4.w));
+            p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_y4.w));
             ActivationFunction_Diff(p_bn_dy,
                                     p_act_dy,
                                     p_bn_y,
@@ -307,34 +279,32 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
 
         if constexpr(REM4)
         {
-            auto remkey = (lid << 2) + LESS4;
-            nidx        = remkey / (H * W);
-            hwidx       = remkey - nidx * H * W;
-            index       = nidx * CHANNELS * H * W + chwid + hwidx;
+            unsigned int remkey = (lid << 2) + LESS4;
+            unsigned int nidx   = remkey / (H * W);
+            unsigned int hwidx  = remkey - nidx * H * W;
+            unsigned int index  = nidx * CHANNELS * H * W + chwid + hwidx;
             if(index < BATCH_SIZE * CHANNELS * H * W)
             {
-                xread4  = *reinterpret_cast<const TI4*>(&x[index]);
-                act_dy4 = *reinterpret_cast<const TI4*>(&dy[index]);
-                act_y4  = *reinterpret_cast<const TI4*>(&y[index]);
+                T4 xread4  = *reinterpret_cast<const T4*>(&x[index]);
+                T4 act_dy4 = *reinterpret_cast<const T4*>(&dy[index]);
+                T4 act_y4  = *reinterpret_cast<const T4*>(&y[index]);
 
-                xhat4.x =
-                    (CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&xread4.x)) - mean) * inv_variance;
-                xhat4.y =
-                    (CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&xread4.y)) - mean) * inv_variance;
-                xhat4.z =
-                    (CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&xread4.z)) - mean) * inv_variance;
-                xhat4.w =
-                    (CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&xread4.w)) - mean) * inv_variance;
+                FLOAT_ACCUM4 xhat4;
+                xhat4.x = (CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&xread4.x)) - mean) * inv_variance;
+                xhat4.y = (CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&xread4.y)) - mean) * inv_variance;
+                xhat4.z = (CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&xread4.z)) - mean) * inv_variance;
+                xhat4.w = (CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&xread4.w)) - mean) * inv_variance;
 
-                bn_y4.x = xhat4.x * lscale + lbias;
-                bn_y4.y = xhat4.y * lscale + lbias;
-                bn_y4.z = xhat4.z * lscale + lbias;
-                bn_y4.w = xhat4.w * lscale + lbias;
+                FLOAT_ACCUM4 bn_y4;
+                bn_y4.x = xhat4.x * scale + bias;
+                bn_y4.y = xhat4.y * scale + bias;
+                bn_y4.z = xhat4.z * scale + bias;
+                bn_y4.w = xhat4.w * scale + bias;
 
                 FLOAT_ACCUM p_bn_dy[1];
-                FLOAT_ACCUM p_act_dy[1] = {CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_dy4.x))};
+                FLOAT_ACCUM p_act_dy[1] = {CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_dy4.x))};
                 FLOAT_ACCUM p_bn_y[1]   = {bn_y4.x};
-                FLOAT_ACCUM p_act_y[1]  = {CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_y4.x))};
+                FLOAT_ACCUM p_act_y[1]  = {CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_y4.x))};
                 ActivationFunction_Diff(p_bn_dy,
                                         p_act_dy,
                                         p_bn_y,
@@ -346,9 +316,9 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
                 db += p_bn_dy[0];
                 ds += xhat4.x * p_bn_dy[0];
 
-                p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_dy4.y));
+                p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_dy4.y));
                 p_bn_y[0]   = bn_y4.y;
-                p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_y4.y));
+                p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_y4.y));
                 ActivationFunction_Diff(p_bn_dy,
                                         p_act_dy,
                                         p_bn_y,
@@ -360,9 +330,9 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
                 db += p_bn_dy[0];
                 ds += xhat4.y * p_bn_dy[0];
 
-                p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_dy4.z));
+                p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_dy4.z));
                 p_bn_y[0]   = bn_y4.z;
-                p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_y4.z));
+                p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_y4.z));
                 ActivationFunction_Diff(p_bn_dy,
                                         p_act_dy,
                                         p_bn_y,
@@ -374,9 +344,9 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
                 db += p_bn_dy[0];
                 ds += xhat4.z * p_bn_dy[0];
 
-                p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_dy4.w));
+                p_act_dy[0] = CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_dy4.w));
                 p_bn_y[0]   = bn_y4.w;
-                p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<TI*>(&act_y4.w));
+                p_act_y[0]  = CVT_FLOAT2ACCUM(*reinterpret_cast<T*>(&act_y4.w));
                 ActivationFunction_Diff(p_bn_dy,
                                         p_act_dy,
                                         p_bn_y,
@@ -405,29 +375,23 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
                 ds, db, CVT_FP32_2ACCUM(1.0f), lcl_data_x2, lcl_data_y2, lid);
         }
 
-        p_scale = lscale;
-        tmp3    = p_scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (BATCH_SIZE * H * W));
+        tmp3 = scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (BATCH_SIZE * H * W));
         __syncthreads();
-        if(lid == 0)
-        {
-            dbias[gid]  = CVT_ACCUM2FP32(db);
-            dscale[gid] = CVT_ACCUM2FP32(ds);
-        }
 
         FLOAT_ACCUM values[MAX_READ];
-        for(auto k = MAX_READ * lid; k < LESSOUT; k += CHUNK)
+        for(unsigned int k = MAX_READ * lid; k < LESSOUT; k += CHUNK)
         {
-            for(auto j = 0; j < MAX_READ; ++j)
+            for(unsigned int j = 0; j < MAX_READ; ++j)
             {
-                auto l = k + j;
-                nidx   = l / (H * W);
-                hwidx  = l - nidx * H * W;
-                index  = nidx * CHANNELS * H * W + chwid + hwidx;
+                unsigned int l     = k + j;
+                unsigned int nidx  = l / (H * W);
+                unsigned int hwidx = l - nidx * H * W;
+                unsigned int index = nidx * CHANNELS * H * W + chwid + hwidx;
                 FLOAT_ACCUM bn_dy[1];
                 FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
                 FLOAT_ACCUM act_y[1]  = {CVT_FLOAT2ACCUM(y[index])};
-                xhat                  = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance;
-                FLOAT_ACCUM bn_y[1]   = {xhat * lscale + lbias};
+                FLOAT_ACCUM xhat      = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance;
+                FLOAT_ACCUM bn_y[1]   = {xhat * scale + bias};
                 ActivationFunction_Diff(bn_dy,
                                         act_dy,
                                         bn_y,
@@ -436,36 +400,36 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
                                         CVT_FLOAT2ACCUM(gamma),
                                         CVT_FLOAT2ACCUM(beta),
                                         CVT_FLOAT2ACCUM(alpha));
-                tmp1      = BATCH_SIZE * H * W * bn_dy[0] - db;
-                tmp2      = -xhat * ds;
-                values[j] = tmp3 * (tmp2 + tmp1);
+                FLOAT_ACCUM tmp1 = BATCH_SIZE * H * W * bn_dy[0] - db;
+                FLOAT_ACCUM tmp2 = -xhat * ds;
+                values[j]        = tmp3 * (tmp2 + tmp1);
             }
             __syncthreads();
-            for(auto j = 0; j < MAX_READ; ++j)
+            for(unsigned int j = 0; j < MAX_READ; ++j)
             {
-                auto l    = k + j;
-                nidx      = l / (H * W);
-                hwidx     = l - nidx * H * W;
-                index     = nidx * CHANNELS * H * W + chwid + hwidx;
-                dx[index] = CVT_ACCUM2FLOAT(values[j]);
+                unsigned int l     = k + j;
+                unsigned int nidx  = l / (H * W);
+                unsigned int hwidx = l - nidx * H * W;
+                unsigned int index = nidx * CHANNELS * H * W + chwid + hwidx;
+                dx[index]          = CVT_ACCUM2FLOAT(values[j]);
             }
         }
 
         if constexpr(REMOUT)
         {
-            auto remkeyout = MAX_READ * lid + LESSOUT;
-            for(auto j = 0; j < MAX_READ; ++j)
+            unsigned int remkeyout = MAX_READ * lid + LESSOUT;
+            for(unsigned int j = 0; j < MAX_READ; ++j)
             {
-                auto l = remkeyout + j;
-                nidx   = l / (H * W);
-                hwidx  = l - nidx * H * W;
-                index  = nidx * CHANNELS * H * W + chwid + hwidx;
+                unsigned int l     = remkeyout + j;
+                unsigned int nidx  = l / (H * W);
+                unsigned int hwidx = l - nidx * H * W;
+                unsigned int index = nidx * CHANNELS * H * W + chwid + hwidx;
                 if(index < BATCH_SIZE * CHANNELS * H * W)
                 {
                     FLOAT_ACCUM bn_dy[1];
                     FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
-                    xhat                  = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance;
-                    FLOAT_ACCUM bn_y[1]   = {xhat * lscale + lbias};
+                    FLOAT_ACCUM xhat      = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance;
+                    FLOAT_ACCUM bn_y[1]   = {xhat * scale + bias};
                     FLOAT_ACCUM act_y[1]  = {CVT_FLOAT2ACCUM(y[index])};
                     ActivationFunction_Diff(bn_dy,
                                             act_dy,
@@ -476,18 +440,18 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
                                             CVT_FLOAT2ACCUM(beta),
                                             CVT_FLOAT2ACCUM(alpha));
 
-                    tmp1      = BATCH_SIZE * H * W * bn_dy[0] - db;
-                    tmp2      = -xhat * ds;
-                    values[j] = tmp3 * (tmp2 + tmp1);
+                    FLOAT_ACCUM tmp1 = BATCH_SIZE * H * W * bn_dy[0] - db;
+                    FLOAT_ACCUM tmp2 = -xhat * ds;
+                    values[j]        = tmp3 * (tmp2 + tmp1);
                 }
             }
             __syncthreads();
-            for(auto j = 0; j < MAX_READ; ++j)
+            for(unsigned int j = 0; j < MAX_READ; ++j)
             {
-                auto l = remkeyout + j;
-                nidx   = l / (H * W);
-                hwidx  = l - nidx * H * W;
-                index  = nidx * CHANNELS * H * W + chwid + hwidx;
+                unsigned int l     = remkeyout + j;
+                unsigned int nidx  = l / (H * W);
+                unsigned int hwidx = l - nidx * H * W;
+                unsigned int index = nidx * CHANNELS * H * W + chwid + hwidx;
                 if(index < BATCH_SIZE * CHANNELS * H * W)
                 {
                     dx[index] = CVT_ACCUM2FLOAT(values[j]);
@@ -501,16 +465,18 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
     }
     else if constexpr(VARIANT == 3)
     {
+        FLOAT_ACCUM batch_values[BATCH_SIZE];
+        FLOAT_ACCUM dy_values[BATCH_SIZE];
         if(lid < H * W)
         {
 #pragma unroll
-            for(auto n = 0; n < BATCH_SIZE; ++n)
+            for(unsigned int n = 0; n < BATCH_SIZE; ++n)
             {
-                index = n * CHANNELS * H * W + chwid + lid;
+                unsigned int index = n * CHANNELS * H * W + chwid + lid;
                 FLOAT_ACCUM bn_dy[1];
                 FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
-                xhat                  = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance;
-                FLOAT_ACCUM bn_y[1]   = {xhat * lscale + lbias};
+                FLOAT_ACCUM xhat      = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance;
+                FLOAT_ACCUM bn_y[1]   = {xhat * scale + bias};
                 FLOAT_ACCUM act_y[1]  = {CVT_FLOAT2ACCUM(y[index])};
                 ActivationFunction_Diff(bn_dy,
                                         act_dy,
@@ -530,11 +496,6 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
                 db += bn_dy[0];
                 ds += xhat * bn_dy[0];
             }
-        }
-        else
-        {
-            db = 0;
-            ds = 0;
         }
 
         __syncthreads();
@@ -558,12 +519,11 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
         // move across the sections of an image in the mini_batch stack
         if(lid < H * W)
         {
-            p_scale = lscale;
-
 #pragma unroll
-            for(auto n = 0; n < BATCH_SIZE; ++n)
+            for(unsigned int n = 0; n < BATCH_SIZE; ++n)
             {
-                index = n * CHANNELS * H * W + chwid + lid;
+                unsigned int index = n * CHANNELS * H * W + chwid + lid;
+                FLOAT_ACCUM tmp1, tmp2;
                 if constexpr(BATCH_SIZE < MAX_N)
                 {
                     tmp1 = BATCH_SIZE * H * W * dy_values[n] - db;
@@ -573,8 +533,8 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
                 {
                     FLOAT_ACCUM bn_dy[1];
                     FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
-                    xhat                  = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance;
-                    FLOAT_ACCUM bn_y[1]   = {xhat * lscale + lbias};
+                    FLOAT_ACCUM xhat      = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance;
+                    FLOAT_ACCUM bn_y[1]   = {xhat * scale + bias};
                     FLOAT_ACCUM act_y[1]  = {CVT_FLOAT2ACCUM(y[index])};
                     ActivationFunction_Diff(bn_dy,
                                             act_dy,
@@ -588,27 +548,28 @@ __forceinline__ __device__ void activbwdspatial(const TI* __restrict__ x,
                     tmp1 = BATCH_SIZE * H * W * bn_dy[0] - db;
                     tmp2 = -xhat * ds;
                 }
-                tmp3      = p_scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (BATCH_SIZE * H * W));
+                tmp3      = scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (BATCH_SIZE * H * W));
                 dx[index] = CVT_ACCUM2FLOAT(tmp3 * (tmp2 + tmp1));
             }
         }
-        if(lid == 0)
-        {
-            dbias[gid]  = CVT_ACCUM2FP32(db);
-            dscale[gid] = CVT_ACCUM2FP32(ds);
-        }
+    }
+
+    if(lid == 0)
+    {
+        dbias[gid]  = CVT_ACCUM2FP32(db);
+        dscale[gid] = CVT_ACCUM2FP32(ds);
     }
 }
 
 extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) //
-    void ActivBwdSpatial(const INPUT_TYPE* __restrict__ x,
-                         const INPUT_TYPE* __restrict__ y,
-                         const INPUT_TYPE* __restrict__ dy,
-                         OUTPUT_TYPE* __restrict__ dx,
-                         const INPUT_TYPE diff_scale,
-                         const INPUT_TYPE gamma,
-                         const INPUT_TYPE beta,
-                         const INPUT_TYPE alpha,
+    void ActivBwdSpatial(const DATA_TYPE* __restrict__ x,
+                         const DATA_TYPE* __restrict__ y,
+                         const DATA_TYPE* __restrict__ dy,
+                         DATA_TYPE* __restrict__ dx,
+                         const DATA_TYPE diff_scale,
+                         const DATA_TYPE gamma,
+                         const DATA_TYPE beta,
+                         const DATA_TYPE alpha,
                          const float* __restrict__ bn_scale,
                          const float* __restrict__ bn_bias,
                          float* __restrict__ dscale,
@@ -616,18 +577,18 @@ extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) //
                          const float* __restrict__ saved_mean,
                          const float* __restrict__ saved_inv_variance)
 {
-    activbwdspatial<INPUT_TYPE, OUTPUT_TYPE>(x,
-                                             y,
-                                             dy,
-                                             dx,
-                                             diff_scale,
-                                             gamma,
-                                             beta,
-                                             alpha,
-                                             bn_scale,
-                                             bn_bias,
-                                             dscale,
-                                             dbias,
-                                             saved_mean,
-                                             saved_inv_variance);
+    activbwdspatial<DATA_TYPE>(x,
+                               y,
+                               dy,
+                               dx,
+                               diff_scale,
+                               gamma,
+                               beta,
+                               alpha,
+                               bn_scale,
+                               bn_bias,
+                               dscale,
+                               dbias,
+                               saved_mean,
+                               saved_inv_variance);
 }
