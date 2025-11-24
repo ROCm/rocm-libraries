@@ -50,6 +50,14 @@ public:
             return *this;
         }
 
+        // Implicit conversion for read access
+        HIPCUB_HOST_DEVICE
+        inline
+            operator T() const
+        {
+            return *value_;
+        }
+
     private:
         T* const   value_;
         const bool keep_;
