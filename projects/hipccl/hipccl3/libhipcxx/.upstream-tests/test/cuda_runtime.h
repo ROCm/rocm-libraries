@@ -295,3 +295,9 @@
 #ifndef __nv_bfloat162
 #  define __nv_bfloat162 __hip_bfloat162
 #endif
+
+#include <hip/hip_fp16.h>
+__host__ __device__ __half __double2half(const double& __value) noexcept
+{
+  return __float2half(static_cast<float>(__value));
+}
