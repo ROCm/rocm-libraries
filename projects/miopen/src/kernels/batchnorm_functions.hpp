@@ -269,8 +269,6 @@ struct StashUpdater
     __device__ StashUpdater(FpAccumType m, FpAccumType v, FpAccumType e)
         : mean(m), variance(v), expAvgFactor(e)
     {
-        static_assert(miopen::batchnorm::config::variant != 4,
-                      "running_stash is only compiled when MIO_BN_VARIANT != 4.");
     }
 
     __forceinline__ __device__ void operator()(FpAccumType& runningMean,
@@ -301,8 +299,6 @@ struct StashUpdaterPA
     __device__ StashUpdaterPA(FpAccumType m, FpAccumType v, FpAccumType e)
         : mean(m), variance(v), expAvgFactor(e)
     {
-        static_assert(miopen::batchnorm::config::variant != 4,
-                      "running_stash is only compiled when MIO_BN_VARIANT != 4.");
     }
 
     __forceinline__ __device__ void operator()(FpAccumType& runningMean,
@@ -340,6 +336,11 @@ __forceinline__ __device__ void running_stash(FpPrecType_C* __restrict resultRun
                                               Updater const& update,
                                               uint channel)
 {
+    // Variant 4 is not used any more. There used to be a special updater for that case deleted when
+    // porting kernels to HIP.
+    static_assert(miopen::batchnorm::config::variant != 4,
+                  "running_stash is only compiled when MIO_BN_VARIANT != 4.");
+
     auto pvt_runMean     = static_cast<FpAccumType_C>(resultRunningMean[channel]);
     auto pvt_runVariance = static_cast<FpAccumType_C>(resultRunningVariance[channel]);
 
