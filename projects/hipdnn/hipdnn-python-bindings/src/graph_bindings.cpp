@@ -43,12 +43,19 @@ void graph_bindings(nb::module_& m)
              "Create execution plans with specified heuristic modes")
         .def("check_support", &graph::Graph::check_support)
         .def("build_plans", &graph::Graph::build_plans)
-        .def("get_workspace_size",
-             [](const graph::Graph& g) {
-                 int64_t workspaceSize;
-                 auto result = g.get_workspace_size(workspaceSize);
-                 return std::make_pair(result, workspaceSize);
-             })
+        .def(
+            "get_workspace_size",
+            [](const graph::Graph& g) {
+                int64_t workspaceSize;
+                auto result = g.get_workspace_size(workspaceSize);
+                if(!result.is_good())
+                {
+                    throw std::runtime_error("Failed to get workspace size: "
+                                             + result.get_message());
+                }
+                return workspaceSize;
+            },
+            "Get the workspace size required for graph execution")
         .def(
             "execute",
             [](const graph::Graph& g,
