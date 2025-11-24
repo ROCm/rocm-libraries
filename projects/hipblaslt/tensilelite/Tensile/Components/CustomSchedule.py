@@ -913,6 +913,76 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
         ]
 
         nglshift = nllshift = 34
+        
+    elif isNN(kernel) and useLDSTr and TLDS==1:
+        kernel["SwapGlobalReadOrder"] = True
+        nglshift = nllshift = 0
+        
+        optSchedule = {
+            # last index of producer <SYNC> first index of consumer
+            # SYNC[0] = -1 to align all waves at the start of the loop
+            # A fence at 23, annd B fence at 36, final vmem fence at 81
+            'SYNC': [[-1, 3, 7, 11, 23, 36, 36, 81, 81]],
+
+            # Avoid interleaving of LRA0 and LRB0
+            # LRA0: tightly packed at the beginning
+            'LRA0': [[0, 1, 2, 3, 4, 5, 6, 7]],
+            # LRB0 scheduled after the A fence, overlapping with GRA/GRB
+            'LRB0': [[24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 35]],
+
+            # Address increments for GR 
+            'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
+            'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
+
+            # first stream (A side in NN+swapped)
+            'GRB': [[23, 23, 24, 24,
+                    26, 26, 28, 28,
+                    29, 29, 31, 31,
+                    33, 33, 35, 35]],
+
+            # second stream (B side in NN+swapped)
+            'GRA': [[36, 36, 38, 38, 40, 40, 41, 41,
+                    43, 43, 45, 45, 47, 47, 48, 48,
+                    50, 50, 52, 52, 54, 54, 55, 55,
+                    57, 57, 59, 59, 60, 60, 62, 62,
+                    64, 64, 66, 66, 67, 67, 69, 69,
+                    71, 71, 73, 73, 74, 74, 76, 76,
+                    78, 78, 79, 79]],
+            
+            # from epilogue in the default schedule
+            # these are not updated in the updated schedule
+            'LRSA': [[50]],
+            'LRSB': [[50]],
+            'LWSA': [[80]],
+            'LWSB': [[80]],
+            'LRA1': [[82, 84, 84, 85, 85, 86, 86, 87]], # 8
+            'LRB1': [[83, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]], # 13
+            'LCC':  [[100, 100]],
+        }
+        
+        syncCode = [
+            SWaitCnt(dscnt=12, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LR/LW"),
+            SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="ensure all previous LRA1/LRB1 done before early MFMA use"),
+            SWaitCnt(dscnt=10, vlcnt=-1, vscnt=-1, comment="ensure all previous LRA1/LRB1 done before early MFMA use"),
+
+            
+            # A fence: all LRA0 are done before DTL writes from the first GR stream startign at 23 (swapped)
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before first DTL writes"),
+            # barrier after LRA0, before first global DTL phase at 23
+            SBarrier(comment="barrier after LRA0 , before GR at 23"),
+
+            # B fence : all LRB0 are done before second DTL stream 
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0 to complete before second DTL writes"),
+            # barrier after LRB0 before second global stream at 36
+            SBarrier(comment="barrier after LRB0, before GR at 36"),
+
+            # final vmem fence: ensure all GRA/GRB are done before next tile LDS reads LRA1/LRB1
+            SWaitCnt(dscnt=-1, vlcnt=34, vscnt=-1, comment="wait for all GRA/GRB before next-tile LDS reads"),
+            # final barrier : all waves; make next-tile LDS visible to LRA1/LRB1
+            SBarrier(comment="final barrier before LRA1/LRB1 (at 83)"),
+        ]
+        
+        nglshift = nllshift = 34
     else:
         return False, None
 
