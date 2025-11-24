@@ -183,11 +183,6 @@ endif()
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/llvm ${ROCM_ROOT}/llvm ${ROCM_ROOT} ${ROCM_ROOT}/hip)
 find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 
-if(BUILD_CODE_COVERAGE)
-  add_compile_options(-fprofile-arcs -ftest-coverage)
-  add_link_options(--coverage)
-endif()
-
 # Setup VERSION
 set(VERSION_STRING "4.1.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
@@ -267,43 +262,54 @@ if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
   )
 endif()
 
+if(BUILD_CODE_COVERAGE)
+  target_compile_options(rocprim INTERFACE
+    -w
+    -fprofile-instr-generate
+    -fcoverage-mapping
+  )
+  target_link_options(rocprim INTERFACE
+    -fprofile-instr-generate
+  )
+endif()
+
 #
 # ADDITIONAL TARGETS FOR CODE COVERAGE
 #
 if(BUILD_CODE_COVERAGE)
-  #
-  # > make coverage_cleanup (clean coverage related files.)
-  # > # run your tests
-  #  > make coverage (generate html documentation)
-  #
-
-  #
-  # Prepare coverage output
-  # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
-  #
-  add_custom_target(coverage
-    DEPENDS rocprim
-    COMMAND mkdir -p lcoverage
-    COMMAND echo "\\#!/bin/bash" > llvm-gcov.sh
-    COMMAND echo "\\# THIS FILE HAS BEEN GENERATED" >> llvm-gcov.sh
-    COMMAND printf "exec /opt/rocm/llvm/bin/llvm-cov gcov $$\\@" >> llvm-gcov.sh
-    COMMAND chmod +x llvm-gcov.sh
-    )
-
-  #
-  # Generate coverage output.
-  #
-  add_custom_command(TARGET coverage
-    COMMAND lcov --directory . --base-directory . --gcov-tool ${CMAKE_BINARY_DIR}/llvm-gcov.sh --capture -o lcoverage/raw_main_coverage.info
-    COMMAND lcov --remove lcoverage/raw_main_coverage.info "'/opt/*'" "'/usr/*'" -o lcoverage/main_coverage.info
-    COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
-    )
-
-  #
-  # Coverage cleanup
-  #
-  add_custom_target(coverage_cleanup
-    COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
+  add_custom_target(
+    coverage_analysis
+    COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
+    COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
+    COMMAND ctest --output-on-failure -E "rocprim.linking*" --gtest_filter=\"\${GTEST_FILTER}\"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
+  )
+
+  find_program(
+    LLVM_PROFDATA
+    llvm-profdata
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  find_program(
+    LLVM_COV
+    llvm-cov
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  get_property(LLVM_COV_OBJECT_ARGS GLOBAL PROPERTY LLVM_COV_OBJECT_ARGS)
+  add_custom_target(
+    coverage
+    DEPENDS coverage_analysis
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocprim-coverage_*.profraw -o ./coverage-report/rocprim.profdata
+    COMMAND ${LLVM_COV} report  ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=./coverage-report/rocprim.profdata
+    COMMAND ${LLVM_COV} show  ${LLVM_COV_OBJECT_ARGS}  --ignore-filename-regex="test_*" -instr-profile=./coverage-report/rocprim.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export  ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=./coverage-report/rocprim.profdata -format=lcov > ./coverage-report/coverage.info
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
 endif()
