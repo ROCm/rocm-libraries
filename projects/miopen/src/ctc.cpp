@@ -233,6 +233,8 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
 
         if(probsDesc.GetType() == miopenHalf)
         {
+            // FP16 is not yet fully supported
+            // See https://github.com/ROCm/rocm-libraries/issues/2866
             params += " -DMIOPEN_USE_FP16=1 -DOPT_ATOMIC_LOGADDEXP=0";
         }
         else

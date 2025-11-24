@@ -18,7 +18,7 @@ inline __device__ FLOAT LogAddExp(const FLOAT* x, const FLOAT* y)
                                     // We don't need the extra precision of log1pf() and it adds
                                     // performance overhead.
                                     // cppcheck-suppress unpreciseMathCall
-                                    : max(a + logf(expf(b - a) + 1), negative_cutoff_val);
+                                    : max(a + logf(expf(c) + 1), negative_cutoff_val);
 }
 
 template <class T>
@@ -36,15 +36,17 @@ inline __device__ void NonAtomicLogAddExp(const unsigned int& local_id,
 {
     __syncthreads();
 
-    // TODO consider parallelizing loop over multple threads rather than only using a couple of
-    // threads in the group.
+    // TODO: https://github.com/ROCm/rocm-libraries/issues/2866
+    // Consider parallelizing loop over multple threads rather than only using a couple of threads
+    // in the group. There may also be a race condition where two threads (lid 0 and 1) may write to
+    // the same gradients[gidx] location when label_cur values collide.
     if(local_id == 0 || local_id == 1)
     {
         for(unsigned int label_idx = 0; label_idx < label_length; label_idx++)
         {
             unsigned int label_offset = 2 * label_idx + local_id;
-            int lb_cur                = (local_id == 0) ? BLANK_LB : *(label_prime + label_offset);
-            size_t gidx = reverse_input_idx * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + lb_cur;
+            unsigned const label_cur  = (local_id == 0) ? BLANK_LB : *(label_prime + label_offset);
+            size_t gidx = reverse_input_idx * GRADS_STRIDE0 + batch_id * GRADS_STRIDE1 + label_cur;
             T beta_temp =
                 (input_idx % 2) == 0 ? *(beta_buff0 + label_offset) : *(beta_buff1 + label_offset);
             size_t bidx_ts = reverse_input_idx * label_prime_len + label_offset;
@@ -106,12 +108,11 @@ inline __device__ void AtomicLogAddExp(const unsigned int& reverse_input_idx,
         float a       = max(prev_val, beta_temp);
         float b       = min(prev_val, beta_temp);
         float c       = b - a;
-        float new_val = c <= negative_cutoff_val
-                            ? max(a, negative_cutoff_val)
-                            // We don't need the extra precision of log1pf() and it adds performance
-                            // overhead.
-                            // cppcheck-suppress unpreciseMathCall
-                            : max(a + logf(expf(b - a) + 1), negative_cutoff_val);
+        float new_val = c <= negative_cutoff_val ? max(a, negative_cutoff_val)
+                                                 // We don't need the extra precision of log1pf()
+                                                 // and it adds performance overhead.
+                                                 // cppcheck-suppress unpreciseMathCall
+                                                 : max(a + logf(expf(c) + 1), negative_cutoff_val);
 
         cur_val = atomicCAS(addr, prev_val, new_val);
     } while(cur_val != prev_val);
