@@ -111,9 +111,9 @@ TEST_F(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableVariousLayouts)
 
     std::vector<std::pair<std::vector<int64_t>, bool>> layoutsAndExpectedResults
         = {{{3, 2, 1, 0}, true},
-           {{3, 0, 2, 1}, false}, // Should be true
-           {{4, 3, 2, 1, 0}, false}, // Should be true
-           {{4, 0, 3, 2, 1}, false}, // Should be true
+           {{3, 0, 2, 1}, true},
+           {{4, 3, 2, 1, 0}, true},
+           {{4, 0, 3, 2, 1}, true},
            {{0, 1, 2, 3}, false}};
 
     using namespace hipdnn_sdk::utilities;
@@ -122,24 +122,16 @@ TEST_F(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableVariousLayouts)
     {
         std::vector<int64_t> xDims(layoutOrder.size(), 16);
         xDims[0] = 1;
-        std::cout << "xDims = " << vecToString(xDims) << "\n";
         auto xStrides = hipdnn_sdk::utilities::generateStrides(xDims, layoutOrder);
-        std::cout << "xStrides = " << vecToString(xStrides) << "\n";
         std::vector<int64_t> wDims(layoutOrder.size(), 3);
         wDims[0] = 1;
         wDims[1] = xDims[1];
-        std::cout << "wDims = " << vecToString(wDims) << "\n";
         auto wStrides = hipdnn_sdk::utilities::generateStrides(wDims, layoutOrder);
-        std::cout << "wStrides = " << vecToString(wStrides) << "\n";
 
         std::vector<int64_t> convPrePadding(layoutOrder.size() - 2, 0);
-        std::cout << "convPrePadding = " << vecToString(convPrePadding) << "\n";
         std::vector<int64_t> convPostPadding(layoutOrder.size() - 2, 0);
-        std::cout << "convPostPadding = " << vecToString(convPostPadding) << "\n";
         std::vector<int64_t> convStrides(layoutOrder.size() - 2, 1);
-        std::cout << "convStrides = " << vecToString(convStrides) << "\n";
         std::vector<int64_t> convDilation(layoutOrder.size() - 2, 1);
-        std::cout << "convDilation = " << vecToString(convDilation) << "\n";
 
         test_conv_common::ConvTestCase convTestCase(std::move(xDims),
                                                     std::move(wDims),
@@ -150,24 +142,6 @@ TEST_F(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableVariousLayouts)
                                                     0);
 
         auto yStrides = generateStrides(convTestCase.yDims, layoutOrder);
-        {
-            auto builder
-                = hipdnn_sdk::test_utilities::createValidConvFwdGraph(convTestCase.xDims,
-                                                                      xStrides,
-                                                                      convTestCase.wDims,
-                                                                      wStrides,
-                                                                      convTestCase.yDims,
-                                                                      yStrides,
-                                                                      convTestCase.convPrePadding,
-                                                                      convTestCase.convPostPadding,
-                                                                      convTestCase.convStride,
-                                                                      convTestCase.convDilation);
-            hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
-            MiopenConvFwdPlanBuilder planBuilder;
-
-            EXPECT_EQ(_planBuilder.isApplicable(_handle, graph), isApplicable)
-                << "Layout order " + hipdnn_sdk::utilities::vecToString(layoutOrder);
-        }
         auto builder = hipdnn_sdk::test_utilities::createValidConvFwdBiasActivGraph(
             convTestCase.xDims,
             xStrides,
@@ -179,7 +153,6 @@ TEST_F(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableVariousLayouts)
             convTestCase.convPostPadding,
             convTestCase.convStride,
             convTestCase.convDilation);
-        // auto builder = hipdnn_sdk::test_utilities::createValidConvFwdBiasActivGraph();
 
         hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
