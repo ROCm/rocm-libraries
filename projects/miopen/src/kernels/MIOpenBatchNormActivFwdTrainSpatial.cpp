@@ -38,10 +38,13 @@ using mio_bn_config = miopen::batchnorm::config;
 namespace miopen {
 namespace batchnorm {
 
+template <typename...>
+constexpr bool dependent_false = false;
+
 template <int MIoBnVariant, typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl
 {
-    static_assert(false, "This variant is not supported.");
+    static_assert(dependent_false<FpType>, "This variant is not supported.");
 };
 
 // Without the macro guards the compiler fails on the constant expressions. Somehow these
