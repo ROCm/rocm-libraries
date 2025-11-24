@@ -181,12 +181,19 @@ def run_convolution_wgrad():
     workspace_size = graph.get_workspace_size()
     print(f"\nWorkspace size required: {workspace_size} bytes")
     
+    # Allocate workspace if needed
+    workspace_buffer = None
+    workspace_ptr = 0
+    if workspace_size > 0:
+        workspace_buffer = hipdnn.DeviceBuffer(workspace_size)
+        workspace_ptr = workspace_buffer.ptr()
+        print(f"✓ Allocated {workspace_size} bytes of workspace memory")
+    
     # Execute the graph
     print("\n" + "="*50)
     print("Executing graph...")
     print("="*50)
     
-    workspace_ptr = workspace_size  # Use workspace_size as placeholder
     exec_result = graph.execute(handle, variant_pack, workspace_ptr)
     
     if exec_result.is_good():
