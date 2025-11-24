@@ -37,7 +37,7 @@ from rocisa.instruction import SAddU32, SAddCU32, SCmpEQU32, SCSelectB32, SSubBU
 from Tensile.Common import IsaVersion
 from Tensile.Utilities.Decorators.Shared import CallableGuard
 
-from copy import deepcopy
+from copy import copy, deepcopy
 
 class ScheduleInfo:
     numCodePaths: int
@@ -1091,6 +1091,104 @@ def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
+def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
+    kernel["MfmaInitCVgprs"] = True
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    optSchedule = dict()
+    syncCode = []
+    if isTN(kernel) and not useLDSTr and TLDS==1:
+        numMfma = 104
+        kernel["SwapGlobalReadOrder"] = False
+
+        # fmt: off
+        # ========== iter start ==========
+        wait   = [-1,]         # wait for LRA and the very first LRB
+        count  = [(3,-1)]      # 13+4 loads for LRA/B, but need only 13+1 here, so 3 are still pending
+        
+        grinca = [        4,    10,    14]
+        grincb = [                       16,18,21]
+        
+        wait   +=[                 12]      # wait for the rest of LRB
+        count  +=[                 (8,-1)] 
+
+        lra0   = [0,1,2,3, 5,7,9,11, 13,15,17,19,20]  # 13 loads
+        wait   +=[                                             29,29]   # wait for all LRA to complete before GRA start
+        count  +=[                                             (4,-1)]
+
+        lrb0   = [                                  22,24,26,28] # 4 loads
+
+        wait   +=[                                                                               40,40]   # wait for all LRB to complete before GRB start
+        count  +=[                                                                               (0,-1)]
+
+
+            
+        gra    = [                                                  30,31,32,33,34,35,36,37,38,39,  41,43,45,46,48,50,52,53,55,57,59,60,62,64,66,67]    # 26 loads
+        grb    = [                                                                                                                                  69,71,73,        77,  81,   85,  89,   93] # 8 loads
+        lrs    = [                                                                                                 50]
+        wait   +=[                                                                                                  51]     # wait for LRA1, LRB1
+        count  +=[                                                                                                  (0,-1)]
+
+        lws    = [                                                                                                                                    70]
+
+        wait   +=[                                                                                                                                      72,72]  # wait for GR + barrier before starting LRA1/LRB1
+        count  +=[                                                                                                                                      (-1,28)] #
+        lra1   = [                                                                                                                                         73,74,75,76,78, 82,84,86,88,90, 92,94,96] # 13 loads
+        lrb1   = [                                                                                                                                                       80,                      98,99,100] # 4 loads
+        # ========== iter done ==========
+        # fmt: on
+        
+        total_gr_loads = len(gra) + len(grb)
+
+        def extend_list(input_list, repeat_count):
+            """Example: extend_list([1, 2, 3], 3) => [1,1,1, 2,2,2, 3,3,3]"""
+            return [item for item in input_list for _ in range(repeat_count)]
+        grinca = extend_list(grinca, 3)
+        grincb = extend_list(grincb, 3)
+        gra    = extend_list(gra, 2)
+        grb    = extend_list(grb, 2)   
+
+
+        optSchedule = {
+            'SYNC':   [wait],
+            'LRA0':   [lra0],
+            'GRIncA': [grinca],
+            'LRB0':   [lrb0],
+            'GRIncB': [grincb],
+            'GRA':    [gra],
+            'GRB':    [grb],
+            'LRSA':   [lrs],
+            'LRSB':   [copy(lrs)], # copy is need to duplicate the list, otherwise no LRSB instructions will be scheduled
+            'LWSA':   [lws],
+            'LWSB':   [copy(lws)], # copy is need to duplicate the list, otherwise no LRSB instructions will be scheduled
+            'LRA1':   [lra1],
+            'LRB1':   [lrb1],
+            'LCC':    [[numMfma-2, numMfma-1]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=count[0][0], vlcnt=count[0][1], vscnt=-1, comment="wait for all LRA0 and one items from LRB0 before starting the sub-iteration"),
+
+            SWaitCnt(dscnt=count[1][0], vlcnt=count[1][1], vscnt=-1, comment="wait for the rest of LRB0 to complete"),
+
+            SWaitCnt(dscnt=count[2][0], vlcnt=count[2][1], vscnt=-1, comment="wait for all LRA0 to complete before GRA start"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=count[3][0], vlcnt=count[3][1], vscnt=-1, comment="wait for all LRB0 to complete before GRB start"),
+            SBarrier(comment=""),
+
+            SWaitCnt(dscnt=count[4][0], vlcnt=count[4][1], vscnt=-1, comment="wait for LRA1, LRB1 before starting next sub-iteration"),
+
+            SWaitCnt(dscnt=count[5][0], vlcnt=count[5][1], vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment="")
+        ]
+        nglshift = nllshift = total_gr_loads
+
+    else:
+        return False, None
+
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
 def hasCustomSchedule(kernel):
 
     if not kernel["UseCustomMainLoopSchedule"]:
@@ -1123,6 +1221,7 @@ def hasCustomSchedule(kernel):
     is256x208x64DTL = [MT0, MT1, DU, PGR, PLR, DTL] == [256, 208, 64, 2, 1, True]
     is224x256x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL] == [224, 256, 64, 2, 1, True]
     is256x224x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL] == [256, 224, 64, 2, 1, True]
+    is204x256x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL] == [208, 256, 64, 2, 1, True]
 
     if is256x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
         return _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS)
@@ -1144,5 +1243,7 @@ def hasCustomSchedule(kernel):
         return _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS)
     elif is256x224x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [2, 2]:
         return _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS)
+    elif is204x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [2, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [1, 4]:
+        return _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS)
 
     return False, None
