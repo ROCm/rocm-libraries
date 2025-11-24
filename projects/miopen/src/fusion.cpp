@@ -453,7 +453,11 @@ miopenStatus_t FusionPlanDescriptor::AddOp(std::shared_ptr<FusionOpDescriptor> d
         desc->SetInputDesc(input_desc);
     else
         desc->SetInputDesc(output_desc);
-    desc->GetOutputDesc(output_desc);
+    auto status = desc->GetOutputDesc(output_desc);
+    if(status != miopenStatusSuccess)
+    {
+        return status;
+    }
     op_map.emplace_back(desc);
     op_count++;
     return miopenStatusSuccess;
