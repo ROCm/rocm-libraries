@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 
-from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo
+from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo, validateAscendingOrder
 from Tensile.Common import IsaVersion
 
 # Helper to create a mock data type
@@ -56,16 +56,15 @@ class TestCustomSchedule:
         """
 
         sched = ScheduleInfo(None, None,  {'P' : [[3, 2, 1]]}, None, None, None, None, None)
-        output = sched.ruleNonDescendingOrder()
+        status, message = validateAscendingOrder(sched)
 
         expected = "Non-descending-order rule violated, schedule key 'P', sequence [3, 2, 1]: value 2 at index 1 is less than 3 at index 0."
-        print(output in expected)
-        print(expected in output)
-        assert output == expected
+        assert status == False
+        assert message == expected
 
         sched = ScheduleInfo(None, None,  {'P' : [[1, 1, 2]]}, None, None, None, None, None)
-        output = sched.ruleNonDescendingOrder()
-        assert not output
+        status, message = validateAscendingOrder(sched)
+        assert status == True
 
     def test_schedule_validation_is_known_valid(self):
         """
@@ -76,12 +75,13 @@ class TestCustomSchedule:
         invalid_schedule = {'P' : [[3, 2, 1]]}
 
         # No verification message means that the schedule info is considered valid.
-        sched = ScheduleInfo(None, None, invalid_schedule, None, None, None, None, isKnownValid = True)
-        assert not sched.getValidationMessage({})
+        sched = ScheduleInfo(None, None, invalid_schedule, None, None, None, None, skipValidation = True)
+        status, message = sched.validate({})
+        assert status == True
 
         # A non-empty verification message means that the schedule info is considered invalid.
-        sched = ScheduleInfo(None, None,  invalid_schedule, None, None, None, None, isKnownValid = False)
-        assert sched.getValidationMessage({})
+        satus, message = ScheduleInfo(None, None,  invalid_schedule, None, None, None, None, skipValidation = False).validate({})
+        assert status == False
 
 
     def test_schedule_256x256x64_16bit_TN(self):

@@ -20,6 +20,8 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+# fmt: off
+
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
                         StructuredModule, TextBlock, ValueEndif, ValueIf, ValueElseIf, ValueSet, SignatureBase
 from rocisa.container import vgpr, sgpr, SMEMModifiers, replaceHolder, EXEC,\
@@ -40,62 +42,78 @@ from Tensile.Utilities.Decorators.Shared import CallableGuard
 from copy import deepcopy
 from typing import Dict
 
+# fmt: on
+
+
+def validateAscendingOrder(scheduleInfo, context: Dict = {}):
+    """
+    Ensure that all sequences of optSchedule are non-decreasing.
+
+    Context and example: There will be a sequence of N 'GRIncA' instructions for
+    incrementing the memory address that the A macro tile is read from.
+    The CMS developer has the freedom to insert these N instructions into
+    'slots' of their choice. A slot is a sequence of instructions between
+    2 consecutive mfma instructions. Example: 'GRIncA' : [[0,1,1,3]] would
+    mean that the N=4 instructions to increment the pointer appear as follows:
+
+    instruction 1    : between mfma 0 and mfma 1.
+    instructions 2,3 : between mfma 1 and mfma 2.
+    instruction 4    : between mfma 3 and mfma 4.
+
+    However, there is a strict requirement that the N slots for these instructions
+    are non-decreasing. This rule is true for all groups of instructions, not
+    just the 'GRIncA' instructions (to be verified).
+    """
+
+    for k, sequences in scheduleInfo.optSchedule.items():
+        for seq in sequences:
+            # Ensure seq is non-decreasing
+            for i in range(1, len(seq)):
+                if seq[i] < seq[i - 1]:
+                    return False, (
+                        f"Non-descending-order rule violated, "
+                        f"schedule key '{k}', sequence {seq}: "
+                        f"value {seq[i]} at index {i} is less than "
+                        f"{seq[i-1]} at index {i-1}."
+                    )
+    return True, ""
+
 
 class ScheduleInfo:
     numCodePaths: int
     numMfma: int
-    isKnownValid : bool
-    def __init__(self, numCodePaths, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder = [], isKnownValid = False):
+    skipValidation: bool
+
+    def __init__(
+        self,
+        numCodePaths,
+        numMfma,
+        optSchedule,
+        syncCode,
+        nglshift,
+        nllshift,
+        mfmaReorder=[],
+        skipValidation=False,
+    ):
         """
-        isKnownValid : if True, an expert should have verified that the schedule is valid (no race conditions, etc) and
-                       that no validation checks should be run.
+        skipValidation : if True, an expert should have verified that the schedule is
+            valid (no race conditions, etc). No validation checks be run during compilation.
         """
         self.numCodePaths = numCodePaths
         self.numMfma = numMfma
         self.optSchedule = optSchedule
         self.syncCode = syncCode
-        self.nglshift = nglshift # vmcnt shift for noglobalload loop
-        self.nllshift = nllshift # vmcnt shift for nolocalload loop
+        self.nglshift = nglshift  # vmcnt shift for noglobalload loop
+        self.nllshift = nllshift  # vmcnt shift for nolocalload loop
         self.mfmaReorder = mfmaReorder
-        self.isKnownValid = isKnownValid
-        self.rules = [self.ruleNonDescendingOrder] # The set of validation rules to run when this object calls `getValidationMessage`.
+        self.skipValidation = skipValidation
 
-    def ruleNonDescendingOrder(self, context: Dict = {}):
-        """
-        Ensure that all sequences of optSchedule are non-decreasing.
+        # The set of validation rules to run when this object calls `getValidationMessage`.
+        self.rules: List[Callable[[ScheduleInfo, dict], [bool, str]]] = [
+            validateAscendingOrder
+        ]
 
-        Context and example: There will be a sequence of N 'GRIncA' instructions for
-        incrementing the memory address that the A macro tile is read from.
-        The CMS developer has the freedom to insert these N instructions into
-        'slots' of their choice. A slot is a sequence of instructions between
-        2 consecutive mfma instructions. Example: 'GRIncA' : [[0,1,1,3]] would
-        mean that the N=4 instructions to increment the pointer appear as follows:
-
-        instruction 1    : between mfma 0 and mfma 1.
-        instructions 2,3 : between mfma 1 and mfma 2.
-        instruction 4    : between mfma 3 and mfma 4.
-
-        However, there is a strict requirement that the N slots for these instructions
-        are non-decreasing. This rule is true for all groups of instructions, not
-        just the 'GRIncA' instructions (to be verified).
-        """
-
-        for k, sequences in self.optSchedule.items():
-            for seq in sequences:
-                print(k)
-                print(seq)
-                # Ensure seq is non-decreasing
-                for i in range(1, len(seq)):
-                    print(seq[i])
-                    if seq[i] < seq[i - 1]:
-                        return (f"Non-descending-order rule violated, "
-                                f"schedule key '{k}', sequence {seq}: "
-                                f"value {seq[i]} at index {i} is less than "
-                                f"{seq[i-1]} at index {i-1}.")
-        return ""
-
-
-    def getValidationMessage(self, context: Dict):
+    def validate(self, context: Dict):
         """
         Returns the empty string if this schedule is considered to be
         valid for `kernel`. If the returned string is not empty, it
@@ -106,23 +124,24 @@ class ScheduleInfo:
 
         Note 2: if a non-empty string is returned, and the reason is
         considered by an expert developer to be incorrect, you can create a
-        ScheduleInfo with `isKnownValid = True`. This is a workaround
+        ScheduleInfo with `skipValidation = True`. This is a workaround
         for possible false positives.
         """
 
-        if self.isKnownValid:
+        if self.skipValidation:
             # All rules bypassed, considered valid.
-            return ""
+            return True, ""
 
         for rule in self.rules:
-            result = rule(context)
-            if result:
-                return result
+            status, message = rule(self, context)
+            if status:
+                return status, message
 
         # All rules passed, considered valid.
-        return ""
+        return True, ""
 
 
+# fmt: off
 
 def removeComments(module):
     retModule = Module()
@@ -234,8 +253,8 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
 
         return InstStreams
 
-    verificationMessage = opt1.getValidationMessage({'kernel' : kernel})
-    assert not verificationMessage, f"Validation failed: {verificationMessage}"
+    status, message = opt1.validate({'kernel' : kernel})
+    assert not status, f"Validation failed: {message}"
 
     InstStreams = convOptToStream(opt1)
 
