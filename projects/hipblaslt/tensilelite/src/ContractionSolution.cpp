@@ -622,7 +622,7 @@ namespace TensileLite
 
         // Pass wsStride if it's not in MBSK mode
         bool gsuWSStride = gsu > 1 && sizeMapping.globalAccumulation != 3 && sizeMapping.streamK == 0;
-        bool skWSStride = sizeMapping.streamK > 0 && sk.reduction == ReductionType::Parallel;
+        bool skWSStride = sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel;
         if(gsuWSStride || skWSStride)
         {
             size_t wsStride = startStrideCD ? d.sizes()[0] : 1;
