@@ -48,7 +48,7 @@ namespace TensileLite
                 std::vector<float> mean, scale;
                 iot::mapRequired(io, "mean", mean);
                 iot::mapRequired(io, "scale", scale);
-                scaler.mean.assign(mean.begin(), mean.end()); 
+                scaler.mean.assign(mean.begin(), mean.end());
                 scaler.scale.assign(scale.begin(), scale.end());
             }
 
@@ -75,7 +75,7 @@ namespace TensileLite
         struct MappingTraits<EmbeddingSimilarity::Network, IO>
         {
             using Network = EmbeddingSimilarity::Network;
-            using iot       = IOTraits<IO>;
+            using iot     = IOTraits<IO>;
 
             static void mapping(IO& io, Network& net)
             {
@@ -96,9 +96,9 @@ namespace TensileLite
 
             static void mapping(IO& io, SolutionEmbeddings& data)
             {
-                iot::mapRequired(io, "embeddings", data.embeddings); 
-                iot::mapRequired(io, "cluster_indices", data.cluster_indices); 
-                iot::mapRequired(io, "centroids", data.centroids); 
+                iot::mapRequired(io, "embeddings", data.embeddings);
+                iot::mapRequired(io, "cluster_indices", data.cluster_indices);
+                iot::mapRequired(io, "centroids", data.centroids);
             }
 
             const static bool flow = false;
@@ -160,35 +160,35 @@ namespace TensileLite
                 std::shared_ptr<EmbeddingSimilarity::Encoder> encoder;
                 if(iot::outputting(io))
                 {
-                    encoder = std::dynamic_pointer_cast<EmbeddingSimilarity::Encoder>(
-                        lib.encoder);
+                    encoder = std::dynamic_pointer_cast<EmbeddingSimilarity::Encoder>(lib.encoder);
                 }
                 else
                 {
                     encoder     = std::make_shared<EmbeddingSimilarity::Encoder>();
                     lib.encoder = encoder;
                 }
-                iot::mapRequired(io, "encoder", *encoder); 
+                iot::mapRequired(io, "encoder", *encoder);
 
                 std::shared_ptr<TensileLite::EmbeddingSimilarity::SolutionEmbeddings> embeddings;
                 if(iot::outputting(io))
                 {
-                    embeddings
-                        = std::dynamic_pointer_cast<TensileLite::EmbeddingSimilarity::SolutionEmbeddings>(
-                            lib.embeddings);
+                    embeddings = std::dynamic_pointer_cast<
+                        TensileLite::EmbeddingSimilarity::SolutionEmbeddings>(lib.embeddings);
                 }
                 else
                 {
-                    embeddings = std::make_shared<TensileLite::EmbeddingSimilarity::SolutionEmbeddings>();
+                    embeddings
+                        = std::make_shared<TensileLite::EmbeddingSimilarity::SolutionEmbeddings>();
                     lib.embeddings = embeddings;
                 }
-                iot::mapRequired(io, "solution_embeddings", *embeddings); 
+                iot::mapRequired(io, "solution_embeddings", *embeddings);
 
                 // Checks
                 if(embeddings->size() != lib.solutions.size())
                     throw std::runtime_error(
                         "ERROR: EmbeddingSimilarity library solution embeddings amount "
                         "does not match solution map size.");
+
                 if(lib.solutions.size() == 0)
                     throw std::runtime_error(
                         "ERROR: EmbeddingSimilarity library solution embeddings amount equals 0");
@@ -197,6 +197,14 @@ namespace TensileLite
                     throw std::runtime_error(
                         "ERROR: EmbeddingSimilarity library solution embeddings size "
                         "does not match the network output size.");
+
+                if(lib.encoder->network.weights[0].size() != (13 * lib.encoder->network.bias[0].size()))
+                {
+                    throw std::runtime_error(
+                        "ERROR: EmbeddingSimilarity network input size ("
+                        + std::to_string((int) (lib.encoder->network.weights[0].size() / lib.encoder->network.bias[0].size()))
+                        + ") does not match the input vector size (13)");
+                }
             }
 
             const static bool flow = false;
