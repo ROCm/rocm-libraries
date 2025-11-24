@@ -62,8 +62,8 @@ namespace rocRoller
             AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
                         "Buffer expression must be of buffer pointer type.");
 
-            bufferExpr
-                = BufferDescriptor::setSize(bufferExpr, Expression::literal(2147483548u, DataType::UInt32));
+            bufferExpr = BufferDescriptor::setSize(
+                bufferExpr, Expression::literal(2147483548u, DataType::UInt32));
             bufferExpr = BufferDescriptor::setOptions(bufferExpr, getDefaultOptions(ctx));
             return bufferExpr;
         }
