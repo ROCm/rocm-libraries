@@ -134,9 +134,9 @@ namespace ConvertInstructionsTest
 
                 Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
                 //rocRoller does the intial setup for the buffer (global memory)
-                bufferExpr = buffDescriptor::setDefaults(bufferExpr, m_context);
+                bufferExpr = BufferDescriptor::setDefaults(bufferExpr, m_context);
                 // set the buffer base pointer to the starting address of the input vector
-                bufferExpr = buffDescriptor::setBasePointer(bufferExpr, s_input->expression());
+                bufferExpr = BufferDescriptor::setBasePointer(bufferExpr, s_input->expression());
 
                 auto bufferRegs = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
@@ -159,7 +159,7 @@ namespace ConvertInstructionsTest
                     vgprIndex, vgprIndex, Register::Value::Literal(outputBytesPerElement));
 
                 // set the buffer base pointer to the starting address of the output vector
-                bufferExpr = buffDescriptor::setBasePointer(bufferExpr, s_output->expression());
+                bufferExpr = BufferDescriptor::setBasePointer(bufferExpr, s_output->expression());
                 co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
 
                 co_yield m_context->mem()->storeBuffer(

@@ -31,8 +31,10 @@
 
 namespace rocRoller
 {
-    namespace buffDescriptor
+    namespace BufferDescriptor
     {
+        using Expression::ExpressionPtr;
+
         ExpressionPtr getDefaultOptions(ContextPtr ctx)
         {
             AssertFatal(ctx, "Context cannot be null.");
@@ -48,10 +50,10 @@ namespace rocRoller
                 // Bits 17:12 are for data format.
                 //   5 - 8_UINT. Currently, everything is buffer-loaded in terms of bytes.
                 // TODO: Add GFX12 buffer descriptor when other formats and/or features are needed.
-                return literal((1u << 28) | (5u << 12), DataType::UInt32);
+                return Expression::literal((1u << 28) | (5u << 12), DataType::UInt32);
             }
             // 0x00020000
-            return literal((4u << 15), DataType::UInt32);
+            return Expression::literal((4u << 15), DataType::UInt32);
         }
 
         ExpressionPtr setDefaults(ExpressionPtr bufferExpr, ContextPtr ctx)
@@ -61,8 +63,8 @@ namespace rocRoller
                         "Buffer expression must be of buffer pointer type.");
 
             bufferExpr
-                = buffDescriptor::setSize(bufferExpr, literal(2147483548u, DataType::UInt32));
-            bufferExpr = buffDescriptor::setOptions(bufferExpr, getDefaultOptions(ctx));
+                = BufferDescriptor::setSize(bufferExpr, Expression::literal(2147483548u, DataType::UInt32));
+            bufferExpr = BufferDescriptor::setOptions(bufferExpr, getDefaultOptions(ctx));
             return bufferExpr;
         }
 

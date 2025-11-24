@@ -89,10 +89,10 @@ namespace rocRollerTest
                 co_yield v_a->allocate();
 
                 Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
-                bufferExpr = buffDescriptor::setDefaults(bufferExpr, m_context);
-                bufferExpr = buffDescriptor::setBasePointer(bufferExpr, s_a->expression());
-                bufferExpr = buffDescriptor::setSize(bufferExpr, Expression::literal(N));
-                bufferExpr = buffDescriptor::incrementBasePointer(
+                bufferExpr = BufferDescriptor::setDefaults(bufferExpr, m_context);
+                bufferExpr = BufferDescriptor::setBasePointer(bufferExpr, s_a->expression());
+                bufferExpr = BufferDescriptor::setSize(bufferExpr, Expression::literal(N));
+                bufferExpr = BufferDescriptor::incrementBasePointer(
                     bufferExpr, Expression::literal(131072)); //0x00020000
 
                 auto bufferRegs = Register::Value::Placeholder(
@@ -104,7 +104,7 @@ namespace rocRollerTest
 
                 co_yield m_context->mem()->loadBuffer(
                     v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
-                bufferExpr = buffDescriptor::setBasePointer(bufferExpr, s_result->expression());
+                bufferExpr = BufferDescriptor::setBasePointer(bufferExpr, s_result->expression());
                 co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
                 co_yield m_context->mem()->storeBuffer(
                     v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
