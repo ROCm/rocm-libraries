@@ -108,6 +108,12 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForWrongNo
 
 TEST_F(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableVariousLayouts)
 {
+    char** s = environ;
+
+    for(; *s != nullptr; s++)
+    {
+        std::cout << *s << "\n";
+    }
 
     std::vector<std::pair<std::vector<int64_t>, bool>> layoutsAndExpectedResults
         = {{{3, 2, 1, 0}, true},
