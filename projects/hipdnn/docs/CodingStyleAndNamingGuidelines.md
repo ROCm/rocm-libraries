@@ -136,7 +136,7 @@ Rules below apply ONLY to the TestSuite name (first parameter of `TEST` / `TEST_
 
 ### 11.2 Unit Tests
 
-In most cases unit style tests should be named so the directly mirror the class under test.  If the class is named `MyClass`, then the test suite should be named `TestMyClass`.  In general these kinds of tests should try to avoid using anything that requires Gpu support.  This is not always possible, in the cases where Gpu support is required, the test suite should be named `TestGpuMyClass`.
+In most cases unit style tests should be named so they directly mirror the class under test.  If the class is named `MyClass`, then the test suite should be named `TestMyClass`.  In general these kinds of tests should try to avoid using anything that requires Gpu support.  This is not always possible, in the cases where Gpu support is required, the test suite should be named `TestGpuMyClass`.
 
 #### Naming Examples
 
@@ -166,7 +166,7 @@ IntegrationGraphFusion
 ```
 
 #### File Naming
-For integration tests, the main test suite might be named `IntegrationGpuFeatureX` but have several child suites like `IntegrationGpuFeatureXFp32` and `IntegrationGpuFeatureXBfp16`. The parent suite name is the primary suite, so the file name should be `IntegrationGpuFeatureX.cpp`. 
+For integration tests, the main test suite might be named `IntegrationGpuFeatureX` but have several child suites like `IntegrationGpuFeatureXFp32` and `IntegrationGpuFeatureXBfp16`. The parent suite name is the primary suite, so the file name should be `IntegrationGpuFeatureX.cpp`.
 
 ### 11.4 Test Case Naming
 

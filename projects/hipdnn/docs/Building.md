@@ -23,7 +23,7 @@
 
 ### Dependencies
 > [!TIP]
-> 💡 Prebuilt binaries and Docker files are available to provide a consistent development environment with all dependencies pre-installed. This is the recommended approach for most users. For more details about these Docker images, see the [Docker README](../dockerfiles/README.md). Dockerfile development environments are not availble for Windows. Refer to the [Windows](#windows) section for details on building under Windows.
+> 💡 Prebuilt binaries and Docker files are available to provide a consistent development environment with all dependencies pre-installed. This is the recommended approach for most users. For more details about these Docker images, see the [Docker README](../dockerfiles/README.md). Dockerfile development environments are not available for Windows. Refer to the [Windows](#windows) section for details on building under Windows.
 
 #### Required Dependencies
 | Dependency | Version | Description |
@@ -54,7 +54,7 @@ The following libraries are automatically managed by CMake (see [Dependencies.cm
 Ensure the required dependencies are installed on your system as outlined in [Dependencies](#dependencies).
 
 > [!TIP]
-> 💡 See [Docker README](../dockerfiles/README.md) for details on using prebuilt binaries in Docker containers to ensure a consistent build enviornment.
+> 💡 See [Docker README](../dockerfiles/README.md) for details on using prebuilt binaries in Docker containers to ensure a consistent build environment.
 
 Refer to the [Platform-Specific Instructions](#platform-specific-instructions) section for details on building under Windows.
 
@@ -128,9 +128,6 @@ cmake -GNinja -DHIP_DNN_BUILD_PLUGINS=OFF ..
 
 # Build only the backend
 cmake -GNinja -DHIP_DNN_BUILD_FRONTEND=OFF ..
-
-# Build without samples
-cmake -GNinja -DHIP_DNN_BUILD_SAMPLES=OFF ..
 ```
 
 ### ROCM_PATH & CMAKE_INSTALL_PREFIX
@@ -204,7 +201,7 @@ Windows 10 and Windows 11 are supported. Windows 11 is recommended.
 To do a standalone build of hipDNN, you will need to set up a number of pre-requisites.
 
 > [!NOTE]
-> The standalone build of hipDNN requires a a subset of the full environment required for buiding TheRock. Refer to [TheRock Windows Support](https://github.com/ROCm/TheRock/blob/main/docs/development/windows_support.md) for a full Windows 11 build environment setup for TheRock (_but do not perform a build of TheRock_ as this is generally not necessary for building hipDNN standalone).
+> The standalone build of hipDNN requires a subset of the full environment required for building TheRock. Refer to [TheRock Windows Support](https://github.com/ROCm/TheRock/blob/main/docs/development/windows_support.md) for a full Windows 11 build environment setup for TheRock (_but do not perform a build of TheRock_ as this is generally not necessary for building hipDNN standalone).
 
 #### 1. Install Chocolatey Package Manager
 
@@ -260,7 +257,7 @@ Abbreviated quotation:
 The instructions below are summarized from web content [here](https://portal.perforce.com/s/article/3472), [here](https://stackoverflow.com/questions/5917249/git-symbolic-links-in-windows/59761201#59761201), and [here](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/security-policy-settings/create-symbolic-links).
 
 
-Verfiy ability to create symlinks. From a command window, run `mklink`:
+Verify ability to create symlinks. From a command window, run `mklink`:
 ```cmd
 > echo "test" > mklinktest.txt
 > mklink linkedfile.txt mklinktest.txt
@@ -278,7 +275,7 @@ If you do not have the ability to enable symlinks, the simplest way to enable th
 
 **Windows 11**: Settings --> System --> For Developers --> Developer Mode --> toggle `On`.
 
-Refer to the links at the beginning of this above for alternative methods to enable symlinks on your system.
+Refer to the links at the beginning of this section for alternative methods to enable symlinks on your system.
 
 You may need to restart your computer for the settings to take effect.
 
@@ -315,7 +312,7 @@ Download a recent nightly *Windows* build tarball of TheRock ROCm SDK for your G
 Complete instructions and alternate methods for installing TheRock are available at https://github.com/ROCm/TheRock/blob/main/RELEASES.md.
 
 > [!NOTE]
-> If a nightly tarball is not avaialble for your GFX Family, you  may be able to [build TheRock from source](https://github.com/ROCm/TheRock/tree/main#building-from-source) or follow the [Roadmap for Support](https://github.com/ROCm/TheRock/blob/main/ROADMAP.md) for more details.
+> If a nightly tarball is not available for your GFX Family, you  may be able to [build TheRock from source](https://github.com/ROCm/TheRock/tree/main#building-from-source) or follow the [Roadmap for Support](https://github.com/ROCm/TheRock/blob/main/ROADMAP.md) for more details.
 
 Unzip the downloaded tarball to a path with no spaces. E.g. after unzipped to `C:\dist\therock` the bin folder will be located at `c:\dist\therock\bin`.
 
@@ -339,7 +336,7 @@ Unzip the downloaded tarball to a path with no spaces. E.g. after unzipped to `C
    set CMAKE_GENERATOR=Ninja
    ```
 
-Use `hipconfig` to check that TheRock is installed correctly and the PATH is setup correctly. The output from the command, as shown below, will show the detected ROCm path and ROCm clang path (`c:\dist\therock\` will be replaced with the folder TheRock was instlled to on your system). This command requires that TheRock bin directory is in your system PATH.
+Use `hipconfig` to check that TheRock is installed correctly and the PATH is setup correctly. The output from the command, as shown below, will show the detected ROCm path and ROCm clang path (`c:\dist\therock\` will be replaced with the folder TheRock was installed to on your system). This command requires that TheRock bin directory is in your system PATH.
 ```cmd
 hipconfig -rocmpath -n --hipclangpath
 c:\dist\therock
@@ -362,7 +359,7 @@ If using custom paths, you may need to modify [ClangToolChain.cmake](../cmake/Cl
 
 From here, follow the instructions in the [Quick Start Guide](#quick-start-guide) section to clone the repository and build hipDNN, **keeping in mind the following notes**:
 * Do **NOT** open the "x64 Native Tools Command Prompt for VS 2022" as this will interfere with the ROCm SDK and Clang toolchain.
-* When generating the project, be sure to set GPU_TARGETS to your GPU as auto-detection is not currenlty supported on Windows, e.g. `cmake -DGPU_TARGETS=gfx1103 ..` (replacing gfx1103 with your GPU)
+* When generating the project, be sure to set GPU_TARGETS to your GPU as auto-detection is not currently supported on Windows, e.g. `cmake -DGPU_TARGETS=gfx1103 ..` (replacing gfx1103 with your GPU)
 * When generating the project, CMake will warn about a clang-format or clang-tidy mismatch. That’s okay for now.
 * Generating the project files may take longer than on Linux, but should complete within a few minutes.
 * You may want to limit the number of threads used by Ninja when building hipDNN so that your computer is not bogged-down by the build. You can use the `ninja -j` option to set the number of threads to something smaller than the number of threads available on your CPU.

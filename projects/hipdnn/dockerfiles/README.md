@@ -1,6 +1,6 @@
 # hipDNN Docker Environments
 
-This directory contains the Dockerfile for building hipDNN development environment Docker image.
+This directory contains the Dockerfile for building the hipDNN development environment Docker image.
 
 ## 📋 Prerequisites
 
@@ -27,7 +27,7 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 
 ### Build Arguments
 
-#### 🔧Select Build TYpe
+#### 🔧Select Build Type
 
 | Argument | Default | Description | Valid Values |
 |----------|---------|-------------|--------------|
@@ -166,7 +166,7 @@ docker run -it \
 ```
 ### Building hipDNN
 
-Follow the [quick start steps in the build guide](./docs/Building.md#quick-start-guide) to build hipDNN.
+Follow the [quick start steps in the build guide](../docs/Building.md#quick-start-guide) to build hipDNN.
 
 ## 💡 Tips and Best Practices
 

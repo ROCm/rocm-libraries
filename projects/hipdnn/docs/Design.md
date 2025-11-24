@@ -13,7 +13,7 @@ hipDNN is a graph-based deep learning library that enables multi-operation fusio
 - **Engine Selection**: Heuristics and benchmarking will be implemented as plugins, allowing extensibility without modifying the core library
 - **Industry Standard API**: Provides a familiar interface that matches established deep learning library conventions
 
-## High-Level Architecture 
+## High-Level Architecture
 
 hipDNN has a plugin-based architecture in order to allow contributors and users to extend hipDNN without modifying the core library. Currently, hipDNN has support for engine plugins which provide the kernels to solve graphs. In the future hipDNN will support both heuristic and benchmarking plugins to allow for improved engine selection. Benchmarking plugins will provide exhaustive tuning capabilities, but will require collecting samples from existing engines to do so. Heuristic plugins will provide better default engine selection given a graph, and shouldn't require collecting samples from existing engines to do so.
 
@@ -26,7 +26,7 @@ hipDNN has a plugin-based architecture in order to allow contributors and users 
 
 **SDK**: A header-only library that provides shared utilities and interfaces that plugins, frontend, and backend depend on to ensure compatibility and communication.
 
-**MIOpen Legacy Plugin**: A plugin that wraps MIOpen and provides access to the existing API through hipDNN. In the future, the MIOpen Legacy Plugin will be its own separate project separate from hipDNN.
+**MIOpen Legacy Plugin**: A plugin that wraps MIOpen and provides access to the existing API through hipDNN. In the future, the MIOpen Legacy Plugin will be its own separate project from hipDNN.
 
 **Other Plugins**: Plugins will be added over time to provide additional operational support, or performance improvements. Plugins should be external projects to hipDNN.
 
