@@ -650,7 +650,9 @@ namespace TensileLite
         size_t startStrideAB = problemType.useInitialStridesAB ? 0 : 1;
 
         // Pass wsStride if it's not in MBSK mode
-        if(gsu > 1 && sizeMapping.globalAccumulation != 3 && sizeMapping.streamK == 0)
+        bool gsuWSStride = gsu > 1 && sizeMapping.globalAccumulation != 3 && sizeMapping.streamK == 0;
+        bool skWSStride = sizeMapping.streamK > 0 && sk.reduction == ReductionType::Parallel;
+        if(gsuWSStride || skWSStride)
         {
             size_t wsStride = startStrideCD ? d.sizes()[0] : 1;
             for(size_t i = startStrideCD; i < d.dimensions(); i++)
@@ -717,7 +719,7 @@ namespace TensileLite
                 gsu = 1;
             }
 
-            auto tiles = problem.getNumTiles(sizeMapping, gsu);
+            auto tiles = problem.getNumTiles(sizeMapping, 1);
 
             // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
             // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
@@ -2987,14 +2989,20 @@ namespace TensileLite
                 gsu = 1;
             }
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
-            auto       tiles     = problem.getNumTiles(sizeMapping, gsu);
+            auto       tiles     = problem.getNumTiles(sizeMapping, 1);
             if(tiles > 0) // Grouped GEMM reports 0 tiles
             {
                 ReductionType reductionStrat = getSKReduction(problem, hardware);
                 size_t skGrid = getSKGrid(problem, hardware, tiles, reductionStrat);
                 // Get space required for partial tiles=
-                // TODO Revise parallel reduction WS to account for LDD
-                if(skGrid > 0 && (reductionStrat == ReductionType::Parallel || (tiles % skGrid != 0 && !streamKDP)))
+                if(reductionStrat == ReductionType::Parallel)
+                {
+                    size_t splitk = skGrid / tiles;
+                    size_t idealWorkspace = requiredWorkspaceSizeGsu(problem, hardware, splitk);
+                    if(idealWorkspace <= problem.workspaceSize())
+                        size += idealWorkspace;
+                }
+                else if(skGrid > 0 && (tiles % skGrid != 0 && !streamKDP))
                 {
                     // Check ideal amount of workspace for optimal performance
                     size_t idealWorkspace = partialTileSize(skGrid);
@@ -3009,41 +3017,50 @@ namespace TensileLite
         {
             // TODO: Pass GSU from problem and change value[2] to gsu if gsu != default value
             size_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : calculateAutoGSU(problem, &hardware);
-            size_t gsuMultiplier = gsu > 1 ? gsu : 0;
-            size_t batch         = problem.d().sizes()[2];
-            size_t tiles         = problem.getNumTiles(sizeMapping, gsu) * batch;
-            size_t tileSize      = sizeMapping.macroTile.x * sizeMapping.macroTile.y
-                              * sizeMapping.workspaceSizePerElemC;
-            size_t bufSize = gsu > 1 ? tiles * tileSize : 0;
-            size += bufSize;
+            size += requiredWorkspaceSizeGsu(problem, hardware, gsu);
+        }
 
-            if(problemType.useGradient && problemType.useBias
-               && problem.getParams().biasEnum() != rocisa::DataType::None)
-            {
-                if(problem.biasSrc() == ContractionProblemGemm::TENSOR::A)
-                {
-                    size += problem.freeSizeA(0) * sizeMapping.workspaceSizePerElemBias
-                            * gsuMultiplier;
-                }
-                else if(problem.biasSrc() == ContractionProblemGemm::TENSOR::B)
-                {
-                    size += problem.freeSizeB(0) * sizeMapping.workspaceSizePerElemBias
-                            * gsuMultiplier;
-                }
-                else if(problem.biasSrc() == ContractionProblemGemm::TENSOR::D
-                        && (gsuMultiplier == 0))
-                {
-                    size += problem.d().totalLogicalElements() * problem.computeTypeElementSize()
-                            * gsu;
-                }
-            }
+        return size;
+    }
 
-            // workspace for amaxD
-            if(problemType.outputAmaxD)
+    size_t ContractionSolution::requiredWorkspaceSizeGsu(Problem const& problem, Hardware const& hardware, size_t gsu) const
+    {
+        size_t size = 0;
+
+        size_t gsuMultiplier = gsu > 1 ? gsu : 0;
+        size_t batch         = problem.d().sizes()[2];
+        size_t tiles         = problem.getNumTiles(sizeMapping, gsu) * batch;
+        size_t tileSize      = sizeMapping.macroTile.x * sizeMapping.macroTile.y
+                          * sizeMapping.workspaceSizePerElemC;
+        size_t bufSize = gsu > 1 ? tiles * tileSize : 0;
+        size += bufSize;
+
+        if(problemType.useGradient && problemType.useBias
+           && problem.getParams().biasEnum() != rocisa::DataType::None)
+        {
+            if(problem.biasSrc() == ContractionProblemGemm::TENSOR::A)
             {
-                auto numWGS = getNumWorkGroups(problem, sizeMapping);
-                size += problem.amaxd().elementBytes() * numWGS;
+                size += problem.freeSizeA(0) * sizeMapping.workspaceSizePerElemBias
+                        * gsuMultiplier;
             }
+            else if(problem.biasSrc() == ContractionProblemGemm::TENSOR::B)
+            {
+                size += problem.freeSizeB(0) * sizeMapping.workspaceSizePerElemBias
+                        * gsuMultiplier;
+            }
+            else if(problem.biasSrc() == ContractionProblemGemm::TENSOR::D
+                    && (gsuMultiplier == 0))
+            {
+                size += problem.d().totalLogicalElements() * problem.computeTypeElementSize()
+                        * gsu;
+            }
+        }
+
+        // workspace for amaxD
+        if(problemType.outputAmaxD)
+        {
+            auto numWGS = getNumWorkGroups(problem, sizeMapping);
+            size += problem.amaxd().elementBytes() * numWGS;
         }
 
         return size;
@@ -3162,11 +3179,6 @@ namespace TensileLite
             // Custom kernel currently only supports single-kernel reduction
             reductionStrat = ReductionType::Tree;
         }
-        else if (problem.d().totalAllocatedElements() > problem.d().totalLogicalElements())
-        {
-            // If LDD > M, fall back to tree reduction
-            reductionStrat = ReductionType::Tree;
-        }
         else if(pAMDGPU->skDynamicGrid > 0)
         {
             size_t x     = 1;
@@ -3210,7 +3222,7 @@ namespace TensileLite
     size_t ContractionSolution::getSKGrid(Problem const&  problem,
                                           Hardware const& hardware,
                                           size_t          tiles,
-                                          ReductionType reductionStrat) const
+                                          ReductionType& reductionStrat) const
     {
         size_t skGrid = tiles; // Fallback
         const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
@@ -3299,6 +3311,16 @@ namespace TensileLite
         else
         {
             skGrid = cuCount;
+        }
+
+        // For tree-reduction there are some limits for divisions to avoid overflow
+        // If we hit one of the limits, fallback to DP
+        size_t itersPerTile = problem.getItersPerTile(sizeMapping);
+        size_t itersPerWG = tiles * itersPerTile / skGrid;
+        if(itersPerTile >=65536 || itersPerWG >= 65536 || (tiles * itersPerTile) >= 16777216)
+        {
+            reductionStrat = ReductionType::Tree;
+            skGrid = tiles;
         }
 
         return skGrid;
