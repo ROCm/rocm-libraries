@@ -172,8 +172,10 @@ namespace TensileLite
                 .batch = batch,
                 .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
                 .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
-                .a_dtype = static_cast<origami::data_type_t>(problem.alphaType()),
-                .b_dtype = static_cast<origami::data_type_t>(problem.betaType()),
+                .a_dtype = static_cast<origami::data_type_t>(problem.a().dataType()),
+                .b_dtype = static_cast<origami::data_type_t>(problem.b().dataType()),
+                .c_dtype = static_cast<origami::data_type_t>(problem.c().dataType()),
+                .d_dtype = static_cast<origami::data_type_t>(problem.d().dataType()),
                 .mi_dtype = miDataType,
                 .a_mx_block_size = 0,   // MX Data types come from rocroller
                 .b_mx_block_size = 0,   // MX Data types come from rocroller

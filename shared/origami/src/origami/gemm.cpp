@@ -989,17 +989,17 @@ double compute_total_latency(const problem_t& problem,
         // avoid division by 0 if K == 0
         if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
           // Use nontemporal B
-          if (!(config.non_temporal_b == 4)) { return std::numeric_limits<double>::max(); }
+          if (!(config.cache_hints_b == 4)) { return std::numeric_limits<double>::max(); }
         } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5)) {
           // Use Non Temporal A
-          if (!(config.non_temporal_a == 4)) { return std::numeric_limits<double>::max(); }
+          if (!(config.cache_hints_a == 4)) { return std::numeric_limits<double>::max(); }
         } else {
           // Never use Non Temporal
-          if (config.non_temporal_a || config.non_temporal_b) {
+          if (config.cache_hints_a || config.cache_hints_b) {
             return std::numeric_limits<double>::max();
           }
         }
-      } else if (config.non_temporal_a || config.non_temporal_b) {
+      } else if (config.cache_hints_a || config.cache_hints_b) {
         return std::numeric_limits<double>::max();
       }
     }
@@ -1071,8 +1071,8 @@ double compute_total_latency(const problem_t& problem,
 
   if (hardware_t::is_debug_enabled()) {
     hardware.log_debug("Total_latency (with heuristics)", total_latency);
-    hardware.log_debug("non_temporal_a", config.non_temporal_a);
-    hardware.log_debug("non_temporal_b", config.non_temporal_b);
+    hardware.log_debug("non_temporal_a", config.cache_hints_a);
+    hardware.log_debug("non_temporal_b", config.cache_hints_b);
     hardware.log_debug("kernel_occupancy", config.occupancy);
     hardware.log_debug("splitting_factor", splitting_factor);
     hardware.log_debug("Input Tile Size A", MT_M * MT_K);

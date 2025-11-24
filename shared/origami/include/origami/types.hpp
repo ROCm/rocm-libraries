@@ -271,10 +271,6 @@ struct config_t {
   /// Reduction strategy.
   reduction_t reduction_strategy{};
 
-  /// non temporal.
-  int non_temporal_a;
-  int non_temporal_b;
-
   constexpr bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && cache_hints_a == o.cache_hints_a &&
            cache_hints_b == o.cache_hints_b;

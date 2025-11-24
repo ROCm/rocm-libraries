@@ -43,8 +43,8 @@ def read_configs_list(library_name):
         config.mi = origami.dim3_t(item['MI_M'], item['MI_N'], item['MI_K'])
         config.occupancy = item['Occupancy']
         config.workgroup_mapping = item['WGM']
-        config.non_temporal_a = item['NTA']
-        config.non_temporal_b = item['NTB']
+        config.cache_hints_a = item['NTA']
+        config.cache_hints_b = item['NTB']
         configs_list.append(config)
     return configs_list
 
@@ -110,7 +110,7 @@ def main():
         problem.a_mx_block_size = 0
         problem.b_mx_block_size = 0
 
-        rv = origami.select_topk_configs(problem, hardware, configs_list, -1)
+        rv = origami.select_ranked_configs(problem, hardware, configs_list)
         results_list = []
         for rank_item in rv:
             if rank_item.latency < 1e12:
@@ -123,23 +123,46 @@ def main():
                                      'MI_K': rank_item.config.mi.k, \
                                      'Occupancy': rank_item.config.occupancy, \
                                      'WGM': rank_item.config.workgroup_mapping, \
-                                     'NTA': rank_item.config.non_temporal_a, \
-                                     'NTB': rank_item.config.non_temporal_b})
+                                     'NTA': rank_item.config.cache_hints_a, \
+                                     'NTB': rank_item.config.cache_hints_b})
         sizes_list.append(results_list)
 
         # count = len(base_rankings[idx])
         # for (base_item, new_item) in zip(base_rankings[idx], rv[:count]):
-        #     assert base_item['Latency']==round(new_item.latency) and \
-        #            base_item['MT_M']==new_item.config.mt.m and \
-        #            base_item['MT_N']==new_item.config.mt.n and \
-        #            base_item['MT_K']==new_item.config.mt.k and \
-        #            base_item['MI_M']==new_item.config.mi.m and \
-        #            base_item['MI_N']==new_item.config.mi.n and \
-        #            base_item['MI_K']==new_item.config.mi.k and \
-        #            base_item['Occupancy']==new_item.config.occupancy and \
-        #            base_item['WGM']==new_item.config.workgroup_mapping and \
-        #            base_item['NTA']==new_item.config.non_temporal_a and \
-        #            base_item['NTB']==new_item.config.non_temporal_b, "Solution ranking not identical"
+            # assert base_item['Latency']==round(new_item.latency) and \
+            #        base_item['MT_M']==new_item.config.mt.m and \
+            #        base_item['MT_N']==new_item.config.mt.n and \
+            #        base_item['MT_K']==new_item.config.mt.k and \
+            #        base_item['MI_M']==new_item.config.mi.m and \
+            #        base_item['MI_N']==new_item.config.mi.n and \
+            #        base_item['MI_K']==new_item.config.mi.k and \
+            #        base_item['Occupancy']==new_item.config.occupancy and \
+            #        base_item['WGM']==new_item.config.workgroup_mapping and \
+            #        base_item['NTA']==new_item.config.cache_hints_a and \
+            #        base_item['NTB']==new_item.config.cache_hints_b, "Solution ranking not identical"
+            # print(idx)
+            # if base_item['Latency']!=round(new_item.latency):
+            #     print(base_item['Latency'], round(new_item.latency))
+            # if base_item['MT_M']!=new_item.config.mt.m:
+            #     print(base_item['MT_M'], new_item.config.mt.m)
+            # if base_item['MT_N']!=new_item.config.mt.n:
+            #     print(base_item['MT_N'], new_item.config.mt.n)
+            # if base_item['MT_K']!=new_item.config.mt.k:
+            #     print(base_item['MT_K'], new_item.config.mt.k)
+            # if base_item['MI_M']!=new_item.config.mi.m:
+            #     print(base_item['MI_M'], new_item.config.mi.m)
+            # if base_item['MI_N']!=new_item.config.mi.n:
+            #     print(base_item['MI_N'], new_item.config.mi.n)
+            # if base_item['MI_K']!=new_item.config.mi.k:
+            #     print(base_item['MI_K'], new_item.config.mi.k)
+            # if base_item['Occupancy']!=new_item.config.occupancy:
+            #     print(base_item['Occupancy'], new_item.config.occupancy)
+            # if base_item['WGM']!=new_item.config.workgroup_mapping:
+            #     print(base_item['WGM'], new_item.config.workgroup_mapping)
+            # if base_item['NTA']!=new_item.config.cache_hints_a:
+            #     print(base_item['NTA'], new_item.config.cache_hints_a)
+            # if base_item['NTB']!=new_item.config.cache_hints_b:
+            #     print(base_item['NTB'], new_item.config.cache_hints_b)
         # print(f"Benchmark {idx} matches")
     yaml_args = {"default_flow_style": None, "sort_keys": False}
     with open("./bench_sizes/results/" + resultsfile, "wt") as foutput:

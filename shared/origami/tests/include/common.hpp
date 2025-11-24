@@ -56,8 +56,8 @@ inline origami::config_t make_config(size_t mt_m,
   config.mi.k              = mi_k;
   config.occupancy         = occupancy;
   config.workgroup_mapping = wgm;
-  config.non_temporal_a    = non_temporal_a;
-  config.non_temporal_b    = non_temporal_b;
+  config.cache_hints_a    = non_temporal_a;
+  config.cache_hints_b    = non_temporal_b;
   return config;
 }
 

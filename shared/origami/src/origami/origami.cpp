@@ -196,8 +196,8 @@ std::tuple<size_t, size_t> select_workgroup_mapping(const problem_t& problem,
   size_t MT_N = config.mt.n;
   size_t MT_K = config.mt.k;
 
-  int nta = config.non_temporal_a;
-  int ntb = config.non_temporal_b;
+  int nta = config.cache_hints_a;
+  int ntb = config.cache_hints_b;
 
   // Default is the closest we can get to a square
   size_t max_CU_XCD = hardware.N_CU / hardware.NUM_XCD;

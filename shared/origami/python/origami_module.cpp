@@ -91,8 +91,8 @@ NB_MODULE(origami, m) {
       .def_rw("mi", &origami::config_t::mi)
       .def_rw("occupancy", &origami::config_t::occupancy)
       .def_rw("workgroup_mapping", &origami::config_t::workgroup_mapping)
-      .def_rw("non_temporal_a", &origami::config_t::non_temporal_a)
-      .def_rw("non_temporal_b", &origami::config_t::non_temporal_b);
+      .def_rw("cache_hints_a", &origami::config_t::cache_hints_a)
+      .def_rw("cache_hints_b", &origami::config_t::cache_hints_b);
 
   nanobind::class_<origami::prediction_result_t>(m, "prediction_result_t")
       .def(nanobind::init<>())
@@ -165,7 +165,7 @@ NB_MODULE(origami, m) {
   m.def("select_config_mnk",
         &origami::select_config_mnk,
         "Select best configuration for M,N,K dimensions");
-  m.def("select_topk_configs", &origami::select_topk_configs, "Select top K configurations");
+  m.def("select_ranked_configs", &origami::select_ranked_configs, "Select ranked configurations");
   m.def("compute_perf_gflops", &origami::compute_perf_gflops, "Compute performance in GFLOPS");
 
   // StreamK functions

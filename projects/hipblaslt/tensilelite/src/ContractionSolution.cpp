@@ -966,8 +966,8 @@ namespace TensileLite
                         .mt             = {static_cast<size_t>(sizeMapping.macroTile.x),
                                            static_cast<size_t>(sizeMapping.macroTile.y),
                                            static_cast<size_t>(sizeMapping.depthU)},
-                        .non_temporal_a = sizeMapping.nonTemporalA,
-                        .non_temporal_b = sizeMapping.nonTemporalB,
+                        .cache_hints_a = sizeMapping.nonTemporalA,
+                        .cache_hints_b = sizeMapping.nonTemporalB,
                     };
                     auto [defaultWGMXCC, defaultWGM] = origami::select_workgroup_mapping(
                         origami_problem, *(hipAMDGPU->analyticalHardware), origami_config, skgrid);
