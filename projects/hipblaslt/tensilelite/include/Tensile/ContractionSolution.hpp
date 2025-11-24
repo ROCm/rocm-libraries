@@ -279,6 +279,7 @@ namespace TensileLite
          * Calculate required workspace size.
          */
         size_t requiredWorkspaceSize(Problem const& problem, Hardware const& hardware) const;
+        size_t requiredWorkspaceSizeGsu(Problem const& problem, Hardware const& hardware, size_t gsu) const;
         size_t requiredWorkspaceSizeGroupedGemm(std::vector<Problem> const& problems,
                                                 Hardware const&             hardware) const;
         size_t requiredHostSizeGroupedGemmSingle(Problem const&  problem,
