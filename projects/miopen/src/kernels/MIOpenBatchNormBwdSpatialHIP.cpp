@@ -28,6 +28,7 @@
 #include "batchnorm_functions.hpp"
 #include "bnorm_spatial_activation_functions.hpp"
 #include "reduction_functions.hpp"
+#include "static_unroll.hpp"
 
 // Load the configs to this file
 namespace /*anonymous*/ {
@@ -327,10 +328,6 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                                                  : mio_bn_config::launch_dim.grp0 * rd_blk * 4;
     static constexpr unsigned int rem4  = mio_bn_config::nhw - (mio_bn_config::nhw / grprd) * grprd;
     static constexpr unsigned int less4 = mio_bn_config::nhw - rem4;
-    static constexpr unsigned int chunk4 = max_read * grprd;
-    static constexpr unsigned int remout4 =
-        mio_bn_config::nhw - ((mio_bn_config::nhw / chunk4) * chunk4);
-    static constexpr unsigned int lessout4 = mio_bn_config::nhw - remout4;
     static constexpr unsigned int rem =
         mio_bn_config::nhw -
         (mio_bn_config::nhw / mio_bn_config::launch_dim.grp0) * mio_bn_config::launch_dim.grp0;
@@ -411,17 +408,6 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         if constexpr(!mio_config::layout_nhwc && mio_bn_config::hw >= 4096)
         {
             fp_type4 read4;
-
-            // TODO: perform unroll
-            // #if (MIO_BN_N > MIO_BN_LOOP_UNROLL_MAXN)
-            //         __attribute__((opencl_unroll_hint(4))) for(unsigned int k = lid << 2; k <
-            //         MIO_BN_LESS4;
-            //                                                    k += GRPRD)
-            // #else
-            //         __attribute__((opencl_unroll_hint(2))) for(unsigned int k = lid << 2; k <
-            //         MIO_BN_LESS4;
-            //                                                    k += GRPRD)
-            // #endif
             for(unsigned int k = lid << 2; k < less4; k += grprd)
             {
                 nidx  = k / mio_bn_config::hw;
@@ -451,12 +437,6 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         }
         else
         {
-            // TODO: unroll
-            // #if (MIO_BN_N > MIO_BN_LOOP_UNROLL_MAXN)
-            //         __attribute__((opencl_unroll_hint(4))) for(unsigned int k = lid; k <
-            //         MIO_BN_LESS;
-            //                                                    k += MIO_BN_GRP0)
-            // #else
             for(unsigned int k = lid; k < less; k += mio_bn_config::launch_dim.grp0)
             {
                 nidx          = k / mio_bn_config::hw;
@@ -527,24 +507,12 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 
 #endif
 
-        // TODO: unroll loop
-        // #if (MIO_BN_N > MIO_BN_LOOP_UNROLL_MAXN)
-        //         __attribute__((opencl_unroll_hint(4))) for(unsigned int k = lid
-        //                                                                     << 2 * (1 -
-        //                                                                     MIO_LAYOUT_NHWC);
-        //                                                    k < MIO_BN_LESS4;
-        //                                                    k += GRPRD)
-        // #else
-        //         __attribute__((opencl_unroll_hint(2))) for(unsigned int k = lid
-        //                                                                     << 2 * (1 -
-        //                                                                     MIO_LAYOUT_NHWC);
-        //                                                    k < MIO_BN_LESS4;
-        //                                                    k += GRPRD)
-        // #endif
-        for(unsigned int k = lid << 2 * (1 - mio_config::layout_nhwc); k < less4; k += grprd)
-        {
-            nidx  = k / mio_bn_config::hw;
-            hwidx = k - (nidx * mio_bn_config::hw);
+        unsigned int kRead = lid << 2 * (1 - mio_config::layout_nhwc);
+        constexpr unsigned int unrollHint1 =
+            mio_bn_config::n > mio_bn_config::loop_unroll_max_n ? 4 : 2;
+        static_unroll_count<unsigned int, 0, less4 / grprd, 1, unrollHint1>{[&](unsigned int) {
+            nidx  = kRead / mio_bn_config::hw;
+            hwidx = kRead - (nidx * mio_bn_config::hw);
 #if MIO_LAYOUT_NHWC
             index               = nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid;
             FpPrecType dyvalue  = cast<FpPrecType>(dy_in[index]);
@@ -571,7 +539,8 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
             miopen::batchnorm::_accumulate(db, dyvalue4);
             miopen::batchnorm::_accumulate_mad(ds, xhat4, dyvalue4);
 #endif
-        }
+            kRead += grprd;
+        }};
 
         if constexpr(rem4 > 0)
         {
@@ -638,10 +607,6 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                 lid);
         }
 
-        FpPrecType tmp1 = 0.;
-        FpPrecType tmp2 = 0.;
-        FpPrecType tmp3 = pscale * invVariance * INHW;
-
         __syncthreads();
 
         if(lid == 0)
@@ -650,76 +615,62 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
             dscale[grpid] = cast<FpPrecType>(ds);
         }
 
-        FpPrecType vals[max_read];
-        FpPrecType value1;
-        // TODO: unroll
-        // #if (MIO_BN_N > MIO_BN_LOOP_UNROLL_MAXN)
-        //         __attribute__((opencl_unroll_hint(4))) for(unsigned int k = (MIO_MAX_READ * lid);
-        //                                                    k < MIO_BN_LESSOUT;
-        //                                                    k += MIO_BN_CHUNK)
-        //         {
-        //             __attribute__((opencl_unroll_hint(4))) for(unsigned int j = 0; j <
-        //             MIO_MAX_READ; j++)
-        // #else
-        for(unsigned int k = (max_read * lid); k < lessout; k += chunk)
-        {
-            for(unsigned int j = 0; j < max_read; j++)
+        using fp_type_vec      = typename mapped_vector_type<FpType, max_read>::type;
+        using fp_prec_type_vec = typename mapped_vector_type<FpPrecType, max_read>::type;
+
+        unsigned int kWrite = max_read * lid;
+        constexpr unsigned int unrollHint2 =
+            mio_bn_config::n > mio_bn_config::loop_unroll_max_n ? 2 : 1;
+        static_unroll_count<unsigned int, 0, lessout / chunk, 1, unrollHint2>{[&](unsigned int) {
+            fp_prec_type_vec vals;
+
+            nidx  = kWrite / mio_bn_config::hw;
+            hwidx = kWrite - (nidx * mio_bn_config::hw);
+            index = mio_config::layout_nhwc
+                        ? nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid
+                        : nidx * mio_bn_config::chw + chwid + hwidx;
+
+            fp_prec_type_vec value1 =
+                cast<fp_prec_type_vec>(*reinterpret_cast<fp_type_vec const*>(dy_in + index));
+            fp_prec_type_vec xhat1 =
+                (cast<fp_prec_type_vec>(*reinterpret_cast<fp_type_vec const*>(x_in + index)) -
+                 mean) *
+                invVariance;
+
+            // TODO: wrap activation functions in a wrapper that handles mapped vector types
+            if constexpr(max_read == 1)
             {
-                unsigned int l = k + j;
-                nidx           = l / mio_bn_config::hw;
-                hwidx          = l - (nidx * mio_bn_config::hw);
-                index          = mio_config::layout_nhwc
-                                     ? nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid
-                                     : nidx * mio_bn_config::chw + chwid + hwidx;
-
-                value1 = cast<FpPrecType>(dy_in[index]);
-                xhat   = (cast<FpPrecType>(x_in[index]) - mean) * invVariance;
-
                 value1 = bwd_activation_op<FpPrecType, mio_config::neuron_op>(
-                    value1, xhat, pscale, pbias, alpha, beta);
-
-                if constexpr(mio_config::input_type_strategy == type_strategy::fp16)
-                {
-                    float temp_tmp1 = fma((float)mio_bn_config::nhw, (float)value1, -db);
-                    float temp_tmp2 = -((float)xhat) * ds;
-                    float temp_vals = (float)tmp3 * (temp_tmp2 + temp_tmp1);
-                    vals[j]         = cast<FpPrecType>(temp_vals);
-                }
-                else
-                {
-                    tmp1    = fma(cast<FpPrecType>(mio_bn_config::nhw), value1, -db);
-                    tmp2    = -xhat * ds;
-                    vals[j] = tmp3 * (tmp2 + tmp1);
-                }
+                    value1, xhat1, pscale, pbias, alpha, beta);
             }
+            else if constexpr(max_read == 2)
+            {
+                value1.x = bwd_activation_op<FpPrecType, mio_config::neuron_op>(
+                    value1.x, xhat1.x, pscale, pbias, alpha, beta);
+                value1.y = bwd_activation_op<FpPrecType, mio_config::neuron_op>(
+                    value1.y, xhat1.y, pscale, pbias, alpha, beta);
+            }
+
+            fp_prec_type_vec tmp1 = fma(
+                cast<fp_prec_type_vec>(mio_bn_config::nhw), value1, cast<fp_prec_type_vec>(-db));
+            fp_prec_type_vec tmp2 = -xhat1 * cast<fp_prec_type_vec>(ds);
+            fp_prec_type_vec tmp3 = cast<fp_prec_type_vec>(pscale * invVariance * INHW);
+            vals                  = tmp3 * (tmp2 + tmp1);
 
             __syncthreads();
 
-            // TODO: unroll
-            // #if (MIO_BN_N > MIO_BN_LOOP_UNROLL_MAXN)
-            //             __attribute__((opencl_unroll_hint(4))) for(unsigned int j = 0; j <
-            //             MIO_MAX_READ; j++)
-            // #else
-            for(unsigned int j = 0; j < max_read; j++)
-            {
-                unsigned int l = k + j;
-                nidx           = l / mio_bn_config::hw;
-                hwidx          = l - (nidx * mio_bn_config::hw);
-                index          = mio_config::layout_nhwc
-                                     ? nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid
-                                     : nidx * mio_bn_config::chw + chwid + hwidx;
-                dx_out[index]  = cast<FpType>(vals[j]);
-            }
-        }
+            *reinterpret_cast<fp_type_vec*>(dx_out + index) = cast<fp_type_vec>(vals);
+            kWrite += chunk;
+        }};
+
+        FpPrecType tmp1 = 0.;
+        FpPrecType tmp2 = 0.;
+        FpPrecType tmp3 = pscale * invVariance * INHW;
 
         if constexpr(remout > 0)
         {
+            FpPrecType vals[max_read];
             unsigned int remkeyout = (max_read * lid) + lessout;
-            // TODO: unroll
-            // #if (MIO_BN_N > MIO_BN_LOOP_UNROLL_MAXN)
-            //             __attribute__((opencl_unroll_hint(4))) for(unsigned int j = 0; j <
-            //             MIO_MAX_READ; j++)
-            // #else
             for(unsigned int j = 0; j < max_read; j++)
             {
                 unsigned int l = remkeyout + j;
@@ -730,8 +681,8 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                                      : nidx * mio_bn_config::chw + chwid + hwidx;
                 if(index < mio_bn_config::nchw)
                 {
-                    value1 = cast<FpPrecType>(dy_in[index]);
-                    xhat   = (cast<FpPrecType>(x_in[index]) - mean) * invVariance;
+                    FpPrecType value1 = cast<FpPrecType>(dy_in[index]);
+                    xhat              = (cast<FpPrecType>(x_in[index]) - mean) * invVariance;
 
                     value1 = bwd_activation_op<FpPrecType, mio_config::neuron_op>(
                         value1, xhat, pscale, pbias, alpha, beta);
@@ -744,11 +695,6 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 
             __syncthreads();
 
-            // TODO: unroll
-            // #if (MIO_BN_N > MIO_BN_LOOP_UNROLL_MAXN)
-            //             __attribute__((opencl_unroll_hint(4))) for(unsigned int j = 0; j <
-            //             MIO_MAX_READ; j++)
-            // #else
             for(unsigned int j = 0; j < max_read; j++)
             {
                 unsigned int l = remkeyout + j;
@@ -799,8 +745,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<3, FpType, FpPrecType, FpAccumType>
         FpPrecType ds          = 0;
         FpPrecType db          = 0;
 
-        // TODO: maybe unused
-        // #if(MIO_BN_N < MIO_BN_MAXN)
+        // maybe unused if MIO_BN_N >= MIO_BN_MAXN
         FpPrecType batchvalues[mio_bn_config::n];
         FpPrecType dyvalues[mio_bn_config::n];
 

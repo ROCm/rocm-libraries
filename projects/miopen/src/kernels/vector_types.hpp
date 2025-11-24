@@ -150,7 +150,12 @@ __forceinline__ __device__ __host__ OutType cast(InType input)
     constexpr auto inSize  = InTypeInfo::size;
     constexpr auto outSize = OutTypeInfo::size;
 
-    if constexpr(inSize == outSize && outSize == 4)
+    if constexpr(inSize == outSize && outSize == 2)
+    {
+        return OutType{detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.x),
+                       detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.y)};
+    }
+    else if constexpr(inSize == outSize && outSize == 4)
     {
         return OutType{detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.x),
                        detail::scalarcast<typename OutTypeInfo::UnderlyingType>(input.y),
