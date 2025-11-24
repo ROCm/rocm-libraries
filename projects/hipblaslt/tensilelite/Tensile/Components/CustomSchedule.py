@@ -565,6 +565,91 @@ class RegisterSchedule:
         # Return original function unchanged (so it can still be called directly)
         return func
 
+@RegisterSchedule(
+    tile_config=TileConfig(96, 256, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_96x256x64_16bit(kernel, useLDSTr, TLDS):
+    numMfma = 48
+    nglshift = nllshift = 11
+    numCodePaths = 2
+    kernel["MfmaInitCVgprs"] = True
+
+    if isTN(kernel) and TLDS==1:
+        kernel["SwapGlobalReadOrder"] = True
+
+        syncTable = [
+            7, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="Finish all LRA1s and LRB1s"),
+
+            9, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LRB0 done"),
+            9, SBarrier(comment=""),
+
+            23, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LRA0 done"),
+
+            35, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Wait for prev GRBs"),
+            35, SBarrier(comment=""),
+
+            43, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Wait for prev GRA"),
+            43, SBarrier(comment=""),
+
+            47, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Finish all LRB1 and 1/3 LRA1"),
+        ]
+
+        syncCode = syncTable[1::2]
+        optSchedule = {
+            'GRIncA' : [[0,0,0,    2,2,2, 3, 4,4],
+                        [-1,-1,-1, 1,1,1, 3, 3,3]],
+            'GRIncB' : [[4, 5,5,5, 6,6,6, 7,7],
+                        [4, 5,5,5, 6,6,6, 7,7]],
+
+            'LRB0'   : [[-1,-1,-1, 1,1,1, 3,3],
+                        [0,0,0,    2,2,2, 4,4]],
+            'LRSB'   : [[8], [9]],
+            
+            'SYNC'   : [syncTable[::2]],
+
+            # Actually loads GRB
+            'GRA'    : [[8,9,  11,11, 13,13, 15,15,  20,20, 22,22, 24,24, 26,26],
+                        [8,10, 12,12, 14,14, 16,16,  21,21, 23,23, 25,25, 27,27]],
+            'LWSB'   : [[32]],
+
+            'LRA0'   : [[17, 17, 17],
+                        [15, 15, 15]],
+            'LRSA'   : [[19]],
+            
+            # Actually loads GRA
+            'GRB'    : [[36,36, 38,38, 40,40],
+                        [37,37, 39,39, 41,41]],
+            'LWSA'   : [[45]],
+            
+            'LRB1'   : [[35,35, 37,37, 39,39, 41,41],
+                        [36,36, 38,38, 40,40, 42,42]],
+            'LRA1'   : [[43,44,46],
+                        [43,45,46]],
+            
+            'LCC'   : [[47, 47]],
+        }
+
+        # Reorder to basically create the 256x96 case
+        mfmaReorder = [
+             0,  3,  6,  9, 12, 15, 18, 21,
+             1,  4,  7, 10, 13, 16, 19, 22,
+             2,  5,  8, 11, 14, 17, 20, 23,
+              # Second half
+             24, 27, 30, 33, 36, 39, 42, 45,
+             25, 28, 31, 34, 37, 40, 43, 46,
+             26, 29, 32, 35, 38, 41, 44, 47
+        ]
+
+        opt1 = ScheduleInfo(numCodePaths, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder=mfmaReorder)
+    else:
+        return False, None
+    
+    return True, opt1
+
 
 @RegisterSchedule(
     tile_config=TileConfig(256, 96, 64, 2, 1, True, 0, 0),
