@@ -46,7 +46,6 @@
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
-#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/get_value.h>
@@ -149,7 +148,7 @@ reduce_n(execution_policy<Derived>& policy, InputIt first, Size num_items, T ini
     {
       return init = __reduce::reduce(policy, first, num_items, init, binary_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static T
     seq(execution_policy<Derived>& policy, InputIt first, Size num_items, T init, BinaryOp binary_op)
     {
@@ -157,9 +156,11 @@ reduce_n(execution_policy<Derived>& policy, InputIt first, Size num_items, T ini
     }
 #  endif
   };
-
-  THRUST_CDP_DISPATCH((return workaround::par(policy, first, num_items, init, binary_op);),
-                      (return workaround::seq(policy, first, num_items, init, binary_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first, num_items, init, binary_op);
+#  else
+  return workaround::seq(policy, first, num_items, init, binary_op);
+#  endif
 }
 
 template <class Derived, class InputIt, class T, class BinaryOp>

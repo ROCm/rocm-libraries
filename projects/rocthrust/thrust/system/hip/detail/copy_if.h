@@ -48,7 +48,6 @@
 #  include <thrust/distance.h>
 #  include <thrust/iterator/iterator_traits.h>
 #  include <thrust/iterator/transform_iterator.h>
-#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
@@ -282,7 +281,7 @@ OutputIterator THRUST_HOST_DEVICE copy_if(
     {
       return __copy_if::copy_if(policy, first, last, result, pred);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIterator seq(
       execution_policy<Derived>& policy, InputIterator first, InputIterator last, OutputIterator result, Predicate pred)
     {
@@ -291,8 +290,11 @@ OutputIterator THRUST_HOST_DEVICE copy_if(
 #  endif
   };
 
-  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, result, pred);),
-                      (return workaround::seq(policy, first, last, result, pred);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first, last, result, pred);
+#  else
+  return workaround::seq(policy, first, last, result, pred);
+#  endif
 } // func copy_if
 
 THRUST_EXEC_CHECK_DISABLE
@@ -318,7 +320,7 @@ OutputIterator THRUST_HOST_DEVICE copy_if(
     {
       return __copy_if::copy_if(policy, first, last, stencil, result, pred);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIterator
     seq(execution_policy<Derived>& policy,
         InputIterator first,
@@ -332,8 +334,11 @@ OutputIterator THRUST_HOST_DEVICE copy_if(
 #  endif
   };
 
-  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, stencil, result, pred);),
-                      (return workaround::seq(policy, first, last, stencil, result, pred);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first, last, stencil, result, pred);
+#  else
+  return workaround::seq(policy, first, last, stencil, result, pred);
+#  endif
 } // func copy_if
 
 } // namespace hip_rocprim

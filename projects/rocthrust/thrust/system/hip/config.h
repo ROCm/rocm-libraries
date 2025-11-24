@@ -76,7 +76,7 @@
 
 // Workaround, so kernel(s) called by function is/are not lost,
 // Implicit instantiation of function template
-// that will be used in par_impl block of THRUST_CDP_DISPATCH.
+// that will be used in #if !defined(__HIP_DEVICE_COMPILE__) block.
 #define THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(function) \
   do                                                     \
   {                                                      \

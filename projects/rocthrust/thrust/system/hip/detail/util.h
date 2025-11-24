@@ -39,7 +39,6 @@
 
 #include <thrust/detail/libcxx_wrapper/nv/target.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/system/hip/detail/cdp_dispatch.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
 #if !THRUST_COMPILER(NVRTC)
@@ -126,8 +125,22 @@ template <class Derived>
 THRUST_HOST_DEVICE hipError_t synchronize_stream(execution_policy<Derived>& policy)
 {
   hipError_t result;
+  // Can't use #if inside NV_IF_TARGET, use a temp macro to hoist the device
+  // instructions out of the target logic.
+#if !defined(__HIP_DEVICE_COMPILE__)
 
-  THRUST_CDP_DISPATCH((result = hipStreamSynchronize(stream(policy));), ((void) policy; result = hipSuccess;));
+#  define THRUST_TEMP_DEVICE_CODE result = hipDeviceSynchronize();
+
+#else
+
+#  define THRUST_TEMP_DEVICE_CODE result = hipSuccess
+
+#endif
+
+  NV_IF_TARGET(
+    NV_IS_HOST, (result = hipStreamSynchronize(stream(policy));), ((void) (policy); THRUST_TEMP_DEVICE_CODE;));
+
+#undef THRUST_TEMP_DEVICE_CODE
 
   return result;
 }
@@ -136,7 +149,12 @@ THRUST_HOST_DEVICE hipError_t synchronize_stream(execution_policy<Derived>& poli
 template <class Policy>
 THRUST_HOST_DEVICE hipError_t synchronize(Policy& policy)
 {
-  THRUST_CDP_DISPATCH((return synchronize_stream(derived_cast(policy));), ((void) policy; return hipSuccess;));
+#if !defined(__HIP_DEVICE_COMPILE__)
+  return synchronize_stream(derived_cast(policy));
+#else
+  (void) (policy);
+  return hipSuccess;
+#endif
 }
 
 // Fallback implementation of the customization point.

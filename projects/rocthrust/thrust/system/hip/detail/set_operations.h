@@ -46,7 +46,6 @@
 #  include <thrust/extrema.h>
 #  include <thrust/pair.h>
 #  include <thrust/set_operations.h>
-#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/get_value.h>
@@ -1150,23 +1149,25 @@ OutputIt THRUST_HOST_DEVICE set_difference(
       items1_t*,
       CompareOp,
       __set_operations::serial_set_difference>) );
-  THRUST_CDP_DISPATCH(
-    (items1_t* null_ = nullptr;
-     auto tmp        = __set_operations::set_operations<false>(
-       policy,
-       items1_first,
-       items1_last,
-       items2_first,
-       items2_last,
-       null_,
-       null_,
-       result,
-       null_,
-       compare,
-       __set_operations::serial_set_difference());
-     result = tmp.first;),
-    (result = thrust::set_difference(
-       cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  items1_t* null_ = nullptr;
+  auto tmp        = __set_operations::set_operations<false>(
+    policy,
+    items1_first,
+    items1_last,
+    items2_first,
+    items2_last,
+    null_,
+    null_,
+    result,
+    null_,
+    compare,
+    __set_operations::serial_set_difference());
+  result = tmp.first;
+#  else
+  result = thrust::set_difference(
+    cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);
+#  endif
   return result;
 }
 
@@ -1210,23 +1211,25 @@ OutputIt THRUST_HOST_DEVICE set_intersection(
       items1_t*,
       CompareOp,
       __set_operations::serial_set_intersection>) );
-  THRUST_CDP_DISPATCH(
-    (items1_t* null_ = nullptr;
-     auto tmp        = __set_operations::set_operations<false>(
-       policy,
-       items1_first,
-       items1_last,
-       items2_first,
-       items2_last,
-       null_,
-       null_,
-       result,
-       null_,
-       compare,
-       __set_operations::serial_set_intersection());
-     result = tmp.first;),
-    (result = thrust::set_intersection(
-       cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  items1_t* null_ = nullptr;
+  auto tmp        = __set_operations::set_operations<false>(
+    policy,
+    items1_first,
+    items1_last,
+    items2_first,
+    items2_last,
+    null_,
+    null_,
+    result,
+    null_,
+    compare,
+    __set_operations::serial_set_intersection());
+  result = tmp.first;
+#  else
+  result = thrust::set_intersection(
+    cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);
+#  endif
   return result;
 }
 
@@ -1270,23 +1273,25 @@ OutputIt THRUST_HOST_DEVICE set_symmetric_difference(
       items1_t*,
       CompareOp,
       __set_operations::serial_set_symmetric_difference>) );
-  THRUST_CDP_DISPATCH(
-    (items1_t* null_ = nullptr;
-     auto tmp        = __set_operations::set_operations<false>(
-       policy,
-       items1_first,
-       items1_last,
-       items2_first,
-       items2_last,
-       null_,
-       null_,
-       result,
-       null_,
-       compare,
-       __set_operations::serial_set_symmetric_difference());
-     result = tmp.first;),
-    (result = thrust::set_symmetric_difference(
-       cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  items1_t* null_ = nullptr;
+  auto tmp        = __set_operations::set_operations<false>(
+    policy,
+    items1_first,
+    items1_last,
+    items2_first,
+    items2_last,
+    null_,
+    null_,
+    result,
+    null_,
+    compare,
+    __set_operations::serial_set_symmetric_difference());
+  result = tmp.first;
+#  else
+  result = thrust::set_symmetric_difference(
+    cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);
+#  endif
   return result;
 }
 
@@ -1330,23 +1335,25 @@ OutputIt THRUST_HOST_DEVICE set_union(
       items1_t*,
       CompareOp,
       __set_operations::serial_set_union>) );
-  THRUST_CDP_DISPATCH(
-    (items1_t* null_ = nullptr;
-     auto tmp        = __set_operations::set_operations<false>(
-       policy,
-       items1_first,
-       items1_last,
-       items2_first,
-       items2_last,
-       null_,
-       null_,
-       result,
-       null_,
-       compare,
-       __set_operations::serial_set_union());
-     result = tmp.first;),
-    (result = thrust::set_union(
-       cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  items1_t* null_ = nullptr;
+  auto tmp        = __set_operations::set_operations<false>(
+    policy,
+    items1_first,
+    items1_last,
+    items2_first,
+    items2_last,
+    null_,
+    null_,
+    result,
+    null_,
+    compare,
+    __set_operations::serial_set_union());
+  result = tmp.first;
+#  else
+  result = thrust::set_union(
+    cvt_to_seq(derived_cast(policy)), items1_first, items1_last, items2_first, items2_last, result, compare);
+#  endif
   return result;
 }
 
@@ -1406,30 +1413,32 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_difference_by_key(
       CompareOp,
       __set_operations::serial_set_difference>) );
   auto ret = thrust::make_pair(keys_result, items_result);
-  THRUST_CDP_DISPATCH(
-    (ret = __set_operations::set_operations<true>(
-       policy,
-       keys1_first,
-       keys1_last,
-       keys2_first,
-       keys2_last,
-       items1_first,
-       items2_first,
-       keys_result,
-       items_result,
-       compare_op,
-       __set_operations::serial_set_difference());),
-    (ret = thrust::set_difference_by_key(
-       cvt_to_seq(derived_cast(policy)),
-       keys1_first,
-       keys1_last,
-       keys2_first,
-       keys2_last,
-       items1_first,
-       items2_first,
-       keys_result,
-       items_result,
-       compare_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  ret = __set_operations::set_operations<true>(
+    policy,
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items2_first,
+    keys_result,
+    items_result,
+    compare_op,
+    __set_operations::serial_set_difference());
+#  else
+  ret = thrust::set_difference_by_key(
+    cvt_to_seq(derived_cast(policy)),
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items2_first,
+    keys_result,
+    items_result,
+    compare_op);
+#  endif
   return ret;
 }
 
@@ -1494,29 +1503,31 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_intersection_by_key(
       CompareOp,
       __set_operations::serial_set_intersection>) );
   auto ret = thrust::make_pair(keys_result, items_result);
-  THRUST_CDP_DISPATCH(
-    (ret = __set_operations::set_operations<true>(
-       policy,
-       keys1_first,
-       keys1_last,
-       keys2_first,
-       keys2_last,
-       items1_first,
-       items1_first,
-       keys_result,
-       items_result,
-       compare_op,
-       __set_operations::serial_set_intersection());),
-    (ret = thrust::set_intersection_by_key(
-       cvt_to_seq(derived_cast(policy)),
-       keys1_first,
-       keys1_last,
-       keys2_first,
-       keys2_last,
-       items1_first,
-       keys_result,
-       items_result,
-       compare_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  ret = __set_operations::set_operations<true>(
+    policy,
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items1_first,
+    keys_result,
+    items_result,
+    compare_op,
+    __set_operations::serial_set_intersection());
+#  else
+  ret = thrust::set_intersection_by_key(
+    cvt_to_seq(derived_cast(policy)),
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    keys_result,
+    items_result,
+    compare_op);
+#  endif
   return ret;
 }
 
@@ -1580,30 +1591,32 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_symmetric_difference_by
       CompareOp,
       __set_operations::serial_set_symmetric_difference>) );
   auto ret = thrust::make_pair(keys_result, items_result);
-  THRUST_CDP_DISPATCH(
-    (ret = __set_operations::set_operations<true>(
-       policy,
-       keys1_first,
-       keys1_last,
-       keys2_first,
-       keys2_last,
-       items1_first,
-       items2_first,
-       keys_result,
-       items_result,
-       compare_op,
-       __set_operations::serial_set_symmetric_difference());),
-    (ret = thrust::set_symmetric_difference_by_key(
-       cvt_to_seq(derived_cast(policy)),
-       keys1_first,
-       keys1_last,
-       keys2_first,
-       keys2_last,
-       items1_first,
-       items2_first,
-       keys_result,
-       items_result,
-       compare_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  ret = __set_operations::set_operations<true>(
+    policy,
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items2_first,
+    keys_result,
+    items_result,
+    compare_op,
+    __set_operations::serial_set_symmetric_difference());
+#  else
+  ret = thrust::set_symmetric_difference_by_key(
+    cvt_to_seq(derived_cast(policy)),
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items2_first,
+    keys_result,
+    items_result,
+    compare_op);
+#  endif
   return ret;
 }
 
@@ -1669,30 +1682,32 @@ pair<KeysOutputIt, ItemsOutputIt> THRUST_HOST_DEVICE set_union_by_key(
       CompareOp,
       __set_operations::serial_set_union>) );
   auto ret = thrust::make_pair(keys_result, items_result);
-  THRUST_CDP_DISPATCH(
-    (ret = __set_operations::set_operations<true>(
-       policy,
-       keys1_first,
-       keys1_last,
-       keys2_first,
-       keys2_last,
-       items1_first,
-       items2_first,
-       keys_result,
-       items_result,
-       compare_op,
-       __set_operations::serial_set_union());),
-    (ret = thrust::set_union_by_key(
-       cvt_to_seq(derived_cast(policy)),
-       keys1_first,
-       keys1_last,
-       keys2_first,
-       keys2_last,
-       items1_first,
-       items2_first,
-       keys_result,
-       items_result,
-       compare_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  ret = __set_operations::set_operations<true>(
+    policy,
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items2_first,
+    keys_result,
+    items_result,
+    compare_op,
+    __set_operations::serial_set_union());
+#  else
+  ret = thrust::set_union_by_key(
+    cvt_to_seq(derived_cast(policy)),
+    keys1_first,
+    keys1_last,
+    keys2_first,
+    keys2_last,
+    items1_first,
+    items2_first,
+    keys_result,
+    items_result,
+    compare_op);
+#  endif
   return ret;
 }
 

@@ -40,7 +40,6 @@
 #include <thrust/system/hip/config.h>
 
 #include <thrust/advance.h>
-#include <thrust/system/hip/detail/cdp_dispatch.h>
 #include <thrust/system/hip/detail/cross_system.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
@@ -101,7 +100,7 @@ copy(execution_policy<System>& system, InputIterator first, InputIterator last, 
     {
       return result = __copy::device_to_device(system, first, last, result);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIterator
     seq(execution_policy<System>& system, InputIterator first, InputIterator last, OutputIterator result)
     {
@@ -109,9 +108,11 @@ copy(execution_policy<System>& system, InputIterator first, InputIterator last, 
     }
 #  endif
   };
-
-  THRUST_CDP_DISPATCH((return workaround::par(system, first, last, result);),
-                      (return workaround::seq(system, first, last, result);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(system, first, last, result);
+#  else
+  return workaround::seq(system, first, last, result);
+#  endif
 } // end copy()
 
 THRUST_EXEC_CHECK_DISABLE
@@ -127,7 +128,7 @@ copy_n(execution_policy<System>& system, InputIterator first, Size n, OutputIter
     {
       return result = __copy::device_to_device(system, first, thrust::next(first, n), result);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIterator
     seq(execution_policy<System>& system, InputIterator first, Size n, OutputIterator result)
     {
@@ -135,9 +136,11 @@ copy_n(execution_policy<System>& system, InputIterator first, Size n, OutputIter
     }
 #  endif
   };
-
-  THRUST_CDP_DISPATCH((return workaround::par(system, first, n, result);),
-                      (return workaround::seq(system, first, n, result);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(system, first, n, result);
+#  else
+  return workaround::seq(system, first, n, result);
+#  endif
 } // end copy_n()
 #endif
 

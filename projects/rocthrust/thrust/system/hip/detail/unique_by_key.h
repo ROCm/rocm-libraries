@@ -47,7 +47,6 @@
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
 #  include <thrust/pair.h>
-#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/get_value.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
@@ -198,7 +197,7 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE unique_by_key_copy(
     {
       return detail::unique_by_key(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static pair<KeyOutputIt, ValOutputIt>
     seq(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
@@ -213,10 +212,11 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE unique_by_key_copy(
     }
 #  endif
   };
-
-  THRUST_CDP_DISPATCH(
-    (return workaround::par(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);),
-    (return workaround::seq(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
+#  else
+  return workaround::seq(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
+#  endif
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class KeyOutputIt, class ValOutputIt>
@@ -254,7 +254,7 @@ pair<KeyInputIt, ValInputIt> THRUST_HOST_DEVICE unique_by_key(
       return hip_rocprim::unique_by_key_copy(
         policy, keys_first, keys_last, values_first, keys_first, values_first, binary_pred);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static pair<KeyInputIt, ValInputIt>
     seq(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
@@ -266,9 +266,11 @@ pair<KeyInputIt, ValInputIt> THRUST_HOST_DEVICE unique_by_key(
     }
 #  endif
   };
-
-  THRUST_CDP_DISPATCH((return workaround::par(policy, keys_first, keys_last, values_first, binary_pred);),
-                      (return workaround::seq(policy, keys_first, keys_last, values_first, binary_pred);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, keys_first, keys_last, values_first, binary_pred);
+#  else
+  return workaround::seq(policy, keys_first, keys_last, values_first, binary_pred);
+#  endif
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt>
