@@ -67,6 +67,12 @@ else()
 
   # Fetch the content using default details
   set(ROCM_DISABLE_CHECKS TRUE)
+  if(WIN32 AND BUILD_SHARED_LIBS_OLD)
+    # We build gtest as a static lib, but the test binaries are built as shared
+    # libraries.  Force gtest to link against a shared (DLL) version of the C
+    # run-time library.
+    set(gtest_force_shared_crt ON CACHE BOOL "Use shared (DLL) run-time library even when Google Test is built as static lib." FORCE)
+  endif()
   FetchContent_MakeAvailable(googletest)
   set(ROCM_DISABLE_CHECKS FALSE)
 
