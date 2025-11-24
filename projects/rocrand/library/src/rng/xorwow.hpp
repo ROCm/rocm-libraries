@@ -394,8 +394,7 @@ public:
         const bool possible_miss_align = head_size > 0 || tail_size > 0;
 
         const auto use_missaligned_variant
-            = cpp_utils::constexpr_value_variant<bool, false, true>::create(
-                possible_miss_align);
+            = cpp_utils::constexpr_value_variant<bool, false, true>::create(possible_miss_align);
 
         status = std::visit(
             [&](auto possibly_miss_aligned)

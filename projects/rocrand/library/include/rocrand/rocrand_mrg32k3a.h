@@ -143,7 +143,7 @@ public:
                                                      const unsigned long long offset)
     {
     #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
-        m_state.boxmuller_float = ROCRAND_NAN_FLOAT;
+        m_state.boxmuller_float  = ROCRAND_NAN_FLOAT;
         m_state.boxmuller_double = ROCRAND_NAN_DOUBLE;
     #endif
         this->discard_subsequence_impl(subsequence);

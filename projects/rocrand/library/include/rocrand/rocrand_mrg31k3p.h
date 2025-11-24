@@ -60,8 +60,8 @@ public:
         // (with mean = 0, and stddev = 1). Often user wants only one
         // normally distributed number, to save performance and random
         // numbers the 2nd value is saved for future requests.
-        double       boxmuller_double; // normally distributed double
-        float        boxmuller_float; // normally distributed float
+        double boxmuller_double; // normally distributed double
+        float  boxmuller_float; // normally distributed float
 #endif
         unsigned int x1[3];
         unsigned int x2[3];

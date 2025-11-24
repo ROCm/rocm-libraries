@@ -144,8 +144,9 @@ struct engine_boxmuller_helper
 
     static __forceinline__ __device__ __host__ float get_float(Engine* engine)
     {
+        const float ret                 = engine->m_state.boxmuller_float;
         engine->m_state.boxmuller_float = ROCRAND_NAN_FLOAT;
-        return engine->m_state.boxmuller_float;
+        return ret;
     }
 
     static __forceinline__ __device__ __host__ void save_float(Engine* engine, float f)
@@ -158,10 +159,12 @@ struct engine_boxmuller_helper
         return engine->m_state.boxmuller_double != ROCRAND_NAN_DOUBLE;
     }
 
-    static __forceinline__ __device__ __host__ float get_double(Engine* engine)
+    static __forceinline__ __device__ __host__
+    double get_double(Engine* engine)
     {
+        const double ret                 = engine->m_state.boxmuller_double;
         engine->m_state.boxmuller_double = ROCRAND_NAN_DOUBLE;
-        return engine->m_state.boxmuller_double;
+        return ret;
     }
 
     static __forceinline__ __device__ __host__ void save_double(Engine* engine, double d)
