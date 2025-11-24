@@ -225,19 +225,6 @@ def run_convolution_dgrad():
         print(f"  dx mean: {np.mean(dx_result):.6f}")
         print(f"  dx std: {np.std(dx_result):.6f}")
     
-    # Explanation of backward data operation
-    print("\n" + "="*50)
-    print("Operation Explanation")
-    print("="*50)
-    print("Convolution backward data (dgrad) computes:")
-    print("  dx = conv_transpose(dy, weight)")
-    print("Where:")
-    print("  - dy is the gradient w.r.t. the output")
-    print("  - weight is the convolution filter")
-    print("  - dx is the computed gradient w.r.t. the input")
-    print("\nThis operation is used during backpropagation to compute")
-    print("gradients that flow back to earlier layers in a neural network.")
-    
     print("\n" + "="*70)
     print("SUCCESS: Convolution backward data (dgrad) completed!")
     print("="*70)

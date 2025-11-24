@@ -225,21 +225,6 @@ def run_convolution_wgrad():
         print(f"  dw mean: {np.mean(dw_result):.6f}")
         print(f"  dw std: {np.std(dw_result):.6f}")
     
-    # Explanation of backward weights operation
-    print("\n" + "="*50)
-    print("Operation Explanation")
-    print("="*50)
-    print("Convolution backward weights (wgrad) computes:")
-    print("  dw = conv(x^T, dy)")
-    print("Where:")
-    print("  - x is the input from the forward pass")
-    print("  - dy is the gradient w.r.t. the output")
-    print("  - dw is the computed gradient w.r.t. the weights")
-    print("\nThis operation is used during backpropagation to update")
-    print("the convolution filter weights during training.")
-    print("\nThe gradient is accumulated over the batch dimension,")
-    print("which is why batch size affects the magnitude of gradients.")
-    
     print("\n" + "="*70)
     print("SUCCESS: Convolution backward weights (wgrad) completed!")
     print("="*70)

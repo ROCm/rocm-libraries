@@ -220,18 +220,6 @@ def run_convolution_fprop():
         print(f"  Output mean: {np.mean(y_result):.6f}")
         print(f"  Output std: {np.std(y_result):.6f}")
     
-    # Manual verification of convolution for a single output element (simplified check)
-    print("\n" + "="*50)
-    print("Simplified Verification (center of first filter on first channel)")
-    print("="*50)
-    
-    # For a 3x3 filter with padding=1, stride=1, the output[0,0,1,1] would involve
-    # the 3x3 region of input[0,0:c,0:3,0:3] convolved with weight[0,:,:,:]
-    if outH > 1 and outW > 1:
-        # This is a simplified check - full convolution would involve all channels
-        print("Note: Full convolution involves summing over all input channels")
-        print("This is a simplified demonstration of the operation")
-    
     print("\n" + "="*70)
     print("SUCCESS: Convolution forward propagation completed!")
     print("="*70)
