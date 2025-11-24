@@ -2,9 +2,19 @@
 # Change Log for MIOpen
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
-## (Unreleased) MIOpen 3.5.1 for ROCm 7.2.0
+## MIOpen 3.5.1 for ROCm 7.2.0
+### Changed
+* Ported several OCL kernels to HIP
+
 ### Optimized
 * [Conv] Improve Composable Kernel (CK) kernel selection during tuning.
+* Added 3D heuristics for gfx950
+
+### Resolved issues
+* Addressed an issue in the stride adjustment logic for ASM (MISA) kernels when the output dimension is one
+* Fixed an issue with the CK bwd solver applicability checks when deterministic is set
+* [BatchNorm] Fixed issue where batchnorm tuning would give incorrect results
+* Fixed issue where generic search was not providing sufficient warm-up for some kernels
 
 ## MIOpen 3.5.1 for ROCm 7.1.0
 ### Added
