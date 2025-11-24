@@ -607,7 +607,7 @@ static KernelInfo GetSubSampleKernelInfo(const ProblemDescription& problem)
     kernel.g_wk.push_back(gbl_wk1);
     kernel.g_wk.push_back(gbl_wk2);
 
-    kernel.kernel_file  = "MIOpenUtilKernels3.cpp";
+    kernel.kernel_file  = "MIOpenSubSample.cpp";
     kernel.kernel_name  = "SubSample";
     kernel.comp_options = subsample_kernel_build_params.GenerateFor(kbp::HIP{});
     return kernel;

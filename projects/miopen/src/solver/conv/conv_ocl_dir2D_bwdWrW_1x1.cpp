@@ -419,7 +419,7 @@ ConvSolution ConvOclBwdWrW1x1::GetSolution(const ExecutionContext& ctx,
             ss_kernel_info.g_wk.push_back(gbl_wk1);
             ss_kernel_info.g_wk.push_back(gbl_wk2);
 
-            ss_kernel_info.kernel_file  = "MIOpenUtilKernels3.cpp";
+            ss_kernel_info.kernel_file  = "MIOpenSubSample.cpp";
             ss_kernel_info.kernel_name  = "SubSample";
             ss_kernel_info.comp_options = subsample_kernel_build_params.GenerateFor(kbp::HIP{});
         }

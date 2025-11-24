@@ -655,7 +655,7 @@ KernelInfo GetSampleKernelInfo(const ProblemDescription& problem)
                                                                : 1;
     const int local_size_x = 256;
 
-    const auto subsample_kernel_build_params = KernelBuildParameters{
+    auto sampling_kernel_build_params = KernelBuildParameters{
         {"LOCAL_SIZE_X", local_size_x},
         {"LOCAL_SIZE_Y", int(1)},
         {"FILTER0_STRIDE0", problem.GetKernelStrideW()},
@@ -682,14 +682,18 @@ KernelInfo GetSampleKernelInfo(const ProblemDescription& problem)
     ss_us_kernel.g_wk.push_back(gbl_wk1);
     ss_us_kernel.g_wk.push_back(gbl_wk2);
 
-    ss_us_kernel.kernel_file = "MIOpenUtilKernels3.cpp";
-
     if(UseSubsample(problem))
+    {
         ss_us_kernel.kernel_name = "SubSample";
+        ss_us_kernel.kernel_file = "MIOpenSubSample.cpp";
+    }
     else
+    {
         ss_us_kernel.kernel_name = "UpSample";
+        ss_us_kernel.kernel_file = "MIOpenUpSample.cpp";
+    }
 
-    ss_us_kernel.comp_options = subsample_kernel_build_params.GenerateFor(kbp::HIP{});
+    ss_us_kernel.comp_options = sampling_kernel_build_params.GenerateFor(kbp::HIP{});
 
     return ss_us_kernel;
 }
