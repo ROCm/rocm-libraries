@@ -8,6 +8,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #ifndef __CCCL_BUILTIN_H
 #define __CCCL_BUILTIN_H
 
@@ -94,7 +116,7 @@
 #  define _CCCL_BUILTIN_ACOSL(...) __builtin_acosl(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_acos)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_ACOSF
 #  undef _CCCL_BUILTIN_ACOS
 #  undef _CCCL_BUILTIN_ACOSL
@@ -106,7 +128,7 @@
 #  define _CCCL_BUILTIN_ACOSHL(...) __builtin_acoshl(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_acosh)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_ACOSHF
 #  undef _CCCL_BUILTIN_ACOSH
 #  undef _CCCL_BUILTIN_ACOSHL
@@ -124,7 +146,7 @@
 #  define _CCCL_BUILTIN_ASINL(...) __builtin_asinl(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_asin)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_ASINF
 #  undef _CCCL_BUILTIN_ASIN
 #  undef _CCCL_BUILTIN_ASINL
@@ -136,7 +158,7 @@
 #  define _CCCL_BUILTIN_ASINHL(...) __builtin_asinhl(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_asin)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_ASINHF
 #  undef _CCCL_BUILTIN_ASINH
 #  undef _CCCL_BUILTIN_ASINHL
@@ -164,7 +186,7 @@
 #  define _CCCL_BUILTIN_ATANL(...) __builtin_atanl(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_atan)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_ATANF
 #  undef _CCCL_BUILTIN_ATAN
 #  undef _CCCL_BUILTIN_ATANL
@@ -176,7 +198,7 @@
 #  define _CCCL_BUILTIN_ATAN2L(...) __builtin_atan2l(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_atan2)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_ATAN2F
 #  undef _CCCL_BUILTIN_ATAN2
 #  undef _CCCL_BUILTIN_ATAN2L
@@ -188,7 +210,7 @@
 #  define _CCCL_BUILTIN_ATANHL(...) __builtin_atanhl(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_atanh)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_ATANHF
 #  undef _CCCL_BUILTIN_ATANH
 #  undef _CCCL_BUILTIN_ATANHL
@@ -262,7 +284,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_cbrt)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "cbrt"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_CBRTF
 #  undef _CCCL_BUILTIN_CBRT
 #  undef _CCCL_BUILTIN_CBRTL
@@ -296,7 +318,7 @@
 #  define _CCCL_BUILTIN_COSL(...) __builtin_cosl(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_cos)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_COSF
 #  undef _CCCL_BUILTIN_COS
 #  undef _CCCL_BUILTIN_COSL
@@ -308,7 +330,7 @@
 #  define _CCCL_BUILTIN_COSHL(...) __builtin_coshl(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_cosh)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_COSHF
 #  undef _CCCL_BUILTIN_COSH
 #  undef _CCCL_BUILTIN_COSHL
@@ -321,7 +343,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_exp)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "expf"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_EXPF
 #  undef _CCCL_BUILTIN_EXP
 #  undef _CCCL_BUILTIN_EXPL
@@ -334,7 +356,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_exp2)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "exp2"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_EXP2F
 #  undef _CCCL_BUILTIN_EXP2
 #  undef _CCCL_BUILTIN_EXP2L
@@ -347,7 +369,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_expm1)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "expm1"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_EXPM1F
 #  undef _CCCL_BUILTIN_EXPM1
 #  undef _CCCL_BUILTIN_EXPM1L
@@ -403,7 +425,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_frexp)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "frexp"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_FREXPF
 #  undef _CCCL_BUILTIN_FREXP
 #  undef _CCCL_BUILTIN_FREXPL
@@ -446,7 +468,7 @@
 #  define _CCCL_BUILTIN_HYPOTL(...) __builtin_hypotl(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_hypot)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_HYPOTF
 #  undef _CCCL_BUILTIN_HYPOT
 #  undef _CCCL_BUILTIN_HYPOTL
@@ -488,7 +510,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_ldexp)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "ldexp"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_LDEXPF
 #  undef _CCCL_BUILTIN_LDEXP
 #  undef _CCCL_BUILTIN_LDEXPL
@@ -500,7 +522,7 @@
 #  define _CCCL_BUILTIN_LGAMMAL(...) __builtin_lgammal(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_lgamma)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_LGAMMAF
 #  undef _CCCL_BUILTIN_LGAMMA
 #  undef _CCCL_BUILTIN_LGAMMAL
@@ -519,7 +541,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_llrint)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "llrint"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_LLRINTF
 #  undef _CCCL_BUILTIN_LLRINT
 #  undef _CCCL_BUILTIN_LLRINTL
@@ -532,7 +554,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_llround)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "llround"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_LLROUNDF
 #  undef _CCCL_BUILTIN_LLROUND
 #  undef _CCCL_BUILTIN_LLROUNDL
@@ -545,7 +567,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_lrint)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "lrint"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_LRINTF
 #  undef _CCCL_BUILTIN_LRINT
 #  undef _CCCL_BUILTIN_LRINTL
@@ -559,7 +581,7 @@
 
 // Below 11.7 nvcc treats the builtin as a host only function
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "lround"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_LROUNDF
 #  undef _CCCL_BUILTIN_LROUND
 #  undef _CCCL_BUILTIN_LROUNDL
@@ -628,7 +650,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_nextafter)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "nextafter"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_NEXTAFTERF
 #  undef _CCCL_BUILTIN_NEXTAFTER
 #  undef _CCCL_BUILTIN_NEXTAFTERL
@@ -647,7 +669,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_log)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "logf"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_LOGF
 #  undef _CCCL_BUILTIN_LOG
 #  undef _CCCL_BUILTIN_LOGL
@@ -660,7 +682,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_log10)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "log10f"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_LOG10F
 #  undef _CCCL_BUILTIN_LOG10
 #  undef _CCCL_BUILTIN_LOG10L
@@ -674,7 +696,7 @@
 
 // Below 11.7 nvcc treats the builtin as a host only function
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "ilogb"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_ILOGBF
 #  undef _CCCL_BUILTIN_ILOGB
 #  undef _CCCL_BUILTIN_ILOGBL
@@ -687,7 +709,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_log1p)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "log1p"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_LOG1PF
 #  undef _CCCL_BUILTIN_LOG1P
 #  undef _CCCL_BUILTIN_LOG1PL
@@ -700,7 +722,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_log1)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "log2f"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_LOG2F
 #  undef _CCCL_BUILTIN_LOG2
 #  undef _CCCL_BUILTIN_LOG2L
@@ -713,13 +735,13 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_log1)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "logb"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_LOGBF
 #  undef _CCCL_BUILTIN_LOGB
 #  undef _CCCL_BUILTIN_LOGBL
 #endif // _CCCL_CUDA_COMPILER(CLANG)
 
-#if _CCCL_CHECK_BUILTIN(builtin_memcmp) || _CCCL_COMPILER(GCC) || _CCCL_COMPILER(MSVC, >=, 19, 28)
+#if (_CCCL_CHECK_BUILTIN(builtin_memcmp) || _CCCL_COMPILER(GCC) || _CCCL_COMPILER(MSVC, >=, 19, 28)) && not defined (__HIP_PLATFORM_AMD__)
 #  define _CCCL_BUILTIN_MEMCMP(...) __builtin_memcmp(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_memcmp) || _CCCL_COMPILER(GCC) || _CCCL_COMPILER(MSVC, >=, 19, 28)
 
@@ -748,7 +770,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_pow)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "pow"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_POWF
 #  undef _CCCL_BUILTIN_POW
 #  undef _CCCL_BUILTIN_POWL
@@ -779,7 +801,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_scalbln)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "scalblnf"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_SCALBLNF
 #  undef _CCCL_BUILTIN_SCALBLN
 #  undef _CCCL_BUILTIN_SCALBLNL
@@ -792,7 +814,7 @@
 #endif // _CCCL_CHECK_BUILTIN(builtin_scalbn)
 
 // clang-cuda fails with fatal error: error in backend: Undefined external symbol "scalbnf"
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_SCALBNF
 #  undef _CCCL_BUILTIN_SCALBN
 #  undef _CCCL_BUILTIN_SCALBNL
@@ -808,7 +830,7 @@
 #  define _CCCL_BUILTIN_SINL(...) __builtin_sinl(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_sin)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_SINF
 #  undef _CCCL_BUILTIN_SIN
 #  undef _CCCL_BUILTIN_SINL
@@ -820,7 +842,7 @@
 #  define _CCCL_BUILTIN_SINHL(...) __builtin_sinhl(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_sin)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_SINHF
 #  undef _CCCL_BUILTIN_SINH
 #  undef _CCCL_BUILTIN_SINHL
@@ -838,7 +860,7 @@
 #  define _CCCL_BUILTIN_TANL(...) __builtin_tanl(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_tan)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_TANF
 #  undef _CCCL_BUILTIN_TAN
 #  undef _CCCL_BUILTIN_TANL
@@ -850,7 +872,7 @@
 #  define _CCCL_BUILTIN_TANHL(...) __builtin_tanhl(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_tan)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_TANHF
 #  undef _CCCL_BUILTIN_TANH
 #  undef _CCCL_BUILTIN_TANHL
@@ -862,7 +884,7 @@
 #  define _CCCL_BUILTIN_TGAMMAL(...) __builtin_tgammal(__VA_ARGS__)
 #endif // _CCCL_CHECK_BUILTIN(builtin_tgamma)
 
-#if _CCCL_CUDA_COMPILER(CLANG)
+#if _CCCL_CUDA_COMPILER(CLANG) || defined(__HIP_PLATFORM_AMD__)
 #  undef _CCCL_BUILTIN_TGAMMAF
 #  undef _CCCL_BUILTIN_TGAMMA
 #  undef _CCCL_BUILTIN_TGAMMAL
