@@ -201,7 +201,7 @@ std::tuple<size_t, size_t> select_workgroup_mapping(const problem_t& problem,
 
   // Default is the closest we can get to a square
   size_t max_CU_XCD = hardware.N_CU / hardware.NUM_XCD;
-  size_t defaultWGM = ceil(std::sqrt(max_CU_XCD));
+  int defaultWGM = static_cast<int>(ceil(std::sqrt(max_CU_XCD)));
 
   // Number of output MTs per split and batch
   size_t numMT_M = math::safe_ceil_div(M, MT_M);
@@ -228,9 +228,9 @@ std::tuple<size_t, size_t> select_workgroup_mapping(const problem_t& problem,
   // WGMXCC Prediction
   // -------------------
   // Default WGMXCC -- always number of XCD
-  auto defaultWGMXCC = hardware.NUM_XCD;
+  int defaultWGMXCC = static_cast<int>(hardware.NUM_XCD);
   bool isWGMXCCset   = false;
-  size_t out_wgmxcc  = defaultWGMXCC;
+  int out_wgmxcc  = static_cast<int>(defaultWGMXCC);
 
   // Batched GEMMs
   if (batch > 1 && !isWGMXCCset) {
@@ -273,7 +273,7 @@ std::tuple<size_t, size_t> select_workgroup_mapping(const problem_t& problem,
   // -------------------
   // Default WGM
   bool isWGMset  = false;
-  size_t out_wgm = defaultWGM;
+  int out_wgm = defaultWGM;
 
   // shortcut:
   // 1. if we have decided to not remap xcc, there is no reason to use wgm
