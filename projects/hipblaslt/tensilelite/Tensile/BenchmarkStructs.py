@@ -188,7 +188,7 @@ class BenchmarkProcess:
         for param in configParams.items():
             checkParametersAreValid(param, validParameters)
 
-        checkStaggerUStride(param)
+        checkStaggerUStride(configParams)
 
         # TODO other checks on groups (same params for each entry? no dups between groups?)
         for list in self.paramGroups:
