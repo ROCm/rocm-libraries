@@ -46,7 +46,6 @@
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
 #  include <thrust/iterator/iterator_traits.h>
-#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
@@ -383,7 +382,7 @@ ValOutputIt THRUST_HOST_DEVICE inclusive_scan_by_key(
       return thrust::hip_rocprim::__scan_by_key::inclusive_scan_by_key(
         policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static ValOutputIt
     seq(execution_policy<Derived>& policy,
         KeyInputIt key_first,
@@ -398,10 +397,11 @@ ValOutputIt THRUST_HOST_DEVICE inclusive_scan_by_key(
     }
 #  endif
   };
-
-  THRUST_CDP_DISPATCH(
-    (return workaround::par(policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);),
-    (return workaround::seq(policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);
+#  else
+  return workaround::seq(policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);
+#  endif
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt, class BinaryPred>
@@ -461,7 +461,7 @@ ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
       return thrust::hip_rocprim::__scan_by_key::exclusive_scan_by_key(
         policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static ValOutputIt
     seq(execution_policy<Derived>& policy,
         KeyInputIt key_first,
@@ -478,9 +478,11 @@ ValOutputIt THRUST_HOST_DEVICE exclusive_scan_by_key(
 #  endif
   };
 
-  THRUST_CDP_DISPATCH(
-    (return workaround::par(policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);),
-    (return workaround::seq(policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
+#  else
+  return workaround::seq(policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
+#  endif
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt, class Init, class BinaryPred>

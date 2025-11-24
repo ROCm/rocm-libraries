@@ -48,7 +48,6 @@
 #  include <thrust/extrema.h>
 #  include <thrust/sequence.h>
 #  include <thrust/sort.h>
-#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
@@ -373,16 +372,18 @@ void THRUST_HOST_DEVICE stable_sort(execution_policy<Derived>& policy, ItemsIt f
       __smart_sort::smart_sort<thrust::detail::false_type, thrust::detail::false_type>(
         policy, first, last, null_, compare_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static void seq(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, CompareOp compare_op)
     {
       thrust::stable_sort(cvt_to_seq(derived_cast(policy)), first, last, compare_op);
     }
 #  endif
   };
-
-  THRUST_CDP_DISPATCH((workaround::par(policy, first, last, compare_op);),
-                      (workaround::seq(policy, first, last, compare_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  workaround::par(policy, first, last, compare_op);
+#  else
+  workaround::seq(policy, first, last, compare_op);
+#  endif
 }
 
 THRUST_EXEC_CHECK_DISABLE
@@ -406,7 +407,7 @@ void THRUST_HOST_DEVICE stable_sort_by_key(
       __smart_sort::smart_sort<thrust::detail::true_type, thrust::detail::false_type>(
         policy, keys_first, keys_last, values, compare_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static void
     seq(execution_policy<Derived>& policy, KeysIt keys_first, KeysIt keys_last, ValuesIt values, CompareOp compare_op)
     {
@@ -415,8 +416,11 @@ void THRUST_HOST_DEVICE stable_sort_by_key(
 #  endif
   };
 
-  THRUST_CDP_DISPATCH((workaround::par(policy, keys_first, keys_last, values, compare_op);),
-                      (workaround::seq(policy, keys_first, keys_last, values, compare_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  workaround::par(policy, keys_first, keys_last, values, compare_op);
+#  else
+  workaround::seq(policy, keys_first, keys_last, values, compare_op);
+#  endif
 }
 
 THRUST_EXEC_CHECK_DISABLE

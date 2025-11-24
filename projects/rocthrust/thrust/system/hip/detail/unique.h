@@ -46,7 +46,6 @@
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
-#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/get_value.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
@@ -172,7 +171,7 @@ unique_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, Outp
     {
       return result = __unique::unique(policy, first, last, result, binary_pred);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, BinaryPred binary_pred)
     {
@@ -180,9 +179,11 @@ unique_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, Outp
     }
 #  endif
   };
-
-  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, result, binary_pred);),
-                      (return workaround::seq(policy, first, last, result, binary_pred);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first, last, result, binary_pred);
+#  else
+  return workaround::seq(policy, first, last, result, binary_pred);
+#  endif
 }
 
 template <class Derived, class InputIt, class OutputIt>
@@ -205,7 +206,7 @@ unique(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last, Binar
     {
       return hip_rocprim::unique_copy(policy, first, last, first, binary_pred);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static ForwardIt
     seq(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last, BinaryPred binary_pred)
     {
@@ -213,9 +214,11 @@ unique(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last, Binar
     }
 #  endif
   };
-
-  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, binary_pred);),
-                      (return workaround::seq(policy, first, last, binary_pred);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first, last, binary_pred);
+#  else
+  return workaround::seq(policy, first, last, binary_pred);
+#  endif
 }
 
 template <class Derived, class ForwardIt>

@@ -46,7 +46,6 @@
 #  include <thrust/detail/type_traits.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/iterator_traits.h>
-#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/dispatch.h>
 
 #  include <cstdint>
@@ -293,7 +292,7 @@ THRUST_HOST_DEVICE OutputIt inclusive_scan_n(
     {
       return result = __scan::inclusive_scan(policy, first, result, num_items, init, scan_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, T init, ScanOp scan_op)
     {
@@ -302,9 +301,11 @@ THRUST_HOST_DEVICE OutputIt inclusive_scan_n(
     }
 #  endif
   };
-
-  THRUST_CDP_DISPATCH((return workaround::par(policy, first, num_items, result, init, scan_op);),
-                      (return workaround::seq(policy, first, num_items, result, init, scan_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first, num_items, result, init, scan_op);
+#  else
+  return workaround::seq(policy, first, num_items, result, init, scan_op);
+#  endif
 }
 
 template <typename Derived, typename InputIt, typename Size, typename OutputIt, typename ScanOp>
@@ -319,7 +320,7 @@ THRUST_HOST_DEVICE OutputIt inclusive_scan_n(
     {
       return result = __scan::inclusive_scan(policy, first, result, num_items, scan_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, ScanOp scan_op)
     {
@@ -328,9 +329,11 @@ THRUST_HOST_DEVICE OutputIt inclusive_scan_n(
     }
 #  endif
   };
-
-  THRUST_CDP_DISPATCH((return workaround::par(policy, first, num_items, result, scan_op);),
-                      (return workaround::seq(policy, first, num_items, result, scan_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first, num_items, result, scan_op);
+#  else
+  return workaround::seq(policy, first, num_items, result, scan_op);
+#  endif
 }
 
 template <typename Derived, typename InputIt, typename OutputIt, typename ScanOp>
@@ -381,7 +384,7 @@ THRUST_HOST_DEVICE OutputIt exclusive_scan_n(
     {
       return result = __scan::exclusive_scan(policy, first, result, num_items, init, scan_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, T init, ScanOp scan_op)
     {
@@ -390,9 +393,11 @@ THRUST_HOST_DEVICE OutputIt exclusive_scan_n(
     }
 #  endif
   };
-
-  THRUST_CDP_DISPATCH((return workaround::par(policy, first, num_items, result, init, scan_op);),
-                      (return workaround::seq(policy, first, num_items, result, init, scan_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first, num_items, result, init, scan_op);
+#  else
+  return workaround::seq(policy, first, num_items, result, init, scan_op);
+#  endif
 }
 
 template <typename Derived, typename InputIt, typename OutputIt, typename T, typename ScanOp>

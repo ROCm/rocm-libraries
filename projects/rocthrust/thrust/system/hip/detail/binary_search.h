@@ -33,7 +33,6 @@
 #  include <thrust/binary_search.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
-#  include <thrust/system/hip/detail/cdp_dispatch.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/execution_policy.h>
 
@@ -268,7 +267,7 @@ OutputIt THRUST_HIP_FUNCTION lower_bound(
     {
       return __binary_search::lower_bound(policy, first, last, values_first, values_last, result, compare_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy,
         HaystackIt first,
@@ -284,8 +283,11 @@ OutputIt THRUST_HIP_FUNCTION lower_bound(
 #  endif
   };
 
-  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, values_first, values_last, result, compare_op);),
-                      (return workaround::seq(policy, first, last, values_first, values_last, result, compare_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first, last, values_first, values_last, result, compare_op);
+#  else
+  return workaround::seq(policy, first, last, values_first, values_last, result, compare_op);
+#  endif
 }
 
 template <class Derived, class HaystackIt, class NeedlesIt, class OutputIt>
@@ -324,7 +326,7 @@ OutputIt THRUST_HIP_FUNCTION upper_bound(
     {
       return __binary_search::upper_bound(policy, first, last, values_first, values_last, result, compare_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy,
         HaystackIt first,
@@ -340,8 +342,11 @@ OutputIt THRUST_HIP_FUNCTION upper_bound(
 # endif
   };
 
-  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, values_first, values_last, result, compare_op);),
-                      (return workaround::seq(policy, first, last, values_first, values_last, result, compare_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first, last, values_first, values_last, result, compare_op);
+#  else
+  return workaround::seq(policy, first, last, values_first, values_last, result, compare_op);
+#  endif
 }
 
 template <class Derived, class HaystackIt, class NeedlesIt, class OutputIt>
@@ -380,7 +385,7 @@ OutputIt THRUST_HIP_FUNCTION binary_search(
     {
       return __binary_search::binary_search(policy, first, last, values_first, values_last, result, compare_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy,
         HaystackIt first,
@@ -396,8 +401,11 @@ OutputIt THRUST_HIP_FUNCTION binary_search(
 #  endif
   };
 
-  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, values_first, values_last, result, compare_op);),
-                      (return workaround::seq(policy, first, last, values_first, values_last, result, compare_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first, last, values_first, values_last, result, compare_op);
+#  else
+  return workaround::seq(policy, first, last, values_first, values_last, result, compare_op);
+#  endif
 }
 
 template <class Derived, class HaystackIt, class NeedlesIt, class OutputIt>
@@ -462,7 +470,7 @@ lower_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last
 
       return first + h_result;
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static HaystackIt
     seq(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
     {
@@ -473,8 +481,11 @@ lower_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last
 # endif
   };
 
-  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, value, compare_op);),
-                      (return workaround::seq(policy, first, last, value, compare_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first, last, value, compare_op);
+#  else
+  return workaround::seq(policy, first, last, value, compare_op);
+#  endif
 }
 
 template <typename Derived, typename HaystackIt, typename T, typename CompareOp>
@@ -521,7 +532,7 @@ upper_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last
 
       return first + h_result;
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static HaystackIt
     seq(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
     {
@@ -532,8 +543,11 @@ upper_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last
 # endif
   };
 
-  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, value, compare_op);),
-                      (return workaround::seq(policy, first, last, value, compare_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first, last, value, compare_op);
+#  else
+  return workaround::seq(policy, first, last, value, compare_op);
+#  endif
 }
 
 template <typename Derived, typename HaystackIt, typename T, typename CompareOp>
@@ -578,7 +592,7 @@ THRUST_HIP_FUNCTION bool binary_search(
 
       return h_result != 0;
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static bool
     seq(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
     {
@@ -589,8 +603,11 @@ THRUST_HIP_FUNCTION bool binary_search(
 #  endif
   };
 
-  THRUST_CDP_DISPATCH((return workaround::par(policy, first, last, value, compare_op);),
-                      (return workaround::seq(policy, first, last, value, compare_op);));
+#  if !defined(__HIP_DEVICE_COMPILE__)
+  return workaround::par(policy, first, last, value, compare_op);
+#  else
+  return workaround::seq(policy, first, last, value, compare_op);
+#  endif
 }
 
 } // namespace hip_rocprim
