@@ -17,7 +17,7 @@ The following improvements represent foundational changes spanning all hipDNN co
 - **Persistence**: Implement graph save and load functionality
 - **Benchmarking & Validation**: Develop Python-based tool suite for graph execution, performance measurement, and validation
 
-### Future Goals
+### Longer-Term Priorities
 
 - **Execution Plan Persistence**: Implement save and load functionality for execution plans
 - **API Extensions**: Add support for behavioral notes and tunable knobs
@@ -34,7 +34,7 @@ The Frontend provides the user-facing C++ API, focusing on usability and feature
 - **Python API**: Add Python frontend for broader accessibility
 - **Engine Selection**: Enhance documentation and headers for available engines and preferred source selection
 
-### Future Goals
+### Longer-Term Priorities
 
 - **Extended Operations**: Support additional operation types
 - **Dynamic Loading**: Enable runtime loading of hipDNN backend libraries
@@ -43,7 +43,7 @@ The Frontend provides the user-facing C++ API, focusing on usability and feature
 
 The Backend manages plugins and orchestrates graph execution. See [Design.md](./Design.md) for detailed architecture information.
 
-### Future Goals
+### Longer-Term Priorities
 
 - **C API Support**: Add graph building C API for language interoperability
 - **Custom Schema Support**: Allow users to extend graphs without recompiling hipDNN backend
@@ -78,22 +78,22 @@ Plugins extend hipDNN's computational capabilities. See [Design.md](./Design.md#
 
 #### Near-Term Priorities
 
-- **Batchnorm inference**: Batchnorm inference & fusion support
-- **Convolution**: Forward convolution & fusion operation support
+- **Batchnorm Inference**: Implement Batchnorm inference with fusion support
+- **Convolution**: Implement Forward Convolution with fusion support
 
 #### Mid-Term Priorities
 
-- **Batchnorm training**: Batchnorm training & fusion support
-- **Convolution**: Backward convolutions (data & weight) & fusion support
-- **GEMM**: GEMM & Fusions support
+- **Batchnorm Training**: Implement Batchnorm training with fusion support
+- **Convolution**: Implement Backward Convolution (Data & Weight) with fusion support
+- **GEMM**: Implement GEMM operations with fusion support
 
-#### Long-Term Priorities
+#### Longer-Term Priorities
 
-- **Attention**: Attention & fusion support
+- **Attention**: Implement Attention operations with fusion support
 
 ### General Plugin Ecosystem
 
-#### Future Goals
+#### Longer-Term Priorities
 
 - **Extended Plugin Support**: Develop additional plugins to broaden graph support
 
@@ -104,7 +104,7 @@ Plugins extend hipDNN's computational capabilities. See [Design.md](./Design.md#
 - **Sample Validation**: Integrate [samples](../samples/README.md) into CI to validate installation and ensure functionality
 - **Reference Plugin**: Create a reference plugin using the Test SDK for validation against other plugins
 
-### Future Goals
+### Longer-Term Priorities
 
 - **ASAN Integration**: Add AddressSanitizer as an automated CI step
 
