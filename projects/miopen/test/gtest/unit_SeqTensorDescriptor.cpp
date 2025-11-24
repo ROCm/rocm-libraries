@@ -69,25 +69,25 @@ struct TestCase
     size_t actual_count_of_sequence;
 };
 
+auto GetTestCases()
+{
+    return std::vector{
+        // clang-format off
+        TestCase{{miopenHalf, {2, 2, 2}}, 2, 4, 2},
+        TestCase{{miopenHalf, {2, 2, 2}, true}, 2, 4, 2},
+        TestCase{{miopenHalf, {2, 2, 2, 2}}, 2, 4, 2},
+        TestCase{{miopenHalf, {2, 2, 2, 2}, true}, 2, 4, 2},
+
+        TestCase{{miopenHalf, {2, 8, 2, 2}}, 8, 16, 2},
+        TestCase{{miopenHalf, {2, 8, 2, 2}, true}, 8, 16, 2},
+        TestCase{{miopenHalf, {2, 16, 8, 2, 2}}, 16, 32, 2},
+        TestCase{{miopenHalf, {2, 16, 8, 2, 2}, true}, 16, 32, 2},
+        // clang-format on
+    };
+}
+
 struct TestTensorSequence : testing::TestWithParam<TestCase>
 {
-    static auto GetTestCases()
-    {
-        return std::vector{
-            // clang-format off
-            TestCase{{miopenHalf, {2, 2, 2}}, 2, 4, 2},
-            TestCase{{miopenHalf, {2, 2, 2}, true}, 2, 4, 2},
-            TestCase{{miopenHalf, {2, 2, 2, 2}}, 2, 4, 2},
-            TestCase{{miopenHalf, {2, 2, 2, 2}, true}, 2, 4, 2},
-
-            TestCase{{miopenHalf, {2, 8, 2, 2}}, 8, 16, 2},
-            TestCase{{miopenHalf, {2, 8, 2, 2}, true}, 8, 16, 2},
-            TestCase{{miopenHalf, {2, 16, 8, 2, 2}}, 16, 32, 2},
-            TestCase{{miopenHalf, {2, 16, 8, 2, 2}, true}, 16, 32, 2},
-            // clang-format on
-        };
-    }
-
     void RunTest()
     {
         const auto p  = GetParam();
@@ -100,9 +100,9 @@ struct TestTensorSequence : testing::TestWithParam<TestCase>
 
 using CPU_TestTensorSequence_FP16 = TestTensorSequence;
 
-TEST_P(CPU_TestTensorSequence_FP16, SeqTensorDescriptor) { this->RunTest(); };
+TEST_P(CPU_TestTensorSequence_FP16, SeqTensorDescriptor) { RunTest(); };
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          CPU_TestTensorSequence_FP16,
-                         testing::ValuesIn(TestTensorSequence::GetTestCases()));
+                         testing::ValuesIn(GetTestCases()));
 } // anonymous namespace
