@@ -687,9 +687,57 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
 
 def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
-    if isNN(kernel) and useLDSTr and TLDS==1:
+
+    optSchedule = dict()
+    syncCode = []
+
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    if isTN(kernel) and TLDS==1:
+        optSchedule = {
+
+            'SYNC'   : [[-1, 4, 13,13, 38,39, 42,43, 70,70]],
+            'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
+            'GRIncB' : [[9,11,12,13,14,15,16,17,18]],
+
+            'LRA0'   : [[0,2,3,4,5]],  ## -2 is place holder
+
+            'LRB0'   : [[13,15,18,21,24,26,28,30],   ## After LRB0, we can mix LRA0 and GRB
+                        [14,16,19,22,25,27,29,31]],
+            ## GRA should start after LRA0 is done.
+            'GRA'    : [[11,14, 17,17, 20,20, 23,23, 26,27],
+                        [12,15, 18,18, 21,21, 24,24, 27,28]],
+
+            ## GRB should start after LRB0 is done
+            'GRB'    : [[40,40, 43,43, 46,46, 49,49, 59,59, 62,62, 65,65, 67,68],  # m0 inc is part of GRA/GRB
+                        [41,41, 44,44, 47,47, 57,57, 60,60, 63,63, 66,66, 68,69]],
+            'LRA1'   : [[44, 47, 53, 58, 63],
+                        [45, 48, 54, 59, 64]],
+
+            #After GRB is done.
+            'LRB1'   : [[70,71,72,73,75,76,77,78]],
+
+            'LRSA'   : [[33]], # after LRA0 and before LRA1
+            'LRSB'   : [[33]], # after LRB0 and before LRB2
+            'LWSA'   : [[74]], # For A
+            'LWSB'   : [[76]],
+
+            'LCC'    : [[79, 79]],
+        }
+        # note: syncCode needs to be
+        syncCode = [SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="Wait for necessary prior LRA1/LRB1 before starting main loop"),
+                    SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 for the remaining main loop"),
+                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete to start GRA"),
+                    SBarrier(comment=""),
+                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete to start GRB"),
+                    SBarrier(comment=""),
+                    SWaitCnt(dscnt=-1, vlcnt=(13 + 1), vscnt=-1, comment="Wait for GRA to complete to start LRA1"),
+                    SBarrier(comment=""),
+                    SWaitCnt(dscnt=-1, vlcnt=13, vscnt=-1, comment="Wait for GRB to complete to start LRB1"),
+                    SBarrier(comment=""),
+                   ]
+        nglshift = nllshift = 13 # vmcnt shift for ngl and nll
+    elif isNN(kernel) and useLDSTr and TLDS==1:
         kernel["SwapGlobalReadOrder"] = True
-        nglshift = nllshift = 0 # vmcnt shift for ngl and nll
         optSchedule = {
             'SYNC'   : [[-1,
             12, 12, # Wait for B
@@ -727,7 +775,6 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 13
 
     elif isNT(kernel) and useLDSTr and TLDS==0:
-        nglshift = nllshift = 0 # vmcnt shift for ngl and nll
         optSchedule = {
             'SYNC': [[-1,17,17,57,57]],
             'GRA': [[16,17,20,20,24,24,28,28,31,31]],
