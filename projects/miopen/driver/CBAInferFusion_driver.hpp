@@ -248,9 +248,7 @@ private:
     std::vector<Tref> wei_host;
     std::vector<Tref> conv_res_host;
     std::vector<Tref> bn_res_host;
-    std::vector<Tref> bn_res_host_mt;
     std::vector<Tref> out_host;
-    std::vector<Tref> activ_host_mt;
     std::vector<Tgpu> scale;
     std::vector<Tgpu> bias;
     std::vector<Tref> bias_host;
@@ -267,6 +265,8 @@ private:
     miopenFusionOpDescriptor_t biasOp;
     miopenFusionOpDescriptor_t activOp;
     miopenOperatorArgs_t fusionArgs;
+
+    bool use_multithread;
 };
 
 template <typename Tgpu, typename Tref>
@@ -375,6 +375,8 @@ int CBAInferFusionDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
         bias_mode = 1;
     else
         bias_mode = 0;
+
+    use_multithread = (inflags.GetValueInt("mt") != 0);
 
     return miopenStatusSuccess;
 }
@@ -545,6 +547,7 @@ int CBAInferFusionDriver<Tgpu, Tref>::AddCmdLineArgs()
                          "",
                          "Write out the fusion metadata graph for the specified operator",
                          "str");
+    inflags.AddInputFlag("mt", 'U', "0", "Use multithreaded version (Default=0)", "int");
 
     return miopenStatusSuccess;
 }
@@ -820,11 +823,10 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     if(useBatchNorm)
     {
-        scale          = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
-        bias           = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
-        bn_res         = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
-        bn_res_host    = std::vector<Tref>(out_sz, static_cast<Tref>(0));
-        bn_res_host_mt = std::vector<Tref>(out_sz, static_cast<Tref>(0));
+        scale       = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
+        bias        = std::vector<Tgpu>(sb_sz, static_cast<Tgpu>(0));
+        bn_res      = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
+        bn_res_host = std::vector<Tref>(out_sz, static_cast<Tref>(0));
 
         bn_res_dev = std::make_unique<GPUMem>(ctx, out_sz, sizeof(Tgpu));
         scale_dev  = std::make_unique<GPUMem>(ctx, sb_sz, sizeof(Tgpu));
@@ -854,8 +856,6 @@ int CBAInferFusionDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     wei_host      = std::vector<Tref>(wei_sz, static_cast<Tref>(0));
     conv_res_host = std::vector<Tref>(out_sz, static_cast<Tref>(0));
     out_host      = std::vector<Tref>(out_sz, static_cast<Tref>(0));
-    activ_host_mt = std::vector<Tref>(out_sz, static_cast<Tref>(0));
-
     // Data initialization
     for(int i = 0; i < in_sz; i++)
     {
@@ -1152,28 +1152,27 @@ void CBAInferFusionDriver<Tgpu, Tref>::runCPUActivFwdInference()
     double activ_alpha, activ_beta, activ_gamma;
     miopenActivationMode_t activ_mode;
     miopenGetActivationDescriptor(activDesc, &activ_mode, &activ_alpha, &activ_beta, &activ_gamma);
-    miopenActivationFwdHost<Tgpu, Tref>(activ_mode,
-                                        activ_gamma,
-                                        activ_beta,
-                                        activ_alpha,
-                                        out.size(),
-                                        (!useBatchNorm) ? conv_res_host.data() : bn_res_host.data(),
-                                        out_host.data());
-
-    miopenActivationFwdHost_mt<Tgpu, Tref>(activ_mode,
-                                           activ_gamma,
-                                           activ_beta,
-                                           activ_alpha,
-                                           out.size(),
-                                           (!useBatchNorm) ? conv_res_host.data()
-                                                           : bn_res_host.data(),
-                                           activ_host_mt.data());
-
-    if(miopen::rms_range(out_host, activ_host_mt) != static_cast<double>(0))
+    if(use_multithread)
     {
-        std::cout << "Error: Results of single-threaded and multi-threaded activation functions do "
-                     "not match."
-                  << std::endl;
+        miopenActivationFwdHost_mt<Tgpu, Tref>(activ_mode,
+                                               activ_gamma,
+                                               activ_beta,
+                                               activ_alpha,
+                                               out.size(),
+                                               (!useBatchNorm) ? conv_res_host.data()
+                                                               : bn_res_host.data(),
+                                               out_host.data());
+    }
+    else
+    {
+        miopenActivationFwdHost<Tgpu, Tref>(activ_mode,
+                                            activ_gamma,
+                                            activ_beta,
+                                            activ_alpha,
+                                            out.size(),
+                                            (!useBatchNorm) ? conv_res_host.data()
+                                                            : bn_res_host.data(),
+                                            out_host.data());
     }
 
     return;
@@ -1371,74 +1370,76 @@ void CBAInferFusionDriver<Tgpu, Tref>::runCPUBNFwdInference()
     if(bn_mode == miopenBNPerActivation)
     { // 1xCxHxW
         std::cout << "Running CPU per activation BN." << std::endl;
-        miopenBNPerActivFwdInferHost(
-            fusion_mode != miopen_fusion_na ? outputTensor
-                                            : inputTensor, // DLOWELL use output for splice test
-            fusion_mode != miopen_fusion_na
-                ? conv_res_host.data()
-                : in_host.data(), // conv_res_host.data(), //DLOWELL use conv for splice test
-            bn_res_host.data(),
-            scale.data(),
-            bias.data(),
-            epsilon,
-            runningMean.data(),
-            runningVariance.data());
-
-        miopenBNPerActivFwdInferHost_mt(
-            fusion_mode != miopen_fusion_na ? outputTensor
-                                            : inputTensor, // DLOWELL use output for splice test
-            fusion_mode != miopen_fusion_na
-                ? conv_res_host.data()
-                : in_host.data(), // conv_res_host.data(), //DLOWELL use conv for splice test
-            bn_res_host_mt.data(),
-            scale.data(),
-            bias.data(),
-            epsilon,
-            runningMean.data(),
-            runningVariance.data());
+        if(use_multithread)
+        {
+            miopenBNPerActivFwdInferHost_mt(
+                fusion_mode != miopen_fusion_na ? outputTensor
+                                                : inputTensor, // DLOWELL use output for splice test
+                fusion_mode != miopen_fusion_na
+                    ? conv_res_host.data()
+                    : in_host.data(), // conv_res_host.data(), //DLOWELL use conv for splice test
+                bn_res_host.data(),
+                scale.data(),
+                bias.data(),
+                epsilon,
+                runningMean.data(),
+                runningVariance.data());
+        }
+        else
+        {
+            miopenBNPerActivFwdInferHost(
+                fusion_mode != miopen_fusion_na ? outputTensor
+                                                : inputTensor, // DLOWELL use output for splice test
+                fusion_mode != miopen_fusion_na
+                    ? conv_res_host.data()
+                    : in_host.data(), // conv_res_host.data(), //DLOWELL use conv for splice test
+                bn_res_host.data(),
+                scale.data(),
+                bias.data(),
+                epsilon,
+                runningMean.data(),
+                runningVariance.data());
+        }
     }
     else if(bn_mode == miopenBNSpatial)
     { // 1xCx1x1
         std::cout << "Running CPU spatial BN." << std::endl;
-        miopenBNSpatialFwdInferHost(
-            fusion_mode != miopen_fusion_na ? outputTensor
-                                            : inputTensor, // DLOWELL use output for splice test
-            fusion_mode != miopen_fusion_na
-                ? conv_res_host.data()
-                : in_host.data(), // conv_res_host.data(), //DLOWELL use conv for splice test
-            bn_res_host.data(),
-            scale.data(),
-            bias.data(),
-            epsilon,
-            runningMean.data(),
-            runningVariance.data());
-
-        miopenBNSpatialFwdInferHost_mt(
-            fusion_mode != miopen_fusion_na ? outputTensor
-                                            : inputTensor, // DLOWELL use output for splice test
-            fusion_mode != miopen_fusion_na
-                ? conv_res_host.data()
-                : in_host.data(), // conv_res_host.data(), //DLOWELL use conv for splice test
-            bn_res_host_mt.data(),
-            scale.data(),
-            bias.data(),
-            epsilon,
-            runningMean.data(),
-            runningVariance.data());
+        if(use_multithread)
+        {
+            miopenBNSpatialFwdInferHost_mt(
+                fusion_mode != miopen_fusion_na ? outputTensor
+                                                : inputTensor, // DLOWELL use output for splice test
+                fusion_mode != miopen_fusion_na
+                    ? conv_res_host.data()
+                    : in_host.data(), // conv_res_host.data(), //DLOWELL use conv for splice test
+                bn_res_host.data(),
+                scale.data(),
+                bias.data(),
+                epsilon,
+                runningMean.data(),
+                runningVariance.data());
+        }
+        else
+        {
+            miopenBNSpatialFwdInferHost(
+                fusion_mode != miopen_fusion_na ? outputTensor
+                                                : inputTensor, // DLOWELL use output for splice test
+                fusion_mode != miopen_fusion_na
+                    ? conv_res_host.data()
+                    : in_host.data(), // conv_res_host.data(), //DLOWELL use conv for splice test
+                bn_res_host.data(),
+                scale.data(),
+                bias.data(),
+                epsilon,
+                runningMean.data(),
+                runningVariance.data());
+        }
     }
     else
     {
         printf("Something went wrong.\nBad batch normalization mode in host kernel "
                "selection.\nExiting...\n\n");
         exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
-    }
-
-    if(miopen::rms_range(bn_res_host, bn_res_host_mt) != static_cast<double>(0))
-    {
-        std::cout
-            << "Error: Results of single-threaded and multi-threaded BN forward infer functions do "
-               "not match."
-            << std::endl;
     }
 
     // C+N mode so we are done
@@ -1486,19 +1487,20 @@ template <typename Tgpu, typename Tref>
 int CBAInferFusionDriver<Tgpu, Tref>::VerifyForward()
 {
     RunForwardCPU();
-
-    const auto error = miopen::rms_range(out_host, out);
+    const auto error        = miopen::rms_range(out_host, out);
+    std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
 
     const double tolerance = std::numeric_limits<Tgpu>::epsilon() * 80;
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Forward Activation FAILED: " << error << " > " << tolerance << std::endl;
+        std::cout << "Forward Activation FAILED against " << solver_type
+                  << " CPU reference: " << error << " > " << tolerance << std::endl;
         return EC_VerifyFwd;
     }
 
-    std::cout << "Forward Activation Verifies on CPU and GPU (" << error << " < " << tolerance
-              << ')' << std::endl;
+    std::cout << "Forward Activation Verifies OK against " << solver_type << " CPU reference ("
+              << error << " < " << tolerance << ')' << std::endl;
 
     return miopenStatusSuccess;
 }
