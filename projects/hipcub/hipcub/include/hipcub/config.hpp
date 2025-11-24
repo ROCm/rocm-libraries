@@ -35,6 +35,14 @@
 // Version
 #include "hipcub_version.hpp" // IWYU pragma: export
 
+// Manage std implementation
+#include "libcxx.hpp" // IWYU pragma: export
+
+// For _CCCL_IMPLICIT_SYSTEM_HEADER
+#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
+    #include _HIPCUB_LIBCXX_INCLUDE(__cccl_config) // IWYU pragma: export
+#endif
+
 #define HIPCUB_NAMESPACE hipcub
 
 // Inline namespace (e.g. HIPCUB_300400_NS where 300400 is the hipCUB version) is used to
