@@ -136,29 +136,12 @@ The complete execution flow from graph input to results:
 
 ## Supported Operations
 
-### BatchNormalization Operations
+The CPU Reference Implementation supports a comprehensive set of deep learning operations for testing and validation purposes, including:
+- **BatchNormalization**: Forward (training/inference modes) and backward operations
+- **Convolution**: Forward pass, data gradients, and weight gradients  
+- **Pointwise**: Unary and binary element-wise operations (activations, arithmetic)
 
-| Operation | Plan Builder | Signature Key | Description |
-|-----------|-------------|---------------|-------------|
-| BatchNorm Forward Inference | `BatchnormFwdInferencePlanBuilder` | `BatchnormFwdInferenceSignatureKey` | Inference-mode forward pass |
-| BatchNorm Forward Training | `BatchnormTrainPlanBuilder` | `BatchnormTrainSignatureKey` | Training-mode forward pass with statistics |
-| BatchNorm Backward | `BatchnormBwdPlanBuilder` | `BatchnormBwdSignatureKey` | Gradient computation |
-
-### Convolution Operations
-
-| Operation | Plan Builder | Signature Key | Description |
-|-----------|-------------|---------------|-------------|
-| Convolution Forward | `ConvolutionFwdPlanBuilder` | `ConvolutionFwdSignatureKey` | Forward convolution |
-| Convolution Backward Data | `ConvolutionBwdPlanBuilder` | `ConvolutionBwdSignatureKey` | Data gradient computation |
-| Convolution Backward Weights | `ConvolutionWrwPlanBuilder` | `ConvolutionWrwSignatureKey` | Weight gradient computation |
-
-### Pointwise Operations
-
-| Operation | Plan Builder | Signature Key | Description |
-|-----------|-------------|---------------|-------------|
-| Unary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | RELU_FWD, SIGMOID_FWD, TANH_FWD, ABS, NEG |
-| Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, RELU_BWD, SIGMOID_BWD, TANH_BWD |
-| Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | None Supported Yet |
+For a complete list of supported operations, datatypes, and layouts, please refer to the [CPU Reference Implementation Operation Support](./OperationSupport-ReferenceImpl.md) document.
 
 ## Extension Guidelines
 
