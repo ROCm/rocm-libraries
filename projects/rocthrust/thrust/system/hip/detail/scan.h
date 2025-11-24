@@ -292,12 +292,14 @@ THRUST_HOST_DEVICE OutputIt inclusive_scan_n(
     {
       return result = __scan::inclusive_scan(policy, first, result, num_items, init, scan_op);
     }
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, T init, ScanOp scan_op)
     {
       return result = thrust::inclusive_scan(
                cvt_to_seq(derived_cast(policy)), first, first + num_items, result, init, scan_op);
     }
+#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, num_items, result, init, scan_op);
@@ -318,12 +320,14 @@ THRUST_HOST_DEVICE OutputIt inclusive_scan_n(
     {
       return result = __scan::inclusive_scan(policy, first, result, num_items, scan_op);
     }
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, ScanOp scan_op)
     {
       return result =
                thrust::inclusive_scan(cvt_to_seq(derived_cast(policy)), first, first + num_items, result, scan_op);
     }
+#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, num_items, result, scan_op);
@@ -380,15 +384,15 @@ THRUST_HOST_DEVICE OutputIt exclusive_scan_n(
     {
       return result = __scan::exclusive_scan(policy, first, result, num_items, init, scan_op);
     }
-
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, T init, ScanOp scan_op)
     {
       return result = thrust::exclusive_scan(
                cvt_to_seq(derived_cast(policy)), first, first + num_items, result, init, scan_op);
     }
+#  endif
   };
-
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, num_items, result, init, scan_op);
 #  else
