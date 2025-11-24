@@ -379,21 +379,21 @@ __forceinline__ __device__ FpVecType tanh(FpVecType x)
 }
 
 template <typename FpVecType>
-__forceinline__ __device__ FpVecType pow(FpVecType x)
+__forceinline__ __device__ FpVecType pow(FpVecType x, FpVecType y)
 {
     constexpr auto VecSize = mapped_vector_info<FpVecType>::size;
     if constexpr(VecSize == 4)
     {
         FpVecType out;
-        out.x = detail::pow(x.x);
-        out.y = detail::pow(x.y);
-        out.z = detail::pow(x.z);
-        out.w = detail::pow(x.w);
+        out.x = detail::pow(x.x, y.x);
+        out.y = detail::pow(x.y, y.y);
+        out.z = detail::pow(x.z, y.z);
+        out.w = detail::pow(x.w, y.w);
         return out;
     }
     else if constexpr(VecSize == 1)
     {
-        return detail::pow(x);
+        return detail::pow(x, y);
     }
     else
     {
