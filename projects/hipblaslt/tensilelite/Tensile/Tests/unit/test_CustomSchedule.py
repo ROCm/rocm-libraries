@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 
-from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo, validateAscendingOrder
+from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo, verifyAscendingOrder
 from Tensile.Common import IsaVersion
 
 # Helper to create a mock data type
@@ -49,39 +49,6 @@ class TestCustomSchedule:
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert not has_schedule
         assert schedule_info is None
-
-    def test_schedule_validation_non_descending_order(self):
-        """
-        Test of the rule that instructions in each instruction category appear in non-descending order
-        """
-
-        sched = ScheduleInfo(None, None,  {'P' : [[3, 2, 1]]}, None, None, None, None, None)
-        status, message = validateAscendingOrder(sched)
-
-        expected = "Non-descending-order rule violated, schedule key 'P', sequence [3, 2, 1]: value 2 at index 1 is less than 3 at index 0."
-        assert status == False
-        assert message == expected
-
-        sched = ScheduleInfo(None, None,  {'P' : [[1, 1, 2]]}, None, None, None, None, None)
-        status, message = validateAscendingOrder(sched)
-        assert status == True
-
-    def test_schedule_validation_is_known_valid(self):
-        """
-        Test of the flag that expect custom mainloop schedule (CMS) developers can use to override the
-        validation checks.
-        """
-        kernel = create_base_kernel()
-        invalid_schedule = {'P' : [[3, 2, 1]]}
-
-        # No verification message means that the schedule info is considered valid.
-        sched = ScheduleInfo(None, None, invalid_schedule, None, None, None, None, skipValidation = True)
-        status, message = sched.validate({})
-        assert status == True
-
-        # A non-empty verification message means that the schedule info is considered invalid.
-        satus, message = ScheduleInfo(None, None,  invalid_schedule, None, None, None, None, skipValidation = False).validate({})
-        assert status == False
 
 
     def test_schedule_256x256x64_16bit_TN(self):
@@ -212,3 +179,45 @@ class TestCustomSchedule:
         assert schedule_info.numMfma == 96
         assert kernel["SwapGlobalReadOrder"]
 
+
+class TestCustomScheduleValidation:
+    def test_schedule_validation_non_descending_order(self):
+        """
+        Test of the rule that instructions in each category
+        appear in non-descending order
+        """
+
+        sched = ScheduleInfo(
+            None, None, {"P": [[3, 2, 1]]}, None, None, None, None, None
+        )
+        status, message = verifyAscendingOrder(sched)
+
+        expected = "Non-descending-order rule violated, schedule key 'P', sequence [3, 2, 1]: value 2 at index 1 is less than 3 at index 0."
+        assert status == False
+        assert message == expected
+
+        sched = ScheduleInfo(
+            None, None, {"P": [[1, 1, 2]]}, None, None, None, None, None
+        )
+        status, message = verifyAscendingOrder(sched)
+        assert status == True
+
+    def test_schedule_validation_disable(self):
+        """
+        Test of the flag that custom mainloop schedule (CMS) developers can use to override the
+        validation checks.
+        """
+        kernel = create_base_kernel()
+        invalid_schedule = {"P": [[3, 2, 1]]}
+
+        # No verification message means that the schedule info is considered valid.
+        status, message = ScheduleInfo(
+            None, None, invalid_schedule, None, None, None, None, skipValidation=True
+        ).isValid({})
+        assert status == True
+
+        # A non-empty verification message means that the schedule info is considered invalid.
+        status, message = ScheduleInfo(
+            None, None, invalid_schedule, None, None, None, None, skipValidation=False
+        ).isValid({})
+        assert status == False
