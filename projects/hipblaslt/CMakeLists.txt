@@ -561,18 +561,6 @@ if(HIPBLASLT_ENABLE_COVERAGE)
     target_link_libraries(hipblaslt-test PRIVATE origami)
     # Add the internal header path for coverage builds
     set(TENSILELITE_DIR ${PROJECT_SOURCE_DIR}/tensilelite)
-    target_include_directories(hipblaslt-test
-        PUBLIC
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/include>
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite>
-            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
-            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail>
-            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include>
-            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include>
-        PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite"
-    )
     target_include_directories(hipblaslt-clients-common PRIVATE
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include>

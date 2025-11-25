@@ -23,3 +23,17 @@ add_custom_command(
 
 add_custom_target(hipblaslt-test-data DEPENDS ${HIPBLASLT_TEST_DATA})
 add_dependencies(hipblaslt-test hipblaslt-test-data)
+if (HIPBLASTLT_ENABLE_COVERAGE)
+    target_include_directories(hipblaslt-test
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../common/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite>
+            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
+            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail>
+            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include>
+            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include>
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../tensilelite"
+    )
+endif()
