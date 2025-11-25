@@ -56,7 +56,6 @@ struct ConvWrwSolverTest
         const miopen::ExecutionContext ctx = [&] {
             auto tmp = miopen::ExecutionContext{&handle};
             problem.SetupFloats(tmp);
-            problem.SetupComputeType(tmp);
             return tmp;
         }();
 
