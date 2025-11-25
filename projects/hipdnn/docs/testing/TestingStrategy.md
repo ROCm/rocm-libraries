@@ -118,6 +118,9 @@ Integration tests validate end-to-end functionality across components.
   - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
   - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
 
+### Graph Validation
+We use reference implementations via the CPU Graph Executor to validate correctness of graph execution in integration tests. See the [CPU Graph Executor Design Document](./CpuGraphExecutorDesign.md) for more details.
+
 ---
 
 ## 3. General Testing Requirements
