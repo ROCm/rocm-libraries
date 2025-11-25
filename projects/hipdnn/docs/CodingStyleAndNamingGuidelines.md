@@ -270,6 +270,9 @@ To run the validation manually:
 ninja validate_test_names
 ```
 
+> [!NOTE]
+> This validation also runs automatically as part of the `ninja check` target.
+
 This tool:
 - Parses all test executables to extract test names
 - Validates ordering of keywords (Integration, Gpu, Feature, Layout, Datatype)
