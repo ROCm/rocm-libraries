@@ -43,8 +43,8 @@ auto GetConvSmokeTestCases(miopenDataType_t datatype)
     return std::vector{
         // clang-format off
 
-        TestCase{{8, 8, 3, 3}, {8, 8, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 1, datatype},  
-        
+        TestCase{{8, 8, 3, 3}, {8, 8, 1, 1}, {0, 0}, {1, 1}, {1, 1}, 1, datatype},
+
         // clang-format on
     };
 }
@@ -78,10 +78,10 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
 const auto& GetTestParams(bool bfp16 = false)
 {
     static const auto params = [bfp16] {
-    Gpu supportedDevices = Gpu::None;        
+        Gpu supportedDevices = Gpu::None;
 // If MIOpen is built without CK these tests will fail, skip them to avoid failing
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-        if (!bfp16)
+        if(!bfp16)
             supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
         else
             supportedDevices = Gpu::gfx94X | Gpu::gfx950;
