@@ -194,13 +194,13 @@ RTCKernelArgs RTCKernelRealComplexEven::get_launch_args(DeviceCallIn& data)
     RTCKernelArgs kargs;
 
     kargs.append_unsigned_int(half_N);
-    if(data.node->length.size() > 1)
+    // lengths + strides are exploded out into separate params
+    for(unsigned int i = 1; i < data.node->length.size(); ++i)
     {
-        kargs.append_unsigned_int(data.node->inStride[1]);
-        kargs.append_unsigned_int(data.node->outStride[1]);
+        kargs.append_unsigned_int(data.node->inStride[i]);
+        kargs.append_unsigned_int(data.node->outStride[i]);
+        kargs.append_unsigned_int(data.node->length[i]);
     }
-    unsigned int higherFFTLengths = product(data.node->length.begin() + 1, data.node->length.end());
-    kargs.append_unsigned_int(higherFFTLengths);
     kargs.append_unsigned_int(data.node->batch);
     kargs.append_ptr(data.bufIn[0]);
     if(array_type_is_planar(data.node->inArrayType))
