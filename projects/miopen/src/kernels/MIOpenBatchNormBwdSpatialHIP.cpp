@@ -549,9 +549,9 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 
 #endif
 
-        constexpr unsigned int unrollHint1 =
+        constexpr unsigned int readUnrollHint =
             mio_bn_config::n > mio_bn_config::loop_unroll_max_n ? 4 : 2;
-        static_unroll_count<unsigned int, 0, less4, grprd, unrollHint1>{[&](unsigned int k) {
+        static_unroll_count<unsigned int, 0, less4, grprd, readUnrollHint>{[&](unsigned int k) {
             unsigned int l = k + (lid << 2 * (1 - mio_config::layout_nhwc));
             if(l < less4)
             {
@@ -624,9 +624,9 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
             dscale[grpid] = cast<FpPrecType>(ds);
         }
 
-        constexpr unsigned int unrollHint2 =
+        constexpr unsigned int writeUnrollHint =
             mio_bn_config::n > mio_bn_config::loop_unroll_max_n ? 2 : 1;
-        static_unroll_count<unsigned int, 0, lessout, chunk, unrollHint2>{[&](unsigned int k) {
+        static_unroll_count<unsigned int, 0, lessout, chunk, writeUnrollHint>{[&](unsigned int k) {
             // Unrolling the loop requires forcing exlicit data vectorization otherwise the
             // compiler will start splitting global loads into smaller chunks resulting in
             // significant slowdown.
