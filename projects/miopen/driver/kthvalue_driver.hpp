@@ -292,6 +292,7 @@ int KthvalueDriver<TIO>::AddCmdLineArgs()
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
     inflags.AddInputFlag(
         "wall", 'w', "0", "Wall-clock Time Each Layer, Requires time == 1 (Default=0)", "int");
+    inflags.AddInputFlag("mt", 'm', "0", "Use multithreaded CPU verification (Default=0)", "int");
 
     return miopenStatusSuccess;
 }
@@ -435,35 +436,38 @@ int KthvalueDriver<TIO>::RunBackwardCPU()
 template <typename TIO>
 int KthvalueDriver<TIO>::VerifyForward()
 {
-    RunForwardCPU();
-
-    double tolerance = std::numeric_limits<TIO>::epsilon() * 10;
-    auto errorOutput = miopen::rms_range(outputHost, output);
-
-    if(!std::isfinite(errorOutput) || errorOutput > tolerance)
+    const double tolerance = std::numeric_limits<TIO>::epsilon() * 10;
+    if(inflags.GetValueInt("mt") == 0)
     {
-        std::cout << "Forward Kthvalue output FAILED: " << errorOutput << " > " << tolerance
-                  << std::endl;
-        return EC_VerifyFwd;
+        RunForwardCPU();
+        auto errorOutput = miopen::rms_range(outputHost, output);
+        if(!std::isfinite(errorOutput) || errorOutput > tolerance)
+        {
+            std::cout << "Forward Kthvalue output FAILED: " << errorOutput << " > " << tolerance
+                    << std::endl;
+            return EC_VerifyFwd;
+        }
+        else
+        {
+            std::cout << "Forward Kthvalue Verifies OK on CPU reference (" << errorOutput << "< "
+                    << tolerance << ')' << std::endl;
+        }
     }
     else
     {
-        std::cout << "Forward Kthvalue Verifies OK on CPU reference (" << errorOutput << "< "
-                  << tolerance << ')' << std::endl;
-    }
-
-    RunForwardCPUMT();
-    auto errorOutputHostMT = miopen::rms_range(outputHost, outputHostMT);
-    if(!std::isfinite(errorOutputHostMT) || errorOutputHostMT > tolerance)
-    {
-        std::cout << "CPU MT version of Forward Kthvalue output FAILED: " << errorOutputHostMT << " > " << tolerance
-                  << std::endl;
-        return EC_VerifyFwd;
-    }
-    else
-    {
-        std::cout << "CPU MT version of forward Kthvalue Verifies OK on CPU reference (" << errorOutputHostMT << "< "
-                  << tolerance << ')' << std::endl;
+        RunForwardCPUMT();
+        auto errorOutputHostMT = miopen::rms_range(outputHost, outputHostMT);
+        if(!std::isfinite(errorOutputHostMT) || errorOutputHostMT > tolerance)
+        {
+            std::cout << "CPU MT version of Forward Kthvalue output FAILED: " << errorOutputHostMT << " > " << tolerance
+                    << std::endl;
+            return EC_VerifyFwd;
+        }
+        else
+        {
+            std::cout << "CPU MT version of forward Kthvalue Verifies OK on CPU reference (" << errorOutputHostMT << "< "
+                    << tolerance << ')' << std::endl;
+        }
     }
 
     return miopenStatusSuccess;
