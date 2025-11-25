@@ -298,6 +298,61 @@ def isTT(kernel):
 def isTN(kernel):
     return kernel["ProblemType"]["TransposeA"] and not kernel["ProblemType"]["TransposeB"]
 
+def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
+
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+
+    if isTN(kernel) and TLDS == 1:
+
+        nglshift = nllshift = 11 
+        syncTable = [
+                    -1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment=""),
+                    7, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment=""),
+
+                    15, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="All LRA0 done"),
+                    15, SBarrier(comment=""),
+
+                    29, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LRB0 done"),
+                    29, SBarrier(comment=""),
+
+                    35, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="All GRA launched, 3 prev GRB."),
+                    35, SBarrier(comment=""),
+
+                    42, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Only global reads for this iter"),
+                    42, SBarrier(comment="")]
+ 
+        syncCode = syncTable[1::2]
+        optSchedule = {
+            'SYNC'   : [syncTable[::2]],
+            'GRIncA' : [[1,1,2,2,3,3,3,4,4]], 
+            'GRIncB' : [[5,5,6,6,6,7,7,8,8]],
+            'LRA0'   : [[1,2,3,4,5,6,  8,10],
+                        [1,2,3,4,5,6,  9,11]],
+            'LRB0'   : [[12,16,18],
+                        [13,17,19]],
+            'GRB'    : [[36,36,38,38,40,40],
+                        [37,37,39,39,41,41]],
+            'GRA'    : [[16,16,18,18,20,20,22,22,24,24,26,26,28,28,30,30],
+                        [17,17,19,19,21,21,23,23,25,25,27,27,29,29,31,31]],
+            'LRA1'   : [[36,37,38,39,40,41,42,43]],
+            'LRB1'   : [[44,45,46]],
+            'LRSA'   : [[30]], # this must come before next reads of A X0 - so the LRA1 
+            'LRSB'   : [[31]], # this must come before next reads of A X0 - so the LRB1 
+            'LWSA'   : [[32]],  # swap after last gr a
+            'LWSB'   : [[42]],  # swap after last gr b
+            'LCC'   : [[47, 47]],
+        }
+
+    else:
+        return False, None
+
+
+    numMfma = 48
+    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
 def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
 
@@ -675,9 +730,57 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
 
 def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
-    if isNN(kernel) and useLDSTr and TLDS==1:
+
+    optSchedule = dict()
+    syncCode = []
+
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    if isTN(kernel) and TLDS==1:
+        optSchedule = {
+
+            'SYNC'   : [[-1, 4, 13,13, 38,39, 42,43, 70,70]],
+            'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
+            'GRIncB' : [[9,11,12,13,14,15,16,17,18]],
+
+            'LRA0'   : [[0,2,3,4,5]],  ## -2 is place holder
+
+            'LRB0'   : [[13,15,18,21,24,26,28,30],   ## After LRB0, we can mix LRA0 and GRB
+                        [14,16,19,22,25,27,29,31]],
+            ## GRA should start after LRA0 is done.
+            'GRA'    : [[11,14, 17,17, 20,20, 23,23, 26,27],
+                        [12,15, 18,18, 21,21, 24,24, 27,28]],
+
+            ## GRB should start after LRB0 is done
+            'GRB'    : [[40,40, 43,43, 46,46, 49,49, 59,59, 62,62, 65,65, 67,68],  # m0 inc is part of GRA/GRB
+                        [41,41, 44,44, 47,47, 57,57, 60,60, 63,63, 66,66, 68,69]],
+            'LRA1'   : [[44, 47, 53, 58, 63],
+                        [45, 48, 54, 59, 64]],
+
+            #After GRB is done.
+            'LRB1'   : [[70,71,72,73,75,76,77,78]],
+
+            'LRSA'   : [[33]], # after LRA0 and before LRA1
+            'LRSB'   : [[33]], # after LRB0 and before LRB2
+            'LWSA'   : [[74]], # For A
+            'LWSB'   : [[76]],
+
+            'LCC'    : [[79, 79]],
+        }
+        # note: syncCode needs to be
+        syncCode = [SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="Wait for necessary prior LRA1/LRB1 before starting main loop"),
+                    SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 for the remaining main loop"),
+                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete to start GRA"),
+                    SBarrier(comment=""),
+                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete to start GRB"),
+                    SBarrier(comment=""),
+                    SWaitCnt(dscnt=-1, vlcnt=(13 + 1), vscnt=-1, comment="Wait for GRA to complete to start LRA1"),
+                    SBarrier(comment=""),
+                    SWaitCnt(dscnt=-1, vlcnt=13, vscnt=-1, comment="Wait for GRB to complete to start LRB1"),
+                    SBarrier(comment=""),
+                   ]
+        nglshift = nllshift = 13 # vmcnt shift for ngl and nll
+    elif isNN(kernel) and useLDSTr and TLDS==1:
         kernel["SwapGlobalReadOrder"] = True
-        nglshift = nllshift = 0 # vmcnt shift for ngl and nll
         optSchedule = {
             'SYNC'   : [[-1,
             12, 12, # Wait for B
@@ -715,7 +818,6 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 13
 
     elif isNT(kernel) and useLDSTr and TLDS==0:
-        nglshift = nllshift = 0 # vmcnt shift for ngl and nll
         optSchedule = {
             'SYNC': [[-1,17,17,57,57]],
             'GRA': [[16,17,20,20,24,24,28,28,31,31]],
@@ -956,6 +1058,76 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
         ]
 
         nglshift = nllshift = 34
+        
+    elif isNN(kernel) and useLDSTr and TLDS==1:
+        kernel["SwapGlobalReadOrder"] = True
+        nglshift = nllshift = 0
+        
+        optSchedule = {
+            # last index of producer <SYNC> first index of consumer
+            # SYNC[0] = -1 to align all waves at the start of the loop
+            # A fence at 23, annd B fence at 36, final vmem fence at 81
+            'SYNC': [[-1, 3, 7, 11, 23, 36, 36, 81, 81]],
+
+            # Avoid interleaving of LRA0 and LRB0
+            # LRA0: tightly packed at the beginning
+            'LRA0': [[0, 1, 2, 3, 4, 5, 6, 7]],
+            # LRB0 scheduled after the A fence, overlapping with GRA/GRB
+            'LRB0': [[24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 35]],
+
+            # Address increments for GR 
+            'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
+            'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
+
+            # first stream (A side in NN+swapped)
+            'GRB': [[23, 23, 24, 24,
+                    26, 26, 28, 28,
+                    29, 29, 31, 31,
+                    33, 33, 35, 35]],
+
+            # second stream (B side in NN+swapped)
+            'GRA': [[36, 36, 38, 38, 40, 40, 41, 41,
+                    43, 43, 45, 45, 47, 47, 48, 48,
+                    50, 50, 52, 52, 54, 54, 55, 55,
+                    57, 57, 59, 59, 60, 60, 62, 62,
+                    64, 64, 66, 66, 67, 67, 69, 69,
+                    71, 71, 73, 73, 74, 74, 76, 76,
+                    78, 78, 79, 79]],
+            
+            # from epilogue in the default schedule
+            # these are not updated in the updated schedule
+            'LRSA': [[50]],
+            'LRSB': [[50]],
+            'LWSA': [[80]],
+            'LWSB': [[80]],
+            'LRA1': [[82, 84, 84, 85, 85, 86, 86, 87]], # 8
+            'LRB1': [[83, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]], # 13
+            'LCC':  [[100, 100]],
+        }
+        
+        syncCode = [
+            SWaitCnt(dscnt=12, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LR/LW"),
+            SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="ensure all previous LRA1/LRB1 done before early MFMA use"),
+            SWaitCnt(dscnt=10, vlcnt=-1, vscnt=-1, comment="ensure all previous LRA1/LRB1 done before early MFMA use"),
+
+            
+            # A fence: all LRA0 are done before DTL writes from the first GR stream startign at 23 (swapped)
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before first DTL writes"),
+            # barrier after LRA0, before first global DTL phase at 23
+            SBarrier(comment="barrier after LRA0 , before GR at 23"),
+
+            # B fence : all LRB0 are done before second DTL stream 
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0 to complete before second DTL writes"),
+            # barrier after LRB0 before second global stream at 36
+            SBarrier(comment="barrier after LRB0, before GR at 36"),
+
+            # final vmem fence: ensure all GRA/GRB are done before next tile LDS reads LRA1/LRB1
+            SWaitCnt(dscnt=-1, vlcnt=34, vscnt=-1, comment="wait for all GRA/GRB before next-tile LDS reads"),
+            # final barrier : all waves; make next-tile LDS visible to LRA1/LRB1
+            SBarrier(comment="final barrier before LRA1/LRB1 (at 83)"),
+        ]
+        
+        nglshift = nllshift = 34
     else:
         return False, None
 
@@ -1096,6 +1268,7 @@ def hasCustomSchedule(kernel):
     is256x208x64DTL = [MT0, MT1, DU, PGR, PLR, DTL] == [256, 208, 64, 2, 1, True]
     is224x256x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL] == [224, 256, 64, 2, 1, True]
     is256x224x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL] == [256, 224, 64, 2, 1, True]
+    is256x96x64DTL = [MT0, MT1, DU, PGR, PLR, DTL] == [256, 96, 64, 2, 1, True]
 
     if is256x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
         return _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS)
@@ -1117,5 +1290,7 @@ def hasCustomSchedule(kernel):
         return _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS)
     elif is256x224x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [2, 2]:
         return _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS)
+    elif is256x96x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16,16,32,1] and MIWG == [2,2]:
+        return _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS)
 
     return False, None
