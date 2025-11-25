@@ -66,7 +66,7 @@ def verifyAscendingOrder(scheduleInfo, context: Dict = {}):
             for i in range(1, len(seq)):
                 if seq[i] < seq[i - 1]:
                     return False, (
-                        f"Non-descending-order rule violated, "
+                        f"Non-descending-order rule failed, "
                         f"schedule key '{k}', sequence {seq}: "
                         f"value {seq[i]} at index {i} is less than "
                         f"{seq[i-1]} at index {i-1}."
@@ -241,7 +241,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         return InstStreams
 
     status, message = opt1.isValid({'kernel' : kernel})
-    assert status is True, f"Validation failed: {message}"
+    assert status is True, f"Custom mainloop schedule validation failed: {message}"
 
     InstStreams = convOptToStream(opt1)
 
