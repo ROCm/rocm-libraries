@@ -184,7 +184,7 @@ namespace TensileLite
                 if(row.first.value->type() == "ExperimentalStreamK" && !streamK)
                     continue;
 
-                if(predictionLib && ((row.first.value->type() == "EqualityMatching") 
+                if(predictionLib && ((row.first.value->type() == "EqualityMatching")
                                      || (row.first.value->type() == "RangeMatching")))
                     continue;
 

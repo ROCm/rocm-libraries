@@ -834,7 +834,7 @@ class LocalReadMFMA(LocalRead):
                             if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
                                 offset_val = offset_val + (offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"]
                             offset_val = offset_val + tP["localReadSwapByteOffset"]
-                            # TODO: Add NLC>1 offset calcs here? 
+                            # TODO: Add NLC>1 offset calcs here?
                             if (kernel["DirectToLds%s" % tc] and  \
                                 kernel["GlobalReadVectorWidth%c"%tc] * tP["bpeDS"] > 4) and not kernel["UseGeneralizedNLCOne%s"%tc]:
                               # another address conversion for DirectToLds + NumLoadsCoalesced > 1

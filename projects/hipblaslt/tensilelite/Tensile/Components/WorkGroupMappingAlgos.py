@@ -116,7 +116,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             tmpSgpr = SgprWGMXCC
             group   = SgprQ
             # offset  = SgprR
-            
+
             tmpVgpr     = writer.vgprPool.checkOutAligned(4,2)
             tmpVgprRes  = ContinuousRegister(tmpVgpr, 4)
 
@@ -129,7 +129,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             module.add(scalarUInt24DivideAndRemainder(qReg=SgprX, rReg=SgprG, dReg="WorkGroup0", divReg=SgprWGMXCC, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))
             module.add(SWaitCnt(kmcnt=0, comment="wait for args to load"))
             module.addComment0("divmod(WG, WGMXCC)")
-            module.add(scalarUInt24DivideAndRemainder(qReg=SgprQ, rReg=SgprR, dReg="skGrid", divReg=SgprWGMXCC, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))            
+            module.add(scalarUInt24DivideAndRemainder(qReg=SgprQ, rReg=SgprR, dReg="skGrid", divReg=SgprWGMXCC, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))
             writer.vgprPool.checkIn(tmpVgpr)
             # Check if current group requires a remainder WG or not
             module.add(SCmpLtU32(src0=sgpr(SgprG), src1=sgpr(SgprR)))

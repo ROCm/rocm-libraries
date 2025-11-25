@@ -94,7 +94,7 @@ namespace TensileLite
                                 solution->sizeMapping.workGroupMapping,     // WGM
                                 solution->sizeMapping.nonTemporalA,         // Cache flag: A
                                 solution->sizeMapping.nonTemporalB          // Cache flag: B
-                            ); 
+                            );
 
                             lib.tile_list.emplace_back(solution_tuple);
                             lib.tile_map.insert(std::make_pair(solution_tuple, index));

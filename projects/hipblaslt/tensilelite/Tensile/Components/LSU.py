@@ -356,7 +356,7 @@ class LSUOn(LSU):
                                 else:
                                 # TODO: hpa_half, int8
                                     assert(0) # unsupported data type, need to modify here and LSU write/read code
-                    
+
                     if kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
                         if not kernel["MIArchVgpr"]:
                             # write to accvgpr

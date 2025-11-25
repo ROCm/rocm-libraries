@@ -243,7 +243,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
            reMap0 = writer.vgprPool.checkOut(1)
            reMap1 = writer.vgprPool.checkOut(1)
            perpStrideInv = permBlock // perpStride
-           
+
            module.addComment0("Computing strided(%u) perp indicies"%perpStrideInv)
            module.add(VAndB32(dst=vgpr(reMap0), src0=(permBlock // perpStrideInv - 1), src1=vgpr(vgprReg), comment="r0 = I %% (%u // %u)"%(permBlock, perpStrideInv)))
            module.add(VLShiftLeftB32(dst=vgpr(reMap0), shiftHex=log2(perpStrideInv), src=vgpr(reMap0), comment="r0 = %u * r0"%(perpStrideInv)))

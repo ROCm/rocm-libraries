@@ -108,7 +108,7 @@ TEST_P(RangeLibraryTest, SpecificSizes)
     // transposeA: true, transposeB false, datatype BFloat16,
     // M in [128, 768], N in [1024, 1408], batch_count in [-1, -1], K in [49024, 49280]
 
-    std::vector<std::tuple<size_t, size_t, size_t, size_t, bool>> MNKB = 
+    std::vector<std::tuple<size_t, size_t, size_t, size_t, bool>> MNKB =
         {{128, 1024, 1,  49024, true},
          {768, 1024, 1,  49024, true},
          {128, 1408, 1,  49024, true},
@@ -119,7 +119,7 @@ TEST_P(RangeLibraryTest, SpecificSizes)
          {128, 1409, 1,  49024, false},
          {128, 1024, 1,  16,    false},
          {128, 1024, 1,  49285, false}};
-         
+
 
     for(auto [M, N, B, K, in_range] : MNKB)
     {

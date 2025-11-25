@@ -1598,7 +1598,7 @@ class GSUOn(GSU):
 
     def lastGsuWgBusyWaiting(self, writer, kernel, ss, tmpSgpr, lastGsuWgBusyWaitingLabel, reductionBodyLabel):
         module = Module("GSU Common lastGsuWgBusyWaiting")
-    
+
         tmpS01 = tmpSgpr.idx
 
         module.add(SLoadB32(dst=sgpr(tmpS01), base=sgpr("SrdSync",2), soffset=0, smem=SMEMModifiers(glc=True), comment="get atomic_dec value"))
@@ -1688,7 +1688,7 @@ class GSUOn(GSU):
                         module.add(codeAccVgprReadInst)
         elif kernel["LocalSplitU"] > 1:
             # read from LSU VGPRs
-            regsPerScalar = writer.states.bpeCinternal // writer.states.bpr # register per scalar            
+            regsPerScalar = writer.states.bpeCinternal // writer.states.bpr # register per scalar
             if kernel["MIArchVgpr"]:
                 tmpStartVgprValuC = writer.states.c.startVgprValu
                 writer.states.c.startVgprValu = 0
@@ -1830,7 +1830,7 @@ class GSUOn(GSU):
         sumIdxGSUSYNC = ss.elementSumIdx[len(batchElements)-1]
         addrCalc = ss.elementAddr[len(batchElements)-1]
         accvgprWriteLabel = Label(writer.labels.getNameInc("accvgpr_write"), comment="")
-        
+
         if (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel'):
             module.add(self.GSUSynccodegenOpt(kernel, writer, ss, batchIdx, tmpSgpr, tmpVgpr, tmpVgprDynamic, gwvw, batchElements,\
                                               endLabel, sumIdxGSUSYNC, addrCalc.addrDVgpr, reductionBodyLabel))
@@ -1952,7 +1952,7 @@ class GSUOn(GSU):
         storeOffsetSgpr = tmpSgpr.idx
         loadOffsetSgpr = tmpSgpr.idx + 1
         storeOffsetSgprRes = ContinuousRegister(storeOffsetSgpr, 1)
-        
+
         addr1 = sgpr(tmpS06, 4)
         addr0 = vgpr(vgproffset)
         bps = kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw
@@ -2476,7 +2476,7 @@ class GSUOn(GSU):
                                                 src1=vgpr(tmpVAdd+0+gwvw*i+j*2, 2), comment="buffer pk"))
 
             ss.lsuStartVgprOffset += len(batchElements) * gwvw * regsPerScalar
-            
+
             if kernel["MIArchVgpr"]:
                 writer.states.c.startVgprValu = tmpStartVgprValuC
                 module.add(RegSet("v", "vgprValuC", tmpStartVgprValuC))
