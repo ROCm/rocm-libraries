@@ -54,7 +54,7 @@ cmake.build-type = "Release"
 # Where the Python module will be installed
 wheel.install-dir = "hipdnn_frontend"
 # Package data
-wheel.packages = ["python/hipdnn_frontend"]
+wheel.packages = ["hipdnn_frontend"]
 
 [tool.scikit-build.cmake.define]
 # Pass any additional CMake definitions if needed

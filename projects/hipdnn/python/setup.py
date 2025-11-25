@@ -27,7 +27,6 @@ setup(
     version='0.1.0',
     description='Python bindings for hipDNN frontend',
     author='Advanced Micro Devices, Inc.',
-    author_email='support@amd.com',
     packages=['hipdnn_frontend'],
     ext_modules=ext_modules,
     install_requires=[
