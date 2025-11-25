@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T>
 void geblttrs_npvt_checkBadArgs(const rocblas_handle handle,
@@ -383,7 +384,7 @@ void geblttrs_npvt_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -400,12 +401,12 @@ void geblttrs_npvt_getPerfData(const rocblas_handle handle,
         geblttrs_npvt_initData<false, true, T>(handle, nb, nblocks, nrhs, dA, lda, dB, ldb, dC, ldc,
                                                dX, ldx, bc, hA, hB, hC, hX, hXRes);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_geblttrs_npvt(STRIDED, handle, nb, nblocks, nrhs, dA.data(), lda, stA, dB.data(),
                                 ldb, stB, dC.data(), ldc, stC, dX.data(), ldx, stX, bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
@@ -528,7 +529,7 @@ void testing_geblttrs_npvt(Arguments& argus)
                                                hXRes, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             geblttrs_npvt_getPerfData<STRIDED, T>(handle, nb, nblocks, nrhs, dA, lda, stA, dB, ldb,
                                                   stB, dC, ldc, stC, dX, ldx, stX, bc, hA, hB, hC, hX,
                                                   hXRes, &gpu_time_used, &cpu_time_used, hot_calls,
@@ -577,7 +578,7 @@ void testing_geblttrs_npvt(Arguments& argus)
                                                hXRes, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             geblttrs_npvt_getPerfData<STRIDED, T>(handle, nb, nblocks, nrhs, dA, lda, stA, dB, ldb,
                                                   stB, dC, ldc, stC, dX, ldx, stX, bc, hA, hB, hC, hX,
                                                   hXRes, &gpu_time_used, &cpu_time_used, hot_calls,

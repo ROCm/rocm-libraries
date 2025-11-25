@@ -45,6 +45,17 @@ include: test_csrmm.yaml
 include: test_csrsm2.yaml
 include: test_gemmi.yaml
 
+#precond
+include: test_csric02.yaml
+include: test_csrilu02.yaml
+include: test_bsric02.yaml
+include: test_bsrilu02.yaml
+include: test_gtsv.yaml
+include: test_gtsv2_nopivot.yaml
+include: test_gtsv2_strided_batch.yaml
+include: test_gtsv_interleaved_batch.yaml
+include: test_gpsv_interleaved_batch.yaml
+
 # conversion
 include: test_bsr2csr.yaml
 include: test_coo2csr.yaml

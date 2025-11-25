@@ -28,6 +28,7 @@
 
 #include <functional>
 #include <vector>
+#include <iostream>
 
 namespace hiptensor
 {
