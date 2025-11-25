@@ -1,8 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Define library target (respects BUILD_SHARED_LIBS)
-add_library(hipsparse)
+# Define library target with explicit type
+if(HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
+    add_library(hipsparse SHARED)
+else()
+    add_library(hipsparse STATIC)
+endif()
 add_library(roc::hipsparse ALIAS hipsparse)
 
 # Target properties

@@ -44,11 +44,8 @@ target_link_libraries(hipsparse-clients-common PUBLIC
     GTest::gtest
 )
 
-if(TARGET Threads::Threads)
-    target_link_libraries(hipsparse-clients-common PUBLIC Threads::Threads)
-endif()
-
-if(TARGET OpenMP::OpenMP_CXX)
+# Link OpenMP if enabled
+if(HIPSPARSE_ENABLE_OPENMP)
     target_link_libraries(hipsparse-clients-common PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
@@ -69,6 +66,11 @@ endif()
 # Enable POSITION_INDEPENDENT_CODE for OBJECT library if building shared libs
 if(HIPSPARSE_BUILD_SHARED_LIBS)
     set_target_properties(hipsparse-clients-common PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+
+# Propagate coverage link flags to resolve gcov symbols when linking against coverage-instrumented library
+if(HIPSPARSE_BUILD_COVERAGE)
+    target_link_options(hipsparse-clients-common PUBLIC --coverage)
 endif()
 
 # Lightweight OBJECT library for samples only (contains only utility.cpp)
@@ -102,4 +104,9 @@ endif()
 # Enable POSITION_INDEPENDENT_CODE for OBJECT library if building shared libs
 if(HIPSPARSE_BUILD_SHARED_LIBS)
     set_target_properties(hipsparse-samples-common PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+
+# Propagate coverage link flags to resolve gcov symbols when linking against coverage-instrumented library
+if(HIPSPARSE_BUILD_COVERAGE)
+    target_link_options(hipsparse-samples-common PUBLIC --coverage)
 endif()
