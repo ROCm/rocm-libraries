@@ -28,9 +28,11 @@ python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
 ```
 
 ## Installing MIOpen
+     
+To install MIOpen, you must first install these prerequisites:  
 
-To install MIOpen, you must first install these prerequisites:
 
+weijrhaslkjhasdlkjd
 * A [ROCm](https://rocm.docs.amd.com/)-enabled platform
 * A base software stack that includes either:
   * HIP (HIP and HCC libraries and header files)

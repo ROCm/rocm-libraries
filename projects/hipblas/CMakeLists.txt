@@ -42,6 +42,10 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
   set( CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
+
+#hi what is up
+
+
 project( hipblas LANGUAGES CXX )
 
 find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
