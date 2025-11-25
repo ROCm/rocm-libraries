@@ -9,11 +9,9 @@
 namespace test_helpers
 {
 
-using namespace hipdnn_sdk::utilities;
-
 template <typename T>
 hipdnnPluginDeviceBuffer_t
-    generateRandomDeviceBuffer(TensorBase<T>& tensor, int uid, T min, T max, unsigned int seed = 0)
+    generateRandomDeviceBuffer(hipdnn_sdk::utilities::TensorBase<T>& tensor, int uid, T min, T max, unsigned int seed = 0)
 {
     tensor.fillWithRandomValues(min, max, seed);
     hipdnnPluginDeviceBuffer_t buffer;
@@ -23,7 +21,7 @@ hipdnnPluginDeviceBuffer_t
 }
 
 template <typename T>
-hipdnnPluginDeviceBuffer_t generateStaticDeviceBuffer(TensorBase<T>& tensor, int uid, T value)
+hipdnnPluginDeviceBuffer_t generateStaticDeviceBuffer(hipdnn_sdk::utilities::TensorBase<T>& tensor, int uid, T value)
 {
     tensor.fillWithValue(value);
     hipdnnPluginDeviceBuffer_t buffer;
@@ -33,7 +31,7 @@ hipdnnPluginDeviceBuffer_t generateStaticDeviceBuffer(TensorBase<T>& tensor, int
 }
 
 template <typename T>
-hipdnnPluginDeviceBuffer_t generateEmptyDeviceBuffer(TensorBase<T>& tensor, int uid)
+hipdnnPluginDeviceBuffer_t generateEmptyDeviceBuffer(hipdnn_sdk::utilities::TensorBase<T>& tensor, int uid)
 {
     hipdnnPluginDeviceBuffer_t buffer;
     buffer.uid = uid;

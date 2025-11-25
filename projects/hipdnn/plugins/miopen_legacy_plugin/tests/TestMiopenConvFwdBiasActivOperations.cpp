@@ -20,6 +20,7 @@
 #include "common/Helpers.hpp"
 
 using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_sdk::utilities;
 using namespace test_fusion_common;
 using namespace test_helpers;
 
