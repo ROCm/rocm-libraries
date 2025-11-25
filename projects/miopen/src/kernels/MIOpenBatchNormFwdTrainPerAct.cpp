@@ -50,22 +50,22 @@ using mio_bn_config = miopen::batchnorm::config;
 #define BLOCK_SIZE (MIO_BN_GRP0 * MIO_BN_GRP1 * MIO_BN_GRP2)
 
 extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrainPerActivation(
-    const typename mio_bn_config::fp_type* __restrict__ in,          /* x input */
-    unsigned int in_nstride,                                         /* C*H*W */
-    unsigned int in_cstride,                                         /* H*W */
-    typename mio_bn_config::fp_type* __restrict__ out,               /* y output */
-    const typename mio_bn_config::fp_prec_type* __restrict__ scale,  /* gamma 1xCxHxW */
-    const typename mio_bn_config::fp_prec_type* __restrict__ bias,   /* beta  1xCxHxW */
+    const typename mio_bn_config::fp_type* __restrict__ in,         /* x input */
+    unsigned int in_nstride,                                        /* C*H*W */
+    unsigned int in_cstride,                                        /* H*W */
+    typename mio_bn_config::fp_type* __restrict__ out,              /* y output */
+    const typename mio_bn_config::fp_prec_type* __restrict__ scale, /* gamma 1xCxHxW */
+    const typename mio_bn_config::fp_prec_type* __restrict__ bias,  /* beta  1xCxHxW */
 #if(MIO_RUNNING_RESULT == 1)
-    double expAvgFactor, /* input momentum */
-    typename mio_bn_config::fp_prec_type* __restrict__ resultRunningMean,      /* in/out */
-    typename mio_bn_config::fp_prec_type* __restrict__ resultRunningVariance,  /* in/out */
+    double expAvgFactor,                                                      /* input momentum */
+    typename mio_bn_config::fp_prec_type* __restrict__ resultRunningMean,     /* in/out */
+    typename mio_bn_config::fp_prec_type* __restrict__ resultRunningVariance, /* in/out */
 #endif
     double epsilon /* input fuzz param > 0 */
 #if(MIO_SAVE_MEAN_VARIANCE == 1)
     ,
-    typename mio_bn_config::fp_prec_type* __restrict__ resultSaveMean,        /* out only */
-    typename mio_bn_config::fp_prec_type* __restrict__ resultSaveInvVariance  /* out only */
+    typename mio_bn_config::fp_prec_type* __restrict__ resultSaveMean,       /* out only */
+    typename mio_bn_config::fp_prec_type* __restrict__ resultSaveInvVariance /* out only */
 #endif
 )
 {
@@ -91,7 +91,8 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
     const fp_prec_type invN = fp_prec_type(1) / fp_prec_type(MIO_BN_N);
 
     // move across the sections of the image mini_batch stack
-    for(int idx = static_cast<int>(ygid); idx < static_cast<int>(in_cstride); idx += static_cast<int>(yglb_sz))
+    for(int idx = static_cast<int>(ygid); idx < static_cast<int>(in_cstride);
+        idx += static_cast<int>(yglb_sz))
     {
         mean     = fp_prec_type(0);
         variance = fp_prec_type(0);
@@ -105,7 +106,8 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
 
         for(int n = 0; n < MIO_BN_N; n++)
         {
-            const fp_prec_type x = static_cast<fp_prec_type>(in[adjIndex + static_cast<int>(in_nstride) * n]);
+            const fp_prec_type x =
+                static_cast<fp_prec_type>(in[adjIndex + static_cast<int>(in_nstride) * n]);
             const fp_prec_type d = x - mean;
             variance += d * d;
         }
@@ -136,12 +138,13 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
 
         for(int n = 0; n < MIO_BN_N; n++)
         {
-            const fp_prec_type x = static_cast<fp_prec_type>(in[static_cast<int>(in_nstride) * n + adjIndex]);
-            inhat                = (x - mean) * invVariance;
+            const fp_prec_type x =
+                static_cast<fp_prec_type>(in[static_cast<int>(in_nstride) * n + adjIndex]);
+            inhat = (x - mean) * invVariance;
 
             // fma(a,b,c) = a*b + c (HIP provides float/double overloads)
-            const fp_prec_type y_prec = fma(pvt_scale, inhat, pvt_bias);
-            out[adjIndex + static_cast<int>(in_nstride) * n]                 = static_cast<fp_type>(y_prec);
+            const fp_prec_type y_prec                        = fma(pvt_scale, inhat, pvt_bias);
+            out[adjIndex + static_cast<int>(in_nstride) * n] = static_cast<fp_type>(y_prec);
         }
     }
 }
