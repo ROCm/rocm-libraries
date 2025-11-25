@@ -71,7 +71,6 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
 {
     using fp_type         = typename mio_bn_config::fp_type;
     using fp_prec_type    = typename mio_bn_config::fp_prec_type;
-    using fp_accum_type   = typename mio_bn_config::fp_accum_type;
     using fp_accum_c_type = typename mio_bn_config::fp_accum_c_type;
     using fp_prec_c_type  = typename mio_bn_config::fp_prec_c_type;
 
@@ -100,14 +99,12 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
         adjIndex = cidx + idx; // gamma and beta tensor index
         for(int n = 0; n < MIO_BN_N; n++)
         {
-            // index = static_cast<int>(in_nstride) * n + adjIndex;
             mean += static_cast<fp_prec_type>(in[adjIndex + static_cast<int>(in_nstride) * n]);
         }
         mean *= invN;
 
         for(int n = 0; n < MIO_BN_N; n++)
         {
-            // index                = static_cast<int>(in_nstride) * n + adjIndex;
             const fp_prec_type x = static_cast<fp_prec_type>(in[adjIndex + static_cast<int>(in_nstride) * n]);
             const fp_prec_type d = x - mean;
             variance += d * d;
@@ -144,7 +141,7 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
 
             // fma(a,b,c) = a*b + c (HIP provides float/double overloads)
             const fp_prec_type y_prec = fma(pvt_scale, inhat, pvt_bias);
-            out[index]                 = static_cast<fp_type>(y_prec);
+            out[adjIndex + static_cast<int>(in_nstride) * n]                 = static_cast<fp_type>(y_prec);
         }
     }
 }
