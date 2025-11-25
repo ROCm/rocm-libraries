@@ -56,8 +56,6 @@ inline void printSampleHelp(const std::string& sampleName)
     std::cout << "Usage: " << sampleName << " [OPTIONS]\n"
               << "Options:\n"
               << "  --verify-cpu, -vc           Enable CPU reference validation\n"
-              << "  --activation-type TYPE      Set activation type (relu, relu6, clamp) [default: "
-                 "relu]\n"
               << "  --batch-stats-only          Use batch statistics only (no running stats) [BN "
                  "training only]\n"
               << "  --full-training             Use full training with running statistics [BN "
@@ -69,7 +67,6 @@ inline void printSampleHelp(const std::string& sampleName)
 struct Config
 {
     bool cpuValidation = false;
-    std::string activationType = "relu";
     bool useRunningStats = false;
 };
 
@@ -84,24 +81,6 @@ inline Config parseCommandLineArgs(int argc, char* argv[])
         if(arg == "--verify-cpu" || arg == "-vc")
         {
             config.cpuValidation = true;
-        }
-        else if(arg == "--activation-type")
-        {
-            if(i + 1 >= argc)
-            {
-                std::cerr << "--activation-type requires an argument" << std::endl;
-                printSampleHelp(argv[0]);
-                exit(EXIT_FAILURE);
-            }
-
-            config.activationType = argv[++i];
-            if(config.activationType != "relu" && config.activationType != "relu6"
-               && config.activationType != "clamp")
-            {
-                std::cerr << "Invalid activation type: " << config.activationType << std::endl;
-                std::cerr << "Valid options are: relu, relu6, clamp" << std::endl;
-                exit(EXIT_FAILURE);
-            }
         }
         else if(arg == "--batch-stats-only")
         {

@@ -24,9 +24,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto inputType = getDataTypeEnumFromType<InputType>();
     auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
 
-    std::cout << "Running batch normalization training + activation graph " << inputType << " ["
-              << layout << "]" << (config.cpuValidation ? " (with CPU validation)" : "")
-              << " [activation: " << config.activationType << "]";
+    std::cout << "Running batch normalization training + ReLU activation graph " << inputType
+              << " [" << layout << "]" << (config.cpuValidation ? " (with CPU validation)" : "");
 
     if(config.useRunningStats)
     {
@@ -91,25 +90,12 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     // Mark BN output as virtual to enable fusion with activation
     y->set_is_virtual(true);
+    y->set_data_type(inputType);
 
-    // Step 2: Pointwise Activation
+    // Step 2: Pointwise ReLU Activation
     auto pwAttributes = graph::PointwiseAttributes();
     pwAttributes.set_name("activation_node");
     pwAttributes.set_mode(PointwiseMode::RELU_FWD);
-
-    // Configure activation based on type
-    if(config.activationType == "relu6")
-    {
-        // Clipped ReLU with upper clip at 6.0
-        pwAttributes.set_relu_upper_clip(6.0f);
-    }
-    else if(config.activationType == "clamp")
-    {
-        // CLAMP with both lower and upper clips
-        pwAttributes.set_relu_lower_clip(0.1f);
-        pwAttributes.set_relu_upper_clip(0.5f);
-    }
-    // For "relu", no additional parameters needed
 
     auto activatedY = graph->pointwise(y, pwAttributes);
     activatedY->set_name("activated_y");
@@ -118,7 +104,10 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     // Configure output tensors for batch statistics
     savedMean->set_output(true);
+    savedMean->set_data_type(intermediateType);
+
     savedInvVariance->set_output(true);
+    savedInvVariance->set_data_type(intermediateType);
 
     // Configure running statistics output tensors
     if(config.useRunningStats)

@@ -56,10 +56,14 @@ bool BnFwdInferActivationFused::IsApplicable(const FusionContext& /*context*/,
         return false;
     if(desc.op_map.at(1)->kind() != miopenFusionOpActivForward)
         return false;
+    if(!(problem.IsFp32() || problem.IsFp16()))
+        return false;
+    if(!(problem.Is2D() && problem.IsLayoutContiguous()))
+        return false;
     return true;
 }
 
-ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& /*context*/,
+ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& context,
                                                     const FusionDescription& problem) const
 {
     const auto bn_problem = problem.GetBnProblem(0, miopen::batchnorm::Direction::ForwardInference);
@@ -67,7 +71,7 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& /*conte
     auto result = ConvSolution{miopenStatusSuccess};
     auto kernel = KernelInfo{};
 
-    kernel.kernel_file = "MIOpenBatchNormActivInfer.cl";
+    kernel.kernel_file = "MIOpenBatchNormActivInferHIP.cpp";
     kernel.kernel_name = "MIOpenBatchNormActivInfer";
     const auto mode    = bn_problem.GetMode();
     if(mode == miopenBNSpatial)
@@ -88,12 +92,32 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& /*conte
 
     size_t read_unit = 1;
     size_t read_len  = (mode == miopenBNSpatial) ? h * w : c * h * w;
+    read_unit        = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
 
-    if(mode == miopenBNSpatial && input_desc.GetType() != miopenHalf)
+    size_t xlocalsize = 256;
+    size_t xgridsize  = read_len / read_unit;
+    size_t ygridsize  = (mode == miopenBNSpatial) ? size_t(c) : 1;
+    size_t zgridsize  = 1;
+
+    // HIP runtime does not support non-uniform blocks
+    // Adjust the xlocalsize and xgridsize accordingly
+    if(xgridsize < xlocalsize)
     {
-        read_unit = (read_len % 4 == 0) ? 4 : (read_len % 2 == 0) ? 2 : 1;
+        // round up the xlocalsize to the nearest wavefront size
+        xlocalsize = AlignUp(xgridsize, context.GetStream().GetWavefrontWidth());
+        // launch only one block
+        xgridsize = xlocalsize;
     }
-    std::string READ_TYPE = (read_unit == 1) ? "_FLOAT" : "_FLOAT" + std::to_string(read_unit);
+    else
+    {
+        xgridsize = AlignUp(xgridsize, xlocalsize);
+    }
+    kernel.l_wk[0] = xlocalsize;
+
+    kernel.g_wk.push_back(xgridsize);
+    kernel.g_wk.push_back(ygridsize);
+    kernel.g_wk.push_back(zgridsize);
+
     const auto& activ_op =
         dynamic_cast<ActivFwdFusionOpDescriptor&>(*problem.fusion_plan_desc->op_map[1]);
     const auto build_params = KernelBuildParameters{
@@ -104,25 +128,17 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext& /*conte
         {"MIO_BN_GRP1", static_cast<int>(1)},
         {"MIO_BN_GRP2", static_cast<int>(1)},
         {"MIOPEN_READ_UNIT", static_cast<int>(read_unit)},
-        {"MIOPEN_READ_TYPE", READ_TYPE},
-        {"MIOPEN_YES_ACTIV", static_cast<int>(1)},
+        {"MIOPEN_SBN_BOUNDS", static_cast<unsigned int>(read_len / read_unit)},
         {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_op.activMode)},
         {"MIOPEN_USE_FP16", static_cast<int>(input_desc.GetType() == miopenHalf)},
         {"MIOPEN_USE_FP32", static_cast<int>(input_desc.GetType() == miopenFloat)}};
-    kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+    kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
     if(bn_problem.GetMode() == miopenBNSpatial)
         kernel.comp_options += " -DSPATIAL_BN";
     else
         kernel.comp_options += " -DPERACT_BN";
     if(input_desc.GetType() == miopenHalf)
         kernel.comp_options += " -DMIOPEN_USE_FPMIX=1";
-    size_t xgridsize = read_len / read_unit;
-    size_t ygridsize = (mode == miopenBNSpatial) ? size_t(c) : 1;
-    size_t zgridsize = 1;
-
-    kernel.g_wk.push_back(xgridsize);
-    kernel.g_wk.push_back(ygridsize);
-    kernel.g_wk.push_back(zgridsize);
 
     result.construction_params.push_back(kernel);
 
