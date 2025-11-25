@@ -14,7 +14,6 @@
 
 #include "PointwiseTensorBundles.hpp"
 
-using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
 
 namespace hipdnn_sdk_test_utils
@@ -29,7 +28,7 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                              hipdnn_sdk::data_objects::DataType accumulatorDataType,
                              hipdnn_sdk::data_objects::DataType outputDataType,
                              hipdnn_frontend::PointwiseMode operation,
-                             unsigned int seed = getGlobalTestSeed(),
+                             unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
                              const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW,
                              std::optional<float> reluLowerClip = std::nullopt,
                              std::optional<float> reluUpperClip = std::nullopt,
@@ -121,7 +120,7 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                               hipdnn_sdk::data_objects::DataType accumulatorDataType,
                               hipdnn_sdk::data_objects::DataType outputDataType,
                               hipdnn_frontend::PointwiseMode operation,
-                              unsigned int seed = getGlobalTestSeed(),
+                              unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
                               const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW,
                               std::optional<float> reluLowerClip = std::nullopt,
                               std::optional<float> reluUpperClip = std::nullopt,

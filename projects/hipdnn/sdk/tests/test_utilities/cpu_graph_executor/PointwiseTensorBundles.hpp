@@ -10,20 +10,19 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
-using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
 
 namespace hipdnn_sdk_test_utils
 {
 
-struct PointwiseUnaryTensorBundle : public GraphTensorBundle
+struct PointwiseUnaryTensorBundle : public hipdnn_sdk::test_utilities::GraphTensorBundle
 {
     PointwiseUnaryTensorBundle(
         const hipdnn_plugin::INodeWrapper& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap,
         unsigned int seed)
-        : GraphTensorBundle(tensorMap)
+        : hipdnn_sdk::test_utilities::GraphTensorBundle(tensorMap)
     {
         const auto& attributes = node.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
 
@@ -32,14 +31,14 @@ struct PointwiseUnaryTensorBundle : public GraphTensorBundle
     }
 };
 
-struct PointwiseBinaryTensorBundle : public GraphTensorBundle
+struct PointwiseBinaryTensorBundle : public hipdnn_sdk::test_utilities::GraphTensorBundle
 {
     PointwiseBinaryTensorBundle(
         const hipdnn_plugin::INodeWrapper& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap,
         unsigned int seed)
-        : GraphTensorBundle(tensorMap)
+        : hipdnn_sdk::test_utilities::GraphTensorBundle(tensorMap)
     {
         const auto& attributes = node.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
 

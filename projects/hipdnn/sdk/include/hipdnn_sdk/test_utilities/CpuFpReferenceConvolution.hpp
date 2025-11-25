@@ -15,8 +15,6 @@ namespace hipdnn_sdk
 namespace test_utilities
 {
 
-using namespace hipdnn_sdk::test_utilities;
-
 class CpuFpReferenceConvolution
 {
 public:

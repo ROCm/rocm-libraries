@@ -12,20 +12,19 @@
 #include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
-using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
 
 namespace hipdnn_sdk_test_utils
 {
 
-struct BatchnormFwdTensorBundle : public GraphTensorBundle
+struct BatchnormFwdTensorBundle : public hipdnn_sdk::test_utilities::GraphTensorBundle
 {
     BatchnormFwdTensorBundle(
         const hipdnn_plugin::INodeWrapper& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap,
         unsigned int seed)
-        : GraphTensorBundle(tensorMap)
+        : hipdnn_sdk::test_utilities::GraphTensorBundle(tensorMap)
     {
         const auto& attributes
             = node.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>();
@@ -42,7 +41,7 @@ template <typename InputDataType, typename ScaleBiasDataType, typename MeanVaria
 struct BatchnormTrainTensorBundle
 {
     BatchnormTrainTensorBundle(const std::vector<int64_t>& dims,
-                               unsigned int seed = getGlobalTestSeed(),
+                               unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
                                const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW,
                                bool useOptionalTensors = false)
         : derivedDims(hipdnn_sdk::utilities::getDerivedShape(dims))
@@ -171,7 +170,7 @@ template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
 struct BatchnormBwdTensorBundle
 {
     BatchnormBwdTensorBundle(const std::vector<int64_t>& dims,
-                             unsigned int seed = getGlobalTestSeed(),
+                             unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
                              const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW)
         : derivedDims(hipdnn_sdk::utilities::getDerivedShape(dims))
         , xTensor(dims, layout)
