@@ -30,8 +30,6 @@
 
 namespace {
 
-namespace unit_tests {
-
 struct SeqTensorDescriptorParams
 {
     SeqTensorDescriptorParams(miopenDataType_t datatype_in, std::vector<size_t>&& lens_in)
@@ -59,11 +57,9 @@ private:
     bool padded_seq_layout;
 };
 
-} // namespace unit_tests
-
 struct TestCase
 {
-    unit_tests::SeqTensorDescriptorParams tp;
+    SeqTensorDescriptorParams tp;
     size_t max_sequence_length;
     size_t total_sequence_length;
     size_t actual_count_of_sequence;
@@ -100,9 +96,11 @@ struct TestTensorSequence : testing::TestWithParam<TestCase>
 
 using CPU_TestTensorSequence_FP16 = TestTensorSequence;
 
+} // anonymous namespace
+
 TEST_P(CPU_TestTensorSequence_FP16, SeqTensorDescriptor) { RunTest(); };
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          CPU_TestTensorSequence_FP16,
                          testing::ValuesIn(GetTestCases()));
-} // anonymous namespace
+
