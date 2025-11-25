@@ -321,9 +321,6 @@ bool IsCKApplicable(const ProblemDescriptionType& problem)
 
     const auto ptrs = DeviceOpType::GetInstances();
 
-    // TODO Remove after PR is done
-    std::cout << "Count xxx: " << ptrs.size() << std::endl;
-
     return std::any_of(
         ptrs.begin(), ptrs.end(), [&args](auto& ptr) { return args.IsSupportedBy(ptr); });
 }
