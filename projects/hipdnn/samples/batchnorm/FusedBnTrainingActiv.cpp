@@ -88,8 +88,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto [y, savedMean, savedInvVariance, nextRunningMean, nextRunningVariance]
         = graph->batchnorm(x, scale, bias, bnAttributes);
 
-    // Mark BN output as virtual to enable fusion with activation
-    y->set_is_virtual(true);
     y->set_data_type(inputType);
 
     // Step 2: Pointwise ReLU Activation
@@ -100,7 +98,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto activatedY = graph->pointwise(y, pwAttributes);
     activatedY->set_name("activated_y");
     activatedY->set_output(true);
-    activatedY->set_is_virtual(false);
 
     // Configure output tensors for batch statistics
     savedMean->set_output(true);
