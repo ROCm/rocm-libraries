@@ -58,6 +58,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/CopyGenerator_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/CrashKernelGenerator.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/CrashKernelGenerator_fwd.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/ExchangeGenerator.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Instruction.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Instruction_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Instruction_impl.hpp"

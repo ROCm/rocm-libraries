@@ -336,18 +336,10 @@ miopen::solver::ConvSolution FindSolution(const miopen::solver::conv::ConvSolver
 template <typename T>
 double GetThreshold(miopenConvAlgorithm_t algo,
                     miopen::conv::Direction direction,
-                    const Tolerances& tolerances,
-                    const bool use_tf32_compute)
+                    const Tolerances& tolerances)
 {
     double tolerance = tolerances.Get(GetDevGpuType(), miopen_type<T>{});
     double threshold = std::numeric_limits<T>::epsilon() * tolerance;
-    if constexpr(std::is_same_v<T, float>)
-    {
-        if(use_tf32_compute)
-        {
-            threshold = std::numeric_limits<half_float::half>::epsilon() * tolerance;
-        }
-    }
     return threshold;
 }
 
@@ -356,8 +348,7 @@ void VerifyData(const std::vector<T>& data,
                 const std::vector<Tref>& ref_data,
                 miopenConvAlgorithm_t algo,
                 miopen::conv::Direction direction,
-                const Tolerances& tolerances,
-                bool use_tf32_compute = false)
+                const Tolerances& tolerances)
 {
     ASSERT_FALSE(miopen::range_zero(ref_data)) << "Reference data is all zeros";
     if constexpr(!std::is_integral_v<T>)
@@ -384,7 +375,7 @@ void VerifyData(const std::vector<T>& data,
     else
     {
         const auto error       = miopen::rms_range(ref_data, data);
-        const double threshold = GetThreshold<T>(algo, direction, tolerances, use_tf32_compute);
+        const double threshold = GetThreshold<T>(algo, direction, tolerances);
         ASSERT_LT(error, threshold) << "Error beyond tolerance";
         // std::cout << "error: " << error << " threshold: " << threshold << std::endl;
     }
@@ -440,16 +431,8 @@ void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
     const auto ctx = [&] {
         auto tmp = miopen::ExecutionContext{&handle};
         problem.SetupFloats(tmp);
-        problem.SetupComputeType(tmp);
         return tmp;
     }();
-
-    if(!(ctx.GetStream().GetDeviceName() == "gfx942") &&
-       conv_config.GetXDataType() == miopenFloat &&
-       conv_config.GetConv().GetMathType() == miopenMathDefault)
-    {
-        GTEST_SKIP() << "TF32 test is not supported on this device";
-    }
 
     if(!solv.IsApplicable(ctx, problem))
     {
@@ -498,12 +481,8 @@ void RunSolverFwd(const miopen::solver::conv::ConvSolverInterface& solv,
 
     output.data = handle.Read<Tout>(out_dev, output.data.size());
 
-    VerifyData(output.data,
-               ref_out.data,
-               algo,
-               miopen::conv::Direction::Forward,
-               params.tolerances,
-               problem.UseTF32());
+    VerifyData(
+        output.data, ref_out.data, algo, miopen::conv::Direction::Forward, params.tolerances);
 }
 
 template <typename T, typename Tref>
@@ -565,7 +544,6 @@ void RunSolverBwd(const miopen::solver::conv::ConvSolverInterface& solv,
     const auto ctx = [&] {
         auto tmp = miopen::ExecutionContext{&handle};
         problem.SetupFloats(tmp);
-        problem.SetupComputeType(tmp);
         return tmp;
     }();
 
@@ -679,7 +657,6 @@ void RunSolverWrw(const miopen::solver::conv::ConvSolverInterface& solv,
     const auto ctx = [&] {
         auto tmp = miopen::ExecutionContext{&handle};
         problem.SetupFloats(tmp);
-        problem.SetupComputeType(tmp);
         return tmp;
     }();
 
@@ -864,7 +841,6 @@ void UnitTestConvSolverDevApplicabilityBase::RunTestImpl(
         const auto ctx = [&] {
             auto tmp = miopen::ExecutionContext{&handle};
             problem.SetupFloats(tmp);
-            problem.SetupComputeType(tmp);
             return tmp;
         }();
 
