@@ -110,6 +110,14 @@ elseif (LIBCUDACXX_ENABLE_HIP)
   enable_language(HIP)
 endif ()
 
+# As part of the TheRock testing process, we need the source directory within the build folder
+# since we need to configure, build and run the tests from within the tester using lit.
+# The reason for this is that lit cannot seperately generate binaries in the build step
+# and execute them in the tester but directly executes and deletes any test binaries during the build.
+if(DEFINED THEROCK_TOOLCHAIN_ROOT)
+  file(COPY "${CMAKE_CURRENT_SOURCE_DIR}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
+
 option(LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS "Enable libhip++ tests." ON)
 if (LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS)
   enable_testing()
