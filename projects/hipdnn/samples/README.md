@@ -3,10 +3,12 @@
 ## How to Build
 
 1. **Prerequisites:**
-   - Build and install hipDNN following the [Building documentation](../docs/Building.md)
-   - Ensure ROCm is installed (typically in `/opt/rocm`)
+
+   - Follow the instructions in [Building.md](../docs/Building.md) to install the needed dependencies, compilers, and libraries needed for building hipDNN projects. Specifically:
+     * CMake
+     * Ninja
+     * ROCm / TheRock
    - A ROCm-compatible GPU is required to run the samples
-   - Have `ninja` build tool available: `apt install ninja-build`
 
 2. **Build Samples:** From this `samples` directory:
    ```bash

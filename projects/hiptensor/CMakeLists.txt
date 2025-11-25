@@ -2,7 +2,7 @@
  #
  # MIT License
  #
- # Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ # Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  #
  # Permission is hereby granted, free of charge, to any person obtaining a copy
  # of this software and associated documentation files (the "Software"), to deal
@@ -59,8 +59,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 #Set clang - driver mode to g++
 set(CLANG_DRIVER_MODE "--driver-mode=g++")
-set(CMAKE_CXX_FLAGS_DEBUG "-g -O1 -ggdb") # clang++ crashes with -O0
-set(CMAKE_CXX_FLAGS_MINSIZEREL "-O2 -DNDEBUG") # clang++ failed to build the project with the default -Os
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O1 -ggdb")           # clang++ crashes with -O0
+set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -O2 -DNDEBUG") # clang++ failed to build the project with the default -Os
 
 # Project options
 if( CMAKE_PROJECT_NAME STREQUAL "hiptensor" )
@@ -207,7 +207,7 @@ if(HIPTENSOR_BUILD_SAMPLES)
 endif()
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "2.1.0" )
+set ( VERSION_STRING "2.2.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # configure a header file to pass the CMake version settings to the source

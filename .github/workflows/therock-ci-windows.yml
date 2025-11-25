@@ -17,8 +17,8 @@ jobs:
   therock-build-windows:
     name: Build
     runs-on: azure-windows-scale-rocm
-    # Skip hipDNN build on Windows since it's not supported yet https://github.com/ROCm/TheRock/issues/1822
-    if: ${{ !contains(inputs.project_to_test, 'hipdnn') }}
+    # Skip hipDNN & plugin build on Windows since it's not supported yet https://github.com/ROCm/TheRock/issues/1822
+    if: ${{ !contains(inputs.project_to_test, 'hipdnn') && !contains(inputs.project_to_test, 'miopen_plugin') }}
     outputs:
       AMDGPU_FAMILIES: ${{ env.AMDGPU_FAMILIES }}
     permissions:
@@ -44,7 +44,7 @@ jobs:
 
        # We only want to build MIOpen HEAD against CK HEAD, not applicable for other projects
       - name: Checkout composable_kernel repository
-        if: ${{ contains(inputs.project_to_test, 'miopen') }}
+        if: ${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen_plugin') }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/composable_kernel"
@@ -55,7 +55,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 0ae0df6719a6e2096d221d6a61326d8494fa050b # 2025-11-07 commit
+          ref: efed3c3b10a5cce8578f58f8eb288582c26d18c4 # 2025-11-19 commit
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -105,6 +105,10 @@ jobs:
           git config --global core.longpaths true
           python ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
 
+      - name: Install external python deps
+        run: |
+          pip install -r TheRock/requirements-external.txt
+
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
@@ -151,7 +155,8 @@ jobs:
         uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 # v5.0.0
         with:
           aws-region: us-east-2
-          role-to-assume: arn:aws:iam::692859939525:role/therock-artifacts-external
+          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+          special-characters-workaround: true
 
       - name: Post Build Upload
         if: always()
@@ -165,8 +170,8 @@ jobs:
   therock-test-windows:
     name: "Test"
     needs: [therock-build-windows]
-    # Skip hipDNN tests on Windows since it's not supported yet https://github.com/ROCm/TheRock/issues/1822
-    if: ${{ !contains(inputs.project_to_test, 'hipdnn') }}
+    # Skip hipDNN & plugin tests on Windows since it's not supported yet https://github.com/ROCm/TheRock/issues/1822
+    if: ${{ !contains(inputs.project_to_test, 'hipdnn') && !contains(inputs.project_to_test, 'miopen_plugin') }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       project_to_test: ${{ inputs.project_to_test }}

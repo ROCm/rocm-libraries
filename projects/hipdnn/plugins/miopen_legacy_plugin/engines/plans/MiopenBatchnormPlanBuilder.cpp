@@ -193,6 +193,64 @@ void batchnormBwdFusionCheckTensors(
     }
 }
 
+void batchnormFwdFusionCheckTensors(
+    const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+{
+    using PM = hipdnn_sdk::data_objects::PointwiseMode;
+    static const std::unordered_set<PM> s_supportedActivations = {PM::RELU_FWD};
+
+    if(s_supportedActivations.count(actAttr.operation()) == 0)
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm fusion currently only supports RELU_FWD activation");
+    }
+
+    // in_0 must be the batchnorm inference output (forward path)
+    if(actAttr.in_0_tensor_uid() != bnInfAttr.y_tensor_uid())
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Activation in_0 must be the batchnorm inference output tensor (y)");
+    }
+
+    // Check for virtual tensors
+    const auto& bnInfTensorX
+        = miopen_utils::findTensorAttributes(tensorMap, bnInfAttr.x_tensor_uid());
+    const auto& bnInfTensorMean
+        = miopen_utils::findTensorAttributes(tensorMap, bnInfAttr.mean_tensor_uid());
+    const auto& bnInfTensorInvVar
+        = miopen_utils::findTensorAttributes(tensorMap, bnInfAttr.inv_variance_tensor_uid());
+    const auto& bnInfTensorScale
+        = miopen_utils::findTensorAttributes(tensorMap, bnInfAttr.scale_tensor_uid());
+    const auto& bnInfTensorBias
+        = miopen_utils::findTensorAttributes(tensorMap, bnInfAttr.bias_tensor_uid());
+    const auto& bnInfTensorY
+        = miopen_utils::findTensorAttributes(tensorMap, bnInfAttr.y_tensor_uid());
+
+    if(bnInfTensorX.virtual_() || bnInfTensorMean.virtual_() || bnInfTensorInvVar.virtual_()
+       || bnInfTensorScale.virtual_() || bnInfTensorBias.virtual_() || !bnInfTensorY.virtual_())
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Batchnorm inference input tensors must be non-virtual, output tensor must be virtual");
+    }
+
+    const auto& actTensorIn0
+        = miopen_utils::findTensorAttributes(tensorMap, actAttr.in_0_tensor_uid());
+    const auto& actTensorOut
+        = miopen_utils::findTensorAttributes(tensorMap, actAttr.out_0_tensor_uid());
+
+    if(!actTensorIn0.virtual_() || actTensorOut.virtual_())
+    {
+        throw hipdnn_plugin::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Activation input from batchnorm must be virtual, output must be non virtual");
+    }
+}
+
 bool batchnormBwdFusionCheckTensorsLogErrors(
     const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const hipdnn_sdk::data_objects::PointwiseAttributes& actAttr,
@@ -202,6 +260,23 @@ bool batchnormBwdFusionCheckTensorsLogErrors(
     try
     {
         batchnormBwdFusionCheckTensors(bnInfAttr, actAttr, bnBwdAttr, tensorMap);
+        return true;
+    }
+    catch(const hipdnn_plugin::HipdnnPluginException& e)
+    {
+        HIPDNN_LOG_INFO(e.what());
+        return false;
+    }
+}
+
+bool batchnormFwdFusionCheckTensorsLogErrors(
+    const hipdnn_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
+    const hipdnn_sdk::data_objects::PointwiseAttributes& actAttr,
+    const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>& tensorMap)
+{
+    try
+    {
+        batchnormFwdFusionCheckTensors(bnInfAttr, actAttr, tensorMap);
         return true;
     }
     catch(const hipdnn_plugin::HipdnnPluginException& e)
@@ -261,6 +336,36 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
 
         return true;
     }
+    case 2:
+    {
+        const auto& node0 = opGraph.getNodeWrapper(0);
+        const auto& node1 = opGraph.getNodeWrapper(1);
+
+        bool isFwdInferenceFirst
+            = node0.attributesType()
+              == hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes;
+        bool isPointwiseSecond = node1.attributesType()
+                                 == hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes;
+
+        if(!(isFwdInferenceFirst && isPointwiseSecond))
+        {
+            HIPDNN_LOG_INFO(
+                "Batchnorm plan builder is not applicable for this graph node order and types");
+            return false;
+        }
+
+        if(!batchnormFwdFusionCheckTensorsLogErrors(
+               node0.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>(),
+               node1.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>(),
+               opGraph.getTensorMap()))
+        {
+            return false;
+        }
+
+        HIPDNN_LOG_INFO("Batchnorm plan builder applicable for batchnorm inference + "
+                        "activation fusion");
+        return true;
+    }
     case 3:
     {
         // batchnorm inference -> activation -> batchnorm backward
@@ -284,9 +389,9 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     }
     default:
     {
-        HIPDNN_LOG_INFO(
-            "Batchnorm plan builder is applicable only for 1 or 3 node graphs. Graph has {} nodes",
-            opGraph.nodeCount());
+        HIPDNN_LOG_INFO("Batchnorm plan builder is applicable only for 1, 2 or 3 node graphs. "
+                        "Graph has {} nodes",
+                        opGraph.nodeCount());
         return false;
     }
     }
@@ -353,6 +458,22 @@ void buildPlanFusedBackwardsActivation([[maybe_unused]] const HipdnnEnginePlugin
     executionContext.setPlan(std::move(plan));
 }
 
+void buildPlanFusedFwdInferenceActivation([[maybe_unused]] const HipdnnEnginePluginHandle& handle,
+                                          const hipdnn_plugin::IGraph& opGraph,
+                                          HipdnnEnginePluginExecutionContext& executionContext)
+{
+    const auto& node0 = opGraph.getNodeWrapper(0);
+    const auto& node1 = opGraph.getNodeWrapper(1);
+
+    const auto& fwdInference
+        = node0.attributesAs<hipdnn_sdk::data_objects::BatchnormInferenceAttributes>();
+    const auto& activation = node1.attributesAs<hipdnn_sdk::data_objects::PointwiseAttributes>();
+
+    BatchnormFwdInferenceParams params(fwdInference, activation, opGraph.getTensorMap());
+    auto plan = std::make_unique<BatchnormFwdInferencePlan>(std::move(params));
+    executionContext.setPlan(std::move(plan));
+}
+
 } // namespace
 
 void MiopenBatchnormPlanBuilder::buildPlan(
@@ -360,6 +481,12 @@ void MiopenBatchnormPlanBuilder::buildPlan(
     const hipdnn_plugin::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
+    if(opGraph.nodeCount() == 2)
+    {
+        HIPDNN_LOG_INFO("Building batchnorm inference + activation fusion plan");
+        buildPlanFusedFwdInferenceActivation(handle, opGraph, executionContext);
+        return;
+    }
     if(opGraph.nodeCount() == 3)
     {
         HIPDNN_LOG_INFO(

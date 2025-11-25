@@ -67,6 +67,7 @@ static inline auto MakeFwdCtxAndProblem(miopenHandle_t handle,
 
     auto ctx = ExecutionContext{&miopen::deref(handle)};
     problem.SetupFloats(ctx);
+    problem.SetupComputeType(ctx);
     return std::make_tuple(std::move(ctx), std::move(problem));
 }
 
@@ -86,6 +87,7 @@ static inline auto MakeBwdCtxAndProblem(miopenHandle_t handle,
 
     auto ctx = ExecutionContext{&miopen::deref(handle)};
     problem.SetupFloats(ctx);
+    problem.SetupComputeType(ctx);
     return std::make_tuple(std::move(ctx), std::move(problem));
 }
 
@@ -111,6 +113,7 @@ static inline auto MakeWrWCtxAndProblem(miopenHandle_t handle,
 
     auto ctx = ExecutionContext{&miopen::deref(handle)};
     problem.SetupFloats(ctx);
+    problem.SetupComputeType(ctx);
     return std::make_tuple(std::move(ctx), std::move(problem));
 }
 
