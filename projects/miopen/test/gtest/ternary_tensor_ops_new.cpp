@@ -23,3 +23,27 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include "gtest_base.hpp"
+#include "gtest_common.hpp"
+
+struct TernaryTensorOpsTestCase
+{
+    std::vector<size_t> tensorlens_ac;
+    std::vector<size_t> tensorlens_b;
+    std::vector<int64_t> offsets;
+    std::vector<size_t> stride_a;
+    std::vector<size_t> stride_b;
+    std::vector<size_t> stride_c;
+    std::vector<float> alphabeta;
+    bool packed;
+    miopenTensorOp_t operation;
+
+    // friend std::ostream& operator<<(std::ostream& os, const TernaryTensorOpsTestCase& tc) {
+    //     return os << "AC lens:" << tensor
+    // }
+};
+
+template <typename T>
+struct TensorOpsCommon : public GTESTBase, public testing::TestWithParam<TernaryTensorOpsTestCase>
+{
+};

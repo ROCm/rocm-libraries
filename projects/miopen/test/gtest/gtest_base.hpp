@@ -23,3 +23,14 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+
+class GTESTBase
+{
+public:
+    virtual void runOptimizedGPU() = 0;
+    virtual void runNaiveGPU()     = 0;
+    virtual void runOptimizedCPU() = 0;
+    virtual void runNaiveCPU()     = 0;
+
+    virtual void runTest() = 0;
+};
