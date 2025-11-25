@@ -865,11 +865,6 @@ namespace GEMMDriverTest
             else
                 Throw<FatalError>("Invalid type.");
         }
-
-        void GPU_SwizzleScaledGEMMMXF4TN(int  waveK,
-                                         bool loadLDSScaleA,
-                                         bool loadLDSScaleB,
-                                         int  unrollK);
     };
 
     class GEMMTestGPU : public BaseGEMMContextFixture<>
