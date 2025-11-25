@@ -28,6 +28,7 @@
 #include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/HoistLoopInvariant.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -92,8 +93,27 @@ TEST_CASE("HoistLoopInvariant independent",
     graph0.control.addElement(Body{}, {forLoop}, {loopBody});
     graph0.control.addElement(Sequence{}, {loopBody}, {assignInvariant});
 
-    std::string dotOutput = graph0.toDOT(true);
-    writeDotToFile(dotOutput, "hoist_loop_invariant_independent.dot");
+    std::string dotOutputBefore = graph0.toDOT(true);
+    writeDotToFile(dotOutputBefore, "hoist_loop_invariant_independent_before.dot");
+
+    // Apply the HoistLoopInvariant transformation
+    kg::HoistLoopInvariant transform;
+    auto                   graph1 = transform.apply(graph0);
+
+    std::string dotOutputAfter = graph1.toDOT(true);
+    writeDotToFile(dotOutputAfter, "hoist_loop_invariant_independent_after.dot");
+
+    // Verify that the assign node was hoisted before the loop
+    // The assignInvariant node should now have a sequence edge to the forLoop
+    auto assignOutputs
+        = graph1.control.getOutputNodeIndices<Sequence>(assignInvariant).to<std::vector>();
+    REQUIRE(std::find(assignOutputs.begin(), assignOutputs.end(), forLoop) != assignOutputs.end());
+
+    // Verify that assignInvariant is no longer inside the loop body
+    auto loopBodyChildren
+        = graph1.control.depthFirstVisit(loopBody, Graph::Direction::Downstream).to<std::vector>();
+    REQUIRE(std::find(loopBodyChildren.begin(), loopBodyChildren.end(), assignInvariant)
+            == loopBodyChildren.end());
 }
 
 TEST_CASE("HoistLoopInvariant dependent", "[kernel-graph][hoist-loop-invariant][graph-transforms]")
@@ -133,6 +153,25 @@ TEST_CASE("HoistLoopInvariant dependent", "[kernel-graph][hoist-loop-invariant][
     graph0.control.addElement(Body{}, {forLoop}, {loopBody});
     graph0.control.addElement(Sequence{}, {loopBody}, {assignDependent});
 
-    std::string dotOutput = graph0.toDOT(true);
-    writeDotToFile(dotOutput, "hoist_loop_invariant_dependent.dot");
+    std::string dotOutputBefore = graph0.toDOT(true);
+    writeDotToFile(dotOutputBefore, "hoist_loop_invariant_dependent_before.dot");
+
+    // Apply the HoistLoopInvariant transformation
+    kg::HoistLoopInvariant transform;
+    auto                   graph1 = transform.apply(graph0);
+
+    std::string dotOutputAfter = graph1.toDOT(true);
+    writeDotToFile(dotOutputAfter, "hoist_loop_invariant_dependent_after.dot");
+
+    // Verify that the assign node was NOT hoisted because it depends on the loop variable
+    // The assignDependent node should still be inside the loop body
+    auto loopBodyChildren
+        = graph1.control.depthFirstVisit(loopBody, Graph::Direction::Downstream).to<std::vector>();
+    REQUIRE(std::find(loopBodyChildren.begin(), loopBodyChildren.end(), assignDependent)
+            != loopBodyChildren.end());
+
+    // Verify that assignDependent does NOT have a direct sequence edge to the forLoop
+    auto assignOutputs
+        = graph1.control.getOutputNodeIndices<Sequence>(assignDependent).to<std::vector>();
+    REQUIRE(std::find(assignOutputs.begin(), assignOutputs.end(), forLoop) == assignOutputs.end());
 }
