@@ -320,7 +320,6 @@ bool IsCKApplicable(const ProblemDescriptionType& problem)
     const auto args = CKArgsType{problem};
 
     const auto ptrs = DeviceOpType::GetInstances();
-
     return std::any_of(
         ptrs.begin(), ptrs.end(), [&args](auto& ptr) { return args.IsSupportedBy(ptr); });
 }
