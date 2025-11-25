@@ -18,10 +18,8 @@ except ImportError as e:
     try:
         from .hipdnn_frontend_python import *
     except ImportError:
-        # Restore original flags before raising error
-        sys.setdlopenflags(_original_flags)
         raise ImportError(
-            "Could not import the hipdnn_frontend compiled extension. "
+            "Could not import the hipdnn_frontend_python compiled extension. "
             "Please ensure the package is properly installed.\n"
             f"Original error: {e}"
         )

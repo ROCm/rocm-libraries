@@ -14,7 +14,6 @@ ext_modules = [
         ],
         include_dirs=[
             np.get_include(),  # Include NumPy headers
-            'path/to/hipdnn_frontend/include',  # Adjust this path as necessary
         ],
         language='c++',
         extra_compile_args=['-std=c++17'],  # Use C++17 standard
