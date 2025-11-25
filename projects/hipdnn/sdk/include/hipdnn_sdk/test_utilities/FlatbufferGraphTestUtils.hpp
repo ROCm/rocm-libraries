@@ -16,10 +16,10 @@ namespace hipdnn_sdk::test_utilities
 
 inline flatbuffers::FlatBufferBuilder createEmptyValidGraph()
 {
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
     flatbuffers::FlatBufferBuilder builder;
-    auto graphOffset = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
+    auto graphOffset = data_objects::CreateGraphDirect(builder,
                                                                    "test",
                                                                    data_objects::DataType::FLOAT,
                                                                    data_objects::DataType::HALF,
@@ -37,18 +37,18 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferenceGraph(
     data_objects::DataType computeDataType = data_objects::DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
 
     std::vector<int64_t> derivedStrides = utilities::getDerivedShape(strides);
     std::vector<int64_t> derivedDims = utilities::getDerivedShape(dims);
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 2, "y", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder,
         3,
         "scale",
@@ -56,7 +56,7 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferenceGraph(
         &derivedStrides,
         &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder,
         4,
         "bias",
@@ -64,7 +64,7 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferenceGraph(
         &derivedStrides,
         &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder,
         5,
         "est_mean",
@@ -72,7 +72,7 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferenceGraph(
         &derivedStrides,
         &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder,
         6,
         "est_variance",
@@ -81,7 +81,7 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferenceGraph(
         &derivedDims));
 
     auto bnormAttributes
-        = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(builder,
+        = data_objects::CreateBatchnormInferenceAttributes(builder,
                                                                        1, // x uid
                                                                        5, // mean uid
                                                                        6, // inv_variance uid
@@ -90,16 +90,16 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferenceGraph(
                                                                        2 // y uid
         );
 
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_sdk::data_objects::CreateNodeDirect(
+    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
+    auto node = data_objects::CreateNodeDirect(
         builder,
         "batchnorm",
         computeDataType,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
+        data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnormAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
+    auto graphOffset = data_objects::CreateGraphDirect(builder,
                                                                    "test",
                                                                    data_objects::DataType::FLOAT,
                                                                    data_objects::DataType::HALF,
@@ -119,39 +119,39 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormBwdGraph(
     data_objects::DataType meanVarianceDataType = data_objects::DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
 
     std::vector<int64_t> derivedDims = utilities::getDerivedShape(dims);
     std::vector<int64_t> derivedStrides = utilities::generateStrides(derivedDims);
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 2, "dy", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 3, "dx", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 4, "scale", scaleBiasDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 5, "dscale", scaleBiasDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 6, "dbias", scaleBiasDataType, &derivedStrides, &derivedDims));
 
     if(hasOptionalAttributes)
     {
-        tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
             builder, 7, "mean", meanVarianceDataType, &derivedStrides, &derivedDims));
 
-        tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
             builder, 8, "inv_variance", meanVarianceDataType, &derivedStrides, &derivedDims));
     }
 
-    auto bnormAttributes = hipdnn_sdk::data_objects::CreateBatchnormBackwardAttributes(
+    auto bnormAttributes = data_objects::CreateBatchnormBackwardAttributes(
         builder,
         2, // dy_tensor_uid
         1, // x_tensor_uid
@@ -166,16 +166,16 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormBwdGraph(
         6 // dbias_tensor_uid
     );
 
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_sdk::data_objects::CreateNodeDirect(
+    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
+    auto node = data_objects::CreateNodeDirect(
         builder,
         "batchnorm_bwd",
         data_objects::DataType::FLOAT,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
+        data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnormAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
+    auto graphOffset = data_objects::CreateGraphDirect(builder,
                                                                    "test",
                                                                    data_objects::DataType::FLOAT,
                                                                    data_objects::DataType::HALF,
@@ -193,37 +193,37 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormFwdInferActGraph(
     data_objects::DataType intermediateDataType = data_objects::DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
 
     std::vector<int64_t> derivedDims = utilities::getDerivedShape(dims);
     std::vector<int64_t> derivedStrides = utilities::generateStrides(derivedDims);
 
     // inputs
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 2, "scale", intermediateDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 3, "bias", intermediateDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 4, "mean", intermediateDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 5, "inv_variance", intermediateDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 6, "y", inputDataType, &strides, &dims, true));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 7, "Dy", inputDataType, &strides, &dims, false)); // is_virtual = true
 
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
 
     // Node 0: Batchnorm Inference
-    auto bnInfAttributes = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(
+    auto bnInfAttributes = data_objects::CreateBatchnormInferenceAttributes(
         builder,
         1, // x_tensor_uid
         4, // mean_tensor_uid
@@ -233,17 +233,17 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormFwdInferActGraph(
         6 // y_tensor_uid (BN_Y - virtual)
     );
 
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(data_objects::CreateNodeDirect(
         builder,
         "batchnorm_inference",
         intermediateDataType,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
+        data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttributes.Union()));
 
     // Node 1: Pointwise (RELU_FWD)
-    auto pointwiseAttributes = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+    auto pointwiseAttributes = data_objects::CreatePointwiseAttributes(
         builder,
-        hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+        data_objects::PointwiseMode::RELU_FWD,
         std::nullopt, // relu_lower_clip
         std::nullopt, // relu_upper_clip
         std::nullopt, // relu_lower_clip_slope
@@ -254,14 +254,14 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormFwdInferActGraph(
         7 // out_0_tensor_uid (Dy - not virtual)
     );
 
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(data_objects::CreateNodeDirect(
         builder,
         "relu_fwd",
         intermediateDataType,
-        hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        data_objects::NodeAttributes::PointwiseAttributes,
         pointwiseAttributes.Union()));
 
-    auto graphOffset = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
+    auto graphOffset = data_objects::CreateGraphDirect(builder,
                                                                    "test",
                                                                    data_objects::DataType::FLOAT,
                                                                    data_objects::DataType::FLOAT,
@@ -280,54 +280,54 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
     data_objects::DataType intermediateDataType = data_objects::DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
 
     std::vector<int64_t> derivedDims = utilities::getDerivedShape(dims);
     std::vector<int64_t> derivedStrides = utilities::generateStrides(derivedDims);
 
     // inputs
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 2, "scale", intermediateDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 3, "bias", intermediateDataType, &derivedStrides, &derivedDims));
 
     if(hasOptionalAttributes)
     {
-        tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
             builder, 4, "mean", intermediateDataType, &derivedStrides, &derivedDims));
 
-        tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
             builder, 5, "inv_variance", intermediateDataType, &derivedStrides, &derivedDims));
     }
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 6, "dy", inputDataType, &strides, &dims));
 
     // output tensors
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 7, "dx", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 8, "dscale", intermediateDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 9, "dbias", intermediateDataType, &derivedStrides, &derivedDims));
 
     // virtual tensors
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 10, "BN_Y", inputDataType, &strides, &dims, true)); // is_virtual = true
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 11, "DX_drelu", inputDataType, &strides, &dims, true)); // is_virtual = true
 
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
 
     // Node 0: Batchnorm Inference
-    auto bnInfAttributes = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(
+    auto bnInfAttributes = data_objects::CreateBatchnormInferenceAttributes(
         builder,
         1, // x_tensor_uid
         hasOptionalAttributes ? 4 : 0, // mean_tensor_uid
@@ -337,17 +337,17 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
         10 // y_tensor_uid (BN_Y - virtual)
     );
 
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(data_objects::CreateNodeDirect(
         builder,
         "batchnorm_inference",
         intermediateDataType,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
+        data_objects::NodeAttributes::BatchnormInferenceAttributes,
         bnInfAttributes.Union()));
 
     // Node 1: Pointwise (RELU_BWD)
-    auto pointwiseAttributes = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+    auto pointwiseAttributes = data_objects::CreatePointwiseAttributes(
         builder,
-        hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
+        data_objects::PointwiseMode::RELU_BWD,
         std::nullopt, // relu_lower_clip
         std::nullopt, // relu_upper_clip
         std::nullopt, // relu_lower_clip_slope
@@ -358,15 +358,15 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
         11 // out_0_tensor_uid (DX_drelu - virtual)
     );
 
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(data_objects::CreateNodeDirect(
         builder,
         "relu_bwd",
         intermediateDataType,
-        hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        data_objects::NodeAttributes::PointwiseAttributes,
         pointwiseAttributes.Union()));
 
     // Node 2: Batchnorm Backward
-    auto bnBwdAttributes = hipdnn_sdk::data_objects::CreateBatchnormBackwardAttributes(
+    auto bnBwdAttributes = data_objects::CreateBatchnormBackwardAttributes(
         builder,
         11, // dy_tensor_uid (DX_drelu)
         1, // x_tensor_uid
@@ -381,14 +381,14 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
         9 // dbias_tensor_uid
     );
 
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+    nodes.push_back(data_objects::CreateNodeDirect(
         builder,
         "batchnorm_backward",
         intermediateDataType,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
+        data_objects::NodeAttributes::BatchnormBackwardAttributes,
         bnBwdAttributes.Union()));
 
-    auto graphOffset = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
+    auto graphOffset = data_objects::CreateGraphDirect(builder,
                                                                    "test",
                                                                    data_objects::DataType::FLOAT,
                                                                    data_objects::DataType::FLOAT,

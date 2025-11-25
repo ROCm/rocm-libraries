@@ -19,7 +19,7 @@ class CpuFpReferenceConvolution
 {
 public:
     // Check if this CPU implementation supports the given node configuration
-    static bool isApplicable(const hipdnn_sdk::data_objects::Node& node)
+    static bool isApplicable(const data_objects::Node& node)
     {
         using namespace hipdnn_sdk::data_objects;
 
