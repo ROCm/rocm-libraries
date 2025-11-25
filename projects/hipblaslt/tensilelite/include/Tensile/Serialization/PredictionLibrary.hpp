@@ -106,6 +106,8 @@ namespace TensileLite
                                 .workgroup_mapping = solution->sizeMapping.workGroupMapping,
                                 .cache_hints_a = solution->sizeMapping.nonTemporalA,
                                 .cache_hints_b = solution->sizeMapping.nonTemporalB,
+                                .workspace_size = std::numeric_limits<size_t>::max(),
+                                .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
                             };
 
                             lib.origami_config_list.emplace_back(origami_config);
