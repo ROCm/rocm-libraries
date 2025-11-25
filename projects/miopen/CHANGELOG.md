@@ -2,6 +2,8 @@
 # Change Log for MIOpen
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
+## (Unreleased) MIOpen 3.5.1 for ROCm 8.0.0
+
 ## MIOpen 3.5.1 for ROCm 7.2.0
 ### Changed
 * Ported several OCL kernels to HIP
