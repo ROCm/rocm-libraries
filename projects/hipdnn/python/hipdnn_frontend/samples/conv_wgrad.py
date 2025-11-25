@@ -11,8 +11,6 @@ def run_convolution_wgrad():
     Computes dw (weight gradient) given dy (output gradient) and x (input).
     """
 
-    print("WARNING: This sample will crash if the miopen DB is not initialized. To avoid this, run a C++ sample first to initialize the DB.\n")
-    
     print("=" * 70)
     print("Convolution Backward Weights (Wgrad) Test")
     print("=" * 70)
