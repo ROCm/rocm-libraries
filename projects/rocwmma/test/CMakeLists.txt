@@ -36,7 +36,7 @@ if(ROCWMMA_CODE_COVERAGE)
     add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
     add_link_options(-fprofile-instr-generate)
 endif()
-add_link_options(-mcmodel=large)
+add_link_options(-mcmodel=large -Wl,--gc-sections)
 
 # Test/benchmark requires additional dependencies
 if(ROCWMMA_USE_SYSTEM_GOOGLETEST)
@@ -67,6 +67,12 @@ else()
 
   # Fetch the content using default details
   set(ROCM_DISABLE_CHECKS TRUE)
+  if(WIN32 AND BUILD_SHARED_LIBS_OLD)
+    # We build gtest as a static lib, but the test binaries are built as shared
+    # libraries.  Force gtest to link against a shared (DLL) version of the C
+    # run-time library.
+    set(gtest_force_shared_crt ON CACHE BOOL "Use shared (DLL) run-time library even when Google Test is built as static lib." FORCE)
+  endif()
   FetchContent_MakeAvailable(googletest)
   set(ROCM_DISABLE_CHECKS FALSE)
 
