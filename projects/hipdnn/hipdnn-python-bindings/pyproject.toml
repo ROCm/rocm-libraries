@@ -59,6 +59,7 @@ wheel.packages = ["python/hipdnn_frontend"]
 [tool.scikit-build.cmake.define]
 # Pass any additional CMake definitions if needed
 CMAKE_PREFIX_PATH = "${CMAKE_PREFIX_PATH}"
+CMAKE_C_COMPILER = "/opt/rocm/llvm/bin/clang"
 CMAKE_CXX_COMPILER = "/opt/rocm/llvm/bin/clang++"
 
 
