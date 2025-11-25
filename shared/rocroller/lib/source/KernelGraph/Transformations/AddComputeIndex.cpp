@@ -60,8 +60,8 @@ namespace rocRoller::KernelGraph
 
     bool operator<(const ComputeIndexChainSpecification& a, const ComputeIndexChainSpecification& b)
     {
-        return std::tie(a.target, a.coords, a.location, a.direction)
-               < std::tie(b.target, b.coords, b.location, b.direction);
+         return std::tie(a.target, a.coords, a.location, a.direction, a.forLoop, a.replaceWithScope, a.isStorePartOfGlobalToLDSOp)
+               < std::tie(b.target, b.coords, b.location, b.direction, b.forLoop, b.replaceWithScope, b.isStorePartOfGlobalToLDSOp);
     }
 
     struct ComputeIndexChain
@@ -568,60 +568,6 @@ namespace rocRoller::KernelGraph
         }
 
         /**
-         * @brief Identify KLoop/KLoopTail pairs that can share compute index chains.
-         *
-         * @param kgraph
-         * @param chains Map of chain specifications to candidates
-         * @return Map from KLoop specs to their corresponding KLoopTail specs
-         */
-        std::map<ComputeIndexChainSpecification, ComputeIndexChainSpecification>
-            IdentifySharedKLoopKLoopTailChains(
-                KernelGraph const&                                                kgraph,
-                std::map<ComputeIndexChainSpecification, std::vector<int>> const& chains)
-        {
-            std::map<ComputeIndexChainSpecification, ComputeIndexChainSpecification>
-                kLoopToKLoopTailSpec;
-
-            // Find all KLoop specs and check if they have corresponding KLoopTail specs
-            for(auto const& [spec, candidates] : chains)
-            {
-                auto maybeForLoop = kgraph.control.get<ForLoopOp>(spec.location);
-                if(!maybeForLoop || maybeForLoop->loopName != rocRoller::KLOOP)
-                    continue;
-
-                // Use helper function to find the corresponding KLoopTail in the graph
-                auto maybeKLoopTail = FindCorrespondingKLoopTail(kgraph, spec.location);
-                if(!maybeKLoopTail)
-                    continue;
-
-                // Look for a spec with this KLoopTail location and matching target/coords
-                for(auto const& [otherSpec, otherCandidates] : chains)
-                {
-                    if(otherSpec.location != *maybeKLoopTail)
-                        continue;
-
-                    // Check if they share the same target and coordinates
-                    if(otherSpec.target == spec.target && otherSpec.coords == spec.coords)
-                    {
-                        Log::debug("Identified shared KLoop/KLoopTail chain: target={}, KLoop={}, "
-                                   "KLoopTail={}",
-                                   spec.target,
-                                   spec.location,
-                                   otherSpec.location);
-
-                        // Both loops will compute their full chains including ForLoop offsets.
-                        // The loop-invariant parts (buffer descriptors, strides) will be
-                        // computed in the hoisted chain and reused.
-                        kLoopToKLoopTailSpec[spec] = otherSpec;
-                        break; // Found the matching KLoopTail spec
-                    }
-                }
-            }
-
-            return kLoopToKLoopTailSpec;
-        }
-
-        /**
          * @brief Add Deallocate nodes for arguments used exclusively by hoisted chains.
          *
          * When buffer descriptors are created in hoisted chains, their constituent kernel
@@ -631,27 +577,43 @@ namespace rocRoller::KernelGraph
          * enable earlier register reuse, reducing SGPR pressure.
          *
          * @param kgraph
-         * @param kLoopToKLoopTailSpec Map from KLoop specs to their KLoopTail counterparts
-         * @param hoistedArgNames Set of argument names used by hoisted chains
-         * @param argToChainBottom Map from argument names to the bottom control node of hoisted chains
-         * @param chains All ComputeIndex chain specifications (to check for other usages)
+         * @param builtChains Map of chain specifications to their built chains
          */
         void DeallocateHoistedArguments(
-            KernelGraph& kgraph,
-            std::map<ComputeIndexChainSpecification, ComputeIndexChainSpecification> const&
-                                                                              kLoopToKLoopTailSpec,
-            std::set<std::string> const&                                      hoistedArgNames,
-            std::map<std::string, int> const&                                 argToChainBottom,
-            std::map<ComputeIndexChainSpecification, std::vector<int>> const& chains)
+            KernelGraph&                                                      kgraph,
+            std::map<ComputeIndexChainSpecification, ComputeIndexChain> const& builtChains)
         {
-            // Build set of shared KLoop/KLoopTail specs
-            std::set<ComputeIndexChainSpecification> sharedKLoopSpecs;
-            for(auto const& [kLoopSpec, kLoopTailSpec] : kLoopToKLoopTailSpec)
+            // Build map of hoisted KLoop specs to their corresponding KLoopTail specs
+            std::map<ComputeIndexChainSpecification, std::set<ComputeIndexChainSpecification>>
+                hoistedToKLoopTailSpecs;
+
+            for(auto const& [spec, chain] : builtChains)
             {
-                sharedKLoopSpecs.insert(kLoopSpec);
-                sharedKLoopSpecs.insert(kLoopTailSpec);
+                // A spec is a hoisted KLoop if it has a forLoop but location != forLoop
+                if(spec.forLoop > 0 && spec.location != spec.forLoop)
+                {
+                    auto maybeForLoopOp = kgraph.control.get<ForLoopOp>(spec.forLoop);
+                    if(maybeForLoopOp && maybeForLoopOp->loopName == rocRoller::KLOOP)
+                    {
+                        // Find the corresponding KLoopTail
+                        auto maybeKLoopTail = FindCorrespondingKLoopTail(kgraph, spec.forLoop);
+                        if(maybeKLoopTail)
+                        {
+                            // Find KLoopTail specs at this location with matching target
+                            for(auto const& [otherSpec, otherChain] : builtChains)
+                            {
+                                if(otherSpec.location == *maybeKLoopTail &&
+                                   otherSpec.target == spec.target)
+                                {
+                                    hoistedToKLoopTailSpecs[spec].insert(otherSpec);
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
+            // Build argNameToBuffers map once for all pairs
             std::map<std::string, std::set<int>> argNameToBuffers;
             for(auto userNode : kgraph.coordinates.getNodes<User>())
             {
@@ -678,148 +640,25 @@ namespace rocRoller::KernelGraph
                       return false;
                   };
 
-            Log::debug("Checking {} arguments for early deallocation", hoistedArgNames.size());
-
-            for(auto const& argName : hoistedArgNames)
+            // Process deallocation for each KLoop/KLoopTail pair independently
+            for(auto const& [hoistedSpec, kLoopTailSpecs] : hoistedToKLoopTailSpecs)
             {
-                auto const& buffersUsingThisArg = argNameToBuffers[argName];
+                // Check if spec contains ForLoop coordinates (loop-variant)
+                auto forLoopCoords = filterCoordinates<ForLoop>(hoistedSpec.coords, kgraph);
+                if(!forLoopCoords.empty())
+                    continue; // Skip loop-variant specs
 
-                // Check if any non-hoisted spec uses this argument
-                auto nonHoistedSpecUsesArg
-                    = std::any_of(chains.begin(), chains.end(), [&](auto const& entry) {
-                          auto const& [spec, candidates] = entry;
-                          if(sharedKLoopSpecs.contains(spec))
-                              return false; // Skip hoisted specs
+                // Build exclusion set for this pair only
+                std::set<ComputeIndexChainSpecification> pairExcludedSpecs;
+                pairExcludedSpecs.insert(hoistedSpec);
+                pairExcludedSpecs.insert(kLoopTailSpecs.begin(), kLoopTailSpecs.end());
 
-                          if(specUsesBuffers(spec, buffersUsingThisArg))
-                          {
-                              Log::debug("Argument '{}' used by non-hoisted spec (target={})",
-                                         argName,
-                                         spec.target);
-                              return true;
-                          }
-                          return false;
-                      });
+                // Track arguments from this hoisted spec
+                std::set<std::string> pairArgNames;
+                std::map<std::string, int> pairArgToChainBottom;
 
-                if(!nonHoistedSpecUsesArg)
-                {
-                    Log::debug("  Decision: SAFE to early deallocate '{}'", argName);
-                    auto deallocate = kgraph.control.addElement(Deallocate{{argName}});
-                    kgraph.control.addElement(
-                        Sequence(), {argToChainBottom.at(argName)}, {deallocate});
-                    Log::debug("  Added Deallocate node for '{}' after control node {}",
-                               argName,
-                               argToChainBottom.at(argName));
-                }
-                else
-                {
-                    Log::debug("  Decision: NOT safe to early deallocate '{}' - used elsewhere",
-                               argName);
-                }
-            }
-        }
-
-        /**
-         * @brief Hoist loop-invariant portions of ComputeIndex chains for KLoop/KLoopTail pairs.
-         *
-         * When KLoop and KLoopTail have similar ComputeIndex chains, they often share
-         * loop-invariant parts (buffer descriptors, strides) but differ in loop-variant parts
-         * (iteration-dependent offsets from ForLoop coordinates). This function:
-         *
-         * 1. Identifies loop-invariant coordinates (non-ForLoop) for each KLoop/KLoopTail pair
-         * 2. Creates a "hoisted spec" containing only these loop-invariant coordinates
-         * 3. Places the hoisted chain at the common ancestor Scope (above both loops)
-         * 4. Tracks buffer arguments for potential early deallocation
-         *
-         * Both KLoop and KLoopTail still compute their full chains (including ForLoop offsets),
-         * but they reuse the buffer descriptors from the hoisted chain, reducing SGPR pressure.
-         *
-         * @param kgraph The kernel graph to modify
-         * @param kLoopToKLoopTailSpec Map from KLoop specs to their KLoopTail counterparts
-         * @param chains All ComputeIndex chain specifications
-         * @param bufferMap Buffer map for reusing buffer descriptors across chains
-         */
-        void HoistSharedKLoopKLoopTailChains(
-            KernelGraph& kgraph,
-            std::map<ComputeIndexChainSpecification, ComputeIndexChainSpecification> const&
-                                                                              kLoopToKLoopTailSpec,
-            std::map<ComputeIndexChainSpecification, std::vector<int>> const& chains,
-            BufferMap&                                                        bufferMap)
-        {
-            // Create hoisted specs: loop-invariant coordinates at common ancestor
-            std::map<ComputeIndexChainSpecification, ComputeIndexChainSpecification> hoistedSpecs;
-
-            for(auto const& [kLoopSpec, kLoopTailSpec] : kLoopToKLoopTailSpec)
-            {
-                Log::debug("Analyzing KLoop={} <-> KLoopTail={} pair for hoisting",
-                           kLoopSpec.location,
-                           kLoopTailSpec.location);
-
-                auto maybeCommonAncestor
-                    = FindCommonAncestorScope(kgraph, kLoopSpec.location, kLoopTailSpec.location);
-                if(!maybeCommonAncestor)
-                {
-                    Log::debug("  No common ancestor Scope found - skipping");
-                    continue;
-                }
-
-                // Filter out ForLoop coordinates (loop-variant)
-                auto forLoopCoords = filterCoordinates<ForLoop>(kLoopSpec.coords, kgraph);
-                std::vector<int> loopInvariantCoords;
-                for(auto coord : kLoopSpec.coords)
-                {
-                    if(!forLoopCoords.contains(coord))
-                        loopInvariantCoords.push_back(coord);
-                }
-
-                Log::debug("  Total coords: {}, ForLoop coords (loop-variant): {}, "
-                           "Loop-invariant coords: {}",
-                           kLoopSpec.coords.size(),
-                           forLoopCoords.size(),
-                           loopInvariantCoords.size());
-
-                if(!loopInvariantCoords.empty())
-                {
-                    Log::debug("  Creating hoisted spec with {} loop-invariant coordinates",
-                               loopInvariantCoords.size());
-
-                    ComputeIndexChainSpecification hoistedSpec = kLoopSpec;
-                    hoistedSpec.coords                         = loopInvariantCoords;
-                    hoistedSpec.location                       = *maybeCommonAncestor;
-                    hoistedSpec.forLoop                        = -1;
-                    hoistedSpec.replaceWithScope               = false;
-                    hoistedSpecs[kLoopSpec]                    = hoistedSpec;
-                }
-                else
-                {
-                    Log::debug("  No loop-invariant coords to hoist - skipping");
-                }
-            }
-
-            // Build all hoisted chains and track arguments for conditional deallocation
-            std::set<std::string>      hoistedArgNames;
-            std::map<std::string, int> argToChainBottom;
-
-            Log::debug("Building {} hoisted chains", hoistedSpecs.size());
-
-            for(auto const& [originalSpec, hoistedSpec] : hoistedSpecs)
-            {
-                Log::debug("Building hoisted chain: location={}, target={}, numCoords={}",
-                           hoistedSpec.location,
-                           hoistedSpec.target,
-                           hoistedSpec.coords.size());
-
-                auto const& candidates = chains.at(originalSpec);
-                auto        chain      = addComputeIndex(
-                    kgraph, candidates[0], Expression::literal(1u), hoistedSpec, bufferMap);
-
-                // Hoisted chains are always placed at a Scope (common ancestor), never at kernel root
-                AssertFatal(hoistedSpec.direction == GD::Upstream,
-                            "Hoisted chains must be Upstream (inserted before their location)");
-                insertBefore(kgraph, hoistedSpec.location, chain.top, chain.bottom);
-
-                // Track buffer arguments and chain bottoms
-                for(auto const& dc : chain.connections)
+                auto const& hoistedChain = builtChains.at(hoistedSpec);
+                for(auto const& dc : hoistedChain.connections)
                 {
                     for(auto userNode :
                         kgraph.coordinates.childNodes(dc.coordinate).to<std::vector>())
@@ -828,20 +667,74 @@ namespace rocRoller::KernelGraph
                         {
                             if(!user->argumentName.empty())
                             {
-                                hoistedArgNames.insert(user->argumentName);
-                                argToChainBottom[user->argumentName] = chain.bottom;
+                                pairArgNames.insert(user->argumentName);
+                                pairArgToChainBottom[user->argumentName] = hoistedChain.bottom;
                             }
                         }
                     }
                 }
+
+                // Update chain bottoms using only the paired KLoopTail specs
+                for(auto const& kLoopTailSpec : kLoopTailSpecs)
+                {
+                    auto const& kLoopTailChain = builtChains.at(kLoopTailSpec);
+                    for(auto const& dc : kLoopTailChain.connections)
+                    {
+                        for(auto userNode :
+                            kgraph.coordinates.childNodes(dc.coordinate).to<std::vector>())
+                        {
+                            if(auto user = kgraph.coordinates.get<User>(userNode))
+                            {
+                                if(!user->argumentName.empty() && pairArgNames.contains(user->argumentName))
+                                {
+                                    pairArgToChainBottom[user->argumentName] = kLoopTailChain.bottom;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Deallocate arguments for this pair
+                for(auto const& argName : pairArgNames)
+                {
+                    auto const& buffersUsingThisArg = argNameToBuffers[argName];
+
+                    // Check if any spec outside this pair uses this argument
+                    auto nonPairSpecUsesArg
+                        = std::any_of(builtChains.begin(), builtChains.end(), [&](auto const& entry) {
+                              auto const& [spec, chain] = entry;
+                              if(pairExcludedSpecs.contains(spec))
+                                  return false; // Skip this pair's specs
+
+                              if(specUsesBuffers(spec, buffersUsingThisArg))
+                              {
+                                  Log::debug("Argument '{}' used by non-pair spec (target={})",
+                                             argName,
+                                             spec.target);
+                                  return true;
+                              }
+                              return false;
+                          });
+
+                    if(!nonPairSpecUsesArg)
+                    {
+                        Log::debug("  Decision: SAFE to early deallocate '{}'", argName);
+                        auto deallocate = kgraph.control.addElement(Deallocate{{argName}});
+                        kgraph.control.addElement(
+                            Sequence(), {pairArgToChainBottom.at(argName)}, {deallocate});
+                        Log::debug("  Added Deallocate node for '{}' after control node {}",
+                                   argName,
+                                   pairArgToChainBottom.at(argName));
+                    }
+                    else
+                    {
+                        Log::debug("  Decision: NOT safe to early deallocate '{}' - used elsewhere",
+                                   argName);
+                    }
+                }
             }
-
-            Log::debug("Hoisting complete: {} unique arguments tracked", hoistedArgNames.size());
-
-            // Deallocate arguments used only by hoisted chains
-            DeallocateHoistedArguments(
-                kgraph, kLoopToKLoopTailSpec, hoistedArgNames, argToChainBottom, chains);
         }
+
     } // anonymous namespace
 
     /**
@@ -951,6 +844,38 @@ namespace rocRoller::KernelGraph
             auto hasForLoop    = !forLoopCoordinates.empty();
             auto hasUnroll     = !unrollCoordinates.empty();
             auto isUniformLoop = maybeForLoop && uniformForLoop(maybeForLoop, kgraph);
+
+            // Check if this is a KLoop with a corresponding KLoopTail - if so, hoist to common ancestor
+            if(maybeForLoop && hasForLoop && isUniformLoop)
+            {
+                auto maybeForLoopOp = kgraph.control.get<ForLoopOp>(*maybeForLoop);
+                if(maybeForLoopOp && maybeForLoopOp->loopName == rocRoller::KLOOP)
+                {
+                    auto maybeKLoopTail = FindCorrespondingKLoopTail(kgraph, *maybeForLoop);
+                    if(maybeKLoopTail)
+                    {
+                        auto maybeCommonAncestor = FindCommonAncestorScope(kgraph, *maybeForLoop, *maybeKLoopTail);
+                        if(maybeCommonAncestor)
+                        {
+                            log->debug("  staged as: KLoop with KLoopTail, hoisting to common ancestor {} "
+                                      "(KLoop={}, KLoopTail={})",
+                                      *maybeCommonAncestor,
+                                      *maybeForLoop,
+                                      *maybeKLoopTail);
+                            // Stage the hoisted version at common ancestor; skip original KLoop location
+                            stageChain(kgraph,
+                                      target,
+                                      candidate,
+                                      *maybeCommonAncestor,
+                                      GD::Upstream,
+                                      isStorePartOfGlobalToLDSOp,
+                                      *maybeForLoop,  // Preserve forLoop for increment attachment
+                                      true);          // replaceWithScope shares scope at common ancestor
+                            return;
+                        }
+                    }
+                }
+            }
 
             auto isReceiveTileLoop = false;
             if(maybeForLoop)
@@ -1079,15 +1004,12 @@ namespace rocRoller::KernelGraph
         KernelGraph commit(KernelGraph const& original) const
         {
             auto               kgraph = original;
-            std::map<int, int> scopes;
+            std::map<int, int> scopes;  // Maps location to actual scope node
+            std::map<int, int> serializationPoints;  // Maps location to last chain bottom for serialization
             BufferMap          bufferMap;
+            std::map<ComputeIndexChainSpecification, ComputeIndexChain> builtChains;
 
-            // Identify and hoist shared KLoop/KLoopTail chains
-            auto kLoopToKLoopTailSpec = IdentifySharedKLoopKLoopTailChains(kgraph, m_chains);
-            HoistSharedKLoopKLoopTailChains(kgraph, kLoopToKLoopTailSpec, m_chains, bufferMap);
-
-            // Build chains for each loop (including ForLoop-dependent offsets)
-            // Both KLoop and KLoopTail build full chains; bufferMap reuses hoisted buffers
+            // Build all chains and insert them into the graph
             for(auto const& [spec, candidates] : m_chains)
             {
                 ExpressionPtr step = Expression::literal(1u);
@@ -1120,19 +1042,22 @@ namespace rocRoller::KernelGraph
                         // is within the scope.
                         if(!scopes.contains(spec.location))
                         {
-                            scopes[spec.location] = replaceWith(
-                                kgraph, spec.location, kgraph.control.addElement(Scope()), false);
+                            auto newScope = kgraph.control.addElement(Scope());
+                            scopes[spec.location] = replaceWith(kgraph, spec.location, newScope, false);
+                            serializationPoints[spec.location] = scopes[spec.location];
                         }
+
                         auto scope = scopes[spec.location];
                         if(m_serializeComputeIndex)
                         {
-                            auto isScope = kgraph.control.get<Scope>(scope).has_value();
+                            auto insertionPoint = serializationPoints[spec.location];
+                            auto isScope = kgraph.control.get<Scope>(insertionPoint).has_value();
                             kgraph.control.addElement(isScope ? ControlEdge(Body())
                                                               : ControlEdge(Sequence()),
-                                                      {scope},
+                                                      {insertionPoint},
                                                       {chain.top});
                             kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
-                            scopes[spec.location] = chain.bottom;
+                            serializationPoints[spec.location] = chain.bottom;
                         }
                         else
                         {
@@ -1176,7 +1101,12 @@ namespace rocRoller::KernelGraph
                         kgraph.mapper.connect(candidate, dc.coordinate, dc.connectionSpec);
                     }
                 }
+
+                builtChains[spec] = chain;
             }
+
+            // Deallocate arguments used only by hoisted KLoop and KLoopTail chains
+            DeallocateHoistedArguments(kgraph, builtChains);
 
             return kgraph;
         }
