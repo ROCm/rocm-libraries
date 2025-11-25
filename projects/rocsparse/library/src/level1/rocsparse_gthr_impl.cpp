@@ -45,18 +45,17 @@ rocsparse_status rocsparse::gthr_strided_batched_template(rocsparse_handle     h
 
     // Check for valid handle
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
-    ROCSPARSE_CHECKARG_SIZE(2, nnz);
-    ROCSPARSE_CHECKARG_ENUM(8, idx_base);
+    ROCSPARSE_CHECKARG_SIZE(1, nnz);
 
     if(nnz == 0)
     {
         return rocsparse_status_success;
     }
 
-    // Check pointer arguments
-    ROCSPARSE_CHECKARG_POINTER(3, y);
-    ROCSPARSE_CHECKARG_POINTER(5, x_val);
-    ROCSPARSE_CHECKARG_POINTER(7, x_ind);
+    ROCSPARSE_CHECKARG_POINTER(2, y);
+    ROCSPARSE_CHECKARG_POINTER(3, x_val);
+    ROCSPARSE_CHECKARG_POINTER(4, x_ind);
+    ROCSPARSE_CHECKARG_ENUM(5, idx_base);
 
     // Stream
     hipStream_t stream = handle->stream;

@@ -26,7 +26,6 @@
 
 namespace rocsparse
 {
-
     template <typename T>
     ROCSPARSE_KERNEL(32)
     void assign_kernel(T* dest, T value)
@@ -37,15 +36,11 @@ namespace rocsparse
             dest[batch_index] = value;
         }
     }
-
 }
 
 template <typename T>
 rocsparse_status rocsparse::assign_async(int64_t n, T* dest, T value, hipStream_t stream)
 {
-    // Use a kernel instead of memcpy, because memcpy is synchronous if the source is not in
-    // pinned memory.
-    // Memset lacks a 64bit option, but would involve a similar implicit kernel anyways.
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
         rocsparse::assign_kernel, dim3(1, n), dim3(32), 0, stream, dest, value);
     return rocsparse_status_success;
@@ -53,23 +48,9 @@ rocsparse_status rocsparse::assign_async(int64_t n, T* dest, T value, hipStream_
 
 template rocsparse_status
     rocsparse::assign_async(int64_t n, int32_t* dest, int32_t value, hipStream_t stream);
+
 template rocsparse_status
     rocsparse::assign_async(int64_t n, int64_t* dest, int64_t value, hipStream_t stream);
-
-template <typename T>
-rocsparse_status rocsparse::assign_async(T* dest, T value, hipStream_t stream)
-{
-    // Use a kernel instead of memcpy, because memcpy is synchronous if the source is not in
-    // pinned memory.
-    // Memset lacks a 64bit option, but would involve a similar implicit kernel anyways.
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        rocsparse::assign_kernel, dim3(1, 1), dim3(32), 0, stream, dest, value);
-    return rocsparse_status_success;
-}
-
-template rocsparse_status rocsparse::assign_async(int32_t* dest, int32_t value, hipStream_t stream);
-
-template rocsparse_status rocsparse::assign_async(int64_t* dest, int64_t value, hipStream_t stream);
 
 rocsparse_status rocsparse::assign_max_async(int64_t             n,
                                              rocsparse_indextype indextype,

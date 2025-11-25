@@ -41,29 +41,6 @@ namespace rocsparse
         array[idx] = rocsparse::conj(array[idx]);
     }
 
-    template <typename T>
-    __device__ T* load(uint32_t index, T* p, int64_t dist)
-    {
-        return p + dist * index;
-    }
-    template <typename T>
-    __device__ const T* load(uint32_t index, const T* p, int64_t dist)
-    {
-        return p + dist * index;
-    }
-
-    template <typename T>
-    __device__ T* load(uint32_t index, T** p, int64_t dist)
-    {
-        return *(p + dist * index);
-    }
-
-    template <typename T>
-    __device__ const T* load(uint32_t index, const T** p, int64_t dist)
-    {
-        return *(p + dist * index);
-    }
-
     template <uint32_t BLOCKSIZE, typename T, typename U>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void conjugate_kernel(int64_t length, U array, int64_t array_dist)

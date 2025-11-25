@@ -817,6 +817,7 @@ void testing_sptrsm_csr(const Arguments& arg)
                             base,
                             &analysis_pivot,
                             &solve_pivot);
+
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
         CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,

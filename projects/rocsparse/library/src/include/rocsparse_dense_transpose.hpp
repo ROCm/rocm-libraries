@@ -30,43 +30,45 @@
 
 namespace rocsparse
 {
-    rocsparse_status        dense_transpose_strided_batched(rocsparse_handle       handle,
-                                                            rocsparse_pointer_mode mode,
-                                                            int64_t                batch_count,
-                                                            int64_t                m,
-                                                            int64_t                n,
-                                                            rocsparse_datatype     alpha_datatype,
-                                                            const void*            alpha,
-                                                            int64_t                alpha_stride,
-                                                            rocsparse_datatype     A_datatype,
-                                                            const void*            A,
-                                                            int64_t                lda,
-                                                            int64_t                A_stride,
-                                                            rocsparse_datatype     B_datatype,
-                                                            void*                  B,
-                                                            int64_t                ldb,
-                                                            int64_t                B_stride);
-    inline rocsparse_status dense_transpose(rocsparse_handle       handle,
-                                            rocsparse_pointer_mode mode,
-                                            int64_t                m,
-                                            int64_t                n,
-                                            rocsparse_datatype     alpha_datatype,
-                                            const void*            alpha,
-                                            rocsparse_datatype     A_datatype,
-                                            const void*            A,
-                                            int64_t                lda,
-                                            rocsparse_datatype     B_datatype,
-                                            void*                  B,
-                                            int64_t                ldb);
-    inline rocsparse_status dense_transpose(rocsparse_handle   handle,
-                                            int64_t            m,
-                                            int64_t            n,
-                                            rocsparse_datatype A_datatype,
-                                            const void*        A,
-                                            int64_t            lda,
-                                            rocsparse_datatype B_datatype,
-                                            void*              B,
-                                            int64_t            ldb);
+    rocsparse_status dense_transpose_strided_batched(rocsparse_handle       handle,
+                                                     rocsparse_pointer_mode mode,
+                                                     int64_t                batch_count,
+                                                     int64_t                m,
+                                                     int64_t                n,
+                                                     rocsparse_datatype     alpha_datatype,
+                                                     const void*            alpha,
+                                                     int64_t                alpha_stride,
+                                                     rocsparse_datatype     A_datatype,
+                                                     const void*            A,
+                                                     int64_t                lda,
+                                                     int64_t                A_stride,
+                                                     rocsparse_datatype     B_datatype,
+                                                     void*                  B,
+                                                     int64_t                ldb,
+                                                     int64_t                B_stride);
+
+    rocsparse_status dense_transpose(rocsparse_handle       handle,
+                                     rocsparse_pointer_mode mode,
+                                     int64_t                m,
+                                     int64_t                n,
+                                     rocsparse_datatype     alpha_datatype,
+                                     const void*            alpha,
+                                     rocsparse_datatype     A_datatype,
+                                     const void*            A,
+                                     int64_t                lda,
+                                     rocsparse_datatype     B_datatype,
+                                     void*                  B,
+                                     int64_t                ldb);
+
+    rocsparse_status dense_transpose(rocsparse_handle   handle,
+                                     int64_t            m,
+                                     int64_t            n,
+                                     rocsparse_datatype A_datatype,
+                                     const void*        A,
+                                     int64_t            lda,
+                                     rocsparse_datatype B_datatype,
+                                     void*              B,
+                                     int64_t            ldb);
 
     template <typename I, typename T>
     inline rocsparse_status dense_transpose(rocsparse_handle handle,
@@ -76,108 +78,42 @@ namespace rocsparse
                                             const T*         A,
                                             int64_t          lda,
                                             T*               B,
-                                            int64_t          ldb);
+                                            int64_t          ldb)
+    {
+
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(handle,
+                                                             rocsparse_pointer_mode_device,
+                                                             m,
+                                                             n,
+                                                             rocsparse::get_datatype<T>(),
+                                                             alpha,
+                                                             rocsparse::get_datatype<T>(),
+                                                             A,
+                                                             lda,
+                                                             rocsparse::get_datatype<T>(),
+                                                             B,
+                                                             ldb));
+        return rocsparse_status_success;
+    }
 
     template <typename I, typename T>
     inline rocsparse_status dense_transpose(
-        rocsparse_handle handle, I m, I n, T alpha, const T* A, int64_t lda, T* B, int64_t ldb);
+        rocsparse_handle handle, I m, I n, T alpha, const T* A, int64_t lda, T* B, int64_t ldb)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(handle,
+                                                             rocsparse_pointer_mode_host,
+                                                             m,
+                                                             n,
+                                                             rocsparse::get_datatype<T>(),
+                                                             &alpha,
+                                                             rocsparse::get_datatype<T>(),
+                                                             A,
+                                                             lda,
+                                                             rocsparse::get_datatype<T>(),
+                                                             B,
+                                                             ldb));
 
-}
+        return rocsparse_status_success;
+    }
 
-inline rocsparse_status rocsparse::dense_transpose(rocsparse_handle   handle,
-                                                   int64_t            m,
-                                                   int64_t            n,
-                                                   rocsparse_datatype A_datatype,
-                                                   const void*        A,
-                                                   int64_t            lda,
-                                                   rocsparse_datatype B_datatype,
-                                                   void*              B,
-                                                   int64_t            ldb)
-{
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(handle,
-                                                         rocsparse_pointer_mode_host,
-                                                         m,
-                                                         n,
-                                                         A_datatype,
-                                                         nullptr,
-                                                         A_datatype,
-                                                         A,
-                                                         lda,
-                                                         B_datatype,
-                                                         B,
-                                                         ldb));
-    return rocsparse_status_success;
-}
-
-inline rocsparse_status rocsparse::dense_transpose(rocsparse_handle       handle,
-                                                   rocsparse_pointer_mode mode,
-                                                   int64_t                m,
-                                                   int64_t                n,
-                                                   rocsparse_datatype     alpha_datatype,
-                                                   const void*            alpha,
-                                                   rocsparse_datatype     A_datatype,
-                                                   const void*            A,
-                                                   int64_t                lda,
-                                                   rocsparse_datatype     B_datatype,
-                                                   void*                  B,
-                                                   int64_t                ldb)
-{
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose_strided_batched(handle,
-                                                                         mode,
-                                                                         static_cast<int64_t>(1),
-                                                                         m,
-                                                                         n,
-                                                                         //
-                                                                         alpha_datatype,
-                                                                         alpha,
-                                                                         static_cast<int64_t>(0),
-                                                                         //
-                                                                         A_datatype,
-                                                                         A,
-                                                                         lda,
-                                                                         static_cast<int64_t>(0),
-                                                                         //
-                                                                         B_datatype,
-                                                                         B,
-                                                                         ldb,
-                                                                         static_cast<int64_t>(0)));
-    return rocsparse_status_success;
-}
-
-template <typename I, typename T>
-inline rocsparse_status rocsparse::dense_transpose(
-    rocsparse_handle handle, I m, I n, const T* alpha, const T* A, int64_t lda, T* B, int64_t ldb)
-{
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(handle,
-                                                         rocsparse_pointer_mode_device,
-                                                         m,
-                                                         n,
-                                                         rocsparse::get_datatype<T>(),
-                                                         alpha,
-                                                         rocsparse::get_datatype<T>(),
-                                                         A,
-                                                         lda,
-                                                         rocsparse::get_datatype<T>(),
-                                                         B,
-                                                         ldb));
-    return rocsparse_status_success;
-}
-
-template <typename I, typename T>
-inline rocsparse_status rocsparse::dense_transpose(
-    rocsparse_handle handle, I m, I n, T alpha, const T* A, int64_t lda, T* B, int64_t ldb)
-{
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(handle,
-                                                         rocsparse_pointer_mode_host,
-                                                         m,
-                                                         n,
-                                                         rocsparse::get_datatype<T>(),
-                                                         &alpha,
-                                                         rocsparse::get_datatype<T>(),
-                                                         A,
-                                                         lda,
-                                                         rocsparse::get_datatype<T>(),
-                                                         B,
-                                                         ldb));
-    return rocsparse_status_success;
 }

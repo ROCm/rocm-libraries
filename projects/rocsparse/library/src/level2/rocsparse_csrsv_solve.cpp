@@ -22,8 +22,6 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse_csrsv.hpp"
-
 #include "../level1/rocsparse_gthr.hpp"
 #include "csrsv_device.h"
 #include "rocsparse_assign_async.hpp"
@@ -32,8 +30,6 @@
 #include "rocsparse_csrsv.hpp"
 #include "rocsparse_csrsv_solve_kernel.hpp"
 #include "rocsparse_utility.hpp"
-
-#include "rocsparse_hash.hpp"
 
 rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
                                         rocsparse_operation         trans,
@@ -148,100 +144,24 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::conjugate_strided_batched(
                 handle, A->batch_count, A->nnz, A->data_type, csrt_val, csrt_val_stride)));
         }
-        local_row_data = csrsv->get_transposed_row_ptr();
-        local_col_data = csrsv->get_transposed_col_ind();
-        if(0)
-        {
-            int32_t* A_row_data  = (int32_t*)malloc(sizeof(int32_t) * (A->rows + 1));
-            int32_t* At_row_data = (int32_t*)malloc(sizeof(int32_t) * (A->rows + 1));
-            int32_t* A_col_data  = (int32_t*)malloc(sizeof(int32_t) * (A->nnz));
-            int32_t* At_col_data = (int32_t*)malloc(sizeof(int32_t) * (A->nnz));
-            hipMemcpy(
-                A_row_data, A->const_row_data, sizeof(int32_t) * (A->rows + 1), hipMemcpyDefault);
-            hipMemcpy(A_col_data, A->const_col_data, sizeof(int32_t) * (A->nnz), hipMemcpyDefault);
-            hipMemcpy(At_row_data,
-                      csrsv->get_transposed_row_ptr(),
-                      sizeof(int32_t) * (A->rows + 1),
-                      hipMemcpyDefault);
-            hipMemcpy(At_col_data,
-                      csrsv->get_transposed_col_ind(),
-                      sizeof(int32_t) * (A->nnz),
-                      hipMemcpyDefault);
 
-            for(int32_t i = 0; i < A->rows; ++i)
-            {
-                for(int32_t k = A_row_data[i] - descr->base; k < A_row_data[i + 1] - descr->base;
-                    ++k)
-                {
-                    const int32_t j = A_col_data[k] - descr->base;
-                    //		    std::cout << "? i " << i << ", j " << j << std::endl;
-                    bool found{};
-                    for(int32_t k1 = At_row_data[j] - descr->base;
-                        k1 < At_row_data[j + 1] - descr->base;
-                        ++k1)
-                    {
-                        const int32_t j1 = At_col_data[k1] - descr->base;
-                        if(j1 == i)
-                        {
-                            found = true;
-                            break;
-                        }
-                    }
-                    if(!found)
-                    {
-                        std::cout << "not found i " << i << ", j " << j << std::endl;
-                        exit(1);
-                    }
-                }
-            }
-        }
+        local_row_data        = csrsv->get_transposed_row_ptr();
+        local_col_data        = csrsv->get_transposed_col_ind();
         local_val_data        = csrt_val;
         local_val_data_stride = A->nnz;
         fill_mode             = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
                                                                          : rocsparse_fill_mode_lower;
     }
-    // Determine gcn_arch
+
     const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
     const int         asicRev       = handle->asic_rev;
-
-    // gfx908
-    const bool     sleep_  = (gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2);
-    const uint32_t wfsize_ = sleep_ ? 64 : handle->wavefront_size;
+    const bool        sleep_  = (gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2);
+    const uint32_t    wfsize_ = sleep_ ? 64 : handle->wavefront_size;
     rocsparse::csrsv_launch_kernel_t csrsv_launch_kernel{};
     RETURN_IF_ROCSPARSE_ERROR(csrsv_launch_kernel_find(
         &csrsv_launch_kernel, 1024, wfsize_, sleep_, A->row_type, A->col_type, A->data_type));
 
 #undef CSRSV_DIM
-    //      std::cout << "dddd " << __LINE__ << std::endl;
-
-    if(0)
-    {
-        // read
-        int32_t* map = (int32_t*)malloc(sizeof(int32_t) * (A->rows));
-        FILE*    f   = fopen("hello.txt", "r");
-        for(int32_t i = 0; i < A->rows; ++i)
-        {
-            fscanf(f, "%d", map + i);
-        }
-        fclose(f);
-        hipMemcpy((void*)csrsv->get_row_map(), map, sizeof(int32_t) * (A->rows), hipMemcpyDefault);
-        free(map);
-        //	exit(1);
-    }
-
-    if(0)
-    {
-        //write
-        int32_t* map = (int32_t*)malloc(sizeof(int32_t) * (A->rows));
-        hipMemcpy(map, csrsv->get_row_map(), sizeof(int32_t) * (A->rows), hipMemcpyDefault);
-        FILE* f = fopen("hello.txt", "w");
-        for(int32_t i = 0; i < A->rows; ++i)
-        {
-            fprintf(f, "%d\n", map[i]);
-        }
-        fclose(f);
-        exit(1);
-    }
 
     csrsv_launch_kernel(handle,
                         A->batch_count,

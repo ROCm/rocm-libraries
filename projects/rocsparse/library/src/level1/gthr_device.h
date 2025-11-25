@@ -29,7 +29,7 @@
 namespace rocsparse
 {
     template <uint32_t BLOCKSIZE, typename I, typename T>
-    __device__ void
+    ROCSPARSE_DEVICE_ILF void
         gthr_device(I nnz, const T* y, T* x_val, const I* x_ind, rocsparse_index_base idx_base)
     {
         I idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;

@@ -28,8 +28,7 @@
 
 namespace rocsparse
 {
-    template <typename T>
-    rocsparse_status assign_async(T* dest, T value, hipStream_t stream);
+
     template <typename T>
     rocsparse_status assign_async(int64_t n, T* dest, T value, hipStream_t stream);
 

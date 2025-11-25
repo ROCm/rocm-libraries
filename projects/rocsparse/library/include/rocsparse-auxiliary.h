@@ -2578,7 +2578,7 @@ rocsparse_status rocsparse_const_dnvec_get_values(rocsparse_const_dnvec_descr de
  *  @param[inout]
  *  descr        the pointer to the dense vector descriptor.
  *  @param[in]
- *  inc  value of the increment.
+ *  inc          value of the increment.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.

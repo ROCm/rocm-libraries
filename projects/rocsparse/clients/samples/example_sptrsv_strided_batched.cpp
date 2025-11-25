@@ -82,10 +82,10 @@ void run_example(rocsparse_handle handle, int batch_count, int ndim, int trials,
     T* dx    = NULL;
     T* dy    = NULL;
 
-    const int64_t A_dist                 = nnz;
-    const int64_t x_dist                 = n;
-    const int64_t A_batch_count          = ((A_dist > 0) ? batch_count : 1);
-    const int64_t x_batch_count          = ((x_dist > 0) ? batch_count : 1);
+    const int64_t A_stride               = nnz;
+    const int64_t x_stride               = n;
+    const int64_t A_batch_count          = ((A_stride > 0) ? batch_count : 1);
+    const int64_t x_batch_count          = ((x_stride > 0) ? batch_count : 1);
     const size_t  val_data_size_in_bytes = sizeof(T) * nnz * A_batch_count;
     const size_t  x_size_in_bytes        = sizeof(T) * n * x_batch_count;
     const size_t  y_size_in_bytes        = sizeof(T) * m * batch_count;
@@ -114,26 +114,15 @@ void run_example(rocsparse_handle handle, int batch_count, int ndim, int trials,
     ROCSPARSE_CHECK(rocsparse_create_csr_descr(
         &A, m, n, nnz, dAptr, dAcol, dAval, itype, jtype, rocsparse_index_base_zero, ttype));
 
-    ROCSPARSE_CHECK(rocsparse_csr_set_strided_batch(A, A_batch_count, 0, A_dist));
+    ROCSPARSE_CHECK(rocsparse_csr_set_strided_batch(A, A_batch_count, 0, A_stride));
     ROCSPARSE_CHECK(rocsparse_create_dnvec_descr(&x, n, dx, ttype));
-    ROCSPARSE_CHECK(rocsparse_dnvec_set_strided_batch(x, x_batch_count, x_dist));
+    ROCSPARSE_CHECK(rocsparse_dnvec_set_strided_batch(x, x_batch_count, x_stride));
     ROCSPARSE_CHECK(rocsparse_dnvec_set_inc(x, 1));
 
-    const int64_t y_dist = m;
+    const int64_t y_stride = m;
     ROCSPARSE_CHECK(rocsparse_create_dnvec_descr(&y, m, dy, ttype));
-    ROCSPARSE_CHECK(rocsparse_dnvec_set_strided_batch(y, batch_count, y_dist));
+    ROCSPARSE_CHECK(rocsparse_dnvec_set_strided_batch(y, batch_count, y_stride));
     ROCSPARSE_CHECK(rocsparse_dnvec_set_inc(y, 1));
-
-#if 0
-    const int64_t y_stride = 1;
-    ROCSPARSE_CHECK(rocsparse_create_dnvec_descr(&y, m, dy, ttype));
-    ROCSPARSE_CHECK(rocsparse_dnvec_set_strided_batch(y,
-						      batch_count,
-						      y_stride));
-    ROCSPARSE_CHECK(rocsparse_dnvec_set_inc(y,
-					    batch_count));
-
-#endif
 
     //
     //
@@ -181,7 +170,7 @@ void run_example(rocsparse_handle handle, int batch_count, int ndim, int trials,
                                                &sptrsv_analysis_policy,
                                                sizeof(sptrsv_analysis_policy),
                                                nullptr));
-    std::cout << "analysis" << std::endl;
+
     // Call sptrsv to get buffer size
     size_t buffer_size_in_bytes;
     ROCSPARSE_CHECK(rocsparse_sptrsv_buffer_size(handle,
@@ -290,10 +279,10 @@ void run_example(rocsparse_handle handle, int batch_count, int ndim, int trials,
     HIP_CHECK(hipFree(dy));
     HIP_CHECK(hipFree(buffer));
 
-    //    ROCSPARSE_CHECK(rocsparse_destroy_sptrsv_descr(sptrsv_descr));
-    //    ROCSPARSE_CHECK(rocsparse_destroy_spmat_descr(A));
-    //    ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(x));
-    //    ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(y));
+    ROCSPARSE_CHECK(rocsparse_destroy_sptrsv_descr(sptrsv_descr));
+    ROCSPARSE_CHECK(rocsparse_destroy_spmat_descr(A));
+    ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(x));
+    ROCSPARSE_CHECK(rocsparse_destroy_dnvec_descr(y));
 }
 
 int main(int argc, char* argv[])

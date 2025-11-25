@@ -81,10 +81,8 @@ void testing_csrsv_bad_arg(const Arguments& arg)
             CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_type(descr, matrix_type));
             EXPECT_ROCSPARSE_STATUS(rocsparse_csrsv_buffer_size<T>(PARAMS_BUFFER_SIZE),
                                     rocsparse_status_not_implemented);
-            std::cout << "analysis " << std::endl;
             EXPECT_ROCSPARSE_STATUS(rocsparse_csrsv_analysis<T>(PARAMS_ANALYSIS),
                                     rocsparse_status_not_implemented);
-            std::cout << "analysis done" << std::endl;
             EXPECT_ROCSPARSE_STATUS(rocsparse_csrsv_solve<T>(PARAMS_SOLVE),
                                     rocsparse_status_not_implemented);
         }

@@ -146,10 +146,8 @@ namespace rocsparse
         // If diag type is unit, re-initialize zero pivot to remove structural zeros
         if(descr->diag_type == rocsparse_diag_type_unit)
         {
-            RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::assign_async(reinterpret_cast<J*>(csrsm_info->get_zero_pivot()),
-                                        std::numeric_limits<J>::max(),
-                                        stream));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_max_async(
+                1, rocsparse::get_indextype<J>(), csrsm_info->get_zero_pivot(), stream));
         }
 
         // Leading dimension
@@ -547,7 +545,7 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
                                               + ((sizeof(T) * m - 1) / 256 + 1) * 256);
         const int64_t b_inc
             = (trans_B == rocsparse_operation_none && order_B == rocsparse_order_column) ? 1 : ldb;
-        double e;
+
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsv_solve_template<I, J, T>(handle,
                                                                             trans_A,
                                                                             m,
