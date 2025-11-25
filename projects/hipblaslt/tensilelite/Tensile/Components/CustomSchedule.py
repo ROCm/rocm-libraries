@@ -1201,7 +1201,7 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
         kernel["SwapGlobalReadOrder"] = False
         optSchedule = {
             'SYNC': [[-1,
-                      15,
+                      14,
                       26,26,
                       59,
                       69,69,
@@ -1224,7 +1224,7 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
 
         syncCode = [
             SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=3 newLW=0 newLR=3 for iteration == 0"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=3 newLW=0 newLR=3 for iteration == 0"),
+            SWaitCnt(dscnt=9, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=3 newLW=0 newLR=3 for iteration == 0"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA0"),
             SBarrier(comment=""),
 
