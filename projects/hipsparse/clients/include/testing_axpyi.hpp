@@ -98,7 +98,18 @@ hipsparseStatus_t testing_axpyi(const Arguments& argus)
 
     // Initial Data on CPU
     srand(12345ULL);
-    hipsparseInitIndex(hxInd.data(), nnz, 1, N);
+    hipsparseInitIndex(hxInd.data(), nnz, idx_base, N + idx_base);
+
+    std::cout << "hxInd" << std::endl;
+    for(size_t i = 0; i < hxInd.size(); i++)
+    {
+        std::cout << hxInd[i] << " ";
+    }
+    std::cout << "" << std::endl;
+
+
+
+
     hipsparseInit<T>(hxVal, 1, nnz);
     hipsparseInit<T>(hy_1, 1, N);
 
