@@ -733,6 +733,7 @@ BenchmarkProblems:
           - Range: [[8192], [7168], [1], [64, 64, 256]]
           - Exact: [4096, 3584, 1, 8192]
         - BiasTypeArgs: ['b']
+
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -769,7 +770,6 @@ BenchmarkProblems:
           - Range: [[256], [192], [1], [32, 64, 256]]
           - Exact: [4096, 3072, 1, 8192]
         - BiasTypeArgs: ['b']
-
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -846,6 +846,7 @@ BenchmarkProblems:
           - Range: [[5120], [8192], [1], [64, 64, 256]]
           - Exact: [2560, 4096, 1, 8192]
         - BiasTypeArgs: ['b']
+
     - # BenchmarkProblemSizeGroup - Standard - All problem
       InitialSolutionParameters:
       BenchmarkCommonParameters:
