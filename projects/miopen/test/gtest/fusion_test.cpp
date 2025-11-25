@@ -128,7 +128,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::Values(0.75f),
                                           testing::Values(0.5f)));
 
-TEST(CPU_FusionCreateOpConvForward, TestInvalidConvLayout)
+TEST(CPU_FusionCreateOpConvForward_FP32, TestInvalidConvLayout)
 {
     std::vector<int> xDims{4, 4, 4, 4};
     std::vector<int> xStrides{1, 4, 16, 64}; // WHCN order
