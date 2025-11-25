@@ -13,6 +13,9 @@ cmake -GNinja ..
 # Run all tests
 ninja check
 
+# Run all tests with minimal output details
+ninja check_ctest
+
 # Run specific test categories
 ninja unit-check        # Unit tests only
 ninja integration-check # Integration tests only
