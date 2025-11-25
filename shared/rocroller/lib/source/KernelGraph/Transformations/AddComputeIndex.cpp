@@ -60,8 +60,20 @@ namespace rocRoller::KernelGraph
 
     bool operator<(const ComputeIndexChainSpecification& a, const ComputeIndexChainSpecification& b)
     {
-         return std::tie(a.target, a.coords, a.location, a.direction, a.forLoop, a.replaceWithScope, a.isStorePartOfGlobalToLDSOp)
-               < std::tie(b.target, b.coords, b.location, b.direction, b.forLoop, b.replaceWithScope, b.isStorePartOfGlobalToLDSOp);
+        return std::tie(a.target,
+                        a.coords,
+                        a.location,
+                        a.direction,
+                        a.forLoop,
+                        a.replaceWithScope,
+                        a.isStorePartOfGlobalToLDSOp)
+               < std::tie(b.target,
+                          b.coords,
+                          b.location,
+                          b.direction,
+                          b.forLoop,
+                          b.replaceWithScope,
+                          b.isStorePartOfGlobalToLDSOp);
     }
 
     struct ComputeIndexChain
@@ -567,174 +579,6 @@ namespace rocRoller::KernelGraph
             return std::nullopt;
         }
 
-        /**
-         * @brief Add Deallocate nodes for arguments used exclusively by hoisted chains.
-         *
-         * When buffer descriptors are created in hoisted chains, their constituent kernel
-         * arguments are copied into SGPRs (e.g., s_mov_b32 s52, s6). After this copy, the
-         * original argument registers can be freed if they're not used by any other chains.
-         * This function identifies such arguments and inserts explicit Deallocate nodes to
-         * enable earlier register reuse, reducing SGPR pressure.
-         *
-         * @param kgraph
-         * @param builtChains Map of chain specifications to their built chains
-         */
-        void DeallocateHoistedArguments(
-            KernelGraph&                                                      kgraph,
-            std::map<ComputeIndexChainSpecification, ComputeIndexChain> const& builtChains)
-        {
-            // Build map of hoisted KLoop specs to their corresponding KLoopTail specs
-            std::map<ComputeIndexChainSpecification, std::set<ComputeIndexChainSpecification>>
-                hoistedToKLoopTailSpecs;
-
-            for(auto const& [spec, chain] : builtChains)
-            {
-                // A spec is a hoisted KLoop if it has a forLoop but location != forLoop
-                if(spec.forLoop > 0 && spec.location != spec.forLoop)
-                {
-                    auto maybeForLoopOp = kgraph.control.get<ForLoopOp>(spec.forLoop);
-                    if(maybeForLoopOp && maybeForLoopOp->loopName == rocRoller::KLOOP)
-                    {
-                        // Find the corresponding KLoopTail
-                        auto maybeKLoopTail = FindCorrespondingKLoopTail(kgraph, spec.forLoop);
-                        if(maybeKLoopTail)
-                        {
-                            // Find KLoopTail specs at this location with matching target
-                            for(auto const& [otherSpec, otherChain] : builtChains)
-                            {
-                                if(otherSpec.location == *maybeKLoopTail &&
-                                   otherSpec.target == spec.target)
-                                {
-                                    hoistedToKLoopTailSpecs[spec].insert(otherSpec);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Build argNameToBuffers map once for all pairs
-            std::map<std::string, std::set<int>> argNameToBuffers;
-            for(auto userNode : kgraph.coordinates.getNodes<User>())
-            {
-                auto user = kgraph.coordinates.get<User>(userNode);
-                if(user && !user->argumentName.empty())
-                {
-                    auto userBuffers = kgraph.coordinates.parentNodes(userNode).to<std::set>();
-                    argNameToBuffers[user->argumentName].insert(userBuffers.begin(),
-                                                                userBuffers.end());
-                }
-            }
-
-            // Helper: check if a spec uses any of the given buffers
-            auto specUsesBuffers
-                = [&](ComputeIndexChainSpecification const& spec, std::set<int> const& buffers) {
-                      for(auto coord : spec.coords)
-                      {
-                          for(auto child : kgraph.coordinates.childNodes(coord))
-                          {
-                              if(buffers.contains(child))
-                                  return true;
-                          }
-                      }
-                      return false;
-                  };
-
-            // Process deallocation for each KLoop/KLoopTail pair independently
-            for(auto const& [hoistedSpec, kLoopTailSpecs] : hoistedToKLoopTailSpecs)
-            {
-                // Check if spec contains ForLoop coordinates (loop-variant)
-                auto forLoopCoords = filterCoordinates<ForLoop>(hoistedSpec.coords, kgraph);
-                if(!forLoopCoords.empty())
-                    continue; // Skip loop-variant specs
-
-                // Build exclusion set for this pair only
-                std::set<ComputeIndexChainSpecification> pairExcludedSpecs;
-                pairExcludedSpecs.insert(hoistedSpec);
-                pairExcludedSpecs.insert(kLoopTailSpecs.begin(), kLoopTailSpecs.end());
-
-                // Track arguments from this hoisted spec
-                std::set<std::string> pairArgNames;
-                std::map<std::string, int> pairArgToChainBottom;
-
-                auto const& hoistedChain = builtChains.at(hoistedSpec);
-                for(auto const& dc : hoistedChain.connections)
-                {
-                    for(auto userNode :
-                        kgraph.coordinates.childNodes(dc.coordinate).to<std::vector>())
-                    {
-                        if(auto user = kgraph.coordinates.get<User>(userNode))
-                        {
-                            if(!user->argumentName.empty())
-                            {
-                                pairArgNames.insert(user->argumentName);
-                                pairArgToChainBottom[user->argumentName] = hoistedChain.bottom;
-                            }
-                        }
-                    }
-                }
-
-                // Update chain bottoms using only the paired KLoopTail specs
-                for(auto const& kLoopTailSpec : kLoopTailSpecs)
-                {
-                    auto const& kLoopTailChain = builtChains.at(kLoopTailSpec);
-                    for(auto const& dc : kLoopTailChain.connections)
-                    {
-                        for(auto userNode :
-                            kgraph.coordinates.childNodes(dc.coordinate).to<std::vector>())
-                        {
-                            if(auto user = kgraph.coordinates.get<User>(userNode))
-                            {
-                                if(!user->argumentName.empty() && pairArgNames.contains(user->argumentName))
-                                {
-                                    pairArgToChainBottom[user->argumentName] = kLoopTailChain.bottom;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Deallocate arguments for this pair
-                for(auto const& argName : pairArgNames)
-                {
-                    auto const& buffersUsingThisArg = argNameToBuffers[argName];
-
-                    // Check if any spec outside this pair uses this argument
-                    auto nonPairSpecUsesArg
-                        = std::any_of(builtChains.begin(), builtChains.end(), [&](auto const& entry) {
-                              auto const& [spec, chain] = entry;
-                              if(pairExcludedSpecs.contains(spec))
-                                  return false; // Skip this pair's specs
-
-                              if(specUsesBuffers(spec, buffersUsingThisArg))
-                              {
-                                  Log::debug("Argument '{}' used by non-pair spec (target={})",
-                                             argName,
-                                             spec.target);
-                                  return true;
-                              }
-                              return false;
-                          });
-
-                    if(!nonPairSpecUsesArg)
-                    {
-                        Log::debug("  Decision: SAFE to early deallocate '{}'", argName);
-                        auto deallocate = kgraph.control.addElement(Deallocate{{argName}});
-                        kgraph.control.addElement(
-                            Sequence(), {pairArgToChainBottom.at(argName)}, {deallocate});
-                        Log::debug("  Added Deallocate node for '{}' after control node {}",
-                                   argName,
-                                   pairArgToChainBottom.at(argName));
-                    }
-                    else
-                    {
-                        Log::debug("  Decision: NOT safe to early deallocate '{}' - used elsewhere",
-                                   argName);
-                    }
-                }
-            }
-        }
-
     } // anonymous namespace
 
     /**
@@ -854,23 +698,25 @@ namespace rocRoller::KernelGraph
                     auto maybeKLoopTail = FindCorrespondingKLoopTail(kgraph, *maybeForLoop);
                     if(maybeKLoopTail)
                     {
-                        auto maybeCommonAncestor = FindCommonAncestorScope(kgraph, *maybeForLoop, *maybeKLoopTail);
+                        auto maybeCommonAncestor
+                            = FindCommonAncestorScope(kgraph, *maybeForLoop, *maybeKLoopTail);
                         if(maybeCommonAncestor)
                         {
-                            log->debug("  staged as: KLoop with KLoopTail, hoisting to common ancestor {} "
-                                      "(KLoop={}, KLoopTail={})",
-                                      *maybeCommonAncestor,
-                                      *maybeForLoop,
-                                      *maybeKLoopTail);
+                            log->debug(
+                                "  staged as: KLoop with KLoopTail, hoisting to common ancestor {} "
+                                "(KLoop={}, KLoopTail={})",
+                                *maybeCommonAncestor,
+                                *maybeForLoop,
+                                *maybeKLoopTail);
                             // Stage the hoisted version at common ancestor; skip original KLoop location
                             stageChain(kgraph,
-                                      target,
-                                      candidate,
-                                      *maybeCommonAncestor,
-                                      GD::Upstream,
-                                      isStorePartOfGlobalToLDSOp,
-                                      *maybeForLoop,  // Preserve forLoop for increment attachment
-                                      true);          // replaceWithScope shares scope at common ancestor
+                                       target,
+                                       candidate,
+                                       *maybeCommonAncestor,
+                                       GD::Upstream,
+                                       isStorePartOfGlobalToLDSOp,
+                                       *maybeForLoop, // Preserve forLoop for increment attachment
+                                       true); // replaceWithScope shares scope at common ancestor
                             return;
                         }
                     }
@@ -1004,10 +850,10 @@ namespace rocRoller::KernelGraph
         KernelGraph commit(KernelGraph const& original) const
         {
             auto               kgraph = original;
-            std::map<int, int> scopes;  // Maps location to actual scope node
-            std::map<int, int> serializationPoints;  // Maps location to last chain bottom for serialization
-            BufferMap          bufferMap;
-            std::map<ComputeIndexChainSpecification, ComputeIndexChain> builtChains;
+            std::map<int, int> scopes; // Maps location to actual scope node
+            std::map<int, int>
+                      serializationPoints; // Maps location to last chain bottom for serialization
+            BufferMap bufferMap;
 
             // Build all chains and insert them into the graph
             for(auto const& [spec, candidates] : m_chains)
@@ -1043,7 +889,8 @@ namespace rocRoller::KernelGraph
                         if(!scopes.contains(spec.location))
                         {
                             auto newScope = kgraph.control.addElement(Scope());
-                            scopes[spec.location] = replaceWith(kgraph, spec.location, newScope, false);
+                            scopes[spec.location]
+                                = replaceWith(kgraph, spec.location, newScope, false);
                             serializationPoints[spec.location] = scopes[spec.location];
                         }
 
@@ -1101,12 +948,7 @@ namespace rocRoller::KernelGraph
                         kgraph.mapper.connect(candidate, dc.coordinate, dc.connectionSpec);
                     }
                 }
-
-                builtChains[spec] = chain;
             }
-
-            // Deallocate arguments used only by hoisted KLoop and KLoopTail chains
-            DeallocateHoistedArguments(kgraph, builtChains);
 
             return kgraph;
         }

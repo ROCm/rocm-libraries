@@ -331,7 +331,9 @@ namespace rocRoller
                     continue;
                 auto exchangeTileTag
                     = only(graph.coordinates.getNeighbours<Graph::Direction::Upstream>(input));
-                AssertFatal(exchangeTileTag);
+                AssertFatal(exchangeTileTag,
+                            "Expected a single upstream Exchange neighbour for: ",
+                            ShowValue(input));
                 graph.coordinates.deleteElement(input);
                 graph.coordinates.addElement(edge, {*exchangeTileTag}, {destMacTileTag});
 
@@ -345,7 +347,9 @@ namespace rocRoller
                         break;
                     }
                 }
-                AssertFatal(exchangeTag);
+                AssertFatal(exchangeTag,
+                            "Expected an Exchange connection for: ",
+                            ShowValue(*exchangeTileTag));
                 auto exchangeTopOp = getTopSetCoordinate(graph, *exchangeTag);
                 inLoopCopies[copyTag].push_back(exchangeTopOp);
             }

@@ -541,11 +541,6 @@ namespace rocRoller
                                 AssertFatal(mergeOp != -1);
                                 auto order = graph.control.compareNodes(
                                     rocRoller::UpdateCache, mergeOp, fDim.second);
-                                if(order != NodeOrdering::LeftFirst)
-                                {
-                                    std::ofstream file("file.dot");
-                                    file << graph.toDOT();
-                                }
                                 AssertFatal(graph.control.compareNodes(
                                                 rocRoller::UpdateCache, mergeOp, fDim.second)
                                                 == NodeOrdering::LeftFirst,
@@ -782,7 +777,6 @@ namespace rocRoller
                     replaceWith(graph, mergeTopOp, replaceOp, false);
                     purgeNodeAndChildren(graph, mergeTopOp);
 
-                    auto tileTag = graph.mapper.get<MacroTile>(merge.first);
                     graph.coordinates.addElement(
                         createNode(index++), {scaleLoads.at(merge.first).second}, {destMacTileTag});
 
@@ -822,6 +816,9 @@ namespace rocRoller
                     graph.mapper.disconnect<Unroll>(tag, unroll);
                     graph.mapper.connect<Unroll>(tag, newUnroll);
 
+                    AssertFatal(remainingReindexes.contains(unroll),
+                                "Expected unroll to be in remaining reindexes: ",
+                                ShowValue(unroll));
                     remainingReindexes.erase(unroll);
                 }
             }
@@ -842,36 +839,39 @@ namespace rocRoller
 
             auto newGraph = original;
 
-            auto const rootTag = *newGraph.control.roots().only();
+            auto const rootTag = newGraph.control.roots().only().value();
 
-            auto findNamedLoopBelow = [&](auto startTag, auto name) {
-                std::optional<int> loopTag;
+            auto findNamedLoopsBelow = [&](auto startTag, auto name) {
+                std::vector<int> loopTags;
                 for(auto const loop : filter(newGraph.control.isElemType<ForLoopOp>(),
                                              newGraph.control.depthFirstVisit(startTag)))
                 {
                     auto forloop = newGraph.control.get<ForLoopOp>(loop).value();
                     if(forloop.loopName == name)
                     {
-                        loopTag = loop;
-                        break;
+                        loopTags.push_back(loop);
                     }
                 }
-                return loopTag;
+                return loopTags;
             };
 
-            // Assumes the kernel has one K loop
-            auto maybeKLoopTag = findNamedLoopBelow(rootTag, KLOOP);
-            AssertFatal(maybeKLoopTag, "Kernel must contain a KLoop");
-            auto const kLoopTag = maybeKLoopTag.value();
-            swizzleScaleLoads(newGraph, m_context, NaryArgument::LHS_SCALE, kLoopTag);
-            swizzleScaleLoads(newGraph, m_context, NaryArgument::RHS_SCALE, kLoopTag);
+            // Support kernels with multiple distinct KLoops
+            auto kLoopTags = findNamedLoopsBelow(rootTag, KLOOP);
+            AssertFatal(not kLoopTags.empty(), "Kernel must contain at least one KLoop");
 
-            auto maybeKLoopTailTag = findNamedLoopBelow(kLoopTag, KLOOPTAIL);
-            if(maybeKLoopTailTag)
+            for(auto const kLoopTag : kLoopTags)
             {
-                auto const kLoopTailTag = maybeKLoopTailTag.value();
-                swizzleScaleLoads(newGraph, m_context, NaryArgument::LHS_SCALE, kLoopTailTag);
-                swizzleScaleLoads(newGraph, m_context, NaryArgument::RHS_SCALE, kLoopTailTag);
+                swizzleScaleLoads(newGraph, m_context, NaryArgument::LHS_SCALE, kLoopTag);
+                swizzleScaleLoads(newGraph, m_context, NaryArgument::RHS_SCALE, kLoopTag);
+
+                auto kLoopTailTags = findNamedLoopsBelow(kLoopTag, KLOOPTAIL);
+                AssertFatal(kLoopTailTags.size() <= 1, "Each KLoop can have at most one KLoopTail");
+                if(not kLoopTailTags.empty())
+                {
+                    auto const kLoopTailTag = kLoopTailTags[0];
+                    swizzleScaleLoads(newGraph, m_context, NaryArgument::LHS_SCALE, kLoopTailTag);
+                    swizzleScaleLoads(newGraph, m_context, NaryArgument::RHS_SCALE, kLoopTailTag);
+                }
             }
 
             removeRedundantSequenceEdges(newGraph);
