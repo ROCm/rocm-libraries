@@ -1204,8 +1204,8 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
         syncTable = [
             -1, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for LRB1-0 "),
             9, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for LRB1-remaining"),
-            17, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="before DirectToLds load, ensure LRB0 have finished"),
-            17, SBarrier(comment=""),
+            19, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="before DirectToLds load, ensure LRB0 have finished"),
+            19, SBarrier(comment=""),
             53, SWaitCnt(dscnt=-1, vlcnt=16+1, vscnt=-1, comment="wait for previous GRB finish"),
             53, SBarrier(comment=""),
             59, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LRA0 finish"),
@@ -1221,7 +1221,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
 
             'LRB0': [[0, 1, 2, 3, 4, 5]],
             'LRA0': [[6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44]],
-            'GRA': [[17,17, 19,19, 21,21, 23,23, 33,33, 41,41]],
+            'GRA': [[19,19, 21,21, 28,28, 31,31, 33,33, 41,41]],
 
             'GRB': [[52,52, 64,64, 74,74, 78,78, 83,83, 88,88, 93,93, 98,98, 105,105, 109,109]],
             'LRB1': [[53, 55, 57, 59, 63, 67]],
