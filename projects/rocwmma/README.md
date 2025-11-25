@@ -118,4 +118,4 @@ The latest official documentation for rocWMMA is available at:
 
 ## Contributing to the rocWMMA Library
 
-Community collaboration is encouraged! If you are considering contributing, please follow the [rocWMMA Contribution Guide](https://github.com/ROCm/rocWMMA/blob/develop/CONTRIBUTING.md) to get started.
+Community collaboration is encouraged! If you are considering contributing, please follow the [rocWMMA Contribution Guide](https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocwmma/CONTRIBUTING.md) to get started.
