@@ -1203,34 +1203,34 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
         kernel["SwapGlobalReadOrder"] = True
         syncTable = [
             -1, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for LRB1-0 "),
-            9, SWaitCnt(dscnt=9, vlcnt=-1, vscnt=-1, comment="wait for LRB1-remaining"),
-            17, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="before DirectToLds load, ensure LRA0 have finished"),
+            9, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for LRB1-remaining"),
+            17, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="before DirectToLds load, ensure LRB0 have finished"),
             17, SBarrier(comment=""),
-            59, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0"),
-            59, SBarrier(comment=""),
-            53, SWaitCnt(dscnt=-1, vlcnt=16, vscnt=-1, comment="wait for previous set of global reads"),
+            53, SWaitCnt(dscnt=-1, vlcnt=16+1, vscnt=-1, comment="wait for previous GRB finish"),
             53, SBarrier(comment=""),
-            71, SWaitCnt(dscnt=-1, vlcnt=16, vscnt=-1, comment="wait for previous set of global reads"),
+            59, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LRA0 finish"),
+            59, SBarrier(comment=""),
+            71, SWaitCnt(dscnt=-1, vlcnt=16+2, vscnt=-1, comment="wait for previous GRA finish"),
             71, SBarrier(comment=""),
         ]
 
         optSchedule = {
             'SYNC': [syncTable[::2]],
             'GRIncA': [[0,1,2,3,4,5,6,7,8]],
-            'GRIncB': [[9,10,11,12,13,14,15,16,17]],
+            'GRIncB': [[9,10,11,12,13,14,16,16,16]],
 
             'LRB0': [[0, 1, 2, 3, 4, 5]],
             'LRA0': [[6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44]],
-            'GRA': [[17,17, 19,19, 21,21, 23,23, 33,33, 43,43]],
+            'GRA': [[17,17, 19,19, 21,21, 23,23, 33,33, 41,41]],
 
-            'GRB': [[52,52, 54,54, 56,56, 58,58, 60,60, 70,70, 72,72, 74,74, 76,76, 78,78]],
+            'GRB': [[52,52, 64,64, 74,74, 78,78, 83,83, 88,88, 93,93, 98,98, 105,105, 109,109]],
             'LRB1': [[53, 55, 57, 59, 63, 67]],
             'LRA1': [[71,73, 75,77, 79,81, 83,85, 87,89, 91,93, 95,97, 99,101, 103,105, 107,109]],
 
-            'LRSB': [[6]],
+            'LRSB': [[16]],
             'LRSA': [[45]],
             'LWSB': [[44]],
-            'LWSA': [[79]],
+            'LWSA': [[109]],
             'LCC': [[119, 119]],
         }
         syncCode = syncTable[1::2]
