@@ -40,7 +40,6 @@ option( MIOPEN_TEST_ALL "Run the full test suite" OFF )
 option( MIOPEN_TEST_HALF "Test in half mode" OFF )
 option( MIOPEN_TEST_INT8 "Test in int8 mode" OFF )
 option( MIOPEN_TEST_BFLOAT16 "Test in bfloat16 mode" OFF )
-option( MIOPEN_TEST_TF32 "Test in tf32 mode" OFF )
 option( MIOPEN_TEST_GFX908 "Test on MI100 (gfx908)" OFF )
 option( MIOPEN_TEST_GFX90A "Test on MI2X0 (gfx90a)" OFF )
 option( MIOPEN_TEST_GFX94X "Test on MI300 (gfx942)" OFF )
@@ -258,13 +257,6 @@ elseif(MIOPEN_TEST_BFLOAT16)
     set(MIOPENDRIVER_MODE_BN NOT_SUPPORTED)
     set(MIOPENDRIVER_MODE_POOL NOT_SUPPORTED)
     set(MIOPENDRIVER_MODE_GEMM NOT_SUPPORTED)
-elseif(MIOPEN_TEST_TF32)
-    set(MIOPEN_GTEST_SUFFIX TF32)
-    set(MIOPEN_TEST_FLOAT_ARG --float)  # TODO: not integrated in test_conv2d
-    set(MIOPENDRIVER_MODE_CONV conv)
-    set(MIOPENDRIVER_MODE_BN NOT_SUPPORTED)
-    set(MIOPENDRIVER_MODE_POOL NOT_SUPPORTED)
-    set(MIOPENDRIVER_MODE_GEMM NOT_SUPPORTED)
 else()
     set(MIOPEN_GTEST_SUFFIX FP32)
     set(MIOPEN_TEST_FLOAT_ARG --float)
@@ -279,7 +271,6 @@ message(STATUS "MIOPEN_GTEST_SUFFIX ${MIOPEN_GTEST_SUFFIX}")
 message(STATUS "MIOPEN_TEST_FLOAT ${MIOPEN_TEST_FLOAT}")
 message(STATUS "MIOPEN_TEST_HALF ${MIOPEN_TEST_HALF}")
 message(STATUS "MIOPEN_TEST_BFLOAT16 ${MIOPEN_TEST_BFLOAT16}")
-message(STATUS "MIOPEN_TEST_TF32 ${MIOPEN_TEST_TF32}")
 message(STATUS "MIOPEN_TEST_INT8 ${MIOPEN_TEST_INT8}")
 message(STATUS "MIOPEN_TEST_ALL ${MIOPEN_TEST_ALL}")
 
@@ -295,7 +286,7 @@ if(MIOPEN_TEST_INT8)
 elseif(MIOPEN_TEST_BFLOAT16)
     set(SKIP_ALL_EXCEPT_TESTS
               test_conv2d test_conv2d_find2 test_tensor_vec test_immed_conv2d
-              test_check_numerics_test test_conv_extra test_conv_for_implicit_gemm test_miopen_conv
+              test_conv_extra test_conv_for_implicit_gemm test_miopen_conv
               test_deepbench_conv test_conv_igemm_dynamic_xdlops_nhwc_wrw_bf16
               test_conv_igemm_dynamic_xdlops_nhwc_fwd_bf16
               test_conv_igemm_dynamic_xdlops_nhwc_bwd_bf16)
@@ -589,7 +580,7 @@ endfunction()
 
 function(add_custom_test NAME)
     set(options
-        BF16_ENABLED BF16_DISABLED HALF_ENABLED HALF_DISABLED INT8_ENABLED INT8_DISABLED TF32_ENABLED TF32_DISABLED FLOAT_ENABLED FLOAT_DISABLED
+        BF16_ENABLED BF16_DISABLED HALF_ENABLED HALF_DISABLED INT8_ENABLED INT8_DISABLED FLOAT_ENABLED FLOAT_DISABLED
         GFX900_ENABLED GFX900_DISABLED GFX906_ENABLED GFX906_DISABLED GFX908_ENABLED GFX908_DISABLED
         GFX103X_ENABLED GFX103X_DISABLED GFX110X_ENABLED GFX110X_DISABLED GFX90A_ENABLED GFX90A_DISABLED GFX94X_ENABLED GFX94X_DISABLED
         SKIP_UNLESS_MLIR SKIP_UNLESS_COMPOSABLEKERNEL SKIP_UNLESS_ALL TEST_PERF_DB_RECORD_NOT_FOUND TEST_TUNING SKIP_XNACK_ON
@@ -600,7 +591,7 @@ function(add_custom_test NAME)
     cmake_parse_arguments(PARSE "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
     # Many custom tests do test only FP32 data type and therefore
-    # added only if none of MIOPEN_TEST_HALF, MIOPEN_TEST_INT8, MIOPEN_TEST_TF32, MIOPEN_TEST_BFLOAT16
+    # added only if none of MIOPEN_TEST_HALF, MIOPEN_TEST_INT8, MIOPEN_TEST_BFLOAT16
     # are set, except the test is allowed explicitly.
     set(HALF_TEST_DEFAULT FALSE)
     option_support_check(${PARSE_HALF_ENABLED} ${PARSE_HALF_DISABLED} ${HALF_TEST_DEFAULT} is_half_check)
@@ -613,10 +604,6 @@ function(add_custom_test NAME)
     set(INT8_TEST_DEFAULT FALSE)
     option_support_check(${PARSE_INT8_ENABLED} ${PARSE_INT8_DISABLED} ${INT8_TEST_DEFAULT} is_int8_check)
     bool_and_f(${MIOPEN_TEST_INT8} ${is_int8_check} is_int8_check)
-
-    set(TF32_TEST_DEFAULT FALSE)
-    option_support_check(${PARSE_TF32_ENABLED} ${PARSE_TF32_DISABLED} ${TF32_TEST_DEFAULT} is_tf32_check)
-    bool_and_f(${MIOPEN_TEST_TF32} ${is_tf32_check} is_tf32_check)
 
     set(FLOAT_TEST_DEFAULT TRUE)
     option_support_check(${PARSE_FLOAT_ENABLED} ${PARSE_FLOAT_DISABLED} ${FLOAT_TEST_DEFAULT} is_float_check)
@@ -705,7 +692,7 @@ function(add_custom_test NAME)
      AND is_xnack_on_check
      AND is_mlir_check
      AND is_composablekernel_check
-     AND (is_half_check OR is_bfloat16_check OR is_int8_check OR is_tf32_check OR is_float_check)
+     AND (is_half_check OR is_bfloat16_check OR is_int8_check OR is_float_check)
      AND (is_hip_check AND is_hip_nogpu_check)
     )
         if(PARSE_TEST_PERF_DB_RECORD_NOT_FOUND AND PARSE_TEST_TUNING)
