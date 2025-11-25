@@ -36,7 +36,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    auto x = createTensor({n, c, h, w}, inputType);
+    auto x = createTensor({n, c, h, w}, inputType, layout);
     auto scale = createTensor({1, c, 1, 1}, intermediateType);
     auto bias = createTensor({1, c, 1, 1}, intermediateType);
     auto prevRunningMean = createTensor({1, c, 1, 1}, intermediateType);
@@ -51,7 +51,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     auto [y, nextRunningMean, nextRunningVar, savedMean, savedInvVariance]
         = graph->batchnorm(x, scale, bias, bnAttributes);
-
     y->set_output(true);
     nextRunningMean->set_output(true);
     nextRunningVar->set_output(true);
@@ -80,7 +79,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
     utilities::Tensor<IntermediateType> prevVarTensor(prevRunningVar->get_dim());
     utilities::Tensor<IntermediateType> momentumTensor(momentum->get_dim());
     utilities::Tensor<IntermediateType> epsilonTensor(epsilon->get_dim());
-
     utilities::Tensor<InputType> yTensor(y->get_dim(), layout);
     utilities::Tensor<IntermediateType> nextMeanTensor(nextRunningMean->get_dim());
     utilities::Tensor<IntermediateType> nextVarTensor(nextRunningVar->get_dim());
@@ -96,12 +94,10 @@ void SampleRunner::operator()(const TensorLayout& layout)
                                         static_cast<IntermediateType>(1.0f));
     prevVarTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
                                        static_cast<IntermediateType>(1.0f));
-
     momentumTensor.memory().hostData()[0] = 0.1f;
     epsilonTensor.memory().hostData()[0] = utilities::BATCHNORM_DEFAULT_EPSILON;
 
     std::unordered_map<int64_t, void*> variantPack;
-
     variantPack[x->get_uid()] = xTensor.memory().deviceData();
     variantPack[scale->get_uid()] = scaleTensor.memory().deviceData();
     variantPack[bias->get_uid()] = biasTensor.memory().deviceData();
@@ -135,19 +131,20 @@ void SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<IntermediateType> savedMeanRefTensor(savedMean->get_dim());
         utilities::Tensor<IntermediateType> savedInvVarRefTensor(savedInvVariance->get_dim());
 
-        // TODO: Uncomment when CPU reference implemented
-        // CpuFpReferenceBatchnormImpl<InputType, IntermediateType>::batchnorm_fwd_training(x_tensor,
-        //                                scale_tensor,
-        //                                bias_tensor,
-        //                                prev_mean_tensor,
-        //                                prev_var_tensor,
-        //                                momentum_tensor,
-        //                                epsilon_tensor,
-        //                                y_ref_tensor,
-        //                                next_mean_ref_tensor,
-        //                                next_var_ref_tensor,
-        //                                saved_mean_ref_tensor,
-        //                                saved_inv_var_ref_tensor);
+        // TODO: Uncomment when CPU reference validation is enabled
+        // CpuFpReferenceBatchnorm::fwdTraining(
+        //     xTensor,
+        //     scaleTensor,
+        //     biasTensor,
+        //     yRefTensor,
+        //     epsilonTensor.memory().hostData()[0],
+        //     momentumTensor.memory().hostData()[0],
+        //     &savedMeanRefTensor,
+        //     &savedInvVarRefTensor,
+        //     &prevMeanTensor,
+        //     &prevVarTensor,
+        //     &nextMeanRefTensor,
+        //     &nextVarRefTensor);
 
         // auto tolerance = test_utilities::batchnorm::getToleranceTraining<InputType>();
         //
@@ -189,12 +186,13 @@ int main(int argc, char* argv[])
 
     initializeFrontendLogging();
 
+    auto backend = hipdnnBackend();
     hipdnnHandle_t handle;
-    HIPDNN_CHECK(hipdnnCreate(&handle));
+    HIPDNN_CHECK(backend->create(&handle));
 
     run(SampleRunner{handle, config});
 
-    HIPDNN_CHECK(hipdnnDestroy(handle));
+    HIPDNN_CHECK(backend->destroy(handle));
     std::cout << "All batch normalization training runs completed.\n";
     return 0;
 }

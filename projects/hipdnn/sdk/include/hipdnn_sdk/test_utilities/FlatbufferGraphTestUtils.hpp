@@ -189,6 +189,92 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormBwdGraph(
     return builder;
 }
 
+inline flatbuffers::FlatBufferBuilder createValidBatchnormFwdInferActGraph(
+    const std::vector<int64_t>& strides = {1, 3, 224, 224},
+    const std::vector<int64_t>& dims = {1, 3, 224, 224},
+    hipdnn_sdk::data_objects::DataType inputDataType = DataType::FLOAT,
+    hipdnn_sdk::data_objects::DataType intermediateDataType = DataType::FLOAT)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+
+    std::vector<int64_t> derivedDims = getDerivedShape(dims);
+    std::vector<int64_t> derivedStrides = generateStrides(derivedDims);
+
+    // inputs
+    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", inputDataType, &strides, &dims));
+
+    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 2, "scale", intermediateDataType, &derivedStrides, &derivedDims));
+
+    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 3, "bias", intermediateDataType, &derivedStrides, &derivedDims));
+
+    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 4, "mean", intermediateDataType, &derivedStrides, &derivedDims));
+
+    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 5, "inv_variance", intermediateDataType, &derivedStrides, &derivedDims));
+
+    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 6, "y", inputDataType, &strides, &dims, true));
+
+    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        builder, 7, "Dy", inputDataType, &strides, &dims, false)); // is_virtual = true
+
+    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+
+    // Node 0: Batchnorm Inference
+    auto bnInfAttributes = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(
+        builder,
+        1, // x_tensor_uid
+        4, // mean_tensor_uid
+        5, // inv_variance_tensor_uid
+        2, // scale_tensor_uid
+        3, // bias_tensor_uid
+        6 // y_tensor_uid (BN_Y - virtual)
+    );
+
+    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "batchnorm_inference",
+        intermediateDataType,
+        hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
+        bnInfAttributes.Union()));
+
+    // Node 1: Pointwise (RELU_FWD)
+    auto pointwiseAttributes = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+        builder,
+        hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
+        std::nullopt, // relu_lower_clip
+        std::nullopt, // relu_upper_clip
+        std::nullopt, // relu_lower_clip_slope
+        flatbuffers::nullopt, // axis_tensor_uid
+        6, // in_0_tensor_uid (BN_Y)
+        flatbuffers::nullopt, // in_1_tensor_uid
+        flatbuffers::nullopt, // in_2_tensor_uid
+        7 // out_0_tensor_uid (Dy - not virtual)
+    );
+
+    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
+        builder,
+        "relu_fwd",
+        intermediateDataType,
+        hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
+        pointwiseAttributes.Union()));
+
+    auto graphOffset = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
+                                                                   "test",
+                                                                   DataType::FLOAT,
+                                                                   DataType::FLOAT,
+                                                                   DataType::FLOAT,
+                                                                   &tensorAttributes,
+                                                                   &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
     const std::vector<int64_t>& strides = {1, 3, 224, 224},
     const std::vector<int64_t>& dims = {1, 3, 224, 224},
@@ -338,16 +424,18 @@ inline flatbuffers::FlatBufferBuilder
         builder, 4, "bias", DataType::FLOAT, &derivedStrides, &derivedDims));
 
     // Epsilon (pass-by-value)
+    std::vector<int64_t> passByValueDims = {1};
     Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(CreateTensorAttributes(builder,
-                                                      5,
-                                                      builder.CreateString("epsilon"),
-                                                      DataType::FLOAT,
-                                                      0,
-                                                      0,
-                                                      false,
-                                                      TensorValue::Float32Value,
-                                                      builder.CreateStruct(epsilonVal).Union()));
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder,
+                                     5,
+                                     "epsilon",
+                                     DataType::FLOAT,
+                                     &passByValueDims,
+                                     &passByValueDims,
+                                     false,
+                                     TensorValue::Float32Value,
+                                     builder.CreateStruct(epsilonVal).Union()));
 
     flatbuffers::Optional<int64_t> meanUid = flatbuffers::nullopt;
     flatbuffers::Optional<int64_t> invVarUid = flatbuffers::nullopt;
@@ -387,6 +475,189 @@ inline flatbuffers::FlatBufferBuilder
                                  NodeAttributes::BatchnormAttributes,
                                  bnormAttributes.Union());
     nodes.push_back(node);
+
+    auto graphOffset = CreateGraphDirect(builder,
+                                         "test",
+                                         DataType::FLOAT,
+                                         DataType::HALF,
+                                         DataType::BFLOAT16,
+                                         &tensorAttributes,
+                                         &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+inline flatbuffers::FlatBufferBuilder
+    createValidBatchnormFwdTrainingActivGraph(bool withMeanVariance = true,
+                                              bool withRunningStats = false,
+                                              PointwiseMode activMode = PointwiseMode::RELU_FWD,
+                                              const std::vector<int64_t>& strides = {1, 3, 14, 14},
+                                              const std::vector<int64_t>& dims = {1, 3, 14, 14})
+{
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<::flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+
+    std::vector<int64_t> derivedStrides = getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = getDerivedShape(dims);
+
+    int64_t uid = 1;
+
+    // Required tensors
+    const auto xTensorUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, xTensorUid, "x", DataType::FLOAT, &strides, &dims));
+
+    const auto scaleTensorUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, scaleTensorUid, "scale", DataType::FLOAT, &derivedStrides, &derivedDims));
+
+    const auto biasTensorUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, biasTensorUid, "bias", DataType::FLOAT, &derivedStrides, &derivedDims));
+
+    // Epsilon (pass-by-value)
+    const auto epsilonTensorUid = uid++;
+    Float32Value epsilonVal(1e-5f);
+    tensorAttributes.push_back(CreateTensorAttributes(builder,
+                                                      epsilonTensorUid,
+                                                      builder.CreateString("epsilon"),
+                                                      DataType::FLOAT,
+                                                      0,
+                                                      0,
+                                                      false,
+                                                      TensorValue::Float32Value,
+                                                      builder.CreateStruct(epsilonVal).Union()));
+
+    // BN output (virtual - intermediate between BN and activation)
+    const auto yBnTensorUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, yBnTensorUid, "y_bn", DataType::FLOAT, &strides, &dims, true)); // virtual
+
+    // Final activation output (non-virtual)
+    const auto yTensorUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, yTensorUid, "y", DataType::FLOAT, &strides, &dims));
+
+    flatbuffers::Optional<int64_t> meanUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> invVarUid = flatbuffers::nullopt;
+
+    if(withMeanVariance)
+    {
+        const auto meanTensorUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, meanTensorUid, "mean", DataType::FLOAT, &derivedStrides, &derivedDims));
+        meanUid = flatbuffers::Optional<int64_t>(meanTensorUid);
+
+        const auto invVarTensorUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                                invVarTensorUid,
+                                                                "inv_variance",
+                                                                DataType::FLOAT,
+                                                                &derivedStrides,
+                                                                &derivedDims));
+        invVarUid = flatbuffers::Optional<int64_t>(invVarTensorUid);
+    }
+
+    flatbuffers::Optional<int64_t> prevRunningMeanUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> prevRunningVarUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> momentumUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> nextRunningMeanUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> nextRunningVarUid = flatbuffers::nullopt;
+
+    if(withRunningStats)
+    {
+        const auto prevMeanUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                                prevMeanUid,
+                                                                "prev_running_mean",
+                                                                DataType::FLOAT,
+                                                                &derivedStrides,
+                                                                &derivedDims));
+        prevRunningMeanUid = flatbuffers::Optional<int64_t>(prevMeanUid);
+
+        const auto prevVarUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                                prevVarUid,
+                                                                "prev_running_variance",
+                                                                DataType::FLOAT,
+                                                                &derivedStrides,
+                                                                &derivedDims));
+        prevRunningVarUid = flatbuffers::Optional<int64_t>(prevVarUid);
+
+        const auto momUid = uid++;
+        Float32Value momentumVal(0.1f);
+        tensorAttributes.push_back(
+            CreateTensorAttributes(builder,
+                                   momUid,
+                                   builder.CreateString("momentum"),
+                                   DataType::FLOAT,
+                                   0,
+                                   0,
+                                   false,
+                                   TensorValue::Float32Value,
+                                   builder.CreateStruct(momentumVal).Union()));
+        momentumUid = flatbuffers::Optional<int64_t>(momUid);
+
+        const auto nextMeanUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                                nextMeanUid,
+                                                                "next_running_mean",
+                                                                DataType::FLOAT,
+                                                                &derivedStrides,
+                                                                &derivedDims));
+        nextRunningMeanUid = flatbuffers::Optional<int64_t>(nextMeanUid);
+
+        const auto nextVarUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                                nextVarUid,
+                                                                "next_running_variance",
+                                                                DataType::FLOAT,
+                                                                &derivedStrides,
+                                                                &derivedDims));
+        nextRunningVarUid = flatbuffers::Optional<int64_t>(nextVarUid);
+    }
+
+    std::vector<::flatbuffers::Offset<Node>> nodes;
+
+    // Node 0: Batchnorm forward training
+    auto bnormAttributes = CreateBatchnormAttributes(builder,
+                                                     xTensorUid,
+                                                     scaleTensorUid,
+                                                     biasTensorUid,
+                                                     epsilonTensorUid,
+                                                     0, // peer_stats_tensor_uid
+                                                     prevRunningMeanUid,
+                                                     prevRunningVarUid,
+                                                     momentumUid,
+                                                     yBnTensorUid, // Virtual output
+                                                     meanUid,
+                                                     invVarUid,
+                                                     nextRunningMeanUid,
+                                                     nextRunningVarUid);
+
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "batchnorm_training",
+                                     DataType::FLOAT,
+                                     NodeAttributes::BatchnormAttributes,
+                                     bnormAttributes.Union()));
+
+    // Node 1: Activation
+    auto activAttributes = CreatePointwiseAttributes(builder,
+                                                     activMode,
+                                                     flatbuffers::nullopt, // relu_lower_clip
+                                                     flatbuffers::nullopt, // relu_upper_clip
+                                                     flatbuffers::nullopt, // relu_lower_clip_slope
+                                                     flatbuffers::nullopt, // axis_tensor_uid
+                                                     yBnTensorUid, // in_0_tensor_uid (virtual)
+                                                     flatbuffers::nullopt, // in_1_tensor_uid
+                                                     flatbuffers::nullopt, // in_2_tensor_uid
+                                                     yTensorUid); // out_0_tensor_uid
+
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "activation",
+                                     DataType::FLOAT,
+                                     NodeAttributes::PointwiseAttributes,
+                                     activAttributes.Union()));
 
     auto graphOffset = CreateGraphDirect(builder,
                                          "test",
