@@ -967,6 +967,56 @@ BenchmarkProblems:
           - Range: [[240], [256], [1], [32, 64, 256]]
           - Range: [[7680], [8192], [1], [64, 64, 256]]
         - BiasTypeArgs: ['b']          
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - 1LDSBuffer: [0]
+        - ActivationFuncCall: [false]
+        - AssertFree0ElementMultiple: [1]
+        - AssertSummationElementMultiple: [1]
+        - ClusterLocalRead: [0]
+        - ConvertAfterDS: [false]
+        - DirectToLds: [1]
+        - DirectToVgprA: [false]
+        - DirectToVgprB: [false]
+        - ExpandPointerSwap: [false]
+        - ForceDisableShadowInit: [false]
+        - GlobalReadVectorWidthA: [2]
+        - GlobalReadVectorWidthB: [8]
+        - LDSTrInst: [false]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LocalReadVectorWidth: [8]
+        - LocalWritePerMfma: [-1]
+        - NonTemporalA: [2]
+        - NonTemporalB: [1]
+        - NonTemporalC: [0]
+        - NonTemporalD: [5]
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 13, 4, 1, 4]
+        - OptNoLoadLoop: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - PreloadKernArgs: [true]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [true]
+        - StoreSyncOpt: [1]
+        - StreamK: [3]
+        - TransposeLDS: [1]
+        - UnrollLoopSwapGlobalReadOrder: [0]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [1]
+        - WorkGroup: [[16, 16, 1]]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[208], [256], [1], [64, 64, 256]]
+          - Range: [[208], [256], [1], [1, 1, 64]]
+          - Range: [[208], [256], [1], [32, 64, 256]]
+          - Exact: [3328, 4096, 1, 8192]
+        - BiasTypeArgs: ['b']
 
   ########################################
   # HHS TN - standard
