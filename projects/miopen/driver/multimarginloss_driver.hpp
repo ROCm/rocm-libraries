@@ -215,12 +215,13 @@ private:
     std::vector<Tgpu> W;
     std::vector<Tgpu> O;
     std::vector<Tref> Ohost;
-    std::vector<Tref> Ohost_mt;
 
     long p;
     float margin;
     miopenLossReductionMode_t reduction_mode;
     size_t ws_sizeInBytes;
+
+    bool use_multithread;
 };
 
 template <typename Tgpu, typename Tref>
@@ -245,6 +246,7 @@ int MultiMarginLossDriver<Tgpu, Tref>::AddCmdLineArgs()
                          "Specifies the reduction to apply to the output ('none'|'mean'|'sum') "
                          "(Default=none to indicate no reduction)",
                          "str");
+    inflags.AddInputFlag("mt", 'u', "0", "Use multithreaded version (Default=0)", "int");
 
     return miopenStatusSuccess;
 }
@@ -267,6 +269,9 @@ int MultiMarginLossDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
         std::cerr << "MultiMarginLoss backward is not implemented." << std::endl;
         return miopenStatusNotImplemented;
     }
+
+    use_multithread = (inflags.GetValueInt("mt") != 0);
+
     return miopenStatusSuccess;
 }
 
@@ -395,10 +400,9 @@ int MultiMarginLossDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
             return miopenStatusAllocFailed;
         }
 
-        o_dev    = std::make_unique<GPUMem>(ctx, o_sz, sizeof(Tgpu));
-        O        = std::vector<Tgpu>(o_sz, static_cast<Tgpu>(0));
-        Ohost    = std::vector<Tref>(o_sz, static_cast<Tref>(0));
-        Ohost_mt = std::vector<Tref>(o_sz, static_cast<Tref>(0));
+        o_dev = std::make_unique<GPUMem>(ctx, o_sz, sizeof(Tgpu));
+        O     = std::vector<Tgpu>(o_sz, static_cast<Tgpu>(0));
+        Ohost = std::vector<Tref>(o_sz, static_cast<Tref>(0));
         if(o_dev->ToGPU(GetStream(), O.data()) != 0)
         {
             std::cerr << "Error copying (out) to GPU, size: " << o_dev->GetSize() << std::endl;
@@ -476,31 +480,37 @@ int MultiMarginLossDriver<Tgpu, Tref>::RunForwardGPU()
 template <typename Tgpu, typename Tref>
 int MultiMarginLossDriver<Tgpu, Tref>::RunForwardCPU()
 {
-    int32_t s = mloMultiMarginLossForwardRunHost(iDesc,
-                                                 tDesc,
-                                                 wDesc,
-                                                 oDesc,
-                                                 p,
-                                                 margin,
-                                                 reduction_mode,
-                                                 I.data(),
-                                                 T.data(),
-                                                 W.data(),
-                                                 Ohost.data());
+    int32_t s = 0;
+    if(use_multithread)
+    {
+        s = mloMultiMarginLossForwardRunHost_mt(iDesc,
+                                                tDesc,
+                                                wDesc,
+                                                oDesc,
+                                                p,
+                                                margin,
+                                                reduction_mode,
+                                                I.data(),
+                                                T.data(),
+                                                W.data(),
+                                                Ohost.data());
+    }
+    else
+    {
+        s = mloMultiMarginLossForwardRunHost(iDesc,
+                                             tDesc,
+                                             wDesc,
+                                             oDesc,
+                                             p,
+                                             margin,
+                                             reduction_mode,
+                                             I.data(),
+                                             T.data(),
+                                             W.data(),
+                                             Ohost.data());
+    }
 
-    int32_t s_mt = mloMultiMarginLossForwardRunHost_mt(iDesc,
-                                                       tDesc,
-                                                       wDesc,
-                                                       oDesc,
-                                                       p,
-                                                       margin,
-                                                       reduction_mode,
-                                                       I.data(),
-                                                       T.data(),
-                                                       W.data(),
-                                                       Ohost_mt.data());
-
-    return s || s_mt;
+    return s;
 }
 
 template <typename Tgpu, typename Tref>
@@ -522,31 +532,19 @@ int MultiMarginLossDriver<Tgpu, Tref>::VerifyForward()
 {
     RunForwardCPU();
 
-    const Tref tolerance = GetTolerance();
-    auto error           = miopen::rms_range(Ohost, O);
+    const Tref tolerance    = GetTolerance();
+    auto error              = miopen::rms_range(Ohost, O);
+    std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Single-threaded forward MultiMarginLoss FAILED: " << error << " > "
-                  << tolerance << std::endl;
+        std::cout << "Forward MultiMarginLoss FAILED against " << solver_type
+                  << " CPU reference: " << error << " > " << tolerance << std::endl;
         return EC_VerifyFwd;
     }
     else
     {
-        std::cout << "Single-threaded forward MultiMarginLoss Verifies OK on CPU reference ("
-                  << error << " < " << tolerance << ')' << std::endl;
-    }
-
-    auto error_mt = miopen::rms_range(Ohost_mt, O);
-    if(!std::isfinite(error_mt) || error_mt > tolerance)
-    {
-        std::cout << "Multi-threaded forward MultiMarginLoss FAILED: " << error_mt << " > "
-                  << tolerance << std::endl;
-        return EC_VerifyFwd;
-    }
-    else
-    {
-        std::cout << "Multi-threaded forward MultiMarginLoss Verifies OK on CPU reference ("
-                  << error_mt << " < " << tolerance << ')' << std::endl;
+        std::cout << "Forward MultiMarginLoss Verifies OK against " << solver_type
+                  << " CPU reference (" << error << " < " << tolerance << ')' << std::endl;
     }
 
     return miopenStatusSuccess;
