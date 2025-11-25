@@ -557,14 +557,16 @@ if(HIPBLASLT_ENABLE_COVERAGE)
     target_link_options(hipblaslt-test PRIVATE -fprofile-instr-generate)
     target_compile_definitions(hipblaslt-test PRIVATE CODE_COVERAGE)
     
+    target_link_libraries(hipblaslt-clients-common PRIVATE origami)
+    target_link_libraries(hipblaslt-test PRIVATE origami)
+    # Add the internal header path for coverage builds
+    set(TENSILELITE_DIR ${PROJECT_SOURCE_DIR}/tensilelite)
     target_link_libraries(
         hipblaslt-test
         PRIVATE
             roc::origami
             tensilelite::tensilelite-host
     )
-    # Add the internal header path for coverage builds
-    set(TENSILELITE_DIR ${PROJECT_SOURCE_DIR}/tensilelite)
     target_include_directories(hipblaslt-clients-common PRIVATE
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include>
