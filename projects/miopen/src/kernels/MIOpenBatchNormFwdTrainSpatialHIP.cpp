@@ -82,11 +82,9 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
         // ACTIVATION_SET()
 
         // SPATIAL
-        mean                = cast<FpAccumType>(0.);
-        variance            = cast<FpAccumType>(0.);
-        invVariance         = cast<FpAccumType>(0.);
-        FpAccumType pvscale = cast<FpAccumType>(0.);
-        FpAccumType pvbias  = cast<FpAccumType>(0.);
+        mean        = cast<FpAccumType>(0.);
+        variance    = cast<FpAccumType>(0.);
+        invVariance = cast<FpAccumType>(0.);
         FpType batchvalues[nloop];
         FpAccumType temp;
 
@@ -169,8 +167,9 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
             variance = 0;
         }
         invVariance = miopen::rsqrt(variance + cast<FpAccumType>(epsilon));
-        pvscale     = cast<FpAccumType>(lcl_scale);
-        pvbias      = cast<FpAccumType>(lcl_bias);
+
+        FpAccumType pvscale = cast<FpAccumType>(lcl_scale);
+        FpAccumType pvbias  = cast<FpAccumType>(lcl_bias);
 
         if(lid < segment)
         {
