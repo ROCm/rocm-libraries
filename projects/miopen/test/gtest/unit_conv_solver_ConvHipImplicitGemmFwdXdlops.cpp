@@ -89,14 +89,17 @@ const auto& GetTestParams()
 
 } // namespace
 
-// solver itself supports I8 from look of it, but CK returns 0 compatible kernels, so I switched off I8
-//using GPU_UnitTestConvSolverImplicitGemmFwdXdlops_I8    = GPU_UnitTestConvSolverFwd_I8;
-
+using GPU_UnitTestConvSolverImplicitGemmFwdXdlops_I8    = GPU_UnitTestConvSolverFwd_I8;
 using GPU_UnitTestConvSolverImplicitGemmFwdXdlops_FP16  = GPU_UnitTestConvSolverFwd_FP16;
 using GPU_UnitTestConvSolverImplicitGemmFwdXdlops_BFP16 = GPU_UnitTestConvSolverFwd_BFP16;
 using GPU_UnitTestConvSolverImplicitGemmFwdXdlops_FP32  = GPU_UnitTestConvSolverFwd_FP32;
 using CPU_UnitTestConvSolverImplicitGemmFwdXdlopsDevApplicability_NONE =
     CPU_UnitTestConvSolverDevApplicabilityFwd_NONE;
+
+TEST_P(GPU_UnitTestConvSolverImplicitGemmFwdXdlops_I8, ConvHipImplicitGemmFwdXdlops)
+{
+    this->RunTest(miopen::solver::conv::ConvHipImplicitGemmFwdXdlops{});
+};
 
 TEST_P(GPU_UnitTestConvSolverImplicitGemmFwdXdlops_FP16, ConvHipImplicitGemmFwdXdlops)
 {
@@ -120,6 +123,12 @@ TEST_P(CPU_UnitTestConvSolverImplicitGemmFwdXdlopsDevApplicability_NONE, SOLVER_
 
 // Smoke tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_UnitTestConvSolverImplicitGemmFwdXdlops_I8,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoImplicitGEMM),
+                                          testing::ValuesIn(GetConvSmokeTestCases(miopenInt8))));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverImplicitGemmFwdXdlops_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
@@ -139,6 +148,11 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::ValuesIn(GetConvSmokeTestCases(miopenFloat))));
 
 // Full tests
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_UnitTestConvSolverImplicitGemmFwdXdlops_I8,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoImplicitGEMM),
+                                          testing::ValuesIn(GetConvFullTestCases(miopenInt8))));
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverImplicitGemmFwdXdlops_FP16,
