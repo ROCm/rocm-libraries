@@ -133,6 +133,8 @@ private:
     std::string in_filename;
     std::string out_filename;
     std::string dump_root;
+
+    bool use_multithread;
 };
 
 template <typename Tgpu, typename Tref, typename Index>
@@ -146,6 +148,9 @@ int PoolDriver_impl<Tgpu, Tref, Index>::ParseCmdLineArgs(int argc, char* argv[])
     {
         miopenEnableProfiling(GetHandle(), true);
     }
+
+    use_multithread = (inflags.GetValueInt("mt") != 0);
+
     return 0;
 }
 
@@ -220,6 +225,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::AddCmdLineArgs()
     inflags.AddInputFlag("in_data", 'j', "", "Input data filename (Default=none)", "str");
     inflags.AddInputFlag("out_data", 'k', "", "Output data filename for bwd (Default=none)", "str");
     inflags.AddInputFlag("dump_root", 'l', "", "Directory to dump buffers (Default=none)", "str");
+    inflags.AddInputFlag("mt", 'U', "0", "Use multithreaded version (Default=0)", "int");
 
     return 0;
 }
@@ -676,62 +682,63 @@ int PoolDriver_impl<Tgpu, Tref, Index>::VerifyForward()
                             : 5e-3; // half
 
     pooling_math_stats stats;
-    bool match = mloPoolingForwardRunHostAndVerify<Tgpu, Tref, Index>(
-        pooling_method,
-        pad_d,
-        stride_d,
-        windowDepth,
-        pad_h,
-        stride_h,
-        windowHeight,
-        pad_w,
-        stride_w,
-        windowWidth,
-        inputTensor,
-        outputTensor,
-        in.data(),
-        out.data(),
-        do_backward,
-        maskhost.data(),
-        mask.data(),
-        tolerance,
-        stats,
-        spatial_dim == 3 ? 1 : inflags.GetValueInt("index_position"));
+    bool match = false;
+    if(use_multithread)
+    {
+        match = mloPoolingForwardRunHostAndVerify_mt<Tgpu, Tref, Index>(
+            pooling_method,
+            pad_d,
+            stride_d,
+            windowDepth,
+            pad_h,
+            stride_h,
+            windowHeight,
+            pad_w,
+            stride_w,
+            windowWidth,
+            inputTensor,
+            outputTensor,
+            in.data(),
+            out.data(),
+            do_backward,
+            maskhost.data(),
+            mask.data(),
+            tolerance,
+            stats,
+            spatial_dim == 3 ? 1 : inflags.GetValueInt("index_position"));
+    }
+    else
+    {
+        match = mloPoolingForwardRunHostAndVerify<Tgpu, Tref, Index>(
+            pooling_method,
+            pad_d,
+            stride_d,
+            windowDepth,
+            pad_h,
+            stride_h,
+            windowHeight,
+            pad_w,
+            stride_w,
+            windowWidth,
+            inputTensor,
+            outputTensor,
+            in.data(),
+            out.data(),
+            do_backward,
+            maskhost.data(),
+            mask.data(),
+            tolerance,
+            stats,
+            spatial_dim == 3 ? 1 : inflags.GetValueInt("index_position"));
+    }
 
-    pooling_math_stats stats_mt;
-    bool match_mt = mloPoolingForwardRunHostAndVerify_mt<Tgpu, Tref, Index>(
-        pooling_method,
-        pad_d,
-        stride_d,
-        windowDepth,
-        pad_h,
-        stride_h,
-        windowHeight,
-        pad_w,
-        stride_w,
-        windowWidth,
-        inputTensor,
-        outputTensor,
-        in.data(),
-        out.data(),
-        do_backward,
-        maskhost.data(),
-        mask.data(),
-        tolerance,
-        stats_mt,
-        spatial_dim == 3 ? 1 : inflags.GetValueInt("index_position"));
-
+    std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
     if(match)
-        std::cout << "Single-threaded forward Pooling Verifies on CPU and GPU (" << stats.max_error
-                  << ", " << stats.max_num_flops_per_res << ')' << std::endl;
+        std::cout << "Forward Pooling Verifies OK against " << solver_type << " CPU reference ("
+                  << stats.max_error << ", " << stats.max_num_flops_per_res << ')' << std::endl;
     else
-        std::cout << "Single-threaded forward Pooling verification FAILED" << std::endl;
-
-    if(match_mt)
-        std::cout << "Multi-threded forward Pooling Verifies on CPU and GPU (" << stats_mt.max_error
-                  << ", " << stats_mt.max_num_flops_per_res << ')' << std::endl;
-    else
-        std::cout << "Multi-threaded forward Pooling verification FAILED" << std::endl;
+        std::cout << "Forward Pooling verification FAILED against " << solver_type
+                  << " CPU reference" << std::endl;
     return 0;
 }
 
@@ -832,81 +839,81 @@ int PoolDriver_impl<Tgpu, Tref, Index>::VerifyBackward()
             ? MLO_POOLING_OP_MAX
             : ((mode == miopenPoolingAverage) ? MLO_POOLING_OP_AVE : MLO_POOLING_OP_AVE_INCLUSIVE);
 
-    pooling_math_stats stats;
-    mloPoolingBackwardRunHost<Tgpu, Tref>(pooling_method,
-                                          windowDepth,
-                                          pad_d,
-                                          stride_d,
-                                          windowHeight,
-                                          pad_h,
-                                          stride_h,
-                                          windowWidth,
-                                          pad_w,
-                                          stride_w,
-                                          dInputTensor,
-                                          dOutputTensor,
-                                          // host output
-                                          dinhost.data(),
-                                          dout.data(),
-                                          maskhost.data(),
-                                          stats);
-
-    pooling_math_stats stats_mt;
-    mloPoolingBackwardRunHost_mt<Tgpu, Tref>(pooling_method,
-                                             windowDepth,
-                                             pad_d,
-                                             stride_d,
-                                             windowHeight,
-                                             pad_h,
-                                             stride_h,
-                                             windowWidth,
-                                             pad_w,
-                                             stride_w,
-                                             dInputTensor,
-                                             dOutputTensor,
-                                             // host output
-                                             dinhost_mt.data(),
-                                             dout.data(),
-                                             maskhost.data(),
-                                             stats_mt);
-
     float ulps_tolerance = 4;
     Tref diff_tolerance  = (sizeof(Tgpu) == 4 || sizeof(Tgpu) == 8) ? static_cast<Tref>(1e-6)
                                                                     : static_cast<Tref>(5e-3);
     double rms_tolerance = (sizeof(Tgpu) == 4 || sizeof(Tgpu) == 8) ? 1e-6 : 5e-3;
 
-    const auto match = mloVerify<Tgpu, Tref>(dInputTensor,
-                                             dInputTensor,
-                                             dinhost.data(),
-                                             din.data(),
-                                             ulps_tolerance,
-                                             diff_tolerance,
-                                             rms_tolerance,
-                                             true,
-                                             stats.max_error);
+    pooling_math_stats stats;
+    bool match = false;
+    if(use_multithread)
+    {
+        mloPoolingBackwardRunHost_mt<Tgpu, Tref>(pooling_method,
+                                                 windowDepth,
+                                                 pad_d,
+                                                 stride_d,
+                                                 windowHeight,
+                                                 pad_h,
+                                                 stride_h,
+                                                 windowWidth,
+                                                 pad_w,
+                                                 stride_w,
+                                                 dInputTensor,
+                                                 dOutputTensor,
+                                                 // host output
+                                                 dinhost_mt.data(),
+                                                 dout.data(),
+                                                 maskhost.data(),
+                                                 stats);
 
-    const auto match_mt = mloVerify_mt<Tgpu, Tref>(dInputTensor,
-                                                   dInputTensor,
-                                                   dinhost_mt.data(),
-                                                   din.data(),
-                                                   ulps_tolerance,
-                                                   diff_tolerance,
-                                                   rms_tolerance,
-                                                   true,
-                                                   stats_mt.max_error);
+        match = mloVerify_mt<Tgpu, Tref>(dInputTensor,
+                                         dInputTensor,
+                                         dinhost_mt.data(),
+                                         din.data(),
+                                         ulps_tolerance,
+                                         diff_tolerance,
+                                         rms_tolerance,
+                                         true,
+                                         stats.max_error);
+    }
+    else
+    {
+        mloPoolingBackwardRunHost<Tgpu, Tref>(pooling_method,
+                                              windowDepth,
+                                              pad_d,
+                                              stride_d,
+                                              windowHeight,
+                                              pad_h,
+                                              stride_h,
+                                              windowWidth,
+                                              pad_w,
+                                              stride_w,
+                                              dInputTensor,
+                                              dOutputTensor,
+                                              // host output
+                                              dinhost.data(),
+                                              dout.data(),
+                                              maskhost.data(),
+                                              stats);
 
+        match = mloVerify<Tgpu, Tref>(dInputTensor,
+                                      dInputTensor,
+                                      dinhost.data(),
+                                      din.data(),
+                                      ulps_tolerance,
+                                      diff_tolerance,
+                                      rms_tolerance,
+                                      true,
+                                      stats.max_error);
+    }
+
+    std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
     if(match)
-        std::cout << "Single-theaded backward Pooling Verifies on CPU and GPU";
+        std::cout << "Backward Pooling Verifies OK against " << solver_type << " CPU reference ("
+                  << stats.max_error << ", " << stats.max_num_flops_per_res << ')' << std::endl;
     else
-        std::cout << "Single-threaded backward Pooling verification FAILED";
-    std::cout << " (" << stats.max_error << ", " << stats.max_num_flops_per_res << ')' << std::endl;
-
-    if(match_mt)
-        std::cout << "Multi-threaded backward Pooling Verifies on CPU and GPU";
-    else
-        std::cout << "Multi-threaded backward Pooling verification FAILED";
-    std::cout << " (" << stats_mt.max_error << ", " << stats_mt.max_num_flops_per_res << ')'
-              << std::endl;
+        std::cout << "Backward Pooling verification FAILED against " << solver_type
+                  << " CPU reference" << std::endl;
 
     return 0;
 }
