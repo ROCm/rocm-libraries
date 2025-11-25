@@ -545,8 +545,8 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                      55, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRB0-1"),
                      63, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRB0-2"),
                      70, SWaitCnt(dscnt=-1, vlcnt=12, vscnt=-1, comment="for LRB1"),
-                     71, SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="wait for LRB0-3"),
                      70, SBarrier(comment="for LRB1"),
+                     71, SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="wait for LRB0-3"),
                      79, SWaitCnt(dscnt=13, vlcnt=-1, vscnt=-1, comment="wait for LRB0 remaining"),]
         optSchedule = {
                 'SYNC'  : [syncTable[::2]],
