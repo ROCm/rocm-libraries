@@ -5,9 +5,11 @@
 
 #include <iostream>
 #include <string>
+#include <tuple>
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/core/tensor/tile_elementwise.hpp"
+#include "ck_tile/core/utility/functional.hpp"
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/host/concat.hpp"
 #include "ck_tile/core/utility/env.hpp"
@@ -15,6 +17,10 @@
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/transform_conv_fwd_to_gemm.hpp"
 #include "ck_tile/ops/grouped_convolution/utils/grouped_convolution_utils.hpp"
+
+#ifdef CK_EXPERIMENTAL_BUILDER
+#include "ck_tile/builder/reflect/instance_traits_tile_grouped_convolution_forward.hpp"
+#endif
 
 namespace ck_tile {
 
@@ -568,6 +574,19 @@ struct GroupedConvolutionForwardKernel
         // clang-format on
     }
 
+#ifdef CK_EXPERIMENTAL_BUILDER
+    CK_TILE_HOST std::string GetInstanceString() const
+    {
+        static_assert(ck_tile::reflect::HasInstanceTraits<GroupedConvolutionForwardKernel>,
+                      "Specialization of instance_traits not found. Please check that a "
+                      "specialization exists in file "
+                      "ck_tile/builder/reflect/"
+                      "instance_traits_tile_grouped_convolution_forward.hpp "
+                      "for the given template parameters.");
+        return ck_tile::reflect::instance_string<GroupedConvolutionForwardKernel>();
+    }
+#endif
+
     CK_TILE_HOST static auto GridSize(const GroupedConvFwdKernelArgsSpecialized& kargs)
     {
         return dim3(
@@ -728,8 +747,8 @@ struct GroupedConvolutionForwardKernel
                         const BDescType& b_desc,
                         const CDescType& c_desc)
     {
-        static_assert(!TilePartitioner::BlockGemmShape::PermuteA, "Not implemented!");
-        static_assert(!TilePartitioner::BlockGemmShape::PermuteB, "Not implemented!");
+        static_assert(!GemmPipeline::BlockGemmShape::PermuteA, "Not implemented!");
+        static_assert(!GemmPipeline::BlockGemmShape::PermuteB, "Not implemented!");
         const auto& a_tensor_view = [&]() {
             return make_tensor_view<address_space_enum::global>(a_ptr, a_desc);
         }();
@@ -867,7 +886,8 @@ struct GroupedConvolutionForwardKernel
                                        const CDescType& c_desc,
                                        const index_t gemm_k,
                                        const index_t block_idx_m,
-                                       const index_t block_idx_n)
+                                       const index_t block_idx_n,
+                                       const CDElementwise& elfunc)
     {
         // Create Gemm tensor views, pad views and tile windows
         const auto& gemm_tensor_views_tuple =
@@ -890,8 +910,9 @@ struct GroupedConvolutionForwardKernel
         // Run Epilogue Pipeline
         auto& c_block_window = gemm_tile_windows.at(I3);
 
-        EpiloguePipeline{}.template operator()<decltype(c_block_window), decltype(c_block_tile)>(
-            c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+        EpiloguePipeline{elfunc}
+            .template operator()<decltype(c_block_window), decltype(c_block_tile)>(
+                c_block_window, c_block_tile, d_block_window, smem_ptr_0);
     }
 
     /**
@@ -925,7 +946,8 @@ struct GroupedConvolutionForwardKernel
                                            const CDescType& c_desc,
                                            const index_t gemm_k,
                                            const index_t block_idx_m,
-                                           const index_t block_idx_n)
+                                           const index_t block_idx_n,
+                                           const CDElementwise& elfunc)
     {
         // Create Gemm tensor views, pad views and tile windows
         const auto& gemm_tensor_views_tuple =
@@ -947,8 +969,9 @@ struct GroupedConvolutionForwardKernel
         // Run Epilogue Pipeline
         auto& c_block_window = gemm_tile_windows.at(I3);
 
-        EpiloguePipeline{}.template operator()<decltype(c_block_window), decltype(c_block_tile)>(
-            c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+        EpiloguePipeline{elfunc}
+            .template operator()<decltype(c_block_window), decltype(c_block_tile)>(
+                c_block_window, c_block_tile, d_block_window, smem_ptr_0);
     }
 
     CK_TILE_DEVICE void operator()(GroupedConvFwdKernelArgsSpecialized kargs) const
@@ -980,6 +1003,14 @@ struct GroupedConvolutionForwardKernel
                                    group_offset_b; // No batch offset for weights!
         OutDataType* base_c_ptr =
             static_cast<OutDataType*>(kargs.out_ptr) + group_offset_c + output_batch_offset;
+
+        // Apply group offsets to D tensors
+        std::array<const void*, NumDTensor> ds_ptr_with_offsets;
+        static_for<0, NumDTensor, 1>{}([&](auto d) {
+            using DType = std::tuple_element_t<d, DsDataType>;
+            ds_ptr_with_offsets[d] =
+                static_cast<const DType*>(kargs.ds_ptr[d]) + group_offset_c + output_batch_offset;
+        });
 
         // =====================================================================
         // Split-image: Map local block to global tile index (if enabled)
@@ -1068,7 +1099,7 @@ struct GroupedConvolutionForwardKernel
             {
                 RunGemm2LDS(a_ptr,
                             b_ptr,
-                            kargs.ds_ptr,
+                            ds_ptr_with_offsets,
                             c_ptr,
                             smem_ptr_0,
                             smem_ptr_1,
@@ -1077,7 +1108,8 @@ struct GroupedConvolutionForwardKernel
                             c_desc,
                             kargs.GemmK,
                             i_m,
-                            i_n);
+                            i_n,
+                            kargs.elfunc);
             }
         }
         else
@@ -1088,7 +1120,7 @@ struct GroupedConvolutionForwardKernel
             {
                 RunGemm(a_ptr,
                         b_ptr,
-                        kargs.ds_ptr,
+                        ds_ptr_with_offsets,
                         c_ptr,
                         smem_ptr_0,
                         a_desc,
@@ -1096,7 +1128,8 @@ struct GroupedConvolutionForwardKernel
                         c_desc,
                         kargs.GemmK,
                         i_m,
-                        i_n);
+                        i_n,
+                        kargs.elfunc);
             }
         }
     }

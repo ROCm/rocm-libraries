@@ -27,6 +27,13 @@
 #include "contraction_solution_instances.hpp"
 #include "contraction_solution.hpp"
 
+// CK data types and utilities
+#include <ck/tensor_operation/gpu/element/binary_element_wise_operation.hpp>
+#include <ck/tensor_operation/gpu/element/unary_element_wise_operation.hpp>
+#include <ck/utility/data_type.hpp>
+#include <ck/utility/tuple.hpp>
+#include <hip/hip_complex.h>
+
 // Ensure access to
 #include "device/hiptensor_contraction_bilinear_instances.hpp"
 #include "device/hiptensor_contraction_scale_instances.hpp"
