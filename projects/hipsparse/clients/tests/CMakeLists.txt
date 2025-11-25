@@ -169,6 +169,11 @@ target_link_libraries(hipsparse-test PRIVATE
     GTest::gtest
 )
 
+# Link OpenMP if enabled
+if(HIPSPARSE_ENABLE_OPENMP)
+    target_link_libraries(hipsparse-test PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
 # Backend-specific settings
 if(HIPSPARSE_ENABLE_CUDA)
     target_compile_definitions(hipsparse-test PRIVATE __HIP_PLATFORM_NVIDIA__)

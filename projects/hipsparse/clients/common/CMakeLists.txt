@@ -39,15 +39,12 @@ target_compile_definitions(hipsparse-clients-common PUBLIC GOOGLE_TEST)
 find_package(GTest REQUIRED)
 
 # Link common dependencies
-target_link_libraries(hipsparse-clients-common PUBLIC 
-    roc::hipsparse
-    GTest::gtest
+target_link_libraries(hipsparse-clients-common 
+    PUBLIC 
+        roc::hipsparse
+    PRIVATE
+        GTest::gtest
 )
-
-# Link OpenMP if enabled
-if(HIPSPARSE_ENABLE_OPENMP)
-    target_link_libraries(hipsparse-clients-common PUBLIC OpenMP::OpenMP_CXX)
-endif()
 
 # Link against stdc++fs for std::experimental::filesystem support
 if(NOT WIN32)
@@ -64,7 +61,7 @@ elseif(HIPSPARSE_ENABLE_HIP)
 endif()
 
 # Enable POSITION_INDEPENDENT_CODE for OBJECT library if building shared libs
-if(HIPSPARSE_BUILD_SHARED_LIBS)
+if(HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
     set_target_properties(hipsparse-clients-common PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 
@@ -102,7 +99,7 @@ elseif(HIPSPARSE_ENABLE_HIP)
 endif()
 
 # Enable POSITION_INDEPENDENT_CODE for OBJECT library if building shared libs
-if(HIPSPARSE_BUILD_SHARED_LIBS)
+if(HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
     set_target_properties(hipsparse-samples-common PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 

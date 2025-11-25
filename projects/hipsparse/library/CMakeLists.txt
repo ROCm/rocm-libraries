@@ -20,7 +20,7 @@ set_target_properties(hipsparse PROPERTIES
 )
 
 # Following boost conventions of prefixing 'lib' on static built libraries
-if(NOT HIPSPARSE_BUILD_SHARED_LIBS)
+if(NOT (HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS))
     set_target_properties(hipsparse PROPERTIES PREFIX "lib")
 endif()
 
@@ -85,7 +85,7 @@ elseif(HIPSPARSE_ENABLE_CUDA)
 endif()
 
 # Windows-specific post-build copy for shared libraries
-if(WIN32 AND HIPSPARSE_BUILD_SHARED_LIBS)
+if(WIN32 AND (HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS))
     add_custom_command(
         TARGET hipsparse POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy

@@ -25,6 +25,11 @@ endif()
 # Link dependencies - gets common properties transitively from helper
 target_link_libraries(hipsparse-bench PRIVATE hipsparse-clients-common)
 
+# Link OpenMP if enabled
+if(HIPSPARSE_ENABLE_OPENMP)
+    target_link_libraries(hipsparse-bench PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
 # Backend-specific settings
 if(HIPSPARSE_ENABLE_CUDA)
     target_compile_definitions(hipsparse-bench PRIVATE __HIP_PLATFORM_NVIDIA__)
