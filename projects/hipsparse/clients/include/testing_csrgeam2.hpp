@@ -1006,7 +1006,7 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
             hipMemcpy(hcsr_val_C_2.data(), dCval_2, sizeof(T) * hnnz_C_2, hipMemcpyDeviceToHost));
 
         std::cout << "GGGG" << std::endl;
-        
+
         // Compute csrgemm host solution
         std::vector<int> hcsr_row_ptr_C_gold(M + 1);
 
