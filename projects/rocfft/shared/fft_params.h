@@ -40,64 +40,13 @@
 #include "../shared/array_validator.h"
 #include "../shared/data_gen_device.h"
 #include "../shared/data_gen_host.h"
+#include "../shared/data_layout.h"
 #include "../shared/device_properties.h"
+#include "../shared/fft_enums.h"
 #include "../shared/gpubuf.h"
 #include "../shared/printbuffer.h"
 #include "../shared/ptrdiff.h"
 #include "../shared/rocfft_complex.h"
-
-enum fft_status
-{
-    fft_status_success,
-    fft_status_failure,
-    fft_status_invalid_arg_value,
-    fft_status_invalid_dimensions,
-    fft_status_invalid_array_type,
-    fft_status_invalid_strides,
-    fft_status_invalid_distance,
-    fft_status_invalid_offset,
-    fft_status_invalid_work_buffer,
-};
-
-enum fft_transform_type
-{
-    fft_transform_type_complex_forward,
-    fft_transform_type_complex_inverse,
-    fft_transform_type_real_forward,
-    fft_transform_type_real_inverse,
-};
-
-enum fft_precision
-{
-    fft_precision_half,
-    fft_precision_single,
-    fft_precision_double,
-};
-
-enum fft_io
-{
-    fft_io_in,
-    fft_io_out
-};
-
-static constexpr bool is_real(const fft_transform_type& dft_type)
-{
-    return dft_type == fft_transform_type_real_forward
-           || dft_type == fft_transform_type_real_inverse;
-}
-static constexpr bool is_complex(const fft_transform_type& dft_type)
-{
-    return !is_real(dft_type);
-}
-static constexpr bool is_fwd(const fft_transform_type& dft_type)
-{
-    return dft_type == fft_transform_type_real_forward
-           || dft_type == fft_transform_type_complex_forward;
-}
-static constexpr bool is_bwd(const fft_transform_type& dft_type)
-{
-    return !is_fwd(dft_type);
-}
 
 // Used for CLI11 parsing of precision enum
 static bool lexical_cast(const std::string& word, fft_precision& precision)
@@ -113,13 +62,6 @@ static bool lexical_cast(const std::string& word, fft_precision& precision)
     return true;
 }
 
-enum fft_auto_allocation
-{
-    fft_auto_allocation_on,
-    fft_auto_allocation_off,
-    fft_auto_allocation_default
-};
-
 // Used for CLI11 parsing of auto-allocation enum
 static bool lexical_cast(const std::string& word, fft_auto_allocation& auto_allocation)
 {
@@ -134,16 +76,6 @@ static bool lexical_cast(const std::string& word, fft_auto_allocation& auto_allo
             "Invalid auto-allocation behavior specified (choose \"on\", \"off\", or \"default\")");
     return true;
 }
-
-// fft_input_generator: linearly spaced sequence in [-0.5,0.5]
-// fft_input_random_generator: pseudo-random sequence in [-0.5,0.5]
-enum fft_input_generator
-{
-    fft_input_random_generator_device,
-    fft_input_random_generator_host,
-    fft_input_generator_device,
-    fft_input_generator_host,
-};
 
 // Used for CLI11 parsing of input gen enum
 static bool lexical_cast(const std::string& word, fft_input_generator& gen)
@@ -165,22 +97,6 @@ static bool lexical_cast(const std::string& word, fft_input_generator& gen)
 #endif
     return true;
 }
-
-enum fft_array_type
-{
-    fft_array_type_complex_interleaved,
-    fft_array_type_complex_planar,
-    fft_array_type_real,
-    fft_array_type_hermitian_interleaved,
-    fft_array_type_hermitian_planar,
-    fft_array_type_unset,
-};
-
-enum fft_result_placement
-{
-    fft_placement_inplace,
-    fft_placement_notinplace,
-};
 
 // Determine the size of the data type given the precision and type.
 template <typename Tsize>
@@ -209,68 +125,6 @@ inline Tsize var_size(const fft_precision precision, const fft_array_type type)
         break;
     }
     return var_size;
-}
-
-template <typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
-static std::vector<T> default_strides(fft_transform_type    dft_type,
-                                      fft_result_placement  placement,
-                                      fft_io                io,
-                                      const std::vector<T>& lengths)
-{
-    std::vector<T> ret(lengths.size());
-    T              def_stride = 1;
-    for(auto dim_idx = lengths.size(); dim_idx-- > 0;)
-    {
-        ret[dim_idx] = def_stride;
-        if(dim_idx == lengths.size() - 1 && is_real(dft_type))
-        {
-            if((io == fft_io_out) == is_fwd(dft_type))
-                def_stride *= (lengths[dim_idx] / 2 + 1);
-            else
-            {
-                if(placement == fft_placement_inplace)
-                    def_stride *= 2 * (lengths[dim_idx] / 2 + 1);
-                else
-                    def_stride *= lengths[dim_idx];
-            }
-        }
-        else
-            def_stride *= lengths[dim_idx];
-    }
-    return ret;
-}
-
-// NOTE: this is generalized for multidimensional batches
-template <typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
-static std::vector<T> default_distances(fft_transform_type    dft_type,
-                                        fft_result_placement  placement,
-                                        fft_io                io,
-                                        const std::vector<T>& lengths,
-                                        const std::vector<T>& batches)
-{
-    if(batches.empty() || lengths.empty())
-        return std::vector<T>(); // empty as well
-    auto temp_lengths = lengths;
-    temp_lengths.insert(temp_lengths.begin(), batches.begin(), batches.end());
-    auto ret = default_strides(dft_type, placement, io, temp_lengths);
-    ret.resize(batches.size());
-    return ret;
-}
-// NOTE: this is for one-dimensional batches
-template <typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
-static T default_distance(fft_transform_type    dft_type,
-                          fft_result_placement  placement,
-                          fft_io                io,
-                          const std::vector<T>& lengths,
-                          const T&              batch_sz)
-{
-    if(lengths.empty())
-        throw std::invalid_argument("empty lengths rejected by default_distance");
-    const auto tmp
-        = default_distances(dft_type, placement, io, lengths, std::vector<T>(1, batch_sz));
-    if(tmp.empty())
-        throw std::runtime_error("internal inconsistency encountered by default_distance");
-    return tmp.front();
 }
 
 #ifdef USE_HIPRAND
@@ -305,6 +159,9 @@ inline void set_input(std::vector<gpubuf>&       input,
                       const Tint1&               field_contig_stride,
                       const size_t               field_contig_dist)
 {
+    if(igen == fft_input_generator_host || igen == fft_input_random_generator_host)
+        throw std::runtime_error("Host input generation is not available for gpu buffers");
+
     auto isize = count_iters(whole_length) * nbatch;
 
     switch(itype)
@@ -430,6 +287,9 @@ inline void set_input(std::vector<hostbuf>&      input,
                       const Tint1                field_contig_stride,
                       const size_t               field_contig_dist)
 {
+    if(igen == fft_input_generator_device || igen == fft_input_random_generator_device)
+        throw std::runtime_error("Device input generation is not available for host buffers");
+
     switch(itype)
     {
     case fft_array_type_complex_interleaved:

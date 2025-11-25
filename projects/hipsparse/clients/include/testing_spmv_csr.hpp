@@ -22,8 +22,8 @@
  * ************************************************************************ */
 
 #pragma once
-#ifndef TESTING_SPMV_CSR_HPP
-#define TESTING_SPMV_CSR_HPP
+#ifndef TESTING_SPMV_SELL_HPP
+#define TESTING_SPMV_SELL_HPP
 
 #include "display.hpp"
 #include "flops.hpp"
@@ -39,7 +39,8 @@
 
 using namespace hipsparse_test;
 
-void testing_spmv_csr_bad_arg(void)
+template <typename I, typename J, typename T>
+void testing_spmv_csr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
@@ -182,7 +183,7 @@ hipsparseStatus_t testing_spmv_csr(Arguments argus)
     T                    h_beta   = make_DataType<T>(argus.beta);
     hipsparseOperation_t transA   = argus.transA;
     hipsparseIndexBase_t idx_base = argus.baseA;
-    hipsparseSpMVAlg_t   alg      = static_cast<hipsparseSpMVAlg_t>(argus.spmv_alg);
+    hipsparseSpMVAlg_t   alg      = argus.spmv_alg;
     std::string          filename = argus.filename;
 
     // Index and data type
