@@ -70,7 +70,7 @@ build*/
 
 # Python virtualenv
 .venv/
-.hipdnn_venv/
+hipdnn_env/
 
 # Python cache
 __pycache__/
