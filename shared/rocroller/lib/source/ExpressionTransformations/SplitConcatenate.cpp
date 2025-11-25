@@ -41,8 +41,8 @@ namespace rocRoller
                         if constexpr(std::is_same_v<T, uint64_t>)
                         {
                             // Split uint64_t into two Raw32 values (low 32 bits, then high 32 bits)
-                            uint32_t low  = static_cast<uint32_t>(val & 0xFFFFFFFF);
-                            uint32_t high = static_cast<uint32_t>((val >> 32) & 0xFFFFFFFF);
+                            uint32_t low  = static_cast<uint32_t>(val);
+                            uint32_t high = static_cast<uint32_t>((val >> 32));
                             return {literal(Raw32(low)), literal(Raw32(high))};
                         }
                         else
