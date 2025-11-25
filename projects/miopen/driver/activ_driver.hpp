@@ -113,6 +113,8 @@ private:
     std::vector<Tgpu> din;
     std::vector<Tgpu> dout;
     std::vector<Tref> dinhost;
+
+    bool use_multithread;
 };
 
 template <typename Tgpu, typename Tref>
@@ -124,6 +126,9 @@ int ActivationDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
     {
         miopenEnableProfiling(GetHandle(), true);
     }
+
+    use_multithread = (inflags.GetValueInt("mt") != 0);
+
     return miopenStatusSuccess;
 }
 
@@ -161,6 +166,7 @@ int ActivationDriver<Tgpu, Tref>::AddCmdLineArgs()
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
     inflags.AddInputFlag(
         "wall", 'w', "0", "Wall-clock Time Each Layer, Requires time == 1 (Default=0)", "int");
+    inflags.AddInputFlag("mt", 'u', "0", "Use multithreaded version (Default=0)", "int");
 
     return miopenStatusSuccess;
 }
@@ -470,34 +476,41 @@ int ActivationDriver<Tgpu, Tref>::VerifyForward()
     miopenGetActivationDescriptor(activDesc, &v_mode, &v_Alpha, &v_Beta, &v_Gamma);
 
     int match = 1;
-    match     = mloNeuronForwardRunHostAndVerify<Tgpu, Tref>(v_mode,
-                                                         static_cast<Tref>(v_Gamma),
-                                                         static_cast<Tref>(v_Beta),
-                                                         static_cast<Tref>(v_Alpha),
-                                                         in.size(),
-                                                         in.data(),
-                                                         out.data(),
-                                                         static_cast<Tref>(allowedEps));
+    if(use_multithread)
+    {
+        match = mloNeuronForwardRunHostAndVerify_mt<Tgpu, Tref>(v_mode,
+                                                                static_cast<Tref>(v_Gamma),
+                                                                static_cast<Tref>(v_Beta),
+                                                                static_cast<Tref>(v_Alpha),
+                                                                in.size(),
+                                                                in.data(),
+                                                                out.data(),
+                                                                static_cast<Tref>(allowedEps));
+    }
+    else
+    {
+        match = mloNeuronForwardRunHostAndVerify<Tgpu, Tref>(v_mode,
+                                                             static_cast<Tref>(v_Gamma),
+                                                             static_cast<Tref>(v_Beta),
+                                                             static_cast<Tref>(v_Alpha),
+                                                             in.size(),
+                                                             in.data(),
+                                                             out.data(),
+                                                             static_cast<Tref>(allowedEps));
+    }
 
-    int match_mt = 1;
-    match_mt     = mloNeuronForwardRunHostAndVerify_mt<Tgpu, Tref>(v_mode,
-                                                               static_cast<Tref>(v_Gamma),
-                                                               static_cast<Tref>(v_Beta),
-                                                               static_cast<Tref>(v_Alpha),
-                                                               in.size(),
-                                                               in.data(),
-                                                               out.data(),
-                                                               static_cast<Tref>(allowedEps));
-
+    std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
     if(match)
     {
-        std::cout << "Single-threaded forward Activation Verifies on CPU and GPU" << std::endl;
+        std::cout << "Forward Activation Verifies OK against " << solver_type << " CPU reference"
+                  << std::endl;
+    }
+    else
+    {
+        std::cout << "Forward Activation FAILED against " << solver_type << " CPU reference"
+                  << std::endl;
     }
 
-    if(match_mt)
-    {
-        std::cout << "Multi-threaded forward Activation Verifies on CPU and GPU" << std::endl;
-    }
     return miopenStatusSuccess;
 }
 
@@ -521,36 +534,42 @@ int ActivationDriver<Tgpu, Tref>::VerifyBackward()
     miopenGetActivationDescriptor(activDesc, &v_mode, &v_Alpha, &v_Beta, &v_Gamma);
 
     int match = 1;
-    match     = mloNeuronBackwardRunHostAndVerify<Tgpu, Tref>(v_mode,
-                                                          static_cast<Tref>(v_Gamma),
-                                                          static_cast<Tref>(v_Beta),
-                                                          static_cast<Tref>(v_Alpha),
-                                                          dinhost.size(),
-                                                          in.data(),
-                                                          out.data(),
-                                                          din.data(),
-                                                          dout.data(),
-                                                          static_cast<Tref>(allowedEps));
-
-    int match_mt = 1;
-    match_mt     = mloNeuronBackwardRunHostAndVerify_mt<Tgpu, Tref>(v_mode,
-                                                                static_cast<Tref>(v_Gamma),
-                                                                static_cast<Tref>(v_Beta),
-                                                                static_cast<Tref>(v_Alpha),
-                                                                dinhost.size(),
-                                                                in.data(),
-                                                                out.data(),
-                                                                din.data(),
-                                                                dout.data(),
-                                                                static_cast<Tref>(allowedEps));
-
+    if(use_multithread)
+    {
+        match = mloNeuronBackwardRunHostAndVerify_mt<Tgpu, Tref>(v_mode,
+                                                                 static_cast<Tref>(v_Gamma),
+                                                                 static_cast<Tref>(v_Beta),
+                                                                 static_cast<Tref>(v_Alpha),
+                                                                 dinhost.size(),
+                                                                 in.data(),
+                                                                 out.data(),
+                                                                 din.data(),
+                                                                 dout.data(),
+                                                                 static_cast<Tref>(allowedEps));
+    }
+    else
+    {
+        match = mloNeuronBackwardRunHostAndVerify<Tgpu, Tref>(v_mode,
+                                                              static_cast<Tref>(v_Gamma),
+                                                              static_cast<Tref>(v_Beta),
+                                                              static_cast<Tref>(v_Alpha),
+                                                              dinhost.size(),
+                                                              in.data(),
+                                                              out.data(),
+                                                              din.data(),
+                                                              dout.data(),
+                                                              static_cast<Tref>(allowedEps));
+    }
+    std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
     if(match)
     {
-        std::cout << "Single-threaded backward Activation Verifies on CPU and GPU" << std::endl;
+        std::cout << "Backward Activation Verifies OK against " << solver_type << " CPU reference"
+                  << std::endl;
     }
-    if(match_mt)
+    else
     {
-        std::cout << "Multi-threaded backward Activation Verifies on CPU and GPU" << std::endl;
+        std::cout << "Backward Activation FAILED against " << solver_type << " CPU reference"
+                  << std::endl;
     }
     return miopenStatusSuccess;
 }

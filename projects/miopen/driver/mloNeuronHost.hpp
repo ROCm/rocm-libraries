@@ -435,7 +435,7 @@ int mloNeuronBackwardRunHostAndVerify_mt(int neuron_type,
     miopen::par_ford(size)(
         [&](size_t i) { bot_df_cpu[i] = f(top_df_cpu[i], bot_cpu[i], top_cpu[i]); });
 
-    std::atomic_int match;
+    std::atomic_int match = 1;
     miopen::par_ford(size)([&](size_t i) {
         Tcheck_ c_val  = bot_df_cpu[i];
         Tcheck_ g_val  = static_cast<Tcheck_>(bot_df_ptr[i]);
