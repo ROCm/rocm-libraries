@@ -652,6 +652,45 @@ TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
     }
 }
 
+TEST_CASE("Nested Reinterpret simplification", "[expression][expression-transformation]")
+{
+    using namespace rocRoller;
+    using namespace Expression;
+
+    auto context = TestContext::ForDefaultTarget();
+
+    auto r_int32
+        = Register::Value::Placeholder(context.get(), Register::Type::Vector, DataType::Int32, 1);
+    r_int32->allocateNow();
+    auto v = r_int32->expression();
+
+    SECTION("Double reinterpret same size types")
+    {
+        auto expr       = reinterpret(DataType::Int32, reinterpret(DataType::Float, v));
+        auto simplified = simplify(expr);
+
+        CHECK_THAT(simplified, IdenticalTo(v));
+    }
+
+    SECTION("Reinterpret chain")
+    {
+        auto expr       = reinterpret(DataType::UInt32, reinterpret(DataType::Float, v));
+        auto simplified = simplify(expr);
+
+        CHECK_THAT(simplified, IdenticalTo(reinterpret(DataType::UInt32, v)));
+    }
+
+    SECTION("Reinterpret of literal")
+    {
+        auto lit        = literal(10.0f);
+        auto expr       = reinterpret(DataType::UInt32, lit);
+        auto simplified = simplify(expr);
+
+        CHECK(std::holds_alternative<CommandArgumentValue>(*simplified));
+        CHECK(std::get<uint32_t>(evaluate(simplified)) == 1092616192);
+    }
+}
+
 TEST_CASE("launchTimeSubExpressions works", "[expression][expression-transformation]")
 {
     using namespace rocRoller;

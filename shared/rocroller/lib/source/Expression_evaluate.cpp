@@ -84,7 +84,10 @@ namespace rocRoller
                 auto resultType = resultVariableType(result);
                 auto cpyType    = resultVariableType(cpy);
                 if(resultType != cpyType)
-                    return reinterpret(result, cpyType.dataType);
+                {
+                    auto resultExpr = std::make_shared<Expression>(result);
+                    return evaluate(reinterpret(cpyType.dataType, resultExpr));
+                }
 
                 return result;
             }
