@@ -18,7 +18,7 @@ if(HIPSPARSE_ENABLE_BENCHMARKS)
     add_subdirectory(benchmarks)
 endif()
 
-if(HIPSPARSE_BUILD_TESTING)
+if(HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
     enable_testing()
     add_subdirectory(tests)
 endif()

@@ -48,7 +48,7 @@ target_link_libraries(hipsparse-clients-common
 
 # Link against stdc++fs for std::experimental::filesystem support
 if(NOT WIN32)
-    target_link_libraries(hipsparse-clients-common PUBLIC stdc++fs)
+    target_link_libraries(hipsparse-clients-common PRIVATE stdc++fs)
 endif()
 
 # Backend-specific settings
@@ -73,7 +73,7 @@ endif()
 # Lightweight OBJECT library for samples only (contains only utility.cpp)
 add_library(hipsparse-samples-common OBJECT)
 
-target_compile_features(hipsparse-samples-common PUBLIC cxx_std_17)
+target_compile_features(hipsparse-samples-common PRIVATE cxx_std_17)
 
 target_sources(hipsparse-samples-common PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp"
@@ -87,7 +87,7 @@ target_link_libraries(hipsparse-samples-common PUBLIC roc::hipsparse)
 
 # Link against stdc++fs for std::experimental::filesystem support
 if(NOT WIN32)
-    target_link_libraries(hipsparse-samples-common PUBLIC stdc++fs)
+    target_link_libraries(hipsparse-samples-common PRIVATE stdc++fs)
 endif()
 
 if(HIPSPARSE_ENABLE_CUDA)

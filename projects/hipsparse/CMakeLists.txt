@@ -139,7 +139,7 @@ if(HIPSPARSE_BUILD_CLIENTS_ONLY OR HIPSPARSE_ENABLE_SAMPLES OR HIPSPARSE_BUILD_T
     rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
     
-    if(HIPSPARSE_BUILD_TESTING)
+    if(HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
         rocm_package_setup_client_component(
             tests
             DEPENDS
@@ -175,7 +175,7 @@ if(HIPSPARSE_BUILD_CLIENTS_ONLY OR HIPSPARSE_ENABLE_SAMPLES OR HIPSPARSE_BUILD_T
             rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_RPM}")
             rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_DEB}")
         endif()
-        if(HIPSPARSE_ENABLE_OPENMP AND HIPSPARSE_BUILD_TESTING)
+        if(HIPSPARSE_ENABLE_OPENMP AND (HIPSPARSE_BUILD_TESTING OR BUILD_TESTING))
             rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${OPENMP_RPM}")
             rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${OPENMP_DEB}")
         endif()
