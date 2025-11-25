@@ -699,6 +699,7 @@ class LocalReadMFMA(LocalRead):
                     assert False, f"Unhandled bpeDS: {tP['bpeDS']}"
             else:
                 numOffsetsPerLoad = 2 * blocksPerTGroupSMFMA
+                numberMTilesPerWave = kernel["MIWaveTile"][tile01]
                 highBits = 0
                 totalLoads = numberMTilesPerWave * numOffsetsPerLoad
                 for tIdx in range(0, numberMTilesPerWave):
