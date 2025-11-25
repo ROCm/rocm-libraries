@@ -165,7 +165,7 @@ NB_MODULE(origami, m) {
   m.def("select_config_mnk",
         &origami::select_config_mnk,
         "Select best configuration for M,N,K dimensions");
-  m.def("select_ranked_configs", &origami::select_ranked_configs, "Select ranked configurations");
+  m.def("select_topk_configs", &origami::select_topk_configs, "Select topk configurations");
   m.def("compute_perf_gflops", &origami::compute_perf_gflops, "Compute performance in GFLOPS");
 
   // StreamK functions

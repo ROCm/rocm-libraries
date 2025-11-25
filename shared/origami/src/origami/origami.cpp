@@ -72,104 +72,19 @@ void pick_best_config_by_arithmetic_intensity(std::vector<prediction_result_t>& 
   // 3) Return the tile with the highest arithmetic intensity
 }
 
-std::vector<prediction_result_t> select_ranked_configs(const problem_t& problem,
-                                  const hardware_t& hardware,
-                                  const std::vector<config_t>& configs) {
+std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
+                                                     const hardware_t& hardware,
+                                                     const std::vector<config_t>& configs,
+                                                     std::size_t topk) {
   // Use rank_configs to get configurations with latencies ranked by performance
-  auto results = rank_configs(problem, hardware, configs);
+  auto ranked_configs = rank_configs(problem, hardware, configs);
 
-  if (results.empty()) { throw std::runtime_error("No valid configs found."); }
-
-  // Apply tie-breaking logic for configs with similar latency
-  double best_latency = results.front().latency;
-  size_t num_the_same = 0;
-
-  // Count the number of similar latencies
-  constexpr double epsilon = 1e-9;
-  // variance is set through environment variable ANALYTICAL_GEMM_HEURISTICS_VARIANCE
-  static const double top_N_heuristic = read_heuristics_variance_env_var();
-  for (const auto& res : results) {
-    bool within_top;
-    const double diff = std::abs(res.latency - best_latency);
-
-    if (top_N_heuristic <= epsilon) {
-      // Absolute tolerance path
-      within_top = diff < epsilon;
-    } else {
-      // Relative tolerance path (guard denom)
-      const double denom = std::max(std::abs(best_latency), epsilon);
-      // If it's within top_N_heuristic%, include it.
-      within_top = (diff / denom) < top_N_heuristic;
-    }
-
-    if (within_top)
-      ++num_the_same;
-    else
-      break;
-  }
-
-  // Finally, use your existing tie-breaker on top_candidates
-  pick_best_config_by_arithmetic_intensity(results, num_the_same);
-
-  // After arithmetic intensity tie-breaking, check if we still have ties
-  // among the top results (those with same latency and arithmetic intensity)
-  if (num_the_same > 1) {
-    // Check if the top tiles still have the same arithmetic intensity
-    double first_ai    = compute_arithmetic_intensity(results.front().config);
-    size_t num_same_ai = 1;
-    for (size_t i = 1; i < num_the_same; ++i) {
-      double current_ai = compute_arithmetic_intensity(results[i].config);
-      if (std::abs(current_ai - first_ai) < 1e-6) {
-        num_same_ai++;
-      } else {
-        break;
-      }
-    }
-
-    // If we still have ties after arithmetic intensity, apply problem dimension tie-breaker
-    if (num_same_ai > 1) {
-      // Problem dimension-based tie breaker:
-      // If M > N, prefer tiles with larger MT_M
-      // If N > M, prefer tiles with larger MT_N
-      // If M == N, this tie-breaker doesn't apply (will use final tie-breaker)
-
-      if (problem.size.m != problem.size.n) {
-        std::stable_sort(results.begin(),
-                         results.begin() + num_same_ai,
-                         [problem](const prediction_result_t& a, const prediction_result_t& b) {
-                           if (problem.size.m > problem.size.n) {
-                             // M-dominant: prefer larger MT_M
-                             if (a.config.mt.m != b.config.mt.m)
-                               return a.config.mt.m > b.config.mt.m;
-                             // If MT_M is same, prefer larger MT_N as secondary
-                             return a.config.mt.n > b.config.mt.n;
-                           } else  // N > M
-                           {
-                             // N-dominant: prefer larger MT_N
-                             if (a.config.mt.n != b.config.mt.n)
-                               return a.config.mt.n > b.config.mt.n;
-                             // If MT_N is same, prefer larger MT_M as secondary
-                             return a.config.mt.m > b.config.mt.m;
-                           }
-                         });
-      }
-
-      // Final tie-breaker: when all else is equal (including square problems),
-      // consistently prefer tiles with larger MT_M
-      // This ensures deterministic selection regardless of input order
-      std::stable_sort(results.begin(),
-                       results.begin() + num_same_ai,
-                       [](const prediction_result_t& a, const prediction_result_t& b) {
-                         // Prefer larger MT_M first
-                         if (a.config.mt.m != b.config.mt.m) return a.config.mt.m > b.config.mt.m;
-                         // If MT_M is same, prefer larger MT_N
-                         if (a.config.mt.n != b.config.mt.n) return a.config.mt.n > b.config.mt.n;
-                         // If both MT_M and MT_N are same, prefer larger MT_K
-                         return a.config.mt.k > b.config.mt.k;
-                       });
-    }
-  }
-  return results;
+  // Return only the top K configurations
+  std::vector<prediction_result_t> topk_configs;
+  size_t count = std::min(topk, ranked_configs.size());
+  topk_configs.reserve(count);
+  for (size_t i = 0; i < count; ++i) { topk_configs.push_back(ranked_configs[i]); }
+  return topk_configs;
 }
 
 /**
@@ -201,7 +116,7 @@ std::tuple<size_t, size_t> select_workgroup_mapping(const problem_t& problem,
 
   // Default is the closest we can get to a square
   size_t max_CU_XCD = hardware.N_CU / hardware.NUM_XCD;
-  int defaultWGM = static_cast<int>(ceil(std::sqrt(max_CU_XCD)));
+  int defaultWGM    = static_cast<int>(ceil(std::sqrt(max_CU_XCD)));
 
   // Number of output MTs per split and batch
   size_t numMT_M = math::safe_ceil_div(M, MT_M);
@@ -229,8 +144,8 @@ std::tuple<size_t, size_t> select_workgroup_mapping(const problem_t& problem,
   // -------------------
   // Default WGMXCC -- always number of XCD
   int defaultWGMXCC = static_cast<int>(hardware.NUM_XCD);
-  bool isWGMXCCset   = false;
-  int out_wgmxcc  = static_cast<int>(defaultWGMXCC);
+  bool isWGMXCCset  = false;
+  int out_wgmxcc    = static_cast<int>(defaultWGMXCC);
 
   // Batched GEMMs
   if (batch > 1 && !isWGMXCCset) {
@@ -272,8 +187,8 @@ std::tuple<size_t, size_t> select_workgroup_mapping(const problem_t& problem,
   // WGM Prediction
   // -------------------
   // Default WGM
-  bool isWGMset  = false;
-  int out_wgm = defaultWGM;
+  bool isWGMset = false;
+  int out_wgm   = defaultWGM;
 
   // shortcut:
   // 1. if we have decided to not remap xcc, there is no reason to use wgm
@@ -410,6 +325,97 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                      return a.latency < b.latency;
                    });
 
+  if (results.empty()) { throw std::runtime_error("No valid configs found."); }
+
+  // Apply tie-breaking logic for configs with similar latency
+  double best_latency = results.front().latency;
+  size_t num_the_same = 0;
+
+  // Count the number of similar latencies
+  constexpr double epsilon = 1e-9;
+  // variance is set through environment variable ANALYTICAL_GEMM_HEURISTICS_VARIANCE
+  static const double top_N_heuristic = read_heuristics_variance_env_var();
+  for (const auto& res : results) {
+    bool within_top;
+    const double diff = std::abs(res.latency - best_latency);
+
+    if (top_N_heuristic <= epsilon) {
+      // Absolute tolerance path
+      within_top = diff < epsilon;
+    } else {
+      // Relative tolerance path (guard denom)
+      const double denom = std::max(std::abs(best_latency), epsilon);
+      // If it's within top_N_heuristic%, include it.
+      within_top = (diff / denom) < top_N_heuristic;
+    }
+
+    if (within_top)
+      ++num_the_same;
+    else
+      break;
+  }
+
+  // Finally, use your existing tie-breaker on top_candidates
+  pick_best_config_by_arithmetic_intensity(results, num_the_same);
+
+  // After arithmetic intensity tie-breaking, check if we still have ties
+  // among the top results (those with same latency and arithmetic intensity)
+  if (num_the_same > 1) {
+    // Check if the top tiles still have the same arithmetic intensity
+    double first_ai    = compute_arithmetic_intensity(results.front().config);
+    size_t num_same_ai = 1;
+    for (size_t i = 1; i < num_the_same; ++i) {
+      double current_ai = compute_arithmetic_intensity(results[i].config);
+      if (std::abs(current_ai - first_ai) < 1e-6) {
+        num_same_ai++;
+      } else {
+        break;
+      }
+    }
+
+    // If we still have ties after arithmetic intensity, apply problem dimension tie-breaker
+    if (num_same_ai > 1) {
+      // Problem dimension-based tie breaker:
+      // If M > N, prefer tiles with larger MT_M
+      // If N > M, prefer tiles with larger MT_N
+      // If M == N, this tie-breaker doesn't apply (will use final tie-breaker)
+
+      if (problem.size.m != problem.size.n) {
+        std::stable_sort(results.begin(),
+                         results.begin() + num_same_ai,
+                         [problem](const prediction_result_t& a, const prediction_result_t& b) {
+                           if (problem.size.m > problem.size.n) {
+                             // M-dominant: prefer larger MT_M
+                             if (a.config.mt.m != b.config.mt.m)
+                               return a.config.mt.m > b.config.mt.m;
+                             // If MT_M is same, prefer larger MT_N as secondary
+                             return a.config.mt.n > b.config.mt.n;
+                           } else  // N > M
+                           {
+                             // N-dominant: prefer larger MT_N
+                             if (a.config.mt.n != b.config.mt.n)
+                               return a.config.mt.n > b.config.mt.n;
+                             // If MT_N is same, prefer larger MT_M as secondary
+                             return a.config.mt.m > b.config.mt.m;
+                           }
+                         });
+      }
+
+      // Final tie-breaker: when all else is equal (including square problems),
+      // consistently prefer tiles with larger MT_M
+      // This ensures deterministic selection regardless of input order
+      std::stable_sort(results.begin(),
+                       results.begin() + num_same_ai,
+                       [](const prediction_result_t& a, const prediction_result_t& b) {
+                         // Prefer larger MT_M first
+                         if (a.config.mt.m != b.config.mt.m) return a.config.mt.m > b.config.mt.m;
+                         // If MT_M is same, prefer larger MT_N
+                         if (a.config.mt.n != b.config.mt.n) return a.config.mt.n > b.config.mt.n;
+                         // If both MT_M and MT_N are same, prefer larger MT_K
+                         return a.config.mt.k > b.config.mt.k;
+                       });
+    }
+  }
   return results;
 }
 
@@ -441,7 +447,7 @@ prediction_result_t select_config_mnk(size_t M,
 prediction_result_t select_config(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const std::vector<config_t>& configs) {
-  auto ranked_configs = select_ranked_configs(problem, hardware, configs);
+  auto ranked_configs = rank_configs(problem, hardware, configs);
 
   // Return the top configuration
   return ranked_configs[0];

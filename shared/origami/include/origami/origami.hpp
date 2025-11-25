@@ -78,9 +78,10 @@ prediction_result_t select_config_mnk(std::size_t M,
  * @param topk Number of top configurations to return
  * @return std::vector<prediction_result_t> Top K configurations ranked by performance (best first)
  */
-std::vector<prediction_result_t> select_ranked_configs(const problem_t& problem,
+std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
                                                      const hardware_t& hardware,
-                                                     const std::vector<config_t>& configs);
+                                                     const std::vector<config_t>& configs,
+                                                     std::size_t topk);
 
 /**
  * @brief Given a latency, compute the achieved throughput in gflops.
