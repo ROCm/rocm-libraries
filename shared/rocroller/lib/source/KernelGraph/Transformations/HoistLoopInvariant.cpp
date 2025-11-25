@@ -47,57 +47,58 @@ namespace rocRoller::KernelGraph
         std::set<int> tags;
 
         // Visit the expression tree to find DataFlowTags
-        std::
-            visit(
-                [&tags](auto&& arg) {
-                    using T = std::decay_t<decltype(arg)>;
-                    if constexpr(std::is_same_v<T, Expression::DataFlowTag>)
+        std::visit(
+            [&tags](auto&& arg) {
+                using T = std::decay_t<decltype(arg)>;
+
+                if constexpr(std::is_same_v<T, Expression::DataFlowTag>)
+                {
+                    tags.insert(arg.tag);
+                }
+                else if constexpr(Expression::CBinary<T>)
+                {
+                    auto lhsTags = extractDataFlowTags(*arg.lhs);
+                    auto rhsTags = extractDataFlowTags(*arg.rhs);
+                    tags.insert(lhsTags.begin(), lhsTags.end());
+                    tags.insert(rhsTags.begin(), rhsTags.end());
+                }
+                else if constexpr(Expression::CUnary<T>)
+                {
+                    auto operandTags = extractDataFlowTags(*arg.arg);
+                    tags.insert(operandTags.begin(), operandTags.end());
+                }
+                else if constexpr(Expression::CTernary<T>)
+                {
+                    auto lhsTags  = extractDataFlowTags(*arg.lhs);
+                    auto r1hsTags = extractDataFlowTags(*arg.r1hs);
+                    auto r2hsTags = extractDataFlowTags(*arg.r2hs);
+                    tags.insert(lhsTags.begin(), lhsTags.end());
+                    tags.insert(r1hsTags.begin(), r1hsTags.end());
+                    tags.insert(r2hsTags.begin(), r2hsTags.end());
+                }
+                else if constexpr(Expression::CNary<T>)
+                {
+                    for(auto const& operand : arg.operands)
                     {
-                        tags.insert(arg.tag);
-                    }
-                    else if constexpr(
-                        std::is_same_v<
-                            T,
-                            Expression::
-                                Add> || std::is_same_v<T, Expression::Subtract> || std::is_same_v<T, Expression::Multiply> || std::is_same_v<T, Expression::Divide>)
-                    {
-                        auto lhsTags = extractDataFlowTags(*arg.lhs);
-                        auto rhsTags = extractDataFlowTags(*arg.rhs);
-                        tags.insert(lhsTags.begin(), lhsTags.end());
-                        tags.insert(rhsTags.begin(), rhsTags.end());
-                    }
-                    else if constexpr(
-                        std::is_same_v<T,
-                                       Expression::
-                                           Negate> || std::is_same_v<T, Expression::BitwiseNegate> || std::is_same_v<T, Expression::LogicalNot> || std::is_same_v<T, Expression::Convert> || std::is_same_v<T, Expression::Exponential2> || std::is_same_v<T, Expression::Exponential> || std::is_same_v<T, Expression::RandomNumber> || std::is_same_v<T, Expression::ToScalar> || std::is_same_v<T, Expression::BitFieldExtract> || std::is_same_v<T, Expression::MagicMultiple> || std::is_same_v<T, Expression::MagicShifts> || std::is_same_v<T, Expression::MagicShiftAndSign>)
-                    {
-                        auto operandTags = extractDataFlowTags(*arg.arg);
+                        auto operandTags = extractDataFlowTags(*operand);
                         tags.insert(operandTags.begin(), operandTags.end());
                     }
-                    else if constexpr(std::is_same_v<T, Expression::Conditional>)
-                    {
-                        auto condTags  = extractDataFlowTags(*arg.lhs);
-                        auto trueTags  = extractDataFlowTags(*arg.r1hs);
-                        auto falseTags = extractDataFlowTags(*arg.r2hs);
-                        tags.insert(condTags.begin(), condTags.end());
-                        tags.insert(trueTags.begin(), trueTags.end());
-                        tags.insert(falseTags.begin(), falseTags.end());
-                    }
-                    else if constexpr(
-                        std::is_same_v<
-                            T,
-                            Expression::
-                                MultiplyAdd> || std::is_same_v<T, Expression::AddShiftL> || std::is_same_v<T, Expression::ShiftLAdd> || std::is_same_v<T, Expression::MatrixMultiply>)
-                    {
-                        auto lhsTags  = extractDataFlowTags(*arg.lhs);
-                        auto r1hsTags = extractDataFlowTags(*arg.r1hs);
-                        auto r2hsTags = extractDataFlowTags(*arg.r2hs);
-                        tags.insert(lhsTags.begin(), lhsTags.end());
-                        tags.insert(r1hsTags.begin(), r1hsTags.end());
-                        tags.insert(r2hsTags.begin(), r2hsTags.end());
-                    }
-                },
-                expr);
+                }
+                else if constexpr(std::is_same_v<T, Expression::ScaledMatrixMultiply>)
+                {
+                    auto matATags   = extractDataFlowTags(*arg.matA);
+                    auto matBTags   = extractDataFlowTags(*arg.matB);
+                    auto matCTags   = extractDataFlowTags(*arg.matC);
+                    auto scaleATags = extractDataFlowTags(*arg.scaleA);
+                    auto scaleBTags = extractDataFlowTags(*arg.scaleB);
+                    tags.insert(matATags.begin(), matATags.end());
+                    tags.insert(matBTags.begin(), matBTags.end());
+                    tags.insert(matCTags.begin(), matCTags.end());
+                    tags.insert(scaleATags.begin(), scaleATags.end());
+                    tags.insert(scaleBTags.begin(), scaleBTags.end());
+                }
+            },
+            expr);
 
         return tags;
     }
