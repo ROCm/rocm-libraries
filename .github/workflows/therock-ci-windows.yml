@@ -17,8 +17,7 @@ jobs:
   therock-build-windows:
     name: Build
     runs-on: azure-windows-scale-rocm
-    # Skip hipDNN & plugin build on Windows since it's not supported yet https://github.com/ROCm/TheRock/issues/1822
-    if: ${{ !contains(inputs.project_to_test, 'hipdnn') && !contains(inputs.project_to_test, 'miopen_plugin') }}
+    if: always()
     outputs:
       AMDGPU_FAMILIES: ${{ env.AMDGPU_FAMILIES }}
     permissions:
@@ -55,7 +54,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: efed3c3b10a5cce8578f58f8eb288582c26d18c4 # 2025-11-19 commit
+          ref: d4186d98752ef3e094d1a682ff3d7ac20935e286 # 2025-11-25 commit
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -170,8 +169,7 @@ jobs:
   therock-test-windows:
     name: "Test"
     needs: [therock-build-windows]
-    # Skip hipDNN & plugin tests on Windows since it's not supported yet https://github.com/ROCm/TheRock/issues/1822
-    if: ${{ !contains(inputs.project_to_test, 'hipdnn') && !contains(inputs.project_to_test, 'miopen_plugin') }}
+    if: always()
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       project_to_test: ${{ inputs.project_to_test }}
