@@ -261,14 +261,21 @@ The CI pipeline automatically runs clang-tidy on all pull requests to ensure com
 
 ### 15.2 Test Naming Enforcement Tool
 
-*[Placeholder: A dedicated test naming enforcement tool is planned to automatically validate that all test names follow the conventions outlined in Section 10]*
+A dedicated test naming enforcement tool is available to automatically validate that all test names follow the conventions outlined in Section 11.
 
-This tool will:
-- Parse all test files and extract TEST/TEST_F suite names
-- Validate ordering of keywords (Integration, Gpu, Feature, Layout, Datatype)
-- Check for prohibited underscores in test suite names
-- Generate reports on non-compliant test names
-- Integrate with CI to block merges with invalid test names
+The tool is located at `cmake/scripts/test_name_validator.py` and is integrated into the build system.
+
+To run the validation manually:
+```bash
+ninja validate_test_names
+```
+
+This tool:
+- Parses all test executables to extract test names
+- Validates ordering of keywords (Integration, Gpu, Feature, Layout, Datatype)
+- Checks for prohibited underscores in test suite names
+- Generates reports on non-compliant test names
+- Is integrated with CI to block merges with invalid test names
 
 ---
 

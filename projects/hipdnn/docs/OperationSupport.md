@@ -20,7 +20,7 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
   - Batchnorm operations (Training, Backward, Inference)
   - Fused operation graphs
 
-- **[Fusilli Plugin](https://github.com/iree-org/fusilli)** - IREE backed plugin for JIT compiling ML operations (with fusions) for AMD GPUs, supporting efficient codegenerated kernels
+- **[Fusilli IREE Plugin](https://github.com/iree-org/fusilli)** - IREE backed plugin for JIT compiling ML operations (with fusions) for AMD GPUs, supporting efficient codegenerated kernels
   - Convolution (Forward, Dgrad, Wgrad)
   - GEMM
   - Batchnorm (Training, Inference)
