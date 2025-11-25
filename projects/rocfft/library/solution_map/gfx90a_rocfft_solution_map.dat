@@ -426,8 +426,8 @@
 {"Problem":{"arch":"gfx90a","token":"kernel_len10x20_single_2d_single"},
  "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 10,20 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":100,"tpt":[ 1,10 ],"factors":[ 10,2,10 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len20x10_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 20,10 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":100,"tpt":[ 5,5 ],"factors":[ 5,4,5,2 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len10x20_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 10,20 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":100,"tpt":[ 5,5 ],"factors":[ 5,2,5,4 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
 {"Problem":{"arch":"gfx90a","token":"kernel_len26x64_single_2d_single"},
  "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 26,64 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":208,"tpt":[ 2,8 ],"factors":[ 13,2,8,8 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
@@ -438,8 +438,8 @@
 {"Problem":{"arch":"gfx90a","token":"kernel_len30x60_single_2d_single"},
  "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 30,60 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":180,"tpt":[ 3,6 ],"factors":[ 10,3,6,10 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len32x16_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 32,16 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":256,"tpt":[ 16,8 ],"factors":[ 2,2,2,4,2,2,4 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len16x32_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 16,32 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":256,"tpt":[ 8,16 ],"factors":[ 2,2,4,2,2,2,4 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
 {"Problem":{"arch":"gfx90a","token":"kernel_len32x64_single_2d_single"},
  "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 32,64 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":256,"tpt":[ 2,8 ],"factors":[ 2,16,8,8 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
@@ -462,38 +462,38 @@
 {"Problem":{"arch":"gfx90a","token":"kernel_len42x96_single_2d_single"},
  "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 42,96 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":672,"tpt":[ 7,16 ],"factors":[ 7,6,4,4,6 ],"ebtype":"R2C_POST","direction":-1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len60x30_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 60,30 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":180,"tpt":[ 6,3 ],"factors":[ 10,6,10,3 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len30x60_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 30,60 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":180,"tpt":[ 3,6 ],"factors":[ 10,3,10,6 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len64x26_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 64,26 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":128,"tpt":[ 4,2 ],"factors":[ 4,16,2,13 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len26x64_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 26,64 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":128,"tpt":[ 2,4 ],"factors":[ 2,13,4,16 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len64x32_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 64,32 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":256,"tpt":[ 8,4 ],"factors":[ 8,8,2,2,8 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len32x64_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 32,64 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":256,"tpt":[ 4,8 ],"factors":[ 2,2,8,8,8 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len72x26_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 72,26 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":234,"tpt":[ 9,2 ],"factors":[ 9,8,13,2 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len26x72_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 26,72 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":234,"tpt":[ 2,9 ],"factors":[ 13,2,9,8 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len72x36_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 72,36 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":432,"tpt":[ 12,6 ],"factors":[ 2,6,6,6,6 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len36x72_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 36,72 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":432,"tpt":[ 6,12 ],"factors":[ 6,6,2,6,6 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len80x36_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 80,36 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":480,"tpt":[ 10,6 ],"factors":[ 10,8,6,6 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len36x80_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 36,80 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":480,"tpt":[ 6,10 ],"factors":[ 6,6,10,8 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len80x40_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 80,40 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":400,"tpt":[ 10,5 ],"factors":[ 8,10,5,8 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len40x80_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 40,80 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":400,"tpt":[ 5,10 ],"factors":[ 5,8,8,10 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len84x36_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 84,36 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":504,"tpt":[ 12,6 ],"factors":[ 4,3,7,6,6 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len36x84_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 36,84 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":504,"tpt":[ 6,12 ],"factors":[ 6,6,4,3,7 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len84x42_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 84,42 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":504,"tpt":[ 12,6 ],"factors":[ 4,3,7,6,7 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len42x84_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 42,84 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":504,"tpt":[ 6,12 ],"factors":[ 6,7,4,3,7 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len84x7_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 84,7 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":84,"tpt":[ 12,1 ],"factors":[ 3,7,4,7 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len7x84_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 7,84 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":84,"tpt":[ 1,12 ],"factors":[ 7,3,7,4 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
-{"Problem":{"arch":"gfx90a","token":"kernel_len96x42_single_2d_single"},
- "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 96,42 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":672,"tpt":[ 16,7 ],"factors":[ 4,4,6,6,7 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
+{"Problem":{"arch":"gfx90a","token":"kernel_len42x96_single_2d_single"},
+ "Solutions":[ {"sol_node_type":"SOL_KERNEL_ONLY","kernel_key":{"lengths":[ 42,96 ],"precision":"single","scheme":"CS_KERNEL_2D_SINGLE","sbrc_trans":"NONE","kernelConfig":{"use_3steps":false,"half_lds":false,"dir_reg":false,"buffer_inst":false,"tpb":1,"wgs":672,"tpt":[ 7,16 ],"factors":[ 6,7,4,4,6 ],"ebtype":"C2R_PRE","direction":1,"static_dim":3,"placement":"OP","iAryType":"CI","oAryType":"CI"}}}
                ]},
 {"Problem":{"arch":"gfx90a","token":"100_dp_ip_complex"},
  "Solutions":[ {"sol_node_type":"SOL_DUMMY","using_scheme":"CS_NONE","solution_childnodes":[  ]}
