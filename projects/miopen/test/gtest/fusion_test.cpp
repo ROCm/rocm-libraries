@@ -164,7 +164,7 @@ TEST(CPU_FusionCreateOpConvForward, TestInvalidConvLayout)
 
     miopenFusionOpDescriptor_t convOp;
     auto status = miopenCreateOpConvForward(fusionPlanDesc, &convOp, convDesc, wDesc);
-    EXPECT_EQUAL(status, miopenStatusInvalidValue);
+    EXPECT_EQUAL(status, miopenStatusUnknownError);
 }
 
 #endif

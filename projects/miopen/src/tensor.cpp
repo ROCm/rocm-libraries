@@ -811,8 +811,7 @@ TensorDescriptor::StringToLayoutType(std::string layout_str, bool vectorized, in
         }
         else
         {
-            MIOPEN_THROW(miopenStatusInvalidValue,
-                         "C-vectorized tensor only support vector length 4 and 8");
+            MIOPEN_THROW("C-vectorized tensor only support vector length 4 and 8");
         }
     }
     else
@@ -839,8 +838,7 @@ TensorDescriptor::StringToLayoutType(std::string layout_str, bool vectorized, in
         }
         else
         {
-            MIOPEN_THROW(miopenStatusInvalidValue,
-                         "Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC");
+            MIOPEN_THROW("Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC");
         }
     }
 }
