@@ -107,6 +107,7 @@ add_library(miopen_legacy_plugin_private
     engines/plans/MiopenBatchnormBwdPlan.cpp
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp
     engines/plans/MiopenBatchnormFwdTrainingPlan.cpp
+    engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.cpp
     engines/plans/MiopenConvBwdPlan.cpp
     engines/plans/MiopenConvFwdBiasActivPlan.cpp
     engines/plans/MiopenConvFwdBiasActivPlanBuilder.cpp
@@ -129,6 +130,21 @@ target_include_directories(miopen_legacy_plugin_private
     PUBLIC 
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+if(WIN32)
+    # On Windows, spdlog::spdlog_header_only has some INTERFACE_COMPILE_OPTIONS that
+    # cause issues when consuming the hipdnn_sdk.  We need to clear these options
+    # Refer to issue: https://github.com/ROCm/TheRock/issues/2003
+
+    # Can't do this to an alias
+    get_property(aliased_target_name TARGET spdlog::spdlog_header_only PROPERTY ALIASED_TARGET)
+    message(STATUS "spdlog::spdlog_header_only aliased target name: '${aliased_target_name}'")
+
+    if(NOT aliased_target_name)
+        set_target_properties(spdlog::spdlog_header_only PROPERTIES INTERFACE_COMPILE_OPTIONS "")
+    endif()
+endif()
+
 target_link_libraries(miopen_legacy_plugin_private PUBLIC MIOpen hipdnn_sdk)
 target_compile_options(miopen_legacy_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
@@ -182,4 +198,5 @@ install(
     TARGETS miopen_legacy_plugin
     EXPORT miopen-legacy-plugin
     LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
+    RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )

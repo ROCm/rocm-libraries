@@ -26,13 +26,25 @@ Definitions:
 
   - &large_matrix_size_range
     - { N:  2011, lda:  2011, K:  253, ldc: 2048 }
+    - { N:  2048, lda:  2048, K:  512, ldc: 2048 }
     - { N:  5000, lda:  5008, K:  164, ldc: 5000 }
     #test the kernels which uses only gemm to compute syrk
     - { N:  601, lda:  2001, K:  2001, ldc: 601 }
     - { N:  64, lda:  5000, K:  5000, ldc: 64 }
 
+  - &matrix_size_kernel_scan
+    - { N:  512, lda:  512, K:  512, ldc: 512 }
+
+  - &alpha_beta_kernel_scan
+    - { alpha:  1.0, alphai:  0.0, beta:  1.0, betai: 0.0 }
+    - { alpha:  1.0, alphai:  0.0, beta: -1.0, betai: 0.0 }
+    - { alpha:  1.0, alphai:  0.0, beta:  0.0, betai: 0.0 }
+    - { alpha:  -1.0, alphai:  0.0, beta:  0.0, betai: 0.0 }
+    - { alpha:  2.0, alphai:  0.0, beta:  0.0, betai: 0.0 }
+    - { alpha:  0.5, alphai:  0.0, beta:  0.5, betai: 0.0 }
+
   - &alpha_beta_range
-    - { alpha:  1.5, alphai:  1.5, beta:  0.0, betai: 0.0 }
+    - { alpha:  1.0, alphai:  0.0, beta:  1.0, betai: 0.0 }
     - { alpha: -2.0, alphai:  1.0, beta: -1.0, betai: 0.5 }
     - { alpha:  0.0, alphai:  0.0, beta:  1.0, betai: 0.0 } # quick success
     - { alpha:  0.0, alphai:  0.0, beta:  2.0, betai: 0.5 } # scale step only
@@ -89,6 +101,16 @@ Tests:
   devices: 1
   initialization: rand_int
 
+- name: syrk_ex_kernel_scan
+  category: pre_checkin
+  function: syrk_ex
+  precision: *syrk_ex_precisions
+  uplo: [ U, L ]
+  transA: [ N, T ]
+  matrix_size: *matrix_size_kernel_scan
+  alpha_beta: *alpha_beta_kernel_scan
+  initialization: hpl
+
 - name: syrk_ex_nighlty
   category: nightly
   function: syrk_ex
@@ -96,7 +118,7 @@ Tests:
   uplo: [ U, L ]
   transA: [ N, T ]
   matrix_size: *large_matrix_size_range
-  alpha_beta: *alpha_beta
+  alpha_beta: *alpha_beta_range
   initialization: hpl
 
 - name: syrk_ex_graph_test
@@ -108,6 +130,7 @@ Tests:
   transA: [ N, T ]
   matrix_size:
     - { N:   199, K:   33,  lda:  199,  ldc: 199 }
+    - { N:    32, K:   32,  lda:  32,   ldc: 32 }
   alpha: [ 1 ]
   beta: [ 1 ]
   graph_test: true
