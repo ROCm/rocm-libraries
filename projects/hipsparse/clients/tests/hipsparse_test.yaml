@@ -79,6 +79,11 @@ include: test_prune_csr2csr.yaml
 include: test_prune_csr2csr_by_percentage.yaml
 include: test_prune_dense2csr.yaml
 include: test_prune_dense2csr_by_percentage.yaml
+include: test_identity.yaml
+include: test_nnz.yaml
+include: test_coosort.yaml
+include: test_cscsort.yaml
+include: test_csrsort.yaml
 
 # generic
 include: test_axpby.yaml
@@ -106,6 +111,7 @@ include: test_spmm_csr.yaml
 include: test_spmv_coo_aos.yaml
 include: test_spmv_coo.yaml
 include: test_spmv_csr.yaml
+include: test_spmv_sell.yaml
 include: test_spsv_coo.yaml
 include: test_spsv_csr.yaml
 include: test_spsm_coo.yaml
