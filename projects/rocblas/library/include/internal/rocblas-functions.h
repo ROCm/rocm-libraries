@@ -4166,7 +4166,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_drotmg_strided_batched_64(rocblas_handle h
     alpha     device pointer or host pointer to scalar alpha.
     @param[in]
         A     device pointer storing banded matrix A.
-              Leading (kl + ku + 1) by n part of the matrix contains the coefficients
+              The leading (kl + ku + 1) by n part of the matrix contains the coefficients
               of the banded matrix. The leading diagonal resides in row (ku + 1) with
               the first super-diagonal above on the RHS of row ku. The first sub-diagonal
               resides below on the LHS of row ku + 2. This propagates up and down across
@@ -4358,7 +4358,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgbmv_64(rocblas_handle                han
     alpha     device pointer or host pointer to scalar alpha.
     @param[in]
         A     device array of device pointers storing each banded matrix A_i.
-              Leading (kl + ku + 1) by n part of the matrix contains the coefficients
+              The leading (kl + ku + 1) by n part of the matrix contains the coefficients
               of the banded matrix. The leading diagonal resides in row (ku + 1) with
               the first super-diagonal above on the RHS of row ku. The first sub-diagonal
               resides below on the LHS of row ku + 2. This propagates up and down across
@@ -4561,7 +4561,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgbmv_batched_64(rocblas_handle           
     alpha     device pointer or host pointer to scalar alpha.
     @param[in]
         A     device pointer to first banded matrix (A_1).
-              Leading (kl + ku + 1) by n part of the matrix contains the coefficients
+              The leading (kl + ku + 1) by n part of the matrix contains the coefficients
               of the banded matrix. The leading diagonal resides in row (ku + 1) with
               the first super-diagonal above on the RHS of row ku. The first sub-diagonal
               resides below on the LHS of row ku + 2. This propagates up and down across
@@ -4770,7 +4770,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgbmv_strided_batched_64(rocblas_handle   
         y := alpha*A**T*x + beta*y,   or
         y := alpha*A**H*x + beta*y,
    
-    where ``alpha`` and ``beta`` are scalars, ``x`` and ``y` are vectors, and ``A`` is an
+    where ``alpha`` and ``beta`` are scalars, ``x`` and ``y`` are vectors, and ``A`` is an
     ``m`` by ``n`` matrix.
 
     @param[in]
@@ -5221,7 +5221,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_tssgemv_batched_64(rocblas_handle         
                 specifies the leading dimension of matrices A_i.
     @param[in]
     strideA     [rocblas_stride]
-                stride from the start of one matrix (A_i) and the next one (A_i+1).
+                stride from the start of one matrix (A_i) to the next one (A_i+1).
     @param[in]
     x           device pointer to the first vector (x_1) in the batch.
     @param[in]
@@ -11525,7 +11525,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_strided_batched_64(rocblas_handle ha
               handle to the rocBLAS library context queue.
     @param[in]
     uplo      rocblas_fill
-              specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'.
+              specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
               - if rocblas_fill_upper, the lower part of A is not referenced.
               - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
@@ -11613,22 +11613,23 @@ ROCBLAS_EXPORT rocblas_status rocblas_dsbmv_64(rocblas_handle handle,
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    sbmv_batched performs the matrix-vector operation:
+    The sbmv_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-        where (A_i, x_i, y_i) is the i-th instance of the batch.
-        alpha and beta are scalars, x_i and y_i are vectors and A_i is an
-        n by n symmetric banded matrix, for i = 1, ..., batch_count.
-        A should contain an upper or lower triangular n by n symmetric banded matrix.
+   
+    where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
+    ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
+    ``n`` by ``n`` symmetric banded matrix, for ``i`` = 1, ..., ``batch_count``.
+    ``A`` should contain an upper or lower triangular ``n`` by ``n`` symmetric banded matrix.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
-            - if rocblas_fill_upper, the lower part of A is not referenced
-            - if rocblas_fill_lower, the upper part of A is not referenced
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
+            - if rocblas_fill_upper, the lower part of A is not referenced.
+            - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
               number of rows and columns of each matrix A_i.
@@ -11723,22 +11724,23 @@ ROCBLAS_EXPORT rocblas_status rocblas_dsbmv_batched_64(rocblas_handle      handl
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    sbmv_strided_batched performs the matrix-vector operation:
+    The sbmv_strided_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-        where (A_i, x_i, y_i) is the i-th instance of the batch.
-        alpha and beta are scalars, x_i and y_i are vectors and A_i is an
-        n by n symmetric banded matrix, for i = 1, ..., batch_count.
-        A should contain an upper or lower triangular n by n symmetric banded matrix.
+   
+    where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
+    ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
+    ``n`` by ``n`` symmetric banded matrix, for ``i`` = 1, ..., ``batch_count``.
+    ``A`` should contain an upper or lower triangular ``n`` by ``n`` symmetric banded matrix.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
-            - if rocblas_fill_upper, the lower part of A is not referenced
-            - if rocblas_fill_lower, the upper part of A is not referenced
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
+            - if rocblas_fill_upper, the lower part of A is not referenced.
+            - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
               number of rows and columns of each matrix A_i.
@@ -11755,7 +11757,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dsbmv_batched_64(rocblas_handle      handl
               specifies the leading dimension of each matrix A_i.
     @param[in]
     strideA     [rocblas_stride]
-                stride from the start of one matrix (A_i) and the next one (A_i+1).
+                stride from the start of one matrix (A_i) to the next one (A_i+1).
     @param[in]
     x         Device pointer to the first vector x_1 on the GPU.
     @param[in]
@@ -11763,8 +11765,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_dsbmv_batched_64(rocblas_handle      handl
               specifies the increment for the elements of each vector x_i.
     @param[in]
     stridex     [rocblas_stride]
-                stride from the start of one vector (x_i) and the next one (x_i+1).
-                There are no restrictions placed on stridex. However, ensure that stridex is of appropriate size.
+                stride from the start of one vector (x_i) to the next one (x_i+1).
+                There are no restrictions placed on stridex. However, ensure that stridex is of an appropriate size.
                 This typically means stridex >= n * incx. stridex should be non zero.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
@@ -11775,8 +11777,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_dsbmv_batched_64(rocblas_handle      handl
               specifies the increment for the elements of each vector y_i.
     @param[in]
     stridey     [rocblas_stride]
-                stride from the start of one vector (y_i) and the next one (y_i+1).
-                There are no restrictions placed on stridey. However, ensure that stridey is of appropriate size.
+                stride from the start of one vector (y_i) to the next one (y_i+1).
+                There are no restrictions placed on stridey. However, ensure that stridey is of an appropriate size.
                 This typically means stridey >= n * incy. stridey should be non zero.
     @param[in]
     batch_count [rocblas_int]
