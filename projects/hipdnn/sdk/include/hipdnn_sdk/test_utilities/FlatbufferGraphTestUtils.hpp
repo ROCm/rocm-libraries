@@ -15,7 +15,6 @@ namespace hipdnn_sdk::test_utilities
 {
 
 using namespace hipdnn_sdk::data_objects;
-using namespace hipdnn_sdk::utilities;
 
 inline flatbuffers::FlatBufferBuilder createEmptyValidGraph()
 {
@@ -42,8 +41,8 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferenceGraph(
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
 
-    std::vector<int64_t> derivedStrides = getDerivedShape(strides);
-    std::vector<int64_t> derivedDims = getDerivedShape(dims);
+    std::vector<int64_t> derivedStrides = utilities::getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = utilities::getDerivedShape(dims);
 
     tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", inputDataType, &strides, &dims));
@@ -124,8 +123,8 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormBwdGraph(
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
 
-    std::vector<int64_t> derivedDims = getDerivedShape(dims);
-    std::vector<int64_t> derivedStrides = generateStrides(derivedDims);
+    std::vector<int64_t> derivedDims = utilities::getDerivedShape(dims);
+    std::vector<int64_t> derivedStrides = utilities::generateStrides(derivedDims);
 
     tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", inputDataType, &strides, &dims));
@@ -198,8 +197,8 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormFwdInferActGraph(
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
 
-    std::vector<int64_t> derivedDims = getDerivedShape(dims);
-    std::vector<int64_t> derivedStrides = generateStrides(derivedDims);
+    std::vector<int64_t> derivedDims = utilities::getDerivedShape(dims);
+    std::vector<int64_t> derivedStrides = utilities::generateStrides(derivedDims);
 
     // inputs
     tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
@@ -285,8 +284,8 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
 
-    std::vector<int64_t> derivedDims = getDerivedShape(dims);
-    std::vector<int64_t> derivedStrides = generateStrides(derivedDims);
+    std::vector<int64_t> derivedDims = utilities::getDerivedShape(dims);
+    std::vector<int64_t> derivedStrides = utilities::generateStrides(derivedDims);
 
     // inputs
     tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
@@ -410,8 +409,8 @@ inline flatbuffers::FlatBufferBuilder
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<TensorAttributes>> tensorAttributes;
 
-    std::vector<int64_t> derivedStrides = getDerivedShape(strides);
-    std::vector<int64_t> derivedDims = getDerivedShape(dims);
+    std::vector<int64_t> derivedStrides = utilities::getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = utilities::getDerivedShape(dims);
 
     // Required tensors
     tensorAttributes.push_back(
@@ -497,8 +496,8 @@ inline flatbuffers::FlatBufferBuilder
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<TensorAttributes>> tensorAttributes;
 
-    std::vector<int64_t> derivedStrides = getDerivedShape(strides);
-    std::vector<int64_t> derivedDims = getDerivedShape(dims);
+    std::vector<int64_t> derivedStrides = utilities::getDerivedShape(strides);
+    std::vector<int64_t> derivedDims = utilities::getDerivedShape(dims);
 
     int64_t uid = 1;
 
@@ -927,8 +926,8 @@ inline flatbuffers::FlatBufferBuilder
     int64_t yBiasTensorUid;
     if(doBias)
     {
-        const auto biasDims = getDerivedShape(yDims);
-        const auto biasStrides = generateStrides(biasDims, extractStrideOrder(yDims));
+        const auto biasDims = utilities::getDerivedShape(yDims);
+        const auto biasStrides = utilities::generateStrides(biasDims, utilities::extractStrideOrder(yDims));
 
         biasTensorUid = tensorUid++;
         tensorAttributes.push_back(CreateTensorAttributesDirect(

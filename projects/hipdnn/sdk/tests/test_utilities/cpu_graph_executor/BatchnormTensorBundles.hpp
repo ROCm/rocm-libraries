@@ -12,7 +12,6 @@
 #include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
-using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::data_objects;
 
@@ -44,9 +43,9 @@ struct BatchnormTrainTensorBundle
 {
     BatchnormTrainTensorBundle(const std::vector<int64_t>& dims,
                                unsigned int seed = getGlobalTestSeed(),
-                               const TensorLayout& layout = TensorLayout::NCHW,
+                               const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW,
                                bool useOptionalTensors = false)
-        : derivedDims(getDerivedShape(dims))
+        : derivedDims(hipdnn_sdk::utilities::getDerivedShape(dims))
         , xTensor(dims, layout)
         , scaleTensor(derivedDims)
         , biasTensor(derivedDims)
@@ -71,25 +70,25 @@ struct BatchnormTrainTensorBundle
             static_cast<MeanVarianceDataType>(1.9f), static_cast<MeanVarianceDataType>(2.0f), seed);
 
         epsilonTensor.fillWithValue(
-            static_cast<MeanVarianceDataType>(static_cast<float>(BATCHNORM_DEFAULT_EPSILON)));
+            static_cast<MeanVarianceDataType>(static_cast<float>(hipdnn_sdk::utilities::BATCHNORM_DEFAULT_EPSILON)));
 
         if(useOptionalTensors)
         {
-            momentumTensor = Tensor<MeanVarianceDataType>({1});
+            momentumTensor = hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>({1});
             momentumTensor->fillWithValue(static_cast<MeanVarianceDataType>(0.1f));
 
-            prevRunningMeanTensor = Tensor<MeanVarianceDataType>(derivedDims);
+            prevRunningMeanTensor = hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>(derivedDims);
             prevRunningMeanTensor->fillWithRandomValues(static_cast<MeanVarianceDataType>(-0.1f),
                                                         static_cast<MeanVarianceDataType>(0.1f),
                                                         seed);
 
-            prevRunningVarianceTensor = Tensor<MeanVarianceDataType>(derivedDims);
+            prevRunningVarianceTensor = hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>(derivedDims);
             prevRunningVarianceTensor->fillWithRandomValues(static_cast<MeanVarianceDataType>(1.9f),
                                                             static_cast<MeanVarianceDataType>(2.0f),
                                                             seed);
 
-            nextRunningMeanTensor = Tensor<MeanVarianceDataType>(derivedDims);
-            nextRunningVarianceTensor = Tensor<MeanVarianceDataType>(derivedDims);
+            nextRunningMeanTensor = hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>(derivedDims);
+            nextRunningVarianceTensor = hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>(derivedDims);
         }
     }
 
@@ -153,19 +152,19 @@ struct BatchnormTrainTensorBundle
     }
 
     std::vector<int64_t> derivedDims;
-    Tensor<InputDataType> xTensor;
-    Tensor<ScaleBiasDataType> scaleTensor;
-    Tensor<ScaleBiasDataType> biasTensor;
-    Tensor<MeanVarianceDataType> meanTensor;
-    Tensor<MeanVarianceDataType> invVarianceTensor;
-    Tensor<MeanVarianceDataType> epsilonTensor;
-    Tensor<InputDataType> yTensor;
+    hipdnn_sdk::utilities::Tensor<InputDataType> xTensor;
+    hipdnn_sdk::utilities::Tensor<ScaleBiasDataType> scaleTensor;
+    hipdnn_sdk::utilities::Tensor<ScaleBiasDataType> biasTensor;
+    hipdnn_sdk::utilities::Tensor<MeanVarianceDataType> meanTensor;
+    hipdnn_sdk::utilities::Tensor<MeanVarianceDataType> invVarianceTensor;
+    hipdnn_sdk::utilities::Tensor<MeanVarianceDataType> epsilonTensor;
+    hipdnn_sdk::utilities::Tensor<InputDataType> yTensor;
 
-    std::optional<Tensor<MeanVarianceDataType>> momentumTensor;
-    std::optional<Tensor<MeanVarianceDataType>> prevRunningMeanTensor;
-    std::optional<Tensor<MeanVarianceDataType>> prevRunningVarianceTensor;
-    std::optional<Tensor<MeanVarianceDataType>> nextRunningMeanTensor;
-    std::optional<Tensor<MeanVarianceDataType>> nextRunningVarianceTensor;
+    std::optional<hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>> momentumTensor;
+    std::optional<hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>> prevRunningMeanTensor;
+    std::optional<hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>> prevRunningVarianceTensor;
+    std::optional<hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>> nextRunningMeanTensor;
+    std::optional<hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>> nextRunningVarianceTensor;
 };
 
 template <typename InputType, typename ScaleBiasType, typename MeanVarianceType>
@@ -173,8 +172,8 @@ struct BatchnormBwdTensorBundle
 {
     BatchnormBwdTensorBundle(const std::vector<int64_t>& dims,
                              unsigned int seed = getGlobalTestSeed(),
-                             const TensorLayout& layout = TensorLayout::NCHW)
-        : derivedDims(getDerivedShape(dims))
+                             const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW)
+        : derivedDims(hipdnn_sdk::utilities::getDerivedShape(dims))
         , xTensor(dims, layout)
         , dyTensor(dims, layout)
         , dxTensor(dims, layout)
@@ -219,13 +218,13 @@ struct BatchnormBwdTensorBundle
     }
 
     std::vector<int64_t> derivedDims;
-    Tensor<InputType> xTensor;
-    Tensor<InputType> dyTensor;
-    Tensor<InputType> dxTensor;
-    Tensor<ScaleBiasType> scaleTensor;
-    Tensor<ScaleBiasType> dscaleTensor;
-    Tensor<ScaleBiasType> dbiasTensor;
-    Tensor<MeanVarianceType> meanTensor;
-    Tensor<MeanVarianceType> invVarianceTensor;
+    hipdnn_sdk::utilities::Tensor<InputType> xTensor;
+    hipdnn_sdk::utilities::Tensor<InputType> dyTensor;
+    hipdnn_sdk::utilities::Tensor<InputType> dxTensor;
+    hipdnn_sdk::utilities::Tensor<ScaleBiasType> scaleTensor;
+    hipdnn_sdk::utilities::Tensor<ScaleBiasType> dscaleTensor;
+    hipdnn_sdk::utilities::Tensor<ScaleBiasType> dbiasTensor;
+    hipdnn_sdk::utilities::Tensor<MeanVarianceType> meanTensor;
+    hipdnn_sdk::utilities::Tensor<MeanVarianceType> invVarianceTensor;
 };
 }

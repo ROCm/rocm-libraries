@@ -35,7 +35,7 @@ struct BatchnormTestCase
         using namespace hipdnn_sdk::test_utilities;
 
         ss << "(dims:";
-        vecToStream(ss, tc.dims);
+        hipdnn_sdk::utilities::vecToStream(ss, tc.dims);
         ss << " seed:" << tc.seed;
         ss << ")";
 
