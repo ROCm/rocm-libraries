@@ -35,8 +35,8 @@ Tests:
   category: quick
   function: csrgeam2
   precision: *single_double_precisions_complex_real
-  M: [0, 50, 647, 1799]
-  N: [0, 13, 523, 3712]
+  M: [0, 1, 2, 10, 50, 647, 1799]
+  N: [0, 1, 2, 10, 13, 523, 3712]
   alpha: [0.0, 1.0]
   alphai: [-0.5]
   beta: [0.0, 2.0]
