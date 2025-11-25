@@ -85,7 +85,7 @@ std::vector<TensorsConfig> TensorsConfigs()
 #if PERF_ENABLE
     // Determine a cache-aware cap on total tensor elements for HIP/AMD:
     // 1) Query L2 size via HIP and use 2x L2 as working set
-    // 2) Fallback to per-architecture table if L2 is not reported
+    // 2) Fallback to per-architecture table (MiB) if L2 is not reported
     size_t maxTotalSize = 0;
 
     // 1) HIP L2 cache query
@@ -98,14 +98,15 @@ std::vector<TensorsConfig> TensorsConfigs()
         {
             // Use 2x L2 as a working-set heuristic
             maxTotalSize = 2ul * static_cast<size_t>(L2_bytes);
-            // Convert bytes -> elements of type T
-            maxTotalSize = maxTotalSize / sizeof(T);
         }
     }
 
-    // 2) Fallback table by architecture family
+    // 2) Fallback table by architecture family (MiB)
     if(maxTotalSize == 0)
-        maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
+        maxTotalSize = getCacheSizeLimit(get_handle().GetDeviceName());
+
+    // Convert bytes -> elements of type T
+    maxTotalSize = maxTotalSize / sizeof(T);
 
     for(int N = 1; N < maxTotalSize; N *= 4)
     {
@@ -453,28 +454,11 @@ protected:
 #endif
 };
 
-// #define CHECK_HALF
-#define CHECK_FLOAT
-// #define CHECK_DOUBLE
+using GPU_OpTensorFwdBiasGenericTest_FP16 = OpTensorFwdBiasGenericTest<half_float::half>;
+using GPU_OpTensorFwdBiasGenericTest_FP32 = OpTensorFwdBiasGenericTest<float>;
+using GPU_OpTensorFwdBiasGenericTest_FP64 = OpTensorFwdBiasGenericTest<double>;
 
-#ifdef CHECK_HALF
-using data_type = half_float::half;
-#define _OpTensorFwdBiasGenericTest GPU_OpTensorFwdBiasGenericTest_FP16
-#endif
-
-#ifdef CHECK_FLOAT
-using data_type = float;
-#define _OpTensorFwdBiasGenericTest GPU_OpTensorFwdBiasGenericTest_FP32
-#endif
-
-#ifdef CHECK_DOUBLE
-using data_type = double;
-#define _OpTensorFwdBiasGenericTest GPU_OpTensorFwdBiasGenericTest_FP64
-#endif
-
-using _OpTensorFwdBiasGenericTest = OpTensorFwdBiasGenericTest<data_type>;
-
-TEST_P(_OpTensorFwdBiasGenericTest, PortTest)
+TEST_P(GPU_OpTensorFwdBiasGenericTest_FP16, PortTest)
 {
     runOCL();
     runHIP();
@@ -482,8 +466,36 @@ TEST_P(_OpTensorFwdBiasGenericTest, PortTest)
 }
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         _OpTensorFwdBiasGenericTest,
-                         testing::Combine(testing::ValuesIn(TensorsConfigs<data_type>()),
+                         GPU_OpTensorFwdBiasGenericTest_FP16,
+                         testing::Combine(testing::ValuesIn(TensorsConfigs<half_float::half>()),
+                                          testing::Values(1.0),
+                                          testing::Values(1.0),
+                                          testing::Values(0.0, 1.0)));
+
+TEST_P(GPU_OpTensorFwdBiasGenericTest_FP32, PortTest)
+{
+    runOCL();
+    runHIP();
+    verify();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_OpTensorFwdBiasGenericTest_FP32,
+                         testing::Combine(testing::ValuesIn(TensorsConfigs<float>()),
+                                          testing::Values(1.0),
+                                          testing::Values(1.0),
+                                          testing::Values(0.0, 1.0)));
+
+TEST_P(GPU_OpTensorFwdBiasGenericTest_FP64, PortTest)
+{
+    runOCL();
+    runHIP();
+    verify();
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_OpTensorFwdBiasGenericTest_FP64,
+                         testing::Combine(testing::ValuesIn(TensorsConfigs<double>()),
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
