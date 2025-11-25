@@ -562,15 +562,11 @@ if(HIPBLASLT_ENABLE_COVERAGE)
     target_link_libraries(
         hipblaslt-test
         PRIVATE
+		hipblaslt-clients-common
+  		hipblaslt
             roc::origami
             tensilelite::tensilelite-host
     )
-    target_include_directories(hipblaslt-clients-common PRIVATE
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail>
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include>
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include>
-    )
-
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
     add_custom_target(
         code_cov_tests
