@@ -23,7 +23,7 @@ add_custom_command(
 
 add_custom_target(hipblaslt-test-data DEPENDS ${HIPBLASLT_TEST_DATA})
 add_dependencies(hipblaslt-test hipblaslt-test-data)
-if (HIPBLASTLT_ENABLE_COVERAGE)
+if (HIPBLASLT_ENABLE_COVERAGE)
     target_include_directories(hipblaslt-test
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../common/include>
