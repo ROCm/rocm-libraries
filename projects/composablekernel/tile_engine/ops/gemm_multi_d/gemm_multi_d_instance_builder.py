@@ -21,8 +21,7 @@ def _import_validation_utils():
 
     # Load the module dynamically
     spec = importlib.util.spec_from_file_location(
-        "validation_utils",
-        os.path.join(parent_dir, "commons", "gemm_validation_utils.py"),
+        "validation_utils", os.path.join(parent_dir, "commons", "validation_utils.py")
     )
     validation_utils = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(validation_utils)
@@ -825,7 +824,7 @@ def main():
     elif elementwise_function == "add":
         function_name = "MultiDAdd"
     elif elementwise_function == "passthrough":
-        function_name = "PassThrough"
+        function_name = "PassThrough"  # TODO Change this
 
     args.elementwise_function = function_name
 

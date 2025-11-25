@@ -344,6 +344,9 @@ hipsparseStatus_t hipsparseXgebsr2gebsrNnz(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p rowBlockDimA, \p colBlockDimA,
 *              \p rowBlockDimC, \p colBlockDimC, \p bsrRowPtrA, \p bsrColIndA, \p bsrValA, \p bsrRowPtrC, \p bsrColIndC,
 *              \p bsrValC, \p descrA, \p descrC or \p buffer pointer is invalid.
+*
+*  \par Example
+*  \snippet example_hipsparse_gebsr2gebsr.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

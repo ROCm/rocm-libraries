@@ -1,7 +1,4 @@
 #!/bin/bash 
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier: MIT
-
 #
 # in order to run this script you'd first need to build the tile_example_gemm executables in ../build/bin/
 #

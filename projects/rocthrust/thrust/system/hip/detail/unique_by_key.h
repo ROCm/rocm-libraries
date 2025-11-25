@@ -198,7 +198,6 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE unique_by_key_copy(
     {
       return detail::unique_by_key(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
     }
-#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static pair<KeyOutputIt, ValOutputIt>
     seq(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
@@ -211,7 +210,6 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE unique_by_key_copy(
       return thrust::unique_by_key_copy(
         cvt_to_seq(derived_cast(policy)), keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
     }
-#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, keys_first, keys_last, values_first, keys_result, values_result, binary_pred);
@@ -255,7 +253,6 @@ pair<KeyInputIt, ValInputIt> THRUST_HOST_DEVICE unique_by_key(
       return hip_rocprim::unique_by_key_copy(
         policy, keys_first, keys_last, values_first, keys_first, values_first, binary_pred);
     }
-#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static pair<KeyInputIt, ValInputIt>
     seq(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
@@ -265,7 +262,6 @@ pair<KeyInputIt, ValInputIt> THRUST_HOST_DEVICE unique_by_key(
     {
       return thrust::unique_by_key(cvt_to_seq(derived_cast(policy)), keys_first, keys_last, values_first, binary_pred);
     }
-#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, keys_first, keys_last, values_first, binary_pred);

@@ -261,14 +261,10 @@ void precompile_test_kernels(const std::string& precompile_file)
 
                     params_forward.free();
 
-                    // some adhoc tokens might be inverse already
-                    if(params_forward.is_forward())
-                    {
-                        rocfft_params params_inverse;
-                        params_inverse.inverse_from_forward(params_forward);
-                        params_inverse.validate();
-                        params_inverse.setup_structs();
-                    }
+                    rocfft_params params_inverse;
+                    params_inverse.inverse_from_forward(params_forward);
+                    params_inverse.validate();
+                    params_inverse.setup_structs();
                 }
                 catch(std::exception& e)
                 {

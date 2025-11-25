@@ -2125,23 +2125,6 @@ Tests:
   requested_solution_num: -1
   unit_check: 1
 
-# Test case for launch limits
-# Review: should this be enabled on CI?
-# It requires a lot of memory and takes a little while to run.
-# - name: matmul_launch_limits
-#   category: nightly
-#   function:
-#     matmul: *hpa_bf16_precision
-#   matrix_size:
-#     - { M:  262144,   N:  131072,    K:  1024 }
-#   algo_method: [1]
-#   transA: T
-#   transB: N
-#   alpha: 1
-#   beta: 0
-#   requested_solution_num: -1
-#   unit_check: 0
-
 - name: matmul_heuristic_all_solutions_real_1byte_fnuz
   category: nightly
   function:

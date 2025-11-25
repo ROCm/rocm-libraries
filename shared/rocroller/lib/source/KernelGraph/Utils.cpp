@@ -44,12 +44,6 @@ namespace rocRoller
          * Helpers
          */
 
-        std::string getForLoopName(KernelGraph const& graph, int tag)
-        {
-            auto forLoop = graph.control.get<CG::ForLoopOp>(tag);
-            return forLoop->loopName;
-        }
-
         std::string toString(UnrollColouring const& colouring)
         {
             std::stringstream os;
@@ -274,10 +268,10 @@ namespace rocRoller
 
             auto forLoopSize = graph.coordinates.get<CT::ForLoop>(forLoopDim)->size;
 
-            auto [forLoopCoord, forLoopOp] = rangeFor(
+            auto clone = rangeFor(
                 graph, forLoopSize, maybeForLoopOp->loopName, DataType::None, forLoopDim);
 
-            return forLoopOp;
+            return clone.second;
         }
 
         std::pair<int, int> getForLoopCoords(int forLoopOp, KernelGraph const& kgraph)

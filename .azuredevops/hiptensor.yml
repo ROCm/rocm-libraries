@@ -26,7 +26,7 @@ trigger:
     - release-staging/rocm-rel-7.*
   paths:
     include:
-    - projects/hiptensor
+    - projects/hipsparselt
     exclude:
     - projects/hiptensor/.githooks
     - projects/hiptensor/.github

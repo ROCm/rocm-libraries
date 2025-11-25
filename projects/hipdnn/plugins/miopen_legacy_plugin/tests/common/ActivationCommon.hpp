@@ -94,14 +94,14 @@ struct ActivTestCase
     }
 };
 
-inline std::vector<ActivTestCase> createFwdActivationSmokeCases()
+inline std::vector<ActivTestCase> createBwdActivationTestCases()
 {
     using PM = hipdnn_sdk::data_objects::PointwiseMode;
 
     std::vector<ActivTestCase> cases;
 
-    // RELU_FWD (standard ReLU) - Only activation supported by MIOpen fusion
-    cases.emplace_back(PM::RELU_FWD,
+    // RELU backward
+    cases.emplace_back(PM::RELU_BWD,
                        std::nullopt, // reluLowerClip
                        std::nullopt, // reluUpperClip
                        std::nullopt, // reluLowerClipSlope
@@ -113,84 +113,26 @@ inline std::vector<ActivTestCase> createFwdActivationSmokeCases()
     return cases;
 }
 
-inline std::vector<ActivTestCase> createFwdActivationFullCases()
+inline std::vector<ActivTestCase> createBatchnormFwdActivationTestCases()
 {
-    using PM = hipdnn_sdk::data_objects::PointwiseMode;
-
-    std::vector<ActivTestCase> cases;
-
-    // RELU_FWD (standard ReLU)
-    cases.emplace_back(PM::RELU_FWD,
-                       0.0f, // reluLowerClip
-                       std::nullopt, // reluUpperClip
-                       std::nullopt, // reluLowerClipSlope
-                       std::nullopt, // swishBeta
-                       std::nullopt, // eluAlpha
-                       std::nullopt // softplusBeta
-    );
-
-    // ReLU6: upper clip at 6.0 (Clipped ReLU)
-    cases.emplace_back(PM::RELU_FWD,
-                       std::nullopt, // reluLowerClip
-                       0.5f, // reluUpperClip
-                       std::nullopt, // reluLowerClipSlope
-                       std::nullopt, // swishBeta
-                       std::nullopt, // eluAlpha
-                       std::nullopt // softplusBeta
-    );
-
-    // CLAMP: both lower and upper clips (e.g., clip to range [0.0, 6.0])
-    cases.emplace_back(PM::RELU_FWD,
-                       0.1f, // reluLowerClip
-                       0.5f, // reluUpperClip
-                       std::nullopt, // reluLowerClipSlope
-                       std::nullopt, // swishBeta
-                       std::nullopt, // eluAlpha
-                       std::nullopt // softplusBeta
-    );
-
-    // Leaky ReLU: NOT supported by MIOpen's batchnorm fusion API
-    // MIOpen's BnFwdTrainingSpatial solver supports:
-    //   - miopenActivationRELU (standard ReLU)
-    //   - miopenActivationCLIPPEDRELU (ReLU with upper clip)
-    //   - miopenActivationCLAMP (ReLU with both upper and lower clips)
-    // but does NOT support:
-    //   - miopenActivationLEAKYRELU (ReLU with lower clip slope)
-    // See: MIOpen's BnFwdTrainingSpatial::IsApplicable() for details.
-#if 0
-    cases.emplace_back(PM::RELU_FWD,
-                       std::nullopt, // reluLowerClip
-                       std::nullopt, // reluUpperClip
-                       0.01f, // reluLowerClipSlope
-                       std::nullopt, // swishBeta
-                       std::nullopt, // eluAlpha
-                       std::nullopt // softplusBeta
-    );
-#endif
-
-    return cases;
-}
-
-inline std::vector<ActivTestCase> createBatchnormBwdActivationTestCases()
-{
-    return {// ReLU Backward: d/dx Max(0, x) = 1 * (x > 0)
-            ActivTestCase(hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
+    return {//Standard ReLU Max(0, x)
+            ActivTestCase(hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
                           0.0f,
                           std::nullopt,
                           std::nullopt,
                           std::nullopt,
                           std::nullopt,
                           std::nullopt),
-            // Clipped ReLU Backward: d/dx Clamp(x, -inf, upper)
-            ActivTestCase(hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
+            //Clipped ReLU
+            ActivTestCase(hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
                           std::nullopt,
                           0.5f,
                           std::nullopt,
                           std::nullopt,
                           std::nullopt,
                           std::nullopt),
-            // CLAMP Backward: d/dx Clamp(x, lower, upper)
-            ActivTestCase(hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
+            //CLAMP
+            ActivTestCase(hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
                           0.1f,
                           0.5f,
                           std::nullopt,

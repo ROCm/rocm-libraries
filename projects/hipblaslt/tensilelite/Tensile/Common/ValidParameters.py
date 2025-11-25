@@ -857,8 +857,7 @@ validParameters = { # we need to make sure this matches develop
     # 0  : Fetch from workgroup dim -> elements dim. (default)
     # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
     "MbskPrefetchMethod": [-1, 0, 1],
-    "UseCustomMainLoopSchedule" : [0, 1],
-    "AdaptiveGemm": [0, 1]
+    "UseCustomMainLoopSchedule" : [0, 1]
 }
 
 newMIValidParameters = {

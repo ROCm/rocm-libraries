@@ -249,9 +249,7 @@ namespace TensileLite
 
             static SubclassMap GetSubclasses()
             {
-                SubclassMap rv(
-                    {Base::template Pair<Predicates::Contraction::LaunchLimits>(),
-                     Base::template Pair<Predicates::Contraction::WorkspaceCheck>()});
+                SubclassMap rv({Base::template Pair<Predicates::Contraction::WorkspaceCheck>()});
 
                 auto gmap = Generic::GetSubclasses();
                 rv.insert(gmap.begin(), gmap.end());
@@ -266,12 +264,6 @@ namespace TensileLite
         template <typename IO>
         const typename TaskPredicateSMT<IO>::SubclassMap SubclassMappingTraits<Predicates::Predicate<Task>,IO>::subclasses
             = TaskPredicateSMT<IO>::GetSubclasses();
-
-        template <typename IO>
-        struct MappingTraits<Predicates::Contraction::LaunchLimits, IO>
-            : public AutoMappingTraits<Predicates::Contraction::LaunchLimits, IO>
-        {
-        };
 
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::WorkspaceCheck, IO>

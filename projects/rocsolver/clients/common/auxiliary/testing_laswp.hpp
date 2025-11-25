@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 template <typename T, typename U>
 void laswp_checkBadArgs(const rocblas_handle handle,
@@ -196,7 +195,7 @@ void laswp_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
+    double start;
 
     if(profile > 0)
     {
@@ -212,11 +211,11 @@ void laswp_getPerfData(const rocblas_handle handle,
     {
         laswp_initData<false, true, T>(handle, n, dA, lda, k1, k2, dIpiv, inc, hA, hIpiv);
 
-        timer.start(stream);
+        start = get_time_us_sync(stream);
         rocsolver_laswp(handle, n, dA.data(), lda, k1, k2, dIpiv.data(), inc);
-        timer.end(stream);
+        *gpu_time_used += get_time_us_sync(stream) - start;
     }
-    *gpu_time_used = timer.get_combined();
+    *gpu_time_used /= hot_calls;
 }
 
 template <typename T>
@@ -298,7 +297,7 @@ void testing_laswp(Arguments& argus)
         laswp_getError<T>(handle, n, dA, lda, k1, k2, dIpiv, inc, hA, hAr, hIpiv, &max_error);
 
     // collect performance data
-    if(argus.timing && hot_calls > 0)
+    if(argus.timing)
         laswp_getPerfData<T>(handle, n, dA, lda, k1, k2, dIpiv, inc, hA, hIpiv, &gpu_time_used,
                              &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels,
                              argus.perf);

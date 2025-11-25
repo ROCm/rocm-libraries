@@ -134,8 +134,6 @@ by ``fftw_plan_dft`` (or ``fftwf_plan_dft``) could be created by ``fftw_plan_man
 For all plan creation functions, the requested plan is said to be configured for in-place operations if identical
 input and output buffers are used when the plan is created. The plan is configured for out-of-place operations otherwise.
 
-.. _hipfftw-unsupported-configurations:
-
 .. note::
   - hipFFTW does not support split complex formats, real-to-real transforms, nor distributed transforms;
   - hipFFTW does not support transforms of more than 3 dimensions, that is, ``rank > 3`` is not supported;
@@ -189,49 +187,7 @@ The following functions can be used for creating basic hipFFTW plans.
 Advanced plans
 --------------
 
-Advanced plans support batched transforms and some non-default data layouts. The following
-additional arguments parameterize the input data layout for a :math:`d`-dimensional transform (:math:`d > 0`)
-of lengths ``n[0] x n[1] x ... x n[d-1]``:
-
-- ``istride`` is the elementary stride, that is, the stride along the last dimension;
-- ``idist`` is the distance between consecutive data sequences in the batch;
-- ``inembed`` is an array of :math:`d` integer values representing the dimensions of a :math:`d`-dimensional array embedding the input data.
-
-``ostride``, ``odist``, and ``onembed`` parameterize the output data layout of the transform
-similarly.
-
-Setting ``inembed`` to ``NULL`` is equivalent to a using ``inembed[i] = n[i]`` for all :math:`0 \leq i < d-1`
-and
-
-- ``inembed[d-1] = n[d-1]`` for complex transforms or out-of-place real forward transforms;
-- ``inembed[d-1] = n[d-1]/2 + 1`` for backward real transforms;
-- ``inembed[d-1] = 2 * (n[d-1]/2 + 1)`` for in-place forward real transforms.
-
-The same behavior holds for setting ``onembed`` to ``NULL``, subsituting "forward" for "backward"
-in the description above (and vice versa).
-
-If set explicitly, all the ``inembed`` and ``onembed`` values must be larger than or equal to their
-default values.
-
-.. note::
-  Using ``NULL`` for ``inembed`` and for ``onembed`` as well as ``istride = 1`` and ``ostride = 1``
-  results in the same data layout as for :ref:`basic plan<hipfftw-basic-plan-creation>` in case of
-  unbatched transforms (``howmany = 1``).
-
-Concretely, considering a batched, three-dimensional transform, the data element of logical
-index :math:`\left(j_0, j_1, j_2\right)` in the :math:`k`-th batch is
-``in[idist * k + istride * (j_2 + inembed[2] * (j_1 + inembed[1] * j_0))]``
-on input and ``out[odist * k + ostride * (j_2 + onembed[2] * (j_1 + onembed[1] * j_0))]`` on output.
-
-The following functions can be used for creating advanced hipFFTW plans.
-
-.. doxygenfunction:: fftw_plan_many_dft
-.. doxygenfunction:: fftwf_plan_many_dft
-.. doxygenfunction:: fftw_plan_many_dft_r2c
-.. doxygenfunction:: fftwf_plan_many_dft_r2c
-.. doxygenfunction:: fftw_plan_many_dft_c2r
-.. doxygenfunction:: fftwf_plan_many_dft_c2r
-
+.. TBD
 
 .. _hipfftw-general-plan-creation:
 
@@ -239,18 +195,6 @@ Arbitrary plans
 ---------------
 
 .. TBD
-
-.. _hipfftw-data-layout-requirements:
-
-Data layout requirements for hipFFTW plans
-------------------------------------------
-For complex in-place transforms, hipFFTW requires all strides and distances to be equal in input and output data layouts.
-For real in-place transforms, hipFFTW requires:
-
-- unit elementary strides along the :math:`\left(d-1\right)`-th dimension for :math:`d`-dimensional transforms;
-- all other input (resp. output) strides and distances to be twice the corresponding output (resp. input) strides and distances for forward (resp. backward) transforms.
-
-Negative strides and distances are *not* supported by hipFFTW.
 
 .. _hipfftw-execution:
 

@@ -398,287 +398,6 @@ namespace rocRoller
             }
         };
 
-        struct ConcatenatePartialSimplifyVisitor
-        {
-            // TODO: support 32 bit literal merging into 64 bit literal, codegen (copier) has problems
-            // ExpressionPtr operator()(CommandArgumentValue const& expr1,
-            //                          CommandArgumentValue const& expr2) const
-            // {
-            //     return std::visit(
-            //         [](auto const& val1, auto const& val2) -> ExpressionPtr {
-            //             using T1 = std::decay_t<decltype(val1)>;
-            //             using T2 = std::decay_t<decltype(val2)>;
-            //             if constexpr(std::is_same_v<T1, uint32_t> && std::is_same_v<T2, uint32_t>)
-            //             {
-            //                 uint64_t result
-            //                     = (static_cast<uint64_t>(val2) << 32) | static_cast<uint64_t>(val1);
-            //                 return literal(result);
-            //             }
-            //             return {};
-            //         },
-            //         expr1,
-            //         expr2);
-            // }
-
-            ExpressionPtr operator()(BitFieldExtract const& expr1,
-                                     BitFieldExtract const& expr2) const
-            {
-                if(expr1.arg == expr2.arg && resultVariableType(expr1.arg).getElementSize() == 8
-                   && expr1.offset == 0 && expr1.width == 32 && expr2.offset == 32
-                   && expr2.width == 32)
-                {
-                    return expr1.arg;
-                }
-
-                return {};
-            }
-
-            template <typename ARG1, typename ARG2>
-            ExpressionPtr operator()(ARG1 const& expr1, ARG2 const& expr2) const
-            {
-                return {};
-            }
-
-            ExpressionPtr call(ExpressionPtr expr1, ExpressionPtr expr2) const
-            {
-                return std::visit(*this, *expr1, *expr2);
-            }
-        };
-
-        /**
-         * Merges consecutive Concatenate operands where possible.
-         * Checks if a pair of operands are two 32-bit BitFieldExtracts from the same 64-bit source
-         */
-        Concatenate concatenatePartialSimplify(Concatenate const& expr)
-        {
-            Concatenate                cpy = expr;
-            std::vector<ExpressionPtr> operands;
-            auto const                 visitor = ConcatenatePartialSimplifyVisitor();
-
-            for(size_t i = 0; i < expr.operands.size(); ++i)
-            {
-                if(i + 1 < expr.operands.size())
-                {
-                    if(auto simplified = visitor.call(expr.operands[i], expr.operands[i + 1]))
-                    {
-                        operands.push_back(simplified);
-                        ++i;
-                        continue;
-                    }
-                }
-                operands.push_back(expr.operands[i]);
-            }
-
-            cpy.operands = std::move(operands);
-            return cpy;
-        }
-
-        struct BitfieldCombineSinkVisitor
-        {
-            BitfieldCombineSinkVisitor(ExpressionPtr src,
-                                       uint32_t      srcOffset,
-                                       uint32_t      dstOffset,
-                                       uint32_t      width)
-                : m_src(src)
-                , m_srcOffset(srcOffset)
-                , m_dstOffset(dstOffset)
-                , m_width(width)
-                , m_srcIsZero(std::nullopt)
-                , m_dstIsZero(std::nullopt)
-                , m_sunk(false)
-            {
-            }
-
-            ExpressionPtr operator()(BitfieldCombine const& expr) const
-            {
-                uint32_t combineStartBit = expr.dstOffset;
-                uint32_t combineEndBit   = expr.dstOffset + expr.width - 1;
-                uint32_t startBit        = m_dstOffset;
-                uint32_t endBit          = m_dstOffset + m_width - 1;
-
-                // If expr BitfieldCombine is fully contained the the sinking BitfieldCombine, remove it
-                if(startBit <= combineStartBit && combineEndBit <= endBit)
-                    return call(expr.rhs);
-
-                // Give up if BitfieldCombines overlap
-                if(combineStartBit <= endBit && combineEndBit >= startBit)
-                    return std::make_shared<Expression>(expr);
-
-                BitfieldCombine cpy = expr;
-                // Recusively sink into nested BitfieldCombines
-                cpy.rhs = call(expr.rhs);
-
-                return std::make_shared<Expression>(cpy);
-            }
-
-            ExpressionPtr operator()(CommandArgumentValue const& expr) const
-            {
-                auto sunkBitfieldCombine = tryEvaluate(bfc(m_src,
-                                                           literal(expr),
-                                                           m_srcOffset,
-                                                           m_dstOffset,
-                                                           m_width,
-                                                           m_srcIsZero,
-                                                           m_dstIsZero));
-
-                if(!sunkBitfieldCombine.has_value())
-                    return std::make_shared<Expression>(expr);
-
-                m_sunk = true;
-                return literal(sunkBitfieldCombine.value());
-            }
-
-            template <typename Expr>
-            ExpressionPtr operator()(Expr const& expr) const
-            {
-                return std::make_shared<Expression>(expr);
-            }
-
-            ExpressionPtr call(ExpressionPtr expr) const
-            {
-                if(!expr)
-                    return expr;
-
-                return std::visit(*this, *expr);
-            }
-
-            bool sunk() const
-            {
-                return m_sunk;
-            }
-
-        private:
-            ExpressionPtr       m_src;
-            uint32_t            m_srcOffset;
-            uint32_t            m_dstOffset;
-            uint32_t            m_width;
-            std::optional<bool> m_srcIsZero;
-            std::optional<bool> m_dstIsZero;
-            mutable bool        m_sunk;
-        };
-
-        /**
-         * Tries to sink a BitfieldCombine into its destination if its source is a literal.
-         * Only done in nested BitfieldCombines where the destination is another BitfieldCombine.
-         * Also removes BitfieldCombines that are fully overridden by BitfieldCombine argument
-         */
-        ExpressionPtr sinkBitfieldCombine(BitfieldCombine const& expr)
-        {
-            BitfieldCombine cpy = expr;
-
-            auto const visitor
-                = BitfieldCombineSinkVisitor{cpy.lhs, cpy.srcOffset, cpy.dstOffset, cpy.width};
-
-            auto result = visitor.call(cpy.rhs);
-            // BitfieldCombine was folded away
-            if(visitor.sunk())
-                return result;
-
-            return bfc(cpy.lhs,
-                       result,
-                       cpy.srcOffset,
-                       cpy.dstOffset,
-                       cpy.width,
-                       cpy.srcIsZero,
-                       cpy.dstIsZero);
-        }
-
-        struct DeepBitfieldExtractVisitor
-        {
-            DeepBitfieldExtractVisitor(uint32_t offset, uint32_t width)
-                : m_offset(offset)
-                , m_width(width)
-            {
-            }
-
-            ExpressionPtr operator()(BitfieldCombine const& expr) const
-            {
-                uint32_t combineStartBit = expr.dstOffset;
-                uint32_t combineEndBit   = expr.dstOffset + expr.width - 1;
-                uint32_t endBit          = m_offset + m_width - 1;
-                // No overlap with this dword
-                if(combineStartBit > endBit || combineEndBit < m_offset)
-                {
-                    return call(expr.rhs);
-                }
-                return std::make_shared<Expression>(expr);
-            }
-
-            ExpressionPtr operator()(Concatenate const& expr) const
-            {
-                uint32_t operandStartBit = 0;
-                uint32_t operandEndBit   = 0;
-                uint32_t endBit          = m_offset + m_width - 1;
-                for(int i = 0; i < expr.operands.size(); ++i)
-                {
-                    operandStartBit = operandEndBit;
-                    operandEndBit += resultVariableType(expr.operands[i]).getElementSize() * 8;
-                    // bitField is fully contained within this operand
-                    if(operandStartBit <= m_offset && endBit <= operandEndBit)
-                    {
-                        this->m_offset -= operandStartBit;
-                        return call(expr.operands[i]);
-                    }
-                }
-
-                return std::make_shared<Expression>(expr);
-            }
-
-            ExpressionPtr operator()(BitFieldExtract const& expr) const
-            {
-                uint32_t endBit     = m_offset + m_width - 1;
-                uint32_t exprEndBit = expr.width - 1;
-
-                // Bitfield is fully contained within this BitFieldExtract
-                if(endBit <= exprEndBit)
-                {
-                    m_offset += expr.offset;
-                    return call(expr.arg);
-                }
-
-                return std::make_shared<Expression>(expr);
-            }
-
-            template <typename Expr>
-            ExpressionPtr operator()(Expr const& expr) const
-            {
-                return std::make_shared<Expression>(expr);
-            }
-
-            ExpressionPtr call(ExpressionPtr expr) const
-            {
-                if(!expr)
-                    return expr;
-
-                return std::visit(*this, *expr);
-            }
-
-            uint32_t get_offset() const
-            {
-                return m_offset;
-            }
-
-        private:
-            mutable uint32_t m_offset;
-            uint32_t         m_width;
-        };
-
-        /**
-         * Returns a BitFieldExtract expression that extracts the specified bitfield from the given expression.
-         * Looks through Concatenate expressions to find the corresponding operand to extract.
-         * Looks through BitfieldCombine expressions to extract from its destination operand if the BitfieldCombine and BitFieldExtract do not overlap.
-         * Looks through nested BitFieldExtract expressions, if the extraction is fully contained within the inner BitFieldExtract.
-         */
-        BitFieldExtract deepBitFieldExtract(BitFieldExtract expr)
-        {
-            auto visitor   = DeepBitfieldExtractVisitor(expr.offset, expr.width);
-            auto extracted = visitor.call(expr.arg);
-            int  offset    = visitor.get_offset();
-
-            // return bfe(expr.outputDataType, extracted, offset, expr.width);
-            return BitFieldExtract{{extracted}, expr.outputDataType, offset, expr.width};
-        }
-
         struct SimplifyExpressionVisitor
         {
             template <CUnary Expr>
@@ -765,40 +484,36 @@ namespace rocRoller
                 cpy.lhs = call(expr.lhs);
                 cpy.rhs = call(expr.rhs);
 
-                return sinkBitfieldCombine(cpy);
+                return std::make_shared<Expression>(cpy);
             }
 
             ExpressionPtr operator()(BitFieldExtract const& expr) const
             {
-                AssertFatal(expr.width > 0, "BitfieldExtract with width 0");
+                auto cpy = expr;
 
-                BitFieldExtract cpy = deepBitFieldExtract(expr);
-
-                // Evaluation might be possitble after deep extraction due to Concatenate expressions
-                auto result = tryEvaluate(cpy);
-                if(result.has_value())
-                    return literal(result.value());
+                AssertFatal(cpy.width > 0, "BitfieldExtract with width 0");
 
                 // Extracting the entire arg with no offset
                 if(cpy.offset == 0 && cpy.width == resultVariableType(cpy.arg).getElementSize() * 8)
                     return call(convert(cpy.outputDataType, cpy.arg));
 
-                cpy.arg = call(cpy.arg);
+                cpy.arg = call(expr.arg);
                 return std::make_shared<Expression>(cpy);
             }
 
             ExpressionPtr operator()(Concatenate const& expr) const
             {
                 auto cpy = expr;
-                AssertFatal(!cpy.operands.empty(), "Concatenate with no operands");
-                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
-
-                cpy = concatenatePartialSimplify(cpy);
 
                 if(cpy.operands.size() == 1)
-                    return cpy.operands[0];
+                    return call(cpy.operands[0]);
 
-                return std::make_shared<Expression>(cpy);
+                // TODO: Check if two consecutive 32-bit literals can be combined into a single 64-bit literal
+                // TODO: Check if two consecutive BitfieldCombines can be merged into their 64-bit src
+                // TODO: Check if two consecutive BitfieldExtracts can be merged into their 64-bit src
+
+                std::ranges::for_each(cpy.operands, [this](auto& op) { op = call(op); });
+                return std::make_shared<Expression>(std::move(cpy));
             }
 
             ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const

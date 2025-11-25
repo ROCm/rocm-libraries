@@ -56,6 +56,9 @@ extern "C" {
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p n or \p p pointer is invalid.
+*
+*  \par Example
+*  \snippet example_hipsparse_create_identity_permutation.cpp doc example
 */
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")
 HIPSPARSE_EXPORT

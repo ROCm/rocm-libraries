@@ -38,8 +38,7 @@
 
 using namespace hipsparse_test;
 
-template <typename I, typename T>
-void testing_rot_bad_arg(const Arguments& argus)
+void testing_rot_bad_arg(void)
 {
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 13000))
     int64_t size = 100;
@@ -95,8 +94,8 @@ hipsparseStatus_t testing_rot(Arguments argus)
     I size = argus.N;
     I nnz  = argus.nnz;
 
-    T hc_coeff = make_DataType<T>(argus.c);
-    T hs_coeff = make_DataType<T>(argus.s);
+    T hc_coeff = make_DataType<T>(argus.alpha);
+    T hs_coeff = make_DataType<T>(argus.beta);
 
     hipsparseIndexBase_t idxBase = argus.baseA;
 

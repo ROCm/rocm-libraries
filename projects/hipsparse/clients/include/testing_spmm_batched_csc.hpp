@@ -41,8 +41,7 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-template <typename I, typename J, typename T>
-void testing_spmm_batched_csc_bad_arg(const Arguments& argus)
+void testing_spmm_batched_csc_bad_arg(void)
 {
 #if(!defined(CUDART_VERSION))
     int32_t              m         = 100;

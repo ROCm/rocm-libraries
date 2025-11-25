@@ -109,7 +109,6 @@ struct Arguments
     double boostval;
     double boostvali;
 
-    int slice_size;
     int ell_width;
     int permute;
     int gtsv_alg;
@@ -189,11 +188,10 @@ struct Arguments
         this->boostval     = 1.0;
         this->boostvali    = 0.0;
 
-        this->slice_size = 2;
-        this->ell_width  = 0;
-        this->permute    = 0;
-        this->gtsv_alg   = 0;
-        this->gpsv_alg   = 0;
+        this->ell_width = 0;
+        this->permute   = 0;
+        this->gtsv_alg  = 0;
+        this->gpsv_alg  = 0;
 
         this->unit_check = 1;
         this->timing     = 0;
@@ -319,7 +317,6 @@ struct Arguments
         HIPSPARSE_FORMAT_CHECK(boosttol);
         HIPSPARSE_FORMAT_CHECK(boostval);
         HIPSPARSE_FORMAT_CHECK(boostvali);
-        HIPSPARSE_FORMAT_CHECK(slice_size);
         HIPSPARSE_FORMAT_CHECK(ell_width);
         HIPSPARSE_FORMAT_CHECK(permute);
         HIPSPARSE_FORMAT_CHECK(gtsv_alg);
@@ -471,7 +468,6 @@ private:
         print("boosttol", arg.boosttol);
         print("boostval", arg.boostval);
         print("boostvali", arg.boostvali);
-        print("slice_size", arg.slice_size);
         print("ell_width", arg.ell_width);
         print("permute", arg.permute);
         print("gtsv_alg", arg.gtsv_alg);

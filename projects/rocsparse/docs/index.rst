@@ -39,7 +39,6 @@ For ROCm code examples, see `<https://github.com/ROCm/rocm-examples>`_.
   .. grid-item-card:: Conceptual
 
     * :doc:`rocSPARSE design <./conceptual/rocsparse-design>`
-    * :doc:`Storage formats <./conceptual/storage-formats-sparse>`
 
   .. grid-item-card:: How to
 

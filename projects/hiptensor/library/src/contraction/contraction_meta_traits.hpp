@@ -27,10 +27,10 @@
 #pragma once
 
 // CK includes
-#include <ck/library/tensor_operation_instance/gpu/contraction_bilinear.hpp>
-#include <ck/library/tensor_operation_instance/gpu/contraction_scale.hpp>
-#include <ck/tensor_operation/gpu/device/device_contraction_multiple_d.hpp>
-#include <ck/tensor_operation/gpu/element/element_wise_operation.hpp>
+#include <contraction_bilinear.hpp>
+#include <contraction_scale.hpp>
+#include <device_contraction_multiple_d.hpp>
+#include <element_wise_operation.hpp>
 
 // hiptensor includes
 #include "data_types.hpp"

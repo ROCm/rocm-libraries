@@ -1,6 +1,3 @@
-# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier: MIT
-
 
 EXE="$(find . -name tile_smoothquant -type f | head -n 1)"
 

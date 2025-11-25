@@ -39,8 +39,7 @@
 
 using namespace hipsparse_test;
 
-template <typename I, typename T>
-void testing_spsm_coo_bad_arg(const Arguments& argus)
+void testing_spsm_coo_bad_arg(void)
 {
 #if(!defined(CUDART_VERSION))
     int64_t              m         = 100;
@@ -193,7 +192,7 @@ hipsparseStatus_t testing_spsm_coo(Arguments argus)
     hipsparseIndexBase_t idx_base = argus.baseA;
     hipsparseDiagType_t  diag     = argus.diag_type;
     hipsparseFillMode_t  uplo     = argus.fill_mode;
-    hipsparseSpSMAlg_t   alg      = argus.spsm_alg;
+    hipsparseSpSMAlg_t   alg      = static_cast<hipsparseSpSMAlg_t>(argus.spsm_alg);
     std::string          filename = argus.filename;
 
 #if(defined(CUDART_VERSION))

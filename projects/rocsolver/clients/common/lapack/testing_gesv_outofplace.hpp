@@ -33,7 +33,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T, typename U>
 void gesv_outofplace_checkBadArgs(const rocblas_handle handle,
@@ -356,7 +355,7 @@ void gesv_outofplace_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
+    double start;
 
     if(profile > 0)
     {
@@ -373,12 +372,12 @@ void gesv_outofplace_getPerfData(const rocblas_handle handle,
         gesv_outofplace_initData<false, true, T>(handle, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
                                                  stB, bc, hA, hIpiv, hB, singular);
 
-        timer.start(stream);
+        start = get_time_us_sync(stream);
         rocsolver_gesv_outofplace(STRIDED, handle, n, nrhs, dA.data(), lda, stA, dIpiv.data(), stP,
                                   dB.data(), ldb, stB, dX.data(), ldx, stX, dInfo.data(), bc);
-        timer.end(stream);
+        *gpu_time_used += get_time_us_sync(stream) - start;
     }
-    *gpu_time_used = timer.get_combined();
+    *gpu_time_used /= hot_calls;
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
@@ -502,7 +501,7 @@ void testing_gesv_outofplace(Arguments& argus)
                                                  hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             gesv_outofplace_getPerfData<STRIDED, T>(
                 handle, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb, stB, dX, ldx, stX, dInfo, bc,
                 hA, hIpiv, hB, hInfo, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
@@ -554,7 +553,7 @@ void testing_gesv_outofplace(Arguments& argus)
                                                  hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             gesv_outofplace_getPerfData<STRIDED, T>(
                 handle, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb, stB, dX, ldx, stX, dInfo, bc,
                 hA, hIpiv, hB, hInfo, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,

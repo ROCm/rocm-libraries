@@ -22,35 +22,6 @@ hipsparseXaxpyi()
   :outline:
 .. doxygenfunction:: hipsparseZaxpyi
 
-.. tabs::
-
-   .. tab:: C++
-
-      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_axpyi_cpp.cpp
-         :language: cpp
-         :start-after: //! [doc example start]
-         :end-before: //! [doc example end]
-         :linenos:
-
-   .. tab:: C
-
-      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_axpyi_c.c
-         :language: c
-         :start-after: /*! [doc example start] */
-         :end-before: /*! [doc example end] */
-         :linenos:
-
-   .. tab:: Fortran
-
-      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_axpyi_fortran.f90
-         :language: fortran
-         :start-after: ! [doc example start]
-         :end-before: ! [doc example end]
-         :linenos:
-
-
-
-
 hipsparseXdoti()
 =================
 
@@ -61,32 +32,6 @@ hipsparseXdoti()
 .. doxygenfunction:: hipsparseCdoti
   :outline:
 .. doxygenfunction:: hipsparseZdoti
-
-.. tabs::
-
-   .. tab:: C++
-
-      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_doti_cpp.cpp
-         :language: cpp
-         :start-after: //! [doc example start]
-         :end-before: //! [doc example end]
-         :linenos:
-
-   .. tab:: C
-
-      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_doti_c.c
-         :language: c
-         :start-after: /*! [doc example start] */
-         :end-before: /*! [doc example end] */
-         :linenos:
-
-   .. tab:: Fortran
-
-      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_doti_fortran.f90
-         :language: fortran
-         :start-after: ! [doc example start]
-         :end-before: ! [doc example end]
-         :linenos:
 
 hipsparseXdotci()
 =================
@@ -106,32 +51,6 @@ hipsparseXgthr()
   :outline:
 .. doxygenfunction:: hipsparseZgthr
 
-.. tabs::
-
-   .. tab:: C++
-
-      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_gthr_cpp.cpp
-         :language: cpp
-         :start-after: //! [doc example start]
-         :end-before: //! [doc example end]
-         :linenos:
-
-   .. tab:: C
-
-      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_gthr_c.c
-         :language: c
-         :start-after: /*! [doc example start] */
-         :end-before: /*! [doc example end] */
-         :linenos:
-
-   .. tab:: Fortran
-
-      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_gthr_fortran.f90
-         :language: fortran
-         :start-after: ! [doc example start]
-         :end-before: ! [doc example end]
-         :linenos:
-
 hipsparseXgthrz()
 =================
 
@@ -150,32 +69,6 @@ hipsparseXroti()
   :outline:
 .. doxygenfunction:: hipsparseDroti
 
-.. tabs::
-
-   .. tab:: C++
-
-      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_roti_cpp.cpp
-         :language: cpp
-         :start-after: //! [doc example start]
-         :end-before: //! [doc example end]
-         :linenos:
-
-   .. tab:: C
-
-      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_roti_c.c
-         :language: c
-         :start-after: /*! [doc example start] */
-         :end-before: /*! [doc example end] */
-         :linenos:
-
-   .. tab:: Fortran
-
-      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_roti_fortran.f90
-         :language: fortran
-         :start-after: ! [doc example start]
-         :end-before: ! [doc example end]
-         :linenos:
-
 hipsparseXsctr()
 =================
 
@@ -186,29 +79,3 @@ hipsparseXsctr()
 .. doxygenfunction:: hipsparseCsctr
   :outline:
 .. doxygenfunction:: hipsparseZsctr
-
-.. tabs::
-
-   .. tab:: C++
-
-      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_sctr_cpp.cpp
-         :language: cpp
-         :start-after: //! [doc example start]
-         :end-before: //! [doc example end]
-         :linenos:
-
-   .. tab:: C
-
-      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_sctr_c.c
-         :language: c
-         :start-after: /*! [doc example start] */
-         :end-before: /*! [doc example end] */
-         :linenos:
-
-   .. tab:: Fortran
-
-      .. literalinclude:: ../../clients/samples/documentation_examples/level1/example_hipsparse_sctr_fortran.f90
-         :language: fortran
-         :start-after: ! [doc example start]
-         :end-before: ! [doc example end]
-         :linenos:

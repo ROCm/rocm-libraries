@@ -5,10 +5,6 @@ Documentation for rocRAND is available at
 
 ## rocRAND 4.2.0 for ROCm 7.2
 
-### Removed
-
-* For performance reasons in the `mrg31k3p_state`, `mrg32k3a_state`, `xorwow_state` and `philox4x32_10_state` states are the `boxmuller_float_state` and `boxmuller_double_state` removed now and the `boxmuller_float` and `boxmuller_double` are set with NaN when the value is not set.
-
 ### Added
 
 * Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.

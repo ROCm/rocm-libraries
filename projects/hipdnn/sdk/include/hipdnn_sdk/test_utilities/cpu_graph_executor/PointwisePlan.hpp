@@ -61,7 +61,7 @@ struct PointwiseParams
     std::optional<float> softplusBeta;
 };
 
-template <typename Input0Type, typename Input1Type, typename OutputType>
+template <typename DataType>
 class PointwisePlan : public IGraphNodePlanExecutor
 {
 public:
@@ -86,15 +86,16 @@ public:
 private:
     void executeNonParameterized(const std::unordered_map<int64_t, void*>& variantPack)
     {
-        auto shallowIn0Tensor = createShallowTensor<Input0Type>(
+        auto shallowIn0Tensor = createShallowTensor<DataType>(
             _params.in0Tensor, variantPack.at(_params.in0Tensor.uid));
 
-        auto shallowOut0Tensor = createShallowTensor<OutputType>(
+        auto shallowOut0Tensor = createShallowTensor<DataType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
 
         if(isUnaryPointwiseMode(_params.mode))
         {
-            CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
+
+            CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
                 _params.mode, *shallowOut0Tensor, *shallowIn0Tensor);
         }
         else if(isBinaryPointwiseMode(_params.mode))
@@ -104,10 +105,10 @@ private:
                 throw std::runtime_error("Binary pointwise operation requires in1 tensor");
             }
 
-            auto shallowIn1Tensor = createShallowTensor<Input1Type>(
+            auto shallowIn1Tensor = createShallowTensor<DataType>(
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
-            CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::pointwiseCompute(
+            CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
                 _params.mode, *shallowOut0Tensor, *shallowIn0Tensor, *shallowIn1Tensor);
         }
         else
@@ -118,26 +119,26 @@ private:
 
     void executeParameterized(const std::unordered_map<int64_t, void*>& variantPack)
     {
-        auto shallowIn0Tensor = createShallowTensor<Input0Type>(
+        auto shallowIn0Tensor = createShallowTensor<DataType>(
             _params.in0Tensor, variantPack.at(_params.in0Tensor.uid));
 
-        auto shallowOut0Tensor = createShallowTensor<OutputType>(
+        auto shallowOut0Tensor = createShallowTensor<DataType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
 
         if(isUnaryPointwiseMode(_params.mode))
         {
-            CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
+            CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
                 _params.mode,
                 *shallowOut0Tensor,
                 *shallowIn0Tensor,
-                static_cast<OutputType>(
+                static_cast<DataType>(
                     _params.reluLowerClip.has_value() ? _params.reluLowerClip.value() : 0.0f),
-                static_cast<OutputType>(_params.reluUpperClip.has_value()
-                                            ? _params.reluUpperClip.value()
-                                            : std::numeric_limits<float>::max()),
-                static_cast<OutputType>(_params.reluLowerClipSlope.has_value()
-                                            ? _params.reluLowerClipSlope.value()
-                                            : 0.0f));
+                static_cast<DataType>(_params.reluUpperClip.has_value()
+                                          ? _params.reluUpperClip.value()
+                                          : std::numeric_limits<float>::max()),
+                static_cast<DataType>(_params.reluLowerClipSlope.has_value()
+                                          ? _params.reluLowerClipSlope.value()
+                                          : 0.0f));
         }
         else if(isBinaryPointwiseMode(_params.mode))
         {
@@ -146,22 +147,22 @@ private:
                 throw std::runtime_error("Binary pointwise operation requires in1 tensor");
             }
 
-            auto shallowIn1Tensor = createShallowTensor<Input1Type>(
+            auto shallowIn1Tensor = createShallowTensor<DataType>(
                 _params.in1Tensor.value(), variantPack.at(_params.in1Tensor.value().uid));
 
-            CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::pointwiseCompute(
+            CpuReferencePointwiseImpl<DataType>::pointwiseCompute(
                 _params.mode,
                 *shallowOut0Tensor,
                 *shallowIn0Tensor,
                 *shallowIn1Tensor,
-                static_cast<OutputType>(
+                static_cast<DataType>(
                     _params.reluLowerClip.has_value() ? _params.reluLowerClip.value() : 0.0f),
-                static_cast<OutputType>(_params.reluUpperClip.has_value()
-                                            ? _params.reluUpperClip.value()
-                                            : std::numeric_limits<float>::max()),
-                static_cast<OutputType>(_params.reluLowerClipSlope.has_value()
-                                            ? _params.reluLowerClipSlope.value()
-                                            : 0.0f));
+                static_cast<DataType>(_params.reluUpperClip.has_value()
+                                          ? _params.reluUpperClip.value()
+                                          : std::numeric_limits<float>::max()),
+                static_cast<DataType>(_params.reluLowerClipSlope.has_value()
+                                          ? _params.reluLowerClipSlope.value()
+                                          : 0.0f));
         }
         else
         {
@@ -172,28 +173,17 @@ private:
     PointwiseParams _params;
 };
 
-template <hipdnn_sdk::data_objects::DataType Input0DataTypeEnum,
-          hipdnn_sdk::data_objects::DataType Input1DataTypeEnum,
-          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
+template <hipdnn_sdk::data_objects::DataType DataTypeEnum>
 class PointwisePlanBuilder : public IGraphNodePlanBuilder
 {
 public:
-    using Input0Type = DataTypeToNative<Input0DataTypeEnum>;
-    using Input1Type = DataTypeToNative<Input1DataTypeEnum>;
-    using ComputeType = DataTypeToNative<ComputeDataTypeEnum>;
-    using OutputType = DataTypeToNative<OutputDataTypeEnum>;
+    using DataType = DataTypeToNative<DataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
-        if(node.compute_data_type() != ComputeDataTypeEnum)
-        {
-            return false;
-        }
-
         const auto* nodeAttributes = node.attributes_as_PointwiseAttributes();
         if(nodeAttributes == nullptr)
         {
@@ -222,15 +212,14 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->out_0_tensor_uid());
 
         // Check required tensor types
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->in_0_tensor_uid(), Input0DataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->out_0_tensor_uid(), OutputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->in_0_tensor_uid(), DataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->out_0_tensor_uid(), DataTypeEnum);
 
         // Check optional tensors based on operation mode
         if(isBinaryPointwiseMode(mode))
         {
             CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->in_1_tensor_uid());
-            CHECK_OPTIONAL_TENSOR_TYPE(
-                tensorMap, nodeAttributes->in_1_tensor_uid(), Input1DataTypeEnum);
+            CHECK_OPTIONAL_TENSOR_TYPE(tensorMap, nodeAttributes->in_1_tensor_uid(), DataTypeEnum);
         }
 
         return true;
@@ -257,6 +246,8 @@ public:
                                      ? tensorMap.at(*nodeAttributes->in_1_tensor_uid())
                                      : nullptr);
 
+        //grab the node values
+
         PointwiseParams params(nodeAttributes->operation(),
                                *in0Tensor,
                                in1Tensor,
@@ -279,9 +270,7 @@ public:
                                      "in PointwisePlanBuilder for the Cpu Graph Executor yet");
         }
 
-        return std::make_unique<PointwisePlan<Input0Type, Input1Type, OutputType>>(
-            std::move(params));
+        return std::make_unique<PointwisePlan<DataType>>(std::move(params));
     }
 };
-
 }

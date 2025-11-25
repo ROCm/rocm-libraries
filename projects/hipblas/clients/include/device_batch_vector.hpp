@@ -66,7 +66,6 @@ public:
         if(false == try_initialize_memory())
         {
             free_memory();
-            throw std::bad_alloc{};
         }
     }
 

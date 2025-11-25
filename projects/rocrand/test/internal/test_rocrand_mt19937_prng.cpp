@@ -54,7 +54,7 @@ INSTANTIATE_TYPED_TEST_SUITE_P(mt19937_generator,
                                mt19937_generator_prng_tests_types);
 
 #ifdef CODE_COVERAGE_ENABLED
-    #include "test_rocrand_host_prng.hpp"
+#include "test_rocrand_host_prng.hpp"
 
 using rocrand_impl::host::mt19937_generator_host;
 using mt19937_generator_prng_host_tests_types
@@ -760,12 +760,17 @@ TYPED_TEST(mt19937_generator_engine_tests, subsequence_test)
 
     // dummy config provider, kernel just needs to verify the amount of generators for the actual call
     using ConfigProvider = default_config_provider<ROCRAND_RNG_PSEUDO_MT19937>;
+    auto jump_ahead_mt19937_kernel = [&] __host__ __device__(auto arch, auto... args)
+    {
+        rocrand_impl::host::
+            jump_ahead_mt19937<generator_t::jump_ahead_thread_count, ConfigProvider, false, arch>(
+                args...);
+    };
 
     rocrand_status status = rocrand_impl::system::device_system::template launch<
-        rocrand_impl::host::
-            jump_ahead_mt19937<generator_t::jump_ahead_thread_count, ConfigProvider, false>,
         rocrand_impl::host::static_block_size_config_provider<
-            generator_t::jump_ahead_thread_count>>(target_arch,
+            generator_t::jump_ahead_thread_count>>(jump_ahead_mt19937_kernel,
+                                                   target_arch,
                                                    dim3(generator_count),
                                                    dim3(generator_t::jump_ahead_thread_count),
                                                    0,
@@ -1180,12 +1185,17 @@ TYPED_TEST(mt19937_generator_engine_tests, jump_ahead_test)
         {
             rocrand_impl::host::target_arch target_arch;
             HIP_CHECK(rocrand_impl::host::get_device_arch(0, target_arch));
-            rocrand_status status = rocrand_impl::system::device_system::template launch<
+            auto jump_ahead_mt19937_kernel = [&] __host__ __device__(auto arch, auto... args)
+            {
                 rocrand_impl::host::jump_ahead_mt19937<generator_t::jump_ahead_thread_count,
                                                        ConfigProvider,
-                                                       is_dynamic>,
+                                                       is_dynamic,
+                                                       arch>(args...);
+            };
+            rocrand_status status = rocrand_impl::system::device_system::template launch<
                 rocrand_impl::host::static_block_size_config_provider<
                     generator_t::jump_ahead_thread_count>>(
+                jump_ahead_mt19937_kernel,
                 target_arch,
                 dim3(generator_count),
                 dim3(generator_t::jump_ahead_thread_count),
@@ -1263,7 +1273,7 @@ TYPED_TEST(mt19937_generator_engine_tests, jump_ahead_host_test)
 
     for(unsigned int engine_id = 0; engine_id < generator_count; ++engine_id)
     {
-        jump_ahead_mt19937<generator_t::jump_ahead_thread_count, ConfigProvider, false>::generate(
+        jump_ahead_mt19937<generator_t::jump_ahead_thread_count, ConfigProvider, false>(
             dim3(engine_id),
             dim3(0),
             dim3(generator_count),

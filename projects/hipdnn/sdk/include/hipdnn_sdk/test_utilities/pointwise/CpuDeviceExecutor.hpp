@@ -44,7 +44,7 @@ public:
 
             // Apply operation and set output
             auto result = op(inputValue);
-            output.setHostValue(safeConvert<OutputType>(result), indices);
+            output.setHostValue(static_cast<OutputType>(result), indices);
         };
 
         auto parallelFunc = makeParallelTensorFunctor(func, broadcastShape);
@@ -86,7 +86,7 @@ public:
 
             // Apply operation and set output
             auto result = op(input1Value, input2Value);
-            output.setHostValue(safeConvert<OutputType>(result), indices);
+            output.setHostValue(static_cast<OutputType>(result), indices);
         };
 
         auto parallelFunc = makeParallelTensorFunctor(func, broadcastShape);

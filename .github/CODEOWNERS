@@ -27,7 +27,6 @@
 /projects/hipsolver/                                @ROCm/solvers-reviewers
 /projects/hipsparse/                                @ROCm/sparses-reviewers
 /projects/hipsparselt/                              @ROCm/hipsparselt-reviewers
-/projects/hiptensor/                                @ROCm/hiptensor-reviewers
 /projects/miopen/                                   @ROCm/miopen-reviewers
 /projects/rocblas/                                  @ROCm/rocblas-reviewers
 /projects/rocfft/                                   @ROCm/fft-reviewers
@@ -79,11 +78,6 @@
 /projects/hipblas-common/**/.readthedocs.yaml       @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
 /projects/hipblas-common/docs/                      @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
 /projects/hipblas-common/library/include/           @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
-
-/projects/hiptensor/**/*.md                         @ROCm/hiptensor-reviewers @ROCm/rocm-documentation
-/projects/hiptensor/**/*.rst                        @ROCm/hiptensor-reviewers @ROCm/rocm-documentation
-/projects/hiptensor/library/include/*               @ROCm/hiptensor-reviewers @ROCm/rocm-documentation
-/projects/hiptensor/docs/                           @ROCm/hiptensor-reviewers @ROCm/rocm-documentation
 
 /projects/rocwmma/**/*.md                           @ROCm/rocwmma-reviewers @ROCm/rocm-documentation
 /projects/rocwmma/**/*.rst                          @ROCm/rocwmma-reviewers @ROCm/rocm-documentation

@@ -27,6 +27,7 @@
 #pragma once
 
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
+#include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
 {

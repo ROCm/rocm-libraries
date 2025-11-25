@@ -41,8 +41,7 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-template <typename I, typename J, typename T>
-void testing_sddmm_csr_bad_arg(const Arguments& argus)
+void testing_sddmm_csr_bad_arg(void)
 {
 #if(!defined(CUDART_VERSION))
 
@@ -197,8 +196,8 @@ hipsparseStatus_t testing_sddmm_csr(Arguments argus)
     hipsparseOperation_t transB   = argus.transB;
     hipsparseOrder_t     orderA   = argus.orderA;
     hipsparseOrder_t     orderB   = argus.orderB;
-    hipsparseIndexBase_t idx_base = argus.baseC;
-    hipsparseSDDMMAlg_t  alg      = argus.sddmm_alg;
+    hipsparseIndexBase_t idx_base = argus.baseA;
+    hipsparseSDDMMAlg_t  alg      = static_cast<hipsparseSDDMMAlg_t>(argus.sddmm_alg);
     std::string          filename = argus.filename;
 
     // Index and data type

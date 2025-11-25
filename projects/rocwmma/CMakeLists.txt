@@ -30,7 +30,6 @@ message(STATUS "CMake version: ${CMAKE_VERSION}")
 if(NOT WIN32)
   if(CMAKE_GENERATOR STREQUAL "Ninja")
     message(STATUS "The CMake generator is Ninja.")
-    set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
   else()
     message(WARNING "The CMake generator is not Ninja. Ninja is preferred over Make.")
   endif()
@@ -53,7 +52,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 #Set Clang C++ flags.
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O2") # clang++ crashes without -O2
-set(CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL} -O2 -DNDEBUG") # clang++ failed to build the project with the default -Os
+set(CMAKE_CXX_FLAGS_MINSIZEREL "-O2 -DNDEBUG") # clang++ failed to build the project with the default -Os
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --driver-mode=g++ -Xclang -fallow-half-arguments-and-returns -D__HIP_HCC_COMPAT_MODE__=1 -Wno-format-nonliteral -parallel-jobs=4 -fclang-abi-compat=17")
 
 # Top level configs
@@ -88,7 +87,7 @@ include(ROCMCheckTargetIds)
 include(ROCMClients)
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "2.2.0" )
+set ( VERSION_STRING "2.1.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # configure a header file to pass the CMake version settings to the source
@@ -138,25 +137,13 @@ set(CMAKE_NO_BUILTIN_CHRPATH ON)
 # default cached variable GPU_TARGET to DEFAULT_GPU_TARGETS, where not all archs are compatible with MFMA instructions
 #
 # By rule, once cached variable is set, it cannot be overridden unless we use the FORCE option
-if(DEFINED AMDGPU_TARGETS)
-  message(WARNING "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS.")
-endif()
 if(GPU_TARGETS)
   set(GPU_TARGETS "${GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
 elseif(AMDGPU_TARGETS)
   set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
+  message(WARNING "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS.")
 else()
-  # Also check for explicitly empty GPU_TARGETS or AMDGPU_TARGETS and compile for a single target in that case.
-  list(GET DEFAULT_GPU_TARGETS 0 FIRST_GPU_TARGET)
-  if(DEFINED GPU_TARGETS)
-    message(WARNING "GPU_TARGETS is explicitly set to empty string. Falling back to default target: ${FIRST_GPU_TARGET}")
-    set(GPU_TARGETS "${FIRST_GPU_TARGET}" CACHE STRING "List of specific machine types for library to target" FORCE)
-  elseif(DEFINED AMDGPU_TARGETS)
-    message(WARNING "AMDGPU_TARGETS is explicitly set to empty string. Falling back to default target: ${FIRST_GPU_TARGET}")
-    set(GPU_TARGETS "${FIRST_GPU_TARGET}" CACHE STRING "List of specific machine types for library to target")
-  else()
-    set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
-  endif()
+  set(GPU_TARGETS "${DEFAULT_GPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
 endif()
 message(STATUS "GPU_TARGETS=${GPU_TARGETS}")
 

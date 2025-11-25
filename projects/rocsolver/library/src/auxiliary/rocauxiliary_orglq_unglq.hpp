@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -81,7 +81,7 @@ void rocsolver_orglq_unglq_getMemorySize(const rocblas_int m,
         // size of workspace is maximum of what is needed by larft and larfb.
         // size of Abyx_tmptr is maximum of what is needed by orgl2/ungl2 and larfb.
         rocsolver_larft_getMemorySize<BATCHED, T>(n, jb, batch_count, &unused, size_work, &unused);
-        rocsolver_larfb_getMemorySize<BATCHED, T>(rocblas_side_right, m - jb, n, jb, batch_count,
+        rocsolver_larfb_getMemorySize<BATCHED, T>(rocblas_side_left, m - jb, n, jb, batch_count,
                                                   &temp, &unused);
 
         *size_Abyx_tmptr = *size_Abyx_tmptr >= temp ? *size_Abyx_tmptr : temp;

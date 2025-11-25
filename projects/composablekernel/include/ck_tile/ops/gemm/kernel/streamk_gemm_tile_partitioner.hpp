@@ -22,10 +22,11 @@ template <typename BlockGemmShapeType,
           StreamKReductionStrategy ReductionStrategyType = StreamKReductionStrategy::Atomic>
 struct StreamKTilePartitionerBase
 {
+    using BlockGemmShape = BlockGemmShapeType;
 
-    static constexpr index_t MPerBlock                          = BlockGemmShapeType::kM;
-    static constexpr index_t NPerBlock                          = BlockGemmShapeType::kN;
-    static constexpr index_t KPerBlock                          = BlockGemmShapeType::kK;
+    static constexpr index_t MPerBlock                          = BlockGemmShape::kM;
+    static constexpr index_t NPerBlock                          = BlockGemmShape::kN;
+    static constexpr index_t KPerBlock                          = BlockGemmShape::kK;
     static constexpr StreamKReductionStrategy ReductionStrategy = ReductionStrategyType;
 
     StreamKTilePartitionerBase(index_t m, index_t n, index_t k, index_t grid);
@@ -226,7 +227,7 @@ struct StreamKTilePartitionerBase
 template <typename BlockGemmShapeType,
           StreamKReductionStrategy ReductionStrategyType,
           bool Persistent>
-struct StreamKTilePartitioner;
+struct StreamKTilePartitioner_v2;
 
 /**
  * @brief Persistent Stream-K tile partitioner derived struct.
@@ -240,13 +241,13 @@ struct StreamKTilePartitioner;
  * the C Tensor.
  */
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
-struct StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>
+struct StreamKTilePartitioner_v2<BlockGemmShapeType, ReductionStrategyType, true>
     : StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>
 {
-    StreamKTilePartitioner(ck_tile::index_t m,
-                           ck_tile::index_t n,
-                           ck_tile::index_t k,
-                           ck_tile::index_t grid);
+    StreamKTilePartitioner_v2(ck_tile::index_t m,
+                              ck_tile::index_t n,
+                              ck_tile::index_t k,
+                              ck_tile::index_t grid);
 
     public:
     static constexpr bool PERSISTENT = true;
@@ -287,13 +288,13 @@ struct StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>
  * the C Tensor.
  */
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
-struct StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>
+struct StreamKTilePartitioner_v2<BlockGemmShapeType, ReductionStrategyType, false>
     : StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>
 {
-    StreamKTilePartitioner(ck_tile::index_t m,
-                           ck_tile::index_t n,
-                           ck_tile::index_t k,
-                           ck_tile::index_t grid);
+    StreamKTilePartitioner_v2(ck_tile::index_t m,
+                              ck_tile::index_t n,
+                              ck_tile::index_t k,
+                              ck_tile::index_t grid);
 
     public:
     static constexpr bool PERSISTENT = false;

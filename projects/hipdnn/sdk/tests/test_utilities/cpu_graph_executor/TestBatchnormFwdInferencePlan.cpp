@@ -82,14 +82,14 @@ TEST_F(TestBatchnormFwdPlan, ExecutePlan)
     auto shallowYTensor = createShallowTensor<float>(
         params.yTensor, directTensorBundle.tensors[attributes.y_tensor_uid()]->rawHostData());
 
-    CpuFpReferenceBatchnorm::fwdInference(*shallowXTensor,
-                                          *shallowScaleTensor,
-                                          *shallowBiasTensor,
-                                          *shallowMeanTensor,
-                                          *shallowInvVarTensor,
-                                          *shallowYTensor);
+    CpuFpReferenceBatchnormImpl<float, float>::batchnormFwdInference(*shallowXTensor,
+                                                                     *shallowScaleTensor,
+                                                                     *shallowBiasTensor,
+                                                                     *shallowMeanTensor,
+                                                                     *shallowInvVarTensor,
+                                                                     *shallowYTensor);
 
-    BatchnormFwdPlan<float, float, float, float, float> fwdPlan(std::move(params));
+    BatchnormFwdPlan<float, float, float, float> fwdPlan(std::move(params));
     fwdPlan.execute(variantPack);
 
     CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
@@ -113,15 +113,13 @@ TEST(TestBatchnormFwdInferencePlanBuilder, PlanConstruction)
     BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
                                      DataType::FLOAT,
                                      DataType::FLOAT,
-                                     DataType::FLOAT,
                                      DataType::FLOAT>
         patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrapper, graphWrapper.getNode(0));
 
     bool result
-        = dynamic_cast<BatchnormFwdPlan<float, float, float, float, float>*>(builtPlan.get())
-          != nullptr;
+        = dynamic_cast<BatchnormFwdPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -140,7 +138,6 @@ TEST(TestBatchnormFwdInferencePlanBuilder, IsApplicable)
     BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
                                      DataType::FLOAT,
                                      DataType::FLOAT,
-                                     DataType::FLOAT,
                                      DataType::FLOAT>
         floatPlanBuilder;
 
@@ -149,7 +146,6 @@ TEST(TestBatchnormFwdInferencePlanBuilder, IsApplicable)
 
     BatchnormFwdInferencePlanBuilder<DataType::FLOAT,
                                      DataType::HALF,
-                                     DataType::FLOAT,
                                      DataType::FLOAT,
                                      DataType::FLOAT>
         badTypesPlanBuilder;

@@ -201,7 +201,6 @@ def test_filterLogicFilesByPredicates_no_match(mock_logic_file):
         result = filterLogicFilesByPredicates(logicFiles, predicateMap)
         assert len(result) == 0
 
-@pytest.mark.xfail
 def test_filterLogicFilesByPredicates_match_emulation_ids(mock_logic_file):
     logicFiles = ["file1.yaml"]
     predicateMap = {

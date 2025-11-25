@@ -93,13 +93,6 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     outputTensorAttr->set_stride(generateStrides(outputDims, layout.strideOrder));
     outputTensorAttr->set_output(true);
 
-    // Ensure properties are inferred
-    auto validateResult = graph->validate();
-    if(validateResult.is_bad())
-    {
-        throw std::runtime_error("Graph validation failed: " + validateResult.get_message());
-    }
-
     // Serialize graph and create tensor bundle
     auto serializedGraph = graph->buildFlatbufferOperationGraph();
     auto graphWrap = hipdnn_plugin::GraphWrapper(serializedGraph.data(), serializedGraph.size());
@@ -192,13 +185,6 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     outputTensorAttr->set_dim(outputDims);
     outputTensorAttr->set_stride(generateStrides(outputDims, layout.strideOrder));
     outputTensorAttr->set_output(true);
-
-    // Ensure properties are inferred
-    auto validateResult = graph->validate();
-    if(validateResult.is_bad())
-    {
-        throw std::runtime_error("Graph validation failed: " + validateResult.get_message());
-    }
 
     // Serialize graph and create tensor bundle
     auto serializedGraph = graph->buildFlatbufferOperationGraph();

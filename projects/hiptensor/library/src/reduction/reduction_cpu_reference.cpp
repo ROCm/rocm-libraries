@@ -24,10 +24,8 @@
  *
  *******************************************************************************/
 
-#include <vector>
-
-#include "../elementwise/elementwise_cpu_reference.hpp"
 #include "reduction_cpu_reference.hpp"
+#include "../elementwise/elementwise_cpu_reference.hpp"
 #include "reduction_cpu_reference_impl.hpp"
 #include "reduction_cpu_reference_instances.hpp"
 
@@ -116,31 +114,6 @@ hiptensorStatus_t hiptensorReductionReference(const void*                       
                                   hipMemcpyHostToHost));
     }
 
-    // CK requires all the modes of the reduced tensors (C/D) to be sorted according to the
-    // non-reduced tensor mode (modeA).
-    //
-    // By permuting the reduced tensor modes and their lengths, if the strides are permuted
-    // following the same order, then it's possible to satisfy CK's requirement without
-    // physically permuting the data.
-    //
-    // For example:
-    //  - A lengths are [3, 5, 8], C/D modes are [2, 1].
-    //  - CK requires sorted modes as [1, 2] for C/D, and the respective lengths [5, 8].
-    //  - Strides of output are generated in this way:
-    //    - output dims are [2, 1]
-    //      => corresponding lengths are [8(2), 5(1)]
-    //      => strides are [5(2), 1(1)]
-    //      => permuted strides are [1(1), 5(2)]
-    //
-    // The code below implements this logic.
-    hiptensorTensorDescriptor sortedDescC    = *descC;
-    std::vector<int>          sortingIndices = {};
-
-    CHECK_HIPTENSOR_ERROR(hiptensor::getSortingIndices(
-        modeA, descA->mLengths.size(), modeC, sortedDescC.mLengths.size(), sortingIndices));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mLengths));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mStrides));
-
     for(auto [_, pSolution] : solutionQ.solutions())
     {
         // Perform reduction with timing if LOG_LEVEL_PERF_TRACE
@@ -148,9 +121,9 @@ hiptensorStatus_t hiptensorReductionReference(const void*                       
         auto [isSupported, time] = (*pSolution)(descA->mLengths,
                                                 descA->mStrides,
                                                 {modeA, modeA + descA->mLengths.size()},
-                                                sortedDescC.mLengths,
-                                                sortedDescC.mStrides,
-                                                {modeC, modeC + sortedDescC.mLengths.size()},
+                                                descC->mLengths,
+                                                descC->mStrides,
+                                                {modeC, modeC + descC->mLengths.size()},
                                                 opA,
                                                 opC,
                                                 alphaD,

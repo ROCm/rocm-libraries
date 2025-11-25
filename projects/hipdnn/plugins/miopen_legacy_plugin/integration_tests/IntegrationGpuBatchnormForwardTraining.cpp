@@ -23,22 +23,6 @@ namespace
 
 using test_bn_common::BatchnormTestCase;
 
-struct BatchnormFwdTrainingTensorIds
-{
-    static constexpr int64_t X_UID = 1;
-    static constexpr int64_t SCALE_UID = 2;
-    static constexpr int64_t BIAS_UID = 3;
-    static constexpr int64_t EPSILON_UID = 4;
-    static constexpr int64_t PREV_RUNNING_MEAN_UID = 5;
-    static constexpr int64_t PREV_RUNNING_VARIANCE_UID = 6;
-    static constexpr int64_t MOMENTUM_UID = 7;
-    static constexpr int64_t Y_UID = 8;
-    static constexpr int64_t MEAN_UID = 9;
-    static constexpr int64_t INV_VARIANCE_UID = 10;
-    static constexpr int64_t NEXT_RUNNING_MEAN_UID = 11;
-    static constexpr int64_t NEXT_RUNNING_VARIANCE_UID = 12;
-};
-
 // Note: hipDNN BatchNorm implements Spatial normalization only (miopenBNSpatial).
 // The mode is hardcoded in the MIOpen plugin (see MiopenBatchnormFwdTrainingPlan.cpp).
 // Per-activation normalization would require LayerNorm or InstanceNorm operations.
@@ -76,32 +60,38 @@ protected:
         graphObj.set_name("BatchnormForwardTrainingTest");
         graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
+        int64_t uid = 1;
         auto dims = testCase.dims;
         auto derivedDims = getDerivedShape(dims);
 
         // Create input tensor attributes
         auto xAttr = graph::makeTensorAttributes(
             "X", inputDataType, dims, generateStrides(dims, layout.strideOrder));
-        xAttr.set_uid(BatchnormFwdTrainingTensorIds::X_UID);
+        xAttr.set_uid(uid++);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto scaleAttr = graph::makeTensorAttributes(
             "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
-        scaleAttr.set_uid(BatchnormFwdTrainingTensorIds::SCALE_UID);
+        scaleAttr.set_uid(uid++);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
         auto biasAttr = graph::makeTensorAttributes(
             "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
-        biasAttr.set_uid(BatchnormFwdTrainingTensorIds::BIAS_UID);
+        biasAttr.set_uid(uid++);
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         // Epsilon: use pass-by-value with double (matches MIOpen API)
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
         std::mt19937 gen(testCase.seed);
         std::uniform_real_distribution<double> epsilonDist(1e-6, 1e-4);
-        epsilonTensorAttr->set_value(epsilonDist(gen))
-            .set_name("epsilon")
-            .set_uid(BatchnormFwdTrainingTensorIds::EPSILON_UID);
+        epsilonTensorAttr->set_value(epsilonDist(gen)).set_name("epsilon").set_uid(uid++);
+
+        // Store tensor IDs for initialization using enum+map pattern
+        _inputTensorIds[graph::BatchnormAttributes::InputNames::X] = xTensorAttr->get_uid();
+        _inputTensorIds[graph::BatchnormAttributes::InputNames::SCALE] = scaleTensorAttr->get_uid();
+        _inputTensorIds[graph::BatchnormAttributes::InputNames::BIAS] = biasTensorAttr->get_uid();
+        _inputTensorIds[graph::BatchnormAttributes::InputNames::EPSILON]
+            = epsilonTensorAttr->get_uid();
 
         // Conditionally setup running statistics based on scenario
         std::shared_ptr<graph::TensorAttributes> prevRunningMeanTensorAttr;
@@ -114,7 +104,7 @@ protected:
                                                                    intermediateDataType,
                                                                    derivedDims,
                                                                    generateStrides(derivedDims));
-            prevRunningMeanAttr.set_uid(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID);
+            prevRunningMeanAttr.set_uid(uid++);
             prevRunningMeanTensorAttr
                 = std::make_shared<graph::TensorAttributes>(std::move(prevRunningMeanAttr));
 
@@ -123,17 +113,22 @@ protected:
                                               intermediateDataType,
                                               derivedDims,
                                               generateStrides(derivedDims));
-            prevRunningVarianceAttr.set_uid(
-                BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID);
+            prevRunningVarianceAttr.set_uid(uid++);
             prevRunningVarianceTensorAttr
                 = std::make_shared<graph::TensorAttributes>(std::move(prevRunningVarianceAttr));
 
             // Momentum: use pass-by-value with double (matches MIOpen API)
             momentumTensorAttr = std::make_shared<graph::TensorAttributes>();
             std::uniform_real_distribution<double> momentumDist(0.05, 0.15);
-            momentumTensorAttr->set_value(momentumDist(gen))
-                .set_name("momentum")
-                .set_uid(BatchnormFwdTrainingTensorIds::MOMENTUM_UID);
+            momentumTensorAttr->set_value(momentumDist(gen)).set_name("momentum").set_uid(uid++);
+
+            // Store running stats tensor IDs
+            _inputTensorIds[graph::BatchnormAttributes::InputNames::MOMENTUM]
+                = momentumTensorAttr->get_uid();
+            _inputTensorIds[graph::BatchnormAttributes::InputNames::PREV_RUNNING_MEAN]
+                = prevRunningMeanTensorAttr->get_uid();
+            _inputTensorIds[graph::BatchnormAttributes::InputNames::PREV_RUNNING_VARIANCE]
+                = prevRunningVarianceTensorAttr->get_uid();
         }
 
         // Create batchnorm attributes
@@ -158,7 +153,7 @@ protected:
         // Set output tensor attributes
         if(!yTensorAttr->has_uid())
         {
-            yTensorAttr->set_uid(BatchnormFwdTrainingTensorIds::Y_UID);
+            yTensorAttr->set_uid(uid++);
         }
         yTensorAttr->set_output(true);
         yTensorAttr->set_data_type(inputDataType);
@@ -170,7 +165,7 @@ protected:
         {
             if(!meanTensorAttr->has_uid())
             {
-                meanTensorAttr->set_uid(BatchnormFwdTrainingTensorIds::MEAN_UID);
+                meanTensorAttr->set_uid(uid++);
             }
             meanTensorAttr->set_output(true);
             meanTensorAttr->set_data_type(intermediateDataType);
@@ -182,7 +177,7 @@ protected:
         {
             if(!invVarianceTensorAttr->has_uid())
             {
-                invVarianceTensorAttr->set_uid(BatchnormFwdTrainingTensorIds::INV_VARIANCE_UID);
+                invVarianceTensorAttr->set_uid(uid++);
             }
             invVarianceTensorAttr->set_output(true);
             invVarianceTensorAttr->set_data_type(intermediateDataType);
@@ -195,8 +190,7 @@ protected:
         {
             if(!nextRunningMeanTensorAttr->has_uid())
             {
-                nextRunningMeanTensorAttr->set_uid(
-                    BatchnormFwdTrainingTensorIds::NEXT_RUNNING_MEAN_UID);
+                nextRunningMeanTensorAttr->set_uid(uid++);
             }
             nextRunningMeanTensorAttr->set_name("next_running_mean");
             nextRunningMeanTensorAttr->set_output(true);
@@ -209,14 +203,26 @@ protected:
         {
             if(!nextRunningVarianceTensorAttr->has_uid())
             {
-                nextRunningVarianceTensorAttr->set_uid(
-                    BatchnormFwdTrainingTensorIds::NEXT_RUNNING_VARIANCE_UID);
+                nextRunningVarianceTensorAttr->set_uid(uid++);
             }
             nextRunningVarianceTensorAttr->set_name("next_running_variance");
             nextRunningVarianceTensorAttr->set_output(true);
             nextRunningVarianceTensorAttr->set_data_type(intermediateDataType);
             nextRunningVarianceTensorAttr->set_dim(derivedDims);
             nextRunningVarianceTensorAttr->set_stride(generateStrides(derivedDims));
+        }
+
+        // Store next running stats tensor IDs if they exist
+        if(nextRunningMeanTensorAttr)
+        {
+            _outputTensorIds[graph::BatchnormAttributes::OutputNames::NEXT_RUNNING_MEAN]
+                = nextRunningMeanTensorAttr->get_uid();
+        }
+
+        if(nextRunningVarianceTensorAttr)
+        {
+            _outputTensorIds[graph::BatchnormAttributes::OutputNames::NEXT_RUNNING_VARIANCE]
+                = nextRunningVarianceTensorAttr->get_uid();
         }
 
         // Register validators for all output tensors
@@ -241,43 +247,49 @@ protected:
     {
         // Note: Epsilon and momentum are pass-by-value (set via set_value()), not buffers
 
-        // X input: default range
-        bundle.tensors.at(BatchnormFwdTrainingTensorIds::X_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-
         // Scale and bias: -2.0 to 2.0 to match MIOpen
-        bundle.tensors.at(BatchnormFwdTrainingTensorIds::SCALE_UID)
+        bundle.tensors.at(_inputTensorIds.at(graph::BatchnormAttributes::InputNames::SCALE))
             ->fillTensorWithRandomValues(-2.0f, 2.0f, seed + 1);
-        bundle.tensors.at(BatchnormFwdTrainingTensorIds::BIAS_UID)
+        bundle.tensors.at(_inputTensorIds.at(graph::BatchnormAttributes::InputNames::BIAS))
             ->fillTensorWithRandomValues(-2.0f, 2.0f, seed + 2);
 
         // Running mean: prev and next must start with SAME values
         // because MIOpen's API uses IN/OUT parameter semantics
-        if(bundle.tensors.find(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID)
-               != bundle.tensors.end()
-           && bundle.tensors.find(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_MEAN_UID)
-                  != bundle.tensors.end())
+        auto prevMeanIt
+            = _inputTensorIds.find(graph::BatchnormAttributes::InputNames::PREV_RUNNING_MEAN);
+        auto nextMeanIt
+            = _outputTensorIds.find(graph::BatchnormAttributes::OutputNames::NEXT_RUNNING_MEAN);
+        if(prevMeanIt != _inputTensorIds.end() && nextMeanIt != _outputTensorIds.end())
         {
             unsigned runningMeanSeed = seed + 1000;
-            bundle.tensors.at(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID)
+            bundle.tensors.at(prevMeanIt->second)
                 ->fillTensorWithRandomValues(-2.0f, 2.0f, runningMeanSeed);
-            bundle.tensors.at(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_MEAN_UID)
+            bundle.tensors.at(nextMeanIt->second)
                 ->fillTensorWithRandomValues(-2.0f, 2.0f, runningMeanSeed);
         }
 
         // Running variance: prev and next must start with SAME values
-        if(bundle.tensors.find(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID)
-               != bundle.tensors.end()
-           && bundle.tensors.find(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_VARIANCE_UID)
-                  != bundle.tensors.end())
+        auto prevVarIt
+            = _inputTensorIds.find(graph::BatchnormAttributes::InputNames::PREV_RUNNING_VARIANCE);
+        auto nextVarIt
+            = _outputTensorIds.find(graph::BatchnormAttributes::OutputNames::NEXT_RUNNING_VARIANCE);
+        if(prevVarIt != _inputTensorIds.end() && nextVarIt != _outputTensorIds.end())
         {
             unsigned runningVarianceSeed = seed + 2000;
-            bundle.tensors.at(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID)
+            bundle.tensors.at(prevVarIt->second)
                 ->fillTensorWithRandomValues(-2.0f, 2.0f, runningVarianceSeed);
-            bundle.tensors.at(BatchnormFwdTrainingTensorIds::NEXT_RUNNING_VARIANCE_UID)
+            bundle.tensors.at(nextVarIt->second)
                 ->fillTensorWithRandomValues(-2.0f, 2.0f, runningVarianceSeed);
         }
+
+        // X input: default range
+        bundle.tensors.at(_inputTensorIds.at(graph::BatchnormAttributes::InputNames::X))
+            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
     }
+
+private:
+    std::unordered_map<graph::BatchnormAttributes::InputNames, int64_t> _inputTensorIds;
+    std::unordered_map<graph::BatchnormAttributes::OutputNames, int64_t> _outputTensorIds;
 };
 
 // NCHW 2D

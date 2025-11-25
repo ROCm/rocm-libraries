@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, bool SYTRD, typename S, typename T, typename U>
 void sytxx_hetxx_checkBadArgs(const rocblas_handle handle,
@@ -390,7 +389,7 @@ void sytxx_hetxx_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
+    double start;
 
     if(profile > 0)
     {
@@ -406,12 +405,12 @@ void sytxx_hetxx_getPerfData(const rocblas_handle handle,
     {
         sytxx_hetxx_initData<false, true, T>(handle, n, dA, lda, bc, hA);
 
-        timer.start(stream);
+        start = get_time_us_sync(stream);
         rocsolver_sytxx_hetxx(STRIDED, SYTRD, handle, uplo, n, dA.data(), lda, stA, dD.data(), stD,
                               dE.data(), stE, dTau.data(), stP, bc);
-        timer.end(stream);
+        *gpu_time_used += get_time_us_sync(stream) - start;
     }
-    *gpu_time_used = timer.get_combined();
+    *gpu_time_used /= hot_calls;
 }
 
 template <bool BATCHED, bool STRIDED, bool SYTRD, typename T>

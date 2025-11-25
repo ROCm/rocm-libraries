@@ -24,12 +24,12 @@
  *
  *******************************************************************************/
 #include <cstring>
-
 #include <hip/hip_runtime_api.h>
 
 #include <hiptensor/hiptensor.h>
 
 #include "data_types.hpp"
+#include "handle.hpp"
 #include "hiptensor_options.hpp"
 #include "logger.hpp"
 #include "util.hpp"

@@ -779,21 +779,21 @@ protected:
                         auto upstreamGradVal
                             = static_cast<float>(upstreamGrad.getHostValue(n, c, h, w));
 
-                        // For x <= lower_clip: local_gradient = lower_slope
-                        // For x > lower_clip && x <= upper_clip: local_gradient = 1.0
+                        // For x < lower_clip: local_gradient = lower_slope
+                        // For lower_clip <= x <= upper_clip: local_gradient = 1.0
                         // For x > upper_clip: local_gradient = 0.0
                         float localGradient;
-                        if(inputVal > lowerClip && inputVal <= upperClip)
-                        {
-                            localGradient = 1.0f;
-                        }
-                        else if(inputVal <= lowerClip)
+                        if(inputVal < lowerClip)
                         {
                             localGradient = lowerSlope;
                         }
-                        else
+                        else if(inputVal > upperClip)
                         {
                             localGradient = 0.0f;
+                        }
+                        else
+                        {
+                            localGradient = 1.0f;
                         }
 
                         auto downstreamGrad = upstreamGradVal * localGradient;
@@ -1203,40 +1203,6 @@ protected:
         CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
         EXPECT_TRUE(validator.allClose(expected, output));
     }
-
-    void testIdentityOperation()
-    {
-        Tensor<Input1Type> input({1, 2, 2, 2});
-        Tensor<OutputType> output({1, 2, 2, 2});
-
-        // Fill with mix of positive, negative, and zero values
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_2), 0, 0, 0, 1); // -2.0
-        input.setHostValue(static_cast<Input1Type>(0.0f), 0, 0, 1, 0); // 0.0
-        input.setHostValue(static_cast<Input1Type>(PI), 0, 0, 1, 1); // π
-        input.setHostValue(static_cast<Input1Type>(E), 0, 1, 0, 0); // e
-        input.setHostValue(static_cast<Input1Type>(-TEST_VALUE_1_5), 0, 1, 0, 1); // -1.5
-        input.setHostValue(static_cast<Input1Type>(TEST_VALUE_2_5), 0, 1, 1, 0); // 2.5
-        input.setHostValue(static_cast<Input1Type>(SQRT_2), 0, 1, 1, 1); // √2
-
-        CpuReferencePointwiseImpl<OutputType, Input1Type>::pointwiseCompute(
-            PointwiseMode::IDENTITY, output, input);
-
-        // Create expected tensor: identity(x) = x
-        Tensor<OutputType> expected({1, 2, 2, 2});
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_1), 0, 0, 0, 0); // 1.0
-        expected.setHostValue(static_cast<OutputType>(-TEST_VALUE_2), 0, 0, 0, 1); // -2.0
-        expected.setHostValue(static_cast<OutputType>(0.0f), 0, 0, 1, 0); // 0.0
-        expected.setHostValue(static_cast<OutputType>(PI), 0, 0, 1, 1); // π
-        expected.setHostValue(static_cast<OutputType>(E), 0, 1, 0, 0); // e
-        expected.setHostValue(static_cast<OutputType>(-TEST_VALUE_1_5), 0, 1, 0, 1); // -1.5
-        expected.setHostValue(static_cast<OutputType>(TEST_VALUE_2_5), 0, 1, 1, 0); // 2.5
-        expected.setHostValue(static_cast<OutputType>(SQRT_2), 0, 1, 1, 1); // √2
-
-        auto tolerance = getMixedTypeTolerance();
-        CpuFpReferenceValidation<OutputType> validator(tolerance, tolerance);
-        EXPECT_TRUE(validator.allClose(expected, output));
-    }
 };
 
 using TestTypes = ::testing::Types<float, half, hip_bfloat16, double>;
@@ -1378,11 +1344,6 @@ TYPED_TEST(CpuReferencePointwiseFixture, Unary3DOperation)
 TYPED_TEST(CpuReferencePointwiseFixture, UnarySingleElementTensor)
 {
     this->testUnarySingleElementTensor();
-}
-
-TYPED_TEST(CpuReferencePointwiseFixture, UnaryIdentity)
-{
-    this->testIdentityOperation();
 }
 
 // Mixed-type binary test instantiations
@@ -1542,9 +1503,4 @@ TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp16, UnaryMixedTypeReluForward)
 TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp16, UnaryMixedTypeParameterizedReluBackward)
 {
     this->testParameterizedReluBackwardOperation();
-}
-
-TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp16, UnaryMixedTypeIdentity)
-{
-    this->testIdentityOperation();
 }

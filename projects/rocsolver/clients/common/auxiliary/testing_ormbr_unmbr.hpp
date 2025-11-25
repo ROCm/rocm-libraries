@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 template <bool COMPLEX, typename T>
 void ormbr_unmbr_checkBadArgs(const rocblas_handle handle,
@@ -295,7 +294,7 @@ void ormbr_unmbr_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
+    double start;
 
     if(profile > 0)
     {
@@ -312,12 +311,12 @@ void ormbr_unmbr_getPerfData(const rocblas_handle handle,
         ormbr_unmbr_initData<false, true, T>(handle, storev, side, trans, m, n, k, dA, lda, dIpiv,
                                              dC, ldc, hA, hIpiv, hC, hW, size_W);
 
-        timer.start(stream);
+        start = get_time_us_sync(stream);
         rocsolver_ormbr_unmbr(handle, storev, side, trans, m, n, k, dA.data(), lda, dIpiv.data(),
                               dC.data(), ldc);
-        timer.end(stream);
+        *gpu_time_used += get_time_us_sync(stream) - start;
     }
-    *gpu_time_used = timer.get_combined();
+    *gpu_time_used /= hot_calls;
 }
 
 template <typename T, bool COMPLEX = rocblas_is_complex<T>>
@@ -439,7 +438,7 @@ void testing_ormbr_unmbr(Arguments& argus)
                                 hIpiv, hC, hCr, &max_error);
 
     // collect performance data
-    if(argus.timing && hot_calls > 0)
+    if(argus.timing)
         ormbr_unmbr_getPerfData<T>(handle, storev, side, trans, m, n, k, dA, lda, dIpiv, dC, ldc,
                                    hA, hIpiv, hC, &gpu_time_used, &cpu_time_used, hot_calls,
                                    argus.profile, argus.profile_kernels, argus.perf);

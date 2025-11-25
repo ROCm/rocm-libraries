@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T, typename U>
 void getri_checkBadArgs(const rocblas_handle handle,
@@ -310,7 +309,7 @@ void getri_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
+    double start;
 
     if(profile > 0)
     {
@@ -326,11 +325,11 @@ void getri_getPerfData(const rocblas_handle handle,
     {
         getri_initData<false, true, T>(handle, n, dA, lda, dIpiv, bc, hA, hIpiv, hInfo, singular);
 
-        timer.start(stream);
+        start = get_time_us_sync(stream);
         rocsolver_getri(STRIDED, handle, n, dA.data(), lda, stA, dIpiv.data(), stP, dInfo.data(), bc);
-        timer.end(stream);
+        *gpu_time_used += get_time_us_sync(stream) - start;
     }
-    *gpu_time_used = timer.get_combined();
+    *gpu_time_used /= hot_calls;
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
@@ -432,7 +431,7 @@ void testing_getri(Arguments& argus)
                                        hIpiv, hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             getri_getPerfData<STRIDED, T>(handle, n, dA, lda, stA, dIpiv, stP, dInfo, bc, hA, hIpiv,
                                           hInfo, &gpu_time_used, &cpu_time_used, hot_calls,
                                           argus.profile, argus.profile_kernels, argus.perf,
@@ -474,7 +473,7 @@ void testing_getri(Arguments& argus)
                                        hIpiv, hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             getri_getPerfData<STRIDED, T>(handle, n, dA, lda, stA, dIpiv, stP, dInfo, bc, hA, hIpiv,
                                           hInfo, &gpu_time_used, &cpu_time_used, hot_calls,
                                           argus.profile, argus.profile_kernels, argus.perf,

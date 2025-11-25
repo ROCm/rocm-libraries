@@ -2242,52 +2242,26 @@ void ref_syrk_ex(rocblas_fill      uplo,
                  U*                C,
                  int64_t           ldc)
 {
-    if constexpr(!std::is_same_v<Tc, double>)
-    {
-        float alpha_float = alpha;
-        float beta_float  = beta;
+    float alpha_float = alpha;
+    float beta_float  = beta;
 
-        host_vector<float> A_float, C_float;
+    host_vector<float> A_float, C_float;
 
-        cast_to_buffer(transA, n, k, lda, A, A_float);
-        cast_to_buffer(rocblas_operation_none, n, n, ldc, C, C_float);
+    cast_to_buffer(transA, n, k, lda, A, A_float);
+    cast_to_buffer(rocblas_operation_none, n, n, ldc, C, C_float);
 
-        ref_syrk(uplo,
-                 transA,
-                 n,
-                 k,
-                 alpha_float,
-                 (const float*)A_float.data(),
-                 lda,
-                 beta_float,
-                 C_float.data(),
-                 ldc);
+    ref_syrk(uplo,
+             transA,
+             n,
+             k,
+             alpha_float,
+             (const float*)A_float.data(),
+             lda,
+             beta_float,
+             C_float.data(),
+             ldc);
 
-        cast_from_buffer(n, n, ldc, C_float, C);
-    }
-    else
-    {
-        double alpha_double = alpha;
-        double beta_double  = beta;
-
-        host_vector<double> A_double, C_double;
-
-        cast_to_buffer(transA, n, k, lda, A, A_double);
-        cast_to_buffer(rocblas_operation_none, n, n, ldc, C, C_double);
-
-        ref_syrk(uplo,
-                 transA,
-                 n,
-                 k,
-                 alpha_double,
-                 (const double*)A_double.data(),
-                 lda,
-                 beta_double,
-                 C_double.data(),
-                 ldc);
-
-        cast_from_buffer(n, n, ldc, C_double, C);
-    }
+    cast_from_buffer(n, n, ldc, C_float, C);
 }
 
 #define INSTANTIATE_SYRK_EX_TEMPLATE(T_, U_, Tc_)                    \

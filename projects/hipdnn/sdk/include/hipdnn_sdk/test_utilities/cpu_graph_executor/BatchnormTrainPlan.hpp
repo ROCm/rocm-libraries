@@ -85,10 +85,9 @@ struct BatchnormTrainParams
     std::optional<hipdnn_sdk::data_objects::TensorAttributesT> nextRunningVarianceTensor;
 };
 
-template <typename XDataType,
+template <typename InputDataType,
           typename ScaleBiasDataType,
           typename MeanVarianceDataType,
-          typename OutputDataType,
           typename ComputeDataType>
 class BatchnormTrainPlan : public IGraphNodePlanExecutor
 {
@@ -100,13 +99,13 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowXTensor
-            = createShallowTensor<XDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
+        auto shallowXTensor = createShallowTensor<InputDataType>(
+            _params.xTensor, variantPack.at(_params.xTensor.uid));
         auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
         auto shallowBiasTensor = createShallowTensor<ScaleBiasDataType>(
             _params.biasTensor, variantPack.at(_params.biasTensor.uid));
-        auto shallowYTensor = createShallowTensor<OutputDataType>(
+        auto shallowYTensor = createShallowTensor<InputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
         // Extract epsilon from pass-by-value tensor (cast to double)
@@ -181,36 +180,37 @@ public:
             nextRunningVariancePtr = nextRunningVariance.get();
         }
 
-        CpuFpReferenceBatchnorm::fwdTraining(*shallowXTensor,
-                                             *shallowScaleTensor,
-                                             *shallowBiasTensor,
-                                             *shallowYTensor,
-                                             epsilon,
-                                             momentumValue,
-                                             meanPtr,
-                                             invVariancePtr,
-                                             prevRunningMeanPtr,
-                                             prevRunningVariancePtr,
-                                             nextRunningMeanPtr,
-                                             nextRunningVariancePtr);
+        CpuFpReferenceBatchnormImpl<InputDataType,
+                                    ScaleBiasDataType,
+                                    MeanVarianceDataType,
+                                    ComputeDataType>::batchnormFwdTraining(*shallowXTensor,
+                                                                           *shallowScaleTensor,
+                                                                           *shallowBiasTensor,
+                                                                           *shallowYTensor,
+                                                                           epsilon,
+                                                                           momentumValue,
+                                                                           meanPtr,
+                                                                           invVariancePtr,
+                                                                           prevRunningMeanPtr,
+                                                                           prevRunningVariancePtr,
+                                                                           nextRunningMeanPtr,
+                                                                           nextRunningVariancePtr);
     }
 
 private:
     BatchnormTrainParams<MeanVarianceDataType> _params;
 };
 
-template <hipdnn_sdk::data_objects::DataType XDataTypeEnum,
+template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
           hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
           hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum,
           hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum>
 class BatchnormTrainPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
-    using XDataType = DataTypeToNative<XDataTypeEnum>;
+    using InputDataType = DataTypeToNative<InputDataTypeEnum>;
     using ScaleBiasDataType = DataTypeToNative<ScaleBiasDataTypeEnum>;
     using MeanVarianceDataType = DataTypeToNative<MeanVarianceDataTypeEnum>;
-    using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
     using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
@@ -236,65 +236,66 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->y_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->epsilon_tensor_uid());
 
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), XDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->bias_tensor_uid(), ScaleBiasDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), InputDataTypeEnum);
 
         // Optional batch statistics tensors
         if(nodeAttributes->mean_tensor_uid().has_value())
         {
-            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid());
-            CHECK_OPTIONAL_TENSOR_TYPE(
-                tensorMap, nodeAttributes->mean_tensor_uid(), MeanVarianceDataTypeEnum);
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid().value());
+            CHECK_TENSOR_TYPE(
+                tensorMap, nodeAttributes->mean_tensor_uid().value(), MeanVarianceDataTypeEnum);
         }
 
         if(nodeAttributes->inv_variance_tensor_uid().has_value())
         {
-            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid());
-            CHECK_OPTIONAL_TENSOR_TYPE(
-                tensorMap, nodeAttributes->inv_variance_tensor_uid(), MeanVarianceDataTypeEnum);
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid().value());
+            CHECK_TENSOR_TYPE(tensorMap,
+                              nodeAttributes->inv_variance_tensor_uid().value(),
+                              MeanVarianceDataTypeEnum);
         }
 
         // Momentum can be any type - will be cast to double during extraction
         if(nodeAttributes->momentum_tensor_uid())
         {
-            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->momentum_tensor_uid());
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->momentum_tensor_uid().value());
         }
 
         // Optional running mean/variance tensors
         if(nodeAttributes->prev_running_mean_tensor_uid())
         {
-            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->prev_running_mean_tensor_uid());
-            CHECK_OPTIONAL_TENSOR_TYPE(tensorMap,
-                                       nodeAttributes->prev_running_mean_tensor_uid(),
-                                       MeanVarianceDataTypeEnum);
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->prev_running_mean_tensor_uid().value());
+            CHECK_TENSOR_TYPE(tensorMap,
+                              nodeAttributes->prev_running_mean_tensor_uid().value(),
+                              MeanVarianceDataTypeEnum);
         }
 
         if(nodeAttributes->prev_running_variance_tensor_uid())
         {
-            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap,
-                                         nodeAttributes->prev_running_variance_tensor_uid());
-            CHECK_OPTIONAL_TENSOR_TYPE(tensorMap,
-                                       nodeAttributes->prev_running_variance_tensor_uid(),
-                                       MeanVarianceDataTypeEnum);
+            CHECK_TENSOR_EXISTS(tensorMap,
+                                nodeAttributes->prev_running_variance_tensor_uid().value());
+            CHECK_TENSOR_TYPE(tensorMap,
+                              nodeAttributes->prev_running_variance_tensor_uid().value(),
+                              MeanVarianceDataTypeEnum);
         }
 
         if(nodeAttributes->next_running_mean_tensor_uid())
         {
-            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->next_running_mean_tensor_uid());
-            CHECK_OPTIONAL_TENSOR_TYPE(tensorMap,
-                                       nodeAttributes->next_running_mean_tensor_uid(),
-                                       MeanVarianceDataTypeEnum);
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->next_running_mean_tensor_uid().value());
+            CHECK_TENSOR_TYPE(tensorMap,
+                              nodeAttributes->next_running_mean_tensor_uid().value(),
+                              MeanVarianceDataTypeEnum);
         }
 
         if(nodeAttributes->next_running_variance_tensor_uid())
         {
-            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap,
-                                         nodeAttributes->next_running_variance_tensor_uid());
-            CHECK_OPTIONAL_TENSOR_TYPE(tensorMap,
-                                       nodeAttributes->next_running_variance_tensor_uid(),
-                                       MeanVarianceDataTypeEnum);
+            CHECK_TENSOR_EXISTS(tensorMap,
+                                nodeAttributes->next_running_variance_tensor_uid().value());
+            CHECK_TENSOR_TYPE(tensorMap,
+                              nodeAttributes->next_running_variance_tensor_uid().value(),
+                              MeanVarianceDataTypeEnum);
         }
 
         return true;
@@ -362,10 +363,9 @@ public:
             nextRunningMean,
             nextRunningVariance);
 
-        return std::make_unique<BatchnormTrainPlan<XDataType,
+        return std::make_unique<BatchnormTrainPlan<InputDataType,
                                                    ScaleBiasDataType,
                                                    MeanVarianceDataType,
-                                                   OutputDataType,
                                                    ComputeDataType>>(std::move(params));
     }
 };

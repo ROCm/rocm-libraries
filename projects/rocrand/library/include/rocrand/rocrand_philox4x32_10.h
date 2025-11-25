@@ -94,7 +94,9 @@ public:
         // (with mean = 0, and stddev = 1). Often user wants only one
         // normally distributed number, to save performance and random
         // numbers the 2nd value is saved for future requests.
-        float  boxmuller_float; // normally distributed float
+        unsigned int boxmuller_float_state; // is there a float in boxmuller_float
+        unsigned int boxmuller_double_state; // is there a double in boxmuller_double
+        float boxmuller_float; // normally distributed float
         double boxmuller_double; // normally distributed double
     #endif
     };
@@ -154,8 +156,8 @@ public:
         m_state.result  = {0, 0, 0, 0};
         m_state.substate = 0;
     #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
-        m_state.boxmuller_float  = ROCRAND_NAN_FLOAT;
-        m_state.boxmuller_double = ROCRAND_NAN_DOUBLE;
+        m_state.boxmuller_float_state = 0;
+        m_state.boxmuller_double_state = 0;
     #endif
         this->discard_subsequence_impl(subsequence);
         this->discard_impl(offset);

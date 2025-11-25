@@ -29,6 +29,7 @@
 #include <rocRoller/AssertOpKinds_fwd.hpp>
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/Utilities/Component.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
 
 namespace rocRoller

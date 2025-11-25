@@ -355,7 +355,8 @@ namespace rocRoller
 
                     registerType = Register::PromoteType(registerType, operandRegisterType);
                     actualNumRegister
-                        = actualNumRegister + DataTypeInfo::Get(operandVariableType).registerCount;
+                        = actualNumRegister
+                          + DataTypeInfo::Get(operandVariableType.dataType).registerCount;
                 }
 
                 AssertFatal(expectedNumRegister == actualNumRegister,

@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, bool GETRF, typename I, typename Td, typename Id>
 void getf2_getrf_npvt_checkBadArgs(const rocblas_handle handle,
@@ -288,7 +287,7 @@ void getf2_getrf_npvt_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
+    double start;
 
     if(profile > 0)
     {
@@ -304,12 +303,12 @@ void getf2_getrf_npvt_getPerfData(const rocblas_handle handle,
         getf2_getrf_npvt_initData<false, true, T>(handle, m, n, dA, lda, stA, dInfo, bc, hA,
                                                   singular);
 
-        timer.start(stream);
+        start = get_time_us_sync(stream);
         rocsolver_getf2_getrf_npvt(STRIDED, GETRF, handle, m, n, dA.data(), lda, stA, dInfo.data(),
                                    bc);
-        timer.end(stream);
+        *gpu_time_used += get_time_us_sync(stream) - start;
     }
-    *gpu_time_used = timer.get_combined();
+    *gpu_time_used /= hot_calls;
 }
 
 template <bool BATCHED, bool STRIDED, bool GETRF, typename T, typename I>
@@ -409,7 +408,7 @@ void testing_getf2_getrf_npvt(Arguments& argus)
                                                          argus.singular);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             getf2_getrf_npvt_getPerfData<STRIDED, GETRF, T>(
                 handle, m, n, dA, lda, stA, dInfo, bc, hA, hIpiv, hInfo, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf,
@@ -449,7 +448,7 @@ void testing_getf2_getrf_npvt(Arguments& argus)
                                                          argus.singular);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             getf2_getrf_npvt_getPerfData<STRIDED, GETRF, T>(
                 handle, m, n, dA, lda, stA, dInfo, bc, hA, hIpiv, hInfo, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf,

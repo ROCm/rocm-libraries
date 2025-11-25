@@ -75,11 +75,9 @@ template<unsigned int OutputPerThread,
          class Engine,
          class Constant,
          class T,
-         class Distribution>
-struct generate_sobol_host
-{
-    template<host::target_arch Arch = host::target_arch::unknown>
-    static void generate(dim3,
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
+void generate_sobol_host(dim3,
                          dim3,
                          dim3,
                          dim3,
@@ -89,8 +87,7 @@ struct generate_sobol_host
                          const Constant*,
                          const unsigned int,
                          Distribution)
-    {}
-};
+{}
 
 template<unsigned int OutputPerThread,
          bool         Scrambled,
@@ -99,7 +96,8 @@ template<unsigned int OutputPerThread,
          class T,
          class Distribution,
          int block_size>
-__global__ __launch_bounds__(block_size)
+__global__
+    __launch_bounds__(block_size)
 void generate_sobol_kernel(T*                 data,
                            const size_t       n,
                            const Constant*    direction_vectors,
@@ -124,11 +122,9 @@ template<unsigned int OutputPerThread,
          class Engine,
          class Constant,
          class T,
-         class Distribution>
-struct generate_sobol_host
-{
-    template<host::target_arch Arch = host::target_arch::unknown>
-    static void generate(dim3               block_idx,
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
+void generate_sobol_host(dim3               block_idx,
                          dim3               thread_idx,
                          dim3               grid_dim,
                          dim3               block_dim,
@@ -267,9 +263,6 @@ struct generate_sobol_host
         }
     }
 }
-#ifndef __HIP_DEVICE_COMPILE__
-};
-#endif
 
 template<bool Is64, bool Scrambled, bool UseSharedVectors>
 struct sobol_device_engine;
@@ -684,7 +677,7 @@ public:
             // On AMD GPUs we must resort to static shared memory for performance.
             = 0;
 #else
-                = system_type::is_device() ? ((Is64 ? 64 : 32) * sizeof(constant_type)) : 0;
+            = system_type::is_device() ? ((Is64 ? 64 : 32) * sizeof(constant_type)) : 0;
 #endif
 
         const size_t       size             = data_size / m_dimensions;
@@ -734,13 +727,18 @@ public:
                 return ROCRAND_STATUS_INTERNAL_ERROR;
             }
 
-            status = system_type::template launch<generate_sobol_host<output_per_thread,
-                                                                      Scrambled,
-                                                                      engine_type,
-                                                                      constant_type,
-                                                                      T,
-                                                                      Distribution>,
-                                                  block_size_provider>(target_arch,
+            auto generate_sobol_host_kernel = [&] __host__ __device__(auto arch, auto... args)
+            {
+                generate_sobol_host<output_per_thread,
+                                    Scrambled,
+                                    engine_type,
+                                    constant_type,
+                                    T,
+                                    Distribution,
+                                    arch>(args...);
+            };
+            status = system_type::template launch<block_size_provider>(generate_sobol_host_kernel,
+                                                                       target_arch,
                                                                        dim3(blocks_x, blocks_y),
                                                                        dim3(threads),
                                                                        shared_mem_bytes,

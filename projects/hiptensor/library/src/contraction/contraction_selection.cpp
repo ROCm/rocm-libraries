@@ -35,13 +35,13 @@
     }
 #endif
 
-#include <ck/stream_config.hpp>
-
 #include "contraction_selection.hpp"
 #include "hiptensor_options.hpp"
 #include "logger.hpp"
 #include "performance.hpp"
 #include "util.hpp"
+
+#include "contraction_cpu_reference.hpp"
 
 namespace hiptensor
 {
@@ -108,11 +108,11 @@ namespace hiptensor
         std::string          best_op_name;
         ContractionSolution* bestSolution = nullptr;
         PerfMetrics          bestMetrics  = {
-            0,
-            "",
-            0,
-            0,
-            0,
+                      0,
+                      "",
+                      0,
+                      0,
+                      0,
         };
 
         std::vector<float> sol_times(candidates.size(), std::numeric_limits<float>::max());

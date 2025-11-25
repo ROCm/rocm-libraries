@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     April 2012
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -418,8 +418,8 @@ rocblas_status rocsolver_gesvd_template(rocblas_handle handle,
     const rocblas_int shiftV = 0;
     const rocblas_int ldx = thinSVD ? k : m;
     const rocblas_int ldy = thinSVD ? k : n;
-    const rocblas_stride strideX = ldx * GEBRD_BLOCKSIZE;
-    const rocblas_stride strideY = ldy * GEBRD_BLOCKSIZE;
+    const rocblas_stride strideX = ldx * GEBRD_GEBD2_SWITCHSIZE;
+    const rocblas_stride strideY = ldy * GEBRD_GEBD2_SWITCHSIZE;
     T* bufferT = tempArrayT;
     rocblas_int ldt = k;
     rocblas_stride strideT = k * k;

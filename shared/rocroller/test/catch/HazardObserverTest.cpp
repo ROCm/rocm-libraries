@@ -722,31 +722,6 @@ namespace HazardObserverTest
                 CHECK_THAT(context.output(), ContainsSubstring("s_nop"));
             }
 
-            SECTION("No NOPs for buffer_store_dwordx4 followed by VALU if vdata not accessed")
-            {
-                auto context = TestContext::ForTarget(arch);
-                auto v = createRegisters(context, Register::Type::Vector, DataType::Float, 1, 4)[0];
-                auto addr = createRegisters(context, Register::Type::Vector, DataType::Raw32, 1)[0];
-                auto a    = createRegisters(
-                    context, Register::Type::Accumulator, DataType::Float, 1, 4)[0];
-                auto s = createRegisters(context, Register::Type::Scalar, DataType::Raw32, 1, 4)[0];
-
-                std::vector<Instruction> insts = {
-                    Instruction("buffer_store_dwordx4",
-                                {},
-                                {v, addr, s, Register::Value::Literal(0)},
-                                {"offen"},
-                                ""),
-                    Instruction("v_add_u32", {addr}, {addr, Register::Value::Literal(0)}, {}, ""),
-                    Instruction("s_endpgm", {}, {}, {}, "")};
-
-                peekAndSchedule(context, insts[0]);
-                peekAndSchedule(context, insts[1]);
-                peekAndSchedule(context, insts[2]);
-
-                CHECK_THAT(context.output(), !ContainsSubstring("s_nop"));
-            }
-
             SECTION("No NOPs when soffset is an SGPR")
             {
                 auto context = TestContext::ForTarget(arch);

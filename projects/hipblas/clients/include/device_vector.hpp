@@ -61,8 +61,6 @@ public:
         , m_inc{inc ? inc : 1}
         , m_data{this->device_vector_setup()}
     {
-        if(!m_data)
-            throw std::bad_alloc{};
     }
 
     //!

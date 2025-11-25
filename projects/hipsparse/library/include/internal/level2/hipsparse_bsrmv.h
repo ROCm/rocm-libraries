@@ -99,6 +99,9 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
 *          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*
+*  \par Example
+*  \snippet example_hipsparse_bsrmv.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

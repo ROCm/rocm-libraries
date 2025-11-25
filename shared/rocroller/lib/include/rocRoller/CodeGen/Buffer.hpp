@@ -33,6 +33,7 @@
 
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Utilities/Comparison.hpp>
+#include <rocRoller/Utilities/Component.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
 
 namespace rocRoller

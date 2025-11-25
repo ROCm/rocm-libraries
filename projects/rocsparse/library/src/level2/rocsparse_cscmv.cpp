@@ -415,7 +415,6 @@ rocsparse_status rocsparse::cscmv(rocsparse_handle          handle,
                                   bool                      fallback_algorithm)
 {
     ROCSPARSE_ROUTINE_TRACE;
-
     rocsparse::cscmv_t f;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmv_find(&f,
                                                     alpha_device_host_datatype,

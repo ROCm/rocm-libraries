@@ -23,31 +23,22 @@ struct BaseFlatmmPipelineAGmemBGmemCRegV1
     {
         return num_loop % 2 == 0 ? TailNumber::Even : TailNumber::Odd;
     }
-
-    template <bool DispatchHotloop = false, TailNumber tail_num, typename RunFunction>
-    CK_TILE_HOST_DEVICE static auto TailHandler(const RunFunction& run_func, bool has_hot_loop)
-    {
-        if constexpr(!DispatchHotloop)
-            return run_func(bool_constant<true>{}, integral_constant<TailNumber, tail_num>{});
-        else if(has_hot_loop)
-            return run_func(bool_constant<true>{}, integral_constant<TailNumber, tail_num>{});
-        else
-            return run_func(bool_constant<false>{}, integral_constant<TailNumber, tail_num>{});
-    }
-
-    template <bool DispatchHotloop = false, typename RunFunction>
+    template <typename RunFunction>
     CK_TILE_HOST_DEVICE static auto
-    TailHandler(const RunFunction& run_func, bool has_hot_loop, TailNumber tail_num)
+    TailHandler(const RunFunction& run_func, bool, TailNumber tail_num)
     {
         if(TailNumber::Even == tail_num)
-            return TailHandler<DispatchHotloop, TailNumber::Even>(run_func, has_hot_loop);
-        else if(TailNumber::Odd == tail_num)
-            return TailHandler<DispatchHotloop, TailNumber::Odd>(run_func, has_hot_loop);
-        else
         {
-            assert(("Wrong TailNumber!", false));
-            return decltype(TailHandler<>(run_func, true, TailNumber::Even)){};
+            return run_func(bool_constant<true>{},
+                            integral_constant<TailNumber, TailNumber::Even>{});
         }
+        else if(TailNumber::Odd == tail_num)
+        {
+            return run_func(bool_constant<true>{},
+                            integral_constant<TailNumber, TailNumber::Odd>{});
+        }
+        // return run_func(bool_constant<true>{}, integral_constant<TailNumber,
+        // TailNumber::Empty>{});
     }
 };
 

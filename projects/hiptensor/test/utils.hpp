@@ -26,9 +26,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <ctime>
 #include <fstream>
-#include <iostream>
 #include <iterator>
 #include <math.h>
 #include <mutex>

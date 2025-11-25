@@ -8,7 +8,6 @@
 #include "EngineManager.hpp"
 #include "MiopenContainer.hpp"
 #include "engines/MiopenEngine.hpp"
-#include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/plans/MiopenBatchnormPlanBuilder.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
@@ -25,10 +24,6 @@ MiopenContainer::MiopenContainer()
 
     auto batchnormPlanBuilder = std::make_unique<MiopenBatchnormPlanBuilder>();
     miopenEngine->addPlanBuilder(std::move(batchnormPlanBuilder));
-
-    auto batchnormFwdTrainingPlanBuilder
-        = std::make_unique<MiopenBatchnormFwdTrainingPlanBuilder>();
-    miopenEngine->addPlanBuilder(std::move(batchnormFwdTrainingPlanBuilder));
 
     auto convPlanBuilder = std::make_unique<MiopenConvPlanBuilder>();
     miopenEngine->addPlanBuilder(std::move(convPlanBuilder));

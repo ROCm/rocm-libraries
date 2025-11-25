@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright (C) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 // This file defines the compile-time "signature" for grouped convolution operations.
@@ -21,6 +21,7 @@
 #include <type_traits>
 
 #include "ck_tile/builder/types.hpp"
+#include "ck_tile/builder/conv_signature_predicates.hpp"
 
 namespace ck_tile::builder {
 
@@ -41,43 +42,20 @@ concept ConvDataType = (T == DataType::FP32) || (T == DataType::FP16) || (T == D
                        (T == DataType::FP8) || (T == DataType::I8) || (T == DataType::U8);
 
 template <typename T>
+concept ConvDeviceOp = std::same_as<std::remove_cvref_t<T>, GroupConvDeviceOp>;
+
+template <typename T>
 concept ConvLayout = std::same_as<std::remove_cvref_t<T>, GroupConvLayout>;
-
-template <typename T>
-concept HasElementwiseOp = requires(T t) {
-    { t.elementwise_operation };
-};
-
-template <typename T>
-concept HasConvolutionDirection = requires(T t) {
-    { t.direction };
-};
-
-// Note: it is not required to provide an ElementwiseOp, but if one is provided, check if well
-// defined
-template <typename T>
-concept ElementwiseOpWellDefinedIfProvided = requires(T t) {
-    requires !HasElementwiseOp<T> || requires {
-        { t.elementwise_operation } -> std::convertible_to<ElementwiseOperation>;
-    };
-};
-
-// Note: it is not required to provide a convolution, but if one is provided, check if well defined
-template <typename T>
-concept ConvolutionDirectionWellDefinedIfProvided = requires(T t) {
-    requires !HasConvolutionDirection<T> || requires {
-        { t.direction } -> std::convertible_to<ConvDirection>;
-    };
-};
 
 // Concept for a type that defines a convolution's operational signature.
 template <typename T>
 concept ConvSignatureDescriptor = requires(T t) {
     { t.spatial_dim } -> std::convertible_to<unsigned int>;
+    { t.direction } -> std::convertible_to<ConvDirection>;
     { t.layout } -> ConvLayout;
     { t.data_type } -> std::convertible_to<DataType>;
-    requires ElementwiseOpWellDefinedIfProvided<T>;
-    requires ConvolutionDirectionWellDefinedIfProvided<T>;
+    { t.elementwise_operation } -> std::convertible_to<ElementwiseOperation>;
+    { t.device_operation } -> ConvDeviceOp;
 };
 
 // Concept to validate a convolution signature's values.
@@ -85,19 +63,7 @@ template <auto Sig>
 concept ValidConvSignature = requires {
     requires ConvSpatialDim<Sig.spatial_dim>;
     requires ConvDataType<Sig.data_type>;
+    requires IsValidConvDeviceOp<Sig>;
 };
-
-// Predicate for forward convolution (default if direction is not included).
-template <auto Sig>
-concept ConvDirectionIsForward =
-    !requires { Sig.direction; } || (Sig.direction == ConvDirection::FORWARD);
-
-// Predicate for backward data convolution.
-template <auto Sig>
-concept ConvDirectionIsBackwardData = (Sig.direction == ConvDirection::BACKWARD_DATA);
-
-// Predicate for backward weight convolution.
-template <auto Sig>
-concept ConvDirectionIsBackwardWeight = (Sig.direction == ConvDirection::BACKWARD_WEIGHT);
 
 } // namespace ck_tile::builder

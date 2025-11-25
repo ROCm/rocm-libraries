@@ -30,6 +30,7 @@
 #include "elementwise/elementwise_cpu_reference.hpp"
 #include "elementwise_test.hpp"
 #include "hiptensor_options.hpp"
+#include "logger.hpp"
 #include "util.hpp"
 #include "utils.hpp"
 

@@ -17,12 +17,7 @@ Infrastructure
 
 - Doxygen and Sphinx are used to generate the project's documentation.
 - Jenkins is used to automate Continuous Integration (CI) testing, with configurations stored in the ``.jenkins`` folder.
-- rocWMMA is hosted and maintained by AMD on `GitHub  <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocwmma>`_.
-
-  .. note::
-
-    The rocWMMA repository for ROCm 7.1.1 and earlier is located at `<https://github.com/ROCm/rocWMMA>`_.
-
+- rocWMMA is hosted and maintained by AMD on `GitHub  <https://github.com/ROCm/rocWMMA>`_.
 - The rocWMMA project is organized and configured using ``CMake``, with ``CMakeLists.txt`` files in the root of each directory.
 - ``clang-format`` is used to format C++ code. ``.githooks/install`` ensures that a clang-format pass will run on each committed file.
 - ``GTest`` is used to implement test suite organization and execution.
@@ -36,7 +31,7 @@ hipRTC support
 The HIP runtime compilation (hipRTC) environment enables on-the-fly runtime compilation, loading, and execution of device code on AMD GPUs. The rocWMMA library is compatible with hipRTC, so it can be used for runtime-generated kernels.
 A simple GEMM sample is included to demonstrate compatibility.
 
-For more information, refer to the `HIP API Reference  <https://rocm.docs.amd.com/projects/HIP/en/latest/index.html>`_
+For more information, refer to the `HIP API Reference  <https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/index.html>`_
 
 --------------------------------
 Design concepts
@@ -233,4 +228,4 @@ The ``test`` directory contains the following test code support:
 Contributing
 ^^^^^^^^^^^^
 
-To contribute to the project, see `Contributing to rocWMMA  <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocwmma/CONTRIBUTING.md>`_.
+To contribute to the project, see `Contributing to rocWMMA  <https://github.com/ROCm/rocWMMA/blob/develop/CONTRIBUTING.md>`_.

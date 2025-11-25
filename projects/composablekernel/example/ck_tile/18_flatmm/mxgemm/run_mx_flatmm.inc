@@ -1,5 +1,5 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 template <typename PrecActType,
           typename PrecWeightType,
@@ -88,7 +88,10 @@ int run_mx_flatmm_with_layouts(int argc,
         throw std::runtime_error("wrong! Unexpected init_method");
     }
 
-    const auto b_shuffled_host  = preShuffleWeight<FlatmmConfig::N_Warp_Tile>(b_origin_host);
+    ck_tile::HostTensor<BDataType> b_shuffled_host(
+        ck_tile::host_tensor_descriptor(K, N, stride_B, is_row_major(b_layout)));
+    preShuffleWeight<FlatmmConfig>(b_origin_host.begin(), b_shuffled_host.begin(), N, K);
+
     const auto scale_a_shuffled = preShuffleScale<FlatmmConfig, true>(scale_a);
     const auto scale_b_shuffled = preShuffleScale<FlatmmConfig, false>(scale_b);
 
@@ -160,5 +163,5 @@ int run_mx_flatmm_with_layouts(int argc,
         std::cout << "The GPU veification result is: " << (pass ? "correct" : "fail") << std::endl;
     }
 
-    return pass ? 0 : -1;
+    return pass;
 }

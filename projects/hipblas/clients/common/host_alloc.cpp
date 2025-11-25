@@ -42,7 +42,7 @@ static size_t                  mem_used{0};
 static std::map<void*, size_t> mem_allocated;
 static std::mutex              mem_mutex;
 
-void alloc_ptr_use(void* ptr, size_t size)
+inline void alloc_ptr_use(void* ptr, size_t size)
 {
     std::lock_guard<std::mutex> lock(mem_mutex);
     if(ptr)
@@ -52,7 +52,7 @@ void alloc_ptr_use(void* ptr, size_t size)
     }
 }
 
-void free_ptr_use(void* ptr, bool call_free)
+inline void free_ptr_use(void* ptr)
 {
     std::lock_guard<std::mutex> lock(mem_mutex);
     if(ptr && mem_allocated[ptr])
@@ -60,8 +60,7 @@ void free_ptr_use(void* ptr, bool call_free)
         mem_used -= mem_allocated[ptr];
         mem_allocated.erase(ptr);
     }
-    if(call_free)
-        free(ptr);
+    free(ptr);
 }
 
 size_t host_bytes_allocated()
@@ -127,7 +126,7 @@ ptrdiff_t host_bytes_available()
 #endif
 }
 
-bool host_mem_safe(size_t n_bytes)
+inline bool host_mem_safe(size_t n_bytes)
 {
 #if defined(HIPBLAS_BENCH)
     return true; // roll out to hipblas-bench when CI does perf testing
@@ -226,5 +225,5 @@ void* host_calloc(size_t nmemb, size_t size)
 
 void host_free(void* ptr)
 {
-    free_ptr_use(ptr, true);
+    free_ptr_use(ptr);
 }

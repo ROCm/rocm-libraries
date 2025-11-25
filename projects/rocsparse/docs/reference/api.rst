@@ -544,10 +544,6 @@ documentation for details about the supported data types and compute types.
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_v2_spmv()`                      |
 +-----------------------------------------------------+
-|:cpp:func:`rocsparse_spmv_set_extra()`               |
-+-----------------------------------------------------+
-|:cpp:func:`rocsparse_spmv_clear_extra()`             |
-+-----------------------------------------------------+
 |:cpp:func:`rocsparse_spsv()`                         |
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_sptrsv_buffer_size()`           |

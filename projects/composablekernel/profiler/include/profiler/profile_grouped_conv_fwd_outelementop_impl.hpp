@@ -1,6 +1,3 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT
-
 #pragma once
 
 #include "ck/library/tensor_operation_instance/gpu/grouped_convolution_forward_convscale.hpp"

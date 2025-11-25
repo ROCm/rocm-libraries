@@ -29,7 +29,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "data_types.hpp"
 #include "plan_cache.hpp"
 #include "singleton.hpp"
 

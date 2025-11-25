@@ -80,7 +80,7 @@ TEST_P(accuracy_test, vs_fftw)
     {
         // Single-proc FFT.
         // Only do round trip for non-field FFTs
-        bool round_trip = params.is_forward() && params.ifields.empty() && params.ofields.empty();
+        bool round_trip = params.ifields.empty() && params.ofields.empty();
 
         try
         {

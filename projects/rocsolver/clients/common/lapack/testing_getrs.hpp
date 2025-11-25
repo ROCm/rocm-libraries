@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename I, typename Td, typename Id>
 void getrs_checkBadArgs(const rocblas_handle handle,
@@ -302,7 +301,7 @@ void getrs_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
+    double start;
 
     if(profile > 0)
     {
@@ -319,12 +318,12 @@ void getrs_getPerfData(const rocblas_handle handle,
         getrs_initData<false, true, T>(handle, trans, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
                                        stB, bc, hA, hIpiv, hIpiv_cpu, hB);
 
-        timer.start(stream);
+        start = get_time_us_sync(stream);
         rocsolver_getrs(STRIDED, handle, trans, n, nrhs, dA.data(), lda, stA, dIpiv.data(), stP,
                         dB.data(), ldb, stB, bc);
-        timer.end(stream);
+        *gpu_time_used += get_time_us_sync(stream) - start;
     }
-    *gpu_time_used = timer.get_combined();
+    *gpu_time_used /= hot_calls;
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename I>
@@ -433,7 +432,7 @@ void testing_getrs(Arguments& argus)
                                        stB, bc, hA, hIpiv, hIpiv_cpu, hB, hBRes, &max_error);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             getrs_getPerfData<STRIDED, T>(handle, trans, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
                                           stB, bc, hA, hIpiv, hIpiv_cpu, hB, &gpu_time_used,
                                           &cpu_time_used, hot_calls, argus.profile,
@@ -476,7 +475,7 @@ void testing_getrs(Arguments& argus)
                                        stB, bc, hA, hIpiv, hIpiv_cpu, hB, hBRes, &max_error);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             getrs_getPerfData<STRIDED, T>(handle, trans, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
                                           stB, bc, hA, hIpiv, hIpiv_cpu, hB, &gpu_time_used,
                                           &cpu_time_used, hot_calls, argus.profile,

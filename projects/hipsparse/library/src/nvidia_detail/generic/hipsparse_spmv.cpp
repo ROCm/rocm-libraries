@@ -78,31 +78,7 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 }
 #endif
 
-#if(CUDART_VERSION >= 12040)
-hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
-                                           hipsparseOperation_t        opA,
-                                           const void*                 alpha,
-                                           hipsparseConstSpMatDescr_t  matA,
-                                           hipsparseConstDnVecDescr_t  vecX,
-                                           const void*                 beta,
-                                           const hipsparseDnVecDescr_t vecY,
-                                           hipDataType                 computeType,
-                                           hipsparseSpMVAlg_t          alg,
-                                           void*                       externalBuffer)
-{
-    return hipsparse::hipCUSPARSEStatusToHIPStatus(
-        cusparseSpMV_preprocess((cusparseHandle_t)handle,
-                                hipsparse::hipOperationToCudaOperation(opA),
-                                alpha,
-                                (const cusparseSpMatDescr_t)matA,
-                                (const cusparseDnVecDescr_t)vecX,
-                                beta,
-                                (const cusparseDnVecDescr_t)vecY,
-                                hipsparse::hipDataTypeToCudaDataType(computeType),
-                                hipsparse::hipSpMVAlgToCudaSpMVAlg(alg),
-                                externalBuffer));
-}
-#elif(CUDART_VERSION >= 12000)
+#if(CUDART_VERSION >= 12000)
 hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
                                            hipsparseOperation_t        opA,
                                            const void*                 alpha,

@@ -52,7 +52,7 @@ class TestNameValidator:
         found_keywords = [kw for kw in self.POSITIONAL_KEYWORDS if kw in case_name]
         if found_keywords:
             issues.append(
-                f"Test case name '{case_name}' should not contain keywords: {', '.join(found_keywords)}. These keywords belong in the test suite name."
+                f"Test case name should not contain keywords: {', '.join(found_keywords)}. These belong in the test suite name."
             )
 
         return issues
@@ -77,7 +77,7 @@ class TestNameValidator:
 
         if not match:
             issues.append(
-                f"Suite name '{suite_name}' does not follow the structure: (Test|Integration)[Gpu?]FeatureName[Datatype?]."
+                "Suite name does not follow the structure: (Test|Integration)[Gpu?]FeatureName[Datatype?]"
             )
             return issues
 
@@ -86,7 +86,7 @@ class TestNameValidator:
         for keyword in self.POSITIONAL_KEYWORDS:
             if keyword in feature_name:
                 issues.append(
-                    f"Keyword '{keyword}' is misplaced and should not be in the middle of the feature name '{feature_name}'."
+                    f"Keyword '{keyword}' is misplaced and should not be in the middle of the suite name."
                 )
 
         return issues
@@ -101,7 +101,7 @@ class TestNameValidator:
         parsed_match = self.FULL_NAME_RE.match(test_name)
         if not parsed_match:
             issues.append(
-                f"Test name '{test_name}' does not match expected PascalCase format 'TestSuite.TestCase' or 'Instance/TestSuite.TestCase' without special characters such as \"_;:<>[],\" etc.."
+                "Test name does not match expected PascalCase format 'TestSuite.TestCase' or 'TestSuite/Instance.TestCase' without special characters."
             )
             return issues
 
@@ -109,18 +109,16 @@ class TestNameValidator:
         suite_name = parsed_match.group("suite")
         case_name = parsed_match.group("case")
 
-        reconstructed_testcase_name = f"{prefix + '/' if prefix else ''}{suite_name}.{case_name}"
-
         for keyword in self.FLATTENED_KEYWORDS:
             matches = re.findall(
-                re.escape(keyword), reconstructed_testcase_name, re.IGNORECASE
+                re.escape(keyword), f"{prefix}/{suite_name}.{case_name}", re.IGNORECASE
             )
 
             valid_matches = [m for m in matches if m == keyword or m == keyword.upper()]
             # Check capitalization
             issues.extend(
                 [
-                    f"Keyword '{match}' should be capitalized as '{keyword}' in '{reconstructed_testcase_name}'"
+                    f"Keyword '{match}' should be capitalized as '{keyword}'"
                     for match in valid_matches
                     if match != keyword
                 ]
@@ -129,7 +127,7 @@ class TestNameValidator:
             # Check duplicates
             if len(valid_matches) > 1:
                 issues.append(
-                    f"Keyword '{keyword}' appears more than once in '{reconstructed_testcase_name}'."
+                    f"Keyword '{keyword}' appears more than once."
                 )  # Potentially useful to make test names more concise
 
         issues.extend(self._validate_suite_structure(suite_name))
@@ -407,11 +405,6 @@ class TestTestNameValidator(unittest.TestCase):
             "Temp/TestConvolution.Forward",
             "Group/IntegrationGpuBatchNormFp32.Accuracy",
             "Config/TestMyClass.Method",
-            "Temp/TestShapeStrideOrder.VerifyOrder", 
-            "CheckGpu/TestMyClass.Method",
-            "CheckFp32/TestMyClass.Method",
-            "CheckIntegration/TestMyClass.Method",
-            "CheckBfp16/TestMyClass.Method",
         ]
 
         for name in valid_names:
@@ -426,7 +419,6 @@ class TestTestNameValidator(unittest.TestCase):
         valid_names = [
             "TestMyClass.DISABLED_Something",
             "IntegrationGpuConvolutionFp32.DISABLED_Forward",
-            "Temp/TestShapeStrideOrder.DISABLED_VerifyOrder/14  # GetParam() = TestCase( [1, 1, 1, 1] )", 
         ]
 
         for name in valid_names:
@@ -455,10 +447,10 @@ class TestTestNameValidator(unittest.TestCase):
     def test_keywords_in_test_case(self) -> None:
         """Test that positional keywords are not allowed in test case names"""
         invalid_names = [
-            "TestMyClass.CheckGpuFunction",  # Gpu in test case
-            "TestMyClass.VerifyFp32Precision",  # Fp32 in test case
-            "TestMyClass.RunIntegrationCheck",  # Integration in test case
-            "TestMyClass.UsingBfp16Type",  # Bfp16 in test case
+            "TestMyClass.TestGpuFunction",  # Gpu in test case
+            "TestMyClass.TestFp32Precision",  # Fp32 in test case
+            "TestMyClass.IntegrationTest",  # Integration in test case
+            "TestMyClass.TestBfp16Type",  # Bfp16 in test case
         ]
 
         for name in invalid_names:
@@ -520,20 +512,14 @@ class TestTestNameValidator(unittest.TestCase):
         """Test duplicate keywords"""
         invalid_names = [
             "TestTestConvolution.Forward",  # Duplicate Test
-            "TestConvolution.TestForward",  # Duplicate Test
-            "TestShapeUtils/TestShapeUtilsExtractStrideOrder.VerifyStrideOrder",  # Duplicate Test
             "TestGpuConvolutionGpu.Forward",  # Duplicate Gpu
-            "TestGpuConvolution.GpuForward",  # Duplicate Gpu
-            "GpuUtils/TestGpuConvolution.Forward",  # Duplicate Gpu
-            "GpuUtils/TestConvolution.GpuForward",  # Duplicate Gpu
         ]
 
         for name in invalid_names:
             with self.subTest(name=name):
                 issues = self.validator.validate_test_name(name)
                 self.assertTrue(
-                    any("appears more than once in" in issue for issue in issues),
-                    f"Expected issues for duplicate keywords in {name}"
+                    len(issues) > 0, f"Expected issues for duplicate keywords in {name}"
                 )
 
     def test_complex_valid_names(self) -> None:
@@ -545,7 +531,6 @@ class TestTestNameValidator(unittest.TestCase):
             "IntegrationGraphFusion.MultipleOps",
             "TestConvolutionHeuristicsFp32.Performance",
             "TestConvolutionHeuristics.Accuracy",
-            "Temp/TestShapeStrideOrder.VerifyOrder/14  # GetParam() = TestCase( [1, 1, 1, 1] )",
         ]
 
         for name in valid_names:

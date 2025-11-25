@@ -44,11 +44,9 @@ namespace rocrand_impl::host
 
 typedef ::rocrand_device::xorwow_engine xorwow_device_engine;
 
-struct init_xorwow_engines
-{
-    template<host::target_arch>
+template<host::target_arch>
 __host__ __device__
-    static inline void generate(dim3 block_idx,
+inline void init_xorwow_engines(dim3 block_idx,
                                 dim3 thread_idx,
                                 dim3 /*grid_dim*/,
                                 dim3                  block_dim,
@@ -57,58 +55,82 @@ __host__ __device__
                                 const unsigned int    engines_size,
                                 unsigned long long    seed,
                                 unsigned long long    offset)
-    {
-        const unsigned int engine_id = block_idx.x * block_dim.x + thread_idx.x;
-        if(engine_id < engines_size)
-        {
-            engines[engine_id]
-                = xorwow_device_engine(seed,
-                                       engine_id,
-                                       offset + (engine_id < start_engine_id ? 1 : 0));
-        }
-    }
-};
-
-template<class ConfigProvider, bool IsDynamic, class T, class Distribution, bool PossibleMissAlign>
-struct generate_xorwow
 {
-    template<host::target_arch Arch = host::target_arch::unknown>
-__host__ __device__ __forceinline__
-    static void generate(dim3 block_idx,
-                         dim3 thread_idx,
-                         dim3 grid_dim,
-                         dim3 /*block_dim*/,
-                         xorwow_device_engine*               engines,
-                         const unsigned int                  start_engine_id,
-                         T*                                  data,
-                         const size_t                        n,
-                         Distribution                        distribution,
-                         [[maybe_unused]] const unsigned int head_size,
-                         [[maybe_unused]] const unsigned int tail_size,
-                         [[maybe_unused]] const size_t       misalignment)
+    const unsigned int engine_id = block_idx.x * block_dim.x + thread_idx.x;
+    if(engine_id < engines_size)
     {
-        static_assert(is_single_tile_config<ConfigProvider, T, Arch>(IsDynamic),
-                      "This kernel should only be used with single tile configs");
-        constexpr unsigned int BlockSize    = get_block_size<ConfigProvider, T, Arch>(IsDynamic);
-        constexpr unsigned int input_width  = Distribution::input_width;
-        constexpr unsigned int output_width = Distribution::output_width;
+        engines[engine_id]
+            = xorwow_device_engine(seed, engine_id, offset + (engine_id < start_engine_id ? 1 : 0));
+    }
+}
 
-        using vec_type = aligned_vec_type<T, output_width>;
+template<class ConfigProvider,
+         bool IsDynamic,
+         class T,
+         class Distribution,
+         host::target_arch Arch = host::target_arch::unknown>
+__host__ __device__ __forceinline__
+void generate_xorwow(dim3 block_idx,
+                     dim3 thread_idx,
+                     dim3 grid_dim,
+                     dim3 /*block_dim*/,
+                     xorwow_device_engine* engines,
+                     const unsigned int    start_engine_id,
+                     T*                    data,
+                     const size_t          n,
+                     Distribution          distribution)
+{
+    static_assert(is_single_tile_config<ConfigProvider, T, Arch>(IsDynamic),
+                  "This kernel should only be used with single tile configs");
+    constexpr unsigned int BlockSize    = get_block_size<ConfigProvider, T, Arch>(IsDynamic);
+    constexpr unsigned int input_width  = Distribution::input_width;
+    constexpr unsigned int output_width = Distribution::output_width;
 
-        const unsigned int thread_id = block_idx.x * BlockSize + thread_idx.x;
-        const size_t       vec_n     = (n - (PossibleMissAlign ? head_size : 0)) / output_width;
+    using vec_type = aligned_vec_type<T, output_width>;
 
-        vec_type* vec_data
-            = reinterpret_cast<vec_type*>(data + (PossibleMissAlign ? misalignment : 0));
-        const unsigned int   num_engines = grid_dim.x * BlockSize;
-        const unsigned int   engine_id   = (thread_id + start_engine_id) % num_engines;
-        xorwow_device_engine engine      = engines[engine_id];
+    const unsigned int thread_id    = block_idx.x * BlockSize + thread_idx.x;
+    const uintptr_t uintptr   = reinterpret_cast<uintptr_t>(data);
+    const size_t misalignment = (output_width - uintptr / sizeof(T) % output_width) % output_width;
+    const unsigned int head_size    = cpp_utils::min(n, misalignment);
+    const unsigned int tail_size = (n - head_size) % output_width;
+    const size_t       vec_n     = (n - head_size) / output_width;
 
-        unsigned int input[input_width];
-        T            output[output_width];
+    vec_type*            vec_data    = reinterpret_cast<vec_type*>(data + misalignment);
+    const unsigned int   num_engines = grid_dim.x * BlockSize;
+    const unsigned int   engine_id   = (thread_id + start_engine_id) % num_engines;
+    xorwow_device_engine engine      = engines[engine_id];
 
-        size_t index = thread_id;
-        while(index < vec_n)
+    unsigned int input[input_width];
+    T            output[output_width];
+
+    size_t index = thread_id;
+    while(index < vec_n)
+    {
+        for(unsigned int i = 0; i < input_width; i++)
+        {
+            input[i] = engine();
+        }
+        distribution(input, output);
+
+#if defined(__gfx90a__)
+        // Workaround: The compiler hoists s_waitcnt vmcnt(..) out of the loops.
+        // For some reason this optimization decreases performance of uniform distributions
+        // on MI200. MI100 and MI300 are not affected.
+        // Here we add s_waitcnt vmcnt(0)
+        __builtin_amdgcn_s_waitcnt(/*vmcnt*/ 0 | (/*exp_cnt*/ 0x7 << 4) | (/*lgkmcnt*/ 0xf << 8));
+#endif
+        vec_data[index] = *reinterpret_cast<vec_type*>(output);
+        // Next position
+        index += num_engines;
+    }
+
+    // Check if we need to save head and tail.
+    // Those numbers should be generated by the thread that would
+    // save next vec_type.
+    if(output_width > 1 && index == vec_n)
+    {
+        // If data is not aligned by sizeof(vec_type)
+        if(head_size > 0)
         {
             for(unsigned int i = 0; i < input_width; i++)
             {
@@ -116,64 +138,36 @@ __host__ __device__ __forceinline__
             }
             distribution(input, output);
 
-#if defined(__gfx90a__)
-            // Workaround: The compiler hoists s_waitcnt vmcnt(..) out of the loops.
-            // For some reason this optimization decreases performance of uniform distributions
-            // on MI200. MI100 and MI300 are not affected.
-            // Here we add s_waitcnt vmcnt(0)
-            __builtin_amdgcn_s_waitcnt(/*vmcnt*/ 0 | (/*exp_cnt*/ 0x7 << 4)
-                                       | (/*lgkmcnt*/ 0xf << 8));
-#endif
-            vec_data[index] = *reinterpret_cast<vec_type*>(output);
-            // Next position
-            index += num_engines;
+            for(unsigned int o = 0; o < output_width; o++)
+            {
+                if(o < head_size)
+                {
+                    data[o] = output[o];
+                }
+            }
         }
 
-        // Check if we need to save head and tail.
-        // Those numbers should be generated by the thread that would
-        // save next vec_type.
-        if constexpr(PossibleMissAlign && output_width > 1)
+        if(tail_size > 0)
         {
-            // If data is not aligned by sizeof(vec_type)
-            if(head_size > 0 && index == vec_n)
+            for(unsigned int i = 0; i < input_width; i++)
             {
-                for(unsigned int i = 0; i < input_width; i++)
-                {
-                    input[i] = engine();
-                }
-                distribution(input, output);
-
-                for(unsigned int o = 0; o < output_width; o++)
-                {
-                    if(o < head_size)
-                    {
-                        data[o] = output[o];
-                    }
-                }
+                input[i] = engine();
             }
+            distribution(input, output);
 
-            if(tail_size > 0 && index == vec_n)
+            for(unsigned int o = 0; o < output_width; o++)
             {
-                for(unsigned int i = 0; i < input_width; i++)
+                if(o < tail_size)
                 {
-                    input[i] = engine();
-                }
-                distribution(input, output);
-
-                for(unsigned int o = 0; o < output_width; o++)
-                {
-                    if(o < tail_size)
-                    {
-                        data[n - tail_size + o] = output[o];
-                    }
+                    data[n - tail_size + o] = output[o];
                 }
             }
         }
-
-        // Save engine with its state
-        engines[engine_id] = engine;
     }
-};
+
+    // Save engine with its state
+    engines[engine_id] = engine;
+}
 
 template<class System, class ConfigProvider>
 class xorwow_generator_template : public generator_impl_base
@@ -295,7 +289,7 @@ public:
 
     rocrand_status init()
     {
-        if(m_engines_initialized)
+        if (m_engines_initialized)
         {
             return ROCRAND_STATUS_SUCCESS;
         }
@@ -329,8 +323,11 @@ public:
         constexpr unsigned int init_threads = ROCRAND_DEFAULT_MAX_BLOCK_SIZE;
         const unsigned int     init_blocks  = (m_engines_size + init_threads - 1) / init_threads;
 
-        status = system_type::template launch<init_xorwow_engines,
-                                              static_block_size_config_provider<init_threads>>(
+        auto init_xorwow_engines_kernel
+            = [&](auto arch, auto... args) { init_xorwow_engines<arch>(args...); };
+
+        status = system_type::template launch<static_block_size_config_provider<init_threads>>(
+            init_xorwow_engines_kernel,
             target_arch,
             dim3(init_blocks),
             dim3(init_threads),
@@ -356,11 +353,12 @@ public:
         return ROCRAND_STATUS_SUCCESS;
     }
 
-    template<class T, class Distribution = uniform_distribution<T>>
-    rocrand_status generate(T* data, size_t data_size, Distribution distribution = Distribution())
+    template<class T, class Distribution = uniform_distribution<T> >
+    rocrand_status generate(T * data, size_t data_size,
+                            Distribution distribution = Distribution())
     {
         rocrand_status status = init();
-        if(status != ROCRAND_STATUS_SUCCESS)
+        if (status != ROCRAND_STATUS_SUCCESS)
         {
             return status;
         }
@@ -384,48 +382,27 @@ public:
             return ROCRAND_STATUS_INTERNAL_ERROR;
         }
 
-        const uintptr_t uintptr = reinterpret_cast<uintptr_t>(data);
-        const size_t    misalignment
-            = (Distribution::output_width - uintptr / sizeof(T) % Distribution::output_width)
-              % Distribution::output_width;
-        const unsigned int head_size = cpp_utils::min(data_size, misalignment);
-        const unsigned int tail_size = (data_size - head_size) % Distribution::output_width;
-
-        const bool possible_miss_align = head_size > 0 || tail_size > 0;
-
-        const auto use_missaligned_variant
-            = cpp_utils::constexpr_value_variant<bool, false, true>::create(possible_miss_align);
-
-        status = std::visit(
-            [&](auto possibly_miss_aligned)
+        status = dynamic_dispatch(
+            m_order,
+            [&, this](auto is_dynamic)
             {
-                return dynamic_dispatch(
-                    m_order,
-                    [&, this](auto is_dynamic)
-                    {
-                        return system_type::template launch<generate_xorwow<ConfigProvider,
-                                                                            is_dynamic,
-                                                                            T,
-                                                                            Distribution,
-                                                                            possibly_miss_aligned>,
-                                                            ConfigProvider,
-                                                            T,
-                                                            is_dynamic>(target_arch,
-                                                                        dim3(config.blocks),
-                                                                        dim3(config.threads),
-                                                                        0,
-                                                                        m_stream,
-                                                                        m_engines,
-                                                                        m_start_engine_id,
-                                                                        data,
-                                                                        data_size,
-                                                                        distribution,
-                                                                        head_size,
-                                                                        tail_size,
-                                                                        misalignment);
-                    });
-            },
-            use_missaligned_variant);
+                auto generate_xorwow_kernel = [&] __host__ __device__(auto arch, auto... args)
+                {
+                    generate_xorwow<ConfigProvider, is_dynamic, T, Distribution, arch>(args...);
+                };
+                return system_type::template launch<ConfigProvider, T, is_dynamic>(
+                    generate_xorwow_kernel,
+                    target_arch,
+                    dim3(config.blocks),
+                    dim3(config.threads),
+                    0,
+                    m_stream,
+                    m_engines,
+                    m_start_engine_id,
+                    data,
+                    data_size,
+                    distribution);
+            });
 
         // Check kernel status
         if(status != ROCRAND_STATUS_SUCCESS)
@@ -434,8 +411,9 @@ public:
         }
 
         // Generating data_size values will use this many distributions
-        const auto touched_engines
-            = (data_size + Distribution::output_width - 1) / Distribution::output_width;
+        const auto touched_engines =
+            (data_size + Distribution::output_width - 1) /
+            Distribution::output_width;
 
         m_start_engine_id = (m_start_engine_id + touched_engines) % m_engines_size;
 
@@ -461,27 +439,27 @@ public:
     }
 
     template<class T>
-    rocrand_status generate_uniform(T* data, size_t data_size)
+    rocrand_status generate_uniform(T * data, size_t data_size)
     {
         uniform_distribution<T> distribution;
         return generate(data, data_size, distribution);
     }
 
     template<class T>
-    rocrand_status generate_normal(T* data, size_t data_size, T mean, T stddev)
+    rocrand_status generate_normal(T * data, size_t data_size, T mean, T stddev)
     {
         normal_distribution<T> distribution(mean, stddev);
         return generate(data, data_size, distribution);
     }
 
     template<class T>
-    rocrand_status generate_log_normal(T* data, size_t data_size, T mean, T stddev)
+    rocrand_status generate_log_normal(T * data, size_t data_size, T mean, T stddev)
     {
         log_normal_distribution<T> distribution(mean, stddev);
         return generate(data, data_size, distribution);
     }
 
-    rocrand_status generate_poisson(unsigned int* data, size_t data_size, double lambda)
+    rocrand_status generate_poisson(unsigned int * data, size_t data_size, double lambda)
     {
         auto result = m_poisson.get_distribution(lambda);
         if(auto* dis = std::get_if<poisson_distribution_t>(&result))

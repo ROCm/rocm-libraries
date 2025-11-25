@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T, typename U>
 void sygvd_hegvd_checkBadArgs(const rocblas_handle handle,
@@ -503,7 +502,7 @@ void sygvd_hegvd_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
+    double start;
 
     if(profile > 0)
     {
@@ -520,12 +519,12 @@ void sygvd_hegvd_getPerfData(const rocblas_handle handle,
         sygvd_hegvd_initData<false, true, T>(handle, itype, evect, n, dA, lda, stA, dB, ldb, stB,
                                              bc, hA, hB, A, B, false, singular);
 
-        timer.start(stream);
+        start = get_time_us_sync(stream);
         rocsolver_sygvd_hegvd(STRIDED, handle, itype, evect, uplo, n, dA.data(), lda, stA,
                               dB.data(), ldb, stB, dD.data(), stD, dE.data(), stE, dInfo.data(), bc);
-        timer.end(stream);
+        *gpu_time_used += get_time_us_sync(stream) - start;
     }
-    *gpu_time_used = timer.get_combined();
+    *gpu_time_used /= hot_calls;
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
@@ -681,7 +680,7 @@ void testing_sygvd_hegvd(Arguments& argus)
                                              hDRes, hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             sygvd_hegvd_getPerfData<STRIDED, T>(
                 handle, itype, evect, uplo, n, dA, lda, stA, dB, ldb, stB, dD, stD, dE, stE, dInfo,
                 bc, hA, hB, hD, hInfo, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
@@ -722,7 +721,7 @@ void testing_sygvd_hegvd(Arguments& argus)
                                              hDRes, hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             sygvd_hegvd_getPerfData<STRIDED, T>(
                 handle, itype, evect, uplo, n, dA, lda, stA, dB, ldb, stB, dD, stD, dE, stE, dInfo,
                 bc, hA, hB, hD, hInfo, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,

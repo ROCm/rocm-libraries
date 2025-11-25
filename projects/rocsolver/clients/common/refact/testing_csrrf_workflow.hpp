@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 /*
  * ===========================================================================
@@ -440,7 +439,7 @@ void testing_csrrf_workflow(Arguments& argus)
                                    analysis_mode);
 
     // collect performance data
-    if(argus.timing && hot_calls > 0)
+    if(argus.timing)
         csrrf_workflow_getPerfData<T>(handle, n, nrhs, nnzM, dptrM, dindM, dvalM, nnzT, dptrT,
                                       dindT, dvalT, dpivP, dpivQ, dB, ldb, rfinfo, hptrM, hindM,
                                       hvalM, hptrT, hindT, hvalT, hpivP, hpivQ, hB, &gpu_time_used,

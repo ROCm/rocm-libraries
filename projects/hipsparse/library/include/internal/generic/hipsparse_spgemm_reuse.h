@@ -350,6 +350,9 @@ hipsparseStatus_t hipsparseSpGEMMreuse_copy(hipsparseHandle_t      handle,
 *  \retval HIPSPARSE_STATUS_NOT_SUPPORTED
 *          \p opA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
 *          \p opB != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE.
+*
+*  \par Example
+*  \snippet example_hipsparse_spgemm_reuse.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

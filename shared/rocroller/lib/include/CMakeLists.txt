@@ -75,7 +75,6 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Arithmetic/ArithmeticShiftR.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Arithmetic/BitFieldExtract.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Arithmetic/BitFieldExtract_detail.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Arithmetic/BitwiseAnd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Arithmetic/BitwiseNegate.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Arithmetic/BitwiseOr.hpp"

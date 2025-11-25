@@ -39,7 +39,6 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/HIPTimer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelArguments.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelOptions.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/LDSBankModel.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LDSAllocator.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Logging.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Random.cpp"

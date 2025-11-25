@@ -92,6 +92,9 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p A, \p nnzPerRow, \p csrVal,
 *          \p csrRowPtr or \p csrColInd is nullptr, \p m or \p n is negative, or \p ld is invalid.
+*
+*  \par Example
+*  \snippet example_hipsparse_dense2csr.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

@@ -616,16 +616,10 @@ def test_gemm_options(tmp_path):
     """GEMM options."""
 
     example = tmp_path / "example.yaml"
-    example_problem = tmp_path / "example_problem.yaml"
 
     def run_and_load_example_yaml(cmd):
         subprocess.run(cmd, check=True)
         yaml_contents = example.read_text()
-        return yaml.load(yaml_contents, Loader=yaml.Loader)
-
-    def run_and_load_example_problem_yaml(cmd):
-        subprocess.run(cmd, check=True)
-        yaml_contents = example_problem.read_text()
         return yaml.load(yaml_contents, Loader=yaml.Loader)
 
     # fails
@@ -726,76 +720,6 @@ def test_gemm_options(tmp_path):
     assert post["swizzleTileSize"]["k"] == 7
     assert post["swizzleTileSize"]["n"] == 11
     assert post["swizzleTileSize"]["l"] == 13
-
-    # setting data initialization modes
-    post = run_and_load_example_problem_yaml(
-        [
-            gemm,
-            "exampleProblem",
-            example_problem,
-            "--arch=gfx950",
-            "--initMode_A=Bounded",
-            "--initMode_B=BoundedAlternatingSign",
-            "--initMode_C=Unbounded",
-        ]
-    )
-    assert post["initMode_A"] == "DataInitMode(Bounded)"
-    assert post["initMode_B"] == "DataInitMode(BoundedAlternatingSign)"
-    assert post["initMode_C"] == "DataInitMode(Unbounded)"
-
-    post = run_and_load_example_problem_yaml(
-        [
-            gemm,
-            "exampleProblem",
-            example_problem,
-            "--arch=gfx950",
-            "--initMode_A=Identity",
-            "--initMode_B=Ones",
-            "--initMode_C=Zeros",
-        ]
-    )
-    assert post["initMode_A"] == "DataInitMode(Identity)"
-    assert post["initMode_B"] == "DataInitMode(Ones)"
-    assert post["initMode_C"] == "DataInitMode(Zeros)"
-
-    mean_B = 0.0
-    std_dev_B = 1.0
-    mean_C = 2.0
-    std_dev_C = 3.0
-    post = run_and_load_example_problem_yaml(
-        [
-            gemm,
-            "exampleProblem",
-            example_problem,
-            "--arch=gfx950",
-            "--initMode_A=TrigonometricFromFloat",
-            f"--initMode_B=NormalFromFloat({mean_B}, {std_dev_B})",
-            f"--initMode_C=NormalFromFloat({mean_C}, {std_dev_C})",
-        ]
-    )
-    assert post["initMode_A"] == "DataInitMode(TrigonometricFromFloat)"
-
-    initMode_B = post["initMode_B"]
-    assert initMode_B.startswith("DataInitMode(NormalFromFloat(")
-    mean, std_dev = initMode_B.split("(")[-1][:-2].split(", ")
-    assert float(mean) == mean_B
-    assert float(std_dev) == std_dev_B
-
-    initMode_C = post["initMode_C"]
-    assert initMode_C.startswith("DataInitMode(NormalFromFloat(")
-    mean, std_dev = initMode_C.split("(")[-1][:-2].split(", ")
-    assert float(mean) == mean_C
-    assert float(std_dev) == std_dev_C
-
-
-def test_gemm_generate_from_example(tmp_path):
-    """GEMM 'generate' from the output of 'example'."""
-
-    example = tmp_path / "example.yaml"
-    subprocess.run([gemm, "example", example], check=True)
-
-    # We should be able to generate a kernel from the config file
-    subprocess.run([gemm, "generate", "--config", example], check=True)
 
 
 def test_gemm_config(tmp_path):

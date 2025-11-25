@@ -114,6 +114,9 @@ hipsparseStatus_t hipsparseXcoosort_bufferSizeExt(hipsparseHandle_t handle,
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows,
 *              \p cooCols or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*
+*  \par Example
+*  \snippet example_hipsparse_coosort_by_row.cpp doc example
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseXcoosortByRow(hipsparseHandle_t handle,
@@ -171,6 +174,9 @@ hipsparseStatus_t hipsparseXcoosortByRow(hipsparseHandle_t handle,
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p cooRows,
 *              \p cooCols or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*
+*  \par Example
+*  \snippet example_hipsparse_coosort_by_column.cpp doc example
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseXcoosortByColumn(hipsparseHandle_t handle,

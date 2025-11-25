@@ -3,24 +3,6 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
-## rocBLAS 5.2.0 for ROCm 7.2
-
-### Added
-* Level 3 `syrk_ex` function for both C and FORTRAN but without API support for the ILP64 format.
-
-### Optimized
-* Level 2 `tpmv` and `sbmv` functions.
-
-### Resolved issues
-* Corrected client memory use counts for the `ROCBLAS_CLIENT_RAM_GB_LIMIT` environment variable.
-* Fix to avoid false Clang static analysis warnings.
-
-## rocBLAS 5.1.1 for ROCm 7.1.1
-
-### Changed
-
-* By default, rocBLAS will not use stream order allocation for its internal workspace. To enable this behavior, set the `ROCBLAS_STREAM_ORDER_ALLOC` environment variable.
-
 ## rocBLAS 5.1.0 for ROCm 7.1
 
 ### Added

@@ -117,6 +117,9 @@ hipsparseStatus_t hipsparseXcscsort_bufferSizeExt(hipsparseHandle_t handle,
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*
+*  \par Example
+*  \snippet example_hipsparse_cscsort.cpp doc example
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseXcscsort(hipsparseHandle_t         handle,

@@ -47,66 +47,6 @@ namespace TensileLite
  */
         namespace Contraction
         {
-            struct LaunchLimits : public Predicate_CRTP<LaunchLimits, Task>
-            {
-                enum
-                {
-                    HasIndex = false,
-                    HasValue = false
-                };
-
-                LaunchLimits() = default;
-
-                static std::string Type()
-                {
-                    return "LaunchLimits";
-                }
-
-                virtual bool operator()(Task const& task) const override
-                {
-                    if (task.solution.sizeMapping.streamK == 0)
-                    {
-                        // For non-stream-k kernels, check if the launch grid would overflow the maximum number of work items
-                        dim3 workGroupSize;
-                        dim3 numWorkGroups;
-                        task.solution.calculateGrid(workGroupSize, numWorkGroups, task.problem);
-                        uint64_t workItems = static_cast<uint64_t>(workGroupSize.x)
-                                           * static_cast<uint64_t>(workGroupSize.y)
-                                           * static_cast<uint64_t>(workGroupSize.z)
-                                           * static_cast<uint64_t>(numWorkGroups.x)
-                                           * static_cast<uint64_t>(numWorkGroups.y)
-                                           * static_cast<uint64_t>(numWorkGroups.z);
-                        return workItems <= std::numeric_limits<uint32_t>::max();
-                    }
-
-                    return true;
-                }
-
-                virtual bool debugEval(Task const& task, std::ostream& stream) const override
-                {
-                    if (task.solution.sizeMapping.streamK == 0)
-                    {
-                        // For non-stream-k kernels, check if the launch grid would overflow the maximum number of work items
-                        dim3 workGroupSize;
-                        dim3 numWorkGroups;
-                        task.solution.calculateGrid(workGroupSize, numWorkGroups, task.problem);
-                        uint64_t workItems = static_cast<uint64_t>(workGroupSize.x)
-                                           * static_cast<uint64_t>(workGroupSize.y)
-                                           * static_cast<uint64_t>(workGroupSize.z)
-                                           * static_cast<uint64_t>(numWorkGroups.x)
-                                           * static_cast<uint64_t>(numWorkGroups.y)
-                                           * static_cast<uint64_t>(numWorkGroups.z);
-                        bool rv = (workItems <= std::numeric_limits<uint32_t>::max());
-                        stream << "LaunchLimits " << rv << " (workItems = " << workItems << ")";
-                        return rv;
-                    }
-
-                    stream << "Launch limits for stream-k kernels handled by grid predictor";
-
-                    return true;
-                }
-            };
-
             struct WorkspaceCheck : public Predicate_CRTP<WorkspaceCheck, Task>
             {
                 enum

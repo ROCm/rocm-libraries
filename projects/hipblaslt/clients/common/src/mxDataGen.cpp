@@ -306,9 +306,7 @@ std::vector<float> generateMXInput(hipDataType            dataType,
     opt.max          = initMethod == "uniform_01" ? 1. : (initMethod == "hpl" ?  .5 : max_val);
     opt.blockScaling = scaleBlockRowSize * scaleBlockColSize;
     // TODO initMethod == "hpl" should also be Bounded, but fails some tests
-    opt.initMode = (initMethod == "Bounded" || initMethod == "uniform_01")
-                       ? DataInitMode(Bounded{})
-                       : DataInitMode(TrigonometricFromFloat{});
+    opt.pattern      = (initMethod == "Bounded" || initMethod == "uniform_01") ? Bounded : Trigonometric;
 
     const uint32_t seed = 1713573849;
 

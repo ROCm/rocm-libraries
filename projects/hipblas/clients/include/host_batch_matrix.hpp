@@ -67,7 +67,6 @@ public:
         if(false == this->try_initialize_memory())
         {
             this->free_memory();
-            throw std::bad_alloc{};
         }
     }
 
@@ -223,7 +222,7 @@ private:
 
     bool try_initialize_memory()
     {
-        bool success = (nullptr != (m_data = (T**)host_calloc(m_batch_count, sizeof(T*))));
+        bool success = (nullptr != (m_data = (T**)host_calloc_throw(m_batch_count, sizeof(T*))));
         if(success)
         {
             for(int64_t batch_index = 0; batch_index < m_batch_count; ++batch_index)
@@ -232,7 +231,7 @@ private:
                 {
                     success = (nullptr
                                != (m_data[batch_index]
-                                   = (T*)host_calloc(m_nmemb * m_batch_count, sizeof(T))));
+                                   = (T*)host_calloc_throw(m_nmemb * m_batch_count, sizeof(T))));
                     if(false == success)
                     {
                         break;

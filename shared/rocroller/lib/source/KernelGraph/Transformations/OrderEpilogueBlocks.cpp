@@ -63,170 +63,6 @@ namespace rocRoller
             using GD = rocRoller::Graph::Direction;
             using namespace ControlGraph;
 
-            /**
-           * @brief Delete Body edges from a parent node to all its children
-          *
-          * 
-          *
-          * @param graph The kernel graph
-          * @param parent The parent node
-          * @param children The children nodes
-          */
-            void deleteBodyEdges(KernelGraph& graph, int parent, std::vector<int> const& children)
-            {
-                for(auto const& child : children)
-                {
-                    graph.control.deleteElement<Body>(std::vector<int>{parent},
-                                                      std::vector<int>{child});
-                    Log::debug("  Deleted Body edge from {} to {}", parent, child);
-                }
-            }
-
-            /**
-            * @brief Create a chain of Scopes connected by Sequence edges
-          *
-          * 
-          * Creates: parent -> Body -> Scope -> Sequence -> Scope -> Sequence -> ... -> Scope
-          *                             |                   |                          |
-          *                           Body                Body                        Body
-          *                             |                   |                          |
-          *                          children[0]         children[1]               children[n]
-          * 
-          * @param graph The kernel graph
-          * @param parent The parent node to attach the first Scope to
-          * @param children The children nodes to place under each Scope
-          */
-            void createScopeChain(KernelGraph& graph, int parent, std::vector<int> const& children)
-            {
-                if(children.empty())
-                    return;
-
-                auto firstScope = graph.control.addElement(Scope());
-                graph.control.addElement(Body(), {parent}, {firstScope});
-                auto prevScope = firstScope;
-
-                Log::debug(
-                    "  Creating scope chain: parent {} -> {} scopes", parent, children.size());
-
-                for(auto i = children.begin(); i != children.end(); i++)
-                {
-                    graph.control.addElement(Body(), {prevScope}, {*i});
-
-                    if(std::next(i) != children.end())
-                    {
-                        auto nextScope = graph.control.addElement(Scope());
-                        graph.control.addElement(Sequence(), {prevScope}, {nextScope});
-                        prevScope = nextScope;
-                    }
-                }
-            }
-
-            /**
-             * @brief Check if a ForLoopOp is or is contained within a RECEIVE loop
-             */
-            bool isWithinReceiveLoop(KernelGraph const& graph, int forLoopTag)
-            {
-                auto containingForLoops = graph.control.nodesContaining(forLoopTag)
-                                              .filter(graph.control.isElemType<ForLoopOp>());
-
-                for(auto containingLoop : containingForLoops)
-                {
-                    if(getForLoopName(const_cast<KernelGraph&>(graph), containingLoop)
-                       == rocRoller::RECEIVE)
-                    {
-                        return true;
-                    }
-                }
-                return false;
-            }
-
-            /**
-             * @brief Order fixup chains within unrolled RECEIVE loops
-             * 
-             * This transformation finds fixup chains across different unrolled iterations
-             * and orders them sequentially using Scopes and Sequence edges, similar to
-             * how orderEpilogueBlocks orders epilogue blocks. This change reduces the register pressure
-             * by avoiding overlapping the fixup chains.
-             * 
-             * Before:
-             *   ForLoop (within RECEIVE)
-             *   |           |           |
-             *   Body       Body       Body
-             *   |           |           |
-             *   Fixup1     Fixup2     Fixup3
-             * 
-             * After:
-             *   ForLoop (within RECEIVE)
-             *   |
-             *   Body
-             *   |
-             *   Scope --Sequence--> Scope --Sequence--> Scope
-             *   |                   |                   |
-             *   Body               Body               Body
-             *   |                   |                   |
-             *   Fixup1            Fixup2            Fixup3
-             */
-            void orderFixupChains(KernelGraph& graph, int tag)
-            {
-                Log::debug("OrderEpilogueBlocks::orderFixupChains({})", tag);
-
-                // Only order fixup chains for loops within RECEIVE
-                if(getForLoopName(graph, tag) != rocRoller::YLOOP
-                   || !isWithinReceiveLoop(graph, tag))
-                {
-                    return;
-                }
-
-                // Get all Body children of this ForLoop (these are the unrolled iterations)
-                auto forChildren = graph.control.getOutputNodeIndices<Body>(tag).to<std::vector>();
-
-                if(forChildren.size() <= 1)
-                {
-                    Log::debug("  Only {} body children, no need to order", forChildren.size());
-                    return;
-                }
-
-                // Sort children by their execution order in the control graph
-                std::sort(forChildren.begin(), forChildren.end(), [&](int a, int b) {
-                    auto order = graph.control.compareNodes(UpdateCache, a, b);
-                    return order == NodeOrdering::LeftFirst;
-                });
-
-                for(auto child : forChildren)
-                {
-                    Log::debug("  Sorted child: {}", child);
-                }
-
-                // Delete the sequence edges between consecutive SetCoordinate operations
-                for(size_t i = 0; i + 1 < forChildren.size(); i++)
-                {
-                    auto currentNode = forChildren[i];
-                    auto nextNode    = forChildren[i + 1];
-
-                    // Verify nodes are SetCoordinate operations
-                    auto currentSetCoordinate = graph.control.get<SetCoordinate>(currentNode);
-                    auto nextSetCoordinate    = graph.control.get<SetCoordinate>(nextNode);
-                    AssertFatal(currentSetCoordinate && nextSetCoordinate,
-                                "SetCoordinate operation not found");
-
-                    // Verify there is a sequence edge between nodes before deletion
-                    auto neighbors = graph.control.getOutputNodeIndices<Sequence>(currentNode)
-                                         .to<std::vector>();
-                    if(std::find(neighbors.begin(), neighbors.end(), nextNode) == neighbors.end())
-                        AssertFatal(false, "Sequence edge not found");
-
-                    graph.control.deleteElement<Sequence>(std::vector<int>{currentNode},
-                                                          std::vector<int>{nextNode});
-                    Log::debug("  Deleted Sequence edge from {} to {}", currentNode, nextNode);
-                }
-
-                // Delete the original Body edges from the ForLoop to the bodies
-                deleteBodyEdges(graph, tag, forChildren);
-
-                // Create a chain of Scopes connected by Sequence edges
-                createScopeChain(graph, tag, forChildren);
-            }
-
             void orderEpilogueBlocks(KernelGraph& graph, int tag, UnrollColouring const& colouring)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::OrderEpilogueBlocks({})", tag);
@@ -268,11 +104,29 @@ namespace rocRoller
                 }
 
                 //Delete the original Epilogue Body Edges from the loop.
-                deleteBodyEdges(graph, tag, forChildren);
+                for(auto const& child : forChildren)
+                {
+                    graph.control.deleteElement<Body>(std::vector<int>{tag},
+                                                      std::vector<int>{child});
+                }
 
                 //Connect Epilogue Blocks via Scopes and Sequences to
                 //order the Epilogues
-                createScopeChain(graph, tag, forChildren);
+                auto firstScope = graph.control.addElement(Scope());
+                graph.control.addElement(Body(), {tag}, {firstScope});
+                auto prevScope = firstScope;
+
+                for(auto i = forChildren.begin(); i != forChildren.end(); i++)
+                {
+                    graph.control.addElement(Body(), {prevScope}, {*i});
+
+                    if(std::next(i) != forChildren.end())
+                    {
+                        auto nextScope = graph.control.addElement(Scope());
+                        graph.control.addElement(Sequence(), {prevScope}, {nextScope});
+                        prevScope = nextScope;
+                    }
+                }
             }
         }
 
@@ -303,7 +157,6 @@ namespace rocRoller
             for(const auto node : graph.control.getNodes<ControlGraph::ForLoopOp>())
             {
                 OrderEpilogueBlocksNS::orderEpilogueBlocks(graph, node, colouring);
-                OrderEpilogueBlocksNS::orderFixupChains(graph, node);
             }
 
             return graph;

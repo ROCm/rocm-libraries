@@ -28,6 +28,12 @@ For Ubuntu and Debian:
 
    sudo apt-get install hiprand
 
+For CentOS-based systems:
+
+.. code-block:: shell
+
+   sudo yum install hiprand
+
 For SLES:
 
 .. code-block:: shell

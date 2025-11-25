@@ -35,7 +35,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T, typename S, typename U>
 void syevd_heevd_checkBadArgs(const rocblas_handle handle,
@@ -703,7 +702,7 @@ void syevd_heevd_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
+    double start;
 
     if(profile > 0)
     {
@@ -719,12 +718,12 @@ void syevd_heevd_getPerfData(const rocblas_handle handle,
     {
         syevd_heevd_initData<false, true, T>(handle, evect, n, dA, lda, bc, hA, A, 0);
 
-        timer.start(stream);
+        start = get_time_us_sync(stream);
         rocsolver_syevd_heevd(STRIDED, handle, evect, uplo, n, dA.data(), lda, stA, dD.data(), stD,
                               dE.data(), stE, dinfo.data(), bc);
-        timer.end(stream);
+        *gpu_time_used += get_time_us_sync(stream) - start;
     }
-    *gpu_time_used = timer.get_combined();
+    *gpu_time_used /= hot_calls;
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
@@ -877,7 +876,7 @@ void testing_syevd_heevd(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
         {
             syevd_heevd_getPerfData<STRIDED, T>(handle, evect, uplo, n, dA, lda, stA, dD, stD, dE,
                                                 stE, dinfo, bc, hA, hD, hinfo, &gpu_time_used,
@@ -917,7 +916,7 @@ void testing_syevd_heevd(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
         {
             syevd_heevd_getPerfData<STRIDED, T>(handle, evect, uplo, n, dA, lda, stA, dD, stD, dE,
                                                 stE, dinfo, bc, hA, hD, hinfo, &gpu_time_used,

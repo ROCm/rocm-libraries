@@ -45,12 +45,12 @@ namespace rocRoller::KernelGraph
 
     namespace AddDeallocateDetail
     {
-        void addDownstreamBarrierInLoop(std::set<int>&       dependencies,
-                                        int                  coordinate,
-                                        std::set<int> const& lastRWOps,
-                                        KernelGraph const&   original)
+        void addDownstreamBarrierInLoop(std::set<int>&            dependencies,
+                                        int                       coordinate,
+                                        std::set<int> const&      lastRWOps,
+                                        KernelGraph const&        original,
+                                        TopologicalCompare const& compare)
         {
-            auto               compare = TopologicalCompare(original);
             std::optional<int> maybeForLoop;
             for(auto control : lastRWOps)
             {
@@ -239,6 +239,7 @@ namespace rocRoller::KernelGraph
     {
         auto tracer    = LastRWTracer(graph);
         auto locations = tracer.lastRWLocations();
+        auto topo      = TopologicalCompare(std::make_shared<KernelGraph>(graph));
 
         // Map of <incoming Sequence edges to add, tags to deallocate>
         std::map<std::set<int>, std::vector<int>> deallocateNodesToAdd;
@@ -251,7 +252,7 @@ namespace rocRoller::KernelGraph
             auto maybeLDS = graph.coordinates.get<LDS>(coordinate);
             if(maybeLDS)
             {
-                addDownstreamBarrierInLoop(dependencies, coordinate, controls, graph);
+                addDownstreamBarrierInLoop(dependencies, coordinate, controls, graph, topo);
             }
 
             simplifyDependencies(graph, dependencies);

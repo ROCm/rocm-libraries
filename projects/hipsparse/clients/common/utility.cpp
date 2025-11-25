@@ -34,6 +34,14 @@
 #define strSUITEcmp(A, B) _stricmp(A, B)
 #endif
 
+#ifdef __cpp_lib_filesystem
+#include <filesystem>
+namespace fs = std::filesystem;
+#else
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
+#endif
+
 /* ============================================================================================ */
 // Return path of this executable
 std::string hipsparse_exepath()

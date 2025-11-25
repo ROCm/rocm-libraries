@@ -1,11 +1,11 @@
 .. meta::
-  :description: Summary of the rocSOLVER API reference library
-  :keywords: rocSOLVER, ROCm, API, documentation, introduction, summary
+  :description: Introduction to the rocSOLVER API reference library
+  :keywords: rocSOLVER, ROCm, API, documentation, introduction
 
 .. _intro:
 
 ********************************************************************
-rocSOLVER API summary
+Introduction to the rocSOLVER API
 ********************************************************************
 
 The following tables summarize the functionality implemented for the different supported precisions in rocSOLVER.

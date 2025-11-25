@@ -110,7 +110,6 @@ set(rocsparse_source
   src/level2/rocsparse_coomv_aos_impl.cpp
   src/level2/rocsparse_coomv_aos.cpp
   #
-  src/level2/rocsparse_csrmv_helpers.cpp
   src/level2/rocsparse_csrmv_template_rowsplit.cpp
   src/level2/rocsparse_csrmv_template_adaptive.cpp
   src/level2/rocsparse_csrmv_template_lrb.cpp

@@ -1,5 +1,5 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "example/ck_tile/01_fmha/fmha_fwd.hpp"
 #include "example/ck_tile/01_fmha/fmha_fwd_runner.hpp"
@@ -7,7 +7,7 @@
 #include "gtest/gtest.h"
 
 #ifndef DataTypeConfig
-#define DataTypeConfig FmhaFwdFp16 // or FmhaFwdBf16 / FmhaFwdFp8Bf16 / FmhaFwdFp32
+#define DataTypeConfig FmhaFwdFp16 // or FmhaFwdBf16 / FmhaFwdFp8 / FmhaFwdFp32
 #endif
 
 using ::testing::Bool;
@@ -39,14 +39,13 @@ struct TestConfigs
         std::tuple{32, -1}, std::tuple{64, -1}, std::tuple{128, -1}, std::tuple{256, -1}};
     static constexpr auto ModeValues        = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues = std::array{true};
-    static constexpr auto qscale_str        = "n";
+    static constexpr bool squant            = false;
     static constexpr bool def_lse           = true;
     static constexpr bool def_is_v_rowmajor = true;
     static int adjust_seqlen(int seqlen) { return seqlen; }
 };
-
 template <>
-struct TestConfigs<FmhaFwdFp8Bf16>
+struct TestConfigs<FmhaFwdFp8>
 {
     static constexpr auto HDimValues =
         std::array{std::tuple{64, -1}, std::tuple{128, -1}, std::tuple{256, -1}};
@@ -54,14 +53,13 @@ struct TestConfigs<FmhaFwdFp8Bf16>
     static constexpr auto AppendKVHDimValues = std::array{std::tuple{64, -1}, std::tuple{128, -1}};
     static constexpr auto ModeValues         = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues  = std::array{true};
-    static constexpr auto qscale_str         = "pt";
+    static constexpr bool squant             = true;
     static constexpr bool def_lse            = false;
     static constexpr bool def_is_v_rowmajor  = true;
     // When there are no fp8 instances with padding, pad seqlen to avoid skipping most of the tests:
     // return ck_tile::integer_least_multiple(seqlen, 128);
     static int adjust_seqlen(int seqlen) { return seqlen; }
 };
-
 template <>
 struct TestConfigs<FmhaFwdFp32>
 {
@@ -78,7 +76,7 @@ struct TestConfigs<FmhaFwdFp32>
     static constexpr auto AppendKVHDimValues = std::array<std::tuple<int, int>, 0>{};
     static constexpr auto ModeValues         = std::array{mode_enum::batch, mode_enum::group};
     static constexpr auto IsVRowmajorValues  = std::array{true};
-    static constexpr auto qscale_str         = "n";
+    static constexpr bool squant             = false;
     static constexpr bool def_lse            = true;
     static constexpr bool def_is_v_rowmajor  = true;
     static int adjust_seqlen(int seqlen) { return seqlen; }
@@ -89,7 +87,7 @@ static auto SplitKVHDimValues    = ValuesIn(TestConfigs<DataTypeConfig>::SplitKV
 static auto AppendKVHDimValues   = ValuesIn(TestConfigs<DataTypeConfig>::AppendKVHDimValues);
 static auto ModeValues           = ValuesIn(TestConfigs<DataTypeConfig>::ModeValues);
 static auto IsVRowmajorValues    = ValuesIn(TestConfigs<DataTypeConfig>::IsVRowmajorValues);
-constexpr static auto qscale_str = TestConfigs<DataTypeConfig>::qscale_str;
+constexpr bool squant            = TestConfigs<DataTypeConfig>::squant;
 constexpr bool def_lse           = TestConfigs<DataTypeConfig>::def_lse;
 constexpr bool def_is_v_rowmajor = TestConfigs<DataTypeConfig>::def_is_v_rowmajor;
 int adjust_seqlen(int seqlen) { return TestConfigs<DataTypeConfig>::adjust_seqlen(seqlen); }
@@ -205,7 +203,7 @@ TEST_P(AllLong, DataTypeConfig)
                                                1024,          // drop_offset
                                                false,         // drop_prefs
                                                mask_str,      // mask_str
-                                               qscale_str,
+                                               squant,
                                                true, // is_rotary_interleaved
                                                1,    // num_splits
                                                COMMON_ARGS);
@@ -249,7 +247,7 @@ TEST(TestCkTileFmhaFwd, AppendKvWithBatchEffLensShouldFail)
         0,     // drop_offset
         false, // drop_prefs
         "0",   // mask
-        qscale_str,
+        squant,
         true, // is_rotary_interleaved
         1,    // num_splits
         init_method,
@@ -293,7 +291,7 @@ TEST(TestCkTileFmhaFwd, SplitKvWithGroupPaddingShouldFail)
         0,
         false,
         "0",
-        qscale_str,
+        squant,
         true,
         2, // num_splits (>1 triggers splitkv)
         init_method,
@@ -336,7 +334,7 @@ TEST(TestCkTileFmhaFwd, PagedKvWithGroupPaddingShouldFail)
         0,
         false,
         "0",
-        qscale_str,
+        squant,
         true,
         1,
         init_method,
@@ -405,7 +403,7 @@ TEST_P(HDimPadding, DataTypeConfig)
                                                0,             // drop_offset
                                                false,         // drop_prefs
                                                mask_str,      // mask_str
-                                               qscale_str,
+                                               squant,
                                                true, // is_rotary_interleaved
                                                1,    // num_splits
                                                COMMON_ARGS);
@@ -465,7 +463,7 @@ TEST_P(ElementwiseBias, DataTypeConfig)
                                                0,                 // drop_offset
                                                false,             // drop_prefs
                                                mask_str,          // mask_str
-                                               qscale_str,
+                                               squant,
                                                true, // is_rotary_interleaved
                                                1,    // num_splits
                                                COMMON_ARGS);
@@ -524,7 +522,7 @@ TEST_P(Alibi, DataTypeConfig)
                                                0,                 // drop_offset
                                                false,             // drop_prefs
                                                mask_str,          // mask_str
-                                               qscale_str,
+                                               squant,
                                                true, // is_rotary_interleaved
                                                1,    // num_splits
                                                COMMON_ARGS);
@@ -585,7 +583,7 @@ TEST_P(Dropout, DataTypeConfig)
                                                drop_offset,       // drop_offset
                                                drop_prefs,        // drop_prefs
                                                mask_str,          // mask_str
-                                               qscale_str,
+                                               squant,
                                                true, // is_rotary_interleaved
                                                1,    // num_splits
                                                COMMON_ARGS);
@@ -650,7 +648,7 @@ TEST_P(PagedKV, DataTypeConfig)
                                                0,               // drop_offset
                                                false,           // drop_prefs
                                                mask_str,        // mask_str
-                                               qscale_str,
+                                               squant,
                                                true, // is_rotary_interleaved
                                                1,    // num_splits
                                                COMMON_ARGS);
@@ -721,7 +719,7 @@ TEST_P(SplitKV, DataTypeConfig)
                                                0,                   // drop_offset
                                                false,               // drop_prefs
                                                mask_str,            // mask_str
-                                               qscale_str,
+                                               squant,
                                                true,       // is_rotary_interleaved
                                                num_splits, // num_splits
                                                COMMON_ARGS);
@@ -798,7 +796,7 @@ TEST_P(AppendKV, DataTypeConfig)
                                                0,                   // drop_offset
                                                false,               // drop_prefs
                                                mask_str,            // mask_str
-                                               qscale_str,
+                                               squant,
                                                false, // is_rotary_interleaved
                                                1,     // num_splits
                                                COMMON_ARGS);
@@ -820,7 +818,7 @@ GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(AppendKVRoPE);
 
 INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                          AppendKVRoPE,
-                         Combine(EnableTestIf(!std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>),
+                         Combine(EnableTestIf(!std::is_same_v<DataTypeConfig, FmhaFwdFp8>),
                                  AppendKVHDimValues,
                                  Bool(),            // layouts of k and v are controlled by i_perm
                                  IsVRowmajorValues, // layout of v is controlled by is_v_rowmajor
@@ -871,7 +869,7 @@ TEST_P(AppendKVRoPE, DataTypeConfig)
                                                0,             // drop_offset
                                                false,         // drop_prefs
                                                mask_str,      // mask_str
-                                               qscale_str,
+                                               squant,
                                                is_rotary_interleaved, // is_rotary_interleaved
                                                1,                     // num_splits
                                                COMMON_ARGS);
@@ -1107,7 +1105,7 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd_Padding, PaddingCases, ValuesIn(kPadd
 
 TEST_P(PaddingCases, DataTypeConfig)
 {
-    if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>)
+    if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp8>)
     {
         GTEST_SKIP() << "Skip for fp8";
     }
@@ -1164,7 +1162,7 @@ TEST_P(PaddingCases, DataTypeConfig)
                                                0,        // drop_offset
                                                false,    // drop_prefs
                                                mask_str, // mask_str
-                                               qscale_str,
+                                               squant,
                                                true, // is_rotary_interleaved
                                                1,    // num_splits
                                                COMMON_ARGS);

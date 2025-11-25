@@ -287,8 +287,6 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
       return __reduce_by_key::reduce_by_key(
         policy, keys_first, keys_last, values_first, keys_output, values_output, binary_pred, binary_op);
     }
-
-#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static pair<KeyOutputIt, ValOutputIt>
     seq(execution_policy<Derived>& policy,
         KeyInputIt keys_first,
@@ -309,7 +307,6 @@ pair<KeyOutputIt, ValOutputIt> THRUST_HOST_DEVICE reduce_by_key(
         binary_pred,
         binary_op);
     }
-#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(

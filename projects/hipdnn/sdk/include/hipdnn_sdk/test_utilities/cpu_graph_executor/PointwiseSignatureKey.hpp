@@ -7,7 +7,6 @@
 #include <hipdnn_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_sdk/plugin/PluginFlatbufferTypeHelpers.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PointwisePlan.hpp>
 #include <hipdnn_sdk/utilities/PointwiseValidation.hpp>
 
@@ -20,7 +19,6 @@ struct PointwiseSignatureKey
         = hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes;
     hipdnn_sdk::data_objects::PointwiseMode operation;
     hipdnn_sdk::data_objects::DataType inputDataType;
-    hipdnn_sdk::data_objects::DataType computeDataType;
     hipdnn_sdk::data_objects::DataType outputDataType;
     hipdnn_sdk::data_objects::DataType input1DataType
         = hipdnn_sdk::data_objects::DataType::UNSET; // For binary ops
@@ -28,13 +26,11 @@ struct PointwiseSignatureKey
     PointwiseSignatureKey() = default;
     constexpr PointwiseSignatureKey(hipdnn_sdk::data_objects::PointwiseMode op,
                                     hipdnn_sdk::data_objects::DataType input,
-                                    hipdnn_sdk::data_objects::DataType compute,
                                     hipdnn_sdk::data_objects::DataType output,
                                     hipdnn_sdk::data_objects::DataType input1
                                     = hipdnn_sdk::data_objects::DataType::UNSET)
         : operation(op)
         , inputDataType(input)
-        , computeDataType(compute)
         , outputDataType(output)
         , input1DataType(input1)
     {
@@ -60,9 +56,6 @@ struct PointwiseSignatureKey
             throw std::runtime_error("Input tensor attributes could not be found in the map");
         }
         inputDataType = input0TensorAttr->data_type();
-
-        // Get compute data type from node
-        computeDataType = node.compute_data_type();
 
         // Get output tensor (always present)
         auto outputTensorAttr = tensorMap.at(nodeAttributes->out_0_tensor_uid());
@@ -102,16 +95,15 @@ struct PointwiseSignatureKey
         return static_cast<std::size_t>(static_cast<int>(nodeType))
                ^ (static_cast<std::size_t>(static_cast<int>(operation)) << 4)
                ^ (static_cast<std::size_t>(static_cast<int>(inputDataType)) << 8)
-               ^ (static_cast<std::size_t>(static_cast<int>(computeDataType)) << 12)
-               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 16)
-               ^ (static_cast<std::size_t>(static_cast<int>(input1DataType)) << 20);
+               ^ (static_cast<std::size_t>(static_cast<int>(outputDataType)) << 12)
+               ^ (static_cast<std::size_t>(static_cast<int>(input1DataType)) << 16);
     }
 
     bool operator==(const PointwiseSignatureKey& other) const noexcept
     {
         return nodeType == other.nodeType && operation == other.operation
-               && inputDataType == other.inputDataType && computeDataType == other.computeDataType
-               && outputDataType == other.outputDataType && input1DataType == other.input1DataType;
+               && inputDataType == other.inputDataType && outputDataType == other.outputDataType
+               && input1DataType == other.input1DataType;
     }
 
     static std::unordered_map<PointwiseSignatureKey,
@@ -123,189 +115,69 @@ struct PointwiseSignatureKey
                            std::unique_ptr<IGraphNodePlanBuilder>,
                            PointwiseSignatureKey>
             map;
-        // Add plan builders for implemented unary operations (input/compute/output)
-        addUnaryPlanBuilders<hipdnn_sdk::data_objects::DataType::FLOAT,
-                             hipdnn_sdk::data_objects::DataType::FLOAT,
-                             hipdnn_sdk::data_objects::DataType::FLOAT>(map);
-        addUnaryPlanBuilders<hipdnn_sdk::data_objects::DataType::HALF,
-                             hipdnn_sdk::data_objects::DataType::FLOAT,
-                             hipdnn_sdk::data_objects::DataType::HALF>(map);
-        addUnaryPlanBuilders<hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                             hipdnn_sdk::data_objects::DataType::FLOAT,
-                             hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
 
-        // Add plan builders for implemented binary operations (input0/input1/compute/output)
-        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_sdk::data_objects::DataType::FLOAT>(map);
-        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::HALF,
-                              hipdnn_sdk::data_objects::DataType::HALF,
-                              hipdnn_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_sdk::data_objects::DataType::HALF>(map);
-        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
-        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::HALF,
-                              hipdnn_sdk::data_objects::DataType::HALF,
-                              hipdnn_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_sdk::data_objects::DataType::FLOAT>(map);
-        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_sdk::data_objects::DataType::FLOAT>(map);
-        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_sdk::data_objects::DataType::BFLOAT16,
-                              hipdnn_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_sdk::data_objects::DataType::FLOAT>(map);
-        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_sdk::data_objects::DataType::HALF,
-                              hipdnn_sdk::data_objects::DataType::FLOAT,
-                              hipdnn_sdk::data_objects::DataType::FLOAT>(map);
+        // Add plan builders for implemented unary operations
+        addUnaryPlanBuilders<hipdnn_sdk::data_objects::DataType::FLOAT>(map);
+        addUnaryPlanBuilders<hipdnn_sdk::data_objects::DataType::HALF>(map);
+        addUnaryPlanBuilders<hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
+
+        // Add plan builders for implemented binary operations
+        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::FLOAT>(map);
+        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::HALF>(map);
+        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
 
         return map;
     }
 
 private:
-    template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
-              hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
-              hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
+    template <hipdnn_sdk::data_objects::DataType DataTypeEnum>
     static void addUnaryPlanBuilders(std::unordered_map<PointwiseSignatureKey,
                                                         std::unique_ptr<IGraphNodePlanBuilder>,
                                                         PointwiseSignatureKey>& map)
     {
         // Add all implemented unary operations
-        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
-                            InputDataTypeEnum,
-                            ComputeDataTypeEnum,
-                            OutputDataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_FWD,
-                            InputDataTypeEnum,
-                            ComputeDataTypeEnum,
-                            OutputDataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::TANH_FWD,
-                            InputDataTypeEnum,
-                            ComputeDataTypeEnum,
-                            OutputDataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::ABS,
-                            InputDataTypeEnum,
-                            ComputeDataTypeEnum,
-                            OutputDataTypeEnum>(map);
-        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::NEG,
-                            InputDataTypeEnum,
-                            ComputeDataTypeEnum,
-                            OutputDataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD, DataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_FWD, DataTypeEnum>(
+            map);
+        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::TANH_FWD, DataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::ABS, DataTypeEnum>(map);
+        addUnaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::NEG, DataTypeEnum>(map);
     }
 
-    template <hipdnn_sdk::data_objects::DataType Input0DataTypeEnum,
-              hipdnn_sdk::data_objects::DataType Input1DataTypeEnum,
-              hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
-              hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
+    template <hipdnn_sdk::data_objects::DataType DataTypeEnum>
     static void addBinaryPlanBuilders(std::unordered_map<PointwiseSignatureKey,
                                                          std::unique_ptr<IGraphNodePlanBuilder>,
                                                          PointwiseSignatureKey>& map)
     {
         // Add all implemented binary operations
-        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::ADD,
-                             Input0DataTypeEnum,
-                             Input1DataTypeEnum,
-                             ComputeDataTypeEnum,
-                             OutputDataTypeEnum>(map);
-        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SUB,
-                             Input0DataTypeEnum,
-                             Input1DataTypeEnum,
-                             ComputeDataTypeEnum,
-                             OutputDataTypeEnum>(map);
-        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::MUL,
-                             Input0DataTypeEnum,
-                             Input1DataTypeEnum,
-                             ComputeDataTypeEnum,
-                             OutputDataTypeEnum>(map);
-        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
-                             Input0DataTypeEnum,
-                             Input1DataTypeEnum,
-                             ComputeDataTypeEnum,
-                             OutputDataTypeEnum>(map);
-        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD,
-                             Input0DataTypeEnum,
-                             Input1DataTypeEnum,
-                             ComputeDataTypeEnum,
-                             OutputDataTypeEnum>(map);
-        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::TANH_BWD,
-                             Input0DataTypeEnum,
-                             Input1DataTypeEnum,
-                             ComputeDataTypeEnum,
-                             OutputDataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::ADD, DataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SUB, DataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::MUL, DataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD, DataTypeEnum>(map);
+        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_BWD, DataTypeEnum>(
+            map);
+        addBinaryPlanBuilder<hipdnn_sdk::data_objects::PointwiseMode::TANH_BWD, DataTypeEnum>(map);
     }
 
     template <hipdnn_sdk::data_objects::PointwiseMode ModeEnum,
-              hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
-              hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
-              hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
+              hipdnn_sdk::data_objects::DataType DataTypeEnum>
     static void addUnaryPlanBuilder(std::unordered_map<PointwiseSignatureKey,
                                                        std::unique_ptr<IGraphNodePlanBuilder>,
                                                        PointwiseSignatureKey>& map)
     {
-        map[PointwiseSignatureKey(
-            ModeEnum, InputDataTypeEnum, ComputeDataTypeEnum, OutputDataTypeEnum)]
-            = std::make_unique<PointwisePlanBuilder<InputDataTypeEnum,
-                                                    InputDataTypeEnum,
-                                                    ComputeDataTypeEnum,
-                                                    OutputDataTypeEnum>>();
+        map[PointwiseSignatureKey(ModeEnum, DataTypeEnum, DataTypeEnum)]
+            = std::make_unique<PointwisePlanBuilder<DataTypeEnum>>();
     }
 
     template <hipdnn_sdk::data_objects::PointwiseMode ModeEnum,
-              hipdnn_sdk::data_objects::DataType Input0DataTypeEnum,
-              hipdnn_sdk::data_objects::DataType Input1DataTypeEnum,
-              hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum,
-              hipdnn_sdk::data_objects::DataType OutputDataTypeEnum>
+              hipdnn_sdk::data_objects::DataType DataTypeEnum>
     static void addBinaryPlanBuilder(std::unordered_map<PointwiseSignatureKey,
                                                         std::unique_ptr<IGraphNodePlanBuilder>,
                                                         PointwiseSignatureKey>& map)
     {
-        map[PointwiseSignatureKey(ModeEnum,
-                                  Input0DataTypeEnum,
-                                  ComputeDataTypeEnum,
-                                  OutputDataTypeEnum,
-                                  Input1DataTypeEnum)]
-            = std::make_unique<PointwisePlanBuilder<Input0DataTypeEnum,
-                                                    Input1DataTypeEnum,
-                                                    ComputeDataTypeEnum,
-                                                    OutputDataTypeEnum>>();
+        map[PointwiseSignatureKey(ModeEnum, DataTypeEnum, DataTypeEnum, DataTypeEnum)]
+            = std::make_unique<PointwisePlanBuilder<DataTypeEnum>>();
     }
 };
+
 }
-
-template <>
-struct fmt::formatter<hipdnn_sdk::test_utilities::PointwiseSignatureKey>
-{
-    static constexpr auto parse(format_parse_context& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const hipdnn_sdk::test_utilities::PointwiseSignatureKey& key,
-                FormatContext& ctx) const
-    {
-        if(key.input1DataType != hipdnn_sdk::data_objects::DataType::UNSET)
-        {
-            // Binary operation
-            return fmt::format_to(ctx.out(),
-                                  "Pointwise(op={}, in0={}, in1={}, compute={}, out={})",
-                                  key.operation,
-                                  key.inputDataType,
-                                  key.input1DataType,
-                                  key.computeDataType,
-                                  key.outputDataType);
-        }
-        // Unary operation
-        return fmt::format_to(ctx.out(),
-                              "Pointwise(op={}, in={}, compute={}, out={})",
-                              key.operation,
-                              key.inputDataType,
-                              key.computeDataType,
-                              key.outputDataType);
-    }
-};

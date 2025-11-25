@@ -28,9 +28,6 @@
 #include "rocsparse_envariables.hpp"
 #include "rocsparse_utility.hpp"
 
-#include "internal/generic/rocsparse_v2_spmv.h"
-#include "rocsparse_spmv_helpers.h"
-
 #include "csrmv_device_nnzsplit.h"
 #include "rocsparse_primitives.hpp"
 
@@ -434,69 +431,7 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
                                                              Y*       y,
                                                              bool     force_conj)
 {
-    return rocsparse::csrmv_nnzsplit_template_dispatch(handle,
-                                                       trans,
-                                                       m,
-                                                       n,
-                                                       nnz,
-                                                       alpha_device_host,
-                                                       descr,
-                                                       csr_val,
-                                                       csr_row_ptr,
-                                                       csr_col_ind,
-                                                       csrmv_info,
-                                                       x,
-                                                       beta_device_host,
-                                                       y,
-                                                       0,
-                                                       nullptr,
-                                                       nullptr,
-                                                       force_conj);
-}
-
-template <typename T, typename I, typename J, typename A, typename X, typename Y>
-rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle    handle,
-                                                             rocsparse_operation trans,
-                                                             J                   m,
-                                                             J                   n,
-                                                             I                   nnz,
-                                                             const T*            alpha_device_host,
-                                                             const rocsparse_mat_descr descr,
-                                                             const A*                  csr_val,
-                                                             const I*                  csr_row_ptr,
-                                                             const J*                  csr_col_ind,
-                                                             rocsparse_csrmv_info      csrmv_info,
-                                                             const X*                  x,
-                                                             const T*      beta_device_host,
-                                                             Y*            y,
-                                                             rocsparse_int num_extra,
-                                                             rocsparse_const_dnvec_descr  gamma_vec,
-                                                             rocsparse_const_dnvec_descr* z_vecs,
-                                                             bool force_conj)
-{
     ROCSPARSE_ROUTINE_TRACE;
-
-    // Extract gamma arrays and z vectors for batched operation
-    using Z                      = Y;
-    T*        gamma_device_array = nullptr;
-    const Z** z_array            = nullptr;
-
-    // Check if pre-extracted arrays are available in spmv descriptor
-    if(num_extra > 0)
-    {
-        if(handle && handle->temp_spmv_descr && spmv_has_device_arrays(handle->temp_spmv_descr))
-        {
-            gamma_device_array = rocsparse::spmv_get_gamma_device_array<T>(handle->temp_spmv_descr);
-            z_array            = rocsparse::spmv_get_z_array<Z>(handle->temp_spmv_descr);
-        }
-        else
-        {
-            // throw an error here as the extra data cannot be retrieved
-            // LCOV_EXCL_START
-            return rocsparse_status_invalid_value;
-            // LCOV_EXCL_STOP
-        }
-    }
 
     const J ysize = (trans == rocsparse_operation_none) ? m : n;
 
@@ -505,8 +440,7 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
 
     if(trans == rocsparse_operation_none || descr->type == rocsparse_matrix_type_symmetric)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::axpby_array_batched(
-            handle, ysize, num_extra, gamma_device_array, z_array, beta_device_host, y));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
         LAUNCH_HELPER(LAUNCH_CSRMV)
     }
 
@@ -514,8 +448,7 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
     {
         if(descr->type != rocsparse_matrix_type_symmetric)
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::axpby_array_batched(
-                handle, ysize, num_extra, gamma_device_array, z_array, beta_device_host, y));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_array(handle, ysize, beta_device_host, y));
         }
 
         LAUNCH_HELPER(LAUNCH_CSRMVT)

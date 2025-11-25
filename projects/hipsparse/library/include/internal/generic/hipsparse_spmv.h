@@ -294,6 +294,9 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *               \p externalBuffer pointer is invalid or if \p opA, \p computeType, \p alg is incorrect.
 *  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p computeType or \p alg is
 *               currently not supported.
+*
+*  \par Example
+*  \snippet example_hipsparse_spmv.cpp doc example
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

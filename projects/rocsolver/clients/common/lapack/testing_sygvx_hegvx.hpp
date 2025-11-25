@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T, typename S, typename U>
 void sygvx_hegvx_checkBadArgs(const rocblas_handle handle,
@@ -669,7 +668,7 @@ void sygvx_hegvx_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
+    double start;
 
     if(profile > 0)
     {
@@ -686,13 +685,13 @@ void sygvx_hegvx_getPerfData(const rocblas_handle handle,
         sygvx_hegvx_initData<false, true, T>(handle, itype, evect, n, dA, lda, stA, dB, ldb, stB,
                                              bc, hA, hB, A, B, false, singular);
 
-        timer.start(stream);
+        start = get_time_us_sync(stream);
         rocsolver_sygvx_hegvx(STRIDED, handle, itype, evect, erange, uplo, n, dA.data(), lda, stA,
                               dB.data(), ldb, stB, vl, vu, il, iu, abstol, dNev.data(), dW.data(),
                               stW, dZ.data(), ldz, stZ, dIfail.data(), stF, dInfo.data(), bc);
-        timer.end(stream);
+        *gpu_time_used += get_time_us_sync(stream) - start;
     }
-    *gpu_time_used = timer.get_combined();
+    *gpu_time_used /= hot_calls;
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
@@ -887,7 +886,7 @@ void testing_sygvx_hegvx(Arguments& argus)
                 argus.singular, hashA, hashB, hashW, hashZ);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             sygvx_hegvx_getPerfData<STRIDED, T>(
                 handle, itype, evect, erange, uplo, n, dA, lda, stA, dB, ldb, stB, vl, vu, il, iu,
                 abstol, dNev, dW, stW, dZ, ldz, stZ, dIfail, stF, dInfo, bc, hA, hB, hNev, hW, hZ,
@@ -936,7 +935,7 @@ void testing_sygvx_hegvx(Arguments& argus)
                 argus.singular, hashA, hashB, hashW, hashZ);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             sygvx_hegvx_getPerfData<STRIDED, T>(
                 handle, itype, evect, erange, uplo, n, dA, lda, stA, dB, ldb, stB, vl, vu, il, iu,
                 abstol, dNev, dW, stW, dZ, ldz, stZ, dIfail, stF, dInfo, bc, hA, hB, hNev, hW, hZ,

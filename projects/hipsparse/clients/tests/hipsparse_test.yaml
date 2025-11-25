@@ -45,17 +45,6 @@ include: test_csrmm.yaml
 include: test_csrsm2.yaml
 include: test_gemmi.yaml
 
-#precond
-include: test_csric02.yaml
-include: test_csrilu02.yaml
-include: test_bsric02.yaml
-include: test_bsrilu02.yaml
-include: test_gtsv.yaml
-include: test_gtsv2_nopivot.yaml
-include: test_gtsv2_strided_batch.yaml
-include: test_gtsv_interleaved_batch.yaml
-include: test_gpsv_interleaved_batch.yaml
-
 # conversion
 include: test_bsr2csr.yaml
 include: test_coo2csr.yaml
@@ -79,35 +68,3 @@ include: test_prune_csr2csr.yaml
 include: test_prune_csr2csr_by_percentage.yaml
 include: test_prune_dense2csr.yaml
 include: test_prune_dense2csr_by_percentage.yaml
-
-# generic
-include: test_axpby.yaml
-include: test_gather.yaml
-include: test_scatter.yaml
-include: test_rot.yaml
-include: test_sddmm_coo_aos.yaml
-include: test_sddmm_coo.yaml
-include: test_sddmm_csc.yaml
-include: test_sddmm_csr.yaml
-include: test_dense_to_sparse_coo.yaml
-include: test_dense_to_sparse_csc.yaml
-include: test_dense_to_sparse_csr.yaml
-include: test_sparse_to_dense_coo.yaml
-include: test_sparse_to_dense_csc.yaml
-include: test_sparse_to_dense_csr.yaml
-include: test_spgemm_csr.yaml
-include: test_spgemmreuse_csr.yaml
-include: test_spmm_batched_coo.yaml
-include: test_spmm_batched_csc.yaml
-include: test_spmm_batched_csr.yaml
-include: test_spmm_coo.yaml
-include: test_spmm_csc.yaml
-include: test_spmm_csr.yaml
-include: test_spmv_coo_aos.yaml
-include: test_spmv_coo.yaml
-include: test_spmv_csr.yaml
-include: test_spsv_coo.yaml
-include: test_spsv_csr.yaml
-include: test_spsm_coo.yaml
-include: test_spsm_csr.yaml
-include: test_spvv.yaml

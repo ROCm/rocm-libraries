@@ -24,9 +24,6 @@
  *
  *******************************************************************************/
 
-#include <cassert>
-#include <fstream>
-
 #include "data_types.hpp"
 #include "hash.hpp"
 #include "plan_cache.hpp"

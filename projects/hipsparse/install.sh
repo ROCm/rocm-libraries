@@ -39,10 +39,10 @@ supported_distro( )
   fi
 
   case "${ID}" in
-    ubuntu|debian|centos|rhel|fedora|sles|opensuse-leap)
+    ubuntu|centos|rhel|fedora|sles|opensuse-leap)
         true
         ;;
-    *)  printf "This script is currently supported on Ubuntu, Debian, CentOS, RHEL, Fedora, SLES, and OpenSUSE-Leap\n"
+    *)  printf "This script is currently supported on Ubuntu, CentOS, RHEL, Fedora, SLES, and OpenSUSE-Leap\n"
         exit 2
         ;;
   esac
@@ -173,7 +173,7 @@ install_packages( )
   fi
 
   case "${ID}" in
-    ubuntu|debian)
+    ubuntu)
       elevate_if_not_root apt update
       install_apt_packages "${library_dependencies_ubuntu[@]}"
       ;;
@@ -227,7 +227,7 @@ install_packages( )
       fi
       ;;
     *)
-      echo "This script is currently supported on Ubuntu, Debian, CentOS, RHEL and Fedora"
+      echo "This script is currently supported on Ubuntu, CentOS, RHEL and Fedora"
       exit 2
       ;;
   esac
@@ -565,7 +565,7 @@ pushd .
     check_exit_code "$?"
 
     case "${ID}" in
-      ubuntu|debian)
+      ubuntu)
         elevate_if_not_root dpkg -i hipsparse[-\_]*.deb
       ;;
       centos|rhel)

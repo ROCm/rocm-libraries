@@ -182,8 +182,7 @@ endif()
 # --- Packaging and installation ---
 
 if(HIPSPARSELT_ENABLE_CLIENT)
-    include(rocm_client_prerequisites)
-    rocm_set_client_package_prerequisites()
+    include(ROCmClientPackages)
     rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
 endif()

@@ -500,8 +500,6 @@ namespace hipsparse
         // case HIPSPARSE_CSRMV_ALG2:
         case HIPSPARSE_SPMV_CSR_ALG2:
             return rocsparse_spmv_alg_csr_stream;
-        case HIPSPARSE_SPMV_SELL_ALG1:
-            return rocsparse_spmv_alg_sell;
         default:
             throw "Non existent hipsparseSpMVAlg_t";
         }
@@ -648,8 +646,6 @@ namespace hipsparse
             return rocsparse_format_coo_aos;
         case HIPSPARSE_FORMAT_BLOCKED_ELL:
             return rocsparse_format_bell;
-        case HIPSPARSE_FORMAT_SLICED_ELL:
-            return rocsparse_format_sell;
         default:
             throw "Non existent hipsparseFormat_t";
         }
@@ -669,8 +665,6 @@ namespace hipsparse
             return HIPSPARSE_FORMAT_COO_AOS;
         case rocsparse_format_bell:
             return HIPSPARSE_FORMAT_BLOCKED_ELL;
-        case rocsparse_format_sell:
-            return HIPSPARSE_FORMAT_SLICED_ELL;
         default:
             throw "Non existent rocsparse_format";
         }

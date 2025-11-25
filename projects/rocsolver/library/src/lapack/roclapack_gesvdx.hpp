@@ -376,8 +376,8 @@ rocblas_status rocsolver_gesvdx_template(rocblas_handle handle,
     const rocblas_stride strideD = k;
     const rocblas_stride strideE = k;
     const rocblas_stride strideT = k * k;
-    const rocblas_stride strideX = ldx * GEBRD_BLOCKSIZE;
-    const rocblas_stride strideY = ldy * GEBRD_BLOCKSIZE;
+    const rocblas_stride strideX = ldx * GEBRD_GEBD2_SWITCHSIZE;
+    const rocblas_stride strideY = ldy * GEBRD_GEBD2_SWITCHSIZE;
     const rocblas_stride strideZ = 2 * k * nsv_max;
     T* UV;
     rocblas_stride strideUV;

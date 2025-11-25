@@ -996,7 +996,7 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
     }
 
     {
-        FindMode findMode;
+        FindMode findMode(solver::Primitive::Fusion);
         auto sol = boost::optional<miopenConvSolution_t>{};
 
         if(findMode.IsFast(fusion_problem) || findMode.IsHybrid(fusion_problem))
@@ -1089,7 +1089,7 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
             continue;
         }
 
-        handle.RegisterInvoker(*invoker, network_config, id.ToString(), AlgorithmName{"fusion"});
+        handle.RegisterInvoker(*invoker, network_config, id.ToString());
         invokers.push_back(std::move(*invoker));
         MIOPEN_LOG_I2(miopen::ConvolutionAlgoToString(algorithm));
     }
@@ -1100,6 +1100,8 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
         return miopenStatusUnsupportedOp;
     }
 
+    handle.SetAsFound1_0(
+        network_config, AlgorithmName{"fusion"}, find_results.front().GetSolver().ToString());
     return miopenStatusSuccess;
 }
 

@@ -38,10 +38,9 @@
 
 namespace rocRoller
 {
-    const std::string XLOOP   = "XLoop";
-    const std::string YLOOP   = "YLoop";
-    const std::string KLOOP   = "KLoop";
-    const std::string RECEIVE = "ReceiveTileLoop";
+    const std::string XLOOP = "XLoop";
+    const std::string YLOOP = "YLoop";
+    const std::string KLOOP = "KLoop";
 
     const std::string SCRATCH = "SCRATCH";
     const std::string NUMWGS  = "numWGs";

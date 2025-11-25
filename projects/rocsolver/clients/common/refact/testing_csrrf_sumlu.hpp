@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 template <typename T>
 void csrrf_sumlu_checkBadArgs(rocblas_handle handle,
@@ -313,7 +312,7 @@ void csrrf_sumlu_getPerfData(rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
+    double start;
 
     if(profile > 0)
     {
@@ -331,13 +330,13 @@ void csrrf_sumlu_getPerfData(rocblas_handle handle,
                                              dptrU, dindU, dvalU, hptrL, hindL, hvalL, hptrU, hindU,
                                              hvalU, hptrT, hindT, hvalT);
 
-        timer.start(stream);
+        start = get_time_us_sync(stream);
         rocsolver_csrrf_sumlu(handle, n, nnzL, dptrL.data(), dindL.data(), dvalL.data(), nnzU,
                               dptrU.data(), dindU.data(), dvalU.data(), dptrT.data(), dindT.data(),
                               dvalT.data());
-        timer.end(stream);
+        *gpu_time_used += get_time_us_sync(stream) - start;
     }
-    *gpu_time_used = timer.get_combined();
+    *gpu_time_used /= hot_calls;
 }
 
 template <typename T>
@@ -477,7 +476,7 @@ void testing_csrrf_sumlu(Arguments& argus)
                                 hptrT, hindT, hvalT, hptrTres, hindTres, hvalTres, &max_error);
 
     // collect performance data
-    if(argus.timing && hot_calls > 0)
+    if(argus.timing)
         csrrf_sumlu_getPerfData<T>(handle, n, nnzL, dptrL, dindL, dvalL, nnzU, dptrU, dindU, dvalU,
                                    nnzT, dptrT, dindT, dvalT, hptrL, hindL, hvalL, hptrU, hindU,
                                    hvalU, hptrT, hindT, hvalT, &gpu_time_used, &cpu_time_used,

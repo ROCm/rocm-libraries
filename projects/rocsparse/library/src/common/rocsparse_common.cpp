@@ -176,63 +176,6 @@ namespace rocsparse
         }
     }
 
-    template <uint32_t BLOCKSIZE, typename I, typename X, typename Y, typename T>
-    ROCSPARSE_DEVICE_ILF void axpby_device(
-        I length, T alpha, const X* __restrict__ x_array, T beta, Y* __restrict__ y_array)
-    {
-        const I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(gid >= length)
-        {
-            return;
-        }
-
-        T tmp = static_cast<T>(0);
-        if(beta != static_cast<T>(0))
-        {
-            tmp = fma(beta, static_cast<T>(y_array[gid]), tmp);
-        }
-        if(alpha != static_cast<T>(0))
-        {
-            tmp = fma(alpha, static_cast<T>(x_array[gid]), tmp);
-        }
-        y_array[gid] = static_cast<Y>(tmp);
-    }
-
-    template <uint32_t BLOCKSIZE, typename I, typename X, typename Y, typename T>
-    ROCSPARSE_DEVICE_ILF void axpby_batched_device(I               length,
-                                                   rocsparse_int   num_extra,
-                                                   const T*        gamma_values,
-                                                   const X* const* x_arrays,
-                                                   T               beta,
-                                                   Y* __restrict__ y_array)
-    {
-        const I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        if(gid >= length)
-        {
-            return;
-        }
-
-        T tmp = static_cast<T>(0);
-        if(beta != static_cast<T>(0))
-        {
-            tmp = fma(beta, static_cast<T>(y_array[gid]), tmp);
-        }
-
-        // Add contributions from all extra vectors, each with its own gamma
-        for(rocsparse_int i = 0; i < num_extra; ++i)
-        {
-            T gamma = gamma_values[i]; // gamma is a scalar value from the array
-            if(gamma != static_cast<T>(0))
-            {
-                tmp = rocsparse::fma<T>(gamma, rocsparse::nontemporal_load(x_arrays[i] + gid), tmp);
-            }
-        }
-
-        y_array[gid] = static_cast<Y>(tmp);
-    }
-
     template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
     ROCSPARSE_DEVICE_ILF void scale_2d_device(
         I m, I n, int64_t ld, int64_t stride, T value, A* __restrict__ array, rocsparse_order order)
@@ -358,56 +301,6 @@ namespace rocsparse
         if(scalar != static_cast<T>(1))
         {
             rocsparse::scale_device<BLOCKSIZE>(length, scalar, array);
-        }
-    }
-
-    template <uint32_t BLOCKSIZE, typename I, typename X, typename Y, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void axpby_kernel(I length,
-                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                      const X* __restrict__ x_array,
-                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                      Y* __restrict__ y_array,
-                      bool is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-
-        rocsparse::axpby_device<BLOCKSIZE>(length, alpha, x_array, beta, y_array);
-    }
-
-    template <uint32_t BLOCKSIZE, typename I, typename X, typename Y, typename T>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void axpby_batched_kernel(I               length,
-                              rocsparse_int   num_extra,
-                              const T*        gamma_values,
-                              const X* const* x_arrays,
-                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
-                              Y* __restrict__ y_array,
-                              bool is_host_mode)
-    {
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-
-        rocsparse::axpby_batched_device<BLOCKSIZE>(
-            length, num_extra, gamma_values, x_arrays, beta, y_array);
-    }
-
-    // Helper kernel to copy gamma values from device pointers
-    template <typename T>
-    ROCSPARSE_KERNEL(256)
-    void gather_gamma_values_kernel(rocsparse_int num_extra, const T** gamma_ptrs, T* gamma_values)
-    {
-        rocsparse_int idx = hipBlockIdx_x * 256 + hipThreadIdx_x;
-        if(idx < num_extra)
-        {
-            if(gamma_ptrs[idx] != nullptr)
-            {
-                gamma_values[idx] = gamma_ptrs[idx][0];
-            }
-            else
-            {
-                gamma_values[idx] = static_cast<T>(0);
-            }
         }
     }
 
@@ -647,40 +540,6 @@ rocsparse_status
     return rocsparse_status_success;
 }
 
-template <typename I, typename X, typename Y, typename T>
-rocsparse_status rocsparse::axpby_array_batched(rocsparse_handle handle,
-                                                I                length,
-                                                rocsparse_int    num_extra,
-                                                const T*         gamma_device_host,
-                                                const X**        x_arrays,
-                                                const T*         beta_device_host,
-                                                Y*               y_array)
-{
-    if(length > 0 && num_extra > 0)
-    {
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::axpby_batched_kernel<256>),
-            dim3((length - 1) / 256 + 1),
-            dim3(256),
-            0,
-            handle->stream,
-            length,
-            num_extra,
-            gamma_device_host,
-            x_arrays,
-            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
-            y_array,
-            handle->pointer_mode == rocsparse_pointer_mode_host);
-    }
-    else if(length > 0 && num_extra == 0)
-    {
-        // If no extra vectors, just scale y by beta
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::scale_array(handle, length, beta_device_host, y_array));
-    }
-    return rocsparse_status_success;
-}
-
 template <typename I, typename A, typename T>
 rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,
                                            I                m,
@@ -859,16 +718,9 @@ INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
 #undef INSTANTIATE
 
-#define INSTANTIATE(ITYPE, ATYPE, TTYPE)                                                          \
-    template rocsparse_status rocsparse::scale_array(                                             \
-        rocsparse_handle handle, ITYPE length, const TTYPE* scalar_device_host, ATYPE* array);    \
-    template rocsparse_status rocsparse::axpby_array_batched(rocsparse_handle handle,             \
-                                                             ITYPE            length,             \
-                                                             rocsparse_int    num_extra,          \
-                                                             const TTYPE*     gamma_device_array, \
-                                                             const ATYPE**    x_arrays,           \
-                                                             const TTYPE*     beta_device_host,   \
-                                                             ATYPE*           y_array);
+#define INSTANTIATE(ITYPE, ATYPE, TTYPE)              \
+    template rocsparse_status rocsparse::scale_array( \
+        rocsparse_handle handle, ITYPE length, const TTYPE* scalar_device_host, ATYPE* array);
 
 INSTANTIATE(int32_t, rocsparse_bfloat16, float);
 INSTANTIATE(int32_t, _Float16, float);

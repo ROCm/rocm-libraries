@@ -25,7 +25,6 @@
  *******************************************************************************/
 #pragma once
 
-#include <stdint.h>
 #include <hip/hip_common.h>
 #include <hip/library_types.h>
 

@@ -127,17 +127,19 @@ extern "C" {
 *  \par Example
 *  \snippet example_rocsparse_spsv.cpp doc example
 */
-ROCSPARSE_EXPORT rocsparse_status rocsparse_spsv(rocsparse_handle            handle,
-                                                 rocsparse_operation         trans,
-                                                 const void*                 alpha,
-                                                 rocsparse_const_spmat_descr mat,
-                                                 rocsparse_const_dnvec_descr x,
-                                                 const rocsparse_dnvec_descr y,
-                                                 rocsparse_datatype          compute_type,
-                                                 rocsparse_spsv_alg          alg,
-                                                 rocsparse_spsv_stage        stage,
-                                                 size_t*                     buffer_size,
-                                                 void*                       temp_buffer);
+__attribute__((deprecated("This function is deprecated and will be removed in a future release. "
+                          "Use rocsparse_sptrsv instead."))) ROCSPARSE_EXPORT rocsparse_status
+    rocsparse_spsv(rocsparse_handle            handle,
+                   rocsparse_operation         trans,
+                   const void*                 alpha,
+                   rocsparse_const_spmat_descr mat,
+                   rocsparse_const_dnvec_descr x,
+                   const rocsparse_dnvec_descr y,
+                   rocsparse_datatype          compute_type,
+                   rocsparse_spsv_alg          alg,
+                   rocsparse_spsv_stage        stage,
+                   size_t*                     buffer_size,
+                   void*                       temp_buffer);
 
 #ifdef __cplusplus
 }

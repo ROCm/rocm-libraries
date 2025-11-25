@@ -422,7 +422,6 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
       return detail::partition_copy(policy, first, last, stencil, selected_result, rejected_result, predicate);
     }
 
-#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
     seq(execution_policy<Derived>& policy,
         InputIt first,
@@ -435,7 +434,6 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
       return thrust::partition_copy(
         cvt_to_seq(derived_cast(policy)), first, last, stencil, selected_result, rejected_result, predicate);
     }
-#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, last, stencil, selected_result, rejected_result, predicate);
@@ -468,7 +466,6 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
       return detail::partition_copy(policy, first, last, selected_result, rejected_result, predicate);
     }
 
-#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
     seq(execution_policy<Derived>& policy,
         InputIt first,
@@ -480,7 +477,6 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
       return thrust::partition_copy(
         cvt_to_seq(derived_cast(policy)), first, last, selected_result, rejected_result, predicate);
     }
-#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, last, selected_result, rejected_result, predicate);
@@ -514,7 +510,6 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
     {
       return detail::partition_copy(policy, first, last, stencil, selected_result, rejected_result, predicate);
     }
-#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
     seq(execution_policy<Derived>& policy,
         InputIt first,
@@ -527,7 +522,6 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
       return thrust::stable_partition_copy(
         cvt_to_seq(derived_cast(policy)), first, last, stencil, selected_result, rejected_result, predicate);
     }
-#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, last, stencil, selected_result, rejected_result, predicate);
@@ -560,7 +554,6 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
       return detail::partition_copy(policy, first, last, selected_result, rejected_result, predicate);
     }
 
-#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
     seq(execution_policy<Derived>& policy,
         InputIt first,
@@ -572,7 +565,6 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
       return thrust::stable_partition_copy(
         cvt_to_seq(derived_cast(policy)), first, last, selected_result, rejected_result, predicate);
     }
-#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, last, selected_result, rejected_result, predicate);
@@ -596,13 +588,11 @@ partition(execution_policy<Derived>& policy, Iterator first, Iterator last, Sten
     {
       return last = detail::inplace_partition(policy, first, last, stencil, predicate);
     }
-#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static Iterator
     seq(execution_policy<Derived>& policy, Iterator first, Iterator last, StencilIt stencil, Predicate predicate)
     {
       return last = thrust::partition(cvt_to_seq(derived_cast(policy)), first, last, stencil, predicate);
     }
-#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, last, stencil, predicate);
@@ -624,13 +614,11 @@ partition(execution_policy<Derived>& policy, Iterator first, Iterator last, Pred
     {
       return last = detail::inplace_partition(policy, first, last, predicate);
     }
-#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static Iterator
     seq(execution_policy<Derived>& policy, Iterator first, Iterator last, Predicate predicate)
     {
       return last = thrust::partition(cvt_to_seq(derived_cast(policy)), first, last, predicate);
     }
-#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, last, predicate);
@@ -657,13 +645,12 @@ Iterator THRUST_HOST_DEVICE stable_partition(
       hip_rocprim::reverse(policy, ret, last);
       return ret;
     }
-#  if !__THRUST_HAS_HIPRT__
+
     THRUST_DEVICE static Iterator
     seq(execution_policy<Derived>& policy, Iterator first, Iterator last, StencilIt stencil, Predicate predicate)
     {
       return thrust::stable_partition(cvt_to_seq(derived_cast(policy)), first, last, stencil, predicate);
     }
-#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, last, stencil, predicate);
@@ -690,13 +677,12 @@ stable_partition(execution_policy<Derived>& policy, Iterator first, Iterator las
       hip_rocprim::reverse(policy, ret, last);
       return ret;
     }
-#  if !__THRUST_HAS_HIPRT__
+
     THRUST_DEVICE static Iterator
     seq(execution_policy<Derived>& policy, Iterator first, Iterator last, Predicate predicate)
     {
       return thrust::stable_partition(cvt_to_seq(derived_cast(policy)), first, last, predicate);
     }
-#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, last, predicate);

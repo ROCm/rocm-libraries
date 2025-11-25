@@ -31,7 +31,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <cfloat>
+#include <fstream>
+#include <memory>
+#include <numeric>
+#include <sstream>
 #include <vector>
+#include <array>
 #include "ctc_gpu_emulator.hpp"
 
 #define NEGATIVE_CUTOFF_VAL (-1e20)
@@ -337,7 +342,6 @@ void RunCTCLossCPUVerify(const int num_class,
                          std::vector<Tref>& losses_host,
                          std::vector<Tref>& gradients_host,
                          std::vector<Tref>& workspace_host,
-                         bool parallel,
                          const int blank_lb      = 0,
                          bool is_softmax_applied = true,
                          const int verify_path   = 1)
@@ -396,7 +400,6 @@ void RunCTCLossCPUVerify(const int num_class,
                               gradients_host,
                               workspace_host,
                               beta_loss,
-                              parallel,
                               blank_lb,
                               is_softmax_applied);
     }
@@ -415,7 +418,8 @@ void RunCTCLossCPUVerify(const int num_class,
         for(int j = 1; j < batch_size; j++)
             label_offsets[j] = label_offsets[j - 1] + labelLengths[j - 1];
 
-        auto per_batch_work = [&](int j) {
+        for(int j = 0; j < batch_size; j++)
+        {
             auto lab_begin = labels.begin() + label_offsets[j];
             std::vector<int> indiv_lab(lab_begin, lab_begin + labelLengths[j]);
 
@@ -478,18 +482,6 @@ void RunCTCLossCPUVerify(const int num_class,
                                  probs_logits_use,
                                  gradients_logits,
                                  blank_lb);
-        };
-
-        if(parallel)
-        {
-            miopen::par_for(batch_size, per_batch_work);
-        }
-        else
-        {
-            for(int j = 0; j < batch_size; j++)
-            {
-                per_batch_work(j);
-            }
         }
 
         gradients_host = is_softmax_applied ? softmaxlayer_gradients_logit : gradients_logits;

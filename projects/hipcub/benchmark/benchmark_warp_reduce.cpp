@@ -29,8 +29,9 @@
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
-template<unsigned int WarpSize, unsigned int Trials, class T>
-__device__ auto warp_reduce_benchmark(const T* d_input, T* d_output)
+template<class T, unsigned int WarpSize, unsigned int Trials>
+__global__ __launch_bounds__(64)
+auto warp_reduce_kernel(const T* d_input, T* d_output)
     -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
 {
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
@@ -49,20 +50,15 @@ __device__ auto warp_reduce_benchmark(const T* d_input, T* d_output)
     d_output[i] = value;
 }
 
-template<unsigned int WarpSize, unsigned int Trials, class T>
-__device__ auto warp_reduce_benchmark(const T* /*d_input*/, T* /*d_output*/)
+template<class T, unsigned int WarpSize, unsigned int Trials>
+__global__ __launch_bounds__(64)
+auto warp_reduce_kernel(const T* /*d_input*/, T* /*d_output*/)
     -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
 {}
 
-template<unsigned int WarpSize, unsigned int Trials, class T>
+template<class T, class Flag, unsigned int WarpSize, unsigned int Trials>
 __global__ __launch_bounds__(64)
-void warp_reduce_kernel(const T* d_input, T* d_output)
-{
-    warp_reduce_benchmark<WarpSize, Trials>(d_input, d_output);
-}
-
-template<unsigned int WarpSize, unsigned int Trials, class T, class Flag>
-__device__ auto segmented_warp_reduce_benchmark(const T* d_input, Flag* d_flags, T* d_output)
+auto segmented_warp_reduce_kernel(const T* d_input, Flag* d_flags, T* d_output)
     -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
 {
     const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
@@ -81,17 +77,11 @@ __device__ auto segmented_warp_reduce_benchmark(const T* d_input, Flag* d_flags,
     d_output[i] = value;
 }
 
-template<unsigned int WarpSize, unsigned int Trials, class T, class Flag>
-__device__ auto segmented_warp_reduce_benchmark(const T* /*d_input*/, Flag* /*d_flags*/, T* /*d_output*/)
+template<class T, class Flag, unsigned int WarpSize, unsigned int Trials>
+__global__ __launch_bounds__(64)
+auto segmented_warp_reduce_kernel(const T* /*d_input*/, Flag* /*d_flags*/, T* /*d_output*/)
     -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
 {}
-
-template<unsigned int WarpSize, unsigned int Trials, class T, class Flag>
-__global__ __launch_bounds__(64)
-void segmented_warp_reduce_kernel(const T* d_input, Flag* d_flags, T* d_output)
-{
-    segmented_warp_reduce_benchmark<WarpSize, Trials>(d_input, d_flags, d_output);
-}
 
 template<bool         Segmented,
          unsigned int WarpSize,
@@ -103,7 +93,7 @@ inline auto execute_warp_reduce_kernel(
     T* input, T* output, Flag* /* flags */, size_t size, hipStream_t stream) ->
     typename std::enable_if<!Segmented>::type
 {
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_reduce_kernel<WarpSize, Trials, T>),
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_reduce_kernel<T, WarpSize, Trials>),
                        dim3(size / BlockSize),
                        dim3(BlockSize),
                        0,
@@ -123,7 +113,7 @@ inline auto
     execute_warp_reduce_kernel(T* input, T* output, Flag* flags, size_t size, hipStream_t stream) ->
     typename std::enable_if<Segmented>::type
 {
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_warp_reduce_kernel<WarpSize, Trials, T, Flag>),
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(segmented_warp_reduce_kernel<T, Flag, WarpSize, Trials>),
                        dim3(size / BlockSize),
                        dim3(BlockSize),
                        0,

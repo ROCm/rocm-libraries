@@ -51,13 +51,13 @@ struct mapped_vector_type<T, 1>
 template <>
 struct mapped_vector_type<float, 4>
 {
-    using type = float __attribute__((ext_vector_type(4)));
+    using type = ::float4;
 };
 
 template <>
 struct mapped_vector_type<float, 2>
 {
-    using type = float __attribute__((ext_vector_type(2)));
+    using type = ::float2;
 };
 
 // half
@@ -90,13 +90,13 @@ struct mapped_vector_type<ushort, 8>
 template <>
 struct mapped_vector_type<ushort, 4>
 {
-    using type = ushort __attribute__((ext_vector_type(4)));
+    using type = ushort4;
 };
 
 template <>
 struct mapped_vector_type<ushort, 2>
 {
-    using type = ushort __attribute__((ext_vector_type(2)));
+    using type = ushort2;
 };
 
 // int

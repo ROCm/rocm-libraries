@@ -24,11 +24,7 @@
  *
  *******************************************************************************/
 
-// #include <random>
-#include <cmath>
-#include <limits>
-#include <numeric>
-#include <stdexcept>
+
 #include <tuple>
 #include <vector>
 
@@ -55,11 +51,10 @@ typedef std::tuple<bool, bool, bool, bool, vector<double>, DataScaling, vector<i
 typedef std::tuple<bool, bool, bool, bool, double, DataScaling, vector<index_t>>
     BoundedAlternatingSignTupleType;
 typedef std::tuple<bool, bool, bool, bool, DataScaling, vector<index_t>> UnboundedTupleType;
+typedef UnboundedTupleType                                           TrigonometricTupleType;
 typedef std::tuple<bool, DataScaling, vector<index_t>>                   ZerosTupleType;
-typedef ZerosTupleType                                                   OnesTupleType;
-typedef ZerosTupleType                                                   IdentityTupleType;
-typedef UnboundedTupleType                                               TrigonometricFromFloatTupleType;
-typedef UnboundedTupleType                                               NormalFromFloatTupleType;
+typedef ZerosTupleType                                               OnesTupleType;
+typedef ZerosTupleType                                               IdentityTupleType;
 
 // clampToF32
 const vector<bool> clamp_params = {false, true};
@@ -176,145 +171,13 @@ std::ostream& operator<<(std::ostream& os, const std::vector<index_t>& vec)
     return os;
 }
 
-double getMean(const std::vector<double>& data)
-{
-    if(data.empty())
-    {
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-
-    return std::reduce(data.begin(), data.end()) / data.size();
-}
-
-double getStdDev(const std::vector<double>& data)
-{
-    const double mean = getMean(data);
-    // Covers empty vector case
-    if(std::isnan(mean))
-    {
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-
-    double sum = 0.0;
-    for(const double& val : data)
-    {
-        sum += (val - mean) * (val - mean);
-    }
-
-    return std::sqrt(sum / data.size());
-}
-
-// Take two vectors of data along with their expected mean and standard deviation,
-// create a histogram for each array in the bounds [mean - hist_radius, mean + hist_radius] with a specified number of bins,
-// and calculate the average percent difference between the two histograms within the given number of standard deviations
-double compareHistogram(const std::vector<double>& data1,
-                        const std::vector<double>& data2,
-                        const double               mean,
-                        const double               std_dev,
-                        const double               hist_radius,
-                        const uint64_t             num_bins,
-                        const uint64_t             num_std_devs)
-{
-    std::map<double, uint64_t> histogram1;
-    std::map<double, uint64_t> histogram2;
-
-    if(num_bins == 0)
-        throw std::runtime_error("compareHistogram: num_bins cannot equal zero");
-    double bin_width = static_cast<double>(hist_radius * 2) / static_cast<double>(num_bins);
-    double first_bin = mean - hist_radius;
-    double last_bin  = mean + hist_radius - bin_width;
-    for(double bin = first_bin; bin <= last_bin; bin += bin_width)
-    {
-        histogram1[bin] = 0;
-        histogram2[bin] = 0;
-    }
-
-    // Make copies of both vectors and sort them in preparation for populating histograms
-    std::vector<double> data1_copy = data1;
-    std::sort(data1_copy.begin(), data1_copy.end());
-    std::vector<double> data2_copy = data2;
-    std::sort(data2_copy.begin(), data2_copy.end());
-
-    // Populate histograms
-    double current_bin = first_bin;
-    for(const double val : data1_copy)
-    {
-        if(std::isnan(val) || std::isinf(val) || val < first_bin || val >= last_bin + bin_width)
-        {
-            continue;
-        }
-
-        while(!(val >= current_bin && val < current_bin + bin_width))
-        {
-            current_bin += bin_width;
-        }
-
-        histogram1[current_bin]++;
-    }
-    current_bin = first_bin;
-    for(const double val : data2_copy)
-    {
-        if(std::isnan(val) || std::isinf(val) || val < first_bin || val >= last_bin + bin_width)
-        {
-            continue;
-        }
-
-        while(!(val >= current_bin && val < current_bin + bin_width))
-        {
-            current_bin += bin_width;
-        }
-
-        histogram2[current_bin]++;
-    }
-
-    // Calculate the average percent difference between the two histograms
-    // within the given number of standard deviations
-    double   sum_percent_diff  = 0.0;
-    uint64_t num_percent_diffs = 0;
-    for(auto const& [bin, val1] : histogram1)
-    {
-        // We only care about diffs within the given number of standard deviations
-        const double lower_bound = mean - (std_dev * num_std_devs);
-        const double upper_bound = mean + (std_dev * num_std_devs);
-        if(bin >= lower_bound && bin + bin_width <= upper_bound)
-        {
-            const uint64_t val2 = histogram2[bin];
-
-            uint64_t diff = std::max(val1, val2) - std::min(val1, val2);
-
-            // To avoid division by zero - if the denominator (val1 + val2) is zero,
-            // both val1 and val2 must themselves be zero because they are both unsigned,
-            // meaning that the percent difference is zero
-            double percent_diff;
-            if(val1 + val2 == 0)
-            {
-                percent_diff = 0.0;
-            }
-            else
-            {
-                percent_diff = 200 * (static_cast<double>(diff) / static_cast<double>(val1 + val2));
-            }
-
-            sum_percent_diff += percent_diff;
-            num_percent_diffs++;
-        }
-    }
-
-    if(num_percent_diffs == 0)
-    {
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-
-    return sum_percent_diff / num_percent_diffs;
-}
-
 template <typename DataType>
 class DataGeneratorBoundedTest : public ::TestWithParam<BoundedTupleType>
 {
     void set_options(BoundedTupleType      tup,
                      DataGeneratorOptions& opts,
-                     vector<index_t>&      size,
-                     vector<index_t>&      stride)
+                     vector<index_t>&          size,
+                     vector<index_t>&          stride)
     {
         opts.clampToF32  = std::get<0>(tup);
         opts.includeInf  = std::get<1>(tup);
@@ -333,12 +196,12 @@ public:
     void testForDataType(BoundedTupleType& params)
     {
         DataGeneratorOptions opts;
-        vector<index_t>      size, stride;
+        vector<index_t>          size, stride;
 
         set_options(params, opts, size, stride);
         std::cout << "testing " << opts << " size=" << size << " stride=" << stride << "\n";
 
-        opts.initMode = DataInitMode(Bounded{});
+        opts.pattern = Bounded;
 
         const auto dgen  = DataGenerator<DataType>().generate(size, stride, opts);
         const auto data  = dgen.getDataBytes();
@@ -353,15 +216,15 @@ public:
             total_size *= size[i];
         }
 
-        const int num_threads_test
+        const int              num_threads_test
             = (std::thread::hardware_concurrency() > 32) ? 32 : std::thread::hardware_concurrency();
 
         vector<bool> has_nan(num_threads_test, false);
         vector<bool> has_inf(num_threads_test, false);
         vector<bool> has_sbn(num_threads_test, false);
 
-// check values
-#pragma omp parallel for num_threads(num_threads_test)
+        // check values
+        #pragma omp parallel for num_threads(num_threads_test)
         for(index_t i = 0; i < total_size; i++)
         {
             // find position
@@ -410,23 +273,23 @@ public:
                 EXPECT_TRUE(std::isnan(ref_float[data_i]));
             }
 
-            const auto tid = omp_get_thread_num();
-            if(isNaNPacked<DataType>(&scale[0], &data[0], scale_i, data_i))
+            const auto tid            = omp_get_thread_num();
+            if (isNaNPacked<DataType>(&scale[0], &data[0], scale_i, data_i))
                 has_nan[tid] = true;
-            if(isInfPacked<DataType>(&scale[0], &data[0], scale_i, data_i))
+            if (isInfPacked<DataType>(&scale[0], &data[0], scale_i, data_i))
                 has_inf[tid] = true;
-            if(isSubnormPacked<DataType>(&data[0], data_i))
+            if (isSubnormPacked<DataType>(&data[0], data_i))
                 has_sbn[tid] = true;
         }
 
         if(opts.includeNaN && DataType::dataInfo.hasNan)
         {
-            ASSERT_TRUE(std::any_of(has_nan.begin(), has_nan.end(), [](bool v) { return v; }));
+            ASSERT_TRUE(std::any_of(has_nan.begin(), has_nan.end(), [](bool v){ return v;}));
         }
 
         if(opts.includeInf && DataType::dataInfo.hasInf)
         {
-            ASSERT_TRUE(std::any_of(has_inf.begin(), has_inf.end(), [](bool v) { return v; }));
+            ASSERT_TRUE(std::any_of(has_inf.begin(), has_inf.end(), [](bool v){ return v;}));
         }
 
         if(opts.forceDenorm && isScaled<DataType>()
@@ -435,7 +298,7 @@ public:
                || (opts.min < -getDataMinSubnorm<DataType>()
                    && opts.max > -getDataMinSubnorm<DataType>())))
         {
-            ASSERT_TRUE(std::any_of(has_sbn.begin(), has_sbn.end(), [](bool v) { return v; }));
+            ASSERT_TRUE(std::any_of(has_sbn.begin(), has_sbn.end(), [](bool v){ return v;}));
         }
     }
 };
@@ -446,8 +309,8 @@ class DataGeneratorBoundedAlternatingSignTest
 {
     void set_options(BoundedAlternatingSignTupleType tup,
                      DataGeneratorOptions&           opts,
-                     vector<index_t>&                size,
-                     vector<index_t>&                stride)
+                     vector<index_t>&                    size,
+                     vector<index_t>&                    stride)
     {
         opts.clampToF32  = std::get<0>(tup);
         opts.includeInf  = std::get<1>(tup);
@@ -465,12 +328,12 @@ public:
     void testForDataType(BoundedAlternatingSignTupleType& params)
     {
         DataGeneratorOptions opts;
-        vector<index_t>      size, stride;
+        vector<index_t>          size, stride;
 
         set_options(params, opts, size, stride);
         std::cout << "testing " << opts << " size=" << size << " stride=" << stride << "\n";
 
-        opts.initMode = DataInitMode(BoundedAlternatingSign{});
+        opts.pattern = BoundedAlternatingSign;
 
         const auto dgen  = DataGenerator<DataType>().generate(size, stride, opts);
         const auto data  = dgen.getDataBytes();
@@ -578,8 +441,8 @@ class DataGeneratorUnboundedTest : public ::TestWithParam<UnboundedTupleType>
 {
     void set_options(UnboundedTupleType    tup,
                      DataGeneratorOptions& opts,
-                     vector<index_t>&      size,
-                     vector<index_t>&      stride)
+                     vector<index_t>&          size,
+                     vector<index_t>&          stride)
     {
         opts.clampToF32  = std::get<0>(tup);
         opts.includeInf  = std::get<1>(tup);
@@ -595,12 +458,12 @@ public:
     void testForDataType(UnboundedTupleType& params)
     {
         DataGeneratorOptions opts;
-        vector<index_t>      size, stride;
+        vector<index_t>          size, stride;
 
         set_options(params, opts, size, stride);
         std::cout << "testing " << opts << " size=" << size << " stride=" << stride << "\n";
 
-        opts.initMode = DataInitMode(Unbounded{});
+        opts.pattern = Unbounded;
 
         const auto dgen  = DataGenerator<DataType>().generate(size, stride, opts);
         const auto data  = dgen.getDataBytes();
@@ -686,13 +549,12 @@ public:
 };
 
 template <typename DataType>
-class DataGeneratorTrigonometricFromFloatTest
-    : public ::TestWithParam<TrigonometricFromFloatTupleType>
+class DataGeneratorTrigonometricTest : public ::TestWithParam<TrigonometricTupleType>
 {
-    void set_options(TrigonometricFromFloatTupleType tup,
-                     DataGeneratorOptions&           opts,
-                     vector<index_t>&                size,
-                     vector<index_t>&                stride)
+    void set_options(TrigonometricTupleType tup,
+                     DataGeneratorOptions&  opts,
+                     vector<index_t>&           size,
+                     vector<index_t>&           stride)
     {
         opts.clampToF32  = std::get<0>(tup);
         opts.includeInf  = std::get<1>(tup);
@@ -705,15 +567,15 @@ class DataGeneratorTrigonometricFromFloatTest
     }
 
 public:
-    void testForDataType(TrigonometricFromFloatTupleType& params)
+    void testForDataType(TrigonometricTupleType& params)
     {
         DataGeneratorOptions opts;
-        vector<index_t>      size, stride;
+        vector<index_t>          size, stride;
 
         set_options(params, opts, size, stride);
         std::cout << "testing " << opts << " size=" << size << " stride=" << stride << "\n";
 
-        opts.initMode = DataInitMode(TrigonometricFromFloat{});
+        opts.pattern = Trigonometric;
 
         const auto dgen  = DataGenerator<DataType>().generate(size, stride, opts);
         const auto data  = dgen.getDataBytes();
@@ -804,194 +666,12 @@ public:
 };
 
 template <typename DataType>
-class DataGeneratorNormalFromFloatTest : public ::TestWithParam<NormalFromFloatTupleType>
-{
-    void set_options(NormalFromFloatTupleType tup,
-                     DataGeneratorOptions&    opts,
-                     vector<index_t>&         size,
-                     vector<index_t>&         stride)
-    {
-        opts.clampToF32  = std::get<0>(tup);
-        opts.includeInf  = std::get<1>(tup);
-        opts.includeNaN  = std::get<2>(tup);
-        opts.forceDenorm = std::get<3>(tup);
-
-        opts.scaling = std::get<4>(tup);
-
-        set_block_size_stride(std::get<5>(tup), opts.blockScaling, size, stride);
-    }
-
-public:
-    void testForDataType(NormalFromFloatTupleType& params)
-    {
-        DataGeneratorOptions opts;
-        vector<index_t>      size, stride;
-
-        set_options(params, opts, size, stride);
-        std::cout << "testing " << opts << " size=" << size << " stride=" << stride << "\n";
-
-        opts.initMode = DataInitMode(NormalFromFloat{0.f, 1.f});
-
-        const auto dgen  = DataGenerator<DataType>().generate(size, stride, opts);
-        const auto data  = dgen.getDataBytes();
-        const auto scale = dgen.getScaleBytes();
-
-        const auto ref_double = dgen.getReferenceDouble();
-        const auto ref_float  = dgen.getReferenceFloat();
-
-        index_t total_size = size[0];
-        for(index_t i = 1; i < size.size(); i++)
-        {
-            total_size *= size[i];
-        }
-
-        bool has_nan = false;
-        bool has_inf = false;
-        bool has_sbn = false;
-
-        // check values
-        for(index_t i = 0; i < total_size; i++)
-        {
-            // find position
-            index_t data_i = (i % size[size.size() - 1]) * stride[size.size() - 1];
-
-            auto tmp = i / size[size.size() - 1];
-            for(index_t j = size.size() - 2; j > 0; j--)
-            {
-                data_i += (tmp % size[j]) * stride[j];
-                tmp /= size[j];
-            }
-
-            data_i += tmp * stride[0];
-
-            const index_t scale_i = data_i / opts.blockScaling;
-
-            // test
-            const auto ref_value = toDoublePacked<DataType>(&scale[0], &data[0], scale_i, data_i);
-            const auto abs_ref_value = std::abs(ref_value);
-
-            if(!std::isnan(ref_value) && !std::isinf(ref_value))
-            {
-                if(opts.clampToF32 && ref_value != 0)
-                {
-                    EXPECT_GE(abs_ref_value, std::numeric_limits<float>::denorm_min());
-                    EXPECT_LE(abs_ref_value, std::numeric_limits<float>::max());
-                }
-            }
-
-            EXPECT_TRUE(opts.includeNaN || !std::isnan(ref_value));
-            EXPECT_TRUE(opts.includeInf || !std::isinf(ref_value));
-
-            // test reference
-            if(!std::isnan(ref_value))
-            {
-                EXPECT_EQ(ref_double[data_i], ref_value);
-                EXPECT_EQ(ref_float[data_i],
-                          toFloatPacked<DataType>(&scale[0], &data[0], scale_i, data_i));
-            }
-            else
-            {
-                EXPECT_TRUE(std::isnan(ref_double[data_i]));
-                EXPECT_TRUE(std::isnan(ref_float[data_i]));
-            }
-
-            has_nan = has_nan || isNaNPacked<DataType>(&scale[0], &data[0], scale_i, data_i);
-            has_inf = has_inf || isInfPacked<DataType>(&scale[0], &data[0], scale_i, data_i);
-            has_sbn = has_sbn || isSubnormPacked<DataType>(&data[0], data_i);
-        }
-
-        if(opts.includeNaN && getDataHasNan<DataType>())
-        {
-            EXPECT_TRUE(has_nan);
-        }
-
-        if(opts.includeInf && getDataHasInf<DataType>())
-        {
-            EXPECT_TRUE(has_inf);
-        }
-
-        if(opts.forceDenorm && isScaled<DataType>())
-        {
-            EXPECT_TRUE(has_sbn);
-        }
-    }
-};
-
-template <typename DataType>
-class DataGeneratorNormalFromFloatDistributionTest
-    : public ::TestWithParam<NormalFromFloatTupleType>
-{
-public:
-    void testForDataType()
-    {
-        DataGeneratorOptions opts;
-        vector<index_t>      size, stride;
-
-        opts.clampToF32   = false;
-        opts.includeInf   = false;
-        opts.includeNaN   = false;
-        opts.forceDenorm  = false;
-        opts.scaling      = DataScaling::Mean;
-        opts.blockScaling = 32;
-
-        const double mean    = 0.f;
-        const double std_dev = 1.f;
-        opts.initMode       = DataInitMode(NormalFromFloat{mean, std_dev});
-
-        size   = {opts.blockScaling * 1000000};
-        stride = {1};
-
-        std::cout << "testing " << opts << " size=" << size << " stride=" << stride << "\n";
-
-        const auto dgen = DataGenerator<DataType>().generate(size, stride, opts);
-
-        auto data = dgen.getReferenceDouble();
-
-        EXPECT_LE(std::abs(getMean(data) - mean), 0.1);
-        EXPECT_LE(std::abs(getStdDev(data) - std_dev), 0.1);
-
-        // Generate reference data
-        const auto bit_size = getDataSignBits<DataType>() + getDataExponentBits<DataType>()
-                              + getDataMantissaBits<DataType>();
-        const auto byte_size   = (bit_size + 7) / 8;
-        const auto buffer_size = byte_size * data.size();
-        // Vector for holding DataType data
-        std::vector<uint8_t> buffer;
-        buffer.resize(buffer_size, 0x00);
-        // Vector for holding reference data
-        std::vector<double>        ref_data(data.size(), 0);
-        std::random_device         rd{};
-        std::mt19937               gen{rd()};
-        std::normal_distribution<> ref_dist{mean, std_dev};
-        for(size_t i = 0; i < ref_data.size(); i++)
-        {
-            // Generate a float, convert it to a DataType, and then convert it into a double
-            const auto val = DGen::satConvertToType<DataType>(ref_dist(gen));
-            std::memcpy(&buffer[i * byte_size], &val, byte_size);
-            uint8_t tScale[] = {Constants::E8M0_1};
-            ref_data[i]      = toDouble<DataType>(tScale, buffer.data(), 0, i);
-        }
-
-        // Collect both arrays into histograms and compare them
-        const double   hist_radius  = 6;
-        const uint64_t num_bins     = 10000;
-        const uint64_t num_std_devs = 3;
-        const auto     avg_percent_diff
-            = compareHistogram(data, ref_data, mean, std_dev, hist_radius, num_bins, num_std_devs);
-
-        // Expect that average percent difference between actual and reference histogram
-        // within three standard deviations is less than 5%
-        EXPECT_LE(avg_percent_diff, 5);
-    }
-};
-
-template <typename DataType>
 class DataGeneratorZerosTest : public ::TestWithParam<ZerosTupleType>
 {
     void set_options(ZerosTupleType        tup,
                      DataGeneratorOptions& opts,
-                     vector<index_t>&      size,
-                     vector<index_t>&      stride)
+                     vector<index_t>&          size,
+                     vector<index_t>&          stride)
     {
         opts.forceDenorm = std::get<0>(tup);
         opts.scaling     = std::get<1>(tup);
@@ -1003,12 +683,12 @@ public:
     void testForDataType(ZerosTupleType& params)
     {
         DataGeneratorOptions opts;
-        vector<index_t>      size, stride;
+        vector<index_t>          size, stride;
 
         set_options(params, opts, size, stride);
         std::cout << "testing " << opts << " size=" << size << " stride=" << stride << "\n";
 
-        opts.initMode = DataInitMode(Zeros{});
+        opts.pattern = Zeros;
 
         const auto dgen  = DataGenerator<DataType>().generate(size, stride, opts);
         const auto data  = dgen.getDataBytes();
@@ -1057,8 +737,8 @@ class DataGeneratorOnesTest : public ::TestWithParam<OnesTupleType>
 {
     void set_options(OnesTupleType         tup,
                      DataGeneratorOptions& opts,
-                     vector<index_t>&      size,
-                     vector<index_t>&      stride)
+                     vector<index_t>&          size,
+                     vector<index_t>&          stride)
     {
         opts.forceDenorm = std::get<0>(tup);
         opts.scaling     = std::get<1>(tup);
@@ -1070,12 +750,12 @@ public:
     void testForDataType(OnesTupleType& params)
     {
         DataGeneratorOptions opts;
-        vector<index_t>      size, stride;
+        vector<index_t>          size, stride;
 
         set_options(params, opts, size, stride);
         std::cout << "testing " << opts << " size=" << size << " stride=" << stride << "\n";
 
-        opts.initMode = DataInitMode(Ones{});
+        opts.pattern = Ones;
 
         const auto dgen  = DataGenerator<DataType>().generate(size, stride, opts);
         const auto data  = dgen.getDataBytes();
@@ -1133,8 +813,8 @@ class DataGeneratorIdentityTest : public ::TestWithParam<IdentityTupleType>
 {
     void set_options(IdentityTupleType     tup,
                      DataGeneratorOptions& opts,
-                     vector<index_t>&      size,
-                     vector<index_t>&      stride)
+                     vector<index_t>&          size,
+                     vector<index_t>&          stride)
     {
         opts.forceDenorm = std::get<0>(tup);
         opts.scaling     = std::get<1>(tup);
@@ -1146,12 +826,12 @@ public:
     void testForDataType(IdentityTupleType& params)
     {
         DataGeneratorOptions opts;
-        vector<index_t>      size, stride;
+        vector<index_t>          size, stride;
 
         set_options(params, opts, size, stride);
         std::cout << "testing " << opts << " size=" << size << " stride=" << stride << "\n";
 
-        opts.initMode = DataInitMode(Identity{});
+        opts.pattern = Identity;
 
         const auto dgen  = DataGenerator<DataType>().generate(size, stride, opts);
         const auto data  = dgen.getDataBytes();
@@ -1172,7 +852,7 @@ public:
         for(index_t i = 0; i < total_size; i++)
         {
             // find position
-            bool    diag     = true;
+            bool   diag     = true;
             index_t past_idx = i % size[size.size() - 1];
 
             index_t data_i = past_idx * stride[size.size() - 1];
@@ -1181,7 +861,7 @@ public:
             for(index_t j = size.size() - 2; j > 0; j--)
             {
                 index_t curr_idx = (tmp % size[j]);
-                diag             = diag && (past_idx == curr_idx);
+                diag            = diag && (past_idx == curr_idx);
 
                 data_i += past_idx * stride[j];
                 tmp /= size[j];
@@ -1219,12 +899,10 @@ public:
 TYPED_TEST_SUITE(DataGeneratorBoundedTest, DataGeneratorTypes);
 TYPED_TEST_SUITE(DataGeneratorBoundedAlternatingSignTest, DataGeneratorTypes);
 TYPED_TEST_SUITE(DataGeneratorUnboundedTest, DataGeneratorTypes);
+TYPED_TEST_SUITE(DataGeneratorTrigonometricTest, DataGeneratorTypes);
 TYPED_TEST_SUITE(DataGeneratorZerosTest, DataGeneratorTypes);
 TYPED_TEST_SUITE(DataGeneratorOnesTest, DataGeneratorTypes);
 TYPED_TEST_SUITE(DataGeneratorIdentityTest, DataGeneratorTypes);
-TYPED_TEST_SUITE(DataGeneratorTrigonometricFromFloatTest, DataGeneratorTypes);
-TYPED_TEST_SUITE(DataGeneratorNormalFromFloatTest, DataGeneratorTypes);
-TYPED_TEST_SUITE(DataGeneratorNormalFromFloatDistributionTest, DataGeneratorTypes);
 
 #define begin_end(container) begin(container), end(container)
 
@@ -1329,6 +1007,22 @@ TYPED_TEST(DataGeneratorUnboundedTest, TestForEachDataType)
     }
 }
 
+TYPED_TEST(DataGeneratorTrigonometricTest, TestForEachDataType)
+{
+    std::vector<TrigonometricTupleType> params;
+    cartesian_product(params,
+                      begin_end(clamp_params),
+                      begin_end(inf_params),
+                      begin_end(nan_params),
+                      begin_end(denorm_params),
+                      begin_end(scale_params),
+                      begin_end(dim_params));
+    for(auto v : params)
+    {
+        this->testForDataType(v);
+    }
+}
+
 TYPED_TEST(DataGeneratorZerosTest, TestForEachDataType)
 {
     std::vector<ZerosTupleType> params;
@@ -1360,41 +1054,4 @@ TYPED_TEST(DataGeneratorIdentityTest, TestForEachDataType)
     {
         this->testForDataType(v);
     }
-}
-
-TYPED_TEST(DataGeneratorTrigonometricFromFloatTest, TestForEachDataType)
-{
-    std::vector<TrigonometricFromFloatTupleType> params;
-    cartesian_product(params,
-                      begin_end(clamp_params),
-                      begin_end(inf_params),
-                      begin_end(nan_params),
-                      begin_end(denorm_params),
-                      begin_end(scale_params),
-                      begin_end(dim_params));
-    for(auto v : params)
-    {
-        this->testForDataType(v);
-    }
-}
-
-TYPED_TEST(DataGeneratorNormalFromFloatTest, TestForEachDataType)
-{
-    std::vector<NormalFromFloatTupleType> params;
-    cartesian_product(params,
-                      begin_end(clamp_params),
-                      begin_end(inf_params),
-                      begin_end(nan_params),
-                      begin_end(denorm_params),
-                      begin_end(scale_params),
-                      begin_end(dim_params));
-    for(auto v : params)
-    {
-        this->testForDataType(v);
-    }
-}
-
-TYPED_TEST(DataGeneratorNormalFromFloatDistributionTest, TestForEachDataType)
-{
-    this->testForDataType();
 }

@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright (C) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 // InstanceTraits specialization for DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor
@@ -14,7 +14,6 @@
 #pragma once
 
 #include "instance_traits.hpp"
-#include "instance_traits_util.hpp"
 
 // Forward declaration to avoid circular dependency.
 namespace ck::tensor_operation::device {

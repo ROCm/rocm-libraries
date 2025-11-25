@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, bool SYGST, typename T>
 void sygsx_hegsx_checkBadArgs(const rocblas_handle handle,
@@ -341,7 +340,7 @@ void sygsx_hegsx_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
+    double start;
 
     if(profile > 0)
     {
@@ -358,12 +357,12 @@ void sygsx_hegsx_getPerfData(const rocblas_handle handle,
         sygsx_hegsx_initData<false, true, T>(handle, itype, uplo, n, dA, lda, stA, dB, ldb, stB, bc,
                                              hA, hB, M, false);
 
-        timer.start(stream);
+        start = get_time_us_sync(stream);
         rocsolver_sygsx_hegsx(STRIDED, SYGST, handle, itype, uplo, n, dA.data(), lda, stA,
                               dB.data(), ldb, stB, bc);
-        timer.end(stream);
+        *gpu_time_used += get_time_us_sync(stream) - start;
     }
-    *gpu_time_used = timer.get_combined();
+    *gpu_time_used /= hot_calls;
 }
 
 template <bool BATCHED, bool STRIDED, bool SYGST, typename T>
@@ -485,7 +484,7 @@ void testing_sygsx_hegsx(Arguments& argus)
                                                     stB, bc, hA, hARes, hB, &max_error);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             sygsx_hegsx_getPerfData<STRIDED, SYGST, T>(
                 handle, itype, uplo, n, dA, lda, stA, dB, ldb, stB, bc, hA, hB, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);
@@ -522,7 +521,7 @@ void testing_sygsx_hegsx(Arguments& argus)
                                                     stB, bc, hA, hARes, hB, &max_error);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             sygsx_hegsx_getPerfData<STRIDED, SYGST, T>(
                 handle, itype, uplo, n, dA, lda, stA, dB, ldb, stB, bc, hA, hB, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);

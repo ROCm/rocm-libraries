@@ -605,31 +605,6 @@ namespace rocRoller::KernelGraph
             auto hasUnroll     = !unrollCoordinates.empty();
             auto isUniformLoop = maybeForLoop && uniformForLoop(maybeForLoop, kgraph);
 
-            auto isReceiveTileLoop = false;
-            if(maybeForLoop)
-            {
-                if(getForLoopName(kgraph, maybeForLoop.value()) == rocRoller::RECEIVE)
-                    isReceiveTileLoop = true;
-            }
-
-            if(isReceiveTileLoop)
-            {
-                auto maybeTopOfLoop = findTopOfContainingOperation<ForLoopOp>(candidate, kgraph);
-                log->debug("  staged as: isReceiveTileLoop, location {}, {}",
-                           *maybeForLoop,
-                           *maybeTopOfLoop);
-
-                stageChain(kgraph,
-                           target,
-                           candidate,
-                           *maybeTopOfLoop,
-                           GD::Upstream,
-                           isStorePartOfGlobalToLDSOp,
-                           -1,
-                           false);
-                return;
-            }
-
             if(hasForLoop && isUniformLoop)
             {
                 log->debug("  staged as: hasForLoop and isUniformLoop, location {} forLoopOp {}",

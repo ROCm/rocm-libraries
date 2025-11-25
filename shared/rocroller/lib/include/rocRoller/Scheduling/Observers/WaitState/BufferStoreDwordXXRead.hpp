@@ -47,7 +47,6 @@ namespace rocRoller
          * | 950  | buffer_store_dwordx3/4 read | v_* read      | 2    |
          *
          * NOTE: If soffset argument is an SGPR, no NOPs required
-         * NOTE: Only affects writedata from the first instruction
          *
          */
         class BufferStoreDwordXXRead : public WaitStateObserver<BufferStoreDwordXXRead>
@@ -65,11 +64,6 @@ namespace rocRoller
             {
                 return target.isCDNAGPU();
             }
-
-            /**
-             * Overriden as we need to target vdata
-             */
-            void observeHazard(Instruction const& inst) override;
 
             int                   getMaxNops(Instruction const& inst) const;
             bool                  trigger(Instruction const& inst) const;

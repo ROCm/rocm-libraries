@@ -29,13 +29,11 @@
 // clang-format off
 // Include order needs to be preserved
 #include <optional>
-#include <vector>
-
 #include <hip/library_types.h>
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_complex.h>
 #include <hip/hip_fp16.h>
-// clang-format on
+#include <iostream>
 
 #include <hiptensor/hiptensor_types.h>
 
@@ -53,7 +51,7 @@ typedef enum hiptensorOperationType_t
 
 struct hiptensorOperationDescriptor
 {
-    uint32_t            mTag;
+    uint32_t             mTag;
     hiptensorDataType_t mScalarType;
     float               mFlops;
     float               mMovedBytes;
@@ -78,8 +76,8 @@ struct hiptensorOperationDescriptor
     hiptensorTensorDescriptor_t mDescD;
     std::vector<int32_t>        mModeD;
 
-    hiptensorOperator_t mOpAC;
-    hiptensorOperator_t mOpABC;
+    hiptensorOperator_t         mOpAC;
+    hiptensorOperator_t         mOpABC;
 
     hiptensorComputeDescriptor_t mDescCompute;
 };
@@ -87,21 +85,11 @@ struct hiptensorOperationDescriptor
 //! @brief hipTensor's library context
 struct hiptensorHandle
 {
-    hiptensor::HipDevice getDevice()
-    {
-        return mDevice;
-    }
-    hiptensor::PlanCache* getPlanCache()
-    {
-        return planCache;
-    }
-    void setPlanCache(hiptensor::PlanCache* pt_PlanCache)
-    {
-        planCache = pt_PlanCache;
-    }
-
+    hiptensor::HipDevice   getDevice() { return mDevice;}
+    hiptensor::PlanCache*  getPlanCache() { return planCache; }
+    void setPlanCache(hiptensor::PlanCache* pt_PlanCache) { planCache = pt_PlanCache; }
 private:
-    hiptensor::HipDevice  mDevice;
+    hiptensor::HipDevice mDevice;
     hiptensor::PlanCache* planCache = nullptr;
 };
 
@@ -147,6 +135,8 @@ bool inline operator==(const hiptensorTensorDescriptor& lhs, const hiptensorTens
     return lhs.mType == rhs.mType && lhs.mLengths == rhs.mLengths && lhs.mStrides == rhs.mStrides
            && lhs.mAlignmentRequirement == rhs.mAlignmentRequirement;
 }
+
+// clang-format on
 
 namespace hiptensor
 {
@@ -232,3 +222,4 @@ namespace std
 }
 
 #include "data_types_impl.hpp"
+

@@ -54,7 +54,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [1]
         - WavefrontSize: [32]
-        - LocalReadVectorWidth: [8,16]
+        - LocalReadVectorWidth: [8]
         - VectorWidthA: [1]
         - VectorWidthB: [1]
         - GlobalReadVectorWidthA: [-1,8] #[1, 2, 4, 8, 16]

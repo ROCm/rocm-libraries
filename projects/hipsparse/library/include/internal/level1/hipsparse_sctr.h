@@ -77,6 +77,9 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p nnz is negative,
 *          \p xVal, \p xInd or \p y is nullptr when \p nnz is greater than zero, or \p idxBase 
 *          is neither \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
+*
+*  \par Example
+*  \snippet example_hipsparse_sctr.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

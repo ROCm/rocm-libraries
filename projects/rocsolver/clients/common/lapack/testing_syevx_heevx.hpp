@@ -35,7 +35,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T, typename S, typename SS, typename U>
 void syevx_heevx_checkBadArgs(const rocblas_handle handle,
@@ -547,7 +546,7 @@ void syevx_heevx_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
+    double start;
 
     if(profile > 0)
     {
@@ -563,13 +562,13 @@ void syevx_heevx_getPerfData(const rocblas_handle handle,
     {
         syevx_heevx_initData<false, true, T>(handle, evect, n, dA, lda, bc, hA, A, 0);
 
-        timer.start(stream);
+        start = get_time_us_sync(stream);
         rocsolver_syevx_heevx(STRIDED, handle, evect, erange, uplo, n, dA.data(), lda, stA, vl, vu,
                               il, iu, abstol, dNev.data(), dW.data(), stW, dZ.data(), ldz, stZ,
                               dIfail.data(), stF, dinfo.data(), bc);
-        timer.end(stream);
+        *gpu_time_used += get_time_us_sync(stream) - start;
     }
-    *gpu_time_used = timer.get_combined();
+    *gpu_time_used /= hot_calls;
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
@@ -748,7 +747,7 @@ void testing_syevx_heevx(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
         {
             syevx_heevx_getPerfData<STRIDED, T>(handle, evect, erange, uplo, n, dA, lda, stA, vl,
                                                 vu, il, iu, abstol, dNev, dW, stW, dZ, ldz, stZ,
@@ -795,7 +794,7 @@ void testing_syevx_heevx(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
         {
             syevx_heevx_getPerfData<STRIDED, T>(handle, evect, erange, uplo, n, dA, lda, stA, vl,
                                                 vu, il, iu, abstol, dNev, dW, stW, dZ, ldz, stZ,

@@ -27,9 +27,6 @@ class ConvForward : public IntegrationGraphVerificationHarness<DataType, ConvTes
 protected:
     void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
     {
-        // Skipping until CK is working on Windows
-        SKIP_IF_WINDOWS();
-
         const ConvTestCase& testCase = this->GetParam();
 
         hipdnn_frontend::graph::Graph graphObj;

@@ -39,6 +39,11 @@ namespace rocRoller
         using GD = Graph::Direction;
         using namespace ControlGraph;
         using namespace CoordinateGraph;
+        std::string getForLoopName(KernelGraph& graph, int start)
+        {
+            auto forLoop = graph.control.get<ForLoopOp>(start);
+            return forLoop->loopName;
+        }
         unsigned int
             getUnrollAmount(KernelGraph& graph, int loopTag, CommandParametersPtr const& params)
         {

@@ -219,27 +219,17 @@ CK_TILE_HOST index_t
 StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::estimate_num_wgs_per_tile()
     const noexcept
 {
-    // In the case of non-atomic reduction or data-parallel (DP) only, there will always be 1
-    // workgroup writing final results to a given macro tile in C.
+    // In the case of non-atomic reduction or data-parallel only, there will always be 1 workgroup
+    // writing final results to a given macro tile in C.
     int num_wgs_per_tile = 1;
 
     // Otherwise, for atomics, multiple workgroups may be writing to the same macro tile in C.
     if(sk_ctas_ > 0 && ReductionStrategy == ck_tile::StreamKReductionStrategy::Atomic)
     {
-        //  If we have DP and SK tiles, this is DP+2TSK which guarantees at most 2 workgroups per
-        //  tile. We only need to check that dp_tiles is greater than zero since we know we have SK
-        //  workgroups.
-        if(dp_tiles_ > 0)
-        {
-            num_wgs_per_tile = 2;
-        }
-        else
-        {
-            ck_tile::index_t iters_per_sk_cta_non_zero = ck_tile::max(iters_per_sk_cta_, 1);
-            // Estimate the number of workgroups per macro tile.
-            num_wgs_per_tile = (iters_per_tile_ / iters_per_sk_cta_non_zero) +
-                               ((iters_per_tile_ % iters_per_sk_cta_non_zero) != 0);
-        }
+        ck_tile::index_t iters_per_sk_cta_non_zero = ck_tile::max(iters_per_sk_cta_, 1);
+        // Estimate the number of workgroups per macro tile.
+        num_wgs_per_tile = (iters_per_tile_ / iters_per_sk_cta_non_zero) +
+                           ((iters_per_tile_ % iters_per_sk_cta_non_zero) != 0);
     }
 
     return std::max(num_wgs_per_tile, 1);
@@ -248,12 +238,15 @@ StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>::estimate_
 template <typename BlockGemmShapeType,
           StreamKReductionStrategy ReductionStrategyType,
           bool Persistent>
-struct StreamKTilePartitioner;
+struct StreamKTilePartitioner_v2;
 
 // child class for Persistent Tile Partitioner
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
-StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>::StreamKTilePartitioner(
-    ck_tile::index_t m, ck_tile::index_t n, ck_tile::index_t k, ck_tile::index_t grid)
+StreamKTilePartitioner_v2<BlockGemmShapeType, ReductionStrategyType, true>::
+    StreamKTilePartitioner_v2(ck_tile::index_t m,
+                              ck_tile::index_t n,
+                              ck_tile::index_t k,
+                              ck_tile::index_t grid)
     : StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>(m, n, k, grid)
 { // inherit from base constructor
     dp_tiles_per_cta_ = this->dp_tiles_ / this->grid_;
@@ -262,8 +255,8 @@ StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>::StreamK
 
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
 CK_TILE_HOST auto
-StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>::grid_size() const noexcept
-    -> dim3
+StreamKTilePartitioner_v2<BlockGemmShapeType, ReductionStrategyType, true>::grid_size()
+    const noexcept -> dim3
 {
     if(extra_dp_tiles_ == 0)
     {
@@ -277,7 +270,7 @@ StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>::grid_si
 
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
 CK_TILE_HOST_DEVICE index_t
-StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>::get_dp_tiles_per_cta()
+StreamKTilePartitioner_v2<BlockGemmShapeType, ReductionStrategyType, true>::get_dp_tiles_per_cta()
     const noexcept
 {
     return dp_tiles_per_cta_;
@@ -285,7 +278,7 @@ StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>::get_dp_
 
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
 CK_TILE_HOST_DEVICE index_t
-StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>::get_extra_dp_tiles()
+StreamKTilePartitioner_v2<BlockGemmShapeType, ReductionStrategyType, true>::get_extra_dp_tiles()
     const noexcept
 {
     return extra_dp_tiles_;
@@ -293,8 +286,11 @@ StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>::get_ext
 
 // child class for Non-Persistent Tile Partitioner
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
-StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>::StreamKTilePartitioner(
-    ck_tile::index_t m, ck_tile::index_t n, ck_tile::index_t k, ck_tile::index_t grid)
+StreamKTilePartitioner_v2<BlockGemmShapeType, ReductionStrategyType, false>::
+    StreamKTilePartitioner_v2(ck_tile::index_t m,
+                              ck_tile::index_t n,
+                              ck_tile::index_t k,
+                              ck_tile::index_t grid)
     : StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>(m, n, k, grid)
 { // inherit from base constructor
     dp_ctas_            = this->dp_tiles_;
@@ -304,15 +300,15 @@ StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>::Stream
 
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
 CK_TILE_HOST auto
-StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>::grid_size() const noexcept
-    -> dim3
+StreamKTilePartitioner_v2<BlockGemmShapeType, ReductionStrategyType, false>::grid_size()
+    const noexcept -> dim3
 {
     return dim3(dp_ctas_ + this->get_sk_ctas(), 1, 1);
 }
 
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
 CK_TILE_HOST_DEVICE index_t
-StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>::get_dp_ctas()
+StreamKTilePartitioner_v2<BlockGemmShapeType, ReductionStrategyType, false>::get_dp_ctas()
     const noexcept
 {
     return dp_ctas_;
@@ -320,16 +316,16 @@ StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>::get_dp
 
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
 CK_TILE_HOST_DEVICE index_t
-StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>::get_dp_start_block_idx()
-    const noexcept
+StreamKTilePartitioner_v2<BlockGemmShapeType, ReductionStrategyType, false>::
+    get_dp_start_block_idx() const noexcept
 {
     return dp_start_block_idx_;
 }
 
 template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
 CK_TILE_HOST_DEVICE index_t
-StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>::get_sk_start_block_idx()
-    const noexcept
+StreamKTilePartitioner_v2<BlockGemmShapeType, ReductionStrategyType, false>::
+    get_sk_start_block_idx() const noexcept
 {
     return sk_start_block_idx_;
 }

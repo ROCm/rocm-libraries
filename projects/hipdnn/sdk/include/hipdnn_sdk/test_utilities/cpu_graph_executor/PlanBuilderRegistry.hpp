@@ -13,7 +13,6 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PointwisePlan.hpp>
 
-#include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanRegistrySignatureKey.hpp>
 
 namespace hipdnn_sdk::test_utilities
@@ -39,16 +38,13 @@ public:
     {
         initializeRegistry();
 
-        HIPDNN_LOG_INFO("Looking up plan builder for signature key: {}", key);
-
         auto it = _registry.find(key);
         if(it != _registry.end())
         {
             return *it->second;
         }
 
-        throw std::runtime_error(
-            fmt::format("No plan builder registered for signature key: {}", key));
+        throw std::runtime_error("No plan builder registered for the given signature key.");
     }
 
 private:

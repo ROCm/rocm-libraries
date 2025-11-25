@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 template <typename T>
 void csrrf_splitlu_checkBadArgs(rocblas_handle handle,
@@ -329,7 +328,7 @@ void csrrf_splitlu_getPerfData(rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
+    double start;
 
     if(profile > 0)
     {
@@ -347,13 +346,13 @@ void csrrf_splitlu_getPerfData(rocblas_handle handle,
                                                hptrT, hindT, hvalT, hptrL, hindL, hvalL, hptrU,
                                                hindU, hvalU);
 
-        timer.start(stream);
+        start = get_time_us_sync(stream);
         rocsolver_csrrf_splitlu(handle, n, nnzT, dptrT.data(), dindT.data(), dvalT.data(),
                                 dptrL.data(), dindL.data(), dvalL.data(), dptrU.data(),
                                 dindU.data(), dvalU.data());
-        timer.end(stream);
+        *gpu_time_used += get_time_us_sync(stream) - start;
     }
-    *gpu_time_used = timer.get_combined();
+    *gpu_time_used /= hot_calls;
 }
 
 template <typename T>
@@ -512,7 +511,7 @@ void testing_csrrf_splitlu(Arguments& argus)
                                   hptrUres, hindUres, hvalUres, &max_error);
 
     // collect performance data
-    if(argus.timing && hot_calls > 0)
+    if(argus.timing)
         csrrf_splitlu_getPerfData<T>(handle, n, nnzT, dptrT, dindT, dvalT, nnzL, dptrL, dindL, dvalL,
                                      nnzU, dptrU, dindU, dvalU, hptrT, hindT, hvalT, hptrL, hindL,
                                      hvalL, hptrU, hindU, hvalU, &gpu_time_used, &cpu_time_used,

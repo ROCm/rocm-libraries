@@ -145,14 +145,7 @@ struct CPU_UnitTestImplicitGemmCKUtil_NONE : CKArgParsingTest<StubbedCKArgs, Stu
 {
 };
 
-TEST_P(CPU_UnitTestImplicitGemmCKUtil_NONE, TestParsing)
-{
-#if MIOPEN_USE_COMPOSABLEKERNEL
-    this->TestParsing();
-#else
-    GTEST_SKIP();
-#endif
-};
+TEST_P(CPU_UnitTestImplicitGemmCKUtil_NONE, TestParsing) { this->TestParsing(); };
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_UnitTestImplicitGemmCKUtil_NONE,

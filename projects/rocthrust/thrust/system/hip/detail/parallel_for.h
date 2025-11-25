@@ -154,7 +154,8 @@ void THRUST_HOST_DEVICE parallel_for(execution_policy<Derived>& policy, F f, Siz
       status = hip_rocprim::synchronize_optional(policy);
       hip_rocprim::throw_on_error(status, "parallel_for: failed to synchronize");
     }
-#  if !__THRUST_HAS_HIPRT__
+
+    // CDP sequential impl:
     THRUST_DEVICE static void seq(execution_policy<Derived>& policy, F f, Size count)
     {
       (void) policy;
@@ -163,7 +164,6 @@ void THRUST_HOST_DEVICE parallel_for(execution_policy<Derived>& policy, F f, Siz
         f(idx);
       }
     }
-#  endif
   };
   // clang-format on
 

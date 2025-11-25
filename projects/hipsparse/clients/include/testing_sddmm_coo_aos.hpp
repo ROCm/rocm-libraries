@@ -41,8 +41,7 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-template <typename I, typename T>
-void testing_sddmm_coo_aos_bad_arg(const Arguments& argus)
+void testing_sddmm_coo_aos_bad_arg(void)
 {
 #if(!defined(CUDART_VERSION))
     int32_t              n         = 100;
@@ -193,7 +192,7 @@ hipsparseStatus_t testing_sddmm_coo_aos(Arguments argus)
     hipsparseOrder_t     orderA   = argus.orderA;
     hipsparseOrder_t     orderB   = argus.orderB;
     hipsparseIndexBase_t idx_base = argus.baseC;
-    hipsparseSDDMMAlg_t  alg      = argus.sddmm_alg;
+    hipsparseSDDMMAlg_t  alg      = static_cast<hipsparseSDDMMAlg_t>(argus.sddmm_alg);
     std::string          filename = argus.filename;
 
     // Index and data type

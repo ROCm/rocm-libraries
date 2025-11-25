@@ -45,7 +45,6 @@ private:
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _engineHeuristicDesc;
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _engineConfigDesc;
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _executionPlanDesc;
-    std::optional<int64_t> _preferredEngineId = std::nullopt;
 
     static std::shared_ptr<TensorAttributes> outputTensor(const std::string& name)
     {
@@ -109,9 +108,7 @@ private:
                     "No engine configurations available for the graph."};
         }
 
-        // Get only top hit if preferred engine id isn't set.
-        // Otherwise get all available engine configs to search for preferred id.
-        int64_t requiredCount = _preferredEngineId.has_value() ? availableEngineCount : 1;
+        int requiredCount = 1;
         std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>> engineConfigs;
         std::vector<hipdnnBackendDescriptor_t> engineConfigsShallow;
         for(size_t i = 0; i < static_cast<size_t>(requiredCount); ++i)
@@ -144,64 +141,10 @@ private:
                     "No engine configurations retrieved from the heuristic desc."};
         }
 
-        // Finalize and get ids for engine configs
-        std::vector<int64_t> engineIds(static_cast<size_t>(count), -1);
-        for(size_t i = 0; i < static_cast<size_t>(count); ++i)
-        {
-            auto engineConfigDesc = engineConfigsShallow[i];
-            RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(engineConfigDesc),
-                                      "Failed to finalize engine config descriptor");
-
-            hipdnnBackendDescriptor_t engineDesc = nullptr;
-            RETURN_ON_BACKEND_FAILURE(
-                hipdnnBackend()->backendGetAttribute(engineConfigDesc,
-                                                     HIPDNN_ATTR_ENGINECFG_ENGINE,
-                                                     HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                                     1,
-                                                     nullptr,
-                                                     &engineDesc),
-                "Failed to get engine from engine configuration descriptor.");
-
-            // Clean-up engineDesc once we no longer need it within this scope.
-            ScopedHipdnnBackendDescriptor scopedEngineDesc(engineDesc);
-
-            RETURN_ON_BACKEND_FAILURE(
-                hipdnnBackend()->backendGetAttribute(engineDesc,
-                                                     HIPDNN_ATTR_ENGINE_GLOBAL_INDEX,
-                                                     HIPDNN_TYPE_INT64,
-                                                     1,
-                                                     nullptr,
-                                                     &engineIds[i]),
-                "Failed to get engine id from engine descriptor.");
-        }
-
-        // Select engine config based on preferred ID or use first available
-        size_t selectedIndex = 0;
-        if(_preferredEngineId.has_value())
-        {
-            bool found = false;
-
-            for(size_t i = 0; i < static_cast<size_t>(count); ++i)
-            {
-
-                if(engineIds[i] == _preferredEngineId.value())
-                {
-                    selectedIndex = i;
-                    found = true;
-                    break;
-                }
-            }
-
-            if(!found)
-            {
-                HIPDNN_FE_LOG_WARN(
-                    "Preferred engine id {} not found, using top engine config instead.",
-                    _preferredEngineId.value());
-            }
-        }
-
-        HIPDNN_FE_LOG_INFO("Selected engine id {} for execution plan.", engineIds[selectedIndex]);
-        _engineConfigDesc = std::move(engineConfigs[selectedIndex]);
+        //TODO
+        // Add filtering and logic to select the best engine configuration that meets the requirements.
+        _engineConfigDesc = std::move(engineConfigs[0]);
+        engineConfigs.erase(engineConfigs.begin(), engineConfigs.begin() + 1);
 
         return {ErrorCode::OK, ""};
     }
@@ -491,7 +434,7 @@ public:
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
-    Error create_execution_plans(const std::vector<HeuristicMode>& modes
+    Error create_execution_plans(std::vector<HeuristicMode> const& modes
                                  = {HeuristicMode::FALLBACK})
     {
         HIPDNN_FE_LOG_INFO("Creating execution plans for graph {}", graph_attributes.get_name());
@@ -538,6 +481,9 @@ public:
     Error build_plans() // NOLINT(readability-identifier-naming)
     {
         HIPDNN_FE_LOG_INFO("Building plans for graph {}", graph_attributes.get_name());
+
+        RETURN_ON_BACKEND_FAILURE(hipdnnBackend()->backendFinalize(_engineConfigDesc->get()),
+                                  "Failed to finalize engine config descriptor");
 
         RETURN_ON_BACKEND_FAILURE(
             hipdnnBackend()->backendSetAttribute(_executionPlanDesc->get(),
@@ -965,13 +911,6 @@ public:
             std::make_shared<ConvolutionWgradNode>(std::move(attributes), graph_attributes));
 
         return dw;
-    }
-
-    // NOLINTBEGIN(readability-identifier-naming)
-    void set_preferred_engine_id_ext(std::optional<int64_t> engineId)
-    // NOLINTEND(readability-identifier-naming)
-    {
-        _preferredEngineId = engineId;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)

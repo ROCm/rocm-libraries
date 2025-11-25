@@ -43,7 +43,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_bsric02_bad_arg(const Arguments& argus)
+void testing_bsric02_bad_arg(void)
 {
 #if(!defined(CUDART_VERSION))
     int                    mb        = 100;

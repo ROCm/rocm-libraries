@@ -37,10 +37,6 @@ tags
 .vscode
 .cline_storage
 
-#code ql
-scripts*/codeql-*/
-scripts*/*_codeql_*/
-
 # build-in-source directory
 
 # emacs temporary/backup files

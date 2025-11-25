@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, bool GEQLF, typename T, typename U>
 void geql2_geqlf_checkBadArgs(const rocblas_handle handle,
@@ -257,7 +256,7 @@ void geql2_geqlf_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    rocsolver_timer timer;
+    double start;
 
     if(profile > 0)
     {
@@ -273,12 +272,12 @@ void geql2_geqlf_getPerfData(const rocblas_handle handle,
     {
         geql2_geqlf_initData<false, true, T>(handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
-        timer.start(stream);
+        start = get_time_us_sync(stream);
         rocsolver_geql2_geqlf(STRIDED, GEQLF, handle, m, n, dA.data(), lda, stA, dIpiv.data(), stP,
                               bc);
-        timer.end(stream);
+        *gpu_time_used += get_time_us_sync(stream) - start;
     }
-    *gpu_time_used = timer.get_combined();
+    *gpu_time_used /= hot_calls;
 }
 
 template <bool BATCHED, bool STRIDED, bool GEQLF, typename T>
@@ -376,7 +375,7 @@ void testing_geql2_geqlf(Arguments& argus)
                                                     hARes, hIpiv, &max_error);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             geql2_geqlf_getPerfData<STRIDED, GEQLF, T>(
                 handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);
@@ -413,7 +412,7 @@ void testing_geql2_geqlf(Arguments& argus)
                                                     hARes, hIpiv, &max_error);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             geql2_geqlf_getPerfData<STRIDED, GEQLF, T>(
                 handle, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf);

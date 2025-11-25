@@ -101,10 +101,6 @@ struct _rocsparse_handle
     // blas handle
     rocsparse::blas_handle blas_handle;
 
-    // Temporary storage for spmv descriptor during csrmv calls
-    // This allows template functions to access pre-extracted arrays
-    void* temp_spmv_descr = nullptr;
-
     // logging streams
     std::ofstream log_trace_ofs;
     std::ofstream log_bench_ofs;

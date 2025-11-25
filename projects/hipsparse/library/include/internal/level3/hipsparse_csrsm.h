@@ -530,6 +530,9 @@ hipsparseStatus_t hipsparseZcsrsm2_analysis(hipsparseHandle_t         handle,
 *              \p transA == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE,
 *              \p transB == \ref HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE or
 *              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
+*
+*  \par Example
+*  \snippet example_hipsparse_csrsm2.cpp doc example
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

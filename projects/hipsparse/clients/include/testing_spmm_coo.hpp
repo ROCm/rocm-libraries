@@ -41,8 +41,7 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-template <typename I, typename T>
-void testing_spmm_coo_bad_arg(const Arguments& argus)
+void testing_spmm_coo_bad_arg(void)
 {
 #if(!defined(CUDART_VERSION))
     int32_t              n         = 100;
@@ -201,7 +200,7 @@ hipsparseStatus_t testing_spmm_coo(Arguments argus)
     hipsparseOrder_t     orderB   = argus.orderB;
     hipsparseOrder_t     orderC   = argus.orderC;
     hipsparseIndexBase_t idx_base = argus.baseA;
-    hipsparseSpMMAlg_t   alg      = argus.spmm_alg;
+    hipsparseSpMMAlg_t   alg      = static_cast<hipsparseSpMMAlg_t>(argus.spmm_alg);
     std::string          filename = argus.filename;
 
 #if(defined(CUDART_VERSION))

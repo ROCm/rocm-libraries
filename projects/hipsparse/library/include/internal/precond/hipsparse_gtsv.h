@@ -163,6 +163,9 @@ hipsparseStatus_t hipsparseZgtsv2_bufferSizeExt(hipsparseHandle_t       handle,
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ldb, \p dl, \p d,
 *              \p du, \p B or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*
+*  \par Example
+*  \snippet example_hipsparse_gtsv.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

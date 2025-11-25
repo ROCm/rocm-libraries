@@ -1,6 +1,3 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT
-
 #pragma once
 
 TEST_P(RRR_BF16_BF16_BF16, MNKPadded)

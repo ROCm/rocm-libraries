@@ -16,11 +16,7 @@ project in the ROCm ecosystem, providing optimized kernels for downstream librar
 The parts of Tensile that are written in Python consist of applications that are collectively responsible
 for generating optimized kernels and library objects to access these kernels from client code.
 
-The code is open source and hosted at `<https://github.com/ROCm/rocm-libraries/tree/develop/shared/tensile>`_.
-
-.. note::
-
-  The Tensile repository for ROCm 7.0 and earlier is located at `<https://github.com/ROCm/tensile>`_.
+The code is open source and hosted at https://github.com/ROCm/Tensile
 
 .. grid:: 2
   :gutter: 2

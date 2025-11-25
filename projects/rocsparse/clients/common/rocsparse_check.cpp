@@ -215,12 +215,6 @@ void unit_check_enum(const rocsparse_indextype a, const rocsparse_indextype b)
     ASSERT_TRUE(a == b);
 }
 
-template <>
-void unit_check_enum(const rocsparse_status a, const rocsparse_status b)
-{
-    ASSERT_TRUE(a == b);
-}
-
 #define MAX_TOL_MULTIPLIER 4
 
 template <typename T>

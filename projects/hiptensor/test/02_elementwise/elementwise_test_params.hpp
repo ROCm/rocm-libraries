@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include <iostream>
+#include <tuple>
 #include <vector>
 
 #include <hiptensor/hiptensor.h>
@@ -138,3 +138,4 @@ namespace hiptensor
     };
 
 } // namespace hiptensor
+

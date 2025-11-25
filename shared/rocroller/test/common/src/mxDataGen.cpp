@@ -32,9 +32,9 @@ namespace rocRoller
                     const float           min,
                     const float           max,
                     int                   blockScaling,
-                    const DataInitMode    initMode)
+                    const DataPattern     pattern)
     {
-        opts.initMode     = initMode;
+        opts.pattern      = pattern;
         opts.min          = min;
         opts.max          = max;
         opts.blockScaling = blockScaling;

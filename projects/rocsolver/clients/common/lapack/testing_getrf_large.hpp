@@ -34,7 +34,6 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
-#include "common/misc/rocsolver_timer.hpp"
 
 /*
  * ===========================================================================
@@ -415,7 +414,7 @@ void testing_getrf_large(Arguments& argus)
                                                     hInfo, hInfoRes, &max_error, argus.singular);
 
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             getrf_large_getPerfData<STRIDED, GETRF, T>(
                 handle, n, n, dA, lda, stA, dIpiv, stP, dInfo, bc, hA, hIpiv, hInfo, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf,
@@ -456,7 +455,7 @@ void testing_getrf_large(Arguments& argus)
 
         // The perf function must return NAN
         // collect performance data
-        if(argus.timing && hot_calls > 0)
+        if(argus.timing)
             getrf_large_getPerfData<STRIDED, GETRF, T>(
                 handle, n, n, dA, lda, stA, dIpiv, stP, dInfo, bc, hA, hIpiv, hInfo, &gpu_time_used,
                 &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels, argus.perf,

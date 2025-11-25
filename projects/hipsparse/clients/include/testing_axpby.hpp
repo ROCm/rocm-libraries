@@ -38,8 +38,7 @@
 
 using namespace hipsparse_test;
 
-template <typename I, typename T>
-void testing_axpby_bad_arg(const Arguments& argus)
+void testing_axpby_bad_arg(void)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
 

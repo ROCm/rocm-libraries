@@ -666,7 +666,8 @@ namespace TensileLite
 
         numWG.x = CeilDivide(numWG.x, sizeMapping.macroTile.x);
         numWG.y = CeilDivide(numWG.y, sizeMapping.macroTile.y);
-        numWG.y *= gsu;
+        if(sizeMapping.streamK == 0)
+            numWG.y *= gsu;
 
         size_t problemTiles = numWG.x * numWG.y;
         if(sizeMapping.persistentKernelAlongBatch || sizeMapping.streamK != 0)

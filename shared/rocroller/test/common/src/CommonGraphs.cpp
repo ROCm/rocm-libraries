@@ -349,19 +349,9 @@ namespace rocRollerTest::Graphs
         m_problem.unrollY = unrollY;
     }
 
-    void GEMM::setStreamK(StreamKMode streamKMode)
-    {
-        m_problem.streamK = streamKMode;
-    }
-
     void GEMM::setProblem(GEMMProblem const& problem)
     {
         m_problem = problem;
-    }
-
-    int GEMM::getFlattenedWorkgroupSize() const
-    {
-        return m_problem.workgroupSizeX * m_problem.workgroupSizeY;
     }
 
     CommandParametersPtr GEMM::getCommandParameters() const

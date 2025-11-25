@@ -52,11 +52,6 @@ endif()
 # Target link libraries
 target_link_libraries(hipsparse-bench PRIVATE roc::hipsparse)
 
-# Link against stdc++fs for std::experimental::filesystem support
-if(NOT WIN32)
-  target_link_libraries(hipsparse-bench PRIVATE stdc++fs)
-endif()
-
 # Add OpenMP if available
 if(OPENMP_FOUND AND THREADS_FOUND)
   target_link_libraries(hipsparse-bench PRIVATE OpenMP::OpenMP_CXX ${OpenMP_CXX_FLAGS})

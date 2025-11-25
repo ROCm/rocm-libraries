@@ -669,31 +669,8 @@ void batchNormPerActHostBwdTrain(const tensor<XDataType>& x_input,
                 dxhat    = 0.;
                 dxhathat = 0.;
 
-                if(!savedMean.data.empty())
-                {
-                    mean       = savedMean(0, cidx, row, column);   // HxW elements
-                    elemInvVar = savedInvVar(0, cidx, row, column); // HxW elements
-                }
-                else
-                {
-                    double variance_accum = 0.;
-                    double mean_accum     = 0.;
-
-                    // process the batch per channel
-                    for(int bidx = 0; bidx < n_batch; bidx++)
-                    { // via mini_batch
-                        auto inval = static_cast<double>(x_input(bidx, cidx, row, column));
-                        mean_accum += inval;
-                        variance_accum += inval * inval;
-                    } // end for (n)
-
-                    mean_accum /= n;
-                    variance_accum /= n;
-                    variance_accum += (-mean_accum * mean_accum);
-
-                    mean       = mean_accum;
-                    elemInvVar = 1.0 / sqrt(variance_accum);
-                }
+                mean       = savedMean(0, cidx, row, column);   // HxW elements
+                elemInvVar = savedInvVar(0, cidx, row, column); // HxW elements
 
                 for(int bidx = 0; bidx < n_batch; bidx++)
                 { // via mini_batch

@@ -21,7 +21,73 @@
  *
  * ************************************************************************ */
 
-#include "test.hpp"
 #include "testing_gtsv2_strided_batch.hpp"
 
-TEST_ROUTINE(gtsv2_strided_batch, precond, arg.M, arg.batch_count);
+#include <hipsparse.h>
+#include <string>
+
+typedef std::tuple<int, int> gtsv2_strided_batch_tuple;
+
+int gtsv2_strided_batch_M_range[]           = {512};
+int gtsv2_strided_batch_batch_count_range[] = {512};
+
+class parameterized_gtsv2_strided_batch : public testing::TestWithParam<gtsv2_strided_batch_tuple>
+{
+protected:
+    parameterized_gtsv2_strided_batch() {}
+    virtual ~parameterized_gtsv2_strided_batch() {}
+    virtual void SetUp() {}
+    virtual void TearDown() {}
+};
+
+Arguments setup_gtsv2_strided_batch_arguments(gtsv2_strided_batch_tuple tup)
+{
+    Arguments arg;
+    arg.M           = std::get<0>(tup);
+    arg.batch_count = std::get<1>(tup);
+    arg.timing      = 0;
+    return arg;
+}
+
+TEST(gtsv2_strided_batch_bad_arg, gtsv2_strided_batch_float)
+{
+    testing_gtsv2_strided_batch_bad_arg<float>();
+}
+
+TEST_P(parameterized_gtsv2_strided_batch, gtsv2_strided_batch_float)
+{
+    Arguments arg = setup_gtsv2_strided_batch_arguments(GetParam());
+
+    hipsparseStatus_t status = testing_gtsv2_strided_batch<float>(arg);
+    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+}
+
+TEST_P(parameterized_gtsv2_strided_batch, gtsv2_strided_batch_double)
+{
+    Arguments arg = setup_gtsv2_strided_batch_arguments(GetParam());
+
+    hipsparseStatus_t status = testing_gtsv2_strided_batch<double>(arg);
+    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+}
+
+TEST_P(parameterized_gtsv2_strided_batch, gtsv2_strided_batch_float_complex)
+{
+    Arguments arg = setup_gtsv2_strided_batch_arguments(GetParam());
+
+    hipsparseStatus_t status = testing_gtsv2_strided_batch<hipComplex>(arg);
+    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+}
+
+TEST_P(parameterized_gtsv2_strided_batch, gtsv2_strided_batch_double_complex)
+{
+    Arguments arg = setup_gtsv2_strided_batch_arguments(GetParam());
+
+    hipsparseStatus_t status = testing_gtsv2_strided_batch<hipDoubleComplex>(arg);
+    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    gtsv2_strided_batch,
+    parameterized_gtsv2_strided_batch,
+    testing::Combine(testing::ValuesIn(gtsv2_strided_batch_M_range),
+                     testing::ValuesIn(gtsv2_strided_batch_batch_count_range)));
