@@ -193,7 +193,7 @@ class TestCustomScheduleValidation:
         """
 
         sched = ScheduleInfo(
-            None, None, {"P": [[3, 2, 1]]}, None, None, None, None, None
+            None, None, {"P": [[3, 2, 1]]}, None, None, None, None
         )
         status, message = verifyAscendingOrder(sched)
 
@@ -202,7 +202,7 @@ class TestCustomScheduleValidation:
         assert message == expected
 
         sched = ScheduleInfo(
-            None, None, {"P": [[1, 1, 2]]}, None, None, None, None, None
+            None, None, {"P": [[1, 1, 2]]}, None, None, None, None
         )
         status, message = verifyAscendingOrder(sched)
         assert status == True
@@ -216,19 +216,18 @@ class TestCustomScheduleValidation:
         invalid_schedule = {"P": [[3, 2, 1]]}
 
         # No verification message means that the schedule info is considered valid.
-        status, message = ScheduleInfo(
-            None, None, invalid_schedule, None, None, None, None, skipValidation=True
-        ).isValid({})
+        scheduleInfo = ScheduleInfo(
+            None, None, invalid_schedule, None, None, None, None
+        )
+        scheduleInfo.disableValidation()
+        status, message = scheduleInfo.isValid({"kernel" : {"DepthU": 42}})
         assert status == True
+        assert message == "CMS validation explicitly disabled. Running on kernel with MT0xMT1xDepthU = ?x?x42"
 
         # A non-empty verification message means that the schedule info is considered invalid.
         status, message = ScheduleInfo(
-            None, None, invalid_schedule, None, None, None, None, skipValidation=False
+            None, None, invalid_schedule, None, None, None, None
         ).isValid({})
         assert status == False
-
-
-
-
 
 

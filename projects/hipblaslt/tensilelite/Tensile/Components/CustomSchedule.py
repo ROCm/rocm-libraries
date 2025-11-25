@@ -77,7 +77,7 @@ def verifyAscendingOrder(scheduleInfo, context: Dict = {}):
 class ScheduleInfo:
     numCodePaths: int
     numMfma: int
-    skipValidation: bool
+    __skipValidation__: bool
 
     def __init__(
         self,
@@ -87,8 +87,7 @@ class ScheduleInfo:
         syncCode,
         nglshift,
         nllshift,
-        mfmaReorder=[],
-        skipValidation=False,
+        mfmaReorder=[]
     ):
         self.numCodePaths = numCodePaths
         self.numMfma = numMfma
@@ -97,12 +96,15 @@ class ScheduleInfo:
         self.nglshift = nglshift  # vmcnt shift for noglobalload loop
         self.nllshift = nllshift  # vmcnt shift for nolocalload loop
         self.mfmaReorder = mfmaReorder
-        self.skipValidation = skipValidation
+        self.__skipValidation__ = False
 
-        # The set of validation rules to inside `isValid`.
+        # The set of validation rules to run inside `isValid`.
         self.rules: List[Callable[[ScheduleInfo, dict], [bool, str]]] = [
             verifyAscendingOrder
         ]
+
+    def disableValidation(self):
+        self.__skipValidation__ = True
 
     def isValid(self, context: Dict):
         """
@@ -113,13 +115,19 @@ class ScheduleInfo:
         is valid. It may be a false negative.
 
         Note 2: if False is returned, this is not proof that the schedule
-        is invalid. It may be a false positive. `skipValidation` can be
-        used to avoid validation in this case.
+        is invalid. It may be a false positive.
         """
 
-        if self.skipValidation:
+
+        if self.__skipValidation__:
+            mt0 = context.get("kernel", {}).get("MacroTile0", "?")
+            mt1 = context.get("kernel", {}).get("MacroTile1", "?")
+            du  = context.get("kernel", {}).get("DepthU", "?")
+            message = f"CMS validation explicitly disabled. Running on kernel with MT0xMT1xDepthU = {mt0}x{mt1}x{du}"
+            print(f"WARNING: {message}")
+
             # All rules bypassed, considered valid.
-            return True, ""
+            return True, message
 
         for rule in self.rules:
             status, message = rule(self, context)
@@ -387,7 +395,7 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
 
     if isTN(kernel) and TLDS == 1:
 
-        nglshift = nllshift = 11 
+        nglshift = nllshift = 11
         syncTable = [
                     -1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment=""),
                     7, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment=""),
@@ -403,11 +411,11 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
 
                     42, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Only global reads for this iter"),
                     42, SBarrier(comment="")]
- 
+
         syncCode = syncTable[1::2]
         optSchedule = {
             'SYNC'   : [syncTable[::2]],
-            'GRIncA' : [[1,1,2,2,3,3,3,4,4]], 
+            'GRIncA' : [[1,1,2,2,3,3,3,4,4]],
             'GRIncB' : [[5,5,6,6,6,7,7,8,8]],
             'LRA0'   : [[1,2,3,4,5,6,  8,10],
                         [1,2,3,4,5,6,  9,11]],
@@ -419,8 +427,8 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
                         [17,17,19,19,21,21,23,23,25,25,27,27,29,29,31,31]],
             'LRA1'   : [[36,37,38,39,40,41,42,43]],
             'LRB1'   : [[44,45,46]],
-            'LRSA'   : [[30]], # this must come before next reads of A X0 - so the LRA1 
-            'LRSB'   : [[31]], # this must come before next reads of A X0 - so the LRB1 
+            'LRSA'   : [[30]], # this must come before next reads of A X0 - so the LRA1
+            'LRSB'   : [[31]], # this must come before next reads of A X0 - so the LRB1
             'LWSA'   : [[32]],  # swap after last gr a
             'LWSB'   : [[42]],  # swap after last gr b
             'LCC'   : [[47, 47]],
@@ -1096,11 +1104,11 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
         ]
 
         nglshift = nllshift = 34
-        
+
     elif isNN(kernel) and useLDSTr and TLDS==1:
         kernel["SwapGlobalReadOrder"] = True
         nglshift = nllshift = 0
-        
+
         optSchedule = {
             # last index of producer <SYNC> first index of consumer
             # SYNC[0] = -1 to align all waves at the start of the loop
@@ -1113,7 +1121,7 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
             # LRB0 scheduled after the A fence, overlapping with GRA/GRB
             'LRB0': [[24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 35]],
 
-            # Address increments for GR 
+            # Address increments for GR
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
             'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
 
@@ -1131,7 +1139,7 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
                     64, 64, 66, 66, 67, 67, 69, 69,
                     71, 71, 73, 73, 74, 74, 76, 76,
                     78, 78, 79, 79]],
-            
+
             # from epilogue in the default schedule
             # these are not updated in the updated schedule
             'LRSA': [[50]],
@@ -1142,19 +1150,19 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
             'LRB1': [[83, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]], # 13
             'LCC':  [[100, 100]],
         }
-        
+
         syncCode = [
             SWaitCnt(dscnt=12, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LR/LW"),
             SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="ensure all previous LRA1/LRB1 done before early MFMA use"),
             SWaitCnt(dscnt=10, vlcnt=-1, vscnt=-1, comment="ensure all previous LRA1/LRB1 done before early MFMA use"),
 
-            
+
             # A fence: all LRA0 are done before DTL writes from the first GR stream startign at 23 (swapped)
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before first DTL writes"),
             # barrier after LRA0, before first global DTL phase at 23
             SBarrier(comment="barrier after LRA0 , before GR at 23"),
 
-            # B fence : all LRB0 are done before second DTL stream 
+            # B fence : all LRB0 are done before second DTL stream
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0 to complete before second DTL writes"),
             # barrier after LRB0 before second global stream at 36
             SBarrier(comment="barrier after LRB0, before GR at 36"),
@@ -1164,7 +1172,7 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
             # final barrier : all waves; make next-tile LDS visible to LRA1/LRB1
             SBarrier(comment="final barrier before LRA1/LRB1 (at 83)"),
         ]
-        
+
         nglshift = nllshift = 34
     else:
         return False, None
@@ -1356,7 +1364,7 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
             SBarrier(comment=""),
             SWaitCnt(dscnt=-1, vlcnt=38, vscnt=-1, comment="wait for previous set of GRB"),
             SBarrier(comment="")
-        ]   
+        ]
         numMfma = 120
         nglshift = nllshift = len(optSchedule["GRA"][0])/2 + len(optSchedule["GRB"][0])/2
     else:
