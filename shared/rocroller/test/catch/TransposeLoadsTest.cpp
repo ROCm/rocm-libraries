@@ -607,10 +607,14 @@ namespace TransposeLoadsTest
 
         auto wavetile = GENERATE(std::make_pair(16, 128), std::make_pair(32, 64));
         auto context  = TestContext::ForTestDevice();
-        REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::ds_read_b64_tr_b16,
-                                GPUCapability::ds_read_b64_tr_b8,
-                                GPUCapability::ds_read_b96_tr_b6,
-                                GPUCapability::ds_read_b64_tr_b4);
+        if(!(context->targetArchitecture().HasCapability(GPUCapability::ds_read_b64_tr_b16)
+             || context->targetArchitecture().HasCapability(GPUCapability::ds_read_b64_tr_b8)
+             || context->targetArchitecture().HasCapability(GPUCapability::ds_read_b96_tr_b6)
+             || context->targetArchitecture().HasCapability(GPUCapability::ds_read_b64_tr_b4)))
+        {
+            SKIP("Architecture " + context->targetArchitecture().target().toString()
+                 + " does not support transpose loads");
+        }
 
         SECTION("For each datatype and unalignedVGPRs option")
         {
