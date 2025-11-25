@@ -35,6 +35,7 @@
 #include "rocsparse_ellmv.hpp"
 #include "rocsparse_sellmv.hpp"
 #include "rocsparse_spmv.hpp"
+#include "rocsparse_spmv_helpers.h"
 
 // Include the helper function
 #include "rocsparse_csrmv_helpers.cpp"
@@ -1376,7 +1377,7 @@ catch(...)
 // LCOV_EXCL_STOP
 
 // Helper functions for accessing pre-extracted arrays from template files
-bool rocsparse_spmv_has_device_arrays(void* spmv_descr_ptr)
+bool rocsparse::spmv_has_device_arrays(void* spmv_descr_ptr)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -1389,7 +1390,7 @@ bool rocsparse_spmv_has_device_arrays(void* spmv_descr_ptr)
 
 // Template helper functions for accessing pre-extracted arrays from template files
 template <typename T>
-T* rocsparse_spmv_get_gamma_device_array(void* spmv_descr_ptr)
+T* rocsparse::spmv_get_gamma_device_array(void* spmv_descr_ptr)
 {
     if(!spmv_descr_ptr)
         return nullptr;
@@ -1399,7 +1400,7 @@ T* rocsparse_spmv_get_gamma_device_array(void* spmv_descr_ptr)
 }
 
 template <typename Z>
-const Z** rocsparse_spmv_get_z_array(void* spmv_descr_ptr)
+const Z** rocsparse::spmv_get_z_array(void* spmv_descr_ptr)
 {
     if(!spmv_descr_ptr)
         return nullptr;
@@ -1410,10 +1411,10 @@ const Z** rocsparse_spmv_get_z_array(void* spmv_descr_ptr)
 
 // Macro for gamma device array ETI
 #define INSTANTIATE_GAMMA_DEVICE_ARRAY(T) \
-    template T* rocsparse_spmv_get_gamma_device_array<T>(void*);
+    template T* rocsparse::spmv_get_gamma_device_array<T>(void*);
 
 // Macro for z array ETI
-#define INSTANTIATE_Z_ARRAY(T) template const T** rocsparse_spmv_get_z_array<T>(void*);
+#define INSTANTIATE_Z_ARRAY(T) template const T** rocsparse::spmv_get_z_array<T>(void*);
 
 // ETI for gamma device array
 INSTANTIATE_GAMMA_DEVICE_ARRAY(float)
