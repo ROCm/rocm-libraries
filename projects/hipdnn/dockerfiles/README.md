@@ -38,6 +38,11 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 > [!NOTE]
 > Prebuilt mode downloads pre-compiled binaries from TheRock nightly builds (much faster)
 
+> [!NOTE]
+> There is currently an issue with using the prebuilt binaries with the gfx90X ASIC family. Refer to this GitHub issue for more details:
+https://github.com/ROCm/TheRock/issues/2179
+
+
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `THEROCK_GIT_TAG`<br>_(deprecated)_ | `7.0.0rc20250909` | Build tag for [nightly tarballs](https://therock-nightly-tarball.s3.amazonaws.com/). Used to create the precompiled binaries download filename key: `therock-dist-linux-$THEROCK_ASIC-dcgpu-$THEROCK_GIT_TAG.tar.gz`.<br>Alternatively, specify the full prebuilt ID using `THEROCK_PREBUILT_ID`, or the full tarball name using `THEROCK_TARBALL`, below. |

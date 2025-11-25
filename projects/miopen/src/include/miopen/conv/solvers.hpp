@@ -4524,15 +4524,13 @@ struct PerformanceConfigHipImplicitGemm3DGroupFwdXdlops
     MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
     MIOPEN_INTERNALS_EXPORT bool
     operator==(const PerformanceConfigHipImplicitGemm3DGroupFwdXdlops& other) const;
-    bool UseTF32() const { return use_tf32; }
 
 private:
-    template <typename DataType, typename ComputeType = DataType>
-    bool Init(const miopen::conv::ProblemDescription&);
-    template <typename DataType, typename ComputeType = DataType>
+    template <typename DataType>
+    void Init(const miopen::conv::ProblemDescription&);
+    template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
     void InitValidKernels(const miopen::conv::ProblemDescription& problem);
-    mutable bool use_tf32 = false;
 };
 
 struct ConvHipImplicitGemm3DGroupFwdXdlops final
@@ -4569,7 +4567,7 @@ struct ConvHipImplicitGemm3DGroupFwdXdlops final
     bool MayNeedWorkspace() const override { return true; }
 
 private:
-    template <typename DataType, typename ComputeType = DataType>
+    template <typename DataType>
     bool CheckCKApplicability(const miopen::conv::ProblemDescription&) const;
 };
 

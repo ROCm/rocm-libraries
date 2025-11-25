@@ -37,6 +37,16 @@ struct PerfHelper
     // hold the min, max, mean, median, and standard deviation
     std::tuple<T, T, double, double, double> gpuStats;
 
+    // number of warmup runs
+    int numWarmupRuns = NUM_WARMUP_RUNS;
+
+    // number of performance runs
+    int numPerfRuns = NUM_PERF_RUNS;
+
+    // Setters for number of runs
+    void setWarmupRuns(int n) { numWarmupRuns = n; }
+    void setPerfRuns(int n) { numPerfRuns = n; }
+
     static T perf_min(const std::vector<T>& data)
     {
         if(data.empty())
@@ -112,14 +122,40 @@ struct PerfHelper
         // If the file was just created (i.e., its size is 0), write the header.
         if(miopen::fs::file_size(filename) == 0)
         {
-            file << "KernelAndTestInfo,min_exec_time_ratio,max_exec_time_ratio,mean_exec_time_"
-                    "ratio,median_exec_time_ratio,SD_ocl,SD_hip\n";
+            if(kernelTestStats.size() == 1)
+            {
+                file << "KernelAndTestInfo,min_exec_time (ms),max_exec_time (ms),mean_exec_time "
+                        "(ms),median_exec_time (ms),SD_exec_time (ms)\n";
+            }
+            else
+            {
+                file << "KernelAndTestInfo,min_exec_time_ratio,max_exec_time_ratio,mean_exec_time_"
+                        "ratio,median_exec_time_ratio,SD_reference (ms),SD_actual (ms)\n";
+            }
         }
 
-        // if the number of entries in the kernelTestStats vector is odd, throw an exception
-        if(kernelTestStats.size() % 2 != 0)
+        // if the number of entries in the kernelTestStats vector is not 1 and not even, throw an
+        // exception
+        if((kernelTestStats.size() != 1) && (kernelTestStats.size() % 2 != 0))
         {
-            throw std::runtime_error("The number of entries in the kernelTestStats vector is odd");
+            throw std::runtime_error(
+                "The number of entries in the kernelTestStats vector is not 1 and not even");
+        }
+
+        // if the number of entries in the kernelTestStats vector is 1
+        if(kernelTestStats.size() == 1)
+        {
+            auto& element = kernelTestStats[0];
+            // write the perf data to the file
+            file << std::get<0>(element) + test_info << "," // KernelAndTestInfo
+                 << std::get<1>(element) << ","             // min_exec_time
+                 << std::get<2>(element) << ","             // max_exec_time
+                 << std::get<3>(element) << ","             // mean_exec_time
+                 << std::get<4>(element) << ","             // median_exec_time
+                 << std::get<5>(element)                    // SD_exec_time
+                 << "\n";
+            file.close();
+            return;
         }
 
         // Calculate the half size of the kernelTestStats vector
@@ -158,7 +194,7 @@ struct PerfHelper
                   Args&&... args)
     {
         // Get kernels matching the kernel_name and network_config from the cache
-        auto&& kernels = handle.GetKernels(kernel_name, network_config);
+        auto kernels = handle.GetKernelsImpl(kernel_name, network_config);
         // Ensure we have at least one kernel
         assert(!kernels.empty());
         // Vector to hold the execution times
@@ -170,17 +206,19 @@ struct PerfHelper
         }
         else
         {
-            handle.EnableProfiling(); // Enable profiling
-            handle.ResetKernelTime(); // for good measure?
+            handle.EnableProfiling(true); // Enable profiling
+            handle.ResetKernelTime();     // for good measure?
         }
         // Optionally ignore the first few runs to allow for warm-up
-        for(size_t i = 0; i < NUM_PERF_RUNS + NUM_WARMUP_RUNS; i++)
+        for(size_t i = 0; i < numWarmupRuns + numPerfRuns; i++)
         {
             // Execute the kernel
-            kernels.front()(std::forward<Args>(args)...);
+            handle.Run(kernels.front())(std::forward<Args>(args)...);
             // Append the elapsed time to the vector
-            if(i >= NUM_WARMUP_RUNS)
+            if(i >= numWarmupRuns)
+            {
                 elapsedTime_ms.push_back(handle.GetKernelTime());
+            }
             handle.ResetKernelTime();
         }
 
