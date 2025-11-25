@@ -252,7 +252,7 @@ Tests:
   stride_scale: [ 1 ]
   batch_count: [ 3 ]
   graph_test: true
-  os_flags: [ Linux ]
+  os_flags: [ LINUX ]
 
 - name: trsv_repeatability_check
   category: stress
