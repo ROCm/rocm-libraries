@@ -1102,32 +1102,30 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         numMfma = 120
         kernel["SwapGlobalReadOrder"] = False
         optSchedule = {
-            'SYNC': [[-1, 5, 26, 26, 35, 35, 59, 71, 71]],
+            'SYNC': [[-1, 5, 26, 26, 35, 35, 71, 71]],
             'LRA0': [[0, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 16]],
             'GRIncA': [[9, 9, 9, 11, 11, 11, 13, 13, 13]],
             'LRB0': [[1, 20, 21, 22, 23, 25, 27, 28, 29, 31]],
             'GRIncB': [[17, 17, 17, 18, 18, 18, 19, 19, 19]],
-            'GRA': [[25, 25, 27, 27, 29, 29, 31, 31, 33, 33, 36, 36]],
+            'GRA': [[27, 27, 29, 29, 31, 31, 33, 33, 36, 36, 38, 38]],
             'GRB': [[53, 53, 58, 58, 63, 63, 67, 67, 72, 72, 77, 77, 82, 82, 86, 86, 91, 91, 96, 96]],
             'LRSA': [[58]],
             'LRSB': [[58]],
-            'LWSA': [[96]],
-            'LWSB': [[96]],
+            'LWSA': [[95]],
+            'LWSB': [[95]],
             'LRA1': [[72, 74, 76, 78, 80, 82, 84, 87, 90, 92, 98, 100]],
             'LRB1': [[99, 106, 107, 108, 109, 110, 111, 112, 113, 114]],
             'LCC': [[118, 119]]
         }
         syncCode = [
-            SWaitCnt(dscnt=9, vlcnt=-1, vscnt=-1, comment="wait for all LRA0 and one items from LRB0 before starting the sub-iteration"),
+            SWaitCnt(dscnt=9, vlcnt=-1, vscnt=-1, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration"),
 
-            SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for the rest of LRB0 to complete"),
+            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for the rest of LRB1 to complete"),
 
             SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for all LRA0 to complete before GRA start"),
             SBarrier(comment=""),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRB0 to complete before GRB start"),
             SBarrier(comment=""),
-
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA1, LRB1 before starting next sub-iteration"),
 
             SWaitCnt(dscnt=-1, vlcnt=16, vscnt=-1, comment="wait for previous set of global reads"),
             SBarrier(comment="")
