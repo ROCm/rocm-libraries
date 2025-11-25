@@ -36,7 +36,7 @@ if(ROCWMMA_CODE_COVERAGE)
     add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
     add_link_options(-fprofile-instr-generate)
 endif()
-add_link_options(-mcmodel=large)
+add_link_options(-mcmodel=large -Wl,--gc-sections)
 
 # Test/benchmark requires additional dependencies
 if(ROCWMMA_USE_SYSTEM_GOOGLETEST)
@@ -67,6 +67,12 @@ else()
 
   # Fetch the content using default details
   set(ROCM_DISABLE_CHECKS TRUE)
+  if(WIN32 AND BUILD_SHARED_LIBS_OLD)
+    # We build gtest as a static lib, but the test binaries are built as shared
+    # libraries.  Force gtest to link against a shared (DLL) version of the C
+    # run-time library.
+    set(gtest_force_shared_crt ON CACHE BOOL "Use shared (DLL) run-time library even when Google Test is built as static lib." FORCE)
+  endif()
   FetchContent_MakeAvailable(googletest)
   set(ROCM_DISABLE_CHECKS FALSE)
 
@@ -110,7 +116,8 @@ function(add_rocwmma_test TEST_TARGET TEST_SOURCE)
   target_link_libraries(${TEST_TARGET} rocwmma GTest::gtest)
   target_link_libraries(${TEST_TARGET} OpenMP::OpenMP_CXX "-L${HIP_CLANG_ROOT}/lib")
   if(UNIX)
-    target_link_libraries(${TEST_TARGET} "-Wl,-rpath='\$$ORIGIN/../llvm/lib'" "-fno-rtlib-add-rpath")
+    set_target_properties(${TEST_TARGET} PROPERTIES INSTALL_RPATH "\$ORIGIN/../llvm/lib")
+    target_link_libraries(${TEST_TARGET} "-fno-rtlib-add-rpath")
   endif()
   target_include_directories(${TEST_TARGET} PRIVATE
                              ${CMAKE_CURRENT_SOURCE_DIR}

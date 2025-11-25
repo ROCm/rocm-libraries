@@ -36,6 +36,8 @@
 #include <rocRoller/Utilities/Utils.hpp>
 
 #include "client/BenchmarkSolution.hpp"
+#include <DataGenerator.hpp>
+#include <common/SourceMatcher.hpp>
 
 namespace rocRoller
 {
@@ -119,6 +121,8 @@ namespace rocRoller
 
                 // When scaleA/B is ScaleMode::SingleScale
                 float scaleValueA, scaleValueB;
+
+                DGen::DataInitMode initModeA, initModeB, initModeC;
 
                 int workgroupMappingDim;
             };
@@ -235,4 +239,11 @@ namespace rocRoller::Client::GEMMClient::CLI
      * Asserts that all values are positive.
      */
     bool ParseMKNL(const std::string& arg, rocRoller::Client::GEMMClient::MKNLTuple& x);
+
+    /**
+     * @brief Parse a DataInitMode variant from a string.
+     *
+     * Asserts that argument is well-formed.
+     */
+    bool ParseInitMode(const std::string& arg, DGen::DataInitMode& result);
 }

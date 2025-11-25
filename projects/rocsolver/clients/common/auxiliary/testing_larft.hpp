@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <typename T>
 void larft_checkBadArgs(const rocblas_handle handle,
@@ -258,7 +259,7 @@ void larft_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -275,11 +276,11 @@ void larft_getPerfData(const rocblas_handle handle,
         larft_initData<false, true, T>(handle, direct, storev, n, k, dV, ldv, dt, dT, ldt, hV, ht,
                                        hT, hw, size_w);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_larft(handle, direct, storev, n, k, dV.data(), ldv, dt.data(), dT.data(), ldt);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <typename T>
@@ -372,7 +373,7 @@ void testing_larft(Arguments& argus)
                           &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         larft_getPerfData<T>(handle, direct, storev, n, k, dV, ldv, dt, dT, ldt, hV, ht, hT,
                              &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                              argus.profile_kernels, argus.perf);
