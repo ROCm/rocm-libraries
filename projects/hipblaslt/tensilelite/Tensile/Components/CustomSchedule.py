@@ -37,7 +37,7 @@ from rocisa.instruction import SAddU32, SAddCU32, SCmpEQU32, SCSelectB32, SSubBU
 from Tensile.Common import IsaVersion
 from Tensile.Utilities.Decorators.Shared import CallableGuard
 
-from copy import copy, deepcopy
+from copy import deepcopy
 
 class ScheduleInfo:
     numCodePaths: int
@@ -1251,7 +1251,7 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
         numMfma = 104
         kernel["SwapGlobalReadOrder"] = False
         optSchedule = {
-            'SYNC': [[-1, 12, 29, 29, 40, 40, 51, 72, 72]],
+            'SYNC': [[-1, 12, 29, 29, 40, 40, 72, 72]],
             'LRA0': [[0, 1, 2, 3, 5, 7, 9, 11, 13, 15, 17, 19, 20]],
             'GRIncA': [[4, 4, 4, 10, 10, 10, 14, 14, 14]],
             'LRB0': [[22, 24, 26, 28]],
@@ -1267,7 +1267,7 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
             'LCC': [[102, 103]]
         }
         syncCode = [
-            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all LRA0 and one items from LRB0 before starting the sub-iteration"),
+            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration"),
 
             SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for the rest of LRB0 to complete"),
 
@@ -1275,8 +1275,6 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
             SBarrier(comment=""),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRB0 to complete before GRB start"),
             SBarrier(comment=""),
-
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA1, LRB1 before starting next sub-iteration"),
 
             SWaitCnt(dscnt=-1, vlcnt=28, vscnt=-1, comment="wait for previous set of global reads"),
             SBarrier(comment="")
