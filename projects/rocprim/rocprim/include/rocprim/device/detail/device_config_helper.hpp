@@ -446,20 +446,20 @@ struct warp_sort_config_params
     /// \brief Allow the partitioning of batches by size for processing via size-optimized kernels.
     bool partitioning_allowed = false;
     /// \brief The number of threads in the logical warp in the small segment processing kernel.
-    unsigned int logical_warp_size_small = 0;
+    unsigned int logical_warp_size_small = 1;
     /// \brief The number of items processed by a thread in the small segment processing kernel.
-    unsigned int items_per_thread_small = 0;
+    unsigned int items_per_thread_small = 1;
     /// \brief The number of threads per block in the small segment processing kernel.
-    unsigned int block_size_small = 0;
+    unsigned int block_size_small = 1;
     /// \brief If the number of segments is at least \p partitioning_threshold, then the segments are partitioned into
     /// small and large segment groups, and each group is handled by a different, specialized kernel.
     unsigned int partitioning_threshold = 0;
     /// \brief The number of threads in the logical warp in the medium segment processing kernel.
-    unsigned int logical_warp_size_medium = 0;
+    unsigned int logical_warp_size_medium = 1;
     /// \brief The number of items processed by a thread in the medium segment processing kernel.
-    unsigned int items_per_thread_medium = 0;
+    unsigned int items_per_thread_medium = 1;
     /// \brief The number of threads per block in the medium segment processing kernel.
-    unsigned int block_size_medium = 0;
+    unsigned int block_size_medium = 1;
 };
 
 struct segmented_radix_sort_config_params
