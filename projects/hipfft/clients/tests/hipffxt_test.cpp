@@ -32,31 +32,9 @@ DISABLE_WARNING_RETURN_TYPE
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
 
-TEST(hipfftxttest, real_only_inplace)
-{
-    hipfftHandle plan;
+class hipfftxtdirectionformat : public ::testing::TestWithParam<std::tuple<int, hipfftXtSubFormat>> {};
 
-    // FIXME
-    
-    size_t    ngpus = 2;
-    const int Nx    = 1024;
-    const int Ny    = 1024;
-
-    auto fftret = HIPFFT_SUCCESS;
-    
-    fftret =  hipfftPlan2d(&plan,
-                             Nx,
-                             Ny,
-                             HIPFFT_R2C);
-    ASSERT_EQ(fftret, HIPFFT_SUCCESS);
-
-    fftret = hipfftDestroy(plan);
-    ASSERT_EQ(fftret, HIPFFT_SUCCESS);
-}
-
-class hipfftxtc2cinplace : public ::testing::TestWithParam<std::tuple<int, hipfftXtSubFormat>> {};
-
-TEST_P(hipfftxtc2cinplace, formattest)
+TEST_P(hipfftxtdirectionformat, c2cinplace)
 {
     size_t    ngpus = 2;
     const int Nx    = 1024;
@@ -64,14 +42,12 @@ TEST_P(hipfftxtc2cinplace, formattest)
 
     auto hipfft_rt = HIPFFT_SUCCESS;
 
-    //std::cout << "Example Test Param: " << GetParam() << std::endl;
-
     const int direction = std::get<0>(GetParam());
     const hipfftXtSubFormat informat = std::get<1>(GetParam());
+    
     const hipfftXtSubFormat outformat = informat == HIPFFT_XT_FORMAT_INPLACE ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED : HIPFFT_XT_FORMAT_INPLACE;
-    
+
     hipfftHandle plan;
-    
     hipfft_rt =   hipfftCreate(&plan);
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
  
@@ -102,7 +78,6 @@ TEST_P(hipfftxtc2cinplace, formattest)
                                reinterpret_cast<void*>(cinput.data()),
                                HIPFFT_COPY_HOST_TO_DEVICE);
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
     
     ASSERT_EQ(inoutdesc->subFormat, informat);
 
@@ -119,103 +94,25 @@ TEST_P(hipfftxtc2cinplace, formattest)
     
     hipfft_rt = hipfftXtFree(inoutdesc);
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-    
+
     hipfft_rt = hipfftDestroy(plan);
     ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 }
 
-INSTANTIATE_TEST_SUITE_P(hipfftxttest,
-                         hipfftxtc2cinplace,
-                             ::testing::Combine(
-                                 ::testing::Values(HIPFFT_FORWARD, HIPFFT_BACKWARD),
-                                 ::testing::Values(HIPFFT_XT_FORMAT_INPLACE,
-                                                   HIPFFT_XT_FORMAT_INPLACE)
-                                 )
+INSTANTIATE_TEST_SUITE_P(
+    hipfftxttest,
+    hipfftxtdirectionformat,
+    ::testing::Combine(
+        ::testing::Values(HIPFFT_FORWARD, HIPFFT_BACKWARD),
+        ::testing::Values(HIPFFT_XT_FORMAT_INPLACE,
+                          HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
+        ),
+    [](const testing::TestParamInfo<hipfftxtdirectionformat::ParamType>& info) {
+        const int direction = std::get<0>(info.param);
+        const hipfftXtSubFormat informat = std::get<1>(info.param);
+        std::string name = direction == HIPFFT_FORWARD ? "forward" : "backward";
+        name += informat == HIPFFT_XT_FORMAT_INPLACE ? "inplace" : "shuffled";
+        return name;
+    }
     );
                          
-TEST(hipfftxttest, c2c_inplace_backward)
-{
-    size_t    ngpus = 2;
-    const int Nx    = 1024;
-    const int Ny    = 1024;
-
-    auto hipfft_rt = HIPFFT_SUCCESS;
-
-    hipfftHandle plan;
-    
-    hipfft_rt =   hipfftCreate(&plan);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
-    // We can re-use the same multiple times GPU to get a "multi-gpu" transform.
-    std::vector<int> gpus(ngpus);
-    std::fill(gpus.begin(), gpus.end(), 0);
-    hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
-    std::vector<size_t> workSize(ngpus);
-    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize.data());
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
-    hipLibXtDesc*       inoutdesc = nullptr;
-    hipfft_rt                     = hipfftXtMalloc(plan, &inoutdesc, HIPFFT_XT_FORMAT_INPLACE);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-    
-    std::vector<std::complex<double>> cinput(Nx * Ny);
-    for(size_t xidx = 0; xidx < Nx; ++xidx)
-    {
-        for(size_t yidx = 0; yidx < Ny; ++yidx)
-        {
-            cinput[xidx * Ny + yidx] = std::complex<double>(xidx,yidx);
-        }
-    }
-    hipfft_rt = hipfftXtMemcpy(plan,
-                               reinterpret_cast<void*>(inoutdesc),
-                               reinterpret_cast<void*>(cinput.data()),
-                               HIPFFT_COPY_HOST_TO_DEVICE);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
-    
-    ASSERT_EQ(inoutdesc->subFormat, HIPFFT_XT_FORMAT_INPLACE);
-
-    hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, HIPFFT_BACKWARD);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
-    ASSERT_EQ(inoutdesc->subFormat, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED);
-
-    hipfft_rt = hipfftXtMemcpy(plan,
-                               reinterpret_cast<void*>(cinput.data()),
-                               reinterpret_cast<void*>(inoutdesc),
-                               HIPFFT_COPY_DEVICE_TO_HOST);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-    
-    hipfft_rt = hipfftXtFree(inoutdesc);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-    
-    hipfft_rt = hipfftDestroy(plan);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-}
-
-
-TEST(hipfftxttest, batch_stuff)
-{
-    hipfftHandle plan;
-
-    size_t    ngpus = 2;
-    const int Nx    = 1024;
-    const int Ny    = 1024;
-    const int nbatch = 2;
-
-
-    //FIXME
-    
-    auto fftret = HIPFFT_SUCCESS;
-    
-    fftret =  hipfftPlan2d(&plan,
-                             Nx,
-                             Ny,
-                             HIPFFT_C2C);
-    ASSERT_EQ(fftret, HIPFFT_SUCCESS);
-
-    fftret = hipfftDestroy(plan);
-    ASSERT_EQ(fftret, HIPFFT_SUCCESS);
-}
