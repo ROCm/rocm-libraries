@@ -14,8 +14,6 @@
 
 #include "PointwiseTensorBundles.hpp"
 
-using namespace hipdnn_sdk::data_objects;
-
 namespace hipdnn_sdk_test_utils
 {
 

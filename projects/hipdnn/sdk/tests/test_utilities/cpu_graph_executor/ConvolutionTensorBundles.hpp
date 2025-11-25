@@ -9,8 +9,6 @@
 #include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
-using namespace hipdnn_sdk::data_objects;
-
 namespace hipdnn_sdk_test_utils
 {
 
