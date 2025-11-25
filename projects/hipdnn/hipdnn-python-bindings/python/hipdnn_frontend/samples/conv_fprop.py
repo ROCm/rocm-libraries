@@ -10,6 +10,8 @@ def run_convolution_fprop():
     This is the Python equivalent of samples/convolution/ConvFprop.cpp
     """
     
+    print("WARNING: This sample will crash if the miopen DB is not initialized. To avoid this, run a C++ sample first to initialize the DB.\n")
+
     print("=" * 70)
     print("Convolution Forward Propagation Test")
     print("=" * 70)

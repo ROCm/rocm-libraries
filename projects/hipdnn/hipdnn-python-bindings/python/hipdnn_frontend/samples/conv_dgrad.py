@@ -10,6 +10,8 @@ def run_convolution_dgrad():
     This is the Python equivalent of samples/convolution/ConvDgrad.cpp
     Computes dx (input gradient) given dy (output gradient) and weights.
     """
+
+    print("WARNING: This sample will crash if the miopen DB is not initialized. To avoid this, run a C++ sample first to initialize the DB.\n")
     
     print("=" * 70)
     print("Convolution Backward Data (Dgrad) Test")
