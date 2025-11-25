@@ -76,8 +76,10 @@ def checkCDBufferAndStrides(problemType, problemSizes, isCEqualD):
 
 def checkStaggerUStride(configParams):
     """Ensures StaggerU == 0 when StaggerUStride = 0"""
+    msgBase = "Invalid parameter value: StaggerUStride = 0 necessitates StaggerU = 0."
+    if "StaggerUStride" not in configParams or "StaggerU" not in configParams
+        return
     if configParams["StaggerUStride"] == 0 and configParams["StaggerU"] != 0:
-        msgBase = "Invalid parameter value: StaggerUStride = 0 necessitates StaggerU = 0."
         raise Exception(msgBase)
 
 class BenchmarkProcess:
