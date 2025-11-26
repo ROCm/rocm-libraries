@@ -476,7 +476,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
             {
                 if(lid < rem4)
                 {
-                    unsigned int index = getTensorIndex(k);
+                    unsigned int index = getTensorIndex(lid + less4);
                     if(index < (mio_bn_config::nchw - 3))
                     {
                         read4 = cast<fp_prec_read_vec_type>(
@@ -569,6 +569,9 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                 miopen::batchnorm::_accumulate(db, dyvalue);
                 miopen::batchnorm::_accumulate_mad(ds, xhat, dyvalue);
             }
+
+            // This is strange; spamming synctheads makes the kernel faster...
+            __syncthreads();
         }};
 
         if constexpr(rem4 > 0)
