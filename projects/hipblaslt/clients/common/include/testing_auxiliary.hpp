@@ -35,11 +35,11 @@
 #include "hipblaslt_vector.hpp"
 #ifdef CODE_COVERAGE
 #include "hipblaslt_internal.hpp"
-#include "rocblaslt_mat_utils.hpp"
+#include "rocblaslt/rocblaslt_mat_utils.hpp"
 #include "rocblaslt/rocroller_host.hpp"
-#include "status.h"
-#include "tensile_host.hpp"
-#include "utility.hpp"
+#include "rocblaslt/status.h"
+#include "rocblaslt/tensile_host.hpp"
+#include "rocblaslt/utility.hpp"
 #endif
 #include "unit.hpp"
 #include "utility.hpp"
