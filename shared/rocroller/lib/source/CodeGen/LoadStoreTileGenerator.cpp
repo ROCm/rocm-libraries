@@ -1700,6 +1700,7 @@ namespace rocRoller
                 co_yield storeMacroTileVGPR(tag, store, coords);
                 break;
             case MemoryType::WAVE:
+            case MemoryType::WAVE_SWIZZLE:
                 co_yield storeMacroTileWAVE(tag, store, coords);
                 break;
             default:

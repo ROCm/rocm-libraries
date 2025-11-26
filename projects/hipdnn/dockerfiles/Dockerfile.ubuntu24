@@ -41,7 +41,7 @@ RUN apt-get update && apt-get install -y \
 # ============================================================================
 # Prebuilt stage - downloads and extracts dev env prebuilt binaries tarball
 #
-# Example build command for default tarball build (gfx94X, 7.0.0rc20250909): 
+# Example build command for default tarball build (gfx94X, 7.0.0rc20250909):
 # docker build -f Dockerfile.ubuntu24 -t hipdnn:prebuilt .
 # This will download and install prebuilt binaries using therock-dist-linux-gfx94X-dcgpu-7.0.0rc20250909.tar.gz
 #
@@ -181,6 +181,12 @@ RUN apt-get update && apt-get install -y \
     llvm-20 \
     && rm -rf /var/lib/apt/lists/*
 
+# Install flatc version 25.9.23
+RUN wget -q https://github.com/google/flatbuffers/releases/download/v25.9.23/Linux.flatc.binary.g++-13.zip -O /tmp/flatc.zip \
+    && unzip /tmp/flatc.zip -d /usr/local/bin \
+    && chmod +x /usr/local/bin/flatc \
+    && rm /tmp/flatc.zip
+
 # Use update-alternatives to set default versions
 RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
 
@@ -194,6 +200,8 @@ RUN for tool in /usr/bin/llvm*-20; do \
             echo "Set alternative for $base -> $tool"; \
         fi \
     done
+
+RUN python3 -m pip install --break-system-packages pre-commit
 
 ENV HIP_PLATFORM=amd
 ENV PATH="/opt/rocm/bin:/opt/rocm:${PATH}"
