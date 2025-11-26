@@ -169,9 +169,8 @@ namespace AddDeallocateTest
             // With 4 unrolls and 2 inflight prefetches, we expect the following
             // 1. A, B deallocated three times in the main loop
             // 2. A, B deallocate after the main loop
-            // 3. A, B deallocate after the tail loop
-            // 4. C deallocated once after the prolog
-            CHECK(ldsDeallocateFromKernel.size() == 6);
+            // 3. C deallocated once after the prolog
+            CHECK(ldsDeallocateFromKernel.size() == 5);
             CHECK(ldsDeallocateInsideLoop.size() == 3);
         }
     }
