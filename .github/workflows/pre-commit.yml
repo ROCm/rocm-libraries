@@ -3,6 +3,7 @@ on:
   pull_request:
     branches:
       - develop
+      - users/sareeder/python-filtering
 
 jobs:
   pre-commit:
