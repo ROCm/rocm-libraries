@@ -175,3 +175,30 @@ TEST_CASE("HoistLoopInvariant dependent", "[kernel-graph][hoist-loop-invariant][
         = graph1.control.getOutputNodeIndices<Sequence>(assignDependent).to<std::vector>();
     REQUIRE(std::find(assignOutputs.begin(), assignOutputs.end(), forLoop) == assignOutputs.end());
 }
+
+TEST_CASE("extractDataFlowTags", "[kernel-graph][hoist-loop-invariant][expression]")
+{
+    using namespace rocRoller;
+    namespace kg = rocRoller::KernelGraph;
+
+    SECTION("Binary operation with DataFlowTags")
+    {
+        // Create two DataFlowTag expressions with different tag IDs
+        Expression::DataFlowTag tag1{42, Register::Type::Vector, DataType::Float};
+        Expression::DataFlowTag tag2{77, Register::Type::Vector, DataType::Float};
+
+        auto tag1Ptr = std::make_shared<Expression::Expression>(tag1);
+        auto tag2Ptr = std::make_shared<Expression::Expression>(tag2);
+
+        // Combine them with a binary operation (addition)
+        auto binaryExpr = Expression::Add{{tag1Ptr, tag2Ptr}};
+
+        // Extract the DataFlowTags
+        auto extractedTags = kg::extractDataFlowTags(binaryExpr);
+
+        // Verify that both tags were extracted
+        REQUIRE(extractedTags.size() == 2);
+        REQUIRE(extractedTags.count(42) == 1);
+        REQUIRE(extractedTags.count(77) == 1);
+    }
+}

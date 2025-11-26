@@ -26,12 +26,21 @@
 
 #pragma once
 
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
+#include <set>
 
 namespace rocRoller
 {
     namespace KernelGraph
     {
+        /**
+         * @brief Extract all DataFlowTags referenced in an expression
+         * @param expr The expression to extract tags from
+         * @return Set of DataFlowTag IDs found in the expression
+         */
+        std::set<int> extractDataFlowTags(Expression::Expression const& expr);
+
         /**
          * @brief Hoist loop-invariant Assign operations outside of loops.
          * 
