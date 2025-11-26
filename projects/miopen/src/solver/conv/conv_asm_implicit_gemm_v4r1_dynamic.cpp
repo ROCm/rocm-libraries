@@ -347,7 +347,10 @@ bool ConvAsmImplicitGemmV4R1DynamicFwd_1x1::IsApplicable(const ExecutionContext&
 
     if(!problem.IsDirectionForward())
         return false;
-
+    
+    if(problem.HasNonPackedTensors())
+        return false;
+        
     if(!problem.Is2d())
         return false;
 
