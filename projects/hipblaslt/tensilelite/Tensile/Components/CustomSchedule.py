@@ -38,18 +38,104 @@ from Tensile.Common import IsaVersion
 from Tensile.Utilities.Decorators.Shared import CallableGuard
 
 from copy import deepcopy
+from typing import Dict
+
+
+def verifyAscendingOrder(scheduleInfo, context: Dict = {}):
+    """
+    Ensure that all sequences of scheduleInfo.optSchedule are non-decreasing.
+
+    Context and example: There will be a sequence of N 'GRIncA' instructions
+    for incrementing the memory address that the A macro tile is read from.
+    The CMS developer has the freedom to insert these N instructions into
+    'slots' of their choice. A slot is a sequence of instructions between
+    2 consecutive mfma instructions. Example: 'GRIncA' : [[0,1,1,3]] would
+    mean that the N=4 instructions to increment the pointer appear as follows:
+
+    instruction 1    : between mfma 0 and mfma 1.
+    instructions 2,3 : between mfma 1 and mfma 2.
+    instruction 4    : between mfma 3 and mfma 4.
+
+    However, there is a correctness requirement that the N slots for these
+    instructions are non-decreasing. This rule is true for all groups of instructions,
+    not just the 'GRIncA' instructions.
+    """
+
+    for k, sequences in scheduleInfo.optSchedule.items():
+        for seq in sequences:
+            for i in range(1, len(seq)):
+                if seq[i] < seq[i - 1]:
+                    return False, (
+                        f"Non-descending-order rule failed, "
+                        f"schedule key '{k}', sequence {seq}: "
+                        f"value {seq[i]} at index {i} is less than "
+                        f"{seq[i-1]} at index {i-1}."
+                    )
+    return True, ""
+
 
 class ScheduleInfo:
     numCodePaths: int
     numMfma: int
-    def __init__(self, numCodePaths, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder = []):
+    __skipValidation__: bool
+
+    def __init__(
+        self,
+        numCodePaths,
+        numMfma,
+        optSchedule,
+        syncCode,
+        nglshift,
+        nllshift,
+        mfmaReorder=[]
+    ):
         self.numCodePaths = numCodePaths
         self.numMfma = numMfma
         self.optSchedule = optSchedule
         self.syncCode = syncCode
-        self.nglshift = nglshift # vmcnt shift for noglobalload loop
-        self.nllshift = nllshift # vmcnt shift for nolocalload loop
+        self.nglshift = nglshift  # vmcnt shift for noglobalload loop
+        self.nllshift = nllshift  # vmcnt shift for nolocalload loop
         self.mfmaReorder = mfmaReorder
+        self.__skipValidation__ = False
+
+        # The set of validation rules to run inside `isValid`.
+        self.rules: List[Callable[[ScheduleInfo, dict], [bool, str]]] = [
+            verifyAscendingOrder
+        ]
+
+    def disableValidation(self):
+        self.__skipValidation__ = True
+
+    def isValid(self, context: Dict):
+        """
+        Return True if all the validation rules pass, False otherwise.
+        If validation fails, a string containing the reason is returned.
+
+        Note 1: If True is returned, this is not proof that this schedule
+        is valid. It may be a false negative.
+
+        Note 2: if False is returned, this is not proof that the schedule
+        is invalid. It may be a false positive.
+        """
+
+
+        if self.__skipValidation__:
+            mt0 = context.get("kernel", {}).get("MacroTile0", "?")
+            mt1 = context.get("kernel", {}).get("MacroTile1", "?")
+            du  = context.get("kernel", {}).get("DepthU", "?")
+            message = f"CMS validation explicitly disabled. Running on kernel with MT0xMT1xDepthU = {mt0}x{mt1}x{du}"
+            print(f"WARNING: {message}")
+
+            # All rules bypassed, considered valid.
+            return True, message
+
+        for rule in self.rules:
+            status, message = rule(self, context)
+            if status is False:
+                return False, message
+
+        # All rules passed, considered valid.
+        return True, ""
 
 
 def removeComments(module):
@@ -118,6 +204,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
     numCodePath = opt1.numCodePaths
     assert opt1.numMfma == len(mfmaCode)
 
+
     for _, indexList in opt1.optSchedule.items():
         assert len(indexList) <= opt1.numCodePaths
 
@@ -161,10 +248,12 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
 
         return InstStreams
 
+    status, message = opt1.isValid({'kernel' : kernel})
+    assert status is True, f"Custom mainloop schedule validation failed: {message}"
+
     InstStreams = convOptToStream(opt1)
 
     macro = Macro("MAINLOOP", ["ID", "useGR=1", "usePLR=1", "useGRInc=1", "useLoop=1"])
-    #macro.add(SBarrier(comment="debug"))
 
     lastIter = numLoopIter - 1
 
@@ -306,7 +395,7 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
 
     if isTN(kernel) and TLDS == 1:
 
-        nglshift = nllshift = 11 
+        nglshift = nllshift = 11
         syncTable = [
                     -1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment=""),
                     7, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment=""),
@@ -322,11 +411,11 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
 
                     42, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Only global reads for this iter"),
                     42, SBarrier(comment="")]
- 
+
         syncCode = syncTable[1::2]
         optSchedule = {
             'SYNC'   : [syncTable[::2]],
-            'GRIncA' : [[1,1,2,2,3,3,3,4,4]], 
+            'GRIncA' : [[1,1,2,2,3,3,3,4,4]],
             'GRIncB' : [[5,5,6,6,6,7,7,8,8]],
             'LRA0'   : [[1,2,3,4,5,6,  8,10],
                         [1,2,3,4,5,6,  9,11]],
@@ -338,8 +427,8 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
                         [17,17,19,19,21,21,23,23,25,25,27,27,29,29,31,31]],
             'LRA1'   : [[36,37,38,39,40,41,42,43]],
             'LRB1'   : [[44,45,46]],
-            'LRSA'   : [[30]], # this must come before next reads of A X0 - so the LRA1 
-            'LRSB'   : [[31]], # this must come before next reads of A X0 - so the LRB1 
+            'LRSA'   : [[30]], # this must come before next reads of A X0 - so the LRA1
+            'LRSB'   : [[31]], # this must come before next reads of A X0 - so the LRB1
             'LWSA'   : [[32]],  # swap after last gr a
             'LWSB'   : [[42]],  # swap after last gr b
             'LCC'   : [[47, 47]],
@@ -402,7 +491,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     elif isNT(kernel) and not useLDSTr and TLDS == 0:
         kernel["UsePLRPack"] = True
-        
+
         optSchedule = {
             'SYNC'  : [[25, 25, 46, 46, 55, 55]],
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
@@ -429,7 +518,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
             'PackA0': [[47, 47, 47, 47, 47, 47, 48, 48, 48, 48, 48, 48, 48, 48, 49, 49, 49, 49, 49, 49, 49, 49, 50, 50]],
             'LCC'   : [[95, 95]],
         }
-        
+
         syncCode = [SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete") ,
                     SBarrier(comment="") ,
                     SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete") ,
@@ -464,8 +553,8 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                      55, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRB0-1"),
                      63, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRB0-2"),
                      70, SWaitCnt(dscnt=-1, vlcnt=12, vscnt=-1, comment="for LRB1"),
-                     71, SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="wait for LRB0-3"),
                      70, SBarrier(comment="for LRB1"),
+                     71, SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="wait for LRB0-3"),
                      79, SWaitCnt(dscnt=13, vlcnt=-1, vscnt=-1, comment="wait for LRB0 remaining"),]
         optSchedule = {
                 'SYNC'  : [syncTable[::2]],
@@ -753,7 +842,7 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
             'LRB0'   : [[0,1,2,3,4,5,6,7]],
             # Buffer loads.
             'GRB'    : [[51,51, 55,55, 59,61, 76,77, 78,78]],
-            'GRA'    : [[11,12, 16,16, 20,20, 24,24, 28, 28, 32,32, 36, 36, 40, 40]], 
+            'GRA'    : [[11,12, 16,16, 20,20, 24,24, 28, 28, 32,32, 36, 36, 40, 40]],
             # Prefetch next iteration.
             'LRA1'   : [[62,63,64,65,66,67,68,69,70,71]],
             'LRB1'   : [[41,42,43,44,45,46,47,49]],
@@ -828,7 +917,7 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
             'LRB0'   : [[0,0,1,2,3]],
             # Buffer loads.
             'GRB'    : [[30,30, 33,33, 36,36, 52,52, 56,56, 60,61, 76,77, 78,78]],
-            'GRA'    : [[11,12, 16,16, 20,20, 23,25, 26, 28]], 
+            'GRA'    : [[11,12, 16,16, 20,20, 23,25, 26, 28]],
             # Prefetch next iteration.
             'LRA1'   : [[62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77]],
             'LRB1'   : [[41,42,43,44,45]],
@@ -1015,11 +1104,11 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
         ]
 
         nglshift = nllshift = 34
-        
+
     elif isNN(kernel) and useLDSTr and TLDS==1:
         kernel["SwapGlobalReadOrder"] = True
         nglshift = nllshift = 0
-        
+
         optSchedule = {
             # last index of producer <SYNC> first index of consumer
             # SYNC[0] = -1 to align all waves at the start of the loop
@@ -1032,7 +1121,7 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
             # LRB0 scheduled after the A fence, overlapping with GRA/GRB
             'LRB0': [[24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 35]],
 
-            # Address increments for GR 
+            # Address increments for GR
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
             'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
 
@@ -1050,7 +1139,7 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
                     64, 64, 66, 66, 67, 67, 69, 69,
                     71, 71, 73, 73, 74, 74, 76, 76,
                     78, 78, 79, 79]],
-            
+
             # from epilogue in the default schedule
             # these are not updated in the updated schedule
             'LRSA': [[50]],
@@ -1061,19 +1150,19 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
             'LRB1': [[83, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99]], # 13
             'LCC':  [[100, 100]],
         }
-        
+
         syncCode = [
             SWaitCnt(dscnt=12, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LR/LW"),
             SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="ensure all previous LRA1/LRB1 done before early MFMA use"),
             SWaitCnt(dscnt=10, vlcnt=-1, vscnt=-1, comment="ensure all previous LRA1/LRB1 done before early MFMA use"),
 
-            
+
             # A fence: all LRA0 are done before DTL writes from the first GR stream startign at 23 (swapped)
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before first DTL writes"),
             # barrier after LRA0, before first global DTL phase at 23
             SBarrier(comment="barrier after LRA0 , before GR at 23"),
 
-            # B fence : all LRB0 are done before second DTL stream 
+            # B fence : all LRB0 are done before second DTL stream
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0 to complete before second DTL writes"),
             # barrier after LRB0 before second global stream at 36
             SBarrier(comment="barrier after LRB0, before GR at 36"),
@@ -1083,7 +1172,7 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
             # final barrier : all waves; make next-tile LDS visible to LRA1/LRB1
             SBarrier(comment="final barrier before LRA1/LRB1 (at 83)"),
         ]
-        
+
         nglshift = nllshift = 34
     else:
         return False, None
@@ -1275,7 +1364,7 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
             SBarrier(comment=""),
             SWaitCnt(dscnt=-1, vlcnt=38, vscnt=-1, comment="wait for previous set of GRB"),
             SBarrier(comment="")
-        ]   
+        ]
         numMfma = 120
         nglshift = nllshift = len(optSchedule["GRA"][0])/2 + len(optSchedule["GRB"][0])/2
     else:
@@ -1379,7 +1468,7 @@ def hasCustomSchedule(kernel):
     elif is256x240x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,2,8]) and MI == [16,16,32,1] and MIWG == [4,1]:
         return _get_schedule_256x240x64_16bit(kernel, useLDSTr, TLDS)
     elif is256x208x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 2, 8]) and MI == [16, 16, 32, 1] and MIWG == [4, 1]:
-        return _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS) 
+        return _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS)
     elif is224x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [2, 2]:
         return _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS)
     elif is256x224x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [2, 2]:
