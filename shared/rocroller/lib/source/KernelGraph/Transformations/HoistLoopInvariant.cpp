@@ -40,67 +40,87 @@ namespace rocRoller::KernelGraph
     using namespace CoordinateGraph;
 
     /**
+     * @brief Visitor for extracting DataFlowTags from expressions
+     * 
+     * This visitor traverses an expression tree and collects all DataFlowTag
+     * references found within it, following the visitor pattern used elsewhere
+     * in the codebase (e.g., DataFlowTagPropagation).
+     */
+    struct DataFlowTagExtractorVisitor
+    {
+        std::set<int> tags;
+
+        void operator()(Expression::DataFlowTag const& expr)
+        {
+            tags.insert(expr.tag);
+        }
+
+        void operator()(Expression::ScaledMatrixMultiply const& expr)
+        {
+            call(expr.matA);
+            call(expr.matB);
+            call(expr.matC);
+            call(expr.scaleA);
+            call(expr.scaleB);
+        }
+
+        template <Expression::CNary Expr>
+        void operator()(Expr const& expr)
+        {
+            for(auto const& operand : expr.operands)
+            {
+                call(operand);
+            }
+        }
+
+        template <Expression::CTernary Expr>
+        void operator()(Expr const& expr)
+        {
+            call(expr.lhs);
+            call(expr.r1hs);
+            call(expr.r2hs);
+        }
+
+        template <Expression::CBinary Expr>
+        void operator()(Expr const& expr)
+        {
+            call(expr.lhs);
+            call(expr.rhs);
+        }
+
+        template <Expression::CUnary Expr>
+        void operator()(Expr const& expr)
+        {
+            call(expr.arg);
+        }
+
+        template <Expression::CValue Value>
+        void operator()(Value const&)
+        {
+            // DataFlowTag already matched separately
+        }
+
+        void call(Expression::ExpressionPtr const& expr)
+        {
+            if(!expr)
+                return;
+            std::visit(*this, *expr);
+        }
+
+        void call(Expression::Expression const& expr)
+        {
+            std::visit(*this, expr);
+        }
+    };
+
+    /**
      * @brief Extract all DataFlowTags referenced in an expression
      */
     std::set<int> extractDataFlowTags(Expression::Expression const& expr)
     {
-        std::set<int> tags;
-
-        // Visit the expression tree to find DataFlowTags
-        std::visit(
-            [&tags](auto&& arg) {
-                using T = std::decay_t<decltype(arg)>;
-
-                if constexpr(std::is_same_v<T, Expression::DataFlowTag>)
-                {
-                    tags.insert(arg.tag);
-                }
-                else if constexpr(Expression::CBinary<T>)
-                {
-                    auto lhsTags = extractDataFlowTags(*arg.lhs);
-                    auto rhsTags = extractDataFlowTags(*arg.rhs);
-                    tags.insert(lhsTags.begin(), lhsTags.end());
-                    tags.insert(rhsTags.begin(), rhsTags.end());
-                }
-                else if constexpr(Expression::CUnary<T>)
-                {
-                    auto operandTags = extractDataFlowTags(*arg.arg);
-                    tags.insert(operandTags.begin(), operandTags.end());
-                }
-                else if constexpr(Expression::CTernary<T>)
-                {
-                    auto lhsTags  = extractDataFlowTags(*arg.lhs);
-                    auto r1hsTags = extractDataFlowTags(*arg.r1hs);
-                    auto r2hsTags = extractDataFlowTags(*arg.r2hs);
-                    tags.insert(lhsTags.begin(), lhsTags.end());
-                    tags.insert(r1hsTags.begin(), r1hsTags.end());
-                    tags.insert(r2hsTags.begin(), r2hsTags.end());
-                }
-                else if constexpr(Expression::CNary<T>)
-                {
-                    for(auto const& operand : arg.operands)
-                    {
-                        auto operandTags = extractDataFlowTags(*operand);
-                        tags.insert(operandTags.begin(), operandTags.end());
-                    }
-                }
-                else if constexpr(std::is_same_v<T, Expression::ScaledMatrixMultiply>)
-                {
-                    auto matATags   = extractDataFlowTags(*arg.matA);
-                    auto matBTags   = extractDataFlowTags(*arg.matB);
-                    auto matCTags   = extractDataFlowTags(*arg.matC);
-                    auto scaleATags = extractDataFlowTags(*arg.scaleA);
-                    auto scaleBTags = extractDataFlowTags(*arg.scaleB);
-                    tags.insert(matATags.begin(), matATags.end());
-                    tags.insert(matBTags.begin(), matBTags.end());
-                    tags.insert(matCTags.begin(), matCTags.end());
-                    tags.insert(scaleATags.begin(), scaleATags.end());
-                    tags.insert(scaleBTags.begin(), scaleBTags.end());
-                }
-            },
-            expr);
-
-        return tags;
+        DataFlowTagExtractorVisitor visitor;
+        visitor.call(expr);
+        return visitor.tags;
     }
 
     /**
