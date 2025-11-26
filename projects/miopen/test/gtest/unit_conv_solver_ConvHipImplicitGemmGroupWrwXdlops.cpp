@@ -75,13 +75,15 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
     };
 }
 
-const auto& GetTestParams(bool bfp16 = false)
+template <miopenDataType_t datatype>
+const auto& GetTestParams()
 {
-    static const auto params = [bfp16] {
+    static const auto params = [] {
         Gpu supportedDevices = Gpu::None;
+
 // If MIOpen is built without CK these tests will fail, skip them to avoid failing
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-        if(!bfp16)
+        if(datatype != miopenBFloat16)
             supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
         else
             supportedDevices = Gpu::gfx94X | Gpu::gfx950;
@@ -126,20 +128,20 @@ TEST_P(CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDevApplicability_NONE, SO
 // Smoke tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_FP16,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParams<miopenHalf>()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvSmokeTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_BFP16,
-    testing::Combine(testing::Values(GetTestParams(true)),
+    testing::Combine(testing::Values(GetTestParams<miopenBFloat16>()),
                      testing::Values(miopenConvolutionAlgoImplicitGEMM),
                      testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_FP32,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParams<miopenFloat>()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvSmokeTestCases(miopenFloat))));
 
@@ -147,24 +149,24 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_FP16,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParams<miopenHalf>()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvFullTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_BFP16,
-                         testing::Combine(testing::Values(GetTestParams(true)),
+                         testing::Combine(testing::Values(GetTestParams<miopenBFloat16>()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvFullTestCases(miopenBFloat16))));
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_FP32,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParams<miopenFloat>()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvFullTestCases(miopenFloat))));
 
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDevApplicability_NONE,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParams<miopenHalf>()),
                                           testing::Values(GetConvSmokeTestCases(miopenHalf)[0])));
