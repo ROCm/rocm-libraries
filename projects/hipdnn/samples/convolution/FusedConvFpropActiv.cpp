@@ -121,7 +121,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
         utilities::Tensor<InputType> pointwiseOutRefTensor(pointwiseOutAttr->get_dim(), layout);
 
-        test_utilities::CpuFpReferenceConvolutionImpl<InputType, float>::convFwdInference(
+        test_utilities::CpuFpReferenceConvolution::fprop(
             xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
         test_utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
