@@ -689,21 +689,19 @@ namespace rocRoller
             }
 
             // Duplicate the body of the original for loop into the tail.
-            // Follow the same logic as unrollLoop() for KLOOP:
+            // Follow similar logic as unrollLoop for the KLOOP, but don't duplicate LDS coordinates:
             // - Find loop-carried dependencies
             // - Don't duplicate coordinates that are loop-carried but NOT paired with LDS
-            // - Duplicate everything else (including LDS-paired coordinates)
+            // - Duplicate everything else (except LDS coordinates)
             // This allows register-allocated coordinates to be freed before the tail loop.
             {
                 auto loopBodies = graph.control.getOutputNodeIndices<Body>(loop).to<std::vector>();
 
-                // Find loop-carried dependencies (same logic as unrollLoop for KLOOP)
                 auto loopCarriedDependencies = findLoopCarriedDependencies(graph, loop);
                 std::unordered_set<int> dontDuplicate;
 
                 for(auto const& [coord, controls] : loopCarriedDependencies)
                 {
-                    // In the KLOOP, we do want to duplicate LDS (and paired tiles)
                     bool pairedWithLDS = false;
                     for(auto op : controls)
                         pairedWithLDS |= graph.mapper.get<LDS>(op) != -1;
@@ -711,6 +709,11 @@ namespace rocRoller
                         continue;
 
                     dontDuplicate.insert(coord);
+                }
+
+                for(auto const tag : graph.coordinates.getNodes<LDS>().to<std::unordered_set>())
+                {
+                    dontDuplicate.insert(tag);
                 }
 
                 // Create a reindexer for the tail loop
