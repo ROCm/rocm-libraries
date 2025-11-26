@@ -36,7 +36,6 @@
 #include "rocsparse_assign_async.hpp"
 #include "rocsparse_common.h"
 #include "rocsparse_control.hpp"
-#include "rocsparse_hash.hpp"
 #include "rocsparse_primitives.hpp"
 #include "rocsparse_utility.hpp"
 

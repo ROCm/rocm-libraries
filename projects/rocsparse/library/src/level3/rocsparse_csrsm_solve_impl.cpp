@@ -33,7 +33,6 @@
 
 #include "../level1/rocsparse_gthr.hpp"
 #include "../level2/rocsparse_csrsv.hpp"
-#include "../level2/rocsparse_hash.hpp"
 #include "csrsm_device.h"
 namespace rocsparse
 {

@@ -45,7 +45,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void conjugate_kernel(int64_t length, U array, int64_t array_dist)
     {
-        auto p = load(hipBlockIdx_y, array, array_dist);
+        auto p = batched_pointer(hipBlockIdx_y, array, array_dist);
         rocsparse::conjugate_device<BLOCKSIZE>(length, p);
     }
 
