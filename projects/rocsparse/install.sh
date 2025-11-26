@@ -74,7 +74,7 @@ supported_distro( )
     ubuntu|debian|centos|rhel|fedora|sles|opensuse-leap|almalinux|rocky|ol)
         true
         ;;
-    *)  printf "This script is currently supported on Ubuntu, Debian, CentOS, RHEL, Fedora, SLES, AlmaLinux, rocky, and ol (detected: ${ID})\n"
+    *)  printf "This script is currently supported on Ubuntu, Debian, CentOS, RHEL, Fedora, SLES, Alma Linux, Rocky Linux (rocky), and Oracle Linux (ol) (detected: ${ID})\n"
         exit 2
         ;;
   esac
