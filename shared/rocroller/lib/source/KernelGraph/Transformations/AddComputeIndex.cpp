@@ -34,9 +34,7 @@
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddComputeIndex.hpp>
-#include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
-#include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller::KernelGraph
 {
@@ -60,20 +58,8 @@ namespace rocRoller::KernelGraph
 
     bool operator<(const ComputeIndexChainSpecification& a, const ComputeIndexChainSpecification& b)
     {
-        return std::tie(a.target,
-                        a.coords,
-                        a.location,
-                        a.direction,
-                        a.forLoop,
-                        a.replaceWithScope,
-                        a.isStorePartOfGlobalToLDSOp)
-               < std::tie(b.target,
-                          b.coords,
-                          b.location,
-                          b.direction,
-                          b.forLoop,
-                          b.replaceWithScope,
-                          b.isStorePartOfGlobalToLDSOp);
+        return std::tie(a.target, a.coords, a.location, a.direction)
+               < std::tie(b.target, b.coords, b.location, b.direction);
     }
 
     struct ComputeIndexChain
@@ -412,11 +398,8 @@ namespace rocRoller::KernelGraph
         bool                            hasUnroll = false;
         std::vector<int>                strideCoords;
 
-        // Use spec.forLoop as the location if it exists (for hoisted chains),
-        // otherwise use spec.location
-        int locationForCoordInfo = (spec.forLoop > 0) ? spec.forLoop : spec.location;
-        for(auto info : getRequiredCoordinatesInfo(
-                op, locationForCoordInfo, graph, spec.isStorePartOfGlobalToLDSOp))
+        for(auto info :
+            getRequiredCoordinatesInfo(op, spec.location, graph, spec.isStorePartOfGlobalToLDSOp))
         {
             if(info.isUnroll)
                 hasUnroll = true;
@@ -513,73 +496,6 @@ namespace rocRoller::KernelGraph
 
         return {chain.front(), chain.back(), connections, update};
     }
-
-    namespace
-    {
-        /**
-         * @brief Find the corresponding KLoopTail for a given KLoop.
-         *
-         * @param kgraph
-         * @param kLoop The KLoop tag
-         * @return The corresponding KLoopTail tag, or std::nullopt if none exists
-         */
-        std::optional<int> FindCorrespondingKLoopTail(KernelGraph const& kgraph, int kLoop)
-        {
-            // Strategy 1: Search downstream via Sequence edges (UnrollLoops case)
-            for(auto node : kgraph.control.depthFirstVisit(kLoop, Graph::Direction::Downstream))
-            {
-                auto maybeForLoop = kgraph.control.get<ForLoopOp>(node);
-                if(maybeForLoop && maybeForLoop->loopName == rocRoller::KLOOPTAIL)
-                    return node;
-            }
-
-            // Strategy 2: Search for siblings under common parent Scope (AddPrefetch case)
-            for(auto ancestor : kgraph.control.breadthFirstVisit(kLoop, Graph::Direction::Upstream))
-            {
-                if(!kgraph.control.get<Scope>(ancestor))
-                    continue;
-
-                // Search all descendants of this Scope for a KLoopTail
-                for(auto descendant :
-                    kgraph.control.depthFirstVisit(ancestor, Graph::Direction::Downstream))
-                {
-                    if(descendant == kLoop)
-                        continue;
-
-                    auto maybeForLoop = kgraph.control.get<ForLoopOp>(descendant);
-                    if(maybeForLoop && maybeForLoop->loopName == rocRoller::KLOOPTAIL)
-                        return descendant;
-                }
-            }
-
-            return std::nullopt;
-        }
-
-        /**
-         * @brief Find the closest common ancestor Scope between two nodes.
-         *
-         * @param kgraph
-         * @param nodeA
-         * @param nodeB
-         * @return The tag of the common ancestor Scope, or std::nullopt if none exists
-         */
-        std::optional<int> FindCommonAncestorScope(KernelGraph const& kgraph, int nodeA, int nodeB)
-        {
-            // Collect all ancestors of nodeA
-            auto ancestorsA = kgraph.control.breadthFirstVisit(nodeA, Graph::Direction::Upstream)
-                                  .to<std::set>();
-
-            // Traverse from nodeB and find first common ancestor that is a Scope
-            for(auto node : kgraph.control.breadthFirstVisit(nodeB, Graph::Direction::Upstream))
-            {
-                if(ancestorsA.contains(node) && kgraph.control.get<Scope>(node))
-                    return node;
-            }
-
-            return std::nullopt;
-        }
-
-    } // anonymous namespace
 
     /**
      * @brief Add ComputeIndex operations.
@@ -688,40 +604,6 @@ namespace rocRoller::KernelGraph
             auto hasForLoop    = !forLoopCoordinates.empty();
             auto hasUnroll     = !unrollCoordinates.empty();
             auto isUniformLoop = maybeForLoop && uniformForLoop(maybeForLoop, kgraph);
-
-            // Check if this is a KLoop with a corresponding KLoopTail - if so, hoist to common ancestor
-            if(maybeForLoop && hasForLoop && isUniformLoop)
-            {
-                auto maybeForLoopOp = kgraph.control.get<ForLoopOp>(*maybeForLoop);
-                if(maybeForLoopOp && maybeForLoopOp->loopName == rocRoller::KLOOP)
-                {
-                    auto maybeKLoopTail = FindCorrespondingKLoopTail(kgraph, *maybeForLoop);
-                    if(maybeKLoopTail)
-                    {
-                        auto maybeCommonAncestor
-                            = FindCommonAncestorScope(kgraph, *maybeForLoop, *maybeKLoopTail);
-                        if(maybeCommonAncestor)
-                        {
-                            log->debug(
-                                "  staged as: KLoop with KLoopTail, hoisting to common ancestor {} "
-                                "(KLoop={}, KLoopTail={})",
-                                *maybeCommonAncestor,
-                                *maybeForLoop,
-                                *maybeKLoopTail);
-                            // Stage the hoisted version at common ancestor; skip original KLoop location
-                            stageChain(kgraph,
-                                       target,
-                                       candidate,
-                                       *maybeCommonAncestor,
-                                       GD::Upstream,
-                                       isStorePartOfGlobalToLDSOp,
-                                       *maybeForLoop, // Preserve forLoop for increment attachment
-                                       true); // replaceWithScope shares scope at common ancestor
-                            return;
-                        }
-                    }
-                }
-            }
 
             auto isReceiveTileLoop = false;
             if(maybeForLoop)
@@ -850,12 +732,9 @@ namespace rocRoller::KernelGraph
         KernelGraph commit(KernelGraph const& original) const
         {
             auto               kgraph = original;
-            std::map<int, int> scopes; // Maps location to actual scope node
-            std::map<int, int>
-                      serializationPoints; // Maps location to last chain bottom for serialization
-            BufferMap bufferMap;
+            std::map<int, int> scopes;
+            BufferMap          bufferMap;
 
-            // Build all chains and insert them into the graph
             for(auto const& [spec, candidates] : m_chains)
             {
                 ExpressionPtr step = Expression::literal(1u);
@@ -866,12 +745,10 @@ namespace rocRoller::KernelGraph
                 }
 
                 // Use first candidate to compute indexes
-                Log::debug(
-                    "KernelGraph::AddComputeIndex()::commit({}) isStorePartOfGlobalToLDSOp({}) "
-                    "location={}",
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::AddComputeIndex()::commit({}) isStorePartOfGlobalToLDSOp({})",
                     candidates[0],
-                    spec.isStorePartOfGlobalToLDSOp,
-                    spec.location);
+                    spec.isStorePartOfGlobalToLDSOp);
 
                 auto chain = addComputeIndex(kgraph, candidates[0], step, spec, bufferMap);
 
@@ -888,23 +765,19 @@ namespace rocRoller::KernelGraph
                         // is within the scope.
                         if(!scopes.contains(spec.location))
                         {
-                            auto newScope = kgraph.control.addElement(Scope());
-                            scopes[spec.location]
-                                = replaceWith(kgraph, spec.location, newScope, false);
-                            serializationPoints[spec.location] = scopes[spec.location];
+                            scopes[spec.location] = replaceWith(
+                                kgraph, spec.location, kgraph.control.addElement(Scope()), false);
                         }
-
                         auto scope = scopes[spec.location];
                         if(m_serializeComputeIndex)
                         {
-                            auto insertionPoint = serializationPoints[spec.location];
-                            auto isScope = kgraph.control.get<Scope>(insertionPoint).has_value();
+                            auto isScope = kgraph.control.get<Scope>(scope).has_value();
                             kgraph.control.addElement(isScope ? ControlEdge(Body())
                                                               : ControlEdge(Sequence()),
-                                                      {insertionPoint},
+                                                      {scope},
                                                       {chain.top});
                             kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
-                            serializationPoints[spec.location] = chain.bottom;
+                            scopes[spec.location] = chain.bottom;
                         }
                         else
                         {
