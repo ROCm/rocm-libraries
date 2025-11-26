@@ -147,16 +147,20 @@ private:
             : device_id(device_id)
             , old_device_id(-1)
         {
-            hipGetDevice(&old_device_id);
+            THROW_IF_HIP_ERROR(hipGetDevice(&old_device_id));
             if(device_id != old_device_id)
-                hipSetDevice(device_id);
+            {
+                THROW_IF_HIP_ERROR(hipSetDevice(device_id));
+            }
         }
 
         // Old device ID is restored on destruction
         ~_rocblas_saved_device_id()
         {
             if(device_id != old_device_id)
-                hipSetDevice(old_device_id);
+            {
+                (void)(hipSetDevice(old_device_id));
+            }
         }
 
         // Move constructor
