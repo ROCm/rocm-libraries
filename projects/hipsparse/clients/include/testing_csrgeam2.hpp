@@ -777,7 +777,21 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
         return HIPSPARSE_STATUS_INTERNAL_ERROR;
     }
 
-    std::cout << "M: " << M << " N: " << N << " nnz_A: " << nnz_A << std::endl;
+    std::cout << "M: " << M << " N: " << N << " nnz_A: " << nnz_A << " idx_base_A: " << idx_base_A << " idx_base_B: " << idx_base_B << std::endl;
+
+    std::cout << "hcsr_row_ptr_A" << std::endl;
+    for(int i = 0; i < M + 1; i++)
+    {
+        std::cout << hcsr_row_ptr_A[i] << " ";
+    }
+    std::cout << "" << std::endl;
+
+    std::cout << "hcsr_col_ind_A" << std::endl;
+    for(int i = 0; i < nnz_A; i++)
+    {
+        std::cout << hcsr_col_ind_A[i] << " ";
+    }
+    std::cout << "" << std::endl;
 
     // B = A so that we can compute the square of A
     int              nnz_B = nnz_A;
@@ -867,7 +881,7 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
     void* dbuffer = (void*)dbuffer_managed.get();
 
     // hipsparse pointer mode host
-    int hnnz_C_1;
+    int hnnz_C_1 = 0;
 
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
     CHECK_HIPSPARSE_ERROR(hipsparseXcsrgeam2Nnz(handle,
@@ -1046,6 +1060,48 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
                      idx_base_A,
                      idx_base_B,
                      idx_base_C);
+
+        std::cout << "hcsr_row_ptr_C_gold" << std::endl;
+        for(int i = 0; i < M + 1; i++)
+        {
+            std::cout << hcsr_row_ptr_C_gold[i] << " ";
+        }
+        std::cout << "" << std::endl;
+
+        std::cout << "hcsr_col_ind_C_gold" << std::endl;
+        for(int i = 0; i < nnz_C_gold; i++)
+        {
+            std::cout << hcsr_col_ind_C_gold[i] << " ";
+        }
+        std::cout << "" << std::endl;
+
+        std::cout << "hcsr_row_ptr_C_1" << std::endl;
+        for(int i = 0; i < M + 1; i++)
+        {
+            std::cout << hcsr_row_ptr_C_1[i] << " ";
+        }
+        std::cout << "" << std::endl;
+
+        std::cout << "hcsr_col_ind_C_1" << std::endl;
+        for(int i = 0; i < hnnz_C_1; i++)
+        {
+            std::cout << hcsr_col_ind_C_1[i] << " ";
+        }
+        std::cout << "" << std::endl;
+
+        std::cout << "hcsr_row_ptr_C_2" << std::endl;
+        for(int i = 0; i < M + 1; i++)
+        {
+            std::cout << hcsr_row_ptr_C_2[i] << " ";
+        }
+        std::cout << "" << std::endl;
+
+        std::cout << "hcsr_col_ind_C_2" << std::endl;
+        for(int i = 0; i < hnnz_C_2; i++)
+        {
+            std::cout << hcsr_col_ind_C_2[i] << " ";
+        }
+        std::cout << "" << std::endl;
 
         std::cout << "JJJJ" << std::endl;
         // Check nnz of C
