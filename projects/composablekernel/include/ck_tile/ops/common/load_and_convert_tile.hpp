@@ -5,6 +5,7 @@
 
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
+#include "ck_tile/core.hpp"
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
 
 namespace ck_tile {
