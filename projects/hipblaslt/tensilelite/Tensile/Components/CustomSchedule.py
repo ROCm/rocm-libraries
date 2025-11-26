@@ -1396,6 +1396,7 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
             'LRB1': [[80, 98, 99, 100]],
             'LCC': [[102, 103]]
         }
+        num_gr = len(optSchedule["GRA"][0])//2 + len(optSchedule["GRB"][0])//2
         syncCode = [
             SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration"),
 
@@ -1406,10 +1407,42 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRB0 to complete before GRB start"),
             SBarrier(comment=""),
 
-            SWaitCnt(dscnt=-1, vlcnt=28, vscnt=-1, comment="wait for previous set of global reads"),
+            SWaitCnt(dscnt=-1, vlcnt=num_gr, vscnt=-1, comment="wait for previous set of global reads"),
             SBarrier(comment="")
         ]
-        nglshift = nllshift = 28
+        nglshift = nllshift = num_gr
+
+    elif isNN(kernel) and useLDSTr and TLDS==1:
+        print("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+        numMfma = 104
+        kernel["SwapGlobalReadOrder"] = False
+        optSchedule = {
+            'GRA': [[24,24,25,25,27,27,29,29,31,31,32,32,34,34,36,36,38,38,39,39,41,41,43,43,45,45,46,46,48,48,50,50,52,52,53,53,55,55,57,57,59,59,60,60,62,62,64,64,66,66,67,67]],
+            'GRB': [[69,69,71,71,73,73,74,74,76,76,78,78,80,80,81,81]],
+            'GRIncA': [[0,0,0,1,1,1,2,2,2]],
+            'GRIncB': [[3,3,3,4,4,4,5,5,5]],
+            'LCC': [[103,103]],
+            'LRA0': [[0,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,14]],
+            'LRA1': [[84,85,85,86,86,87,87,88,88,89,89,90,90,91,91,92,92,93,93,94,94,95,95,96,96,97]],
+            'LRB0': [[1,15,16,17]],
+            'LRB1': [[84,98,99,100]],
+            'LRSA': [[50]],
+            'LRSB': [[50]],
+            'LWSA': [[81]],
+            'LWSB': [[81]],
+            'SYNC': [[-1,12,24,24,51,83,83]]
+        }
+        num_gr = len(optSchedule["GRA"][0])//2 + len(optSchedule["GRB"][0])//2
+        syncCode = [
+            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=3 newLW=0 newLR=3 for iteration == 0"),
+            SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+            SWaitCnt(dscnt=-1, vlcnt=num_gr, vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment="")
+        ]
+        nglshift = nllshift = num_gr
     else:
         return False, None
 
