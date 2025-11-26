@@ -7924,16 +7924,18 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr2_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    trmv performs one of the matrix-vector operations:
+    The trmv functions perform one of the matrix-vector operations:
 
         x = A*x or
         x = A**T*x or
         x = A**H*x
-        where x is an n element vector and A is an n by n unit, or non-unit, upper or lower triangular matrix.
-        The vector x is overwritten.
+   
+    where ``x`` is an ``n``-element vector and ``A`` is an ``n`` by ``n`` unit, or non-unit, upper or lower triangular matrix.
+    The vector ``x`` is overwritten.
+   
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
@@ -7943,8 +7945,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr2_strided_batched_64(rocblas_handle   
     @param[in]
     transA     [rocblas_operation]
             - rocblas_operation_none:    op(A) = A.
-            - rocblas_operation_transpose:   op(A) = A^T
-            - rocblas_operation_conjugate_transpose:  op(A) = A^H
+            - rocblas_operation_transpose:   op(A) = A^T.
+            - rocblas_operation_conjugate_transpose:  op(A) = A^H.
 
     @param[in]
     diag    [rocblas_diagonal]
@@ -7956,7 +7958,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr2_strided_batched_64(rocblas_handle   
               n specifies the number of rows of A. n >= 0.
 
     @param[in]
-    A         device pointer storing matrix A, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A, otherwise the lower triangular part of the leading n-by-n array contains the matrix A.
+    A         device pointer storing matrix A, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A. Otherwise, the lower triangular part of the leading n-by-n array contains the matrix A.
 
     @param[in]
     lda       [rocblas_int]
@@ -8056,17 +8058,18 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmv_64(rocblas_handle                han
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    trmv_batched performs one of the matrix-vector operations:
+    The trmv_batched functions perform one of the matrix-vector operations:
 
         x_i = A_i*x_i or
         x_i = A_i**T*x_i or
         x_i = A_i**H*x_i, 0 < i < batch_count
-        where x_i is an n element vector and A_i is an n by n (unit, or non-unit, upper or lower triangular matrix)
-        The vectors x_i are overwritten.
+   
+    where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular matrix).
+    The vectors ``x_i`` are overwritten.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
@@ -8076,8 +8079,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmv_64(rocblas_handle                han
     @param[in]
     transA     [rocblas_operation]
             - rocblas_operation_none:    op(A) = A.
-            - rocblas_operation_transpose:   op(A) = A^T
-            - rocblas_operation_conjugate_transpose:  op(A) = A^H
+            - rocblas_operation_transpose:   op(A) = A^T.
+            - rocblas_operation_conjugate_transpose:  op(A) = A^H.
 
     @param[in]
     diag    [rocblas_diagonal]
@@ -8089,7 +8092,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmv_64(rocblas_handle                han
               n specifies the number of rows of matrices A_i. n >= 0.
 
     @param[in]
-    A         device pointer to an array of device pointers to the A_i matrices, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A_i, otherwise the lower triangular part of the leading n-by-n array contains the matrix A_i.
+    A         device pointer to an array of device pointers to the A_i matrices, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A_i. Otherwise the lower triangular part of the leading n-by-n array contains the matrix A_i.
 
     @param[in]
     lda       [rocblas_int]
@@ -8203,19 +8206,20 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmv_batched_64(rocblas_handle           
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    trmv_strided_batched performs one of the matrix-vector operations:
+    The trmv_strided_batched functions perform one of the matrix-vector operations:
 
         x_i = A_i*x_i or
         x_i = A_i**T*x_i, or
         x_i = A_i**H*x_i, 0 < i < batch_count
-        where x_i is an n element vector and A_i is an n by n (unit, or non-unit, upper or lower triangular matrix)
-        with strides specifying how to retrieve $x_i$ (resp. $A_i$) from $x_{i-1}$ (resp. $A_i$).
+   
+    where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular matrix)
+    with strides specifying how to retrieve ``$x_i$`` (resp. ``$A_i$``) from ``$x_{i-1}$`` (resp. ``$A_i$``).
 
-    The vectors x_i are overwritten.
+    The vectors ``x_i`` are overwritten.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
@@ -8225,8 +8229,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmv_batched_64(rocblas_handle           
     @param[in]
     transA     [rocblas_operation]
             - rocblas_operation_none:    op(A) = A.
-            - rocblas_operation_transpose:   op(A) = A^T
-            - rocblas_operation_conjugate_transpose:  op(A) = A^H
+            - rocblas_operation_transpose:   op(A) = A^T.
+            - rocblas_operation_conjugate_transpose:  op(A) = A^H.
 
     @param[in]
     diag    [rocblas_diagonal]
@@ -8238,7 +8242,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmv_batched_64(rocblas_handle           
               n specifies the number of rows of matrices A_i. n >= 0.
 
     @param[in]
-    A         device pointer to the matrix A_1 of the batch, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A_i, otherwise the lower triangular part of the leading n-by-n array contains the matrix A_i.
+    A         device pointer to the matrix A_1 of the batch, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A_i. Otherwise, the lower triangular part of the leading n-by-n array contains the matrix A_i.
 
     @param[in]
     lda       [rocblas_int]
@@ -8375,18 +8379,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmv_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    tpmv performs one of the matrix-vector operations:
+    The tpmv functions perform one of the matrix-vector operations:
 
         x = A*x or
         x = A**T*x or
         x = A**H*x
-        where x is an n element vector and A is an n by n unit, or non-unit,
-        upper or lower triangular matrix, supplied in the pack form.
-        The vector x is overwritten.
+   
+    where ``x`` is an ``n`` element vector and ``A`` is an ``n`` by ``n`` unit, or non-unit,
+    upper or lower triangular matrix, supplied in the pack form.
+    The vector ``x`` is overwritten.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
@@ -8511,17 +8516,18 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpmv_64(rocblas_handle                han
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    tpmv_batched performs one of the matrix-vector operations:
+    The tpmv_batched functions perform one of the matrix-vector operations:
 
         x_i = A_i*x_i or
         x_i = A_i**T*x_i or
         x_i = A_i**H*x_i, 0 < i < batch_count
-        where x_i is an n element vector and A_i is an n by n (unit, or non-unit, upper or lower triangular matrix)
-        The vectors x_i are overwritten.
+   
+    where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular matrix).
+    The vectors ``x_i`` are overwritten.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
@@ -8544,7 +8550,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpmv_64(rocblas_handle                han
               n specifies the number of rows of matrices A_i. n >= 0.
 
     @param[in]
-    A         device pointer to an array of device pointers to the A_i matrices, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A_i, otherwise the lower triangular part of the leading n-by-n array contains the matrix A_i.
+    A         device pointer to an array of device pointers to the A_i matrices, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A_i. Otherwise the lower triangular part of the leading n-by-n array contains the matrix A_i.
 
     @param[in, out]
     x         device pointer to an array of device pointers to the x_i vectors. On exit, each x_i is overwritten with the transformed vector x_i.
@@ -8645,18 +8651,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpmv_batched_64(rocblas_handle           
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    tpmv_strided_batched performs one of the matrix-vector operations:
+    The tpmv_strided_batched functions perform one of the matrix-vector operations:
 
         x_i = A_i*x_i or
         x_i = A_i**T*x_i or
         x_i = A_i**H*x_i, 0 < i < batch_count
-        where x_i is an n element vector and A_i is an n by n (unit, or non-unit, upper or lower triangular matrix)
-        with strides specifying how to retrieve $x_i$ (resp. $A_i$) from $x_{i-1}$ (resp. $A_i$).
-        The vectors x_i are overwritten.
+   
+    where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular matrix)
+    with strides specifying how to retrieve ``$x_i$`` (resp. $``A_i$``) from ``$x_{i-1}$`` (resp. ``$A_i$``).
+    The vectors ``x_i`` are overwritten.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
@@ -8679,7 +8686,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpmv_batched_64(rocblas_handle           
             n specifies the number of rows of matrices A_i. n >= 0.
 
     @param[in]
-    A       device pointer to the matrix A_1 of the batch, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A_i, otherwise the lower triangular part of the leading n-by-n array contains the matrix A_i.
+    A       device pointer to the matrix A_1 of the batch, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A_i. Otherwise, the lower triangular part of the leading n-by-n array contains the matrix A_i.
 
     @param[in]
     stride_A  [rocblas_stride]
@@ -8804,16 +8811,17 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpmv_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    tbmv performs one of the matrix-vector operations:
+    The tbmv functions perform one of the matrix-vector operations:
 
         x := A*x      or
         x := A**T*x   or
         x := A**H*x,
-        x is a vectors and A is a banded n by n matrix (see description below).
+   
+    ``x`` is a vector and ``A`` is a banded ``n`` by ``n`` matrix (see description below).
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
             - rocblas_fill_upper: A is an upper banded triangular matrix.
@@ -8825,7 +8833,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpmv_strided_batched_64(rocblas_handle   
     diag      [rocblas_diagonal]
             - rocblas_diagonal_unit: The main diagonal of A is assumed to consist of only
                                      1's and is not referenced.
-            - rocblas_diagonal_non_unit: No assumptions are made of A's main diagonal.
+            - rocblas_diagonal_non_unit: No assumptions are made about the main diagonal of A.
     @param[in]
     n         [rocblas_int]
               the number of rows and columns of the matrix represented by A.
@@ -8846,7 +8854,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpmv_strided_batched_64(rocblas_handle   
                 with the main diagonal and k super-diagonals, everything
                 else can be assumed to be 0.
                 The matrix is compacted so that the main diagonal resides on the k'th
-                row, the first super diagonal resides on the RHS of the k-1'th row, etc,
+                row, the first super diagonal resides on the RHS of the k-1'th row, and so forth,
                 with the k'th diagonal on the RHS of the 0'th row.
                    Ex: (rocblas_fill_upper; n = 5; k = 2)
                       1 6 9 0 0              0 0 9 8 7
@@ -8971,17 +8979,18 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbmv_64(rocblas_handle                han
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    tbmv_batched performs one of the matrix-vector operations:
+    The tbmv_batched functions perform one of the matrix-vector operations:
 
         x_i := A_i*x_i      or
         x_i := A_i**T*x_i   or
         x_i := A_i**H*x_i,
-        where (A_i, x_i) is the i-th instance of the batch.
-        x_i is a vector and A_i is an n by n matrix, for i = 1, ..., batch_count.
+   
+    where (``A_i``, ``x_i``) is the i-th instance of the batch,
+    ``x_i`` is a vector, and ``A_i`` is an ``n`` by ``n`` matrix, for ``i`` = 1, ..., ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
             - rocblas_fill_upper: each A_i is an upper banded triangular matrix.
@@ -8993,7 +9002,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbmv_64(rocblas_handle                han
     diag      [rocblas_diagonal]
             - rocblas_diagonal_unit: The main diagonal of each A_i is assumed to consist of only
                                      1's and is not referenced.
-            - rocblas_diagonal_non_unit: No assumptions are made of each A_i's main diagonal.
+            - rocblas_diagonal_non_unit: No assumptions are made of the main diagonal of each A_i.
     @param[in]
     n         [rocblas_int]
               the number of rows and columns of the matrix represented by each A_i.
@@ -9014,7 +9023,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbmv_64(rocblas_handle                han
                 with the main diagonal and k super-diagonals, everything
                 else can be assumed to be 0.
                 The matrix is compacted so that the main diagonal resides on the k'th
-                row, the first super diagonal resides on the RHS of the k-1'th row, etc,
+                row, the first super diagonal resides on the RHS of the k-1'th row, and so forth,
                 with the k'th diagonal on the RHS of the 0'th row.
                    Ex: (rocblas_fill_upper; n = 5; k = 2)
                       1 6 9 0 0              0 0 9 8 7
@@ -9150,17 +9159,18 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbmv_batched_64(rocblas_handle           
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    tbmv_strided_batched performs one of the matrix-vector operations:
+    The tbmv_strided_batched functions perform one of the matrix-vector operations:
 
         x_i := A_i*x_i      or
         x_i := A_i**T*x_i   or
         x_i := A_i**H*x_i,
-        where (A_i, x_i) is the i-th instance of the batch.
-        x_i is a vector and A_i is an n by n matrix, for i = 1, ..., batch_count.
+   
+    where (``A_i``, ``x_i``) is the i-th instance of the batch,
+    ``x_i`` is a vector, and ``A_i`` is an ``n`` by ``n`` matrix, for ``i`` = 1, ..., ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
             - rocblas_fill_upper: each A_i is an upper banded triangular matrix.
@@ -9172,7 +9182,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbmv_batched_64(rocblas_handle           
     diag      [rocblas_diagonal]
             - rocblas_diagonal_unit: The main diagonal of each A_i is assumed to consist of only
                                      1's and is not referenced.
-            - rocblas_diagonal_non_unit: No assumptions are made of each A_i's main diagonal.
+            - rocblas_diagonal_non_unit: No assumptions are made of the main diagonal of each A_i.
     @param[in]
     n         [rocblas_int]
               the number of rows and columns of the matrix represented by each A_i.
@@ -9193,7 +9203,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbmv_batched_64(rocblas_handle           
                 with the main diagonal and k super-diagonals, everything
                 else can be assumed to be 0.
                 The matrix is compacted so that the main diagonal resides on the k'th
-                row, the first super diagonal resides on the RHS of the k-1'th row, etc,
+                row, the first super diagonal resides on the RHS of the k-1'th row, and so forth,
                 with the k'th diagonal on the RHS of the 0'th row.
                    Ex: (rocblas_fill_upper; n = 5; k = 2)
                       1 6 9 0 0              0 0 9 8 7
@@ -9351,16 +9361,17 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbmv_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    tbsv solves:
+    The tbsv functions solve:
 
          A*x = b or
          A**T*x = b or
          A**H*x = b
-         where x and b are vectors and A is a banded triangular matrix.
+   
+    where ``x`` and ``b`` are vectors and ``A`` is a banded triangular matrix.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
@@ -9375,7 +9386,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbmv_strided_batched_64(rocblas_handle   
 
     @param[in]
     diag    [rocblas_diagonal]
-            - rocblas_diagonal_unit: A is assumed to be unit triangular (i.e. the diagonal elements
+            - rocblas_diagonal_unit: A is assumed to be unit triangular (the diagonal elements
             of A are not used in computations).
             - rocblas_diagonal_non_unit: A is not assumed to be unit triangular.
 
@@ -9501,19 +9512,20 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbsv_64(rocblas_handle                han
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    tbsv_batched solves:
+    The tbsv_batched functions solve:
 
          A_i*x_i = b_i or
          A_i**T*x_i = b_i or
          A_i**H*x_i = b_i
-         where x_i and b_i are vectors and A_i is a banded triangular matrix,
-        for i = [1, batch_count].
+   
+    where ``x_i`` and ``b_i`` are vectors and ``A_i`` is a banded triangular matrix,
+    for ``i`` = [1, ``batch_count``].
 
-    The input vectors b_i are overwritten by the output vectors x_i.
+    The input vectors ``b_i`` are overwritten by the output vectors ``x_i``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
@@ -9528,7 +9540,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbsv_64(rocblas_handle                han
 
     @param[in]
     diag    [rocblas_diagonal]
-            - rocblas_diagonal_unit:     each A_i is assumed to be unit triangular (i.e. the diagonal elements
+            - rocblas_diagonal_unit:     each A_i is assumed to be unit triangular (the diagonal elements
             of each A_i are not used in computations).
             - rocblas_diagonal_non_unit: each A_i is not assumed to be unit triangular.
 
@@ -9665,19 +9677,20 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbsv_batched_64(rocblas_handle           
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    tbsv_strided_batched solves:
+    The tbsv_strided_batched functions solve:
 
          A_i*x_i = b_i or
          A_i**T*x_i = b_i or
          A_i**H*x_i = b_i
-         where x_i and b_i are vectors and A_i is a banded triangular matrix,
-        for i = [1, batch_count].
+   
+    where ``x_i`` and ``b_i`` are vectors and ``A_i`` is a banded triangular matrix,
+    for ``i`` = [1, ``batch_count``].
 
-    The input vectors b_i are overwritten by the output vectors x_i.
+    The input vectors ``b_i`` are overwritten by the output vectors ``x_i``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
@@ -9692,7 +9705,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbsv_batched_64(rocblas_handle           
 
     @param[in]
     diag    [rocblas_diagonal]
-            - rocblas_diagonal_unit:     each A_i is assumed to be unit triangular (i.e. the diagonal elements
+            - rocblas_diagonal_unit:     each A_i is assumed to be unit triangular (the diagonal elements
             of each A_i are not used in computations).
             - rocblas_diagonal_non_unit: each A_i is not assumed to be unit triangular.
 
@@ -10305,18 +10318,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsv_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    tpsv solves:
+    The tpsv functions solve:
 
          A*x = b or
          A**T*x = b or
          A**H*x = b
-         where x and b are vectors and A is a triangular matrix stored in the packed format.
+   
+    where ``x`` and ``b`` are vectors and ``A`` is a triangular matrix stored in the packed format.
 
-    The input vector b is overwritten by the output vector x.
+    The input vector ``b`` is overwritten by the output vector ``x``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
@@ -10325,13 +10339,13 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsv_strided_batched_64(rocblas_handle   
 
     @param[in]
     transA  [rocblas_operation]
-            - rocblas_operation_none: Solves A*x = b
-            - rocblas_operation_transpose: Solves A**T*x = b
-            - rocblas_operation_conjugate_transpose: Solves A**H*x = b
+            - rocblas_operation_none: Solves A*x = b.
+            - rocblas_operation_transpose: Solves A**T*x = b.
+            - rocblas_operation_conjugate_transpose: Solves A**H*x = b.
 
     @param[in]
     diag    [rocblas_diagonal]
-            - rocblas_diagonal_unit:  A is assumed to be unit triangular (i.e. the diagonal elements
+            - rocblas_diagonal_unit:  A is assumed to be unit triangular (the diagonal elements
             of A are not used in computations).
             - rocblas_diagonal_non_unit: A is not assumed to be unit triangular.
 
@@ -10429,19 +10443,20 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpsv_64(rocblas_handle                han
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    tpsv_batched solves:
+    The tpsv_batched functions solve:
 
          A_i*x_i = b_i or
          A_i**T*x_i = b_i or
          A_i**H*x_i = b_i
-        where x_i and b_i are vectors and A_i is a triangular matrix stored in the packed format,
-        for i in [1, batch_count].
+   
+    where ``x_i`` and ``b_i`` are vectors and ``A_i`` is a triangular matrix stored in the packed format,
+    for ``i`` in [1, ``batch_count``].
 
-    The input vectors b_i are overwritten by the output vectors x_i.
+    The input vectors ``b_i`` are overwritten by the output vectors ``x_i``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
@@ -10450,13 +10465,13 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpsv_64(rocblas_handle                han
 
     @param[in]
     transA  [rocblas_operation]
-            - rocblas_operation_none: Solves A*x = b
-            - rocblas_operation_transpose: Solves A**T*x = b
-            - rocblas_operation_conjugate_transpose: Solves A**H*x = b
+            - rocblas_operation_none: Solves A*x = b.
+            - rocblas_operation_transpose: Solves A**T*x = b.
+            - rocblas_operation_conjugate_transpose: Solves A**H*x = b.
 
     @param[in]
     diag    [rocblas_diagonal]
-            - rocblas_diagonal_unit: Each A_i is assumed to be unit triangular (i.e. the diagonal elements
+            - rocblas_diagonal_unit: Each A_i is assumed to be unit triangular (the diagonal elements
             of each A_i are not used in computations).
             - rocblas_diagonal_non_unit: each A_i is not assumed to be unit triangular.
 
@@ -10565,19 +10580,20 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpsv_batched_64(rocblas_handle           
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    tpsv_strided_batched solves:
+    The tpsv_strided_batched functions solve:
 
          A_i*x_i = b_i or
          A_i**T*x_i = b_i or
          A_i**H*x_i = b_i
-        where x_i and b_i are vectors and A_i is a triangular matrix stored in the packed format,
-        for i in [1, batch_count].
+   
+    where ``x_i`` and ``b_i`` are vectors and ``A_i`` is a triangular matrix stored in the packed format,
+    for ``i`` in [1, ``batch_count``].
 
-    The input vectors b_i are overwritten by the output vectors x_i.
+    The input vectors ``b_i`` are overwritten by the output vectors ``x_i``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
@@ -10586,13 +10602,13 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpsv_batched_64(rocblas_handle           
 
     @param[in]
     transA  [rocblas_operation]
-            - rocblas_operation_none: Solves A*x = b
-            - rocblas_operation_transpose: Solves A**T*x = b
-            - rocblas_operation_conjugate_transpose: Solves A**H*x = b
+            - rocblas_operation_none: Solves A*x = b.
+            - rocblas_operation_transpose: Solves A**T*x = b.
+            - rocblas_operation_conjugate_transpose: Solves A**H*x = b.
 
     @param[in]
     diag    [rocblas_diagonal]
-            - rocblas_diagonal_unit:     each A_i is assumed to be unit triangular (i.e. the diagonal elements
+            - rocblas_diagonal_unit:     each A_i is assumed to be unit triangular (the diagonal elements
             of each A_i are not used in computations).
             - rocblas_diagonal_non_unit: each A_i is not assumed to be unit triangular.
 
@@ -10724,21 +10740,22 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpsv_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    symv performs the matrix-vector operation:
+    The symv functions perform the matrix-vector operation:
 
         y := alpha*A*x + beta*y
-        where alpha and beta are scalars, x and y are n element vectors and
-        A should contain an upper or lower triangular n by n symmetric matrix.
+   
+    where ``alpha`` and ``beta`` are scalars, and ``x`` and ``y`` are ``n``-element vectors.
+    ``A`` should contain an upper or lower triangular ``n`` by ``n`` symmetric matrix.
 
     symv has an implementation which uses atomic operations. See Atomic Operations
     in the API Reference Guide for more information.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo     [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - if rocblas_fill_upper, the lower part of A is not referenced.
             - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
@@ -10747,7 +10764,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpsv_strided_batched_64(rocblas_handle   
     alpha
               specifies the scalar alpha.
     @param[in]
-    A         pointer storing matrix A on the GPU
+    A         pointer storing matrix A on the GPU.
     @param[in]
     lda       [rocblas_int]
               specifies the leading dimension of A.
@@ -10757,7 +10774,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpsv_strided_batched_64(rocblas_handle   
     incx      [rocblas_int]
               specifies the increment for the elements of x.
     @param[in]
-    beta      specifies the scalar beta
+    beta      specifies the scalar beta.
     @param[out]
     y         pointer storing vector y on the GPU.
     @param[in]
@@ -10867,21 +10884,22 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymv_64(rocblas_handle                han
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    symv_batched performs the matrix-vector operation:
+    The symv_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-        where (A_i, x_i, y_i) is the i-th instance of the batch.
-        alpha and beta are scalars, x_i and y_i are vectors and A_i is an
-        n by n symmetric matrix, for i = 1, ..., batch_count.
-        A a should contain an upper or lower triangular symmetric matrix
-        and the opposing triangular part of A is not referenced.
+   
+    where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
+    ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
+    ``n`` by ``n`` symmetric matrix, for ``i`` = 1, ..., ``batch_count``.
+    ``A`` should contain an upper or lower triangular symmetric matrix.
+    The opposing triangular part of ``A`` is not referenced.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - if rocblas_fill_upper, the lower part of A is not referenced.
             - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
@@ -11023,23 +11041,24 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymv_batched_64(rocblas_handle           
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    symv_strided_batched performs the matrix-vector operation:
+    The symv_strided_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-        where (A_i, x_i, y_i) is the i-th instance of the batch.
-        alpha and beta are scalars, x_i and y_i are vectors and A_i is an
-        n by n symmetric matrix, for i = 1, ..., batch_count.
-        A a should contain an upper or lower triangular symmetric matrix
-        and the opposing triangular part of A is not referenced.
+   
+    where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
+    ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
+    ``n`` by ``n`` symmetric matrix, for ``i`` = 1, ..., ``batch_count``.
+    ``A`` should contain an upper or lower triangular symmetric matrix.
+    The opposing triangular part of ``A`` is not referenced.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
-            - if rocblas_fill_upper, the lower part of A is not referenced
-            - if rocblas_fill_lower, the upper part of A is not referenced
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
+            - if rocblas_fill_upper, the lower part of A is not referenced.
+            - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
               number of rows and columns of each matrix A_i.
@@ -11053,7 +11072,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymv_batched_64(rocblas_handle           
               specifies the leading dimension of each matrix A_i.
     @param[in]
     strideA     [rocblas_stride]
-                stride from the start of one matrix (A_i) and the next one (A_i+1).
+                stride from the start of one matrix (A_i) to the next one (A_i+1).
     @param[in]
     x         Device pointer to the first vector x_1 on the GPU.
     @param[in]
@@ -11061,8 +11080,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymv_batched_64(rocblas_handle           
               specifies the increment for the elements of each vector x_i.
     @param[in]
     stridex     [rocblas_stride]
-                stride from the start of one vector (x_i) and the next one (x_i+1).
-                There are no restrictions placed on stride_x. However, ensure that stridex is of appropriate size.
+                stride from the start of one vector (x_i) to the next one (x_i+1).
+                There are no restrictions placed on stride_x. However, ensure that stridex is of an appropriate size.
                 This typically means stridex >= n * incx. stridex should be non zero.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
@@ -11073,8 +11092,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymv_batched_64(rocblas_handle           
               specifies the increment for the elements of each vector y_i.
     @param[in]
     stridey     [rocblas_stride]
-                stride from the start of one vector (y_i) and the next one (y_i+1).
-                There are no restrictions placed on stride_y. However, ensure that stridey is of appropriate size.
+                stride from the start of one vector (y_i) to the next one (y_i+1).
+                There are no restrictions placed on stride_y. However, ensure that stridey is of an appropriate size.
                 This typically means stridey >= n * incy. stridey should be non zero.
     @param[in]
     batch_count [rocblas_int]
@@ -11215,20 +11234,21 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymv_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    spmv performs the matrix-vector operation:
+    The spmv functions perform the matrix-vector operation:
 
         y := alpha*A*x + beta*y
-        where alpha and beta are scalars, x and y are n element vectors and
-        A should contain an upper or lower triangular n by n packed symmetric matrix.
+   
+    where ``alpha`` and ``beta`` are scalars, and ``x`` and ``y`` are ``n``-element vectors.
+    ``A`` should contain an upper or lower triangular ``n`` by ``n`` packed symmetric matrix.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
-    uplo      rocblas_fill
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
-            - if rocblas_fill_upper, the lower part of A is not referenced
-            - if rocblas_fill_lower, the upper part of A is not referenced
+    uplo      [rocblas_fill]
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
+            - if rocblas_fill_upper, the lower part of A is not referenced.
+            - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
     @param[in]
@@ -11300,22 +11320,23 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_64(rocblas_handle handle,
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    spmv_batched performs the matrix-vector operation:
+    The spmv_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-        where (A_i, x_i, y_i) is the i-th instance of the batch.
-        alpha and beta are scalars, x_i and y_i are vectors and A_i is an
-        n by n symmetric matrix, for i = 1, ..., batch_count.
-        A should contain an upper or lower triangular n by n packed symmetric matrix.
+   
+    where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
+    ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
+    ``n`` by ``n`` symmetric matrix, for ``i`` = 1, ..., ``batch_count``.
+    ``A`` should contain an upper or lower triangular ``n`` by ``n`` packed symmetric matrix.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
-            - if rocblas_fill_upper, the lower part of A is not referenced
-            - if rocblas_fill_lower, the upper part of A is not referenced
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
+            - if rocblas_fill_upper, the lower part of A is not referenced.
+            - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
               number of rows and columns of each matrix A_i.
@@ -11394,22 +11415,23 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_batched_64(rocblas_handle      handl
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    spmv_strided_batched performs the matrix-vector operation:
+    The spmv_strided_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-        where (A_i, x_i, y_i) is the i-th instance of the batch.
-        alpha and beta are scalars, x_i and y_i are vectors and A_i is an
-        n by n symmetric matrix, for i = 1, ..., batch_count.
-        A should contain an upper or lower triangular n by n packed symmetric matrix.
+   
+    where (``A_i``, ``x_i``, ``y_i``) is the i-th instance of the batch,
+    ``alpha`` and ``beta`` are scalars, ``x_`` and ``y_i`` are vectors, and ``A_i`` is an
+    ``n`` by ``n`` symmetric matrix, for ``i`` = 1, ..., ``batch_count``.
+    ``A`` should contain an upper or lower triangular ``n`` by ``n`` packed symmetric matrix.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
-            - if rocblas_fill_upper, the lower part of A is not referenced
-            - if rocblas_fill_lower, the upper part of A is not referenced
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
+            - if rocblas_fill_upper, the lower part of A is not referenced.
+            - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
               number of rows and columns of each matrix A_i.
@@ -11420,7 +11442,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_batched_64(rocblas_handle      handl
     A         Device pointer to the first matrix A_1 on the GPU.
     @param[in]
     strideA     [rocblas_stride]
-                stride from the start of one matrix (A_i) and the next one (A_i+1).
+                stride from the start of one matrix (A_i) to the next one (A_i+1).
     @param[in]
     x         Device pointer to the first vector x_1 on the GPU.
     @param[in]
@@ -11428,8 +11450,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_batched_64(rocblas_handle      handl
               specifies the increment for the elements of each vector x_i.
     @param[in]
     stridex     [rocblas_stride]
-                stride from the start of one vector (x_i) and the next one (x_i+1).
-                There are no restrictions placed on stridex. However, ensure that stridex is of appropriate size.
+                stride from the start of one vector (x_i) to the next one (x_i+1).
+                There are no restrictions placed on stridex. However, ensure that stridex is ofan appropriate size.
                 This typically means stridex >= n * incx. stridex should be non zero.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
@@ -11440,8 +11462,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_batched_64(rocblas_handle      handl
               specifies the increment for the elements of each vector y_i.
     @param[in]
     stridey     [rocblas_stride]
-                stride from the start of one vector (y_i) and the next one (y_i+1).
-                There are no restrictions placed on stridey. However, ensure that stridey is of appropriate size.
+                stride from the start of one vector (y_i) to the next one (y_i+1).
+                There are no restrictions placed on stridey. However, ensure that stridey is of an appropriate size.
                 This typically means stridey >= n * incy. stridey should be non zero.
     @param[in]
     batch_count [rocblas_int]
@@ -11517,14 +11539,14 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_strided_batched_64(rocblas_handle ha
 
         y := alpha*A*x + beta*y
    
-    where ``alpha`` and ``beta`` are scalars, ``x`` and ``y`` are ``n``-element vectors, and
+    where ``alpha`` and ``beta`` are scalars, and ``x`` and ``y`` are ``n``-element vectors.
     ``A`` should contain an upper or lower triangular ``n`` by ``n ``symmetric banded matrix.
 
     @param[in]
     handle    [rocblas_handle]
               handle to the rocBLAS library context queue.
     @param[in]
-    uplo      rocblas_fill
+    uplo      [rocblas_fill]
               specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
               - if rocblas_fill_upper, the lower part of A is not referenced.
               - if rocblas_fill_lower, the upper part of A is not referenced.
@@ -12461,18 +12483,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgerc_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    spr performs the matrix-vector operations:
+    The spr functions perform the matrix-vector operations:
 
         A := A + alpha*x*x**T
-        where alpha is a scalar, x is a vector, and A is an
-        n by n symmetric matrix, supplied in packed form.
+   
+    where ``alpha`` is a scalar, ``x`` is a vector, and ``A`` is an
+    ``n`` by ``n`` symmetric matrix, supplied in packed form.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of A is supplied in AP.
             - rocblas_fill_lower: The lower triangular part of A is supplied in AP.
     @param[in]
@@ -12589,18 +12612,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zspr_64(rocblas_handle                hand
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    spr_batched performs the matrix-vector operations:
+    The spr_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*x_i**T
-        where alpha is a scalar, x_i is a vector, and A_i is an
-        n by n symmetric matrix, supplied in packed form, for i = 1, ..., batch_count.
+   
+    where ``alpha`` is a scalar, ``x_i`` is a vector, and ``A_i`` is an
+    ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies  either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of each A_i is supplied in AP.
             - rocblas_fill_lower: The lower triangular part of each A_i is supplied in AP.
     @param[in]
@@ -12616,7 +12640,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zspr_64(rocblas_handle                hand
               specifies the increment for the elements of each x_i.
     @param[in, out]
     AP        device array of device pointers storing the packed version of the specified triangular portion of
-              each symmetric matrix A_i of at least size ((n * (n + 1)) / 2). Array is of at least size batch_count.
+              each symmetric matrix A_i of at least size ((n * (n + 1)) / 2). The array is of at least size batch_count.
 
                     if uplo == rocblas_fill_upper:
                         The upper triangular portion of each symmetric matrix A_i is supplied.
@@ -12727,18 +12751,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zspr_batched_64(rocblas_handle            
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    spr_strided_batched performs the matrix-vector operations:
+    The spr_strided_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*x_i**T
-        where alpha is a scalar, x_i is a vector, and A_i is an
-        n by n symmetric matrix, supplied in packed form, for i = 1, ..., batch_count.
+   
+    where ``alpha`` is a scalar, ``x_i`` is a vector, and ``A_i`` is an
+    ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of each A_i is supplied in AP.
             - rocblas_fill_lower: The lower triangular part of each A_i is supplied in AP.
     @param[in]
@@ -12788,7 +12813,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zspr_batched_64(rocblas_handle            
                                 4 7 9 0
     @param[in]
     stride_A    [rocblas_stride]
-                stride from the start of one (A_i) and the next (A_i+1).
+                stride from the start of one (A_i) to the next (A_i+1).
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
@@ -12887,18 +12912,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zspr_strided_batched_64(rocblas_handle    
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    spr2 performs the matrix-vector operation:
+    The spr2 functions perform the matrix-vector operation:
 
         A := A + alpha*x*y**T + alpha*y*x**T
-        where alpha is a scalar, x and y are vectors, and A is an
-        n by n symmetric matrix, supplied in packed form.
+   
+    where ``alpha`` is a scalar, ``x`` and ``y`` are vectors, and ``A`` is an
+    ``n`` by ``n`` symmetric matrix, supplied in packed form.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of A is supplied in AP.
             - rocblas_fill_lower: The lower triangular part of A is supplied in AP.
     @param[in]
@@ -12995,18 +13021,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspr2_64(rocblas_handle handle,
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    spr2_batched performs the matrix-vector operation:
+    The spr2_batched functions perform the matrix-vector operation:
 
         A_i := A_i + alpha*x_i*y_i**T + alpha*y_i*x_i**T
-        where alpha is a scalar, x_i and y_i are vectors, and A_i is an
-        n by n symmetric matrix, supplied in packed form, for i = 1, ..., batch_count.
+   
+    where ``alpha`` is a scalar, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
+    ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of each A_i is supplied in AP.
             - rocblas_fill_lower: The lower triangular part of each A_i is supplied in AP.
     @param[in]
@@ -13110,18 +13137,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspr2_batched_64(rocblas_handle      handl
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    spr2_strided_batched performs the matrix-vector operation:
+    The spr2_strided_batched functions perform the matrix-vector operation:
 
         A_i := A_i + alpha*x_i*y_i**T + alpha*y_i*x_i**T
-        where alpha is a scalar, x_i and y_i are vectors, and A_i is an
-        n by n symmetric matrix, supplied in packed form, for i = 1, ..., batch_count.
+   
+    where ``alpha`` is a scalar, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
+    ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of each A_i is supplied in AP.
             - rocblas_fill_lower: The lower triangular part of each A_i is supplied in AP.
     @param[in]
@@ -13137,7 +13165,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspr2_batched_64(rocblas_handle      handl
               specifies the increment for the elements of each x_i.
     @param[in]
     stride_x  [rocblas_stride]
-              stride from the start of one vector (x_i) and the next one (x_i+1).
+              stride from the start of one vector (x_i) to the next one (x_i+1).
     @param[in]
     y         device pointer pointing to the first vector (y_1).
     @param[in]
@@ -13145,7 +13173,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspr2_batched_64(rocblas_handle      handl
               specifies the increment for the elements of each y_i.
     @param[in]
     stride_y  [rocblas_stride]
-              stride from the start of one vector (y_i) and the next one (y_i+1).
+              stride from the start of one vector (y_i) to the next one (y_i+1).
     @param[in, out]
     AP        device pointer storing the packed version of the specified triangular portion of
               each symmetric matrix A_i. Points to the first A_1.
@@ -13179,7 +13207,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspr2_batched_64(rocblas_handle      handl
                                 4 7 9 0
     @param[in]
     stride_A    [rocblas_stride]
-                stride from the start of one (A_i) and the next (A_i+1).
+                stride from the start of one (A_i) to the next (A_i+1).
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
@@ -13247,20 +13275,21 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspr2_strided_batched_64(rocblas_handle ha
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    syr performs the matrix-vector operations:
+    The syr functions perform the matrix-vector operations:
 
         A := A + alpha*x*x**T
-        where alpha is a scalar, x is a vector, and A is an
-        n by n symmetric matrix.
+   
+    where ``alpha`` is a scalar, ``x`` is a vector, and ``A`` is an
+    ``n`` by ``n`` symmetric matrix.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
-            - if rocblas_fill_upper, the lower part of A is not referenced
-            - if rocblas_fill_lower, the upper part of A is not referenced
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
+            - if rocblas_fill_upper, the lower part of A is not referenced.
+            - if rocblas_fill_lower, the upper part of A is not referenced.
 
     @param[in]
     n         [rocblas_int]
@@ -13358,20 +13387,21 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr_64(rocblas_handle                hand
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    syr_batched performs a batch of matrix-vector operations:
+    The syr_batched functions perform a batch of matrix-vector operations:
 
         A[i] := A[i] + alpha*x[i]*x[i]**T
-        where alpha is a scalar, x is an array of vectors, and A is an array of
-        n by n symmetric matrices, for i = 1 , ... , batch_count.
+   
+    where ``alpha`` is a scalar, ``x`` is an array of vectors, and ``A`` is an array of
+      ``n`` by ``n`` symmetric matrices, for ``i`` = 1 , ... , ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
-            - if rocblas_fill_upper, the lower part of A is not referenced
-            - if rocblas_fill_lower, the upper part of A is not referenced
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
+            - if rocblas_fill_upper, the lower part of A is not referenced.
+            - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
               the number of rows and columns of matrix A.
@@ -13479,20 +13509,21 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr_batched_64(rocblas_handle            
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    syr_strided_batched performs the matrix-vector operations:
+    The syr_strided_batched functions perform the matrix-vector operations:
 
         A[i] := A[i] + alpha*x[i]*x[i]**T
-        where alpha is a scalar, vectors, and A is an array of
-        n by n symmetric matrices, for i = 1 , ... , batch_count.
+   
+    where ``alpha`` is a scalar, ``x`` is an array of vectors, and ``A`` is an array of
+    ``n`` by ``n`` symmetric matrices, for ``i`` = 1 , ... , ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
-            - if rocblas_fill_upper, the lower part of A is not referenced
-            - if rocblas_fill_lower, the upper part of A is not referenced
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
+            - if rocblas_fill_upper, the lower part of A is not referenced.
+            - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
               the number of rows and columns of each matrix A.
@@ -13514,7 +13545,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr_batched_64(rocblas_handle            
               specifies the leading dimension of each A_i.
     @param[in]
     strideA   [rocblas_stride]
-              stride from the start of one matrix (A_i) and the next one (A_i+1).
+              stride from the start of one matrix (A_i) to the next one (A_i+1).
     @param[in]
     batch_count [rocblas_int]
               number of instances in the batch.
@@ -13622,20 +13653,21 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr_strided_batched_64(rocblas_handle    
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    syr2 performs the matrix-vector operations:
+    The syr2 functions perform the matrix-vector operations:
 
         A := A + alpha*x*y**T + alpha*y*x**T
-        where alpha is a scalar, x and y are vectors, and A is an
-        n by n symmetric matrix.
+   
+    where ``alpha`` is a scalar, ``x`` and ``y`` are vectors, and ``A`` is an
+    ``n`` by ``n`` symmetric matrix.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
-            - if rocblas_fill_upper, the lower part of A is not referenced
-            - if rocblas_fill_lower, the upper part of A is not referenced
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
+            - if rocblas_fill_upper, the lower part of A is not referenced.
+            - if rocblas_fill_lower, the upper part of A is not referenced.
 
     @param[in]
     n         [rocblas_int]
@@ -13753,20 +13785,21 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2_64(rocblas_handle                han
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    syr2_batched performs a batch of matrix-vector operations:
+    The syr2_batched functions perform a batch of matrix-vector operations:
 
         A[i] := A[i] + alpha*x[i]*y[i]**T + alpha*y[i]*x[i]**T
-        where alpha is a scalar, x[i] and y[i] are vectors, and A[i] is a
-        n by n symmetric matrix, for i = 1 , ... , batch_count.
+   
+    where ``alpha`` is a scalar, ``x[i]`` and ``y[i]`` are vectors, and ``A[i]`` is a
+    ``n`` by ``n`` symmetric matrix, for ``i`` = 1 , ... , ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
-            - if rocblas_fill_upper, the lower part of A is not referenced
-            - if rocblas_fill_lower, the upper part of A is not referenced
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
+            - if rocblas_fill_upper, the lower part of A is not referenced.
+            - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
               the number of rows and columns of matrix A.
@@ -13895,20 +13928,21 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2_batched_64(rocblas_handle           
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    syr2_strided_batched the matrix-vector operations:
+    The syr2_strided_batched functions perform the matrix-vector operations:
 
         A[i] := A[i] + alpha*x[i]*y[i]**T + alpha*y[i]*x[i]**T
-        where alpha is a scalar, x[i] and y[i] are vectors, and A[i] is a
-        n by n symmetric matrices, for i = 1 , ... , batch_count
+   
+    where ``alpha`` is a scalar, ``x[i]`` and ``y[i]`` are vectors, and ``A[i]`` is a
+    ``n`` by ``n`` symmetric matrices, for ``i`` = 1 , ... , ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
-            - if rocblas_fill_upper, the lower part of A is not referenced
-            - if rocblas_fill_lower, the upper part of A is not referenced
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
+            - if rocblas_fill_upper, the lower part of A is not referenced.
+            - if rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     n         [rocblas_int]
               the number of rows and columns of each matrix A.
@@ -13938,7 +13972,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2_batched_64(rocblas_handle           
               specifies the leading dimension of each A_i.
     @param[in]
     strideA   [rocblas_stride]
-              stride from the start of one matrix (A_i) and the next one (A_i+1).
+              stride from the start of one matrix (A_i) to the next one (A_i+1).
     @param[in]
     batch_count [rocblas_int]
               number of instances in the batch.
