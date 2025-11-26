@@ -73,6 +73,23 @@ endif()
 
 project ( MIOpen C CXX )
 
+### ------ flags for unused code sections ------ ###
+add_compile_options(
+    "-Wall" 
+    "-Wextra" 
+    "-Wunused-function" 
+    "-Wunused-variable" 
+    "-Wunreachable-code"
+)
+
+set(MIOPEN_BACKEND "HIP" CACHE STRING "Force HIP" FORCE)
+set(MIOPEN_USE_MLIR ON CACHE BOOL "Force MLIR" FORCE)
+set(MIOPEN_USE_HIP_KERNELS ON CACHE BOOL "Force HIP Kernels" FORCE)
+
+set(BUILD_SHARED_LIBS ON CACHE BOOL "Shared Libs" FORCE)
+set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "RelWithDebInfo" FORCE)
+### -------------------------------------------- ###
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
