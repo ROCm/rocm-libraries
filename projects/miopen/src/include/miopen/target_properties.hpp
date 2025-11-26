@@ -27,6 +27,7 @@
 #define GUARD_TARGET_PROPERTIES_HPP
 
 #include <string>
+#include <tuple>
 
 #define WORKAROUND_ISSUE_1204 1 // ROCm may incorrectly report "sramecc-" for gfx900.
 #define WORKAROUND_ISSUE_3001 1
@@ -39,14 +40,70 @@ class TargetProperties
 {
     struct xnack_t
     {
-        const std::string tag{":xnack"};
-        virtual ~xnack_t() = default;
+        std::string tag;
+
+        xnack_t(const std::string& tag_) : tag(tag_) {}
+
+        auto init(const std::string& raw_name, const std::string&) const
+        {
+            bool initialized = false;
+            bool reported    = false;
+            bool enabled     = false;
+
+            auto tag_pos = raw_name.find(tag);
+            if(tag_pos != std::string::npos)
+            {
+                tag_pos += tag.length();
+                if(raw_name.length() > tag_pos)
+                {
+                    reported = true;
+                    enabled  = (raw_name[tag_pos] == '+');
+                }
+            }
+
+            initialized = true;
+            return std::make_tuple(initialized, reported, enabled);
+        }
     };
 
     struct sramecc_t
     {
-        const std::string tag{":sramecc"};
-        virtual ~sramecc_t() = default;
+        std::string tag;
+
+        sramecc_t(const std::string& tag_) : tag(tag_) {}
+
+        auto init(const std::string& raw_name, const std::string& dev_name) const
+        {
+            bool initialized = false;
+            bool reported    = false;
+            bool enabled     = (dev_name == "gfx906" || dev_name == "gfx908");
+
+#if WORKAROUND_ISSUE_1204
+            if(dev_name == "gfx900")
+            {
+                reported = false;
+            }
+            else
+#endif
+            {
+                auto tag_pos = raw_name.find(tag);
+                if(tag_pos != std::string::npos)
+                {
+                    tag_pos += tag.length();
+                    if(raw_name.length() > tag_pos)
+                    {
+                        reported = (raw_name[tag_pos] == '+');
+                    }
+                }
+                else
+                {
+                    reported = enabled;
+                }
+            }
+
+            initialized = true;
+            return std::make_tuple(initialized, reported, enabled);
+        }
     };
 
     template <typename T>
@@ -55,6 +112,9 @@ class TargetProperties
         bool initialized{false};
         bool reported{false};
         bool enabled{false};
+
+        TargetProperty() = default;
+        TargetProperty(const std::string& tag_) : T(tag_) {}
 
         void CheckInit() const
         {
@@ -77,48 +137,24 @@ class TargetProperties
             return !(reported && enabled);
         }
 
-        void Init(const std::string& raw_name, const std::string& dev_name)
+        void init(const std::string& raw_name, const std::string& dev_name)
         {
-#if WORKAROUND_ISSUE_1204
-            if(std::is_same_v<T, sramecc_t> && dev_name == "gfx900")
-            {
-                initialized = true;
-                return; // reported == false, enabled == false;
-            }
-#endif
-
-            // DKMS driver older than 5.9 may report incorrect state of SRAMECC feature.
-            // Therefore we compute default SRAMECC and rely on it for now.
-            if(std::is_same_v<T, sramecc_t> && (dev_name == "gfx906" || dev_name == "gfx908"))
-            {
-                reported    = true;
-                enabled     = true;
-                initialized = true;
-            }
-
-            auto tag_pos = raw_name.find(this->tag);
-            if(tag_pos != std::string::npos)
-            {
-                tag_pos += this->tag.length();
-                if(raw_name.length() > tag_pos)
-                {
-                    if(raw_name[tag_pos] == '+')
-                    {
-                        reported = true;
-                        enabled  = true;
-                    }
-                    if(raw_name[tag_pos] == '-')
-                    {
-                        reported = true;
-                    }
-                }
-            }
-
-            initialized = true;
+            std::tie(initialized, reported, enabled) = T::init(raw_name, dev_name);
         }
     };
 
+    struct TargetPropertyXnack : public TargetProperty<xnack_t>
+    {
+        TargetPropertyXnack() : TargetProperty<xnack_t>(":xnack") {}
+    };
+
+    struct TargetPropertySramecc : public TargetProperty<sramecc_t>
+    {
+        TargetPropertySramecc() : TargetProperty<sramecc_t>(":sramecc") {}
+    };
+
     void InitDbId();
+
     std::string name;
     std::string dbId;
     static const std::size_t MaxWaveScratchSize;
@@ -127,8 +163,8 @@ class TargetProperties
 public:
     virtual ~TargetProperties() = default;
 
-    TargetProperty<xnack_t> xnack;
-    TargetProperty<sramecc_t> sramecc;
+    TargetPropertyXnack xnack;
+    TargetPropertySramecc sramecc;
 
     virtual const std::string& Name() const { return name; }
     const std::string& DbId() const { return dbId; }

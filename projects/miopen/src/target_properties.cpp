@@ -81,8 +81,8 @@ void TargetProperties::Init(const Handle* const handle)
     }();
     name = GetDeviceNameFromMap(rawName);
 
-    xnack.Init(rawName, name);
-    sramecc.Init(rawName, name);
+    xnack.init(rawName, name);
+    sramecc.init(rawName, name);
 
     InitDbId();
 }
