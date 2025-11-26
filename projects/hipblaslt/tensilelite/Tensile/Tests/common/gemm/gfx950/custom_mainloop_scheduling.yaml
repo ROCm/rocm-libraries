@@ -258,7 +258,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - LDSTrInst: [0]
+        - LDSTrInst: [1]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [0,1]
       BenchmarkJoinParameters:

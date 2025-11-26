@@ -397,47 +397,43 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     
-    if isNN(kernel) and not useLDSTr and TLDS == 1:
+    if isNN(kernel) and useLDSTr and TLDS == 1:
+        kernel["SwapGlobalReadOrder"] = True
         #index and code pair
-        
-        syncTable = [-1, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="LRB1-0"),
-                      7, SWaitCnt(dscnt=10, vlcnt=-1, vscnt=-1, comment="LRB1-1"),
-                      8, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="LRB0"),
-                      8, SBarrier(comment=""),
-                     15, SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="LRB1-remaining"),
-                     47, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="LRB0-0"),
-                     54, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="wait for previous GRA"),
-                     54, SBarrier(comment="LRA1"),
-                     55, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="LRB0-1"),
-                     63, SWaitCnt(dscnt=4+2, vlcnt=-1, vscnt=-1, comment="LRB0-2"),
-                     71, SWaitCnt(dscnt=7+1, vlcnt=-1, vscnt=-1, comment="LRB0-3"),
-                     79, SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="LRB0-remaining"),]
+        syncTable = [-1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA1"),
+                     15, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for LRB0"),
+                     15, SBarrier(comment=""),
+                     46, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+                     51, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="wait for previous set of global reads"),
+                     51, SBarrier(comment=""),
+                     63, SWaitCnt(dscnt=-1, vlcnt=14-4, vscnt=-1, comment="wait for previous set of global reads"),
+                     63, SBarrier(comment=""),
+                    ]
         optSchedule = {
-                'SYNC'  : [syncTable[::2]],
-                'GRIncA': [[0,1,2,3,4,5,6,7,8]],
-                'GRIncB': [[9,10,11,12,13,14,15,16,17]],
+                    'SYNC'  : [syncTable[::2]],
+                    'GRIncA': [[0,1,2,3,4,5,6,7,8]],
+                    'GRIncB': [[9,10,11,12,13,14,15,16,17]],
 
-                'LRA0': [[0, 1, 2, 3, 4, 5, 6, 7],
-                         [1, 2, 3, 4, 5, 6, 7, 8]],
-                'LRB0': [[8, 10, 12, 14, 16, 18],
-                         [9, 11, 13, 15, 17, 19]],
-                'GRA': [[9,9, 18,18, 26,26, 30,30, 34,34, 40,40, 42,42, 44,44],
-                        [10,10, 19,19, 27,27, 31,31, 35,35, 41,41, 43,43, 45,45]],
-                'GRB': [[54,54, 58,58, 62,62, 66,66, 70,70, 74,74],
-                        [55,55, 59,59, 63,63, 67,67, 71,71, 75,75]],
-                'LRA1': [[55, 57, 59, 61, 63, 65, 67, 71],
-                         [56, 58, 60, 62, 64, 66, 68, 72]],
-                'LRB1': [[72, 74, 76, 78, 80, 82],
-                         [73, 75, 77, 79, 81, 83]],
-                'LRSA': [[46]],
-                'LRSB': [[46]],
-                'LWSA': [[33]],
-                'LWSB': [[80]],
-                'PackA0': [[47, 47, 47, 47, 47, 47, 48, 48, 48, 48, 49, 49, 49, 49, 50, 50, 50, 50, 51, 51, 51, 51, 52, 52, 52, 52, 53, 53, 53, 53, 53, 53]],
-                'PackA1': [[-1, -1, -1, -1, -1, -1, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5]],
+                    'LRB0': [[-1, 0, 1, 2, 3, 4],
+                             [0, 1, 2, 3, 4, 5]],
+                    'LRA0': [[6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 25, 27, 29, 31, 33, 35],
+                             [7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 26, 28, 30, 32, 34, 36]],
+                    'GRA': [[15,15, 17,17, 27,27, 29,29, 31,31, 33,33],
+                            [16, 16, 18, 18, 28, 28, 30, 30, 32, 32, 34, 34]],
 
-                'LCC' : [[95, 95]],
-            }
+                    'GRB': [[50,50, 52,52, 54,54, 56,56, 66,66, 68,68, 70,70, 72,72],
+                            [51,51, 53,53, 55,55, 57,57, 67,67, 69,69, 71,71, 73,73]],
+                    'LRB1': [[51, 53, 55, 57, 59, 61],
+                             [52, 54, 56, 58, 60, 62]],
+                    'LRA1': [[63, 65, 67, 69, 71, 73, 75, 77, 79, 81, 83, 85, 87, 89, 91, 93],
+                             [64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94]],
+                    
+                    'LRSB': [[14]],
+                    'LRSA': [[45]],
+                    'LWSB': [[94]],
+                    'LWSA': [[94]],
+                    'LCC' : [[95, 95]],
+                }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     else:
