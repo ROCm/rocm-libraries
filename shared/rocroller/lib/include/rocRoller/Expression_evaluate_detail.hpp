@@ -132,6 +132,9 @@ namespace rocRoller::Expression::EvaluateDetail
         }
     }
 
+    CommandArgumentValue reinterpretTruncateValue(CommandArgumentValue const& value,
+                                                  DataType                    targetDataType,
+                                                  std::endian                 endianness);
 }
 
 #include <rocRoller/Expression_impl.hpp>
