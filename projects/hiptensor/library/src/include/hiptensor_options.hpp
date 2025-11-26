@@ -26,7 +26,9 @@
 
 #pragma once
 
-#include <stdlib.h>
+#include <algorithm>
+#include <cstdlib>
+#include <string>
 
 #include "hiptensor_ostream.hpp"
 #include "singleton.hpp"

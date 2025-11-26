@@ -29,6 +29,8 @@ file(WRITE "${INSTALL_TEST_FILE}"
 
 # This variable is defined here to be accessible to other test sub-modules
 set(COMMON_TEST_HEADER_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+set(PROFILE_DIR "${CMAKE_BINARY_DIR}/coverage-report")
+set_property(GLOBAL PROPERTY LLVM_COV_OBJECT_ARGS "")
 
 function(add_relative_test test_name test_target)
     get_target_property(EXE_PATH ${test_target} RUNTIME_OUTPUT_DIRECTORY)
@@ -43,8 +45,17 @@ function(add_relative_test test_name test_target)
             set(EXE_NAME "${test_target}")
         endif()
     endif()
+    if(BUILD_CODE_COVERAGE)
+	  set(ABS_EXE "${EXE_PATH}/${EXE_NAME}")
+	  set_property(GLOBAL APPEND PROPERTY LLVM_COV_OBJECT_ARGS -object "${ABS_EXE}")
+    endif()
     file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
     add_test(NAME "${test_name}" COMMAND "./${rel_path}")
+    if(BUILD_CODE_COVERAGE)
+      set_tests_properties(${test_name} PROPERTIES
+        ENVIRONMENT "LLVM_PROFILE_FILE=${PROFILE_DIR}/profraw/rocprim-coverage_%m.profraw"
+      )
+    endif()
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
 endfunction()
 

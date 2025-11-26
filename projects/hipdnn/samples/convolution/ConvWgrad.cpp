@@ -63,14 +63,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
     auto dwAttr = graph->conv_wgrad(dyAttr, xAttr, convAttributes);
     dwAttr->set_output(true);
 
-    utilities::Tensor<InputType> dyTensor(dyAttr->get_dim(), layout);
-    utilities::Tensor<InputType> xTensor(xAttr->get_dim(), layout);
-    utilities::Tensor<InputType> dwTensor(dwAttr->get_dim(), layout);
-
-    dyTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
-    xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
-    dwTensor.fillWithValue(static_cast<InputType>(0.0f));
-
     HIPDNN_FE_CHECK(graph->validate());
     std::cout << "Graph validation successful.\n";
 
@@ -85,6 +77,14 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     HIPDNN_FE_CHECK(graph->build_plans());
     std::cout << "Plans build successful.\n";
+
+    utilities::Tensor<InputType> dyTensor(dyAttr->get_dim(), layout);
+    utilities::Tensor<InputType> xTensor(xAttr->get_dim(), layout);
+    utilities::Tensor<InputType> dwTensor(dwAttr->get_dim(), layout);
+
+    dyTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
+    xTensor.fillWithRandomValues(static_cast<InputType>(0.0f), static_cast<InputType>(1.0f));
+    dwTensor.fillWithValue(static_cast<InputType>(0.0f));
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[dyAttr->get_uid()] = dyTensor.memory().deviceData();
@@ -114,7 +114,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         utilities::Tensor<InputType> dwRefTensor(dwAttr->get_dim(), layout);
 
-        test_utilities::CpuFpReferenceConvolutionImpl<InputType, float>::convBwdWeight(
+        test_utilities::CpuFpReferenceConvolution::wgrad(
             xTensor, dwRefTensor, dyTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
         auto tolerance = test_utilities::conv::getToleranceWrw<InputType>();

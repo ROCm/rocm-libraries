@@ -29,6 +29,7 @@
 #include <gtest/gtest.h>
 
 #include "common.hpp"
+#include "contraction_test_params.hpp"
 #include "hiptensor_length_generation.hpp"
 #include "hiptensor_options.hpp"
 #include "llvm/yaml_parser.hpp"
@@ -39,6 +40,11 @@
 #else
 #define HIPTENSOR_TEST_YAML_BUNDLE 0
 #endif // HIPTENSOR_TEST_YAML_INCLUDE
+
+// Define a placeholder macro for clangd when YAML bundle is not available
+#ifndef HIPTENSOR_TEST_GET_YAML
+#define HIPTENSOR_TEST_GET_YAML ""
+#endif
 
 auto inline load_config_params()
 {
@@ -216,4 +222,3 @@ auto inline load_sequence_config_params()
 
     return ::testing::ValuesIn(paramsSequence);
 }
-
