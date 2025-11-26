@@ -202,3 +202,28 @@ TEST_CASE("extractDataFlowTags", "[kernel-graph][hoist-loop-invariant][expressio
         REQUIRE(extractedTags.count(77) == 1);
     }
 }
+
+TEST_CASE("hoistNodeBeforeLoop helper", "[kernel-graph][hoist-loop-invariant][helper]")
+{
+    using namespace rocRoller;
+    namespace kg = rocRoller::KernelGraph;
+    using namespace kg::ControlGraph;
+    using namespace kg::CoordinateGraph;
+
+    auto ctx = TestContext::ForDefaultTarget();
+
+    kg::KernelGraph graph;
+
+    auto predecessor = graph.control.addElement(NOP{});
+
+    auto loopSize                  = Expression::literal(10);
+    auto [loopIndexCoord, forLoop] = kg::rangeFor(graph, loopSize, "TestLoop");
+
+    auto loopBody = graph.control.addElement(NOP{});
+    graph.control.addElement(Body{}, {forLoop}, {loopBody});
+    graph.control.addElement(Sequence{}, {predecessor}, {forLoop});
+    auto nodeToHoist = graph.control.addElement(NOP{});
+
+    std::string dotOutputBefore = graph.toDOT(true);
+    writeDotToFile(dotOutputBefore, "hoist_node_before_loop_helper_before.dot");
+}

@@ -228,6 +228,75 @@ namespace rocRoller::KernelGraph
         return invariantAssigns;
     }
 
+    int HoistLoopInvariant::hoistNodeBeforeLoop(
+        KernelGraph& kgraph, int nodeToHoist, int loopNode, int predecessorNode, int sequenceEdge)
+    {
+        // First, completely disconnect the node from the loop body
+        // Get all edges connected to the node
+        auto upstreamEdges = kgraph.control.getNeighbours<Graph::Direction::Upstream>(nodeToHoist);
+        auto downstreamEdges
+            = kgraph.control.getNeighbours<Graph::Direction::Downstream>(nodeToHoist);
+
+        // Collect predecessors and successors before removing edges
+        auto nodePredecessors
+            = kgraph.control.getInputNodeIndices<Sequence>(nodeToHoist).to<std::vector>();
+        auto nodeSuccessors
+            = kgraph.control.getOutputNodeIndices<Sequence>(nodeToHoist).to<std::vector>();
+
+        // Remove all upstream edges to the node
+        for(auto edge : upstreamEdges)
+        {
+            kgraph.control.deleteElement(edge);
+        }
+
+        // Remove all downstream edges from the node
+        for(auto edge : downstreamEdges)
+        {
+            kgraph.control.deleteElement(edge);
+        }
+
+        // Connect predecessors directly to successors to maintain control flow inside loop
+        for(auto pred : nodePredecessors)
+        {
+            for(auto succ : nodeSuccessors)
+            {
+                // Only add the bypass edge if it doesn't already exist
+                auto existingEdges
+                    = kgraph.control.getNeighbours<Graph::Direction::Downstream>(pred);
+                bool alreadyConnected = false;
+                for(auto edge : existingEdges)
+                {
+                    auto targets = kgraph.control.getOutputNodeIndices<Sequence>(pred);
+                    if(std::find(targets.begin(), targets.end(), succ) != targets.end())
+                    {
+                        alreadyConnected = true;
+                        break;
+                    }
+                }
+                if(!alreadyConnected)
+                {
+                    kgraph.control.addElement(Sequence{}, {pred}, {succ});
+                }
+            }
+        }
+
+        // Now insert the node before the loop
+        // Remove the original sequence edge if it's valid
+        if(sequenceEdge != -1)
+        {
+            kgraph.control.deleteElement(sequenceEdge);
+        }
+
+        // Add sequence from predecessor to hoisted node
+        kgraph.control.addElement(Sequence{}, {predecessorNode}, {nodeToHoist});
+
+        // Add sequence from hoisted node to loop
+        kgraph.control.addElement(Sequence{}, {nodeToHoist}, {loopNode});
+
+        // Return the hoisted node as the new predecessor for subsequent hoisting
+        return nodeToHoist;
+    }
+
     KernelGraph HoistLoopInvariant::apply(KernelGraph const& original)
     {
         auto kgraph = original;
@@ -271,72 +340,15 @@ namespace rocRoller::KernelGraph
             if(sequenceEdge == -1 || predecessorNode == -1)
                 continue;
 
-            // Hoist each invariant assign
+            // Hoist each invariant assign using the helper function
             for(auto assignNode : invariantAssigns)
             {
-                // First, completely disconnect the assign from the loop body
-                // Get all edges connected to the assign node
-                auto assignUpstreamEdges
-                    = kgraph.control.getNeighbours<Graph::Direction::Upstream>(assignNode);
-                auto assignDownstreamEdges
-                    = kgraph.control.getNeighbours<Graph::Direction::Downstream>(assignNode);
+                // Use the helper function to hoist the node
+                predecessorNode = hoistNodeBeforeLoop(
+                    kgraph, assignNode, loopNode, predecessorNode, sequenceEdge);
 
-                // Collect predecessors and successors before removing edges
-                auto assignPredecessors
-                    = kgraph.control.getInputNodeIndices<Sequence>(assignNode).to<std::vector>();
-                auto assignSuccessors
-                    = kgraph.control.getOutputNodeIndices<Sequence>(assignNode).to<std::vector>();
-
-                // Remove all upstream edges to the assign node
-                for(auto edge : assignUpstreamEdges)
-                {
-                    kgraph.control.deleteElement(edge);
-                }
-
-                // Remove all downstream edges from the assign node
-                for(auto edge : assignDownstreamEdges)
-                {
-                    kgraph.control.deleteElement(edge);
-                }
-
-                // Connect predecessors directly to successors to maintain control flow inside loop
-                for(auto pred : assignPredecessors)
-                {
-                    for(auto succ : assignSuccessors)
-                    {
-                        // Only add the bypass edge if it doesn't already exist
-                        auto existingEdges
-                            = kgraph.control.getNeighbours<Graph::Direction::Downstream>(pred);
-                        bool alreadyConnected = false;
-                        for(auto edge : existingEdges)
-                        {
-                            auto targets = kgraph.control.getOutputNodeIndices<Sequence>(pred);
-                            if(std::find(targets.begin(), targets.end(), succ) != targets.end())
-                            {
-                                alreadyConnected = true;
-                                break;
-                            }
-                        }
-                        if(!alreadyConnected)
-                        {
-                            kgraph.control.addElement(Sequence{}, {pred}, {succ});
-                        }
-                    }
-                }
-
-                // Now insert the assign before the loop
-                // Remove the original sequence edge
-                kgraph.control.deleteElement(sequenceEdge);
-
-                // Add sequence from predecessor to assign
-                kgraph.control.addElement(Sequence{}, {predecessorNode}, {assignNode});
-
-                // Add sequence from assign to loop
-                kgraph.control.addElement(Sequence{}, {assignNode}, {loopNode});
-
-                // Update for next iteration
-                predecessorNode = assignNode;
-                sequenceEdge    = -1; // Mark as invalid since we deleted it
+                // Mark sequence edge as invalid after first hoist (it gets deleted in the helper)
+                sequenceEdge = -1;
             }
         }
 

@@ -54,6 +54,25 @@ namespace rocRoller
         public:
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override;
+
+            /**
+             * @brief Hoist a single node out of a loop and insert it before the loop (for testing)
+             * 
+             * This function disconnects the given node from the loop body and inserts it
+             * into the control flow before the loop starts.
+             * 
+             * @param kgraph The kernel graph to modify
+             * @param nodeToHoist The node to hoist out of the loop
+             * @param loopNode The loop from which to hoist the node
+             * @param predecessorNode The node that should precede the hoisted node
+             * @param sequenceEdge The sequence edge leading into the loop (will be deleted)
+             * @return The hoisted node, which becomes the new predecessor for subsequent operations
+             */
+            static int hoistNodeBeforeLoop(KernelGraph& kgraph,
+                                           int          nodeToHoist,
+                                           int          loopNode,
+                                           int          predecessorNode,
+                                           int          sequenceEdge);
         };
     }
 }
