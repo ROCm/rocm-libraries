@@ -111,9 +111,9 @@ The following dependencies are required:
 *  `ROCm <https://github.com/ROCm/ROCm>`_ (Version 6.4 or later)
 *  `CMake <https://cmake.org/>`_ (Version 3.14 or later)
 *  `rocm-cmake <https://github.com/ROCm/rocm-cmake>`_ (Version 0.8.0 or later)
-*  `HIP runtime <https://github.com/ROCm/hip>`_ (Version 6.4.0 or later) (Or the ROCm hip-runtime-amd package)
+*  `HIP runtime <https://github.com/ROCm/rocm-systems/tree/develop/projects/hip>`_ (Version 6.4.0 or later) (Or the ROCm hip-runtime-amd package)
 *  `LLVM OpenMP <https://openmp.llvm.org/>`_ runtime dev package (Version 10.0 or later) (Also available as the ROCm rocm-llvm-dev package)
-*  (Optional, only required to use rocBLAS for validation) `rocBLAS <https://github.com/ROCm/rocBLAS>`_ (Version 4.3.0 for ROCm 6.3 or later) (Or the ROCm rocblas and rocblas-dev packages).
+*  (Optional, only required to use rocBLAS for validation) `rocBLAS <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_ (Version 4.3.0 for ROCm 6.3 or later) (Or the ROCm rocblas and rocblas-dev packages).
 
 .. <!-- spellcheck-enable -->
 
@@ -124,8 +124,12 @@ The following dependencies are required:
 Downloading rocWMMA
 -------------------------------------------
 
-The rocWMMA source code is available from the `rocWMMA GitHub <https://github.com/ROCm/rocWMMA>`_.
+The rocWMMA source code is available from the `rocWMMA GitHub <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocwmma>`_.
 ROCm version 6.4 or later is required.
+
+.. note::
+
+   The rocWMMA repository for ROCm 7.1.1 and earlier is located at `<https://github.com/ROCm/rocWMMA>`_.
 
 To verify the ROCm version installed on an Ubuntu system, use this command:
 
@@ -146,10 +150,22 @@ The rocWMMA GitHub repository has branches with names like ``rocm-major.minor.x`
 where ``major`` and ``minor`` are the same as for the ROCm version.
 To download rocWMMA on ROCm version ``x.y``, use this command:
 
-.. code-block:: shell
+.. tab-set::
+    .. tab-item:: ROCm 7.2.0 and later
 
-   git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocWMMA.git
-   cd rocWMMA
+        .. code-block:: shell
+
+           git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocm-libraries.git
+           cd projects/rocwmma
+
+        Alternatively, you can use ``sparse-checkout`` to clone only the rocWMMA project from the ``rocm-libraries`` monorepo. For more information, see `Contributing to the ROCm Libraries <https://github.com/ROCm/rocm-libraries/blob/develop/CONTRIBUTING.md#option-b-clone-the-monorepo-with-sparse-checkout>`_.
+
+    .. tab-item:: ROCm 7.1.1 and prior
+
+        .. code-block:: shell
+
+           git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocWMMA.git
+           cd rocWMMA
 
 Replace ``x.y`` in the above command with the version of ROCm installed on your machine.
 For example, if you have ROCm 6.0 installed, then replace ``release/rocm-rel-x.y`` with ``release/rocm-rel-6.0``.

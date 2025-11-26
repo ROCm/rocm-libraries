@@ -13,14 +13,15 @@ The following table lists all operations currently supported in hipDNN:
 |-----------|-----------|---------|--------|-------|
 | Batchnorm Backward  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Spatial mode only¹ |
 | Batchnorm Inference + DRelu + Backward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Fused graph³ |
-| Batchnorm Training  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Spatial mode only¹ |
+| Batchnorm Training  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Spatial mode only¹, No running stats⁴ |
 | Convolution Dgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Cross-correlation only² |
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Cross-correlation only² |
 | Convolution Wgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Cross-correlation only² |
 
 ¹ See Batchnorm Operations note below  
 ² See Convolution Operations note below  
-³ See Fused Operations note below
+³ See Fused Operations note below  
+⁴ See Batchnorm Training Running Statistics note below
 
 ## Operation Notes
 
@@ -35,6 +36,9 @@ The following table lists all operations currently supported in hipDNN:
 
 > [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only. Sparse tensor support is planned for future releases.
+
+> [!NOTE]
+> **Batchnorm Training Running Statistics:** Currently, batchnorm training only supports computing batch statistics (mean and inverse variance) without updating running statistics.
 
 ## Legend
 
