@@ -1091,6 +1091,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMBetaIsZeroStreamK)
     {
+        REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
         GEMMProblem gemm;
 
         hipDeviceProp_t deviceProperties;
@@ -1125,6 +1126,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamK)
     {
+        REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs, GPUCapability::HasXCC);
         GEMMProblem gemm;
 
         hipDeviceProp_t deviceProperties;
@@ -1177,6 +1179,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamK)
     {
+        REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
         GEMMProblem gemm;
 
         hipDeviceProp_t deviceProperties;
@@ -1212,6 +1215,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamKSmall)
     {
+        REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
         GEMMProblem gemm;
 
         hipDeviceProp_t deviceProperties;
@@ -1241,10 +1245,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamK_MultipleFixups)
     {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
-        {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
-        }
+        REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
 
         GEMMProblem gemm;
 
@@ -1283,6 +1284,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestStreamKWGMGPU, GPU_BasicGEMMStreamKWorkgroupMapping)
     {
+        REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs, GPUCapability::HasXCC);
         GEMMProblem gemm;
 
         hipDeviceProp_t deviceProperties;
