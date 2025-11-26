@@ -451,7 +451,6 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
-    
     if isTN(kernel) and not useLDSTr and TLDS == 1:
         #index and code pair
         syncTable = [-1, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for LRB1-0"),
