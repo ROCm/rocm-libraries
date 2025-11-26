@@ -312,7 +312,6 @@ void PerformanceConfigPoolingForward2d::HeuristicInit(
     default: MIOPEN_THROW("Unsupported datatype");
     }
 #endif
-    initialized = true;
 }
 
 bool PerformanceConfigPoolingForward2d::SetNextValue(
@@ -322,11 +321,6 @@ bool PerformanceConfigPoolingForward2d::SetNextValue(
     std::ignore = problem;
     return false;
 #else
-    if(!initialized)
-    {
-        HeuristicInit(problem);
-        return true;
-    }
     do
     {
         if(!NextTwoPower<min_out_pix_tile1, max_out_pix_tile1>(out_pix_tile1))

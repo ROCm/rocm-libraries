@@ -53,7 +53,6 @@ struct PerformanceConfigPoolingForward2d : PerfConfigBase<PerformanceConfigPooli
     int out_pix_tile1;
     int local_size0;
     int local_size1;
-    bool initialized                       = false;
     static constexpr int min_local_size0   = 8;
     static constexpr int max_local_size0   = 32;
     static constexpr int min_local_size1   = 8;
