@@ -48,15 +48,22 @@ option(HIPSPARSE_BUILD_CLIENTS_ONLY "Build only clients." OFF)
 option(HIPSPARSE_BUILD_TESTING "Build tests (requires googletest)." OFF)
 option(HIPSPARSE_ENABLE_BENCHMARKS "Build benchmarks." ON)
 option(HIPSPARSE_ENABLE_SAMPLES "Build examples." ON)
+option(HIPSPARSE_ENABLE_FORTRAN "Enable Fortran client support." ON)
 option(HIPSPARSE_ENABLE_OPENMP "Enable OpenMP support in clients for parallel execution." ON)
-option(HIPSPARSE_BUILD_COVERAGE "Build with code coverage enabled." OFF)
+option(HIPSPARSE_ENABLE_COVERAGE "Build with code coverage enabled." OFF)
 option(HIPSPARSE_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
 option(HIPSPARSE_BUILD_DOCS "Build documentation." OFF)
 
 # Validate incompatible option combinations
-if(HIPSPARSE_BUILD_COVERAGE AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-    message(WARNING "Code coverage is most effective with CMAKE_BUILD_TYPE=Debug")
+if(HIPSPARSE_ENABLE_COVERAGE)
+    # if(HIPSPARSE_ENABLE_FORTRAN)
+        # message(FATAL_ERROR "Cannot enable fortran clients and code coverage.")
+    if((NOT CMAKE_BUILD_TYPE STREQUAL "Debug") AND (NOT CMAKE_BUILD_TYPE STREQUAL "RhelWithDebInfo"))
+        message(FATAL_ERROR "Code coverage is only supported for CMAKE_BUILD_TYPE=Debug and CMAKE_BUILD_TYPE=RelWithDebInfo.") # rel with deb info also
+    endif()
 endif()
+
+
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -66,7 +73,9 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 # Conditionally enable Fortran
-if(NOT WIN32 AND (HIPSPARSE_BUILD_TESTING OR BUILD_TESTING OR HIPSPARSE_ENABLE_BENCHMARKS))
+# NOTE: Behavior change - Fortran now controlled by HIPSPARSE_ENABLE_FORTRAN option (default ON)
+# Previously enabled automatically when building tests or benchmarks
+if(HIPSPARSE_ENABLE_FORTRAN)
     enable_language(Fortran)
 endif()
 
@@ -93,6 +102,9 @@ endif()
 
 if(NOT HIPSPARSE_BUILD_CLIENTS_ONLY)
     add_subdirectory(library)
+else()
+    # When building clients-only, find the installed hipSPARSE library
+    find_package(hipsparse 4.0.0 REQUIRED CONFIG)
 endif()
 
 # --- Client targets ---
@@ -232,7 +244,7 @@ endif()
 
 # --- Code coverage targets ---
 
-if(HIPSPARSE_BUILD_COVERAGE)
+if(HIPSPARSE_ENABLE_COVERAGE)
     add_custom_target(coverage_cleanup
         COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}

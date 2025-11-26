@@ -37,7 +37,7 @@ if(HIPSPARSE_ENABLE_ASAN)
 endif()
 
 # Conditional flags for coverage
-if(HIPSPARSE_BUILD_COVERAGE)
+if(HIPSPARSE_ENABLE_COVERAGE)
     target_compile_options(hipsparse PRIVATE -fprofile-arcs -ftest-coverage)
     target_link_options(hipsparse PRIVATE --coverage)
 endif()
@@ -46,8 +46,8 @@ endif()
 add_subdirectory(include)
 add_subdirectory(src)
 
-# Create Fortran module if not on Windows
-if(NOT WIN32)
+# Create Fortran module if Fortran support is enabled
+if(HIPSPARSE_ENABLE_FORTRAN)
     # Set Fortran module output directory
     set(CMAKE_Fortran_MODULE_DIRECTORY "${PROJECT_BINARY_DIR}/include/hipsparse")
     

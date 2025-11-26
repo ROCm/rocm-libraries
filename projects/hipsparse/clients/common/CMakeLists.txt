@@ -21,16 +21,11 @@ target_include_directories(hipsparse-clients-common PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
 )
 
-# Additional includes when building clients only
-if(HIPSPARSE_BUILD_CLIENTS_ONLY)
-    target_include_directories(hipsparse-clients-common PRIVATE ${hipsparse_INCLUDE_DIRS}/hipsparse)
-endif()
+# Note: When building clients-only, include directories are automatically
+# provided by linking to the roc::hipsparse imported target from find_package()
 
 # Common compile options
-target_compile_options(hipsparse-clients-common PUBLIC
-    -Wno-unused-command-line-argument
-    -Wall
-)
+target_compile_options(hipsparse-clients-common PUBLIC -Wall)
 
 # Common compile definitions
 target_compile_definitions(hipsparse-clients-common PUBLIC GOOGLE_TEST)
@@ -66,7 +61,7 @@ if(HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
 endif()
 
 # Propagate coverage link flags to resolve gcov symbols when linking against coverage-instrumented library
-if(HIPSPARSE_BUILD_COVERAGE)
+if(HIPSPARSE_ENABLE_COVERAGE)
     target_link_options(hipsparse-clients-common PUBLIC --coverage)
 endif()
 
@@ -104,6 +99,6 @@ if(HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
 endif()
 
 # Propagate coverage link flags to resolve gcov symbols when linking against coverage-instrumented library
-if(HIPSPARSE_BUILD_COVERAGE)
+if(HIPSPARSE_ENABLE_COVERAGE)
     target_link_options(hipsparse-samples-common PUBLIC --coverage)
 endif()

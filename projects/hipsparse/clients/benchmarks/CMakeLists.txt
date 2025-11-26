@@ -15,7 +15,7 @@ target_sources(hipsparse-bench PRIVATE
 )
 
 # Additional compile options specific to benchmarks
-target_compile_options(hipsparse-bench PRIVATE -Wno-deprecated)
+target_compile_options(hipsparse-bench PRIVATE -Wall)
 
 # Additional includes when building clients only
 if(HIPSPARSE_BUILD_CLIENTS_ONLY)

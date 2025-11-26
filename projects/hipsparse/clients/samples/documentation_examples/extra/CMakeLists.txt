@@ -43,8 +43,8 @@ target_sources(example_hipsparse_csrgemm2_c PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}
 target_link_libraries(example_hipsparse_csrgemm2_c PRIVATE hipsparse-samples-common)
 set_target_properties(example_hipsparse_csrgemm2_c PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
 
-# Fortran examples (only if not on Windows, using HIP, and building with library)
-if(NOT WIN32 AND NOT HIPSPARSE_BUILD_CLIENTS_ONLY)
+# Fortran examples (only if Fortran support enabled and building with library)
+if(HIPSPARSE_ENABLE_FORTRAN AND NOT HIPSPARSE_BUILD_CLIENTS_ONLY)
     add_executable(example_hipsparse_csrgeam_fortran)
     target_sources(example_hipsparse_csrgeam_fortran PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/example_hipsparse_csrgeam_fortran.f90")
     add_dependencies(example_hipsparse_csrgeam_fortran hipsparse_fortran)

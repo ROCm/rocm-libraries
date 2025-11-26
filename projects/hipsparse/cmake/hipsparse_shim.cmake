@@ -18,7 +18,7 @@
 # BUILD_CLIENTS_ONLY        → HIPSPARSE_BUILD_CLIENTS_ONLY
 # USE_CUDA                  → HIPSPARSE_ENABLE_CUDA
 # BUILD_CUDA                → HIPSPARSE_ENABLE_CUDA (deprecated in favor of USE_CUDA)
-# BUILD_CODE_COVERAGE       → HIPSPARSE_BUILD_COVERAGE
+# BUILD_CODE_COVERAGE       → HIPSPARSE_ENABLE_COVERAGE
 # BUILD_ADDRESS_SANITIZER   → HIPSPARSE_ENABLE_ASAN
 # BUILD_VERBOSE             → CMAKE_VERBOSE_MAKEFILE
 # BUILD_DOCS                → HIPSPARSE_BUILD_DOCS
@@ -93,7 +93,7 @@ shim_mapping(BUILD_CLIENTS_TESTS HIPSPARSE_BUILD_TESTING "Build test client; mas
 shim_mapping(BUILD_CLIENTS_BENCHMARKS HIPSPARSE_ENABLE_BENCHMARKS "Build benchmark client.")
 shim_mapping(BUILD_CLIENTS_SAMPLES HIPSPARSE_ENABLE_SAMPLES "Build client samples.")
 shim_mapping(BUILD_CLIENTS_ONLY HIPSPARSE_BUILD_CLIENTS_ONLY "Build only clients.")
-shim_mapping(BUILD_CODE_COVERAGE HIPSPARSE_BUILD_COVERAGE "Build with code coverage enabled.")
+shim_mapping(BUILD_CODE_COVERAGE HIPSPARSE_ENABLE_COVERAGE "Build with code coverage enabled.")
 shim_mapping(BUILD_ADDRESS_SANITIZER HIPSPARSE_ENABLE_ASAN "Build with address sanitizer enabled.")
 shim_mapping(BUILD_VERBOSE CMAKE_VERBOSE_MAKEFILE "Enable verbose output from Makefile builds.")
 shim_mapping(BUILD_DOCS HIPSPARSE_BUILD_DOCS "Build documentation.")

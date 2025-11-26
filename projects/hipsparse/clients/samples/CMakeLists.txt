@@ -60,8 +60,8 @@ if(NOT HIPSPARSE_ENABLE_CUDA OR (HIPSPARSE_ENABLE_CUDA AND CUDA_VERSION LESS 11)
     )
 endif()
 
-# Fortran samples (only if not on Windows, using HIP, and building with library)
-if(NOT WIN32 AND HIPSPARSE_ENABLE_HIP AND NOT HIPSPARSE_BUILD_CLIENTS_ONLY)
+# Fortran samples (only if Fortran support enabled, using HIP, and building with library)
+if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND NOT HIPSPARSE_BUILD_CLIENTS_ONLY)
     # Fortran example: example_fortran_auxiliary
     add_executable(example_fortran_auxiliary)
     target_sources(example_fortran_auxiliary PRIVATE
