@@ -21,7 +21,7 @@
 #
 # ########################################################################
 
-# The ROCm platform requires at least Ubuntu 16.04 or Fedora 24, which have cmake 3.5
+#  The ROCm platform requires at least Ubuntu 16.04 or Fedora 24, which have cmake 3.5
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 
 # Consider removing this in the future
