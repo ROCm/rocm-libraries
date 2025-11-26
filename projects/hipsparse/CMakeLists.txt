@@ -58,7 +58,7 @@ option(HIPSPARSE_BUILD_DOCS "Build documentation." OFF)
 if(HIPSPARSE_ENABLE_COVERAGE)
     # if(HIPSPARSE_ENABLE_FORTRAN)
         # message(FATAL_ERROR "Cannot enable fortran clients and code coverage.")
-    if((NOT CMAKE_BUILD_TYPE STREQUAL "Debug") AND (NOT CMAKE_BUILD_TYPE STREQUAL "RhelWithDebInfo"))
+    if((NOT CMAKE_BUILD_TYPE STREQUAL "Debug") AND (NOT CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo"))
         message(FATAL_ERROR "Code coverage is only supported for CMAKE_BUILD_TYPE=Debug and CMAKE_BUILD_TYPE=RelWithDebInfo.") # rel with deb info also
     endif()
 endif()
