@@ -127,6 +127,9 @@ void testing_v2_spmv_sell(const Arguments& arg)
 
     matrix_factory.init_sell(hA, M, N, sell_slice_size, base);
 
+    // Scale matrix values
+    rocsparse_init<A>(hA.val, hA.nnz, 1, 1, arg.convert_to_int);
+
     // Allocate host memory for vectors
     host_vector<X> hx((trans == rocsparse_operation_none) ? N : M);
     host_vector<Y> hy((trans == rocsparse_operation_none) ? M : N);
