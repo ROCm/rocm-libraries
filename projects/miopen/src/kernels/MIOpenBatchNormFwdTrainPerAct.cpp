@@ -75,12 +75,12 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
     using fp_prec_c_type  = typename mio_bn_config::fp_prec_c_type;
 
     // PER ACTIVATION
-    fp_prec_type mean        = fp_prec_type(0);
-    fp_prec_type variance    = fp_prec_type(0);
-    fp_prec_type invVariance = fp_prec_type(0);
-    fp_prec_type inhat       = fp_prec_type(0);
-    fp_prec_type pvt_scale   = fp_prec_type(0);
-    fp_prec_type pvt_bias    = fp_prec_type(0);
+    // fp_prec_type mean        = fp_prec_type(0);
+    // fp_prec_type variance    = fp_prec_type(0);
+    // fp_prec_type invVariance = fp_prec_type(0);
+    // fp_prec_type inhat       = fp_prec_type(0);
+    // fp_prec_type pvt_scale   = fp_prec_type(0);
+    // fp_prec_type pvt_bias    = fp_prec_type(0);
 
     unsigned int xgid    = blockIdx.x * MIO_BN_GRP0 + threadIdx.x;
     unsigned int ygid    = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
@@ -90,34 +90,40 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
 
     const fp_prec_type invN = fp_prec_type(1) / fp_prec_type(MIO_BN_N);
 
+    auto nstr = in_nstride;
+
     // move across the sections of the image mini_batch stack
     for(int idx = static_cast<int>(ygid); idx < static_cast<int>(in_cstride);
         idx += static_cast<int>(yglb_sz))
     {
-        mean     = fp_prec_type(0);
-        variance = fp_prec_type(0);
+        fp_prec_type mean     = fp_prec_type(0);
+        fp_prec_type variance = fp_prec_type(0);
 
-        adjIndex = cidx + idx; // gamma and beta tensor index
-        for(int n = 0; n < MIO_BN_N; n++)
+        unsigned adjIndex = cidx + idx; // gamma and beta tensor index
+        auto ptr = in + adjIndex;
+        auto out_ptr = out + adjIndex;
+
+        for(unsigned int n = 0; n < MIO_BN_N; n++)
         {
-            mean += static_cast<fp_prec_type>(in[adjIndex + static_cast<int>(in_nstride) * n]);
+            mean += static_cast<fp_prec_type>(ptr[nstr * n]);
         }
         mean *= invN;
 
-        for(int n = 0; n < MIO_BN_N; n++)
+        for(unsigned int n = 0; n < MIO_BN_N; n++)
         {
             const fp_prec_type x =
-                static_cast<fp_prec_type>(in[adjIndex + static_cast<int>(in_nstride) * n]);
-            const fp_prec_type d = x - mean;
-            variance += d * d;
+                static_cast<fp_prec_type>(ptr[nstr * n]);
+           const fp_prec_type d = x - mean;
+           variance += d * d;
         }
         variance *= invN;
 
-        // epsilon is double in API; cast to precision type for math
-        invVariance = rsqrt(variance + static_cast<fp_prec_type>(epsilon));
+        // asm volatile (""::"v"(variance));
+        // // epsilon is double in API; cast to precision type for math
+        fp_prec_type invVariance = static_cast<fp_prec_type>(rsqrt(variance + static_cast<fp_prec_type>(epsilon)));
 
-        pvt_scale = *(scale + adjIndex);
-        pvt_bias  = *(bias + adjIndex);
+        fp_prec_type pvt_scale = scale[adjIndex];
+        fp_prec_type pvt_bias  = bias[adjIndex];
 
 #if(MIO_RUNNING_RESULT == 1)
         // Match the newer HIP templated/namespaced pattern:
@@ -136,15 +142,16 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
             resultSaveMean, resultSaveInvVariance, mean, invVariance, adjIndex);
 #endif
 
-        for(int n = 0; n < MIO_BN_N; n++)
+        for(unsigned int n = 0; n < MIO_BN_N; n++)
         {
             const fp_prec_type x =
-                static_cast<fp_prec_type>(in[static_cast<int>(in_nstride) * n + adjIndex]);
-            inhat = (x - mean) * invVariance;
+                static_cast<fp_prec_type>(ptr[nstr * n]);
+            fp_prec_type inhat = (x - mean) * invVariance;
 
             // fma(a,b,c) = a*b + c (HIP provides float/double overloads)
             const fp_prec_type y_prec                        = fma(pvt_scale, inhat, pvt_bias);
-            out[adjIndex + static_cast<int>(in_nstride) * n] = static_cast<fp_type>(y_prec);
+            out_ptr[nstr * n] = static_cast<fp_type>(y_prec);
+            // asm volatile (""::"v"(y_prec));
         }
     }
 }
