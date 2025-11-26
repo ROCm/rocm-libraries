@@ -56,8 +56,8 @@ lengths = {
 def api_overhead():
     """API overhead"""
 
-    # iteraion 10000 takes too long time for "getAll", 1000 is enough
-    problemlist = [Problem(args={"--cold_iters" : "10" , "--iters" : "1000"})]
+    # set different value for hot iteration of getHeuristic and getAll
+    problemlist = [Problem(args={"--cold_iters" : "10" , "--iters" : "1000" , "--get_all_iters" : "100"})]
     yield ProblemSet(benchType="api_overhead", name="benchset_1", problems=problemlist)
 
 def amax_example():
@@ -97,6 +97,13 @@ def matmul_set_2():
 
     problemlist = [Problem(args={"--log_function_name" : "" , "--yaml" : "matmul_probset2_bench.yaml"})]
     yield ProblemSet(benchType="matmul", name="benchset_2", problems=problemlist)
+
+def ci_perf_job():
+    """run basic job for PR-CI"""
+
+    # general suites for all arches
+    yield from api_overhead()
+    yield from matmul_set_1()
 
 def all():
     """all routine benchmarks"""
