@@ -854,8 +854,7 @@ namespace origami
         // This is the minimum unique bytes needed from HBM to feed the concurrent workgroups.
         double min_load
             = static_cast<double>((mall_m * MT_M * MT_K * safe_ceil_div(element_size_A, 8))
-                                  + (mall_n * MT_N * MT_K * safe_ceil_div(element_size_B, 8)))
-              * batch; // Apply batching to the minimum load itself.
+                                  + (mall_n * MT_N * MT_K * safe_ceil_div(element_size_B, 8)));
         // The actual loads cannot be less than this physical minimum.
         Ld_MEM  = std::max(Ld_MEM, min_load);
         Ld_mem2 = std::max(Ld_mem2, min_load);
@@ -982,7 +981,7 @@ namespace origami
         double L_WG_setup = 1; // WG_setup_Latency
 
         // 3) Prologue: 2.2× memory latency
-        double L_prologue = 1.5 * L_mem; // 1.5 chosen emprically
+        double L_prologue = 1.5 * L_mem * effective_tile_penalty; // 1.5 chosen emprically
 
         // L_compute *= std::max(L_compute, L_LDS);
 
@@ -1357,11 +1356,6 @@ namespace origami
         // TODO These are quantifying effects that don't work in the current math.
         // TODO THESE SHOULD BE TEMPORARY FIXES AND BE MORE SOLIDLY INTEGRATED LATER
         bool heuristics = hardware_t::is_heuristics_enabled();
-
-        const char* env = std::getenv("ANALYTICAL_GEMM_HEURISTICS");
-        heuristics      = !(env && std::string(env) == "0");
-
-
 
         // heuristics = 0;
         //  Heuristics for TF32
