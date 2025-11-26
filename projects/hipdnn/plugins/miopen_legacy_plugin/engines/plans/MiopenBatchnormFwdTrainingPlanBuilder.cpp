@@ -281,6 +281,8 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
         {
             // Solo batchnorm training
             checkTensorVirtuality1Node(bnAttr, opGraph.getTensorMap());
+            HIPDNN_LOG_INFO(
+                "BatchnormFwdTraining plan builder applicable for single node batchnorm training");
             return true;
         }
 
@@ -289,6 +291,8 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
         checkTensorVirtuality2Node(bnAttr, activAttr, opGraph.getTensorMap());
         // Validate params can be created successfully
         BatchnormFwdTrainingParams params(bnAttr, activAttr, opGraph.getTensorMap());
+        HIPDNN_LOG_INFO(
+            "BatchnormFwdTraining plan builder applicable for training + activation fusion");
         return true;
     }
     catch(const hipdnn_plugin::HipdnnPluginException& e)
