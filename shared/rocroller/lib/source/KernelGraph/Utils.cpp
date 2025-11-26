@@ -1364,11 +1364,13 @@ namespace rocRoller
             }
         }
 
-        std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph)
+        Generator<int> bodyParents(int control, KernelGraph const& graph)
         {
-            TIMER(t, "controlStack");
-            std::deque<int> rv = {control};
+            return bodyParents(control, graph.control);
+        }
 
+        Generator<int> bodyParents(int control, ControlGraph::ControlGraph const& graph)
+        {
             std::unordered_set<int> visitedNodes = {control};
 
             // Walk up the first edge we find until we have found a root (which
@@ -1389,9 +1391,20 @@ namespace rocRoller
                 auto isContaining
                     = !std::holds_alternative<ControlGraph::Sequence>(graph.getEdge(edge));
                 if(isContaining)
-                    rv.push_front(node);
+                    co_yield node;
 
                 neighbours = graph.getNeighbours<Graph::Direction::Upstream>(node);
+            }
+        }
+
+        std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph)
+        {
+            TIMER(t, "controlStack");
+            std::deque<int> rv = {control};
+
+            for(auto parent : bodyParents(control, graph))
+            {
+                rv.push_front(parent);
             }
 
             return rv;

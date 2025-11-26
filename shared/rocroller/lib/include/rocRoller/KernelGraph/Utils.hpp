@@ -712,13 +712,25 @@ namespace rocRoller
         void removeRedundantBodyEdgesBaselineMethod(KernelGraph& graph);
 
         /**
+         * Yields all of the nodes that are body parents of `control` in order from the node
+         * up to the root of the graph.
+         */
+        Generator<int> bodyParents(int control, KernelGraph const& graph);
+
+        /**
+         * Yields all of the nodes that are body parents of `control` in order from the node
+         * up to the root of the graph.
+         */
+        Generator<int> bodyParents(int control, ControlGraph::ControlGraph const& graph);
+
+        /**
          * Returns all of the nodes that contain `control` with a body
-         * relationship in order from the root of the graph
+         * relationship in order from the root of the graph, including `control` itself.
          */
         std::deque<int> controlStack(int control, KernelGraph const& graph);
         /**
          * Returns all of the nodes that contain `control` with a body
-         * relationship in order from the root of the graph
+         * relationship in order from the root of the graph, including `control` itself.
          */
         std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph);
 
