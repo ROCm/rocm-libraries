@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -2906,7 +2906,7 @@ inline hipsolverStatus_t hipsolver_gesv_bufferSize(testAPI_t         API,
         return hipsolverDnSSgesv_bufferSize(
             handle, n, nrhs, A, lda, ipiv, B, ldb, X, ldx, nullptr, lwork);
     default:
-        *lwork;
+        *lwork = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
@@ -2935,7 +2935,7 @@ inline hipsolverStatus_t hipsolver_gesv_bufferSize(testAPI_t         API,
         return hipsolverDnDDgesv_bufferSize(
             handle, n, nrhs, A, lda, ipiv, B, ldb, X, ldx, nullptr, lwork);
     default:
-        *lwork;
+        *lwork = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
@@ -2993,7 +2993,7 @@ inline hipsolverStatus_t hipsolver_gesv_bufferSize(testAPI_t         API,
                                             nullptr,
                                             lwork);
     default:
-        *lwork;
+        *lwork = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
@@ -3051,7 +3051,7 @@ inline hipsolverStatus_t hipsolver_gesv_bufferSize(testAPI_t               API,
                                             nullptr,
                                             lwork);
     default:
-        *lwork;
+        *lwork = 0;
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
 }
