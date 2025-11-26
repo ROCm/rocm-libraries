@@ -159,6 +159,28 @@ namespace hiptensor
         };
     }
 
+    bool isColMajorLayout(std::vector<std::size_t> const& strides,
+                          std::vector<std::size_t> const& lengths)
+    {
+        if(strides.empty())
+        {
+            using hiptensor::HiptensorOptions;
+            auto& options = HiptensorOptions::instance();
+            return options->isColMajorStrides();
+        }
+
+        if(strides.size() > 0 && strides[0] != 1)
+            return false;
+        for(int i = 1; i < static_cast<int>(strides.size()); i++)
+        {
+            if(strides[i] != strides[i - 1] * lengths[i - 1])
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     std::vector<std::size_t> getCKColMajorStrides(std::vector<std::size_t> const& lengths)
     {
         std::vector<std::size_t> strides(lengths.size(), 1);
@@ -169,7 +191,7 @@ namespace hiptensor
             strides[s] = stride;
             stride *= lengths[s];
         }
-    
+
         // Assign first half of strides
         for(int s = strides.size() - 1; s > static_cast<int>(strides.size()) / 2 - 1; s--)
         {

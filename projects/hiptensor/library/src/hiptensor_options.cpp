@@ -224,10 +224,5 @@ namespace hiptensor
     {
         return mColMajorStrides;
     }
-
-    void HiptensorOptions::setColMajorStrides(bool isColMajor)
-    {
-        mColMajorStrides = isColMajor;
-    }
-
+    
 } // namespace hiptensor

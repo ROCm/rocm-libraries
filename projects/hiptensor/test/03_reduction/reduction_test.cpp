@@ -215,14 +215,6 @@ namespace hiptensor
         auto cOp          = op[1];
         auto reduceOp     = op[2];
 
-        //Set hipTensor memory layout from input in yaml file
-        using hiptensor::HiptensorOptions;
-        auto& options = HiptensorOptions::instance();
-        if(memoryLayout == HIPTENSOR_MEMORY_LAYOUT_COLUMN_MAJOR)
-           options -> setColMajorStrides(true);
-        else if(memoryLayout == HIPTENSOR_MEMORY_LAYOUT_ROW_MAJOR)
-           options -> setColMajorStrides(false);
-
         EXPECT_TRUE((lengths.size() > 0) && (lengths.size() <= 6));
         EXPECT_TRUE((outputDims.size() >= 0) && (outputDims.size() <= 6));
 

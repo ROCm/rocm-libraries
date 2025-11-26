@@ -71,7 +71,6 @@ namespace hiptensor
         bool usingDefaultConfig();
         bool performValidation();
         bool isColMajorStrides();
-        void setColMajorStrides(bool isColMajor);
 
         int32_t hotRuns();
         int32_t coldRuns();
