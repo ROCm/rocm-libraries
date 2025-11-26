@@ -154,6 +154,10 @@ bool fft::IsApplicable(const ExecutionContext& ctx, const ProblemDescription& pr
        (std::tie(in_h, in_w) != std::make_tuple(7, 7)))
         return false;
 
+    // TODO: These cases produce incorrect results. Fix if possible. For now don't allow to run them
+    if(!is_fwd && std::tie(in_h, in_w) == std::make_tuple(7, 7) && wei_k < 16)
+        return false;
+
     const auto cparam = std::make_tuple(conv.GetConvPads()[0],
                                         conv.GetConvPads()[1],
                                         conv.GetConvStrides()[0],
