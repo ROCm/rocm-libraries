@@ -32,8 +32,6 @@ struct BatchnormTestCase
 
     friend std::ostream& operator<<(std::ostream& ss, const BatchnormTestCase& tc)
     {
-        using namespace hipdnn_sdk::test_utilities;
-
         ss << "(dims:";
         hipdnn_sdk::utilities::vecToStream(ss, tc.dims);
         ss << " seed:" << tc.seed;

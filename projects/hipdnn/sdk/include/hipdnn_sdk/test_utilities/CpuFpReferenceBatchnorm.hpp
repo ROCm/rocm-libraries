@@ -54,7 +54,7 @@ public:
         };
 
         // Iterate all indices in parallel
-        auto parallelFunc = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
+        auto parallelFunc = makeParallelTensorFunctor(
             batchnormFwdInferenceFunc, x.dims());
         parallelFunc(std::thread::hardware_concurrency());
 
@@ -172,7 +172,7 @@ public:
         auto nChannels = x.dims().at(1);
         std::vector<int64_t> parallelDims = {nChannels};
 
-        auto parallelFunc = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(
+        auto parallelFunc = makeParallelTensorFunctor(
             batchnormFwdTrainingFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
@@ -285,7 +285,7 @@ public:
         std::vector<int64_t> parallelDims = {nChannels};
 
         auto parallelFunc
-            = hipdnn_sdk::test_utilities::makeParallelTensorFunctor(batchnormBwdFunc, parallelDims);
+            = makeParallelTensorFunctor(batchnormBwdFunc, parallelDims);
         parallelFunc(std::thread::hardware_concurrency());
 
         dx.memory().markHostModified();

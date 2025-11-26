@@ -11,9 +11,9 @@ namespace helpers
 {
 
 template <typename T>
-hipdnn_sdk::utilities::MigratableMemory<T> createBuffer(size_t size, T mult)
+utilities::MigratableMemory<T> createBuffer(size_t size, T mult)
 {
-    hipdnn_sdk::utilities::MigratableMemory<T> buffer(size);
+    utilities::MigratableMemory<T> buffer(size);
 
     T* data = buffer.hostData();
 
@@ -26,9 +26,9 @@ hipdnn_sdk::utilities::MigratableMemory<T> createBuffer(size_t size, T mult)
 }
 
 template <typename T>
-hipdnn_sdk::utilities::MigratableMemory<T> createConstantBuffer(size_t size, T value)
+utilities::MigratableMemory<T> createConstantBuffer(size_t size, T value)
 {
-    hipdnn_sdk::utilities::MigratableMemory<T> buffer(size);
+    utilities::MigratableMemory<T> buffer(size);
 
     T* data = buffer.hostData();
 
