@@ -49,6 +49,5 @@ namespace rocRoller
 
         void removeRedundantSequenceEdges(ControlGraph::ControlGraph& graph);
         void removeRedundantBodyEdges(ControlGraph::ControlGraph& graph);
-        // void removeRedundantNOPs(ControlGraph::ControlGraph& graph);
     }
 }

@@ -1,14 +1,15 @@
 # hipDNN Docker Environments
 
-This directory contains the Dockerfile for building hipDNN development environment Docker image.
+This directory contains the Dockerfile for building the hipDNN development environment Docker image.
 
 ## 📋 Prerequisites
 
-- Docker installed on your system (17.05+ for multi-stage support)
-    - Docker Buildx is required to properly select build stages with the `--target` flag (`docker buildx version` to verify it's available)
-    - Without buildx, Docker may attempt to build all stages instead of only the selected target, which can cause build failures
-- ROCm-compatible GPU (for running with GPU support)
-- Sufficient disk space for Docker images
+- **Docker with Buildx installed** (Version 27.5.1+ recommended)
+    - **Why?** This Dockerfile relies on BuildKit (Buildx) to selectively build only the necessary stages. Legacy builders or older versions may attempt to build *all* stages—including those with missing arguments—causing build failures.
+- **ROCm-compatible GPU**
+    - Required for running applications with GPU support.
+- **Sufficient disk space**
+    - Required for storing development Docker images.
 
 ## 🐳 Ubuntu 24.04
 
@@ -27,7 +28,7 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 
 ### Build Arguments
 
-#### 🔧Select Build TYpe
+#### 🔧Select Build Type
 
 | Argument | Default | Description | Valid Values |
 |----------|---------|-------------|--------------|
@@ -37,6 +38,11 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 
 > [!NOTE]
 > Prebuilt mode downloads pre-compiled binaries from TheRock nightly builds (much faster)
+
+> [!NOTE]
+> There is currently an issue with using the prebuilt binaries with the gfx90X ASIC family. Refer to this GitHub issue for more details:
+https://github.com/ROCm/TheRock/issues/2179
+
 
 | Argument | Default | Description |
 |----------|---------|-------------|
@@ -161,7 +167,7 @@ docker run -it \
 ```
 ### Building hipDNN
 
-Follow the [quick start steps in the build guide](./docs/Building.md#quick-start-guide) to build hipDNN.
+Follow the [quick start steps in the build guide](../docs/Building.md#quick-start-guide) to build hipDNN.
 
 ## 💡 Tips and Best Practices
 
@@ -201,11 +207,10 @@ Follow the [quick start steps in the build guide](./docs/Building.md#quick-start
 
 ### Build issues
 
-**Missing or old Docker version:**
-- Ensure the installed docker version is 17.05 or newer to support multi-stage builds
-- Check version with: `docker --version`
-
-**Missing Docker Buildx:**
-- Buildx is required for proper multi-stage build target selection
-- Verify buildx is available: `docker buildx version`
-- If buildx is missing, Docker will attempt to build ALL stages in the Dockerfile and fail due to argument mismatches between the different types of build
+**Build fails attempting to build all stages / Argument mismatches:**
+- **Symptom:** The build attempts to execute stages you didn't select (e.g., compiling from source in `fullbuild` when you requested `prebuilt`), often failing due to default arguments or configuration conflicts in those unselected stages.
+- **Cause:** You are likely using the legacy Docker builder instead of BuildKit (Buildx). The legacy builder attempts to process all stages, whereas BuildKit only builds what is necessary for the target.
+- **Solution:**
+  - Ensure Docker Buildx is installed and enabled (`docker buildx version`).
+  - Upgrade Docker to the recommended version (27.5.1+).
+  - If using an older version, try explicitly enabling BuildKit: `DOCKER_BUILDKIT=1 docker build ...`
