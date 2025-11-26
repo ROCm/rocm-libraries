@@ -120,6 +120,11 @@ RUN wget https://github.com/Yelp/dumb-init/releases/download/v1.2.0/dumb-init_1.
     cmake -DZSTD_FROM_INTERNET=ON -DHIREDIS_FROM_INTERNET=ON .. && make -j install && rm -rf /tmp/* && \
     ccache -s && \
     cd / && \
+# Install Ninja build system    
+    wget -qO /usr/local/bin/ninja.gz https://github.com/ninja-build/ninja/releases/latest/download/ninja-linux.zip && \
+    gunzip /usr/local/bin/ninja.gz && \
+    chmod a+x /usr/local/bin/ninja && \
+    cd / && \
 # Install doc requirements
     pip3 install -r /doc-requirements.txt && \
 # Composable Kernel requires this version cmake
@@ -135,46 +140,94 @@ ENV PATH="/opt/rocm:${PATH}"
 ADD script/redis-cli.conf /redis-cli.conf
 ADD script/sccache_wrapper.sh /sccache_wrapper.sh
 
-RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
-    if [ "$MIOPEN_SCCACHE" != "" ]; then \
+RUN echo Building for GPU Archs: ${GPU_ARCHS}
+
+# Setup sccache environment variables globally if needed
+ENV ROCM_PATH=/opt/rocm \
+    SCCACHE_ENABLED=true \
+    SCCACHE_LOG_LEVEL=debug \
+    SCCACHE_IDLE_TIMEOUT=14400 \
+    COMPILERS_HASH_DIR=/tmp/.sccache \
+    SCCACHE_BIN=/usr/local/.cargo/bin/sccache \
+    SCCACHE_EXTRAFILES=/tmp/.sccache/rocm_compilers_hash_file
+
+# Install sccache binary
+RUN if [ "$MIOPEN_SCCACHE" != "" ]; then \
     mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
-    curl ${SCCACHE_REPO_URL}/portable/0.2.16/sccache-0.2.16-alpha.1-rocm --output ${SCCACHE_INSTALL_LOCATION}/sccache && \
+    curl ${SCCACHE_REPO_URL}/portable/0.2.16/sccache-0.2.16-alpha.1-rocm \
+         --output ${SCCACHE_INSTALL_LOCATION}/sccache && \
     chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache; \
-    export ROCM_PATH=/opt/rocm && \
-    export SCCACHE_ENABLED=true && \
-    export SCCACHE_LOG_LEVEL=debug && \
-    export SCCACHE_IDLE_TIMEOUT=14400 && \
-    export COMPILERS_HASH_DIR=/tmp/.sccache && \
-    export SCCACHE_BIN=/usr/local/.cargo/bin/sccache && \
-    export SCCACHE_EXTRAFILES=/tmp/.sccache/rocm_compilers_hash_file && \
+    fi
+
+# Configure sccache Redis connection
+RUN if [ "$MIOPEN_SCCACHE" != "" ]; then \
+    echo "MIOPEN_SCCACHE is set to $MIOPEN_SCCACHE, configuring sccache to use redis." && \
     export SCCACHE_REDIS="redis://$MIOPEN_SCCACHE" && \
-    echo "connect = $MIOPEN_SCCACHE" >> redis-cli.conf && \
     export SCCACHE_C_CUSTOM_CACHE_BUSTER="${MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER}" && \
-    echo $SCCACHE_C_CUSTOM_CACHE_BUSTER && \
+    echo "connect = $MIOPEN_SCCACHE" >> redis-cli.conf && \
     stunnel redis-cli.conf && \
-    export PATH=$PATH:${SCCACHE_INSTALL_LOCATION} && \
     ./sccache_wrapper.sh --enforce_redis; \
-    fi &&\
-    CK_COMMIT=$(grep 'ROCm/composable_kernel' requirements.txt | sed -n 's/.*@\([a-zA-Z0-9]*\).*/\1/p') && \
+    fi
+
+# Download and build Composable Kernel
+RUN CK_COMMIT=$(grep 'ROCm/composable_kernel' requirements.txt | sed -n 's/.*@\([a-zA-Z0-9]*\).*/\1/p') && \
+    echo "Building CK commit: ${CK_COMMIT}" && \
     wget -O ck.tar.gz https://www.github.com/ROCm/composable_kernel/archive/${CK_COMMIT}.tar.gz && \
-    tar zxvf ck.tar.gz &&\
+    tar zxvf ck.tar.gz && \
     cd composable_kernel-${CK_COMMIT} && \
     mkdir build && cd build && \
-    num_threads=64 && \
-    echo Building CK with ${num_threads} threads && \
-    CXX=/opt/rocm/bin/amdclang++ cmake \
+    CXX=/opt/rocm/bin/amdclang++ cmake -G Ninja \
     -D CMAKE_PREFIX_PATH=/opt/rocm \
     -D CMAKE_CXX_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
+    -D CMAKE_HIP_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
     -D CMAKE_C_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
     -D CMAKE_BUILD_TYPE=Release \
     -D GPU_ARCHS=${GPU_ARCHS} \
     -D MIOPEN_REQ_LIBS_ONLY=ON \
-    -D CMAKE_CXX_FLAGS=" -O3 " .. && \
-    make -j ${num_threads} install && \    
+    -D CMAKE_CXX_FLAGS="-O3 " \
+    .. && \
+    ninja -j 128 install && \
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
     sccache -s; \
     fi
 
+# RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
+#     if [ "$MIOPEN_SCCACHE" != "" ]; then \
+#     mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
+#     curl ${SCCACHE_REPO_URL}/portable/0.2.16/sccache-0.2.16-alpha.1-rocm --output ${SCCACHE_INSTALL_LOCATION}/sccache && \
+#     chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache; \
+#     export ROCM_PATH=/opt/rocm && \
+#     export SCCACHE_ENABLED=true && \
+#     export SCCACHE_LOG_LEVEL=debug && \
+#     export SCCACHE_IDLE_TIMEOUT=14400 && \
+#     export COMPILERS_HASH_DIR=/tmp/.sccache && \
+#     export SCCACHE_BIN=/usr/local/.cargo/bin/sccache && \
+#     export SCCACHE_EXTRAFILES=/tmp/.sccache/rocm_compilers_hash_file && \
+#     export SCCACHE_REDIS="redis://$MIOPEN_SCCACHE" && \
+#     echo "connect = $MIOPEN_SCCACHE" >> redis-cli.conf && \
+#     export SCCACHE_C_CUSTOM_CACHE_BUSTER="${MIOPEN_SCCACHE_CUSTOM_CACHE_BUSTER}" && \
+#     echo $SCCACHE_C_CUSTOM_CACHE_BUSTER && \
+#     stunnel redis-cli.conf && \
+#     export PATH=$PATH:${SCCACHE_INSTALL_LOCATION} && \
+#     ./sccache_wrapper.sh --enforce_redis; \
+#     fi &&\
+#     CK_COMMIT=$(grep 'ROCm/composable_kernel' requirements.txt | sed -n 's/.*@\([a-zA-Z0-9]*\).*/\1/p') && \
+#     wget -O ck.tar.gz https://www.github.com/ROCm/composable_kernel/archive/${CK_COMMIT}.tar.gz && \
+#     tar zxvf ck.tar.gz &&\
+#     cd composable_kernel-${CK_COMMIT} && \
+#     mkdir build && cd build && \
+#     num_threads=64 && \
+#     echo Building CK with ${num_threads} threads && \
+#     CXX=/opt/rocm/bin/amdclang++ cmake -G Ninja \
+#     -D CMAKE_PREFIX_PATH=/opt/rocm \
+#     -D CMAKE_CXX_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
+#     -D CMAKE_C_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
+#     -D CMAKE_BUILD_TYPE=Release \
+#     -D GPU_ARCHS=${GPU_ARCHS} \
+#     -D MIOPEN_REQ_LIBS_ONLY=ON \
+#     -D CMAKE_CXX_FLAGS="-O3 " .. && \
+#     make -j ${num_threads} install && \    
+    
 # Composable Kernel installed separated from rbuild to take in values from GPU_ARCHS
 RUN sed -i '/composable_kernel/d' /requirements.txt
 
