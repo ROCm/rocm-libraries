@@ -3313,7 +3313,7 @@ class Solution(collections.abc.Mapping):
           (state["1LDSBuffer"] == 0) and numLdsBlk == 2 and \
           (offsetBlk + roundupOffsetBlk) > state["MaxLDS"]
       else:
-        state["StoreSwapAddr"] = (state["1LDSBuffer"] != 1) and \
+        state["StoreSwapAddr"] = offsetBlk > 0 and (state["1LDSBuffer"] != 1) and \
           (offsetBlk + int(2**(math.ceil(math.log(offsetBlk, 2)))) > state["MaxLDS"])
 
       if offsetBlk > 0 and not state["StoreSwapAddr"] and numLdsBlk == 2:
