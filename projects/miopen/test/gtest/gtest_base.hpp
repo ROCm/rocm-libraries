@@ -26,11 +26,14 @@
 
 class GTESTBase
 {
-public:
-    virtual void runOptimizedGPU() = 0;
-    virtual void runNaiveGPU()     = 0;
-    virtual void runOptimizedCPU() = 0;
-    virtual void runNaiveCPU()     = 0;
+protected:
+    virtual miopenStatus_t runOptimizedGPU() = 0;
+    virtual miopenStatus_t runNaiveGPU()     = 0;
+    virtual miopenStatus_t runOptimizedCPU() = 0;
+    virtual miopenStatus_t runNaiveCPU()     = 0;
 
+    virtual void runDetailedAnalysis() = 0;
+
+public:
     virtual void runTest() = 0;
 };

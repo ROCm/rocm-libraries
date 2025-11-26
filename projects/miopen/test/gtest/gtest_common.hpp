@@ -39,6 +39,47 @@
 #include "../driver.hpp"
 #include "../lib_env_var.hpp"
 
+#include "gtest_base.hpp"
+
+/*! @enum miopenTestConfiguration_t
+ * Enum values for quick test configuration.
+ */
+typedef enum
+{
+    miopenTestFast     = 0, /*!< Fastest test execution configuration. */
+    miopenTestDetailed = 1, /*!< Detailed test execution configuration. */
+    miopenTestManual   = 2, /*!< Manual test configuration. */
+} miopenTestConfiguration_t;
+
+/*! @enum miopenUnitUnderTest_t
+ * Enum values for selecting unit under test (UUT) in manual configuration mode.
+ * There is no option to choose Naive CPU implementation as UUT because that is 'most trusted'
+ * implementation that should verify result of other implementations.
+ */
+typedef enum
+{
+    miopenUnitOptimizedGPU = 0, /*!< Optimized GPU implementation as UUT. */
+    miopenUnitNaiveGPU     = 1, /*!< Naive GPU implementation as UUT. */
+    miopenUnitOptimizedCPU = 2, /*!< Optimized CPU implementation as UUT. */
+} miopenUnitUnderTest_t;
+
+/*! @enum miopenTestReference_t
+ * Enum values for selecting test reference (REF) in manual configuration mode.
+ * There is no option to choose Optimized GPU as test reference because that is 'least trusted'
+ * implementation and it can only be used as UUT.
+ */
+typedef enum
+{
+    miopenTestReferenceNaiveGPU     = 0, /*!< Naive GPU implementation as reference. */
+    miopenTestReferenceOptimizedCPU = 1, /*!< Optimized CPU implementation as reference. */
+    miopenTestReferenceNaiveCPU     = 2, /*!< Naive CPU implementation as reference. */
+} miopenTestReference_t;
+
+miopenTestReference_t GetTestFastReference(miopenUnitUnderTest_t uut)
+{
+    return static_cast<miopenTestReference_t>(static_cast<int>(uut));
+}
+
 template <typename T>
 class ScopedEnvironment
 {
@@ -52,11 +93,11 @@ public:
         restore = ClearValue();
     }
 
-    ScopedEnvironment()                         = delete;
-    ScopedEnvironment(const ScopedEnvironment&) = delete;
-    ScopedEnvironment(ScopedEnvironment&&)      = delete;
+    ScopedEnvironment()                                    = delete;
+    ScopedEnvironment(const ScopedEnvironment&)            = delete;
+    ScopedEnvironment(ScopedEnvironment&&)                 = delete;
     ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
-    ScopedEnvironment& operator=(ScopedEnvironment&&) = delete;
+    ScopedEnvironment& operator=(ScopedEnvironment&&)      = delete;
 
     ~ScopedEnvironment()
     {

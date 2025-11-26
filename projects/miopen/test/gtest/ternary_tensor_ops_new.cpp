@@ -23,8 +23,11 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "gtest_base.hpp"
 #include "gtest_common.hpp"
+
+constexpr miopenTestConfiguration_t testConfig = miopenTestFast;
+constexpr miopenUnitUnderTest_t UUT            = miopenUnitNaiveGPU;
+constexpr miopenTestReference_t REF            = miopenTestReferenceNaiveCPU;
 
 struct TernaryTensorOpsTestCase
 {
@@ -46,4 +49,14 @@ struct TernaryTensorOpsTestCase
 template <typename T>
 struct TensorOpsCommon : public GTESTBase, public testing::TestWithParam<TernaryTensorOpsTestCase>
 {
+protected:
+    void SetUp() override { prng::reset_seed(); }
+
+    miopenStatus_t runOptimizedGPU() override { return miopenStatusNotImplemented; }
+    miopenStatus_t runNaiveGPU() override { return miopenStatusSuccess; }
+    miopenStatus_t runOptimizedCPU() override { return miopenStatusSuccess; }
+    miopenStatus_t runNaiveCPU() override { return miopenStatusSuccess; }
+
+public:
+    void runTest() override {}
 };
