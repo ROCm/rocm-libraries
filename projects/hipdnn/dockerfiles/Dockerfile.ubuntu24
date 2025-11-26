@@ -124,8 +124,8 @@ RUN if [ "$THEROCK_GIT_HASH" != "default" ]; then \
 # Update rocm-libraries submodule to specific ref if provided
 RUN if [ "$ROCM_LIBRARIES_REF" != "default" ]; then \
         echo "Updating rocm-libraries submodule to: $ROCM_LIBRARIES_REF"; \
-        git submodule update --init external/rocm-libraries && \
-        cd external/rocm-libraries && \
+        git submodule update --init rocm-libraries && \
+        cd rocm-libraries && \
         git fetch origin && \
         git checkout $ROCM_LIBRARIES_REF; \
     fi
