@@ -203,7 +203,7 @@ TEST_CASE("extractDataFlowTags", "[kernel-graph][hoist-loop-invariant][expressio
     }
 }
 
-TEST_CASE("hoistNodeBeforeLoop helper", "[kernel-graph][hoist-loop-invariant][helper]")
+TEST_CASE("hoistNodeBeforeLoop", "[kernel-graph][hoist-loop-invariant][helper]")
 {
     using namespace rocRoller;
     namespace kg = rocRoller::KernelGraph;
@@ -221,9 +221,29 @@ TEST_CASE("hoistNodeBeforeLoop helper", "[kernel-graph][hoist-loop-invariant][he
 
     auto loopBody = graph.control.addElement(NOP{});
     graph.control.addElement(Body{}, {forLoop}, {loopBody});
-    graph.control.addElement(Sequence{}, {predecessor}, {forLoop});
-    auto nodeToHoist = graph.control.addElement(NOP{});
+    auto sequenceEdge = graph.control.addElement(Sequence{}, {predecessor}, {forLoop});
+    auto nodeToHoist  = graph.control.addElement(NOP{});
+    graph.control.addElement(Sequence{}, {loopBody}, {nodeToHoist});
 
     std::string dotOutputBefore = graph.toDOT(true);
     writeDotToFile(dotOutputBefore, "hoist_node_before_loop_helper_before.dot");
+
+    int result = kg::HoistLoopInvariant::hoistNodeBeforeLoop(
+        graph, nodeToHoist, forLoop, predecessor, sequenceEdge);
+
+    std::string dotOutputAfter = graph.toDOT(true);
+    writeDotToFile(dotOutputAfter, "hoist_node_before_loop_helper_after.dot");
+
+    // Verify that the node was hoisted
+    // The nodeToHoist should now have a sequence edge to the forLoop
+    auto nodeOutputs = graph.control.getOutputNodeIndices<Sequence>(nodeToHoist).to<std::vector>();
+    REQUIRE(std::find(nodeOutputs.begin(), nodeOutputs.end(), forLoop) != nodeOutputs.end());
+
+    // Verify that nodeToHoist is no longer inside the loop body
+    auto loopBodyChildren
+        = graph.control.depthFirstVisit(loopBody, Graph::Direction::Downstream).to<std::vector>();
+    REQUIRE(std::find(loopBodyChildren.begin(), loopBodyChildren.end(), nodeToHoist)
+            == loopBodyChildren.end());
+
+    REQUIRE(result == nodeToHoist);
 }
