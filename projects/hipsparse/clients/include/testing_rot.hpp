@@ -119,7 +119,7 @@ hipsparseStatus_t testing_rot(Arguments argus)
 
     // Initial Data on CPU
     srand(12345ULL);
-    hipsparseInitIndex(hx_ind.data(), nnz, 1, size);
+    hipsparseInitIndex(hx_ind.data(), nnz, idxBase, size + idxBase);
     hipsparseInit<T>(hx_val_1, 1, nnz);
     hipsparseInit<T>(hy_1, 1, size);
 

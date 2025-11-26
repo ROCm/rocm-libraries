@@ -184,7 +184,7 @@ hipsparseStatus_t testing_gemvi(Arguments argus)
 
     // Initial Data on CPU
     srand(12345ULL);
-    hipsparseInitIndex(hx_ind.data(), nnz, 1, n);
+    hipsparseInitIndex(hx_ind.data(), nnz, idxBase, n + idxBase);
     hipsparseInit<T>(hx_val, 1, nnz);
     hipsparseInit<T>(hy, 1, m);
     hy_gold = hy;

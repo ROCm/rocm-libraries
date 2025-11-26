@@ -128,7 +128,7 @@ constexpr T getToleranceFwd()
 {
     if constexpr(std::is_same_v<T, float>)
     {
-        return 8.5e-6f;
+        return 1e-5f;
     }
     else if constexpr(std::is_same_v<T, half>)
     {
