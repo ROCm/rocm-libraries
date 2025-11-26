@@ -265,7 +265,8 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
         if(skip_time < std::numeric_limits<float>::max())
         {
             // skip Naive if another solver has been timed and solution took more than 50ns.
-            if(using_search_cutoff && sol.solver_id.find("Naive") != std::string::npos && skip_time > 0.05f)
+            if(using_search_cutoff && sol.solver_id.find("Naive") != std::string::npos &&
+               skip_time > 0.05f)
             {
                 MIOPEN_LOG_I("Skipping Naive Solver: " << algorithm_name.ToString() << ":"
                                                        << sol.solver_id);
