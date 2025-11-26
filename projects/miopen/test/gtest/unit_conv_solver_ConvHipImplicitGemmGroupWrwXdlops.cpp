@@ -95,8 +95,8 @@ const auto& GetTestParams(bool bfp16 = false)
 
 } // namespace
 
-// Solver itself supports I8 in isApplicable, but CK returns 0 compatible kernels, so I switched off I8
-//using GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_I8    = GPU_UnitTestConvSolverWrw_I8;
+// Solver itself supports I8 in isApplicable, but CK returns 0 compatible kernels
+// using GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_I8    = GPU_UnitTestConvSolverWrw_I8;
 using GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_FP16  = GPU_UnitTestConvSolverWrw_FP16;
 using GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_BFP16 = GPU_UnitTestConvSolverWrw_BFP16;
 using GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_FP32  = GPU_UnitTestConvSolverWrw_FP32;
