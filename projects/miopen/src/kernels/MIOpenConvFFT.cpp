@@ -3329,8 +3329,6 @@ extern "C" __global__
     DST.y = fma(MULA.x, MULB.y, DST.y);  \
     DST.y = fma(MULA.y, MULB.x, DST.y);
 
-// TODO: Why are mem_fence(CLK_LOCAL_MEM_FENCE) used here?
-
 /* 4x4 micro-tile */
 #define MICRO_TILE                    \
     rA[0] = localA[offA + 0 * WG_0I]; \
@@ -3358,8 +3356,7 @@ extern "C" __global__
     TYPE_MAD(rA[3], rB[0], rC[3][0]); \
     TYPE_MAD(rA[3], rB[1], rC[3][1]); \
     TYPE_MAD(rA[3], rB[2], rC[3][2]); \
-    TYPE_MAD(rA[3], rB[3], rC[3][3]); \
-    /*mem_fence(CLK_LOCAL_MEM_FENCE);*/
+    TYPE_MAD(rA[3], rB[3], rC[3][3]);
 
 /* preprocessor definitions of kernel arguments*/
 #define strideC0I 1
@@ -3755,8 +3752,6 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     DST.y = fma(MULA.x, MULB.y, DST.y);  \
     DST.y = fma(MULA.y, MULB.x, DST.y);
 
-// TODO: Why are mem_fence(CLK_LOCAL_MEM_FENCE) used here?
-
 /* 4x4 micro-tile */
 #define SUMMATION_UNROLL                                       \
     rA[0] = ldsReadIterA[0 * SG0I];                            \
@@ -3784,8 +3779,7 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     TYPE_MAC(rA[0], rB[3], rC[(0 + 3 * TT0I / VECTOR_WIDTH)]); \
     TYPE_MAC(rA[1], rB[3], rC[(1 + 3 * TT0I / VECTOR_WIDTH)]); \
     TYPE_MAC(rA[2], rB[3], rC[(2 + 3 * TT0I / VECTOR_WIDTH)]); \
-    TYPE_MAC(rA[3], rB[3], rC[(3 + 3 * TT0I / VECTOR_WIDTH)]); \
-    /*mem_fence(CLK_LOCAL_MEM_FENCE);*/
+    TYPE_MAC(rA[3], rB[3], rC[(3 + 3 * TT0I / VECTOR_WIDTH)]);
 
 /* hard-coded initial strides */
 #define strideC0I 1
