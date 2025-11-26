@@ -511,7 +511,6 @@ std::vector<Solution> Problem::FindSolutionsImpl(const Handle& handle,
 
     auto ctx = ExecutionContext{&handle};
     conv_problem.SetupFloats(ctx);
-    conv_problem.SetupComputeType(ctx);
     ctx.do_search = options.exhaustive_search;
 
     const auto invoke_ctx =

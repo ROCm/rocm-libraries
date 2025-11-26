@@ -3,10 +3,12 @@
 ## How to Build
 
 1. **Prerequisites:**
-   - Build and install hipDNN following the [Building documentation](../docs/Building.md)
-   - Ensure ROCm is installed (typically in `/opt/rocm`)
+
+   - Follow the instructions in [Building.md](../docs/Building.md) to install the needed dependencies, compilers, and libraries for building hipDNN projects. Specifically:
+     * CMake
+     * Ninja
+     * ROCm / TheRock
    - A ROCm-compatible GPU is required to run the samples
-   - Have `ninja` build tool available: `apt install ninja-build`
 
 2. **Build Samples:** From this `samples` directory:
    ```bash
@@ -99,7 +101,7 @@ The fused graph consists of three operations:
 3. **Batchnorm Backward**: Computes gradients with respect to inputs and parameters
    ```python
    dbias = sum(dx_drelu)
-   x_hat = (x - mean) * inv_variance  
+   x_hat = (x - mean) * inv_variance
    dscale = sum(dx_drelu * x_hat)
    dx = (scale * inv_variance) * (dx_drelu - (dbias + x_hat * dscale) / nhw)
    ```
@@ -115,7 +117,7 @@ Inputs: x, dy, scale, bias, mean, inv_variance
         ↓
     bn_y = batchnorm_inference(x, mean, inv_variance, scale, bias)
         ↓ (virtual tensor)
-    dx_drelu = activation_backward(bn_y, dy)  
+    dx_drelu = activation_backward(bn_y, dy)
         ↓ (virtual tensor)
     [dx, dscale, dbias] = batchnorm_backward(dx_drelu, x, scale, mean, inv_variance)
         ↓
