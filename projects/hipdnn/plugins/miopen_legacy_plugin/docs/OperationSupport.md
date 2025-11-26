@@ -6,13 +6,13 @@ For general information about hipDNN's operation support, please see the [hipDNN
 
 ## Current Operation Support
 
-The following table lists all operations currently supported by the MIOpen Legacy Plugin:
+The following table lists all operations currently supported in hipDNN:
 
 | Operation | Datatypes | Layouts | Notes |
 |-----------|-----------|---------|-------|
 | Batchnorm Backward  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only¹ |
 | Batchnorm Inference + DRelu + Backward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph³ |
-| Batchnorm Training  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only¹ |
+| Batchnorm Training  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Spatial mode only¹, No running stats⁴ |
 | Convolution Dgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
 | Convolution Wgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
@@ -20,6 +20,7 @@ The following table lists all operations currently supported by the MIOpen Legac
 ¹ See Batchnorm Operations note below
 ² See Convolution Operations note below
 ³ See Fused Operations note below
+⁴ See Batchnorm Training Running Statistics note below
 
 ## Operation Notes
 
@@ -34,6 +35,9 @@ The following table lists all operations currently supported by the MIOpen Legac
 
 > [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only.
+
+> [!NOTE]
+> **Batchnorm Training Running Statistics:** Currently, batchnorm training only supports computing batch statistics (mean and inverse variance) without updating running statistics.
 
 ## Legend
 

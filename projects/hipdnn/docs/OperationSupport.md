@@ -25,6 +25,13 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
   - GEMM
   - Batchnorm (Training, Inference)
 
+### Reference Implementation
+
+- **[CPU Reference Implementation](./OperationSupport-ReferenceImpl.md)** - CPU-based reference implementation for validation and testing
+  - Provides ground-truth results for validating GPU implementations
+  - Supports core operations (Convolution, Batchnorm, Pointwise)
+  - Not intended for performance or production use
+
 ## Roadmap
 
 For information about planned features, upcoming operations, and the development roadmap, please see:
