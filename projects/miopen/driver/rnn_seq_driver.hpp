@@ -847,7 +847,7 @@ int RNNSeqDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
     const size_t hid_sz = Get3DNoVECTensorSize(hiddenTensor);
 
-    size_t workSpace_sz = 0;
+    size_t workSpace_sz    = 0;
     size_t reserveSpace_sz = 0;
     status |= miopenGetRNNTempSpaceSizes(
         GetHandle(), rnnDesc, inputSeqTensor, fwd_type, &workSpace_sz, &reserveSpace_sz);
