@@ -162,7 +162,7 @@ RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
     mkdir build && cd build && \
     num_threads=64 && \
     echo Building CK with ${num_threads} threads && \
-    CXX=/opt/rocm/bin/amdclang++ cmake -G Ninja \
+    CXX=/opt/rocm/bin/amdclang++ cmake \
     -D CMAKE_PREFIX_PATH=/opt/rocm \
     -D CMAKE_CXX_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
     -D CMAKE_C_COMPILER_LAUNCHER="${COMPILER_LAUNCHER}" \
