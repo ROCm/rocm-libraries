@@ -464,17 +464,17 @@ namespace rocRoller
                             Register::ValuePtr tmpRegister;
                             co_yield generate(tmpRegister,
                                               simplify(basePointer->expression() + user->offset));
-                            bufferExpr = BufferDescriptor::setBasePointer(
+                            bufferExpr = BufferDescriptor::SetBasePointer(
                                 bufferExpr, tmpRegister->expression());
                         }
                         else
                         {
-                            bufferExpr = BufferDescriptor::setBasePointer(
+                            bufferExpr = BufferDescriptor::SetBasePointer(
                                 bufferExpr, basePointer->expression());
                         }
 
-                        bufferExpr = BufferDescriptor::setOptions(
-                            bufferExpr, BufferDescriptor::getDefaultOptions(m_context));
+                        bufferExpr = BufferDescriptor::SetOptions(
+                            bufferExpr, BufferDescriptor::GetDefaultOptions(m_context));
                         Register::ValuePtr limitValue;
                         co_yield generate(limitValue, toBytes(user->size));
                         // TODO: Handle sizes larger than 32 bits
@@ -482,7 +482,7 @@ namespace rocRoller
                                          ? limitValue
                                          : limitValue->subset({0});
                         limit->setVariableType(DataType::UInt32);
-                        bufferExpr = BufferDescriptor::setSize(bufferExpr, limit->expression());
+                        bufferExpr = BufferDescriptor::SetSize(bufferExpr, limit->expression());
                         co_yield Expression::generate(bufferReg, bufferExpr, m_context);
                     }
                     scope->addRegister(buffer);

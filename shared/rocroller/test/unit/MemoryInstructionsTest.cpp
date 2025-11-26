@@ -434,11 +434,11 @@ namespace MemoryInstructionsTest
                 co_yield m_context->copier()->copy(v_result, s_result, "Move pointer.");
 
                 Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
-                bufferExpr = BufferDescriptor::setDefaults(bufferExpr, m_context);
-                bufferExpr = BufferDescriptor::setBasePointer(
+                bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
+                bufferExpr = BufferDescriptor::SetBasePointer(
                     bufferExpr, Expression::literal(0x00000000ull, DataType::UInt64));
-                bufferExpr = BufferDescriptor::setSize(bufferExpr, Expression::literal(0x00000001));
-                bufferExpr = BufferDescriptor::incrementBasePointer(
+                bufferExpr = BufferDescriptor::SetSize(bufferExpr, Expression::literal(0x00000001));
+                bufferExpr = BufferDescriptor::IncrementBasePointer(
                     bufferExpr, Expression::literal(0x00000001ull, DataType::UInt64));
 
                 auto sRD = Register::Value::Placeholder(
@@ -448,7 +448,7 @@ namespace MemoryInstructionsTest
                 co_yield m_context->copier()->copy(v_a, sRD, "Move Value");
                 co_yield m_context->mem()->storeGlobal(v_result, v_a, 0, 16);
 
-                auto optsExpr = BufferDescriptor::getOptions(bufferExpr);
+                auto optsExpr = BufferDescriptor::GetOptions(bufferExpr);
                 auto dOpt     = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, {DataType::Raw32}, 1);
                 co_yield Expression::generate(dOpt, optsExpr, m_context);
@@ -490,7 +490,7 @@ namespace MemoryInstructionsTest
                                   hipMemcpyDefault),
                         HasHipSuccess(0));
 
-            auto                 defaultOptions = BufferDescriptor::getDefaultOptions(m_context);
+            auto                 defaultOptions = BufferDescriptor::GetDefaultOptions(m_context);
             CommandArgumentValue optionsValue   = Expression::evaluate(defaultOptions);
             uint32_t             opts           = std::get<uint32_t>(optionsValue);
 
@@ -547,9 +547,9 @@ namespace MemoryInstructionsTest
                 co_yield v_a->allocate();
 
                 Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
-                bufferExpr = BufferDescriptor::setDefaults(bufferExpr, m_context);
-                bufferExpr = BufferDescriptor::setBasePointer(bufferExpr, s_a->expression());
-                bufferExpr = BufferDescriptor::setSize(bufferExpr, Expression::literal(N));
+                bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
+                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression());
+                bufferExpr = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N));
 
                 auto bufferRegs = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
@@ -561,7 +561,7 @@ namespace MemoryInstructionsTest
                 co_yield m_context->mem()->loadBuffer(
                     v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
 
-                bufferExpr = BufferDescriptor::setBasePointer(bufferExpr, s_result->expression());
+                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_result->expression());
                 co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
 
                 co_yield m_context->mem()->storeBuffer(
@@ -1297,10 +1297,10 @@ namespace MemoryInstructionsTest
                 co_yield v_a->allocate();
 
                 Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
-                bufferExpr = BufferDescriptor::setDefaults(bufferExpr, m_context);
-                bufferExpr = BufferDescriptor::setBasePointer(bufferExpr, s_a->expression());
-                bufferExpr = BufferDescriptor::setSize(bufferExpr, Expression::literal(N));
-                bufferExpr = BufferDescriptor::setOptions(bufferExpr, Expression::literal(131072));
+                bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
+                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression());
+                bufferExpr = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N));
+                bufferExpr = BufferDescriptor::SetOptions(bufferExpr, Expression::literal(131072));
 
                 auto bufferRegs = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
@@ -1312,7 +1312,7 @@ namespace MemoryInstructionsTest
 
                 co_yield m_context->mem()->loadBuffer(
                     v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
-                bufferExpr = BufferDescriptor::setBasePointer(bufferExpr, s_result->expression());
+                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_result->expression());
                 co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
                 bufferExpr = bufferRegs->expression();
                 co_yield m_context->mem()->storeBuffer(
@@ -1320,20 +1320,20 @@ namespace MemoryInstructionsTest
 
                 co_yield m_context->mem()->loadBuffer(
                     v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N, true);
-                bufferExpr = BufferDescriptor::setBasePointer(bufferExpr, s_result->expression());
+                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_result->expression());
                 co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
                 bufferExpr = bufferRegs->expression();
                 co_yield m_context->mem()->storeBuffer(
                     v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N, true);
 
                 co_yield m_context->mem()->loadLocal(v_a, vgprSerial, 0, N);
-                bufferExpr = BufferDescriptor::setBasePointer(bufferExpr, s_result->expression());
+                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_result->expression());
                 co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
                 bufferExpr = bufferRegs->expression();
                 co_yield m_context->mem()->storeLocal(v_a, vgprSerial, 0, N);
 
                 co_yield m_context->mem()->loadLocal(v_a, vgprSerial, 0, N, "", true);
-                bufferExpr = BufferDescriptor::setBasePointer(bufferExpr, s_result->expression());
+                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_result->expression());
                 co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
                 bufferExpr = bufferRegs->expression();
                 co_yield m_context->mem()->storeLocal(v_a, vgprSerial, 0, N, "", true);
@@ -1476,10 +1476,10 @@ namespace MemoryInstructionsTest
                 s_offset, Register::Value::Literal(v_lds->getLDSAllocation()->offset()));
 
             Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
-            bufferExpr = BufferDescriptor::setDefaults(bufferExpr, m_context);
-            bufferExpr = BufferDescriptor::setBasePointer(bufferExpr, s_a->expression());
-            bufferExpr = BufferDescriptor::setSize(bufferExpr, Expression::literal(N));
-            bufferExpr = BufferDescriptor::setOptions(bufferExpr,
+            bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
+            bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression());
+            bufferExpr = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N));
+            bufferExpr = BufferDescriptor::SetOptions(bufferExpr,
                                                       Expression::literal(131072)); //0x00020000
 
             auto bufferRegs = Register::Value::Placeholder(

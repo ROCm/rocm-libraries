@@ -32,18 +32,18 @@ namespace rocRoller
 {
     namespace BufferDescriptor
     {
-        Expression::ExpressionPtr setDefaults(Expression::ExpressionPtr bufferExpr, ContextPtr ctx);
-        Expression::ExpressionPtr getDefaultOptions(ContextPtr ctx);
-        Expression::ExpressionPtr setBasePointer(Expression::ExpressionPtr bufferExpr,
+        Expression::ExpressionPtr SetDefaults(Expression::ExpressionPtr bufferExpr, ContextPtr ctx);
+        Expression::ExpressionPtr GetDefaultOptions(ContextPtr ctx);
+        Expression::ExpressionPtr SetBasePointer(Expression::ExpressionPtr bufferExpr,
                                                  Expression::ExpressionPtr ptrExpr);
-        Expression::ExpressionPtr getBasePointer(Expression::ExpressionPtr bufferExpr);
-        Expression::ExpressionPtr incrementBasePointer(Expression::ExpressionPtr bufferExpr,
+        Expression::ExpressionPtr GetBasePointer(Expression::ExpressionPtr bufferExpr);
+        Expression::ExpressionPtr IncrementBasePointer(Expression::ExpressionPtr bufferExpr,
                                                        Expression::ExpressionPtr offsetExpr);
-        Expression::ExpressionPtr setSize(Expression::ExpressionPtr bufferExpr,
+        Expression::ExpressionPtr SetSize(Expression::ExpressionPtr bufferExpr,
                                           Expression::ExpressionPtr sizeExpr);
-        Expression::ExpressionPtr getSize(Expression::ExpressionPtr bufferExpr);
-        Expression::ExpressionPtr setOptions(Expression::ExpressionPtr bufferExpr,
+        Expression::ExpressionPtr GetSize(Expression::ExpressionPtr bufferExpr);
+        Expression::ExpressionPtr SetOptions(Expression::ExpressionPtr bufferExpr,
                                              Expression::ExpressionPtr optsExpr);
-        Expression::ExpressionPtr getOptions(Expression::ExpressionPtr bufferExpr);
+        Expression::ExpressionPtr GetOptions(Expression::ExpressionPtr bufferExpr);
     }
 }

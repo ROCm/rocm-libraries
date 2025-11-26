@@ -315,9 +315,9 @@ namespace rocRollerTest
                 DataTypeInfo::Get(result_ptr->variableType().dataType).elementBits, 8u);
 
             Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
-            bufferExpr = BufferDescriptor::setDefaults(bufferExpr, m_context);
-            bufferExpr = BufferDescriptor::setBasePointer(bufferExpr, s_a->expression());
-            bufferExpr = BufferDescriptor::setSize(bufferExpr, Expression::literal(N));
+            bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
+            bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression());
+            bufferExpr = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N));
 
             auto bufferRegs = Register::Value::Placeholder(
                 m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
@@ -332,7 +332,7 @@ namespace rocRollerTest
                 co_yield m_context->mem()->loadBuffer(
                     v_temp->element({i}), vgprSerial, i, bufferRegs, bufInstOpts, 1);
             }
-            bufferExpr = BufferDescriptor::setBasePointer(bufferExpr, s_result->expression());
+            bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_result->expression());
             co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
 
             co_yield m_context->mem()->storeBuffer(

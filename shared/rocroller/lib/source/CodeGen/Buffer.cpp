@@ -35,7 +35,7 @@ namespace rocRoller
     {
         using Expression::ExpressionPtr;
 
-        ExpressionPtr getDefaultOptions(ContextPtr ctx)
+        ExpressionPtr GetDefaultOptions(ContextPtr ctx)
         {
             AssertFatal(ctx, "Context cannot be null.");
 
@@ -56,19 +56,19 @@ namespace rocRoller
             return Expression::literal((4u << 15), DataType::UInt32);
         }
 
-        ExpressionPtr setDefaults(ExpressionPtr bufferExpr, ContextPtr ctx)
+        ExpressionPtr SetDefaults(ExpressionPtr bufferExpr, ContextPtr ctx)
         {
             AssertFatal(bufferExpr && ctx, "Buffer and context cannot be null.");
             AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
                         "Buffer expression must be of buffer pointer type.");
 
-            bufferExpr = BufferDescriptor::setSize(
+            bufferExpr = BufferDescriptor::SetSize(
                 bufferExpr, Expression::literal(2147483548u, DataType::UInt32));
-            bufferExpr = BufferDescriptor::setOptions(bufferExpr, getDefaultOptions(ctx));
+            bufferExpr = BufferDescriptor::SetOptions(bufferExpr, GetDefaultOptions(ctx));
             return bufferExpr;
         }
 
-        ExpressionPtr setBasePointer(ExpressionPtr bufferExpr, ExpressionPtr addressExpr)
+        ExpressionPtr SetBasePointer(ExpressionPtr bufferExpr, ExpressionPtr addressExpr)
         {
             AssertFatal(bufferExpr && addressExpr,
                         "Buffer and address expressions cannot be null.");
@@ -84,7 +84,7 @@ namespace rocRoller
             return bfc(addressExpr, bufferExpr, 0, 0, 64);
         }
 
-        ExpressionPtr getBasePointer(ExpressionPtr bufferExpr)
+        ExpressionPtr GetBasePointer(ExpressionPtr bufferExpr)
         {
             AssertFatal(bufferExpr, "Buffer expression cannot be null.");
             AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
@@ -93,7 +93,7 @@ namespace rocRoller
             return bfe(DataType::UInt64, bufferExpr, 0, 64);
         }
 
-        ExpressionPtr incrementBasePointer(ExpressionPtr bufferExpr, ExpressionPtr valueExpr)
+        ExpressionPtr IncrementBasePointer(ExpressionPtr bufferExpr, ExpressionPtr valueExpr)
         {
             AssertFatal(bufferExpr && valueExpr, "Buffer and value expressions cannot be null.");
             AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
@@ -103,7 +103,7 @@ namespace rocRoller
             return bfc(basePointer + valueExpr, bufferExpr, 0, 0, 64);
         }
 
-        ExpressionPtr setSize(ExpressionPtr bufferExpr, ExpressionPtr sizeExpr)
+        ExpressionPtr SetSize(ExpressionPtr bufferExpr, ExpressionPtr sizeExpr)
         {
             AssertFatal(bufferExpr && sizeExpr, "Buffer and size expressions cannot be null.");
             AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
@@ -112,7 +112,7 @@ namespace rocRoller
             return bfc(sizeExpr, bufferExpr, 0, 64, 32);
         }
 
-        ExpressionPtr getSize(ExpressionPtr bufferExpr)
+        ExpressionPtr GetSize(ExpressionPtr bufferExpr)
         {
             AssertFatal(bufferExpr, "Buffer expression cannot be null.");
             AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
@@ -121,7 +121,7 @@ namespace rocRoller
             return bfe(DataType::UInt32, bufferExpr, 64, 32);
         }
 
-        ExpressionPtr setOptions(ExpressionPtr bufferExpr, ExpressionPtr optsExpr)
+        ExpressionPtr SetOptions(ExpressionPtr bufferExpr, ExpressionPtr optsExpr)
         {
             AssertFatal(bufferExpr && optsExpr, "Buffer and options expressions cannot be null.");
             AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
@@ -130,7 +130,7 @@ namespace rocRoller
             return bfc(optsExpr, bufferExpr, 0, 96, 32);
         }
 
-        ExpressionPtr getOptions(ExpressionPtr bufferExpr)
+        ExpressionPtr GetOptions(ExpressionPtr bufferExpr)
         {
             AssertFatal(bufferExpr, "Buffer expression cannot be null.");
             AssertFatal(resultVariableType(bufferExpr).pointerType == PointerType::Buffer,
