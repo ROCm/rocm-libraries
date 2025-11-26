@@ -89,24 +89,20 @@ namespace rocRoller::KernelGraph
                 if(!node.has_value())
                     return false;
 
-                auto candidates = subGraph.roots().to<std::list>();
-
-                std::unordered_set<int> remainingNodes(nodes.begin(), nodes.end());
-                remainingNodes.reserve(nodes.size());
-
-                std::unordered_set<int> completedNodes;
-                completedNodes.reserve(nodes.size());
-
-                auto nodeSatisfied = [&](int node) -> bool {
-                    if(completedNodes.contains(node))
-                        return false;
-
-                    for(auto input : subGraph.getInputNodeIndices<ControlGraph::Sequence>(node))
-                    {
-                        if(!completedNodes.contains(input))
-                            return false;
-                    }
-                    return true;
+                auto _isMemoryNode = []<typename T>(T const& theNode) {
+                    using namespace ControlGraph;
+                    return CIsAnyOf<T,
+                                    LoadLDSTile,
+                                    LoadLinear,
+                                    LoadVGPR,
+                                    LoadSGPR,
+                                    LoadTiled,
+                                    StoreLDSTile,
+                                    LoadTileDirect2LDS,
+                                    StoreLinear,
+                                    StoreTiled,
+                                    StoreVGPR,
+                                    StoreSGPR>;
                 };
 
                 return std::visit(_isMemoryNode, *node);
@@ -332,43 +328,6 @@ namespace rocRoller::KernelGraph
                     }
                 }
             }
-        }
-
-        ConstraintStatus NoUnorderedMultiplyNodes(const KernelGraph& k)
-        {
-            ConstraintStatus retval;
-
-            auto groupedMultiplyNodes = OrderMultiplyNodesDetail::getGroupedMultiplyNodes(k);
-
-            std::set<int> ambiguousNodes;
-
-            for(auto& [parent, nodes] : groupedMultiplyNodes)
-            {
-                for(size_t idx = 0; idx + 1 < nodes.size(); idx++)
-                {
-                    if(k.control.compareNodes(UpdateCache, nodes[idx], nodes[idx + 1])
-                       == ControlGraph::NodeOrdering::Undefined)
-                    {
-                        ambiguousNodes.insert(nodes[idx]);
-                        ambiguousNodes.insert(nodes[idx + 1]);
-                    }
-                }
-            }
-
-            if(!ambiguousNodes.empty())
-            {
-                std::ostringstream msg;
-
-                msg << "\\(";
-                streamJoin(msg, ambiguousNodes, "|");
-                msg << "\\)";
-
-                retval.combine(false,
-                               "Unordered multiply nodes found: " + ShowValue(ambiguousNodes)
-                                   + " Handy regex search string: " + msg.str());
-            }
-
-            return retval;
         }
     }
 
