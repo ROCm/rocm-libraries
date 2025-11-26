@@ -126,13 +126,7 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
             mean += temp;
             variance = fma(temp, temp, variance);
         }
-        __syncthreads(); // Note: in the original OpenCL kernel the synchronization was outside of
-                         // this if statement
-
-        // if (lid == 0 && grpid == 0)
-        // {
-        //     printf("use gcn: %d\n", mio_bn_config::use_amdgcn);
-        // }
+        __syncthreads();
 
         constexpr auto lcl_data_size =
             mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
@@ -618,9 +612,7 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
                                                           const FpPrecType* scale,
                                                           const FpPrecType* bias,
                                                           FpPrecType alpha,
-                                                          FpPrecType beta
-                                                          /*possibly more things for the C iface*/
-    )
+                                                          FpPrecType beta)
     {
         unsigned int xstride = mio_config::layout_nhwc ? 1 : mio_bn_config::hw;
         unsigned int ystride = mio_config::layout_nhwc ? mio_bn_config::c : 1;

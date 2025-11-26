@@ -140,8 +140,6 @@ __forceinline__ __device__ __host__ void _accumulate(TAccum& a, T const& b)
     }
 }
 
-/* TODO: extend for variant 2 fwd train spatial ports */
-
 __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
                                                       unsigned int zgroupoffset,
                                                       unsigned int ygroupoffset,
