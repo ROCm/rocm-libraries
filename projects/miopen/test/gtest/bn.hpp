@@ -338,10 +338,9 @@ protected:
             this->GetParam();
         bn_bwd_test_data.SetUpImpl(bn_config, bn_mode, tensor_layout);
 
-        bn_bwd_test_data.activ_alpha = bn_bwd_test_data.activ_mode == miopenActivationCLAMP
-                                           ? 0.1
-                                           : 0.5;
-        bn_bwd_test_data.activ_beta  = 0.3;
+        bn_bwd_test_data.activ_alpha =
+            bn_bwd_test_data.activ_mode == miopenActivationCLAMP ? 0.1 : 0.5;
+        bn_bwd_test_data.activ_beta = 0.3;
 
         auto&& handle      = get_handle();
         miopenStatus_t res = miopenStatusUnknownError;

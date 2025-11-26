@@ -239,7 +239,7 @@ protected:
         params += " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::OpenCL{});
         params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_FWD_BIAS";
 
-        std::string program_name{"MIOpenTensorKernels.cl}";
+        std::string program_name{"MIOpenTensorKernels.cl"};
         std::string network_config_ocl = network_config + "-ocl";
 
         handle.AddKernel("OpTensorFwdBias",
@@ -364,21 +364,21 @@ protected:
 #if PERF_ENABLE
         std::string stats{};
         stats += "_aclens_" + std::to_string(tensorsConfig.aclens[0]) + "_" +
-                std::to_string(tensorsConfig.aclens[1]) + "_" +
-                std::to_string(tensorsConfig.aclens[2]) + "_" +
-                std::to_string(tensorsConfig.aclens[3]) + "_acstrides_" +
-                std::to_string(tensorsConfig.acstrides[0]) + "_" +
-                std::to_string(tensorsConfig.acstrides[1]) + "_" +
-                std::to_string(tensorsConfig.acstrides[2]) + "_" +
-                std::to_string(tensorsConfig.acstrides[3]);
+                 std::to_string(tensorsConfig.aclens[1]) + "_" +
+                 std::to_string(tensorsConfig.aclens[2]) + "_" +
+                 std::to_string(tensorsConfig.aclens[3]) + "_acstrides_" +
+                 std::to_string(tensorsConfig.acstrides[0]) + "_" +
+                 std::to_string(tensorsConfig.acstrides[1]) + "_" +
+                 std::to_string(tensorsConfig.acstrides[2]) + "_" +
+                 std::to_string(tensorsConfig.acstrides[3]);
         stats += "_blens_" + std::to_string(tensorsConfig.blens[0]) + "_" +
-                std::to_string(tensorsConfig.blens[1]) + "_" +
-                std::to_string(tensorsConfig.blens[2]) + "_" +
-                std::to_string(tensorsConfig.blens[3]) + "_bstrides_" +
-                std::to_string(tensorsConfig.bstrides[0]) + "_" +
-                std::to_string(tensorsConfig.bstrides[1]) + "_" +
-                std::to_string(tensorsConfig.bstrides[2]) + "_" +
-                std::to_string(tensorsConfig.bstrides[3]);
+                 std::to_string(tensorsConfig.blens[1]) + "_" +
+                 std::to_string(tensorsConfig.blens[2]) + "_" +
+                 std::to_string(tensorsConfig.blens[3]) + "_bstrides_" +
+                 std::to_string(tensorsConfig.bstrides[0]) + "_" +
+                 std::to_string(tensorsConfig.bstrides[1]) + "_" +
+                 std::to_string(tensorsConfig.bstrides[2]) + "_" +
+                 std::to_string(tensorsConfig.bstrides[3]);
         stats += "_alpha0_" + std::to_string(alpha0) + "_alpha1_" + std::to_string(alpha1) +
                  "_beta_" + std::to_string(beta) + "_" + miopen::GetDataType(data_type);
 
