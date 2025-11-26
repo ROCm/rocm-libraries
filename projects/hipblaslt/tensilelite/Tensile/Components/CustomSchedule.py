@@ -527,7 +527,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                 'LRSA': [[46]],
                 'LWSB': [[78]],
                 'LWSA': [[95]],
-                    }
+                'LCC' : [[95, 95]],}
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     else:
