@@ -90,7 +90,7 @@ INCLUDED_HEADERS = [
     "bias_vector",
     "bias_type",
     "rotating_buffer",
-    "gflops",
+    "rocroller-Gflops",
     "gbs",
     "us",
     "macro_tile",
@@ -153,19 +153,22 @@ def dump_hipblaslt_csv(suite: str, rundir: Path, outdir: Path = None):
     for rec in results:
         rec["batch_count"] = rec.get("batch_count", 1)
         rec["compute_type"] = rec.get("compute_type", "f32")
-        rec["gflops"] = round(compute_gflops(
-            rec.get("M", 0),
-            rec.get("N", 0),
-            rec.get("K", 0),
-            rec.get("us", 0)
-        ), 4)
-        rec["gbs"] = round(compute_gbs(
-            rec.get("M", 0),
-            rec.get("N", 0),
-            rec.get("K", 0),
-            rec.get("us", 0),
-            rec.get("type_A", 4.0)
-        ), 4)
+        rec["rocroller-Gflops"] = round(
+            compute_gflops(
+                rec.get("M", 0), rec.get("N", 0), rec.get("K", 0), rec.get("us", 0)
+            ),
+            4,
+        )
+        rec["gbs"] = round(
+            compute_gbs(
+                rec.get("M", 0),
+                rec.get("N", 0),
+                rec.get("K", 0),
+                rec.get("us", 0),
+                rec.get("type_A", 4.0),
+            ),
+            4,
+        )
 
     df = pd.DataFrame(results)
     df = df.rename(columns=RENAMES)
