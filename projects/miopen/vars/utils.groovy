@@ -321,13 +321,13 @@ def getDockerImage(Map conf=[:])
 
 // New wrapper function to add gitStatusWrapper around getDockerImage
 def getDockerImageWithStatus(Map conf=[:]) {
-    def variant = env.STAGE_NAME ?: "unknown"  // Fallback if STAGE_NAME is not set
+    def stageName = env.STAGE_NAME ?: "Docker Image"  
     def credentialsID = env.monorepo_status_wrapper_creds
     if (env.REPO_NAME == "MIOpen") {
         credentialsID = env.miopen_git_creds
     }
     
-    gitStatusWrapper(credentialsId: "${credentialsID}", gitHubContext: "${variant}", account: 'ROCm', repo: "${env.REPO_NAME}") {
+    gitStatusWrapper(credentialsId: "${credentialsID}", gitHubContext: "${stageName}", account: 'ROCm', repo: "${env.REPO_NAME}") {
         try {
             return getDockerImage(conf) 
         }
@@ -336,7 +336,6 @@ def getDockerImageWithStatus(Map conf=[:]) {
                 throw e
         }
         catch (Exception ex) {
-            // Log the error and re-throw to ensure status is updated to "failure"
             echo "Error in getDockerImageWithStatus: ${ex.message}"
             throw ex
         }
