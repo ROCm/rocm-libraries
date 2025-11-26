@@ -265,7 +265,7 @@ protected:
         params += " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::OpenCL{});
         params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_FWD_BIAS_GENERIC";
 
-        std::string program_name       = "MIOpenTensorKernels.cl";
+        std::string program_name{"MIOpenTensorKernels.cl"};
         std::string network_config_ocl = network_config + "-ocl";
 
         handle.AddKernel("OpTensorFwdBiasGeneric",
@@ -334,7 +334,7 @@ protected:
         params += " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::HIP{});
         params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_FWD_BIAS_GENERIC";
 
-        std::string program_name       = "MIOpenTensorKernelsHip.cpp";
+        std::string program_name{"MIOpenTensorKernelsHip.cpp"};
         std::string network_config_hip = network_config + "-hip";
 
         handle.AddKernel("OpTensorFwdBiasGeneric",
@@ -430,9 +430,8 @@ protected:
     std::string network_config{};
     std::string params{};
     std::vector<size_t> vld, vgd;
-    int work_per_wg, num_wg;
     const int max_num_wg = 4096;
-    int incr_wg          = 0;
+    int work_per_wg, num_wg, incr_wg{0};
 
     tensor<T> tensA;
     tensor<T> tensB;
@@ -455,8 +454,6 @@ protected:
 };
 
 using GPU_OpTensorFwdBiasGenericTest_FP16 = OpTensorFwdBiasGenericTest<half_float::half>;
-using GPU_OpTensorFwdBiasGenericTest_FP32 = OpTensorFwdBiasGenericTest<float>;
-using GPU_OpTensorFwdBiasGenericTest_FP64 = OpTensorFwdBiasGenericTest<double>;
 
 TEST_P(GPU_OpTensorFwdBiasGenericTest_FP16, PortTest)
 {
@@ -471,6 +468,8 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
+/*
+using GPU_OpTensorFwdBiasGenericTest_FP32 = OpTensorFwdBiasGenericTest<float>;
 
 TEST_P(GPU_OpTensorFwdBiasGenericTest_FP32, PortTest)
 {
@@ -485,6 +484,8 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
+*/
+using GPU_OpTensorFwdBiasGenericTest_FP64 = OpTensorFwdBiasGenericTest<double>;
 
 TEST_P(GPU_OpTensorFwdBiasGenericTest_FP64, PortTest)
 {

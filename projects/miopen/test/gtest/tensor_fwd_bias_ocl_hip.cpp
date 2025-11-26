@@ -33,7 +33,6 @@
 #define PERF_ENABLE 0
 #if PERF_ENABLE
 #include "perf_helper.hpp"
-
 #define POW_2 1
 #endif
 
@@ -51,7 +50,7 @@ template <typename T>
 std::vector<TensorsConfig> TensorsConfigs()
 {
     std::vector<TensorsConfig> configs;
-    auto insertTestCase = [&configs](size_t& N, size_t& C, size_t& H, size_t& W) {
+    auto insertTestCase = [&configs](size_t N, size_t C, size_t H, size_t W) {
         configs.push_back(
             {{N, C, H, W}, {C * H * W, H * W, W, 1}, {N, C, H, W}, {C * H * W, H * W, W, 1}});
         configs.push_back(
@@ -87,7 +86,7 @@ std::vector<TensorsConfig> TensorsConfigs()
     };
 
 #if PERF_ENABLE
-    size_t maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
+    size_t maxTotalSize = getCacheSizeLimit(get_handle().GetDeviceName()) / sizeof(T);
 
     // Generate all NCHW tensors that are limited by L3 cache size
     // or 2xL2 cache size when L3 is not available
@@ -141,7 +140,9 @@ std::vector<TensorsConfig> TensorsConfigs()
             }
         }
     }
-#endif // POW_2
+#endif
+
+    return configs;
 #else
     size_t N = 1;
     size_t C = 1;
@@ -156,9 +157,8 @@ std::vector<TensorsConfig> TensorsConfigs()
     H = 20;
     W = 20;
     insertTestCase(N, C, H, W);
-#endif // PERF_ENABLE
-
     return configs;
+#endif
 }
 
 template <typename T>
@@ -239,7 +239,7 @@ protected:
         params += " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::OpenCL{});
         params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_FWD_BIAS";
 
-        std::string program_name       = "MIOpenTensorKernels.cl";
+        std::string program_name{"MIOpenTensorKernels.cl}";
         std::string network_config_ocl = network_config + "-ocl";
 
         handle.AddKernel("OpTensorFwdBias",
@@ -301,7 +301,7 @@ protected:
         params += " " + miopen::GetDataTypeKBP(data_type).GenerateFor(miopen::kbp::HIP{});
         params += " -DMIOPEN_TENSOR_OP=miopenAdd -DUSE_FWD_BIAS";
 
-        std::string program_name       = "MIOpenTensorKernelsHip.cpp";
+        std::string program_name{"MIOpenTensorKernelsHip.cpp"};
         std::string network_config_hip = network_config + "-hip";
 
         handle.AddKernel("OpTensorFwdBias",
@@ -364,21 +364,21 @@ protected:
 #if PERF_ENABLE
         std::string stats{};
         stats += "_aclens_" + std::to_string(tensorsConfig.aclens[0]) + "_" +
-                 std::to_string(tensorsConfig.aclens[1]) + "_" +
-                 std::to_string(tensorsConfig.aclens[2]) + "_" +
-                 std::to_string(tensorsConfig.aclens[3]) + "_acstrides_" +
-                 std::to_string(tensorsConfig.acstrides[0]) + "_" +
-                 std::to_string(tensorsConfig.acstrides[1]) + "_" +
-                 std::to_string(tensorsConfig.acstrides[2]) + "_" +
-                 std::to_string(tensorsConfig.acstrides[3]);
+                std::to_string(tensorsConfig.aclens[1]) + "_" +
+                std::to_string(tensorsConfig.aclens[2]) + "_" +
+                std::to_string(tensorsConfig.aclens[3]) + "_acstrides_" +
+                std::to_string(tensorsConfig.acstrides[0]) + "_" +
+                std::to_string(tensorsConfig.acstrides[1]) + "_" +
+                std::to_string(tensorsConfig.acstrides[2]) + "_" +
+                std::to_string(tensorsConfig.acstrides[3]);
         stats += "_blens_" + std::to_string(tensorsConfig.blens[0]) + "_" +
-                 std::to_string(tensorsConfig.blens[1]) + "_" +
-                 std::to_string(tensorsConfig.blens[2]) + "_" +
-                 std::to_string(tensorsConfig.blens[3]) + "_bstrides_" +
-                 std::to_string(tensorsConfig.bstrides[0]) + "_" +
-                 std::to_string(tensorsConfig.bstrides[1]) + "_" +
-                 std::to_string(tensorsConfig.bstrides[2]) + "_" +
-                 std::to_string(tensorsConfig.bstrides[3]);
+                std::to_string(tensorsConfig.blens[1]) + "_" +
+                std::to_string(tensorsConfig.blens[2]) + "_" +
+                std::to_string(tensorsConfig.blens[3]) + "_bstrides_" +
+                std::to_string(tensorsConfig.bstrides[0]) + "_" +
+                std::to_string(tensorsConfig.bstrides[1]) + "_" +
+                std::to_string(tensorsConfig.bstrides[2]) + "_" +
+                std::to_string(tensorsConfig.bstrides[3]);
         stats += "_alpha0_" + std::to_string(alpha0) + "_alpha1_" + std::to_string(alpha1) +
                  "_beta_" + std::to_string(beta) + "_" + miopen::GetDataType(data_type);
 
@@ -389,10 +389,8 @@ protected:
     std::string network_config{};
     std::string params{};
     std::vector<size_t> vld, vgd;
-    int work_per_wg;
-    int num_wg;
-    int max_num_wg = 4096;
-    int incr_wg    = 0;
+    const int max_num_wg = 4096;
+    int work_per_wg, num_wg, incr_wg{0};
 
     tensor<T> tensA;
     tensor<T> tensB;
