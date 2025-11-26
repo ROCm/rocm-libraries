@@ -204,7 +204,6 @@ build:cmake-minimum-apt:
       - $BUILD_DIR/benchmark/*
       - $BUILD_DIR/CMakeCache.txt
       - $BUILD_DIR/CTestTestfile.cmake
-      - $BUILD_DIR/deps/googlebenchmark/
       - $BUILD_DIR/deps/rocrand/
       - $BUILD_DIR/example/CTestTestfile.cmake
       - $BUILD_DIR/example/example_*
@@ -371,7 +370,6 @@ autotune:build:
     paths:
       - $BUILD_DIR/benchmarks.tar.zstd
       - $BUILD_DIR/.ninja_log
-      - $BUILD_DIR/deps/googlebenchmark/
     expire_in: 1 week
 
 .test:common:

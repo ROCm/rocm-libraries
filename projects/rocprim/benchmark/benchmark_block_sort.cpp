@@ -20,12 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_block_sort.parallel.hpp"
+#include "benchmark_block_sort.hpp"
 
-// HIP API
 #include <hip/hip_runtime.h>
 
-// rocPRIM
 #ifndef BENCHMARK_CONFIG_TUNING
     #include <rocprim/block/block_sort.hpp>
     #include <rocprim/types.hpp>
@@ -38,11 +36,9 @@
     #include <stdint.h>
 #endif
 
-#define CREATE_BENCHMARK_IPT_ALG(K, V, BS, IPT, ALG)       \
-    benchmark_utils::executor::queue_sorted_instance<      \
-        block_sort_benchmark<K, V, BS, IPT, ALG, true>>(); \
-    benchmark_utils::executor::queue_sorted_instance<      \
-        block_sort_benchmark<K, V, BS, IPT, ALG, false>>();
+#define CREATE_BENCHMARK_IPT_ALG(K, V, BS, IPT, ALG)                              \
+    primbench::executor::queue<block_sort_benchmark<K, V, BS, IPT, ALG, true>>(); \
+    primbench::executor::queue<block_sort_benchmark<K, V, BS, IPT, ALG, false>>();
 
 #define CREATE_BENCHMARK_IPT(K, V, BS, IPT)                                                   \
     CREATE_BENCHMARK_IPT_ALG(K, V, BS, IPT, rocprim::block_sort_algorithm::merge_sort)        \
@@ -55,7 +51,7 @@
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 512 * benchmark_utils::MiB, 10, 0);
+    primbench::executor executor(argc, argv, 512 * primbench::MiB);
 
     // Block sizes as large as possible are most relevant
     CREATE_BENCHMARK(float, rocprim::empty_type, 256)

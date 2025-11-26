@@ -20,12 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_reduce_by_key.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include "benchmark_device_reduce_by_key.hpp"
+#include "primbench.hpp"
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 2 * benchmark_utils::GiB, 10, 5);
+    primbench::executor executor(argc, argv, 2 * primbench::GiB);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     add_benchmarks<false>(executor);

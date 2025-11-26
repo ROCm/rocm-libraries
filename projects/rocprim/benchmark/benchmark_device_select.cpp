@@ -20,25 +20,23 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_select.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include "benchmark_device_select.hpp"
+#include "primbench.hpp"
 
 #define CREATE_SELECT_PREDICATED_FLAG_BENCHMARK(T, F, p) \
-    executor.queue_instance(                             \
-        device_select_predicated_flag_benchmark<T, F, rocprim::default_config, p>());
+    executor.queue<device_select_predicated_flag_benchmark<T, F, rocprim::default_config, p>>();
 
 #define CREATE_SELECT_FLAG_BENCHMARK(T, F, p) \
-    executor.queue_instance(device_select_flag_benchmark<T, rocprim::default_config, F, p>());
+    executor.queue<device_select_flag_benchmark<T, rocprim::default_config, F, p>>();
 
 #define CREATE_SELECT_PREDICATE_BENCHMARK(T, p) \
-    executor.queue_instance(device_select_predicate_benchmark<T, rocprim::default_config, p>());
+    executor.queue<device_select_predicate_benchmark<T, rocprim::default_config, p>>();
 
 #define CREATE_UNIQUE_BENCHMARK(T, p) \
-    executor.queue_instance(device_select_unique_benchmark<T, rocprim::default_config, p>());
+    executor.queue<device_select_unique_benchmark<T, rocprim::default_config, p>>();
 
 #define CREATE_UNIQUE_BY_KEY_BENCHMARK(K, V, p) \
-    executor.queue_instance(                    \
-        device_select_unique_by_key_benchmark<K, V, rocprim::default_config, p>());
+    executor.queue<device_select_unique_by_key_benchmark<K, V, rocprim::default_config, p>>();
 
 #define BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(type, value)                         \
     CREATE_SELECT_PREDICATED_FLAG_BENCHMARK(type, value, select_probability::p005) \
@@ -86,7 +84,7 @@
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
+    primbench::executor executor(argc, argv, 128 * primbench::MiB);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types
@@ -120,10 +118,6 @@ int main(int argc, char* argv[])
     BENCHMARK_UNIQUE_BY_KEY_TYPE(rocprim::uint128_t, rocprim::int128_t)
 
     // Not tuned custom types
-    using custom_double2    = common::custom_type<double, double>;
-    using custom_int_double = common::custom_type<int, double>;
-    using huge_float2       = common::custom_huge_type<1024, float, float>;
-
     BENCHMARK_SELECT_FLAG_TYPE(custom_double2, unsigned char)
     BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(custom_double2, unsigned char)
     BENCHMARK_UNIQUE_BY_KEY_TYPE(double, custom_double2)
@@ -132,11 +126,11 @@ int main(int argc, char* argv[])
     BENCHMARK_UNIQUE_TYPE(custom_int_double)
     BENCHMARK_UNIQUE_BY_KEY_TYPE(custom_int_double, custom_int_double)
 
-    BENCHMARK_SELECT_FLAG_TYPE(huge_float2, unsigned char)
-    BENCHMARK_SELECT_PREDICATE_TYPE(huge_float2)
-    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(huge_float2, unsigned char)
-    BENCHMARK_UNIQUE_TYPE(huge_float2)
-    BENCHMARK_UNIQUE_BY_KEY_TYPE(huge_float2, huge_float2)
+    BENCHMARK_SELECT_FLAG_TYPE(custom_huge_float2_1024, unsigned char)
+    BENCHMARK_SELECT_PREDICATE_TYPE(custom_huge_float2_1024)
+    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(custom_huge_float2_1024, unsigned char)
+    BENCHMARK_UNIQUE_TYPE(custom_huge_float2_1024)
+    BENCHMARK_UNIQUE_BY_KEY_TYPE(custom_huge_float2_1024, custom_huge_float2_1024)
     #endif
 #endif
 

@@ -20,17 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_adjacent_difference.parallel.hpp"
+#include "benchmark_device_adjacent_difference.hpp"
 
 #ifndef BENCHMARK_CONFIG_TUNING
     #include "../common/device_adjacent_difference.hpp"
     #include "../common/utils_custom_type.hpp"
 #endif
 
-// HIP API
 #include <hip/hip_runtime_api.h>
 
-// rocPRIM
 #ifndef BENCHMARK_CONFIG_TUNING
     #include <rocprim/types.hpp>
 #endif
@@ -43,7 +41,7 @@
 #endif
 
 #define CREATE_BENCHMARK(T, Left, Aliasing) \
-    executor.queue_instance(device_adjacent_difference_benchmark<T, Left, Aliasing>());
+    executor.queue<device_adjacent_difference_benchmark<T, Left, Aliasing>>();
 
 // clang-format off
 #define CREATE_BENCHMARKS(T) \
@@ -55,7 +53,7 @@
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 2 * benchmark_utils::GiB, 10, 5);
+    primbench::executor executor(argc, argv, 2 * primbench::GiB);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types
@@ -74,9 +72,6 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARKS(rocprim::uint128_t);
 
     // Not tuned custom types
-    using custom_float2  = common::custom_type<float, float>;
-    using custom_double2 = common::custom_type<double, double>;
-
     CREATE_BENCHMARKS(custom_float2);
     CREATE_BENCHMARKS(custom_double2);
     #endif

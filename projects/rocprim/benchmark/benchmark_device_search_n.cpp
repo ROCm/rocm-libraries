@@ -20,17 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_search_n.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include "benchmark_device_search_n.hpp"
+#include "primbench.hpp"
 
-// HIP API
 #include <hip/hip_runtime.h>
 
 #include <cstddef>
 #include <string>
 #include <vector>
 
-#define CREATE_BENCHMARK(T, S, C) executor.queue_instance(benchmark_search_n<T, S, C>());
+#define CREATE_BENCHMARK(T, S, C) executor.queue<device_search_n_benchmark<T, S, C>>();
 
 #define CREATE_BENCHMARKS(T)                                  \
     CREATE_BENCHMARK(T, size_t, count_equal_to<1>)            \
@@ -43,7 +42,7 @@
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 2 * benchmark_utils::GiB, 10, 10);
+    primbench::executor executor(argc, argv, 2 * primbench::GiB, primbench::flags::sync);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types
@@ -61,9 +60,6 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARKS(rocprim::uint128_t)
 
     // Not tuned custom types
-    using custom_int2            = common::custom_type<int>;
-    using custom_longlong_double = common::custom_type<long long, double>;
-
     CREATE_BENCHMARKS(custom_int2)
     CREATE_BENCHMARKS(custom_longlong_double)
     #endif

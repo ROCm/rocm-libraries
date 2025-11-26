@@ -20,29 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_find_first_of.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include "benchmark_device_find_first_of.hpp"
 
-#ifndef BENCHMARK_CONFIG_TUNING
-    #include "../common/utils_custom_type.hpp"
-#endif
-
-// HIP API
-#include <hip/hip_runtime.h>
-
-#ifndef BENCHMARK_CONFIG_TUNING
-    #include <rocprim/types.hpp>
-#endif
-
-#include <cstddef>
-#include <string>
-#include <vector>
-#ifndef BENCHMARK_CONFIG_TUNING
-    #include <stdint.h>
-#endif
+#include "primbench.hpp"
 
 #define CREATE_BENCHMARK_FIND_FIRST_OF(TYPE, KEYS_SIZE, FIRST_OCCURENCE) \
-    executor.queue_instance(device_find_first_of_benchmark<TYPE>(KEYS_SIZE, FIRST_OCCURENCE));
+    executor.queue<device_find_first_of_benchmark<TYPE>>(KEYS_SIZE, FIRST_OCCURENCE);
 
 // clang-format off
 #define CREATE_BENCHMARK0(TYPE, KEYS_SIZE) \
@@ -60,7 +43,7 @@
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 2);
+    primbench::executor executor(argc, argv, 128 * primbench::MiB);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types
@@ -72,16 +55,11 @@ int main(int argc, char* argv[])
 
     #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
     // Not tuned types
-    CREATE_BENCHMARK(int16_t)
-    CREATE_BENCHMARK(int32_t)
     CREATE_BENCHMARK(float)
     CREATE_BENCHMARK(double)
     CREATE_BENCHMARK(rocprim::uint128_t)
 
     // Not tuned custom types
-    using custom_int2            = common::custom_type<int, int>;
-    using custom_longlong_double = common::custom_type<long long, double>;
-
     CREATE_BENCHMARK(custom_int2)
     CREATE_BENCHMARK(custom_longlong_double)
     #endif

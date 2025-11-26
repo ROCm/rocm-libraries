@@ -20,17 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_binary_search.parallel.hpp"
+#include "benchmark_device_binary_search.hpp"
 
-#include "benchmark_utils.hpp"
+#include "primbench.hpp"
 
 #include "../common/utils_custom_type.hpp"
 #include "../common/utils_device_ptr.hpp"
 
-// HIP API
 #include <hip/hip_runtime.h>
 
-// rocPRIM
 #include <rocprim/device/config_types.hpp>
 #include <rocprim/functional.hpp>
 #include <rocprim/types.hpp>
@@ -46,8 +44,8 @@
 #endif
 
 #define CREATE_BENCHMARK(VALUE_TYPE, OUTPUT_TYPE, K, SORTED, SUBALGORITHM) \
-    executor.queue_instance(                                               \
-        device_binary_search_benchmark<SUBALGORITHM, VALUE_TYPE, OUTPUT_TYPE, K, SORTED>());
+    executor.queue<                                                        \
+        device_binary_search_benchmark<SUBALGORITHM, VALUE_TYPE, OUTPUT_TYPE, K, SORTED>>();
 
 #define BENCHMARK_ALGORITHMS(VALUE_TYPE, OUTPUT_TYPE, K, SORTED)                     \
     CREATE_BENCHMARK(VALUE_TYPE, OUTPUT_TYPE, K, SORTED, binary_search_subalgorithm) \
@@ -72,7 +70,7 @@
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
+    primbench::executor executor(argc, argv, 128 * primbench::MiB);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types
@@ -94,9 +92,6 @@ int main(int argc, char* argv[])
     BENCHMARK_TYPE(rocprim::uint128_t)
 
     // Not tuned custom types
-    using custom_float2  = common::custom_type<float, float>;
-    using custom_double2 = common::custom_type<double, double>;
-
     BENCHMARK_TYPE(custom_float2)
     BENCHMARK_TYPE(custom_double2)
     #endif

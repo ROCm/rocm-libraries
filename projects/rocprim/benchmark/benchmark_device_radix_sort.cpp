@@ -21,23 +21,20 @@
 // SOFTWARE.
 
 #include "benchmark_device_radix_sort.hpp"
-#include "benchmark_utils.hpp"
+#include "primbench.hpp"
 
-// HIP API
 #include <hip/hip_runtime.h>
 
 #include <cstddef>
 #include <string>
 #include <vector>
 
-#define CREATE_RADIX_SORT_BENCHMARK(...) \
-    executor.queue_instance(device_radix_sort_benchmark<__VA_ARGS__>());
+#define CREATE_RADIX_SORT_BENCHMARK(...) executor.queue<device_radix_sort_benchmark<__VA_ARGS__>>();
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
+    primbench::executor executor(argc, argv, 128 * primbench::MiB);
 
-    using custom_key = common::custom_type<float, int16_t>;
     CREATE_RADIX_SORT_BENCHMARK(int)
     CREATE_RADIX_SORT_BENCHMARK(float)
     CREATE_RADIX_SORT_BENCHMARK(long long)
@@ -45,13 +42,9 @@ int main(int argc, char* argv[])
     CREATE_RADIX_SORT_BENCHMARK(uint8_t)
     CREATE_RADIX_SORT_BENCHMARK(rocprim::half)
     CREATE_RADIX_SORT_BENCHMARK(short)
-    CREATE_RADIX_SORT_BENCHMARK(custom_key)
+    CREATE_RADIX_SORT_BENCHMARK(custom_float_int16)
     CREATE_RADIX_SORT_BENCHMARK(rocprim::int128_t)
     CREATE_RADIX_SORT_BENCHMARK(rocprim::uint128_t)
-
-    using custom_float2  = common::custom_type<float, float>;
-    using custom_double2 = common::custom_type<double, double>;
-    using custom_key     = common::custom_type<float, int16_t>;
 
     CREATE_RADIX_SORT_BENCHMARK(int, float)
     CREATE_RADIX_SORT_BENCHMARK(int, double)
@@ -69,7 +62,7 @@ int main(int argc, char* argv[])
     CREATE_RADIX_SORT_BENCHMARK(int8_t, int8_t)
     CREATE_RADIX_SORT_BENCHMARK(uint8_t, uint8_t)
     CREATE_RADIX_SORT_BENCHMARK(rocprim::half, rocprim::half)
-    CREATE_RADIX_SORT_BENCHMARK(custom_key, double)
+    CREATE_RADIX_SORT_BENCHMARK(custom_float_int16, double)
     CREATE_RADIX_SORT_BENCHMARK(rocprim::int128_t, rocprim::int128_t)
     CREATE_RADIX_SORT_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t)
 

@@ -20,17 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_partition.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include "benchmark_device_partition.hpp"
+#include "primbench.hpp"
 
 #ifndef BENCHMARK_CONFIG_TUNING
     #include "../common/utils_custom_type.hpp"
 #endif
 
-// HIP API
 #include <hip/hip_runtime.h>
 
-// rocPRIM
 #ifndef BENCHMARK_CONFIG_TUNING
     #include <rocprim/device/config_types.hpp>
     #include <rocprim/types.hpp>
@@ -44,21 +42,19 @@
 #endif
 
 #define CREATE_PARTITION_FLAG_BENCHMARK(T, F, p) \
-    executor.queue_instance(device_partition_flag_benchmark<T, rocprim::default_config, F, p>());
+    executor.queue<device_partition_flag_benchmark<T, rocprim::default_config, F, p>>();
 
 #define CREATE_PARTITION_PREDICATE_BENCHMARK(T, p) \
-    executor.queue_instance(device_partition_predicate_benchmark<T, rocprim::default_config, p>());
+    executor.queue<device_partition_predicate_benchmark<T, rocprim::default_config, p>>();
 
 #define CREATE_PARTITION_TWO_WAY_FLAG_BENCHMARK(T, F, p) \
-    executor.queue_instance(                             \
-        device_partition_two_way_flag_benchmark<T, rocprim::default_config, F, p>());
+    executor.queue<device_partition_two_way_flag_benchmark<T, rocprim::default_config, F, p>>();
 
 #define CREATE_PARTITION_TWO_WAY_PREDICATE_BENCHMARK(T, p) \
-    executor.queue_instance(                               \
-        device_partition_two_way_predicate_benchmark<T, rocprim::default_config, p>());
+    executor.queue<device_partition_two_way_predicate_benchmark<T, rocprim::default_config, p>>();
 
 #define CREATE_PARTITION_THREE_WAY_BENCHMARK(T, p) \
-    executor.queue_instance(device_partition_three_way_benchmark<T, rocprim::default_config, p>());
+    executor.queue<device_partition_three_way_benchmark<T, rocprim::default_config, p>>();
 
 #define BENCHMARK_FLAG_TYPE(type, flag_type)                                      \
     CREATE_PARTITION_FLAG_BENCHMARK(type, flag_type, partition_probability::p005) \
@@ -99,7 +95,7 @@
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
+    primbench::executor executor(argc, argv, 128 * primbench::MiB);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types
@@ -130,24 +126,20 @@ int main(int argc, char* argv[])
     BENCHMARK_THREE_WAY_TYPE(rocprim::uint128_t)
 
     // Not tuned custom types
-    using custom_double2    = common::custom_type<double, double>;
-    using custom_int_double = common::custom_type<int, double>;
-    using huge_float2       = common::custom_huge_type<1024, float, float>;
-
     BENCHMARK_FLAG_TYPE(custom_double2, unsigned char)
-    BENCHMARK_FLAG_TYPE(huge_float2, uint8_t)
+    BENCHMARK_FLAG_TYPE(custom_huge_float2_1024, uint8_t)
 
     BENCHMARK_PREDICATE_TYPE(custom_int_double)
-    BENCHMARK_PREDICATE_TYPE(huge_float2)
+    BENCHMARK_PREDICATE_TYPE(custom_huge_float2_1024)
 
     BENCHMARK_TWO_WAY_FLAG_TYPE(custom_double2, unsigned char)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(huge_float2, uint8_t)
+    BENCHMARK_TWO_WAY_FLAG_TYPE(custom_huge_float2_1024, uint8_t)
 
     BENCHMARK_TWO_WAY_PREDICATE_TYPE(custom_int_double)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(huge_float2)
+    BENCHMARK_TWO_WAY_PREDICATE_TYPE(custom_huge_float2_1024)
 
     BENCHMARK_THREE_WAY_TYPE(custom_int_double)
-    BENCHMARK_THREE_WAY_TYPE(huge_float2)
+    BENCHMARK_THREE_WAY_TYPE(custom_huge_float2_1024)
     #endif
 #endif
 

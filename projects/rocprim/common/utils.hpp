@@ -30,6 +30,7 @@
     // The lambda is invoked immediately as assertions that generate a fatal failure can
     // only be used in void-returning functions.
     #define HIP_CHECK(condition)                                                            \
+        do                                                                                  \
         {                                                                                   \
             hipError_t error = condition;                                                   \
             if(error != hipSuccess)                                                         \
@@ -38,9 +39,11 @@
                 { FAIL() << "HIP error " << error << ": " << hipGetErrorString(error); }(); \
                 exit(error);                                                                \
             }                                                                               \
-        }
+        }                                                                                   \
+        while(0)
 #else
     #define HIP_CHECK(condition)                                                                \
+        do                                                                                      \
         {                                                                                       \
             hipError_t error = condition;                                                       \
             if(error != hipSuccess)                                                             \
@@ -49,7 +52,8 @@
                           << " line: " << __LINE__ << std::endl;                                \
                 exit(error);                                                                    \
             }                                                                                   \
-        }
+        }                                                                                       \
+        while(0)
 #endif
 
 namespace common

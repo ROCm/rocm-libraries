@@ -20,21 +20,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_adjacent_find.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include "benchmark_device_adjacent_find.hpp"
+#include "primbench.hpp"
 
 #ifndef BENCHMARK_CONFIG_TUNING
     #include "../common/utils_custom_type.hpp"
 #endif
 
-// HIP
 #include <hip/hip_runtime.h>
 
 #ifndef BENCHMARK_CONFIG_TUNING
     #include <rocprim/types.hpp>
 #endif
 
-// C++ Standard Library
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -42,7 +40,7 @@
     #include <stdint.h>
 #endif
 
-#define CREATE_BENCHMARK(T, P) executor.queue_instance(device_adjacent_find_benchmark<T, P>());
+#define CREATE_BENCHMARK(T, P) executor.queue<device_adjacent_find_benchmark<T, P>>();
 
 #define CREATE_ADJACENT_FIND_BENCHMARKS(T) \
     CREATE_BENCHMARK(T, 1)                 \
@@ -51,7 +49,7 @@
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 2 * benchmark_utils::GiB, 10, 5);
+    primbench::executor executor(argc, argv, 2 * primbench::GiB);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types
@@ -66,17 +64,9 @@ int main(int argc, char* argv[])
 
     #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
     // Not tuned types
-    CREATE_ADJACENT_FIND_BENCHMARKS(int16_t)
-    CREATE_ADJACENT_FIND_BENCHMARKS(int32_t)
     CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::uint128_t)
 
     // Not tuned custom types
-    using custom_float2          = common::custom_type<float, float>;
-    using custom_double2         = common::custom_type<double, double>;
-    using custom_int2            = common::custom_type<int, int>;
-    using custom_char_double     = common::custom_type<char, double>;
-    using custom_longlong_double = common::custom_type<long long, double>;
-
     CREATE_ADJACENT_FIND_BENCHMARKS(custom_float2)
     CREATE_ADJACENT_FIND_BENCHMARKS(custom_double2)
     CREATE_ADJACENT_FIND_BENCHMARKS(custom_int2)

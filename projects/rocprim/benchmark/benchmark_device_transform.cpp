@@ -20,17 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_transform.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include "benchmark_device_transform.hpp"
+#include "primbench.hpp"
 
 #ifndef BENCHMARK_CONFIG_TUNING
     #include "../common/utils_custom_type.hpp"
 #endif
 
-// HIP API
 #include <hip/hip_runtime.h>
 
-// rocPRIM
 #ifndef BENCHMARK_CONFIG_TUNING
     #include <rocprim/types.hpp>
 #endif
@@ -42,14 +40,13 @@
     #include <stdint.h>
 #endif
 
-#define CREATE_BENCHMARK(T) executor.queue_instance(device_transform_benchmark<T, false>());
+#define CREATE_BENCHMARK(T) executor.queue<device_transform_benchmark<T, false>>();
 
-#define CREATE_BENCHMARK_BINARY(T) \
-    executor.queue_instance(device_transform_benchmark<T, false, true>());
+#define CREATE_BENCHMARK_BINARY(T) executor.queue<device_transform_benchmark<T, false, true>>();
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 512 * benchmark_utils::MiB, 10, 5);
+    primbench::executor executor(argc, argv, 512 * primbench::MiB);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types
@@ -73,9 +70,6 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK_BINARY(rocprim::int128_t)
 
     // Not tuned custom types
-    using custom_float2  = common::custom_type<float, float>;
-    using custom_double2 = common::custom_type<double, double>;
-
     CREATE_BENCHMARK(custom_float2)
     CREATE_BENCHMARK(custom_double2)
     CREATE_BENCHMARK_BINARY(custom_double2)

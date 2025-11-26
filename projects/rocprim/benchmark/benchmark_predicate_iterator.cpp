@@ -20,116 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_utils.hpp"
+#include "benchmark_predicate_iterator.hpp"
 
-#include "../common/predicate_iterator.hpp"
-#include "../common/utils_custom_type.hpp"
-#include "../common/utils_device_ptr.hpp"
+#include "primbench.hpp"
 
-#include <benchmark/benchmark.h>
-
-#include <hip/hip_runtime.h>
-
-// rocPRIM
-#include <rocprim/device/device_transform.hpp>
-#include <rocprim/functional.hpp>
-#include <rocprim/iterator/predicate_iterator.hpp>
-#include <rocprim/iterator/transform_iterator.hpp>
-#include <rocprim/types.hpp>
-
-#include <cstddef>
-#include <stdint.h>
-#include <string>
-#include <vector>
-
-template<typename T, int C>
-struct less_than
-{
-    __device__
-    bool operator()(T value) const
-    {
-        return value < T{C};
-    }
-};
-
-template<typename T, typename Predicate, typename Transform>
-struct transform_op
-{
-    __device__
-    auto operator()(T v) const
-    {
-        return Predicate{}(v) ? Transform{}(v) : v;
-    }
-};
-
-template<typename T, typename Predicate, typename Transform>
-struct transform_it
-{
-    using value_type = T;
-
-    void operator()(T* d_input, T* d_output, const size_t size, const hipStream_t stream)
-    {
-        auto t_it
-            = rocprim::make_transform_iterator(d_input, transform_op<T, Predicate, Transform>{});
-        HIP_CHECK(rocprim::transform(t_it, d_output, size, rocprim::identity<T>{}, stream));
-    }
-};
-
-template<typename T, typename Predicate, typename Transform>
-struct read_predicate_it
-{
-    using value_type = T;
-
-    void operator()(T* d_input, T* d_output, const size_t size, const hipStream_t stream)
-    {
-        auto t_it = rocprim::make_transform_iterator(d_input, Transform{});
-        auto r_it = rocprim::make_predicate_iterator(t_it, d_input, Predicate{});
-        HIP_CHECK(rocprim::transform(r_it, d_output, size, rocprim::identity<T>{}, stream));
-    }
-};
-
-template<typename T, typename Predicate, typename Transform>
-struct write_predicate_it
-{
-    using value_type = T;
-
-    void operator()(T* d_input, T* d_output, const size_t size, const hipStream_t stream)
-    {
-        auto t_it = rocprim::make_transform_iterator(d_input, Transform{});
-        auto w_it = rocprim::make_predicate_iterator(d_output, d_input, Predicate{});
-        HIP_CHECK(rocprim::transform(t_it, w_it, size, rocprim::identity<T>{}, stream));
-    }
-};
-
-template<typename IteratorBenchmark>
-void run_benchmark(benchmark_utils::state&& state)
-{
-    const auto& stream = state.stream;
-    const auto& bytes  = state.bytes;
-    const auto& seed   = state.seed;
-
-    using T = typename IteratorBenchmark::value_type;
-
-    // Calculate the number of elements
-    size_t size = bytes / sizeof(T);
-
-    const auto     random_range = limit_random_range<T>(0, 99);
-    std::vector<T> input
-        = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
-    common::device_ptr<T> d_input(input);
-    common::device_ptr<T> d_output(size);
-    HIP_CHECK(hipDeviceSynchronize());
-
-    state.run([&] { IteratorBenchmark{}(d_input.get(), d_output.get(), size, stream); });
-
-    state.set_throughput(size, sizeof(T));
-}
-
-#define CREATE_BENCHMARK(B, T, C)                                                                \
-    executor.queue_fn(bench_naming::format_name("{lvl:device,algo:" #B ",p:p" #C ",key_type:" #T \
-                                                ",cfg:default_config}")                          \
-                          .c_str(),                                                              \
-                      run_benchmark<B<T, less_than<T, C>, common::increment_by<5>>>);
+#define CREATE_BENCHMARK(B, T, C) \
+    executor                      \
+        .queue<predicate_iterator_benchmark<B<T, less_than<T, C>, common::increment_by<5>>, C>>();
 
 // clang-format off
 #define CREATE_TYPED_BENCHMARK(T)                \
@@ -152,9 +49,7 @@ void run_benchmark(benchmark_utils::state&& state)
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 512 * benchmark_utils::MiB, 10, 5);
-
-    using custom_128 = common::custom_type<int64_t, int64_t>;
+    primbench::executor executor(argc, argv, 512 * primbench::MiB);
 
     CREATE_TYPED_BENCHMARK(int8_t)
     CREATE_TYPED_BENCHMARK(int16_t)

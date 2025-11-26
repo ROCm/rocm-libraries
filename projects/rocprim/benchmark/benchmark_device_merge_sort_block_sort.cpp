@@ -20,14 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_merge_sort_block_sort.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include "benchmark_device_merge_sort_block_sort.hpp"
+#include "primbench.hpp"
 
 #ifndef BENCHMARK_CONFIG_TUNING
     #include "../common/utils_custom_type.hpp"
 #endif
 
-// HIP API
 #include <hip/hip_runtime.h>
 
 #ifndef BENCHMARK_CONFIG_TUNING
@@ -41,8 +40,7 @@
     #include <stdint.h>
 #endif
 
-#define CREATE_BENCHMARK(...) \
-    executor.queue_instance(device_merge_sort_block_sort_benchmark<__VA_ARGS__>());
+#define CREATE_BENCHMARK(...) executor.queue<device_merge_sort_block_sort_benchmark<__VA_ARGS__>>();
 
 #define CREATE_BENCHMARK_TYPE_TUNING(KeyType)      \
     CREATE_BENCHMARK(KeyType, rocprim::empty_type) \
@@ -54,7 +52,7 @@
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
+    primbench::executor executor(argc, argv, 128 * primbench::MiB);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types
@@ -79,13 +77,6 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t)
 
     // Not tuned custom types
-    using custom_float2          = common::custom_type<float, float>;
-    using custom_double2         = common::custom_type<double, double>;
-    using custom_int2            = common::custom_type<int, int>;
-    using custom_char_double     = common::custom_type<char, double>;
-    using custom_longlong_double = common::custom_type<long long, double>;
-    using custom_char_short      = common::custom_type<char, short>;
-
     CREATE_BENCHMARK(int, custom_float2)
     CREATE_BENCHMARK(long long, custom_double2)
     CREATE_BENCHMARK(custom_double2, custom_double2)

@@ -20,18 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// HIP API
 #include <hip/hip_runtime.h>
 
-#include "benchmark_device_radix_sort_onesweep.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include "benchmark_device_radix_sort_onesweep.hpp"
+#include "primbench.hpp"
 
 #include <cstddef>
 #include <string>
 #include <vector>
 
-#define CREATE_BENCHMARK(...) \
-    executor.queue_instance(device_radix_sort_onesweep_benchmark<__VA_ARGS__>());
+#define CREATE_BENCHMARK(...) executor.queue<device_radix_sort_onesweep_benchmark<__VA_ARGS__>>();
 
 #define CREATE_BENCHMARK_TYPE_TUNING(KeyType)      \
     CREATE_BENCHMARK(KeyType, rocprim::empty_type) \
@@ -43,7 +41,7 @@
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
+    primbench::executor executor(argc, argv, 128 * primbench::MiB);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     // Tuned types
@@ -76,9 +74,6 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t)
 
     // Not tuned custom types
-    using custom_float2  = common::custom_type<float, float>;
-    using custom_double2 = common::custom_type<double, double>;
-
     CREATE_BENCHMARK(int, custom_float2)
     CREATE_BENCHMARK(int, custom_double2)
     CREATE_BENCHMARK(long long, custom_float2)
