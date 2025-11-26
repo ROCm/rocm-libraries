@@ -777,7 +777,7 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
         return HIPSPARSE_STATUS_INTERNAL_ERROR;
     }
 
-    std::cout << "M: " << M << " N: " << N << " nnz_A: " << nnz_A << " idx_base_A: " << idx_base_A << " idx_base_B: " << idx_base_B << std::endl;
+    std::cout << "M: " << M << " N: " << N << " nnz_A: " << nnz_A << std::endl;
 
     std::cout << "hcsr_row_ptr_A" << std::endl;
     for(int i = 0; i < M + 1; i++)
