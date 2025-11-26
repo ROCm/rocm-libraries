@@ -212,3 +212,15 @@ Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the
 - Use integration tests to verify operation behavior
 - Check plugin loading with `HIPDNN_LOG_LEVEL=info`
 - For plugin issues, check the default plugin path or use custom paths with `hipdnnSetEnginePluginPaths_ext`
+
+## ⚠️ Troubleshooting
+
+### Segmentation Faults during Graph Execution Plan Build
+
+If you are seeing segfaults when building execution plans for graphs, this might be caused by Thread Local Storage (TLS) allocation issues (such as static TLS exhaustion) between the executable and dynamically loaded backend plugins.
+
+To resolve this, enable PIC/PIE to ensure compatibility with the plugin loader system (dlopen). This setting instructs CMake to emit position-independent code (e.g., via `-fPIC`  or `-fPIE`), which is necessary for creating shared libraries or executables that load plugins dynamically.
+
+```cmake
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+```
