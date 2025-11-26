@@ -372,6 +372,7 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
     }
 
     const auto workSpaceSize = GetWorkspaceSize(ctx, problem);
+    const unsigned int halfw = static_cast<unsigned int>(workSpaceSize / (sizeof(float) * 2 * 2));
 
     parms += " -DCFF_IMG_H=";
     parms += std::to_string(in_h);
@@ -384,7 +385,7 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
     parms += " -DCFF_CHANNELS=";
     parms += std::to_string(in_c);
     parms += " -DCFF_HALFW=";
-    parms += std::to_string(workSpaceSize / (sizeof(float) * 2 * 2));
+    parms += std::to_string(halfw);
 
     if(!problem.IsDirectionForward())
     {
@@ -440,7 +441,6 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
     }
 
     sol.invoker_factory = [=](const std::vector<Kernel>& kernels) {
-        int halfw = static_cast<int>(workSpaceSize) / (2 * 2 * static_cast<int>(sizeof(float)));
         const int padding = FFTConvParams::TransposePadding;
 
         return [=](const Handle& handle, const AnyInvokeParams& primitive_params) {
