@@ -1141,6 +1141,47 @@ def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
+def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
+    kernel["MfmaInitCVgprs"] = True
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    if isNN(kernel) and useLDSTr and TLDS==1:
+        numMfma = 120
+        kernel["SwapGlobalReadOrder"] = False
+        optSchedule = {
+            'SYNC': [[-1, 5, 26, 26, 44, 44, 71, 71]],
+            'LRA0': [[0, 1, 2, 3, 4, 6, 8, 10, 12, 14, 16, 18]],
+            'GRIncA': [[7, 7, 7, 9, 9, 9, 11, 11, 11]],
+            'LRB0': [[20, 22, 24, 25, 27, 29, 31, 33, 35, 37]],
+            'GRIncB': [[13, 13, 13, 15, 15, 15, 17, 17, 17]],
+            'GRA': [[28, 28, 30, 30, 32, 32, 36, 36, 39, 39, 42, 42]],
+            'GRB': [[53, 53, 58, 58, 63, 63, 67, 67, 72, 72, 77, 77, 82, 82, 86, 86, 91, 91, 96, 96]],
+            'LRSA': [[58]],
+            'LRSB': [[58]],
+            'LWSA': [[95]],
+            'LWSB': [[95]],
+            'LRA1': [[72, 74, 76, 78, 80, 82, 84, 87, 90, 92, 98, 100]],
+            'LRB1': [[99, 106, 107, 108, 109, 110, 111, 112, 113, 114]],
+            'LCC': [[118, 119]],
+        }
+        syncCode = [
+            SWaitCnt(dscnt=9, vlcnt=-1, vscnt=-1, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration"),
+            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for the rest of LRB1 to complete"),
+
+            SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for all LRA0 to complete before GRA start"),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRB0 to complete before GRB start"),
+            SBarrier(comment=""),
+
+            SWaitCnt(dscnt=-1, vlcnt=16, vscnt=-1, comment="wait for previous set of global reads"),
+            SBarrier(comment="")
+        ]
+        nglshift = nllshift = 16
+    else:
+        return False, None
+
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
 def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
@@ -1321,6 +1362,7 @@ def hasCustomSchedule(kernel):
     is256x96x64DTL = [MT0, MT1, DU, PGR, PLR, DTL] == [256, 96, 64, 2, 1, True]
     is240x256x64DTL = [MT0, MT1, DU, PGR, PLR, DTL] == [240, 256, 64, 2, 1, True]
     is208x256x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL] == [208, 256, 64, 2, 1, True]
+    is192x320x64DTL = [MT0, MT1, DU, PGR, PLR, DTL] == [192, 320, 64, 2, 1, True]
 
     if is256x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
         return _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS)
@@ -1348,5 +1390,6 @@ def hasCustomSchedule(kernel):
         return _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS)
     elif is208x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [2, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [1, 4]:
         return _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS)
-
+    elif is192x320x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
+        return _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS)
     return False, None
