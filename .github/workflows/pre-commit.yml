@@ -24,7 +24,7 @@ jobs:
           # Filter changed files to opted-in projects
           FILTERED_FILES=""
           for project in "${OPTED_IN_PROJECTS[@]}"; do
-            PROJECT_FILES=$(echo "$CHANGED_FILES" | grep "^projects/$project/" || true)
+            PROJECT_FILES=$(echo "$CHANGED_FILES" | grep -e "^projects/$project/" -e "^shared/$project/" || true)
             if [ -n "$PROJECT_FILES" ]; then
               FILTERED_FILES="$FILTERED_FILES $PROJECT_FILES"
 
@@ -33,8 +33,8 @@ jobs:
             fi
           done
 
-          # Add any files outside the projects folder
-          NON_PROJECT_FILES=$(echo "$CHANGED_FILES" | grep -v "^projects/" || true)
+          # Add any files outside the projects and shared folders
+          NON_PROJECT_FILES=$(echo "$CHANGED_FILES" | grep -v -e "^projects/" -e "^shared/" || true)
           if [ -n "$NON_PROJECT_FILES" ]; then
             FILTERED_FILES="$FILTERED_FILES $NON_PROJECT_FILES"
           fi

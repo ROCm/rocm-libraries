@@ -11,6 +11,7 @@
   - [Implementation Details & Best Practices](#implementation-details)
   - [Key Files Reference](#key-files-reference)
 - [Plugin Architecture](#plugin-architecture)
+- [Plugin Loading](#plugin-loading)
 - [Example: MIOpen Legacy Plugin](#example-miopen-legacy-plugin)
 
 ---
@@ -248,6 +249,10 @@ hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
     hipdnnPluginLoadingMode_ext_t loading_mode
 );
 ```
+
+### Plugin Symbol Resolution
+All plugins are loaded with `RTLD_NOW` to ensure that all symbols are resolved at load time. This means
+that all dependencies must be satisfied when the plugin is loaded. To avoid symbol conflicts, all plugins must be built with with `-fvisibility=hidden` to limit symbol exposure.
 
 #### Path Resolution
 
