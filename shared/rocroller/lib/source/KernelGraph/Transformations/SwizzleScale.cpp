@@ -124,6 +124,8 @@ namespace rocRoller
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
             AssertFatal(macTile.memoryType == MemoryType::WAVE_SWIZZLE,
                         "Exchange: MacroTile memory type not supported yet.");
+            AssertFatal(macTile.subTileSizes.at(0) == 64 || macTile.subTileSizes.at(0) == 32,
+                        ShowValue(macTile.subTileSizes.at(0)));
 
             std::vector<DeferredConnection> connections;
 
@@ -131,51 +133,105 @@ namespace rocRoller
             auto iWaveX   = graph.coordinates.addElement(waveTile.tileIndex(0));
             auto iWaveY   = graph.coordinates.addElement(waveTile.tileIndex(1));
 
-            uint const nSIMDBlock   = macTile.miTileSizes[2];
-            uint const nSIMDIndex   = 4 / nSIMDBlock;
-            uint const lanesPerSIMD = 16;
-
-            auto SIMDBlock
+            auto       wavefrontSize = context->kernel()->wavefront_size();
+            uint const lanesPerSIMD  = 16;
+            uint const nSIMDsPerWave = wavefrontSize / lanesPerSIMD;
+            uint const nSIMDIndex    = macTile.subTileSizes.at(0) / lanesPerSIMD;
+            uint const nSIMDBlock    = nSIMDsPerWave / nSIMDIndex;
+            auto       SIMDBlock
                 = graph.coordinates.addElement(Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
             auto SIMDIndex
                 = graph.coordinates.addElement(Adhoc("SIMDIndex", literal(nSIMDIndex), nullptr));
             auto laneInSIMD = graph.coordinates.addElement(Lane(literal(lanesPerSIMD), nullptr));
 
-            uint const numElements   = waveTile.elements();
-            auto       wavefrontSize = context->kernel()->wavefront_size();
-            uint const wfs           = static_cast<uint>(wavefrontSize);
-            uint const numVgpr       = numElements / wfs;
-            uint const nVgprIndex    = macTile.miTileSizes[2];
-            uint const nVgprBlock    = 4 / nVgprIndex;
-            uint const nBlocks       = numVgpr / nVgprBlock / nVgprIndex;
-
-            auto vgprBlock
+            uint const numElements       = waveTile.elements();
+            uint const activeLanesInWave = static_cast<uint>(wavefrontSize);
+            uint const numVgpr           = numElements / activeLanesInWave;
+            uint const nVgprIndex
+                = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
+            // Minimal swizzle tile size 64x4 or 32x8 = 256
+            uint const numElementsPerMinimalSwizzleTile = 256;
+            uint const nVgprBlock = numElementsPerMinimalSwizzleTile / macTile.subTileSizes.at(0)
+                                    / nSIMDBlock / nVgprIndex;
+            uint const nBlocks = numVgpr / nVgprBlock / nVgprIndex;
+            auto       vgprBlock
                 = graph.coordinates.addElement(VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
             auto vgprIndex
                 = graph.coordinates.addElement(VGPRBlockIndex(literal(nVgprIndex), literal(1u)));
             auto block
                 = graph.coordinates.addElement(Adhoc("Block", literal(nBlocks), literal(1u)));
+            auto vgpr = graph.coordinates.addElement(VGPR(literal(numVgpr), literal(1u)));
+
+            graph.coordinates.addElement(Tile(), {vgpr}, {block, vgprBlock, vgprIndex});
+
+            uint const nSIMDIndexBlock = nVgprIndex;
+            uint const nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
+            auto       SIMDIndexBlock  = graph.coordinates.addElement(
+                Adhoc("SIMDIndexBlock", literal(nSIMDIndexBlock), nullptr));
+            auto SIMDIndexIndex = graph.coordinates.addElement(
+                Adhoc("SIMDIndexIndex", literal(nSIMDIndexIndex), nullptr));
+
+            graph.coordinates.addElement(Flatten(), {SIMDIndexBlock, SIMDIndexIndex}, {SIMDIndex});
 
             connections.push_back(DC<WaveTile>(waveTileTag));
             connections.push_back(DC<Adhoc>(SIMDBlock, 0));
             connections.push_back(DC<Adhoc>(SIMDIndex, 1));
+            connections.push_back(DC<Adhoc>(SIMDIndexBlock, 2));
+            connections.push_back(DC<Adhoc>(SIMDIndexIndex, 3));
             connections.push_back(DC<Lane>(laneInSIMD));
             connections.push_back(DC<VGPRBlockNumber>(vgprBlock));
             connections.push_back(DC<VGPRBlockIndex>(vgprIndex));
+            connections.push_back(DC<VGPR>(vgpr));
 
             if(arg == NaryArgument::LHS_SCALE)
             {
-                graph.coordinates.addElement(
-                    Flatten(), {vgprIndex, SIMDIndex, laneInSIMD}, {iWaveX});
-                graph.coordinates.addElement(Flatten(), {block, vgprBlock, SIMDBlock}, {iWaveY});
-                graph.coordinates.addElement(Flatten(), {iWaveX, iWaveY}, {waveTileTag});
+                if(macTile.subTileSizes.at(0) == 64)
+                {
+                    graph.coordinates.addElement(
+                        Flatten(), {vgprIndex, SIMDIndexIndex, laneInSIMD}, {iWaveX});
+                    graph.coordinates.addElement(
+                        Flatten(), {block, SIMDBlock, vgprBlock, SIMDIndexBlock}, {iWaveY});
+                    graph.coordinates.addElement(Flatten(), {iWaveX, iWaveY}, {waveTileTag});
+                }
+                else if(macTile.subTileSizes.at(0) == 32 && macTile.miTileSizes.at(0) == 16)
+                {
+                    graph.coordinates.addElement(Flatten(), {vgprIndex, laneInSIMD}, {iWaveX});
+                    graph.coordinates.addElement(
+                        Flatten(), {block, vgprBlock, SIMDBlock, SIMDIndex}, {iWaveY});
+                    graph.coordinates.addElement(Flatten(), {iWaveX, iWaveY}, {waveTileTag});
+                }
+                else if(macTile.subTileSizes.at(0) == 32 && macTile.miTileSizes.at(0) == 32)
+                {
+                    graph.coordinates.addElement(Flatten(), {SIMDIndex, laneInSIMD}, {iWaveX});
+                    graph.coordinates.addElement(
+                        Flatten(), {block, vgprIndex, SIMDBlock, vgprBlock}, {iWaveY});
+                    graph.coordinates.addElement(Flatten(), {iWaveX, iWaveY}, {waveTileTag});
+                }
             }
             if(arg == NaryArgument::RHS_SCALE)
             {
-                graph.coordinates.addElement(
-                    Flatten(), {vgprIndex, SIMDIndex, laneInSIMD}, {iWaveY});
-                graph.coordinates.addElement(Flatten(), {block, vgprBlock, SIMDBlock}, {iWaveX});
-                graph.coordinates.addElement(Flatten(), {iWaveY, iWaveX}, {waveTileTag});
+                if(macTile.subTileSizes.at(0) == 64)
+                {
+                    graph.coordinates.addElement(
+                        Flatten(), {vgprIndex, SIMDIndexIndex, laneInSIMD}, {iWaveY});
+                    graph.coordinates.addElement(
+                        Flatten(), {block, SIMDBlock, vgprBlock, SIMDIndexBlock}, {iWaveX});
+                    graph.coordinates.addElement(Flatten(), {iWaveY, iWaveX}, {waveTileTag});
+                }
+                else if(macTile.subTileSizes.at(0) == 32 && macTile.miTileSizes.at(0) == 16)
+                {
+                    graph.coordinates.addElement(Flatten(), {vgprIndex, laneInSIMD}, {iWaveY});
+                    graph.coordinates.addElement(
+                        Flatten(), {block, vgprBlock, SIMDBlock, SIMDIndex}, {iWaveX});
+                    graph.coordinates.addElement(Flatten(), {iWaveY, iWaveX}, {waveTileTag});
+                }
+                else if(macTile.subTileSizes.at(0) == 32 && macTile.miTileSizes.at(0) == 32)
+                {
+                    graph.coordinates.addElement(Flatten(), {SIMDIndex, laneInSIMD}, {iWaveY});
+                    graph.coordinates.addElement(
+                        Flatten(), {block, vgprIndex, SIMDBlock, vgprBlock}, {iWaveX});
+                    graph.coordinates.addElement(Flatten(), {iWaveY, iWaveX}, {waveTileTag});
+                }
             }
 
             return connections;
@@ -309,36 +365,40 @@ namespace rocRoller
             connections.push_back(DC<WaveTileNumber>(nWave0, 0));
             connections.push_back(DC<WaveTileNumber>(nWave1, 1));
 
-            uint const nLaneInSIMD = 16;
-            uint const nSIMDBlock  = macTile.miTileSizes[2];
-            uint const nSIMDIndex  = 4 / nSIMDBlock;
-
-            auto SIMDBlock
-                = graph.coordinates.addElement(Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
-            auto SIMDIndex
+            uint const nLaneInSIMD   = 16;
+            uint const nSIMDsPerWave = wavefrontSize / nLaneInSIMD;
+            uint const nSIMDIndex    = macTile.subTileSizes.at(0) / nLaneInSIMD;
+            auto       SIMDIndex
                 = graph.coordinates.addElement(Adhoc("SIMDIndex", literal(nSIMDIndex), nullptr));
             auto laneInSIMD = graph.coordinates.addElement(Lane(literal(nLaneInSIMD), nullptr));
 
-            uint numElements = waveTile.elements();
-            uint wfs         = static_cast<uint>(wavefrontSize);
-            uint numVgpr     = numElements / wfs;
+            uint const nSIMDBlock = nSIMDsPerWave / nSIMDIndex;
+            auto       SIMDBlock
+                = graph.coordinates.addElement(Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
 
-            uint const nVgprIndex = macTile.miTileSizes[2];
-            uint const nVgprBlock = 4 / nVgprIndex;
-            uint const nBlocks    = numVgpr / nVgprBlock / nVgprIndex;
+            uint const numElements       = waveTile.elements();
+            uint const activeLanesInWave = static_cast<uint>(wavefrontSize);
+            uint const numVgpr           = numElements / activeLanesInWave;
+            uint const nVgprIndex
+                = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
+            // Minimal swizzle tile size 64x4 or 32x8 = 256
+            uint const numElementsPerMinimalSwizzleTile = 256;
+            uint const nVgprBlock = numElementsPerMinimalSwizzleTile / macTile.subTileSizes.at(0)
+                                    / nSIMDBlock / nVgprIndex;
+            uint const nBlocks = numVgpr / nVgprBlock / nVgprIndex;
             auto       vgprBlock
                 = graph.coordinates.addElement(VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
             auto vgprIndex
                 = graph.coordinates.addElement(VGPRBlockIndex(literal(nVgprIndex), literal(1u)));
+            auto vgpr = graph.coordinates.addElement(VGPR(literal(numVgpr), literal(1u)));
             auto block
                 = graph.coordinates.addElement(Adhoc("Block", literal(nBlocks), literal(1u)));
-            auto vgpr = graph.coordinates.addElement(VGPR(literal(numVgpr), literal(1u)));
             graph.coordinates.addElement(Flatten(), {block, vgprBlock, vgprIndex}, {vgpr});
             connections.push_back(DC<VGPRBlockNumber>(vgprBlock));
             connections.push_back(DC<VGPRBlockIndex>(vgprIndex));
             connections.push_back(DC<VGPR>(vgpr));
 
-            auto wavefrontSizeLiteral = literal(wfs);
+            auto activeLanesInWaveLiteral = literal(activeLanesInWave);
 
             auto wave  = graph.coordinates.addElement(Wavefront(-1));
             auto wave0 = graph.coordinates.addElement(Wavefront(0));
@@ -346,7 +406,7 @@ namespace rocRoller
             graph.coordinates.addElement(Flatten(), {wave0, wave1}, {wave});
 
             auto workitem = graph.coordinates.addElement(Workitem(0));
-            auto lane     = graph.coordinates.addElement(Lane(wavefrontSizeLiteral, literal(1u)));
+            auto lane = graph.coordinates.addElement(Lane(activeLanesInWaveLiteral, literal(1u)));
             graph.coordinates.addElement(Flatten(), {wave, lane}, {workitem});
             graph.coordinates.addElement(Flatten(), {SIMDBlock, SIMDIndex, laneInSIMD}, {lane});
 
@@ -358,8 +418,9 @@ namespace rocRoller
 
             if(arg == NaryArgument::LHS_SCALE)
             {
-                graph.coordinates.addElement(Tile(), {iWave0}, {SIMDBlock, SIMDIndex, laneInSIMD});
-                graph.coordinates.addElement(PassThrough(), {iWave1}, {vgpr});
+                graph.coordinates.addElement(Tile(), {iWave0}, {SIMDIndex, laneInSIMD});
+                graph.coordinates.addElement(
+                    Tile(), {iWave1}, {block, SIMDBlock, vgprBlock, vgprIndex});
 
                 if(existingUnroll0 != -1)
                 {
@@ -392,8 +453,9 @@ namespace rocRoller
 
             if(arg == NaryArgument::RHS_SCALE)
             {
-                graph.coordinates.addElement(Tile(), {iWave1}, {SIMDBlock, SIMDIndex, laneInSIMD});
-                graph.coordinates.addElement(PassThrough(), {iWave0}, {vgpr});
+                graph.coordinates.addElement(Tile(), {iWave1}, {SIMDIndex, laneInSIMD});
+                graph.coordinates.addElement(
+                    Tile(), {iWave0}, {block, SIMDBlock, vgprBlock, vgprIndex});
 
                 if(existingUnroll1 != -1)
                 {
@@ -445,8 +507,9 @@ namespace rocRoller
 
             AssertFatal(waveSwizzleM == waveSwizzleN,
                         "waveSwizzleM is not equal to waveSwizzleN",
-                        ShowValue(waveM),
-                        ShowValue(waveN));
+                        ShowValue(waveSwizzleM),
+                        ShowValue(waveSwizzleN));
+
             return std::make_pair(waveSwizzleM / waveM, waveSwizzleK / waveK);
         }
 
@@ -460,10 +523,17 @@ namespace rocRoller
             AssertFatal(
                 waveM == waveN, "waveM is not equal to waveN", ShowValue(waveM), ShowValue(waveN));
 
-            auto const waveSwizzleMN = 64;
-            auto const waveSwizzleK  = 4;
+            auto const waveSwizzleM = macTile.swizzleTileSizes.at(0);
+            auto const waveSwizzleN = macTile.swizzleTileSizes.at(1);
+            AssertFatal(waveSwizzleM == waveSwizzleN,
+                        "waveSwizzleM is not equal to waveSwizzleN",
+                        ShowValue(waveSwizzleM),
+                        ShowValue(waveSwizzleN));
+            // Minimal swizzle tile size 64x4 or 32x8 = 256
+            uint const numElementsPerMinimalSwizzleTile = 256;
+            auto const waveSwizzleK = numElementsPerMinimalSwizzleTile / waveSwizzleM;
 
-            return std::make_pair(waveSwizzleMN / waveM, waveSwizzleK / waveK);
+            return std::make_pair(waveSwizzleM / waveM, waveSwizzleK / waveK);
         }
 
         std::map<int, std::vector<std::pair<int, int>>>
@@ -685,8 +755,11 @@ namespace rocRoller
                 // Since the load tile size (e.g. 64x4, 64x8, 64x12, 64x16) can be
                 // greater than equal to the exchange tile size (64x4),
                 // add index edge to point to the register allocation (subset).
-                auto tileTag         = graph.mapper.get<MacroTile>(load.first);
-                auto exchangeTileTag = graph.coordinates.addElement(MacroTile());
+                auto tileTag = graph.mapper.get<MacroTile>(load.first);
+                auto tile    = graph.coordinates.getNode<MacroTile>(tileTag);
+                AssertFatal(tile.miTileSizes.size() == 4, ShowValue(tile.miTileSizes.size()));
+
+                auto exchangeTileTag = graph.coordinates.addElement(tile);
                 graph.coordinates.addElement(Index(0), {exchangeTileTag}, {tileTag});
                 graph.mapper.connect<MacroTile>(exchange, exchangeTileTag);
 
@@ -735,7 +808,7 @@ namespace rocRoller
                         // Since the load tile size (e.g. 64x4, 64x8, 64x12, 64x16) can be
                         // greater than equal to the exchange tile size (64x4),
                         // add index edge to point to the register allocation (subset).
-                        exchangeTileTag = graph.coordinates.addElement(MacroTile());
+                        exchangeTileTag = graph.coordinates.addElement(tile);
                         graph.coordinates.addElement(
                             Index(merge.second), {exchangeTileTag}, {tileTag});
                         graph.mapper.connect<MacroTile>(exchange, exchangeTileTag);
