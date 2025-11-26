@@ -31,6 +31,9 @@
 #include <miopen/pooling/invoke_params.hpp>
 #include <miopen/pooling/problem_description.hpp>
 #include <miopen/utility/transposing_solver.hpp>
+#include <miopen/performance_config.hpp>
+#include <miopen/execution_context.hpp>
+#include <miopen/generic_search.hpp>
 
 #include <utility>
 
@@ -41,17 +44,91 @@ namespace solver {
 namespace pooling {
 
 using PoolingSolver = NonTunableSolverBase<ExecutionContext, miopen::pooling::ProblemDescription>;
+template <class PerformanceConfig>
+using PoolingTunableSolver =
+    SolverBaseTunable<ExecutionContext, miopen::pooling::ProblemDescription, PerformanceConfig>;
 
-struct PoolingForward2d final : PoolingSolver
+struct PerformanceConfigPoolingForward2d : PerfConfigBase<PerformanceConfigPoolingForward2d>
+{
+    int out_pix_tile1;
+    int local_size0;
+    int local_size1;
+    bool initialized                       = false;
+    static constexpr int min_local_size0   = 8;
+    static constexpr int max_local_size0   = 32;
+    static constexpr int min_local_size1   = 8;
+    static constexpr int max_local_size1   = 128;
+    static constexpr int min_out_pix_tile1 = 1;
+    static constexpr int max_out_pix_tile1 = 16;
+
+    PerformanceConfigPoolingForward2d(int out_pix_tile1_, int local_size0_, int local_size1_)
+        : out_pix_tile1(out_pix_tile1_), local_size0(local_size0_), local_size1(local_size1_)
+    {
+    }
+    PerformanceConfigPoolingForward2d()
+        : PerformanceConfigPoolingForward2d(
+              static_cast<int>(1), static_cast<int>(8), static_cast<int>(8))
+    {
+    }
+    PerformanceConfigPoolingForward2d(bool)
+        : PerformanceConfigPoolingForward2d(
+              static_cast<int>(1), static_cast<int>(8), static_cast<int>(8))
+    {
+    }
+
+    void HeuristicInit(const miopen::pooling::ProblemDescription&);
+    bool SetNextValue(const miopen::pooling::ProblemDescription&);
+    bool IsValidValue() const;
+    bool IsValid(const ExecutionContext&, const miopen::pooling::ProblemDescription&) const;
+    bool operator==(const PerformanceConfigPoolingForward2d& other) const;
+
+    template <class Self, class F>
+    static void Visit(Self&& self, F f)
+    {
+        f(self.out_pix_tile1, "out_pix_tile1");
+        f(self.local_size0, "local_size0");
+        f(self.local_size1, "local_size1");
+    }
+
+private:
+    void Init(const miopen::pooling::ProblemDescription&);
+};
+
+struct PoolingForward2d final : PoolingTunableSolver<PerformanceConfigPoolingForward2d>
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<PoolingForward2d>(); }
 
     bool IsApplicable(const ExecutionContext& context,
                       const miopen::pooling::ProblemDescription& problem) const override;
+    ConvSolution
+    GetSolutionImpl(const ExecutionContext& context,
+                    const miopen::pooling::ProblemDescription& problem,
+                    const std::optional<PerformanceConfigPoolingForward2d>& config) const;
     ConvSolution GetSolution(const ExecutionContext& context,
-                             const miopen::pooling::ProblemDescription& problem) const override;
+                             const miopen::pooling::ProblemDescription& problem) const
+    {
+        return GetSolutionImpl(context, problem, std::nullopt);
+    }
+    ConvSolution GetSolution(const ExecutionContext& context,
+                             const miopen::pooling::ProblemDescription& problem,
+                             const PerformanceConfigPoolingForward2d& config) const override
+    {
+        return GetSolutionImpl(context, problem, config);
+    }
     std::size_t GetWorkspaceSize(const ExecutionContext& context,
                                  const miopen::pooling::ProblemDescription& problem) const override;
+    PerformanceConfigPoolingForward2d
+    GetDefaultPerformanceConfig(const ExecutionContext&,
+                                const miopen::pooling::ProblemDescription&) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::pooling::ProblemDescription&,
+                                  const PerformanceConfigPoolingForward2d&) const override;
+    PerformanceConfigPoolingForward2d Search(const ExecutionContext& context,
+                                             const miopen::pooling::ProblemDescription& problem,
+                                             const AnyInvokeParams& invoke_context) const override
+    {
+        return GenericSearch(*this, context, problem, invoke_context);
+    }
 };
 
 struct PoolingForwardNd final : PoolingSolver
