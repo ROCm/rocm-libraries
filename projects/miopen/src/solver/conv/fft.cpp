@@ -31,6 +31,7 @@
 #include <miopen/conv_solution.hpp>
 #include <miopen/convolution_fft.hpp>
 #include <miopen/env.hpp>
+#include <miopen/kernel_build_params.hpp>
 #include <miopen/tensor.hpp>
 
 #include <boost/any.hpp>
@@ -338,58 +339,52 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
 
     cgemm_grid(global_work_size[4], local_work_size[4], cgemm_choice, N, out_c, out_n);
 
-    std::string parms;
+    const auto workSpaceSize = GetWorkspaceSize(ctx, problem);
+    const unsigned int halfw = static_cast<unsigned int>(workSpaceSize / (sizeof(float) * 2 * 2));
+
+    auto build_params = KernelBuildParameters{
+        {"CFF_IMG_H", in_h},
+        {"CFF_IMG_W", in_w},
+        {"CFF_BATCH", in_n},
+        {"CFF_NFILTER", out_c},
+        {"CFF_CHANNELS", in_c},
+        {"CFF_HALFW", halfw},
+    };
 
     if(in_tranpose_choice == 0)
-        parms += " -DCFF_TRANSP_IN_MOD16=1";
+        build_params.Define("CFF_TRANSP_IN_MOD16", 1);
     if(wt_tranpose_choice == 0)
-        parms += " -DCFF_TRANSP_WT_MOD16=1";
+        build_params.Define("CFF_TRANSP_WT_MOD16", 1);
     if(ot_tranpose_choice == 0)
-        parms += " -DCFF_TRANSP_OT_MOD16=1";
+        build_params.Define("CFF_TRANSP_OT_MOD16", 1);
 
     switch(cgemm_choice)
     {
-    case 1: parms += " -DCFF_CGEMM_CHOICE_1=1"; break;
-    case 2: parms += " -DCFF_CGEMM_CHOICE_2=1"; break;
-    default: parms += " -DCFF_CGEMM_CHOICE_0=1"; break;
+    case 1: build_params.Define("CFF_CGEMM_CHOICE_1", 1); break;
+    case 2: build_params.Define("CFF_CGEMM_CHOICE_2", 1); break;
+    default: build_params.Define("CFF_CGEMM_CHOICE_0", 1); break;
     }
 
     if((in_h == 28) && (in_w == 28))
     {
-        parms += " -DCFF_IMG_SZ_28_28";
+        build_params.Define("CFF_IMG_SZ_28_28", 1);
     }
     else if((in_h == 27) && (in_w == 27))
     {
-        parms += " -DCFF_IMG_SZ_27_27";
+        build_params.Define("CFF_IMG_SZ_27_27", 1);
     }
     else if((in_h == 14) && (in_w == 14))
     {
-        parms += " -DCFF_IMG_SZ_14_14";
+        build_params.Define("CFF_IMG_SZ_14_14", 1);
     }
     else if((in_h == 7) && (in_w == 7))
     {
-        parms += " -DCFF_IMG_SZ_7_7";
+        build_params.Define("CFF_IMG_SZ_7_7", 1);
     }
-
-    const auto workSpaceSize = GetWorkspaceSize(ctx, problem);
-    const unsigned int halfw = static_cast<unsigned int>(workSpaceSize / (sizeof(float) * 2 * 2));
-
-    parms += " -DCFF_IMG_H=";
-    parms += std::to_string(in_h);
-    parms += " -DCFF_IMG_W=";
-    parms += std::to_string(in_w);
-    parms += " -DCFF_BATCH=";
-    parms += std::to_string(in_n);
-    parms += " -DCFF_NFILTER=";
-    parms += std::to_string(out_c);
-    parms += " -DCFF_CHANNELS=";
-    parms += std::to_string(in_c);
-    parms += " -DCFF_HALFW=";
-    parms += std::to_string(halfw);
 
     if(!problem.IsDirectionForward())
     {
-        parms += " -DCFF_BACKWARD";
+        build_params.Define("CFF_BACKWARD", 1);
     }
 
     const std::string algorithm    = "miopenConvolutionFwdAlgoFFT";
@@ -434,7 +429,7 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
         auto kernel         = KernelInfo{};
         kernel.kernel_file  = program_name;
         kernel.kernel_name  = kernel_name;
-        kernel.comp_options = parms;
+        kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
         kernel.g_wk         = vgd;
         kernel.l_wk         = vld;
         sol.construction_params.push_back(kernel);
