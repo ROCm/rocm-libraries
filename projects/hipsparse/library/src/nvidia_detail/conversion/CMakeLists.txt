@@ -1,7 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Conversion function sources
 target_sources(hipsparse PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_bsr2csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_coo2csr.cpp"

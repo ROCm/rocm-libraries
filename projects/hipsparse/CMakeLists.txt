@@ -63,7 +63,9 @@ if(HIPSPARSE_ENABLE_COVERAGE)
     endif()
 endif()
 
-
+if(HIPSPARSE_ENABLE_ASAN AND HIPSPARSE_ENABLE_FORTRAN)
+    message(FATAL_ERROR "Cannot enable both address sanitizer and Fortran clients")
+endif()
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -130,7 +132,6 @@ if(HIPSPARSE_BUILD_CLIENTS_ONLY OR HIPSPARSE_ENABLE_SAMPLES OR HIPSPARSE_BUILD_T
         set(GFORTRAN_RPM "gfortran")
     endif()
     
-    # Set OpenMP package dependencies only if enabled
     if(HIPSPARSE_ENABLE_OPENMP)
         set(OPENMP_RPM "libgomp")
         set(OPENMP_DEB "libomp-dev")
@@ -194,7 +195,6 @@ if(HIPSPARSE_BUILD_CLIENTS_ONLY OR HIPSPARSE_ENABLE_SAMPLES OR HIPSPARSE_BUILD_T
     endif()
 endif()
 
-# Package specific dependencies
 if(HIPSPARSE_ENABLE_HIP)
     set(ROCSPARSE_MINIMUM "4.0.1")
     rocm_package_add_dependencies(SHARED_DEPENDS "rocsparse >= ${ROCSPARSE_MINIMUM}")

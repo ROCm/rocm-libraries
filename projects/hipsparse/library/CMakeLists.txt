@@ -1,7 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Define library target with explicit type
 if(HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
     add_library(hipsparse SHARED)
 else()
@@ -9,7 +8,6 @@ else()
 endif()
 add_library(roc::hipsparse ALIAS hipsparse)
 
-# Target properties
 rocm_set_soversion(hipsparse ${hipsparse_SOVERSION})
 set_target_properties(hipsparse PROPERTIES
     CXX_EXTENSIONS OFF
@@ -24,34 +22,26 @@ if(NOT (HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS))
     set_target_properties(hipsparse PROPERTIES PREFIX "lib")
 endif()
 
-# Compile features (NOT global CMAKE_CXX_STANDARD)
 target_compile_features(hipsparse PRIVATE cxx_std_17)
 
-# Common compile options
 target_compile_options(hipsparse PRIVATE -Wno-unused-command-line-argument -Wall)
 
-# Conditional flags for ASAN
 if(HIPSPARSE_ENABLE_ASAN)
     target_compile_options(hipsparse PRIVATE -fsanitize=address -shared-libasan)
     target_link_options(hipsparse PRIVATE -fuse-ld=lld)
 endif()
 
-# Conditional flags for coverage
 if(HIPSPARSE_ENABLE_COVERAGE)
     target_compile_options(hipsparse PRIVATE -fprofile-arcs -ftest-coverage)
     target_link_options(hipsparse PRIVATE --coverage)
 endif()
 
-# Add subdirectories for header management and sources
 add_subdirectory(include)
 add_subdirectory(src)
 
-# Create Fortran module if Fortran support is enabled
 if(HIPSPARSE_ENABLE_FORTRAN)
-    # Set Fortran module output directory
     set(CMAKE_Fortran_MODULE_DIRECTORY "${PROJECT_BINARY_DIR}/include/hipsparse")
     
-    # Create hipSPARSE Fortran module
     add_library(hipsparse_fortran OBJECT)
     
     target_sources(hipsparse_fortran PRIVATE
@@ -59,17 +49,15 @@ if(HIPSPARSE_ENABLE_FORTRAN)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/hipsparse_enums.f90"
     )
     
-    # Target compile options
     target_compile_options(hipsparse_fortran PRIVATE -ffree-form -cpp)
 endif()
 
-# Installation
 rocm_install_targets(
     TARGETS hipsparse
     INCLUDE ${CMAKE_BINARY_DIR}/include
 )
 
-# Export targets
+
 if(HIPSPARSE_ENABLE_HIP)
     rocm_export_targets(
         TARGETS roc::hipsparse

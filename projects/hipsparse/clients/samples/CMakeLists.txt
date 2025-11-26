@@ -29,7 +29,7 @@ if(NOT WIN32)
     endif()
 endif()
 
-# C++ sample: example_handle
+
 add_executable(example_handle)
 target_sources(example_handle PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/example_handle.cpp"

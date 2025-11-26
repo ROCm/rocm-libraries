@@ -17,7 +17,6 @@ configure_file(
     COPYONLY
 )
 
-# Copy all internal headers
 set(HEADER_FILES
     # Level1
     internal/level1/hipsparse_axpyi.h
@@ -116,12 +115,10 @@ foreach(file_i ${HEADER_FILES})
     )
 endforeach()
 
-# Generate export header
 generate_export_header(hipsparse
     EXPORT_FILE_NAME "${PROJECT_BINARY_DIR}/include/hipsparse/hipsparse-export.h"
 )
 
-# Public include directories
 target_include_directories(hipsparse
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>

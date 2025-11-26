@@ -39,10 +39,8 @@ file(CREATE_LINK
     SYMBOLIC
 )
 
-# Create test executable
 add_executable(hipsparse-test)
 
-# Add test sources
 target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_gtest_main.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_axpyi.cpp"
@@ -138,7 +136,6 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_coo.cpp"
 )
 
-# HIP-only test sources
 if(HIPSPARSE_ENABLE_HIP)
     target_sources(hipsparse-test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/test_doti.cpp"
@@ -155,26 +152,21 @@ if(HIPSPARSE_ENABLE_HIP)
     )
 endif()
 
-# Additional includes when building clients only
 if(HIPSPARSE_BUILD_CLIENTS_ONLY)
     target_include_directories(hipsparse-test PRIVATE ${hipsparse_INCLUDE_DIRS}/hipsparse)
 endif()
 
-# Compile definitions
 target_compile_definitions(hipsparse-test PRIVATE GOOGLE_TEST)
 
-# Link dependencies - gets common properties transitively
 target_link_libraries(hipsparse-test PRIVATE
     hipsparse-clients-common
     GTest::gtest
 )
 
-# Link OpenMP if enabled
 if(HIPSPARSE_ENABLE_OPENMP)
     target_link_libraries(hipsparse-test PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
-# Backend-specific settings
 if(HIPSPARSE_ENABLE_CUDA)
     target_compile_definitions(hipsparse-test PRIVATE __HIP_PLATFORM_NVIDIA__)
     target_include_directories(hipsparse-test PRIVATE ${HIP_INCLUDE_DIRS})
@@ -307,7 +299,6 @@ add_custom_target(hipsparse-test-data
 
 add_dependencies(hipsparse-test hipsparse-test-data hipsparse-common)
 
-# Installation
 rocm_install(TARGETS hipsparse-test COMPONENT tests)
 rocm_install(FILES ${HIPSPARSE_TEST_DATA} DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test" COMPONENT tests)
 rocm_install(
@@ -354,5 +345,4 @@ endforeach()
     )
 endif()
 
-# Add CTest test
 add_test(hipsparse-test hipsparse-test)
