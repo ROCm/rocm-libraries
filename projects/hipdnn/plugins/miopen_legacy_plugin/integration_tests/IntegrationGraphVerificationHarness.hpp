@@ -76,7 +76,7 @@ protected:
         initializeBundle(graph, gpuBundle, seed);
         initializeBundle(graph, cpuBundle, seed);
 
-        executeGpuGraph(_handle, graph, gpuBundle);
+        ASSERT_NO_FATAL_FAILURE(executeGpuGraph(_handle, graph, gpuBundle));
         executeCpuGraph(graph, cpuBundle);
 
         ASSERT_GE(outputTensorIds.size(), 1)
