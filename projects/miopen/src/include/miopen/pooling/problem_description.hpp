@@ -111,7 +111,6 @@ struct ProblemDescription : ProblemDescriptionTag
 
     NetworkConfig MakeNetworkConfig() const;
 
-#if MIOPEN_ENABLE_SQLITE
     template <class Self>
     static void Visit(Self&& self, std::function<void(int64_t, std::string)> f)
     {
@@ -176,7 +175,6 @@ struct ProblemDescription : ProblemDescriptionTag
     // It has to be discoverable via ADL from problem description.
     friend auto GetDb(const ExecutionContext& context, const ProblemDescriptionTag&)
         -> PerformanceDb;
-#endif
 
 private:
     Direction direction;
@@ -198,24 +196,22 @@ private:
     std::size_t GetOutWidth() const { return yDesc.GetLengths()[yDesc.GetNumDims() - 1]; }
     std::string GetInShape() const
     {
-        std::string shape = "(" + std::to_string(GetInBatchSize());
-        shape += "," + std::to_string(GetInChannel());
+        std::string shape = std::to_string(GetInBatchSize());
+        shape += "x" + std::to_string(GetInChannel());
         if(GetInDepth() != 0)
-            shape += "," + std::to_string(GetInDepth());
-        shape += "," + std::to_string(GetInHeight());
-        shape += "," + std::to_string(GetInWidth());
-        shape += ")";
+            shape += "x" + std::to_string(GetInDepth());
+        shape += "x" + std::to_string(GetInHeight());
+        shape += "x" + std::to_string(GetInWidth());
         return shape;
     }
     std::string GetOutShape() const
     {
-        std::string shape = "(" + std::to_string(GetOutBatchSize());
-        shape += "," + std::to_string(GetOutChannel());
+        std::string shape = std::to_string(GetOutBatchSize());
+        shape += "x" + std::to_string(GetOutChannel());
         if(GetOutDepth() != 0)
-            shape += "," + std::to_string(GetOutDepth());
-        shape += "," + std::to_string(GetOutHeight());
-        shape += "," + std::to_string(GetOutWidth());
-        shape += ")";
+            shape += "x" + std::to_string(GetOutDepth());
+        shape += "x" + std::to_string(GetOutHeight());
+        shape += "x" + std::to_string(GetOutWidth());
         return shape;
     }
     std::string GetDirectionStr() const
