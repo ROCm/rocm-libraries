@@ -7,6 +7,28 @@
 //
 //===---------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #ifndef _LIBCUDACXX___INTERNAL_NAMESPACES_H
 #define _LIBCUDACXX___INTERNAL_NAMESPACES_H
 
@@ -31,27 +53,36 @@
 
 // Standard namespaces with or without versioning
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_STD_NOVERSION namespace cuda { namespace std {
-#  define _LIBCUDACXX_END_NAMESPACE_STD_NOVERSION } }
+#  define _LIBCUDACXX_END_NAMESPACE_STD_NOVERSION } } \
+    namespace hip = cuda;
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_STD namespace cuda { namespace std { inline namespace _LIBCUDACXX_ABI_NAMESPACE {
-#  define _LIBCUDACXX_END_NAMESPACE_STD } } }
+#  define _LIBCUDACXX_END_NAMESPACE_STD } } } \
+    namespace hip = cuda;
 
 // cuda specific namespaces
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_CUDA namespace cuda { inline namespace _LIBCUDACXX_ABI_NAMESPACE {
-#  define _LIBCUDACXX_END_NAMESPACE_CUDA } }
+#  define _LIBCUDACXX_END_NAMESPACE_CUDA } } \
+    namespace hip = cuda;
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_MR namespace cuda { namespace mr { inline namespace _LIBCUDACXX_ABI_NAMESPACE {
-#  define _LIBCUDACXX_END_NAMESPACE_CUDA_MR } } }
+#  define _LIBCUDACXX_END_NAMESPACE_CUDA_MR } } } \
+    namespace hip = cuda;
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_DEVICE namespace cuda { namespace device { inline namespace _LIBCUDACXX_ABI_NAMESPACE {
-#  define _LIBCUDACXX_END_NAMESPACE_CUDA_DEVICE } } }
+#  define _LIBCUDACXX_END_NAMESPACE_CUDA_DEVICE } } } \
+    namespace hip = cuda;
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_PTX namespace cuda { namespace ptx { inline namespace _LIBCUDACXX_ABI_NAMESPACE {
-#  define _LIBCUDACXX_END_NAMESPACE_CUDA_PTX } } }
+#  define _LIBCUDACXX_END_NAMESPACE_CUDA_PTX } } } \
+    namespace hip = cuda;
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_DEVICE_EXPERIMENTAL namespace cuda { namespace device { namespace experimental { inline namespace _LIBCUDACXX_ABI_NAMESPACE {
-#  define _LIBCUDACXX_END_NAMESPACE_CUDA_DEVICE_EXPERIMENTAL } } } }
+#  define _LIBCUDACXX_END_NAMESPACE_CUDA_DEVICE_EXPERIMENTAL } } } } \
+    namespace hip = cuda;
 
 // Namespaces related to <ranges>
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_RANGES namespace cuda { namespace std { namespace ranges { inline namespace _LIBCUDACXX_ABI_NAMESPACE {
-#  define _LIBCUDACXX_END_NAMESPACE_RANGES } } } }
+#  define _LIBCUDACXX_END_NAMESPACE_RANGES } } } } \
+    namespace hip = cuda;
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_VIEWS namespace cuda { namespace std { namespace ranges { namespace views { inline namespace _LIBCUDACXX_ABI_NAMESPACE {
-#  define _LIBCUDACXX_END_NAMESPACE_VIEWS } } } } }
+#  define _LIBCUDACXX_END_NAMESPACE_VIEWS } } } } } \
+    namespace hip = cuda;
 
 #  if _CCCL_STD_VER >= 2020
 #    define _LIBCUDACXX_BEGIN_NAMESPACE_RANGES_ABI inline namespace __cxx20 {
