@@ -450,25 +450,6 @@ rocsparse_status rocsparse::gtrm_analysis(rocsparse_handle          handle,
     }
 
     apply_sort2(handle, m, done_array, workspace2, workspace, row_map, rocprim_buffer);
-
-#if 0
-    if (1)
-      {
-	//write
-	int32_t * map = (int32_t*)malloc(sizeof(int32_t)*(m));
-	hipMemcpy(map,
-		  row_map,
-		  sizeof(int32_t)*(m),
-		  hipMemcpyDefault);
-	FILE * f = fopen("map.txt","w");
-	for (int32_t i=0;i<m;++i)
-	  {
-	    fprintf(f,"%d\n",map[i]);
-	  }
-	fclose(f);
-	//	exit(1);
-      }
-#endif
     return rocsparse_status_success;
 }
 

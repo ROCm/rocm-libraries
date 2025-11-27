@@ -269,8 +269,7 @@ void testing_csrsv(const Arguments& arg)
 
             // Call it twice.
             CHECK_ROCSPARSE_ERROR(rocsparse_csrsv_analysis<T>(PARAMS_ANALYSIS(dA)));
-            // CHECK_ROCSPARSE_ERROR(rocsparse_csrsv_analysis<T>(PARAMS_ANALYSIS(dA)));
-            if(1)
+            CHECK_ROCSPARSE_ERROR(rocsparse_csrsv_analysis<T>(PARAMS_ANALYSIS(dA)));
             {
                 auto st = rocsparse_csrsv_zero_pivot(handle, descr, info, analysis_pivot);
                 CHECK_HIP_ERROR(hipStreamSynchronize(stream));
