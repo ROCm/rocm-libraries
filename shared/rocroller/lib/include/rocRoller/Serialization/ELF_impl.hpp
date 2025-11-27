@@ -31,6 +31,7 @@
 #include <vector>
 
 #include <rocRoller/Serialization/ELF.hpp>
+#include <rocRoller/Serialization/ELF_detail.hpp>
 #include <rocRoller/Serialization/comgr/comgr.hpp>
 
 #include <amd_comgr/amd_comgr.h>
@@ -39,18 +40,21 @@ namespace rocRoller
 {
     namespace Serialization
     {
-        template <typename T>
-        T fromELFData(amd_comgr_metadata_node_t metadataNode)
+        namespace ELFDetail
         {
-            T rv;
+            template <typename T>
+            T fromELFData(amd_comgr_metadata_node_t metadataNode)
+            {
+                T rv;
 
-            Serialization::ComgrNodeInput comgrNodeInput(metadataNode, nullptr);
-            comgrNodeInput.input(metadataNode, rv);
-            amd_comgr_destroy_metadata(metadataNode);
+                Serialization::ComgrNodeInput comgrNodeInput(metadataNode, nullptr);
+                comgrNodeInput.input(metadataNode, rv);
+                amd_comgr_destroy_metadata(metadataNode);
 
-            return rv;
-        }
-
+                return rv;
+            }
+        } // namespace ELFDetail 
+   
         template <typename T>
         T fromELFFile(std::string const& filename)
         {
@@ -88,7 +92,7 @@ namespace rocRoller
 
             try
             {
-                return fromELFData<T>(node);
+                return ELFDetail::fromELFData<T>(node);
             }
             catch(...)
             {
