@@ -62,7 +62,6 @@ if(HIPSPARSE_ENABLE_HIP)
     rocm_export_targets(
         TARGETS roc::hipsparse
         DEPENDS PACKAGE hip
-        STATIC_DEPENDS PACKAGE rocsparse
         NAMESPACE roc::
     )
 elseif(HIPSPARSE_ENABLE_CUDA)
