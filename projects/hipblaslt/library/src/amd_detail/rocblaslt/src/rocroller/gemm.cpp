@@ -61,7 +61,6 @@ void setPredicates(std::shared_ptr<GemmKernel> gemmKernel)
     });
 
     // parameters
-    auto unrollKExp        = literal(params->unrollK);
     auto workgroupTileMExp = literal(solutionParams->workgroupTile.m);
     auto workgroupTileNExp = literal(solutionParams->workgroupTile.n);
     auto workgroupTileKExp = literal(solutionParams->workgroupTile.k);
@@ -69,8 +68,6 @@ void setPredicates(std::shared_ptr<GemmKernel> gemmKernel)
     // constants
     auto zero = literal(0u);
     auto one  = literal(1u);
-
-    // sanitize parameters
 
     // predicates
     std::stringstream ss;
