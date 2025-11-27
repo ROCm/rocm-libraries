@@ -36,5 +36,5 @@ Tests:
   function: sctr
   precision: *single_double_precisions_complex_real
   N: [12000, 15332, 22031]
-  nnz: [0, 5, 10, 500, 1000, 7111, 10000]
+  nnz: [0, 5, 10, 500, 1000, 7111, 10000, 12000]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]

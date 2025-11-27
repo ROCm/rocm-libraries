@@ -402,9 +402,8 @@ INSTANTIATE_TEST_SUITE_P(adhoc_token_hermitian_input,
                                                                    adhoc_hermitian_input_tokens)),
                          accuracy_test::TestName);
 
-const auto adhoc_nondefault_layout_tokens = {
+const auto adhoc_nondefault_layout_complex_tokens = {
     // clang-format off
-    // plan creation failures:
     "complex_forward_len_29_4_16_double_op_batch_233_istride_540_135_5_CI_ostride_1540_140_4_CI_idist_20520_odist_55440_ioffset_0_0_ooffset_0_0",
     "complex_forward_len_23_16_4_single_op_batch_253_istride_450_10_2_CI_ostride_1376_32_4_CI_idist_16650_odist_41280_ioffset_0_0_ooffset_0_0",
     "complex_forward_len_19_16_4_double_ip_batch_376_istride_384_16_4_CI_ostride_384_16_4_CI_idist_10752_odist_10752_ioffset_0_0_ooffset_0_0",
@@ -436,7 +435,39 @@ const auto adhoc_nondefault_layout_tokens = {
     "complex_inverse_len_29_27_4_double_op_batch_1358_istride_216_8_1_CI_ostride_672_24_2_CI_idist_6480_odist_22176_ioffset_0_0_ooffset_0_0",
     "complex_inverse_len_29_4_27_double_op_batch_1358_istride_216_27_1_CI_ostride_672_56_2_CI_idist_6480_odist_22176_ioffset_0_0_ooffset_0_0",
     "complex_forward_len_19_16_16_single_ip_batch_3_istride_342_18_1_CI_ostride_342_18_1_CI_idist_6840_odist_6840_ioffset_0_0_ooffset_0_0",
-    "complex_inverse_len_19_27_27_double_op_batch_600_istride_1624_58_2_CI_ostride_3780_140_4_CI_idist_34104_odist_128520_ioffset_0_0_ooffset_0_0"
+    "complex_inverse_len_19_27_27_double_op_batch_600_istride_1624_58_2_CI_ostride_3780_140_4_CI_idist_34104_odist_128520_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_81_74_single_ip_batch_2_istride_74_1_CI_ostride_74_1_CI_idist_7696_odist_7696_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_50_129_single_op_batch_3189_istride_1432_8_CI_ostride_129_1_CI_idist_81624_odist_24252_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_9_4_29_single_op_batch_3186_istride_4_1_36_CI_ostride_1_9_36_CI_idist_1044_odist_1044_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_25_4_19_single_op_batch_6953_istride_1_25_100_CI_ostride_1_475_25_CI_idist_1900_odist_1900_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_9_29_32_double_op_batch_1584_istride_1_288_9_CI_ostride_928_1_29_CI_idist_8352_odist_8352_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_9_27_19_single_op_batch_4484_istride_1_9_243_CI_ostride_27_1_243_CI_idist_4617_odist_4617_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_4_32_57_single_op_batch_567_istride_1_4_128_CI_ostride_1_228_4_CI_idist_7296_odist_7296_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_4_25_47_single_op_batch_852_istride_1_4_100_CI_ostride_1175_47_1_CI_idist_4700_odist_4700_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_9_27_23_single_op_batch_2126_istride_27_1_243_CI_ostride_621_1_27_CI_idist_5589_odist_5589_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_47_32_8_double_op_batch_445_istride_256_8_1_CI_ostride_32_1_1504_CI_idist_12032_odist_12032_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_16_29_9_single_op_batch_4808_istride_9_144_1_CI_ostride_261_1_29_CI_idist_4176_odist_4176_ioffset_0_0_ooffset_0_0"
+    "complex_forward_len_19_9_16_single_op_batch_4875_istride_144_16_1_CI_ostride_16_304_1_CI_idist_2736_odist_2736_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_32_38_4_double_op_batch_1202_istride_4_128_1_CI_ostride_1_32_1216_CI_idist_4864_odist_4864_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_19_16_9_double_op_batch_3154_istride_144_9_1_CI_ostride_1_171_19_CI_idist_2736_odist_2736_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_32_29_9_single_op_batch_3859_istride_9_288_1_CI_ostride_29_1_928_CI_idist_8352_odist_8352_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_4_23_4_single_op_batch_4948_istride_1_16_4_CI_ostride_92_4_1_CI_idist_368_odist_368_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_32_23_25_double_op_batch_2016_istride_25_800_1_CI_ostride_575_25_1_CI_idist_18400_odist_18400_ioffset_0_0",
+    "complex_forward_len_16_50_4_single_op_batch_441_istride_1_64_16_CI_ostride_50_1_800_CI_idist_3200_odist_3200_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_9_29_9_single_op_batch_3750_istride_1_81_9_CI_ostride_29_1_261_CI_idist_2349_odist_2349_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_8_23_8_double_op_batch_5361_istride_8_64_1_CI_ostride_184_8_1_CI_idist_1472_odist_1472_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_31_9_32_single_op_batch_3955_istride_288_1_9_CI_ostride_9_1_279_CI_idist_8928_odist_8928_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_19_9_25_double_op_batch_3123_istride_225_1_9_CI_ostride_225_25_1_CI_idist_4275_odist_4275_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_32_16_23_double_op_batch_822_istride_16_1_512_CI_ostride_368_23_1_CI_idist_11776_odist_11776_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_31_16_9_single_op_batch_2599_istride_144_9_1_CI_ostride_9_279_1_CI_idist_4464_odist_4464_ioffset_0_0_ooffset_0_0",
+    "complex_inverse_len_23_16_8_double_op_batch_912_istride_186_8_1_CI_ostride_173_8_1_CI_idist_5888_odist_5888_ioffset_0_0_ooffset_0_0",
+    "complex_forward_len_23_8_25_double_ip_batch_2056_istride_323_25_1_CI_ostride_323_25_1_CI_idist_9200_odist_9200_ioffset_0_0_ooffset_0_0",
+    // clang-format on
+};
+
+const auto adhoc_nondefault_layout_real_tokens = {
+    // clang-format off
+    // plan creation failures:
     "real_inverse_len_25_8_double_ip_batch_7851_istride_11_1_HI_ostride_22_1_R_idist_825_odist_1650_ioffset_0_0_ooffset_0_0",
     "real_inverse_len_9_54_single_ip_batch_2976_istride_106_1_HI_ostride_212_1_R_idist_3286_odist_6572_ioffset_0_0_ooffset_0_0",
     "real_inverse_len_81_18_double_ip_batch_2790_istride_12_1_HI_ostride_24_1_R_idist_1884_odist_3768_ioffset_0_0_ooffset_0_0",
@@ -462,8 +493,6 @@ const auto adhoc_nondefault_layout_tokens = {
     "real_inverse_len_4_18_double_ip_batch_7484_istride_64_1_HI_ostride_128_1_R_idist_8192_odist_16384_ioffset_0_0_ooffset_0_0",
     "real_inverse_len_9_8_double_ip_batch_6908_istride_7_1_HI_ostride_14_1_R_idist_462_odist_924_ioffset_0_0_ooffset_0_0",
     // plan can be created but inaccurate results are produced:
-    "complex_forward_len_81_74_single_ip_batch_2_istride_74_1_CI_ostride_74_1_CI_idist_7696_odist_7696_ioffset_0_0_ooffset_0_0",
-    "complex_forward_len_50_129_single_op_batch_3189_istride_1432_8_CI_ostride_129_1_CI_idist_81624_odist_24252_ioffset_0_0_ooffset_0_0",
     "real_forward_len_486_double_op_batch_7014_istride_7014_R_ostride_7014_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0_flags_64",
     "real_forward_len_486_double_op_batch_910_istride_910_R_ostride_910_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
     "real_forward_len_15_12_76_single_ip_batch_125_istride_1280_80_1_R_ostride_640_40_1_HI_idist_32000_odist_16000_ioffset_0_0_ooffset_0_0",
@@ -479,12 +508,18 @@ const auto adhoc_nondefault_layout_tokens = {
     "real_inverse_len_6_12_46_single_op_batch_2312_istride_288_24_1_HI_ostride_46_276_1_R_idist_1728_odist_3312_ioffset_0_0_ooffset_0_0",
     "real_inverse_len_7_14_76_double_ip_batch_202_istride_1794_39_1_HI_ostride_3588_78_1_R_idist_75348_odist_150696_ioffset_0_0_ooffset_0_0",
     "real_forward_len_2_14_46_single_ip_batch_499_istride_2050_50_1_R_ostride_1025_25_1_HI_idist_71750_odist_35875_ioffset_0_0_ooffset_0_0",
-    "real_forward_len_26_52_double_op_batch_3899_istride_240_4_R_ostride_224_7_HI_idist_15600_odist_8960_ioffset_0_0_ooffset_0_0"
+    "real_forward_len_26_52_double_op_batch_3899_istride_240_4_R_ostride_224_7_HI_idist_15600_odist_8960_ioffset_0_0_ooffset_0_0",
     // clang-format on
 };
 
-INSTANTIATE_TEST_SUITE_P(DISABLED_adhoc_nondefault_layout,
-                         accuracy_test,
-                         ::testing::ValuesIn(param_generator_token(test_prob,
-                                                                   adhoc_nondefault_layout_tokens)),
-                         accuracy_test::TestName);
+INSTANTIATE_TEST_SUITE_P(
+    adhoc_nondefault_layout_complex,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator_token(test_prob, adhoc_nondefault_layout_complex_tokens)),
+    accuracy_test::TestName);
+
+INSTANTIATE_TEST_SUITE_P(
+    DISABLED_adhoc_nondefault_layout_real,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator_token(test_prob, adhoc_nondefault_layout_real_tokens)),
+    accuracy_test::TestName);
