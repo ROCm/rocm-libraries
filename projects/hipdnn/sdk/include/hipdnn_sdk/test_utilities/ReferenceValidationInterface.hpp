@@ -19,7 +19,8 @@ class IReferenceValidation
 public:
     virtual ~IReferenceValidation() = default;
 
-    virtual bool allClose(utilities::ITensor& reference, utilities::ITensor& implementation) const = 0;
+    virtual bool allClose(utilities::ITensor& reference, utilities::ITensor& implementation) const
+        = 0;
 };
 
 } // namespace test_utilities

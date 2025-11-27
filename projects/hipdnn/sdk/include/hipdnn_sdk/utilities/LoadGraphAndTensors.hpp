@@ -105,8 +105,8 @@ struct GraphAndTensorMap
             auto zeroedTensorPtr = std::visit(
                 [&](auto dataType) {
                     using DataType = decltype(dataType);
-                    auto tensorPtr = std::unique_ptr<ITensor>(
-                        new utilities::Tensor<DataType>(outputTensorPtr->dims(), outputTensorPtr->strides()));
+                    auto tensorPtr = std::unique_ptr<ITensor>(new utilities::Tensor<DataType>(
+                        outputTensorPtr->dims(), outputTensorPtr->strides()));
                     tensorPtr->fillTensorWithValue(0.f);
                     return tensorPtr;
                 },

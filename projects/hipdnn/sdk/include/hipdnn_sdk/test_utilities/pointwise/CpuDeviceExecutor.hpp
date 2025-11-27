@@ -20,7 +20,8 @@ class CpuDeviceExecutor
 public:
     template <typename Op, typename InputType>
     void executeUnary(const utilities::TensorBase<InputType>& input,
-                      utilities::TensorBase<OutputType>& output, Op op)
+                      utilities::TensorBase<OutputType>& output,
+                      Op op)
     {
         const auto& inputDims = input.dims();
         const auto& outputDims = output.dims();

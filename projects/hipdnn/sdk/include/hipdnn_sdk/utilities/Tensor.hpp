@@ -525,10 +525,9 @@ private:
 template <typename T>
 using PinnedTensor = Tensor<T, PinnedHostAllocator<T>>;
 
-inline std::unique_ptr<utilities::ITensor>
-    createTensor(hipdnn_sdk::data_objects::DataType dataType,
-                 const std::vector<int64_t>& dims,
-                 const std::vector<int64_t>& strides)
+inline std::unique_ptr<utilities::ITensor> createTensor(hipdnn_sdk::data_objects::DataType dataType,
+                                                        const std::vector<int64_t>& dims,
+                                                        const std::vector<int64_t>& strides)
 {
     switch(dataType)
     {

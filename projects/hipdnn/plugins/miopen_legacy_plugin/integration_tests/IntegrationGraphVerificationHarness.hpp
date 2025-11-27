@@ -33,8 +33,8 @@ protected:
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
         // Note: The plugin paths has to be set before we create the hipdnn handle.
-        auto pluginPath
-            = std::filesystem::weakly_canonical(utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
+        auto pluginPath = std::filesystem::weakly_canonical(
+            utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
         const std::string pluginPathStr = pluginPath.string();
         const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
@@ -59,7 +59,8 @@ protected:
         }
     }
 
-    virtual void runGraphTest(DataType tolerance, const utilities::TensorLayout& layout = utilities::TensorLayout::NCHW)
+    virtual void runGraphTest(DataType tolerance,
+                              const utilities::TensorLayout& layout = utilities::TensorLayout::NCHW)
         = 0;
 
 protected:

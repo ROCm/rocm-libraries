@@ -4,14 +4,12 @@
 include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
 
 if(ENABLE_CLANG_TIDY)
-    findAndCheckClangTidy()
+    findandcheckclangtidy()
 
     set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-    set(CLANG_TIDY_COMMAND 
-        ${CLANG_TIDY_EXE}
-        --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy
-        -p ${CMAKE_BINARY_DIR}
+    set(CLANG_TIDY_COMMAND ${CLANG_TIDY_EXE} --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy -p
+                           ${CMAKE_BINARY_DIR}
     )
 endif()
 
