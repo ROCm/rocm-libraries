@@ -406,7 +406,7 @@ public:
         // Set packed flag after validations since it can be incorrect if dims/strides are invalid.
         _packed = TensorBase<T>::computeIsPacked(dims, strides);
 
-        _memory = MigratableMemory<T, HostAlloc, DeviceAlloc>(
+        _memory = utilities::MigratableMemory<T, HostAlloc, DeviceAlloc>(
             TensorBase<T>::calculateElementSpace(dims, strides));
     }
 
@@ -515,7 +515,7 @@ private:
         }
     }
 
-    MigratableMemory<T, HostAlloc, DeviceAlloc> _memory;
+    utilities::MigratableMemory<T, HostAlloc, DeviceAlloc> _memory;
     std::vector<int64_t> _dims;
     std::vector<int64_t> _strides;
     size_t _elementCount;
@@ -525,7 +525,7 @@ private:
 template <typename T>
 using PinnedTensor = Tensor<T, PinnedHostAllocator<T>>;
 
-inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
+inline std::unique_ptr<utilities::ITensor>
     createTensor(hipdnn_sdk::data_objects::DataType dataType,
                  const std::vector<int64_t>& dims,
                  const std::vector<int64_t>& strides)
