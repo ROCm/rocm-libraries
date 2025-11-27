@@ -147,6 +147,11 @@ void testing_spmm_csr(const Arguments& arg)
                             (trans_A == rocsparse_operation_none) ? K : M,
                             nnz_A,
                             base);
+            
+    
+    // Redfine values
+    rocsparse_init_1d_array<A>(
+        hcsr_val, nnz_A, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
 
     // Some matrix properties
     J A_m = (trans_A == rocsparse_operation_none) ? M : K;
@@ -179,8 +184,8 @@ void testing_spmm_csr(const Arguments& arg)
     host_vector<C> hC_gold(nnz_C);
 
     // Initialize data on CPU
-    rocsparse_init<B>(hB, nnz_B, 1, 1, arg.convert_to_int);
-    rocsparse_init<C>(hC_1, nnz_C, 1, 1, arg.convert_to_int);
+    rocsparse_init_1d_array<B>(hB, nnz_B, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
+    rocsparse_init_1d_array<C>(hC_1, nnz_C, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
 
     hC_2    = hC_1;
     hC_gold = hC_1;

@@ -149,6 +149,9 @@ Tests:
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
+  rand_gen_min: 0.0
+  rand_gen_max: 100.0
+  convert_to_int: true
   filename: [mac_econ_fwd500,
              bmwcra_1,
              scircuit,
