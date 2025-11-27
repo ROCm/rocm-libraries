@@ -2102,8 +2102,8 @@ rocsparse_status rocsparse_const_bell_get(rocsparse_const_spmat_descr descr,
  *  @param[out]
  *  sell_colval_size       actual number of elements stored in the sliced ELL matrix.
  *  @param[out]
- *  sell_slice_offsets     slice offsets array in the sliced ELL matrix (must be array of length \p nslices + 1 
- *                         where \p nslices=(rows-1)/sell_slice_size+1 ). 
+ *  sell_slice_offsets     slice offsets array in the sliced ELL matrix (must be array of length \p nslices + 1
+ *                         where \p nslices=(rows-1)/sell_slice_size+1 ).
  *  @param[out]
  *  sell_col_ind            column indices of the sliced ELL matrix (must be array of length \p sell_colval_size ).
  *  @param[out]
@@ -2715,39 +2715,6 @@ ROCSPARSE_EXPORT
 rocsparse_status rocsparse_const_dnvec_get_values(rocsparse_const_dnvec_descr descr,
                                                   const void**                values);
 /**@}*/
-
-/*! \ingroup aux_module
- *  \brief Overwrite the increment of the dense vector, which is 1 by default.
- *
- *  @param[inout]
- *  descr        the pointer to the dense vector descriptor.
- *  @param[in]
- *  inc          value of the increment.
- *
- *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- */
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_dnvec_set_inc(rocsparse_dnvec_descr descr, int64_t inc);
-
-/*! \ingroup aux_module
- *  \brief Set the batch count and batch stride in the dense vector descriptor
- *
- *  @param[inout]
- *  descr        the pointer to the dense vector descriptor.
- *  @param[in]
- *  batch_count  the batch count in the dense vector.
- *  @param[in]
- *  batch_stride the batch stride in the dense vector
- *
- *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
- */
-ROCSPARSE_EXPORT
-rocsparse_status rocsparse_dnvec_set_strided_batch(rocsparse_dnvec_descr descr,
-                                                   rocsparse_int         batch_count,
-                                                   int64_t               batch_stride);
 
 /*! \ingroup aux_module
  *  \brief Set the values array in a dense vector descriptor
