@@ -30,6 +30,7 @@ target_sources(rocroller-tests-catch
 
         "${CMAKE_CURRENT_SOURCE_DIR}/AddDeallocateTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddPrefetchTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AddStreamKTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AliasDataFlowTagsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AnnotateInstructionsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArgumentTracerTest.cpp"
@@ -64,6 +65,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphConstraintsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphRemoveDuplicatesTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphSimplifyTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphUtilsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LDSAllocationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LDSBankModelTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LargerLDSTest.cpp"

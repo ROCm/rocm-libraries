@@ -16,8 +16,6 @@ namespace hipdnn_sdk
 namespace test_utilities
 {
 
-using namespace hipdnn_sdk::utilities;
-
 template <class T>
 class CpuFpReferenceValidation : public IReferenceValidation
 {
@@ -35,7 +33,7 @@ public:
 
     ~CpuFpReferenceValidation() override = default;
 
-    bool allClose(ITensor& reference, ITensor& implementation) const override
+    bool allClose(utilities::ITensor& reference, utilities::ITensor& implementation) const override
     {
         if(reference.elementCount() != implementation.elementCount()
            || reference.dims() != implementation.dims())
@@ -43,8 +41,8 @@ public:
             return false;
         }
 
-        TensorView<T> refView(reference);
-        TensorView<T> implView(implementation);
+        utilities::TensorView<T> refView(reference);
+        utilities::TensorView<T> implView(implementation);
 
         std::atomic<bool> result(true);
 
