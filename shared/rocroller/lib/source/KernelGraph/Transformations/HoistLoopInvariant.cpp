@@ -128,17 +128,10 @@ namespace rocRoller::KernelGraph
     int HoistLoopInvariant::hoistNodeBeforeLoop(
         KernelGraph& kgraph, int nodeToHoist, int loopNode, int predecessorNode, int sequenceEdge)
     {
-        // Duplicate the node we want to hoist
         int hoistedNode = duplicateControlNode(kgraph, nodeToHoist);
-
-        // Insert the duplicated node before the loop
-        // insertBefore will handle redirecting incoming edges and creating the sequence
+        Log::info("Hoisted node {} to new node {}", nodeToHoist, hoistedNode);
         insertBefore(kgraph, loopNode, hoistedNode, hoistedNode);
-
-        // Remove the original node from inside the loop while maintaining connectivity
         bypassAndDelete(kgraph, nodeToHoist);
-
-        // Return the hoisted node as the new predecessor for subsequent hoisting
         return hoistedNode;
     }
 
@@ -150,8 +143,10 @@ namespace rocRoller::KernelGraph
             // file << original.toDOT(true);
         }
 
+        auto graph = original;
+
         {
-            ControlFlowRWTracer tracer(original);
+            ControlFlowRWTracer tracer(graph);
             const auto          result = tracer.coordinatesReadWrite();
 
             std::unordered_map<int, std::vector<int>> coordinateAccessMap;
@@ -178,7 +173,7 @@ namespace rocRoller::KernelGraph
 
             for(const auto& [coordinate, control] : singleWriteCoordinates)
             {
-                auto enclosingLoopOpt = findEnclosingLoop(original, control);
+                auto enclosingLoopOpt = findEnclosingLoop(graph, control);
 
                 if(!enclosingLoopOpt.has_value())
                 {
@@ -188,11 +183,11 @@ namespace rocRoller::KernelGraph
 
                 int loopNode = enclosingLoopOpt.value();
 
-                auto assignNodeOpt = original.control.get<Assign>(control);
+                auto assignNodeOpt = graph.control.get<Assign>(control);
                 if(!assignNodeOpt.has_value())
                 {
                     Log::trace("Control node {} is not an Assign node, skipping", control);
-                    auto element = original.control.getElement(control);
+                    auto element = graph.control.getElement(control);
                     continue;
                 }
 
@@ -210,7 +205,7 @@ namespace rocRoller::KernelGraph
                 for(auto tag : usedTags)
                 {
                     const auto isWrittenInLoop
-                        = isCoordinateWrittenInLoop(original, loopNode, tag, tracer);
+                        = isCoordinateWrittenInLoop(graph, loopNode, tag, tracer);
 
                     if(isWrittenInLoop)
                     {
@@ -221,20 +216,53 @@ namespace rocRoller::KernelGraph
 
                 if(allTagsLoopInvariant && !usedTags.empty())
                 {
-                    Log::info("Hoisting Assign node {} before loop node {}, uses tags {}",
-                              control,
-                              loopNode,
-                              usedTags);
+                    Log::info(
+                        "Hoisting Assign node {} before loop node {}, it uses dataflowtags {}",
+                        control,
+                        loopNode,
+                        usedTags);
 
-                    auto loopPredecessors
-                        = original.control.getInputNodeIndices<ControlEdge>(loopNode)
-                              .to<std::vector>();
+                    {
+                        auto inputs = graph.control.getInputNodeIndices<ControlEdge>(control);
+                        for(auto input : inputs)
+                        {
+                            Log::info("Input nodes {}: {} {}",
+                                      control,
+                                      input,
+                                      Graph::variantToString(graph.control.getElement(input)));
+                        }
+                        auto outputs = graph.control.getOutputNodeIndices<ControlEdge>(control);
+                        for(auto output : outputs)
+                        {
+                            Log::info("Output nodes {}: {} {}",
+                                      control,
+                                      output,
+                                      Graph::variantToString(graph.control.getElement(output)));
+                        }
+                        auto inEdges
+                            = graph.control.getNeighbours<Graph::Direction::Upstream>(control);
+                        for(auto edge : inEdges)
+                        {
+                            Log::info("InEdges {}",
+                                      Graph::variantToString(graph.control.getElement(edge)));
+                        }
+                        auto outEdges
+                            = graph.control.getNeighbours<Graph::Direction::Downstream>(control);
+                        for(auto edge : outEdges)
+                        {
+                            Log::info("OutEdges {}",
+                                      Graph::variantToString(graph.control.getElement(edge)));
+                        }
+                    }
+
+                    auto loopPredecessors = graph.control.getInputNodeIndices<ControlEdge>(loopNode)
+                                                .to<std::vector>();
 
                     for(auto pred : loopPredecessors)
                     {
-                        Log::info("pred {} {}",
+                        Log::info("predicate of loop {} {}",
                                   pred,
-                                  Graph::variantToString(original.control.getElement(pred)));
+                                  Graph::variantToString(graph.control.getElement(pred)));
                     }
 
                     AssertFatal(
@@ -242,22 +270,25 @@ namespace rocRoller::KernelGraph
                         fmt::format("Got {} predecessors for loop node {} {}",
                                     loopPredecessors.size(),
                                     loopNode,
-                                    Graph::variantToString(original.control.getElement(loopNode))));
+                                    Graph::variantToString(graph.control.getElement(loopNode))));
 
                     int predecessorNode = loopPredecessors[0]; // Take the first predecessor
 
-                    hoistNodeBeforeLoop(
-                        const_cast<KernelGraph&>(original), control, loopNode, predecessorNode, -1);
+                    hoistNodeBeforeLoop(graph,
+                                        control,
+                                        loopNode,
+                                        predecessorNode,
+                                        -1); // TODO: last arg is not used
                 }
             }
         }
 
         {
             // std::fstream file("HoistLoopInvariant_after.dot");
-            // file << original.toDOT(true);
+            // file << graph.toDOT(true);
         }
 
-        return original;
+        return graph;
     }
 
     std::string HoistLoopInvariant::name() const

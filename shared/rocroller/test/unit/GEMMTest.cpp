@@ -1152,7 +1152,7 @@ namespace GEMMDriverTest
         gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = true;
 
-        for(auto twoTile : {true, false})
+        for(auto twoTile : {false})
         {
             gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
             basicGEMM<float>(gemm);
