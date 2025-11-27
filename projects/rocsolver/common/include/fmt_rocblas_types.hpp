@@ -46,7 +46,6 @@
 #endif
 #else
 #include <format>
-#include <print>
 #define BEGIN_CONDITIONAL_NAMESPACE \
     namespace std                   \
     {

@@ -10,7 +10,8 @@
 #else
 #include <format>
 #include <ostream>
-#include <print>
+#include <iostream>
+#include <cstdio>
 #include <ranges>
 #endif
 
@@ -104,19 +105,20 @@ namespace formatting
     template <class... Args>
     void print(std::format_string<Args...> fmt_string, Args&&... args)
     {
-        std::print(fmt_string, std::forward<Args>(args)...);
+
+        std::cout << std::format(fmt_string, std::forward<Args>(args)...);
     }
 
     template <class... Args>
     void print(FILE* stream, std::format_string<Args...> fmt_string, Args&&... args)
     {
-        std::print(stream, fmt_string, std::forward<Args>(args)...);
+        fprintf(stream, "%s", std::format(fmt_string, std::forward<Args>(args)...).c_str());
     }
 
     template <class... Args>
     void print(std::ostream& stream, std::format_string<Args...> fmt_string, Args&&... args)
     {
-        std::print(stream, fmt_string, std::forward<Args>(args)...);
+        stream << std::format(fmt_string, std::forward<Args>(args)...);
     }
 
     template <class... Args>
