@@ -66,10 +66,6 @@ jobs:
         run: |
           pip install -r TheRock/requirements.txt
 
-      - name: Install external python deps
-        run: |
-          pip install -r TheRock/requirements-external.txt
-
       - name: Patch rocm-libraries
         run: |
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
@@ -108,6 +104,10 @@ jobs:
         run: |
           git config --global core.longpaths true
           python ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
+
+      - name: Install external python deps
+        run: |
+          pip install -r TheRock/requirements-external.txt
 
       - name: Configure Projects
         env:
