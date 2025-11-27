@@ -39,8 +39,18 @@ from Tensile.Common import IsaVersion
 from Tensile.Utilities.Decorators.Shared import CallableGuard
 
 from copy import deepcopy
-from typing import Callable, Dict, List, Tuple
+from typing import Callable
+from enum import Enum, auto
 import Tensile.Components.CMSValidator as cmsv
+
+# Enum to distinguish between different schedule matching outcomes
+class ScheduleMatchStatus(Enum):
+    FOUND = auto()                  # Schedule found and supported
+    NO_MATCH = auto()               # Criteria don't match, continue searching
+    UNSUPPORTED_VARIANT = auto()    # Criteria match but variant unsupported, stop searching
+
+# Global registry for schedule functions
+_SCHEDULE_REGISTRY = []
 
 @dataclass
 class SyncSchedule:
@@ -141,7 +151,7 @@ class ScheduleInfo:
     def disableValidation(self):
         self.__skipValidation__ = True
 
-    def isValid(self, context: Dict):
+    def isValid(self, context: dict):
         """
         Return True if all the validation rules pass, False otherwise.
         If validation fails, a string containing the reason is returned.
@@ -411,6 +421,36 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
     return module, numCodePath
 
 
+
+def hasCustomSchedule(kernel):
+    """
+    Trampoline function that checks if a custom schedule is available.
+    Iterates through registered schedule functions and returns the first match.
+    """
+    if not kernel["UseCustomMainLoopSchedule"]:
+        return False, None
+    if not kernel["EnableMatrixInstruction"]:
+        return False, None
+    if not kernel["ISA"] == IsaVersion(9,5,0):
+        return False, None
+    if isMixed(kernel):
+        return False, None
+
+    useLDSTr = kernel["LDSTrInst"]
+    TLDS = kernel["TransposeLDS"]
+    
+    for schedule_func in _SCHEDULE_REGISTRY:
+        status, schedule = schedule_func(kernel, useLDSTr, TLDS)
+        if status == ScheduleMatchStatus.FOUND:
+            return True, schedule
+        elif status == ScheduleMatchStatus.UNSUPPORTED_VARIANT:
+            # Criteria matched but variant unsupported - stop searching
+            return False, None
+        # status == NO_MATCH: continue to next schedule
+    
+    return False, None
+
+
 @CallableGuard
 def isNN(kernel):
     return not kernel["ProblemType"]["TransposeA"] and not kernel["ProblemType"]["TransposeB"]
@@ -427,6 +467,113 @@ def isTT(kernel):
 def isTN(kernel):
     return kernel["ProblemType"]["TransposeA"] and not kernel["ProblemType"]["TransposeB"]
 
+@CallableGuard
+def is16bit(kernel):
+    return kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16()
+
+@CallableGuard
+def is8bit(kernel):
+    return kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()
+
+@CallableGuard
+def isMixed(kernel):
+    return kernel["ProblemType"]["DataTypeA"].numBytes() != kernel["ProblemType"]["DataTypeB"].numBytes()
+
+@dataclass(frozen=True)
+class TileConfig:
+    macro_tile_size_0: int
+    macro_tile_size_1: int
+    depth_u: int
+    prefetch_global_read: int
+    prefetch_local_read: int
+    direct_to_lds: bool
+    wave_separate_global_read_a: int
+    wave_separate_global_read_b: int
+
+class RegisterSchedule:
+    """
+    Decorator that registers a schedule function with its matching criteria.
+    The function is wrapped with logic that checks if the kernel matches the criteria.
+    
+    Usage:
+        @RegisterSchedule(
+            tile_config=TileConfig(256, 96, 64, 2, 1, True, 0, 0),
+            dtype_predicate=is16bit,
+            vector_widths=[8, 8, 8],
+            matrix_inst=[16, 16, 32, 1],
+            mfma_wave_group=[2, 2]
+        )
+        def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
+            ...
+    """
+    
+    def __init__(self, tile_config: TileConfig, dtype_predicate: Callable, vector_widths: list[int], matrix_inst: list[int], mfma_wave_group: list[int]):
+        """
+        Initialize the registration decorator with matching criteria.
+        
+        Args:
+            tile_config:        TileConfig object
+            dtype_predicate:    Callable that takes kernel and returns True if dtype matches
+            vector_widths:      List of [GRVWA, GRVWB, LRVW]
+            matrix_inst:        List [M, N, K, B] for MI
+            mfma_wave_group:    List [rows, cols] for MIWG
+        """
+        self.tile_config = tile_config
+        self.dtype_predicate = dtype_predicate
+        self.vector_widths = vector_widths
+        self.matrix_inst = matrix_inst
+        self.mfma_wave_group = mfma_wave_group
+    
+    def __call__(self, func: Callable) -> Callable:
+        """Wrap the function with matching logic and register it."""
+        def wrapped_func(kernel: dict, useLDSTr: bool, TLDS: int) -> tuple[ScheduleMatchStatus, ScheduleInfo | None]:
+            # TODO: Currently ULSGRO not checked for in CMS, disabled for now
+            if kernel["UnrollLoopSwapGlobalReadOrder"]:
+                return ScheduleMatchStatus.NO_MATCH, None
+
+            if not self.dtype_predicate(kernel):
+                return ScheduleMatchStatus.NO_MATCH, None
+
+            MT0, MT1, DU = kernel["MacroTile0"], kernel["MacroTile1"], kernel["DepthU"]
+            PGR, PLR, DTL = kernel["PrefetchGlobalRead"], kernel["PrefetchLocalRead"], kernel["DirectToLds"]
+            WSGRA, WSGRB = kernel["WaveSeparateGlobalReadA"], kernel["WaveSeparateGlobalReadB"]
+            kernel_tile_config = TileConfig(MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB)
+            if self.tile_config != kernel_tile_config:
+                return ScheduleMatchStatus.NO_MATCH, None
+
+            GRVWA, GRVWB = kernel["GlobalReadVectorWidthA"], kernel["GlobalReadVectorWidthB"]
+            LRVW = kernel["LocalReadVectorWidth"]
+            kernel_vector_widths = [GRVWA, GRVWB, LRVW]            
+            if self.vector_widths != kernel_vector_widths:
+                return ScheduleMatchStatus.NO_MATCH, None
+            
+            if self.matrix_inst != kernel["MatrixInstruction"]:
+                return ScheduleMatchStatus.NO_MATCH, None
+            
+            if self.mfma_wave_group != kernel["MIWaveGroup"]:
+                return ScheduleMatchStatus.NO_MATCH, None
+            
+            # All wrapper criteria matched - call inner function
+            match, schedule = func(kernel, useLDSTr, TLDS)
+            
+            if match:
+                return ScheduleMatchStatus.FOUND, schedule
+            # Inner function returned False - variant unsupported, stop searching
+            return ScheduleMatchStatus.UNSUPPORTED_VARIANT, None
+               
+        _SCHEDULE_REGISTRY.append(wrapped_func)
+        
+        # Return original function unchanged (so it can still be called directly)
+        return func
+
+
+@RegisterSchedule(
+    tile_config=TileConfig(256, 96, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
 def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
 
     optSchedule = dict()
@@ -484,6 +631,13 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
+@RegisterSchedule(
+    tile_config=TileConfig(192, 256, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
 def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
 
@@ -619,6 +773,13 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
+@RegisterSchedule(
+    tile_config=TileConfig(256, 192, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
 def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     numMfma = 96
@@ -750,6 +911,13 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
 
     return True, opt1
 
+@RegisterSchedule(
+    tile_config=TileConfig(256, 256, 128, 2, 0, True, 0, 0),
+    dtype_predicate=is8bit,
+    vector_widths=[16, 16, 16],
+    matrix_inst=[16, 16, 128, 1],
+    mfma_wave_group=[2, 2]
+)
 def _get_schedule_256x256x128_8bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
 
@@ -797,6 +965,13 @@ def _get_schedule_256x256x128_8bit(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift, mfmaReorder)
     return True, opt1
 
+@RegisterSchedule(
+    tile_config=TileConfig(256, 256, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
 def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
 
@@ -938,6 +1113,13 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
+@RegisterSchedule(
+    tile_config=TileConfig(160, 256, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
 def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     numMfma = 80
@@ -1061,6 +1243,13 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
 
     return True, opt1
 
+@RegisterSchedule(
+    tile_config=TileConfig(256, 160, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
 def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
@@ -1136,6 +1325,13 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
 
     return True, opt1
 
+@RegisterSchedule(
+    tile_config=TileConfig(256, 240, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 2, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[4, 1]
+)
 def _get_schedule_256x240x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
@@ -1234,6 +1430,13 @@ def _get_schedule_256x240x64_16bit(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
+@RegisterSchedule(
+    tile_config=TileConfig(256, 208, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 2, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[4, 1]
+)
 def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
@@ -1346,6 +1549,13 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
+@RegisterSchedule(
+    tile_config=TileConfig(224, 256, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
 def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
@@ -1395,6 +1605,13 @@ def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
+@RegisterSchedule(
+    tile_config=TileConfig(192, 320, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
 def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     kernel["SwapGlobalReadOrder"] = False
@@ -1515,6 +1732,13 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
 
     return True, opt1
 
+@RegisterSchedule(
+    tile_config=TileConfig(256, 224, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
 def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
@@ -1567,6 +1791,13 @@ def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
+@RegisterSchedule(
+    tile_config=TileConfig(320, 192, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
 def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
@@ -1657,6 +1888,13 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
+@RegisterSchedule(
+    tile_config=TileConfig(240, 256, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[2, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[1, 4]
+)
 def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     optSchedule = dict()
@@ -1767,6 +2005,13 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
         return False, None
     return True, opt1
 
+@RegisterSchedule(
+    tile_config=TileConfig(208, 256, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[2, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[1, 4]
+)
 def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     kernel["SwapGlobalReadOrder"] = False
@@ -1882,6 +2127,13 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
+@RegisterSchedule(
+    tile_config=TileConfig(128, 224, 64, 2, 1, True, 0, 0),
+    dtype_predicate=is16bit,
+    vector_widths=[8, 8, 8],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
 def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
 
@@ -1936,81 +2188,3 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
     numMfma = 56
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
-
-def hasCustomSchedule(kernel):
-
-    if not kernel["UseCustomMainLoopSchedule"]:
-        return False, None
-    # Only support kernels using matrix instructions for now
-    if not kernel["EnableMatrixInstruction"]:
-        return False, None
-    if not kernel["ISA"] == IsaVersion(9,5,0):
-        return False, None
-    # Currently ULSGRO not checked for in CMS, disabled for now
-    if kernel["UnrollLoopSwapGlobalReadOrder"]:
-        return False, None
-
-    is16bit = kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16()
-    is8bit = kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()
-    isMixed = kernel["ProblemType"]["DataTypeA"].numBytes() != kernel["ProblemType"]["DataTypeB"].numBytes()
-
-    MT0, MT1, DU, PGR, PLR, DTL = kernel["MacroTile0"], kernel["MacroTile1"], kernel["DepthU"], kernel["PrefetchGlobalRead"], kernel["PrefetchLocalRead"], kernel["DirectToLds"]
-    GRVWA, GRVWB = kernel["GlobalReadVectorWidthA"], kernel["GlobalReadVectorWidthB"]
-    LRVW = kernel["LocalReadVectorWidth"]
-    MI = kernel["MatrixInstruction"]
-    MIWG = kernel["MIWaveGroup"]
-    useLDSTr = kernel["LDSTrInst"]
-    TLDS = kernel["TransposeLDS"]
-    WSGRA, WSGRB = kernel["WaveSeparateGlobalReadA"], kernel["WaveSeparateGlobalReadB"]
-
-    is256x256x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [256, 256, 64, 2, 1, True, 0, 0]
-    is192x256x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [192, 256, 64, 2, 1, True, 0, 0]
-    is256x256x128DTL = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [256, 256, 128, 2, 0, True, 0, 0]
-    is160x256x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [160, 256, 64, 2, 1, True, 0, 0]
-    is256x160x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [256, 160, 64, 2, 1, True, 0, 0]
-    is256x192x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [256, 192, 64, 2, 1, True, 0, 0]
-    is256x240x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [256, 240, 64, 2, 1, True, 0, 0]
-    is256x208x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [256, 208, 64, 2, 1, True, 0, 0]
-    is224x256x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [224, 256, 64, 2, 1, True, 0, 0]
-    is256x224x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [256, 224, 64, 2, 1, True, 0, 0]
-    is256x96x64DTL   = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [256, 96, 64, 2, 1, True, 0, 0]
-    is320x192x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [320, 192, 64, 2, 1, True, 0, 0]
-    is240x256x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [240, 256, 64, 2, 1, True, 0, 0]
-    is208x256x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [208, 256, 64, 2, 1, True, 0, 0]
-    is192x320x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [192, 320, 64, 2, 1, True, 0, 0]
-    is320x192x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [320, 192, 64, 2, 1, True, 0, 0]
-    is128x224x64DTL  = [MT0, MT1, DU, PGR, PLR, DTL, WSGRA, WSGRB] == [128, 224, 64, 2, 1, True, 0, 0]
-
-    if is256x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
-        return _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS)
-    elif is256x256x128DTL and is8bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [16, 16, 16]) and MI == [16,16,128,1] and MIWG == [2,2]:
-        return _get_schedule_256x256x128_8bit(kernel, useLDSTr, TLDS)
-    elif is192x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16,16,32,1] and MIWG == [2,2]:
-        return _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS)
-    elif is160x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
-        return _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS)
-    elif is256x160x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
-        return _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS)
-    elif is256x192x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16,16,32,1] and MIWG == [2,2]:
-        return _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS)
-    elif is256x240x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,2,8]) and MI == [16,16,32,1] and MIWG == [4,1]:
-        return _get_schedule_256x240x64_16bit(kernel, useLDSTr, TLDS)
-    elif is256x208x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 2, 8]) and MI == [16, 16, 32, 1] and MIWG == [4, 1]:
-        return _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS)
-    elif is224x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [2, 2]:
-        return _get_schedule_224x256x64_16bit(kernel, useLDSTr, TLDS)
-    elif is256x224x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [2, 2]:
-        return _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS)
-    elif is256x96x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16,16,32,1] and MIWG == [2,2]:
-        return _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS)
-    elif is320x192x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [2, 2]:
-        return _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS)
-    elif is240x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [2,8,8]) and MI == [16,16,32,1] and MIWG == [1,4]:
-        return _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS)
-    elif is208x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [2, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [1, 4]:
-        return _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS)
-    elif is192x320x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
-        return _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS)
-    elif is128x224x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [2, 2]:
-        return _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS)
-    return False, None
