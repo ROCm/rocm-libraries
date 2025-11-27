@@ -45,11 +45,16 @@ endif()
 
 option(HIPSPARSE_BUILD_SHARED_LIBS "Build hipSPARSE as a shared library." ON)
 option(HIPSPARSE_BUILD_CLIENTS_ONLY "Build only clients." OFF)
-option(HIPSPARSE_BUILD_TESTING "Build tests (requires googletest)." OFF)
-option(HIPSPARSE_ENABLE_BENCHMARKS "Build benchmarks." ON)
-option(HIPSPARSE_ENABLE_SAMPLES "Build examples." ON)
-option(HIPSPARSE_ENABLE_FORTRAN "Enable Fortran client support." ON)
-option(HIPSPARSE_ENABLE_OPENMP "Enable OpenMP support in clients for parallel execution." ON)
+
+option(HIPSPARSE_ENABLE_CLIENT "Build hipSPARSE clients." ON)
+if(HIPSPARSE_ENABLE_CLIENT)
+    option(HIPSPARSE_ENABLE_BENCHMARKS "Build benchmark client." ON)
+    option(HIPSPARSE_ENABLE_SAMPLES "Build sample programs." ON)
+    option(HIPSPARSE_ENABLE_FORTRAN "Enable Fortran client support." ON)
+    option(HIPSPARSE_ENABLE_OPENMP "Enable OpenMP support in clients for parallel execution." ON)
+endif()
+
+option(HIPSPARSE_BUILD_TESTING "Build test client." OFF)
 option(HIPSPARSE_ENABLE_COVERAGE "Build with code coverage enabled." OFF)
 option(HIPSPARSE_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
 option(HIPSPARSE_BUILD_DOCS "Build documentation." OFF)
@@ -94,7 +99,7 @@ elseif(HIPSPARSE_ENABLE_HIP)
     find_package(rocsparse 4.0.1 REQUIRED CONFIG)
 endif()
 
-if(HIPSPARSE_BUILD_TESTING OR BUILD_TESTING OR HIPSPARSE_ENABLE_BENCHMARKS OR HIPSPARSE_ENABLE_SAMPLES)
+if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
     if(HIPSPARSE_ENABLE_OPENMP)
         find_package(OpenMP REQUIRED)
     endif()
@@ -111,7 +116,7 @@ endif()
 
 # --- Client targets ---
 
-if(HIPSPARSE_BUILD_CLIENTS_ONLY OR HIPSPARSE_ENABLE_SAMPLES OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING OR HIPSPARSE_ENABLE_BENCHMARKS)
+if(HIPSPARSE_BUILD_CLIENTS_ONLY OR HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
     if(NOT CLIENTS_OS)
         rocm_set_os_id(CLIENTS_OS)
         string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
@@ -148,7 +153,7 @@ endif()
 
 # --- Packaging and installation ---
 
-if(HIPSPARSE_BUILD_CLIENTS_ONLY OR HIPSPARSE_ENABLE_SAMPLES OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING OR HIPSPARSE_ENABLE_BENCHMARKS)
+if(HIPSPARSE_BUILD_CLIENTS_ONLY OR HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
     rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
     
