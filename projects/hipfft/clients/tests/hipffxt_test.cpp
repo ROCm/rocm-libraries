@@ -24,6 +24,8 @@
 #include <complex>
 #include <gtest/gtest.h>
 
+// For test parameters (eg verbose)
+#include "../../shared/accuracy_test.h"
 
 // FIXME: only on cuda?
 DISABLE_WARNING_PUSH
@@ -32,7 +34,41 @@ DISABLE_WARNING_RETURN_TYPE
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
 
-class hipfftxtdirectionformat : public ::testing::TestWithParam<std::tuple<int, hipfftXtSubFormat>> {};
+std::string formatname(const hipfftXtSubFormat format)
+{
+    switch(format)
+    {
+    case HIPFFT_XT_FORMAT_INPUT:
+        return "HIPFFT_XT_FORMAT_INPUT";
+    case HIPFFT_XT_FORMAT_OUTPUT:
+        return "HIPFFT_XT_FORMAT_OUTPUT";
+    case HIPFFT_XT_FORMAT_INPLACE:
+        return "HIPFFT_XT_FORMAT_INPLACE";
+    case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
+        return "HIPFFT_XT_FORMAT_INPLACE_SHUFFLED";
+    case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
+        return "HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED";
+    case HIPFFT_FORMAT_UNDEFINED:
+        return "HIPFFT_FORMAT_UNDEFINED";
+    }
+}
+
+std::string directionname(const int direction)
+{
+    switch(direction)
+    {
+    case HIPFFT_FORWARD:
+        return "HIPFFT_FORWARD";
+    case HIPFFT_BACKWARD:
+        return "HIPFFT_BACKWARD";
+    }
+}
+
+
+class hipfftxtdirectionformat : public ::testing::TestWithParam<std::tuple<int, hipfftXtSubFormat>>
+{};
+
+
 
 TEST_P(hipfftxtdirectionformat, c2cinplace)
 {
@@ -45,58 +81,70 @@ TEST_P(hipfftxtdirectionformat, c2cinplace)
     const int direction = std::get<0>(GetParam());
     const hipfftXtSubFormat informat = std::get<1>(GetParam());
     
-    const hipfftXtSubFormat outformat = informat == HIPFFT_XT_FORMAT_INPLACE ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED : HIPFFT_XT_FORMAT_INPLACE;
+    const hipfftXtSubFormat outformat
+        = informat == HIPFFT_XT_FORMAT_INPLACE
+        ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
+        : HIPFFT_XT_FORMAT_INPLACE;
 
+    if(verbose > 0)
+    {
+        std::cout << "complex-to-complex direction: " << directionname(direction)
+                  << " input format: " << formatname(informat)
+                  << " output format: " << formatname(outformat)
+                  << "\n";
+    }
+    
     hipfftHandle plan;
     hipfft_rt =   hipfftCreate(&plan);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
  
     // We can re-use the same multiple times GPU to get a "multi-gpu" transform.
     std::vector<int> gpus(ngpus);
     std::fill(gpus.begin(), gpus.end(), 0);
     hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 
     std::vector<size_t> workSize(ngpus);
     hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny, HIPFFT_Z2Z, workSize.data());
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 
     hipLibXtDesc*       inoutdesc = nullptr;
     hipfft_rt                     = hipfftXtMalloc(plan, &inoutdesc, informat);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
     
-    std::vector<std::complex<double>> cinput(Nx * Ny);
+    std::vector<std::complex<double>> input(Nx * Ny);
     for(size_t xidx = 0; xidx < Nx; ++xidx)
     {
         for(size_t yidx = 0; yidx < Ny; ++yidx)
         {
-            cinput[xidx * Ny + yidx] = std::complex<double>(xidx,yidx);
+            input[xidx * Ny + yidx] = std::complex<double>(xidx,yidx);
         }
     }
     hipfft_rt = hipfftXtMemcpy(plan,
                                reinterpret_cast<void*>(inoutdesc),
-                               reinterpret_cast<void*>(cinput.data()),
+                               reinterpret_cast<void*>(input.data()),
                                HIPFFT_COPY_HOST_TO_DEVICE);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
     
-    ASSERT_EQ(inoutdesc->subFormat, informat);
+    EXPECT_EQ(inoutdesc->subFormat, informat);
 
-    hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, HIPFFT_FORWARD);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, direction);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 
-    ASSERT_EQ(inoutdesc->subFormat, outformat);
-
+    EXPECT_EQ(inoutdesc->subFormat, outformat);
+    
+    std::vector<std::complex<double>> output(Nx * Ny);
     hipfft_rt = hipfftXtMemcpy(plan,
-                               reinterpret_cast<void*>(cinput.data()),
+                               reinterpret_cast<void*>(output.data()),
                                reinterpret_cast<void*>(inoutdesc),
                                HIPFFT_COPY_DEVICE_TO_HOST);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
     
     hipfft_rt = hipfftXtFree(inoutdesc);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 
     hipfft_rt = hipfftDestroy(plan);
-    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -115,4 +163,119 @@ INSTANTIATE_TEST_SUITE_P(
         return name;
     }
     );
-                         
+
+
+TEST_P(hipfftxtdirectionformat, r2cinplace)
+{
+    size_t    ngpus = 2;
+    const int Nx    = 1024;
+    const int Ny    = 1024;
+
+    auto hipfft_rt = HIPFFT_SUCCESS;
+    
+    const int direction = std::get<0>(GetParam());
+    const hipfftXtSubFormat informat = std::get<1>(GetParam());
+    
+    const hipfftXtSubFormat outformat
+        = informat == HIPFFT_XT_FORMAT_INPLACE
+        ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
+        : HIPFFT_XT_FORMAT_INPLACE;
+
+    if(verbose > 0)
+    {
+        std::cout << "real-to-complex direction: " << directionname(direction)
+                  << " input format: " << formatname(informat)
+                  << " output format: " << formatname(outformat)
+                  << "\n";
+    }
+    
+    hipfftHandle plan;
+    hipfft_rt =   hipfftCreate(&plan);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+
+    const bool goodcombo =
+        (direction == HIPFFT_FORWARD && informat == HIPFFT_XT_FORMAT_INPLACE)
+        ||
+        (direction == HIPFFT_BACKWARD && informat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED);
+    
+    std::vector<size_t> workSize(ngpus);
+    hipfft_rt = hipfftMakePlan2d(plan, Nx, Ny,
+                                 (direction == HIPFFT_FORWARD) ? HIPFFT_D2Z : HIPFFT_Z2D,
+                                 workSize.data());
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftMakePlan2d failed";
+    
+    hipLibXtDesc*       inoutdesc = nullptr;
+    hipfft_rt                     = hipfftXtMalloc(plan, &inoutdesc, informat);
+    if(goodcombo)
+    {
+        EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc failed";
+    }
+    else
+    {
+        EXPECT_NE(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtMalloc worked but shouldn't";
+        SUCCEED();
+    }
+
+    std::vector<double> real(Nx * Ny);
+    std::vector<std::complex<double>> complex(Nx * (Ny / 2 + 1));
+
+    if(direction == HIPFFT_FORWARD)
+    {
+        for(size_t xidx = 0; xidx < Nx; ++xidx)
+        {
+            for(size_t yidx = 0; yidx < Ny; ++yidx)
+            {
+                real[xidx * Ny + yidx] = xidx * Nx + yidx;
+            }
+        }
+    }
+    else
+    {
+        for(size_t xidx = 0; xidx < Nx; ++xidx)
+        {
+            for(size_t yidx = 0; yidx < Ny /2 + 1; ++yidx)
+            {
+                complex[xidx * Ny + yidx] = std::complex<double>(xidx,yidx);
+            }
+        }
+    }
+    hipfft_rt = hipfftXtMemcpy(plan,
+                               reinterpret_cast<void*>(inoutdesc),
+                               direction == HIPFFT_FORWARD
+                               ? reinterpret_cast<void*>(real.data())
+                               : reinterpret_cast<void*>(complex.data()),
+                               HIPFFT_COPY_HOST_TO_DEVICE);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    
+    EXPECT_EQ(inoutdesc->subFormat, informat)
+        << "informat not what expected:"
+        << " got " << formatname((hipfftXtSubFormat)inoutdesc->subFormat)
+        << " expected " << formatname((hipfftXtSubFormat)informat);
+
+    hipfft_rt = hipfftXtExecDescriptor(plan, inoutdesc, inoutdesc, direction);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "exec failed"; 
+    // if(direction == HIPFFT_FORWARD)
+    //     hipfft_rt = hipfftXtExecDescriptorD2Z(plan, inoutdesc, inoutdesc);
+    // else
+    //     hipfft_rt = hipfftXtExecDescriptorZ2D(plan, inoutdesc, inoutdesc);
+    // ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+
+    EXPECT_EQ(inoutdesc->subFormat, outformat)
+        << "outformat not what expected:"
+        << " got " << formatname((hipfftXtSubFormat)inoutdesc->subFormat)
+        << " expected " << formatname((hipfftXtSubFormat)outformat);
+
+    hipfft_rt = hipfftXtMemcpy(plan,
+                               direction == HIPFFT_FORWARD
+                               ? reinterpret_cast<void*>(complex.data())
+                               : reinterpret_cast<void*>(real.data()),
+                               reinterpret_cast<void*>(inoutdesc),
+                               HIPFFT_COPY_DEVICE_TO_HOST);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+    
+    hipfft_rt = hipfftXtFree(inoutdesc);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+
+    hipfft_rt = hipfftDestroy(plan);
+    EXPECT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+}
