@@ -8,8 +8,10 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/BatchnormFwdInferencePlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionBwdPlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionFwdPlan.hpp>
+#include <hipdnn_sdk/test_utilities/cpu_graph_executor/ConvolutionWrwPlan.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PlanBuilderRegistry.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PointwisePlan.hpp>
+#include <hipdnn_sdk/utilities/json/Graph.hpp>
 
 namespace hipdnn_sdk::test_utilities
 {
@@ -35,7 +37,7 @@ public:
             planExecutors.push_back(buildPlanForNode(graphWrap, node));
         }
 
-        std::vector<std::unique_ptr<ITensor>> virtualTensors;
+        std::vector<std::unique_ptr<utilities::ITensor>> virtualTensors;
         std::unordered_map<int64_t, void*> variantPackWithVirtualTensorsAdded
             = populateVariantPackWithMissingVirtualTensors(
                 variantPack, graphWrap.getTensorMap(), virtualTensors);
@@ -51,7 +53,7 @@ private:
         const std::unordered_map<int64_t, void*>& variantPack,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap,
-        std::vector<std::unique_ptr<ITensor>>& virtualTensors)
+        std::vector<std::unique_ptr<utilities::ITensor>>& virtualTensors)
     {
         std::unordered_map<int64_t, void*> updatedVariantPack = variantPack;
 
@@ -71,13 +73,14 @@ private:
         buildPlanForNode(const hipdnn_plugin::IGraph& graph,
                          const hipdnn_sdk::data_objects::Node& node)
     {
-        // TODO: Switch this to the node's compute_type
-        auto key = buildSignatureKey(node, graph.getTensorMap(), graph.getGraph().compute_type());
+        auto key = buildSignatureKey(node, graph.getTensorMap(), node.compute_data_type());
 
         const auto& planBuilder = _planRegistry.getPlanBuilder(key);
         if(!planBuilder.isApplicable(node, graph.getTensorMap()))
         {
-            throw std::runtime_error("Plan builder is not applicable for the given node");
+            std::string nodeName = node.name() == nullptr ? "" : " " + node.name()->str();
+            throw std::runtime_error("Plan builder is not applicable for the given node: "
+                                     + nodeName);
         }
 
         return planBuilder.buildNodePlan(graph, node);
@@ -103,6 +106,8 @@ private:
             return ConvolutionFwdSignatureKey(node, tensorMap, computeType);
         case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes:
             return ConvolutionBwdSignatureKey(node, tensorMap, computeType);
+        case hipdnn_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes:
+            return ConvolutionWrwSignatureKey(node, tensorMap, computeType);
         default:
             throw std::runtime_error("Unsupported node type for signature key generation");
         }

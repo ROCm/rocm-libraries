@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -214,22 +214,27 @@ CK_TILE_DEVICE fp8x8_t amd_assembly_i4_to_fp8x8(int a)
 
     uint32_t tmp_pos, tmp_neg, tmp_res_even, tmp_res_odd, final_sel;
 
+    // ---- Lower 4 int4 values (even positions) ----
+    // Extract dictionary indices: low 3 bits of each byte (values 0..7).
     uint32_t dict_sel = a & 0x07070707;
-    uint32_t sign     = a >> 1;
-    asm volatile("v_and_or_b32 %0, %1, %2, %3"
-                 : "=v"(final_sel)
-                 : "v"(sign), "v"(0x04040404), "v"(0x03020100));
-
-    tmp_pos      = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
-    tmp_neg      = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
+    // sign bit is bit[2] of each nibble after bias; shift to isolate per-byte sign.
+    uint32_t sign = a >> 1;
+    // Build final selector:
+    //   - bit 2 of each byte (0x04) selects negative vs positive table
+    //   - 0x03020100 selects byte lanes [0,1,2,3] in order
+    final_sel = (sign & 0x04040404) | 0x03020100;
+    // Lookup positive and negative fp8 codes from the small register tables.
+    tmp_pos = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
+    tmp_neg = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
+    // Select per-lane between tmp_pos and tmp_neg using the sign-derived selector.
     tmp_res_even = __builtin_amdgcn_perm(tmp_neg, tmp_pos, final_sel);
 
+    // ---- Upper 4 int4 values (odd positions) ----
+    // Shift to bring the high-nibble int4s into place and repeat the process.
     a >>= 4;
-    dict_sel = a & 0x07070707;
-    sign     = a >> 1;
-    asm volatile("v_and_or_b32 %0, %1, %2, %3"
-                 : "=v"(final_sel)
-                 : "v"(sign), "v"(0x04040404), "v"(0x03020100));
+    dict_sel  = a & 0x07070707;
+    sign      = a >> 1;
+    final_sel = (sign & 0x04040404) | 0x03020100;
 
     tmp_pos           = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
     tmp_neg           = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
@@ -306,22 +311,29 @@ CK_TILE_DEVICE bf8x8_t amd_assembly_i4_to_bf8x8(uint32_t a)
 
     uint32_t tmp_pos, tmp_neg, tmp_res_even, tmp_res_odd, final_sel;
 
+    // ---- Lower 4 int4 values (even positions) ----
+    // Extract dictionary indices: low 3 bits of each byte (values 0..7).
     uint32_t dict_sel = a & 0x07070707;
-    uint32_t sign     = a >> 1;
-    asm volatile("v_and_or_b32 %0, %1, %2, %3"
-                 : "=v"(final_sel)
-                 : "v"(sign), "v"(0x04040404), "v"(0x03020100));
 
-    tmp_pos      = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
-    tmp_neg      = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
+    // sign bit is bit[2] of each nibble after bias; shift to isolate per-byte sign.
+    uint32_t sign = a >> 1;
+    // Build final selector:
+    //   - bit 2 of each byte (0x04) selects negative vs positive table
+    //   - 0x03020100 selects byte lanes [0,1,2,3] in order
+    final_sel = (sign & 0x04040404) | 0x03020100;
+
+    // Lookup positive and negative fp8 codes from the small register tables.
+    tmp_pos = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
+    tmp_neg = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
+    // Select per-lane between tmp_pos and tmp_neg using the sign-derived selector.
     tmp_res_even = __builtin_amdgcn_perm(tmp_neg, tmp_pos, final_sel);
 
+    // ---- Upper 4 int4 values (odd positions) ----
+    // Shift to bring the high-nibble int4s into place and repeat the process.
     a >>= 4;
-    dict_sel = a & 0x07070707;
-    sign     = a >> 1;
-    asm volatile("v_and_or_b32 %0, %1, %2, %3"
-                 : "=v"(final_sel)
-                 : "v"(sign), "v"(0x04040404), "v"(0x03020100));
+    dict_sel  = a & 0x07070707;
+    sign      = a >> 1;
+    final_sel = (sign & 0x04040404) | 0x03020100;
 
     tmp_pos           = __builtin_amdgcn_perm(reg1, reg0, dict_sel);
     tmp_neg           = __builtin_amdgcn_perm(reg3, reg2, dict_sel);
@@ -454,11 +466,8 @@ struct PassThrough
     }
 
     template <typename E, typename C, typename... Ds>
-    CK_TILE_HOST_DEVICE auto operator()(E& e, const C& c, const Ds&... ds) const -> void
+    CK_TILE_HOST_DEVICE auto operator()(E& e, const C& c, const Ds&...) const -> void
     {
-        // Suppress unused parameter warning for ds
-        ((void)ds, ...);
-
         // Just assign e with c
         if constexpr(std::is_same_v<E, C>)
         {
@@ -1540,6 +1549,23 @@ struct Logistic
     const float alpha_;
 };
 
+struct Clamp
+{
+    CK_TILE_HOST_DEVICE Clamp(float lower = std::numeric_limits<float>::lowest(),
+                              float upper = std::numeric_limits<float>::max())
+        : lower_(lower), upper_(upper) {};
+
+    template <typename T>
+    CK_TILE_HOST_DEVICE constexpr void operator()(T& y, const T& x) const
+    {
+        T lower = ck_tile::type_convert<T>(lower_);
+        T upper = ck_tile::type_convert<T>(upper_);
+        y       = ck_tile::clamp(x, lower, upper);
+    }
+
+    float lower_, upper_;
+};
+
 struct ConvInvscale
 {
     static constexpr const char* name = "ConvInvscale";
@@ -1627,6 +1653,55 @@ struct Cast
     {
         y = ck_tile::type_convert<DstType>(x);
     };
+};
+
+/**
+ * @brief Compose two unary element-wise functions into one.
+ *
+ *
+ * @note The Ds tensor can be used by at most one of the composed functions.
+ * This holds even if compositions are chained:
+ * In `Compose<FA, Compose<FB, FC>>`, only one of `FA`, `FB`, or `FC` can use
+ * the Ds tensor.
+ *
+ * @tparam FuncA    The first function to be applied.
+ * @tparam FuncB    The second function to be applied.
+ * @tparam FuncADs  Whether `FuncA` uses the Ds tensor.
+ * @tparam FuncBDs  Whether `FuncB` uses the Ds tensor.
+ */
+template <typename FuncA, typename FuncB, bool FuncADs = false, bool FuncBDs = false>
+struct Compose
+{
+    static_assert(!(FuncADs && FuncBDs), "Only one composed function may use the Ds tensor.");
+
+    CK_TILE_HOST_DEVICE Compose(FuncA func_a_ = FuncA{}, FuncB func_b_ = FuncB{})
+        : func_a(func_a_), func_b(func_b_)
+    {
+    }
+
+    template <typename AIn, typename BOut, typename AOut = AIn, typename... ADs>
+    CK_TILE_HOST_DEVICE constexpr void operator()(BOut& y, const AIn& x, const ADs&... ds) const
+    {
+        AOut tmp;
+        if constexpr(FuncADs)
+        {
+            func_a(tmp, x, ds...);
+            func_b(y, tmp);
+        }
+        else if constexpr(FuncBDs)
+        {
+            func_a(tmp, x);
+            func_b(y, tmp, ds...);
+        }
+        else
+        {
+            func_a(tmp, x);
+            func_b(y, tmp);
+        }
+    }
+
+    const FuncA func_a;
+    const FuncB func_b;
 };
 
 // support fastconvert of int8 to fp16

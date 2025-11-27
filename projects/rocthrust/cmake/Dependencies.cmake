@@ -238,24 +238,26 @@ endfunction()
 
 fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH ROCM_DEP_RELEASE_BRANCH)
 
-# If rocPRIM was found in the monorepo tree or was downloaded, we need to build it.
-# Set up download_project to build from the existing rocprim directory at ${ROCPRIM_PATH}.
-# Note that since we don't set any download-related options, nothing is actually downloaded here - just built.
-if(${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD")
-  download_project(
-    PROJ                rocprim
-    SOURCE_DIR          ${ROCPRIM_PATH}
-    INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
-    CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
-    LOG_CONFIGURE       TRUE
-    LOG_BUILD           TRUE
-    LOG_INSTALL         TRUE
-    BUILD_PROJECT       TRUE
-    STATUS_MSG          "Building"
-  )
-
-  find_package(rocprim REQUIRED CONFIG PATHS ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim NO_DEFAULT_PATH)
-endif()
+if(${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO")
+    # The fetch_dep call above should have downloaded/located the source. We just need to make it available.
+    message(STATUS "Configuring rocPRIM")
+    FetchContent_Declare(
+      prim
+      SOURCE_DIR    ${ROCPRIM_PATH}
+      INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
+      CMAKE_ARGS    -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
+      LOG_CONFIGURE TRUE
+      LOG_BUILD     TRUE
+      LOG_INSTALL   TRUE
+    )
+    FetchContent_MakeAvailable(prim)
+    if(NOT TARGET roc::rocprim)
+      add_library(roc::rocprim ALIAS rocprim)
+    endif()
+    if(NOT TARGET roc::rocprim_hip)
+      add_library(roc::rocprim_hip ALIAS rocprim_hip)
+    endif()
+  endif()
 
 # Test dependencies
 if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
@@ -268,45 +270,45 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   endif()
 
   if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
-    message(STATUS "GTest not found or force download GTest on. Downloading and building GTest.")
-    set(GTEST_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/gtest CACHE PATH "")
-
-    download_project(
-      PROJ                googletest
-      GIT_REPOSITORY      https://github.com/google/googletest.git
-      GIT_TAG             release-1.11.0
-      GIT_SHALLOW         TRUE
-      INSTALL_DIR         ${GTEST_ROOT}
-      CMAKE_ARGS          -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
-      LOG_DOWNLOAD        TRUE
-      LOG_CONFIGURE       TRUE
-      LOG_BUILD           TRUE
-      LOG_INSTALL         TRUE
-      BUILD_PROJECT       TRUE
-      UPDATE_DISCONNECTED TRUE
-    )
-    find_package(GTest REQUIRED CONFIG PATHS ${GTEST_ROOT})
+    option(BUILD_GTEST "Builds the googletest subproject" ON)
+    option(BUILD_GMOCK "Builds the googlemock subproject" OFF)
+    option(INSTALL_GTEST "Enable installation of googletest." OFF)
+    if(EXISTS /usr/src/googletest AND NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
+      FetchContent_Declare(
+        googletest
+        SOURCE_DIR /usr/src/googletest
+      )
+    else()
+      message(STATUS "Google Test not found. Fetching...")
+      FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG        release-1.11.0
+      )
+    endif()
+    FetchContent_MakeAvailable(googletest)
+    add_library(GTest::GTest ALIAS gtest)
+    add_library(GTest::Main  ALIAS gtest_main)
   endif()
 
   if (NOT TARGET TBB::tbb AND NOT TARGET tbb AND BUILD_HIPSTDPAR_TEST_WITH_TBB)
     message(STATUS "TBB not found or force download TBB on. Downloading and building TBB.")
     set(TBB_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/tbb CACHE PATH "" FORCE)
 
-    download_project(
-      PROJ  TBB
+    FetchContent_Declare(
+      TBB
       GIT_REPOSITORY      https://github.com/oneapi-src/oneTBB.git
       GIT_TAG             1c4c93fc5398c4a1acb3492c02db4699f3048dea # v2021.13.0
-      INSTALL_DIR         ${TBB_ROOT}
+      INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/deps/tbb
       CMAKE_ARGS          -DCMAKE_CXX_COMPILER=g++ -DTBB_TEST=OFF -DTBB_BUILD=ON -DTBB_INSTALL=ON -DTBBMALLOC_PROXY_BUILD=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
-      LOG_DOWNLOAD        TRUE
       LOG_CONFIGURE       TRUE
       LOG_BUILD           TRUE
       LOG_INSTALL         TRUE
-      BUILD_PROJECT       TRUE
-      UPDATE_DISCONNECTED TRUE
     )
-    find_package(TBB REQUIRED CONFIG PATHS ${TBB_ROOT})
-
+    FetchContent_MakeAvailable(TBB)
+    if(NOT TARGET TBB::tbb)
+      add_library(TBB::tbb)
+    endif()
   endif()
 
   # SQlite (for run-to-run bitwise-reproducibility tests)
@@ -386,21 +388,18 @@ if(BUILD_BENCHMARK)
       endif()
     endif()
 
-    download_project(
-      PROJ                googlebenchmark
-      GIT_REPOSITORY      https://github.com/google/benchmark.git
-      GIT_TAG             v${BENCHMARK_VERSION}
-      GIT_SHALLOW         TRUE
-      INSTALL_DIR         ${GOOGLEBENCHMARK_ROOT}
-      CMAKE_ARGS          -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DBUILD_SHARED_LIBS=OFF -DBENCHMARK_ENABLE_TESTING=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_CXX_STANDARD=14 ${COMPILER_OVERRIDE}
-      LOG_DOWNLOAD        TRUE
-      LOG_CONFIGURE       TRUE
-      LOG_BUILD           TRUE
-      LOG_INSTALL         TRUE
-      BUILD_PROJECT       TRUE
-      UPDATE_DISCONNECTED TRUE
+    message(STATUS "Google Benchmark not found. Fetching...")
+    option(BENCHMARK_ENABLE_TESTING "Enable testing of the benchmark library." OFF)
+    option(BENCHMARK_ENABLE_INSTALL "Enable installation of benchmark." OFF)
+    FetchContent_Declare(
+      googlebench
+      GIT_REPOSITORY https://github.com/google/benchmark.git
+      GIT_TAG        v${BENCHMARK_VERSION}
     )
-    find_package(benchmark REQUIRED CONFIG PATHS ${GOOGLEBENCHMARK_ROOT} NO_DEFAULT_PATH)
+    FetchContent_MakeAvailable(googlebench)
+    if(NOT TARGET benchmark::benchmark)
+      add_library(benchmark::benchmark ALIAS benchmark)
+    endif()
   endif()
 
   # rocRAND (https://github.com/ROCm/rocm-libraries)
@@ -410,29 +409,27 @@ if(BUILD_BENCHMARK)
   # The path to the repo will is stored in ${ROCRAND_PATH}.
   if(${ROCRAND_FETCH_METHOD} STREQUAL "MONOREPO" OR ${ROCRAND_FETCH_METHOD} STREQUAL "DOWNLOAD")
     message(STATUS "Downloading and building rocrand.")
-    set(ROCRAND_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand CACHE PATH "")
-
     set(EXTRA_CMAKE_ARGS "-DGPU_TARGETS=${GPU_TARGETS}")
-    # CMAKE_ARGS of download_project (or ExternalProject_Add) can't contain ; so another separator
-    # is needed and LIST_SEPARATOR is passed to download_project()
+    # CMAKE_ARGS of FetchContent_Declare (or ExternalProject_Add) can't contain ; so another separator
+    # is needed and LIST_SEPARATOR is passed to FetchContent_Declare()
     string(REPLACE ";" "|" EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS}")
     # Pass launcher so sccache can be used to speed up building rocRAND
     if(CMAKE_CXX_COMPILER_LAUNCHER)
       set(EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}")
     endif()
-    download_project(
-      PROJ                  rocrand
-      SOURCE_DIR            ${ROCRAND_PATH}
-      INSTALL_DIR           ${ROCRAND_ROOT}
-      LIST_SEPARATOR        |
-      CMAKE_ARGS            -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}
-      LOG_CONFIGURE         TRUE
-      LOG_BUILD             TRUE
-      LOG_INSTALL           TRUE
-      LOG_OUTPUT_ON_FAILURE TRUE
-      BUILD_PROJECT         TRUE
-      STATUS_MSG            "Building"
+    
+    FetchContent_Declare(
+      rocrand
+      SOURCE_DIR    ${ROCRAND_PATH}
+      INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand
+      CMAKE_ARGS    -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}
+      LOG_CONFIGURE TRUE
+      LOG_BUILD     TRUE
+      LOG_INSTALL   TRUE
     )
-    find_package(rocrand REQUIRED CONFIG PATHS ${ROCRAND_ROOT})
+    FetchContent_MakeAvailable(rocrand)
+    if(NOT TARGET roc::rocrand)
+      add_library(roc::rocrand ALIAS rocrand)
+    endif()
   endif()
 endif()

@@ -35,6 +35,7 @@
 #include <Tensile/Tensile.hpp>
 
 #include <Tensile/Activation.hpp>
+#include <Tensile/CachingLibrary.hpp>
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/Predicates.hpp>
@@ -182,6 +183,7 @@ namespace TensileLite
         using Problem       = ContractionProblemGemm;
         using Inputs        = ContractionInputs;
         using GroupedInputs = ContractionGroupedInputs;
+        using ParamsCache  = CacheMap<std::pair<int32_t, uint32_t>, Problem>;
 
         /**
          * Indicate a solution is equally or estimatedly matched.
@@ -277,6 +279,7 @@ namespace TensileLite
          * Calculate required workspace size.
          */
         size_t requiredWorkspaceSize(Problem const& problem, Hardware const& hardware) const;
+        size_t requiredWorkspaceSizeGsu(Problem const& problem, Hardware const& hardware, size_t gsu) const;
         size_t requiredWorkspaceSizeGroupedGemm(std::vector<Problem> const& problems,
                                                 Hardware const&             hardware) const;
         size_t requiredHostSizeGroupedGemmSingle(Problem const&  problem,
@@ -284,8 +287,11 @@ namespace TensileLite
 
         size_t requiredSynchronizerSize(Problem const& problem, Hardware const& hardware) const;
 
+        void calculateGrid(dim3& workGroupSize,
+                           dim3& numWorkGroups,
+                           ContractionSolution::Problem const& problem) const;
         origami::streamk::reduction_type getSKReduction(Problem const& problem, Hardware const& hardware) const;
-        size_t getSKGrid(Problem const& problem, Hardware const& hardware, size_t tiles, origami::streamk::reduction_type reductionStrat) const;
+        size_t getSKGrid(Problem const& problem, Hardware const& hardware, size_t tiles, origami::streamk::reduction_type& reductionStrat) const;
         size_t partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);
@@ -530,6 +536,7 @@ namespace TensileLite
         bool                         debugKernel     = false;
         bool                         kernelArgsLog   = false;
         mutable int                  isFallbackCUSol = -1; // -1:unset, 0:false, 1:true
+        mutable ParamsCache paramsCache = ParamsCache(std::make_pair(0,0));
 
         std::shared_ptr<Predicates::Predicate<Task>> taskPredicate
             = std::make_shared<Predicates::True<Task>>();
@@ -559,7 +566,9 @@ namespace TensileLite
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
-        std::pair<int32_t, uint32_t> calculateAutoWGM(Problem const& problem, Hardware const* hardware) const;
+        std::pair<int32_t, uint32_t> calculateAutoWGM(Problem const&  problem, 
+                                                      Hardware const* hardware, 
+                                                      uint32_t        skgrid) const;
         uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
     };
 

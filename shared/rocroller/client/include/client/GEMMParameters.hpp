@@ -36,6 +36,8 @@
 #include <rocRoller/Utilities/Utils.hpp>
 
 #include "client/BenchmarkSolution.hpp"
+#include <DataGenerator.hpp>
+#include <common/SourceMatcher.hpp>
 
 namespace rocRoller
 {
@@ -52,6 +54,21 @@ namespace rocRoller
                 N,
 
                 Count
+            };
+
+            struct MNKTuple
+            {
+                int m, n, k;
+            };
+
+            struct MNKBTuple
+            {
+                int m, n, k, b;
+            };
+
+            struct MKNLTuple
+            {
+                int m, k, n, l;
             };
 
             std::string toString(TransposeType trans);
@@ -105,6 +122,8 @@ namespace rocRoller
                 // When scaleA/B is ScaleMode::SingleScale
                 float scaleValueA, scaleValueB;
 
+                DGen::DataInitMode initModeA, initModeB, initModeC;
+
                 int workgroupMappingDim;
             };
 
@@ -140,8 +159,9 @@ namespace rocRoller
                 bool loadLDSScaleA = false;
                 bool loadLDSScaleB = false;
 
-                bool swizzleScale  = false;
-                bool prefetchScale = false;
+                bool      swizzleScale    = false;
+                MKNLTuple swizzleTileSize = {0, 0, 0, 0};
+                bool      prefetchScale   = false;
 
                 // Other options
                 Parameters::Solution::LoadPath loadPathA{
@@ -181,10 +201,49 @@ namespace rocRoller
                 rocRoller::Client::BenchmarkResults benchmarkResults;
             };
 
+            std::ostream& operator<<(std::ostream& s, MNKTuple const& x);
+            std::ostream& operator<<(std::ostream& s, MNKBTuple const& x);
+            std::ostream& operator<<(std::ostream& s, MKNLTuple const& x);
             std::ostream& operator<<(std::ostream& s, TransposeType const& x);
             std::ostream& operator<<(std::ostream& s, TypeParameters const& x);
             std::ostream& operator<<(std::ostream& s, ProblemParameters const& x);
             std::ostream& operator<<(std::ostream& s, SolutionParameters const& x);
         }
     }
+}
+
+namespace rocRoller::Client::GEMMClient::CLI
+{
+    constexpr bool PARSE_SUCCESS = true;
+    constexpr bool PARSE_FAILURE = false;
+
+    /**
+     * @brief Parse an MxNxK or MxNxKxB tuple from a string.
+     *
+     * If B is missing, it is set to 1.
+     *
+     * Asserts that all values are positive.
+     */
+    bool ParseMNKB(const std::string& arg, rocRoller::Client::GEMMClient::MNKBTuple& x);
+
+    /**
+     * @brief Parse an MxNxK tuple from a string.
+     *
+     * Asserts that all values are positive.
+     */
+    bool ParseMNK(const std::string& arg, rocRoller::Client::GEMMClient::MNKTuple& x);
+
+    /**
+     * @brief Parse an MxK/NxL tuple from a string.
+     *
+     * Asserts that all values are positive.
+     */
+    bool ParseMKNL(const std::string& arg, rocRoller::Client::GEMMClient::MKNLTuple& x);
+
+    /**
+     * @brief Parse a DataInitMode variant from a string.
+     *
+     * Asserts that argument is well-formed.
+     */
+    bool ParseInitMode(const std::string& arg, DGen::DataInitMode& result);
 }

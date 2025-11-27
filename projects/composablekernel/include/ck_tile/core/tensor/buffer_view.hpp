@@ -1,15 +1,12 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/arch/arch.hpp"
-#if __clang_major__ >= 20
 #include "ck_tile/core/arch/amd_buffer_addressing_builtins.hpp"
-#else
 #include "ck_tile/core/arch/amd_buffer_addressing.hpp"
-#endif
 #include "ck_tile/core/arch/generic_memory_space_atomic.hpp"
 #include "ck_tile/core/container/array.hpp"
 #include "ck_tile/core/numeric/integer.hpp"

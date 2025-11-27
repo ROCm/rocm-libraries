@@ -11,6 +11,7 @@
   - [Implementation Details & Best Practices](#implementation-details)
   - [Key Files Reference](#key-files-reference)
 - [Plugin Architecture](#plugin-architecture)
+- [Plugin Loading](#plugin-loading)
 - [Example: MIOpen Legacy Plugin](#example-miopen-legacy-plugin)
 
 ---
@@ -72,7 +73,7 @@ Before creating a plugin, ensure you have **built and installed hipDNN**. Plugin
 
 2. **Implement Plugin API Functions**
 
-   The underlying implementation below the plugin API level is entirely at the developer's discretion. While the following architectural components are recommended for code organization and maintainability; the only true requirement is to implement the exported API functions defined in `engine_plugin_api.h`. However, the common architectural pattern consists of:
+   The underlying implementation below the plugin API level is entirely at the developer's discretion. While the following architectural components are recommended for code organization and maintainability, the only true requirement is to implement the exported API functions defined in `engine_plugin_api.h`. However, the common architectural pattern consists of:
    - **Engine Manager**: Manages available engines and their capabilities
    - **Engine**: Implements graph execution for specific operations (each engine must have a globally unique `int64_t` ID)
    - **Execution Plans**: Define how operations are executed
@@ -108,12 +109,12 @@ For **Engine Implementations**:
 In general, the **best practices** consist of:
 
 1. Organizing kernels by operation type
-2. Efficiently manage device memory allocations and transfers
-3. Validate inputs and provide meaningful error messages and logs via the sdk
-4. Properly manage compute streams for asynchronous execution
-5. Profile kernels and optimize for target hardware
-6. Validate and document supported operations, hardware requirements, and limitations
-7. Include unit tests and integration tests
+2. Efficiently managing device memory allocations and transfers
+3. Validating inputs and provide meaningful error messages and logs via the sdk
+4. Properly managing compute streams for asynchronous execution
+5. Profiling kernels and optimize for target hardware
+6. Validating and documenting supported operations, hardware requirements, and limitations
+7. Including unit tests and integration tests
 
 ### Key Files Reference
 
@@ -152,14 +153,14 @@ Your plugin's CMakeLists.txt should:
 
 When building an external plugin, the hipDNN SDK provides CMake variables to help you install your plugin in the correct location:
 
-- **Absolute path** (`HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR`): 
+- **Absolute path** (`HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR`):
   - Hardcoded at CMake configure time
-  - This is intended for **developer-use only**
-  
+  - This is intended for **developer use only**
+
 - **Relative path** (`HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR`):
   - **Recommended for installations**
-  - Automatically prepends the `CMAKE_INSTALL_PREFIX` of the consumer 
-  - Remains correct when setting the prefix during the CMake install command 
+  - Automatically prepends the `CMAKE_INSTALL_PREFIX` of the consumer
+  - Remains correct when setting the prefix during the CMake install command
 
 ```cmake
 find_package(hipdnn_sdk CONFIG REQUIRED) # or hipdnn_frontend which includes hipdnn_sdk
@@ -248,6 +249,10 @@ hipdnnStatus_t hipdnnSetEnginePluginPaths_ext(
     hipdnnPluginLoadingMode_ext_t loading_mode
 );
 ```
+
+### Plugin Symbol Resolution
+All plugins are loaded with `RTLD_NOW` to ensure that all symbols are resolved at load time. This means
+that all dependencies must be satisfied when the plugin is loaded. To avoid symbol conflicts, all plugins must be built with with `-fvisibility=hidden` to limit symbol exposure.
 
 #### Path Resolution
 
@@ -365,8 +370,11 @@ Integration tests validate end-to-end functionality of your plugin:
   - Test different data types, layouts, dimensions, and edge-cases for each
   - Enable tests for all supported ASICs
   - GPU typically required for meaningful validation
+  - Tests are divided into two categories described by the prefix argument passed to INSTANTIATE_TEST_SUITE_P
+    - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
+    - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
 
-For a comprehensive example of an integration test, see: [`plugins/miopen_legacy_plugin/integration_tests/BatchnormFwdInferenceIntegrationTest.cpp`](../plugins/miopen_legacy_plugin/integration_tests/BatchnormFwdInferenceIntegrationTest.cpp)
+For a comprehensive example of an integration test, see: [`plugins/miopen_legacy_plugin/integration_tests/IntegrationGpuBatchnormForwardInference.cpp`](../plugins/miopen_legacy_plugin/integration_tests/IntegrationGpuBatchnormForwardInference.cpp)
 
 Moreover, see our [general testing requirements](./testing/TestingStrategy.md#general-testing-requirements).
 

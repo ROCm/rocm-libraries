@@ -27,7 +27,13 @@ import pathlib
 from itertools import product
 from typing import List
 
-from rrperf.problems import CodeGenRun, GEMMRun, TensileRun, TypeParameters
+from rrperf.problems import (
+    CodeGenRun,
+    GEMMRun,
+    MKNLTuple,
+    TensileRun,
+    TypeParameters,
+)
 from rrperf.utils import rocm_gfx
 
 repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
@@ -127,6 +133,10 @@ HGEMM_7680x8448x8448 = dict(
     workgroup_size_x=128,
     workgroup_size_y=2,
     types=TypeParameters(fp16, trans_A="N", trans_B="T"),
+)
+
+SGEMM_256x256x16384 = dict(
+    M=256, N=256, K=16384, mac_m=64, mac_n=64, mac_k=64, types=fp32
 )
 
 
@@ -612,6 +622,24 @@ def streamk():
         )
 
 
+def smallMN_largeK_fp32():
+    yield mkGEMM(
+        SGEMM_256x256x16384,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        visualize=False,
+        prefetch=False,  # TODO: Fix k loop unrolling with stream k
+        # prefetchInFlight=2,
+        # prefetchLDSFactor=2,
+        streamK=False,
+        types=TypeParameters(
+            SGEMM_256x256x16384["types"],
+            trans_A="T",
+            trans_B="N",
+        ),
+    )
+
+
 def scalar_is_zero():
     # TODO: Make streamK and ConstantPropagation transformation can be both applied
     sgemm = update_parameters(
@@ -1022,6 +1050,7 @@ def fp4_target():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 64 // 32 * 2 * 2, 64, 64 // 32 * 2 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1069,6 +1098,7 @@ def fp4_target_d2lds_mi32x32x64_pf2x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 64 // 32 * 2 * 2, 64, 64 // 32 * 2 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1145,6 +1175,59 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 64 // 32 * 2 * 4, 64, 64 // 32 * 2 * 4),
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
+
+
+def fp4_target_d2lds_mi32x32x64_st32x8_pf4x1():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        beta=0.0,
+        mac_m=128,
+        mac_n=128,
+        mac_k=256,
+        wave_m=32,
+        wave_n=32,
+        wave_k=64,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        unroll_x=0,
+        unroll_y=0,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadLDSScale_A=False,
+        loadLDSScale_B=False,
+        storeLDS_D=False,
+        prefetch=True,
+        prefetchInFlight=4,
+        prefetchLDSFactor=1,
+        prefetchScale=True,
+        swizzleScale=True,
+        prefetchMixMemOps=True,
+        betaInFma=True,
+        scheduler="Priority",
+        matchMemoryAccess=True,
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleBlockSize=32,
+        ),
+        swizzleTileSize=MKNLTuple(32, 8, 32, 8),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1153,10 +1236,12 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
 
 def fp4_target_d2lds_mi32x32x64_pf4x1_wgm():
     yield from add_wgm((0, 2), fp4_target_d2lds_mi32x32x64_pf4x1())
+    yield from add_wgm((0, 2), fp4_target_d2lds_mi32x32x64_st32x8_pf4x1())
 
 
 def fp4_target_d2lds_mi32x32x64_pf4x1_both():
     yield from fp4_target_d2lds_mi32x32x64_pf4x1()
+    yield from fp4_target_d2lds_mi32x32x64_st32x8_pf4x1()
     yield from fp4_target_d2lds_mi32x32x64_pf4x1_wgm()
 
 
@@ -1206,6 +1291,60 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 128 // 32 * 1 * 4, 64, 128 // 32 * 1 * 4),
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
+
+
+def fp4_target_d2lds_mi16x16x128_st32x8_pf4x1():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        beta=0.0,
+        mac_m=128,
+        mac_n=128,
+        mac_k=256,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        unroll_x=0,
+        unroll_y=0,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadLDSScale_A=False,
+        loadLDSScale_B=False,
+        storeLDS_D=False,
+        prefetch=True,
+        prefetchInFlight=4,
+        prefetchLDSFactor=1,
+        prefetchScale=True,
+        swizzleScale=True,
+        prefetchMixMemOps=True,
+        betaInFma=True,
+        scheduler="Priority",
+        schedulerCost="LinearWeightedSimple",
+        matchMemoryAccess=True,
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleBlockSize=32,
+        ),
+        swizzleTileSize=MKNLTuple(32, 8, 32, 8),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1214,11 +1353,75 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
 
 def fp4_target_d2lds_mi16x16x128_pf4x1_wgm():
     yield from add_wgm((0, 2), fp4_target_d2lds_mi16x16x128_pf4x1())
+    yield from add_wgm((0, 2), fp4_target_d2lds_mi16x16x128_st32x8_pf4x1())
 
 
 def fp4_target_d2lds_mi16x16x128_pf4x1_both():
     yield from fp4_target_d2lds_mi16x16x128_pf4x1()
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf4x1()
     yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
+
+
+def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        beta=0.0,
+        mac_m=128,
+        mac_n=128,
+        mac_k=256,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        unroll_x=0,
+        unroll_y=0,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadLDSScale_A=False,
+        loadLDSScale_B=False,
+        storeLDS_D=False,
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=1,
+        prefetchScale=True,
+        swizzleScale=True,
+        prefetchMixMemOps=True,
+        betaInFma=True,
+        scheduler="Priority",
+        schedulerCost="LinearWeightedSimple",
+        matchMemoryAccess=True,
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleBlockSize=32,
+        ),
+        swizzleTileSize=MKNLTuple(32, 8, 32, 8),
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
+
+
+def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm():
+    yield from add_wgm((0, 2), fp4_target_d2lds_mi16x16x128_st32x8_pf2x1())
+
+
+def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_both():
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1()
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm()
 
 
 def does_this_fail():
@@ -1328,7 +1531,9 @@ def fp4_kernels_no_wgm():
     yield from fp4_target()
     yield from fp4_target_d2lds_mi32x32x64_pf2x1()
     yield from fp4_target_d2lds_mi32x32x64_pf4x1()
+    yield from fp4_target_d2lds_mi32x32x64_st32x8_pf4x1()
     yield from fp4_target_d2lds_mi16x16x128_pf4x1()
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf4x1()
     # yield from fp4_single_scale_target_d2lds_mi16x16x128_pf4x1()
 
 
@@ -1342,6 +1547,8 @@ def fp4_kernels_wgm():
 def fp4_16x16x128_scale_options():
     yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
     yield from addSkipPermlane(fp4_target_d2lds_mi16x16x128_pf4x1_wgm())
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm()
+    yield from addSkipPermlane(fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm())
 
 
 def fp4_32x32x64_scale_options():
@@ -1409,6 +1616,7 @@ def mxfp8_target_128x256():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 128 // 32 * 1 * 2, 64, 128 // 32 * 1 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1456,6 +1664,7 @@ def mxfp8_target_256x128():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 128 // 32 * 1 * 2, 64, 128 // 32 * 1 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1503,6 +1712,7 @@ def mxfp8_target_d2lds_mi32x32x64_pf2x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 64 // 32 * 2 * 2, 64, 64 // 32 * 2 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1558,6 +1768,7 @@ def mxfp8_target_d2lds_mi32x32x64_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 64 // 32 * 2 * 4, 64, 64 // 32 * 2 * 4),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1613,6 +1824,7 @@ def mxfp8_target_d2lds_mi16x16x128_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 128 // 32 * 1 * 4, 64, 128 // 32 * 1 * 4),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1723,14 +1935,15 @@ def all():
         yield from fp8_kernels()
         yield from mxfp8_kernels()
         yield from mx_gemms_f8f6f4()
-    else:
-        yield from sgemm()
-        yield from hgemm()
-        yield from hgemm_no_store_LDS()
-        yield from streamk()
-        yield from streamk_sweep()
-        yield from scalar_is_zero()
-        yield from codegen()
+
+    yield from sgemm()
+    yield from hgemm()
+    yield from hgemm_no_store_LDS()
+    yield from streamk()
+    yield from streamk_sweep()
+    yield from scalar_is_zero()
+    yield from smallMN_largeK_fp32()
+    yield from codegen()
 
 
 def all_gfx120X():
