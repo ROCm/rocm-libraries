@@ -97,6 +97,23 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
     label_skipWGMXCC = Label(label="skip_WGMXCC", comment="skip WGMXCC if no enough WGs to remap")
 
     if(kernel["StreamK"] != 0 and kernel["WorkGroupMappingXCC"] == -1):
+        label_skipWGMCHUNK = Label(label="skip_WGMCHUNK", comment="skip WGMCHUNK if no enough WGs to remap")
+        """
+        Use chiplet_transform_chunk, skip classic wgmxcc remapping
+        """        
+        SgprIndex = "WorkGroup0"
+        SgprChunkSize = writer.sgprPool.checkOut(1)
+        module.add(SLShiftRightB32(dst=sgpr(SgprChunkSize), shiftHex=hex(22), src=sgpr(sgprWGM), comment="Get WGMCHUNK"))
+        module.add(SAndB32(dst=sgpr(SgprChunkSize), src0=sgpr(SgprChunkSize), src1=hex(1023), comment="Get WGMCHUNK"))
+        module.addComment0("remap WGs if WGMCHUNK > 1")
+        module.add(SCmpGtU32(src0=sgpr(SgprChunkSize), src1=1))
+        module.add(SCBranchSCC0(label_skipWGMCHUNK.getLabelName()))
+        module.add(chiplet_transform_chunked(writer, kernel, SgprIndex, tmpSgprNumWorkGroups, SgprChunkSize))
+        writer.sgprPool.checkIn(SgprChunkSize)
+        module.add(SBranch(label_skipWGMXCC.getLabelName()))
+        module.add(label_skipWGMCHUNK)
+
+
         """
         Formula:
         x, g   = divmod(old_wg, WGMXCC)
@@ -115,8 +132,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             # Reuse some sgprs
             tmpSgpr = SgprWGMXCC
             group   = SgprQ
-            # offset  = SgprR
-            
+
             tmpVgpr     = writer.vgprPool.checkOutAligned(4,2)
             tmpVgprRes  = ContinuousRegister(tmpVgpr, 4)
 
@@ -140,7 +156,7 @@ def wgmXCC(writer, kernel, tmpSgprNumWorkGroups):
             module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr(SgprX), src1=sgpr(SgprO)))
             module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(SgprG), src1=sgpr(group)))
             module.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), src1=sgpr(tmpSgpr)))
-
+            # Skip
             module.add(label_skipWGMXCC)
     else:
         with writer.allocTmpSgpr(6, 2) as tmpSgprRes:
