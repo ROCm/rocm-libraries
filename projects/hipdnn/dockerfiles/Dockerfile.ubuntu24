@@ -122,6 +122,7 @@ RUN if [ "$THEROCK_GIT_HASH" != "default" ]; then \
     fi
 
 # Update rocm-libraries submodule to specific ref if provided
+# we need to commit the change so that fetch_sources.py does not overwrite the change
 RUN if [ "$ROCM_LIBRARIES_REF" != "default" ]; then \
         echo "Updating rocm-libraries submodule to: $ROCM_LIBRARIES_REF"; \
         git submodule update --init rocm-libraries && \
@@ -133,8 +134,6 @@ RUN if [ "$ROCM_LIBRARIES_REF" != "default" ]; then \
         git commit -m "Update rocm-libraries submodule to $ROCM_LIBRARIES_REF"; \
     fi
 
-RUN git log -2
-
 RUN python3 -m venv /opt/venv
 
 # Adding the venv into the path activates the python virtual env in a way.  We cant source it the
@@ -143,15 +142,9 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 RUN pip install -r requirements.txt
 
-
 RUN git config --global url."https://github.com/".insteadOf git@github.com: && \
 git config --global credential.helper "!f() { echo username=anonymous; echo password=; }; f" && \
 python ./build_tools/fetch_sources.py
-
-RUN echo "rocm-libraries pinned to commit:" && \
-    cd rocm-libraries && \
-    git log -10 && \
-    cd ..
 
 # Do this after fetch_sources.py or you wont have the repos pulled this file references.
 RUN pip install -r requirements-external.txt
