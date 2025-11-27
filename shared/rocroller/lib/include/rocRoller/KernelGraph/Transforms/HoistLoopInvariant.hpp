@@ -27,6 +27,7 @@
 #pragma once
 
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 #include <set>
 
@@ -85,6 +86,24 @@ namespace rocRoller
              * @return The node index of the enclosing ForLoopOp, or std::nullopt if none exists
              */
             static std::optional<int> findEnclosingLoop(KernelGraph const& kgraph, int controlNode);
+
+            /**
+             * @brief Check if a coordinate is written to within a ForLoopOp
+             * 
+             * This function uses the ControlFlowRWTracer to check if the specified
+             * coordinate is written to by any control node that is a descendant
+             * of the given loop node.
+             * 
+             * @param kgraph The kernel graph to search
+             * @param loopNode The ForLoopOp node to check within
+             * @param coordinate The coordinate to check for writes
+             * @param tracer The ControlFlowRWTracer with read/write information
+             * @return True if the coordinate is written within the loop, false otherwise
+             */
+            static bool isCoordinateWrittenInLoop(KernelGraph const&         kgraph,
+                                                  int                        loopNode,
+                                                  int                        coordinate,
+                                                  ControlFlowRWTracer const& tracer);
         };
     }
 }

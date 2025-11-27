@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/Graph/Hypergraph.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/HoistLoopInvariant.hpp>
@@ -199,34 +200,12 @@ namespace rocRoller::KernelGraph
             ControlFlowRWTracer tracer(original);
             const auto          result = tracer.coordinatesReadWrite();
 
-            std::unordered_map<int, std::vector<std::pair<int, ControlFlowRWTracer::ReadWrite>>>
-                coordinateAccessMap;
+            std::unordered_map<int, std::vector<int>> coordinateAccessMap;
 
             for(const auto& [control, coordinate, rw] : result)
             {
-                std::string rwStr;
-                switch(rw)
-                {
-                    using enum ControlFlowRWTracer::ReadWrite;
-                case READ:
-                    rwStr = "Read";
-                    break;
-                case WRITE:
-                    rwStr = "Write";
-                    break;
-                case READWRITE:
-                    rwStr = "Read/Write";
-                    break;
-                default:
-                    rwStr = "None";
-                    break;
-                }
-                Log::trace("Control Node: {}, Coordinate Node: {}, Access Type: {}",
-                           control,
-                           coordinate,
-                           rwStr);
-
-                coordinateAccessMap[coordinate].emplace_back(control, rw);
+                if(rw == ControlFlowRWTracer::ReadWrite::WRITE)
+                    coordinateAccessMap[coordinate].emplace_back(control);
             }
 
             std::vector<std::pair<int, int>> singleWriteCoordinates; // (coordinate, control)
@@ -235,29 +214,51 @@ namespace rocRoller::KernelGraph
             {
                 if(accessList.size() == 1)
                 {
-                    const auto& [control, rw] = accessList[0];
-                    if(rw == ControlFlowRWTracer::ReadWrite::WRITE)
-                    {
-                        singleWriteCoordinates.emplace_back(coordinate, control);
-                        Log::info("Coordinate {} has single write-only access from control node {}",
-                                  coordinate,
-                                  control);
-                    }
+                    const auto control = accessList[0];
+                    singleWriteCoordinates.emplace_back(coordinate, control);
+                    Log::trace("Coordinate {} has single write-only access from control node {}",
+                               coordinate,
+                               control);
                 }
             }
 
             for(const auto& [coordinate, control] : singleWriteCoordinates)
             {
                 auto enclosingLoopOpt = findEnclosingLoop(original, control);
+
                 if(!enclosingLoopOpt.has_value())
                 {
-                    Log::info("No enclosing loop found for control node {}, skipping hoisting",
-                              control);
+                    Log::trace("No enclosing loop found for control node {}, skipping", control);
                     continue;
                 }
 
                 int loopNode = enclosingLoopOpt.value();
-                Log::info("Enclosing loop for control node {} is loop node {}", control, loopNode);
+
+                auto assignNodeOpt = original.control.get<Assign>(control);
+                if(!assignNodeOpt.has_value())
+                {
+                    Log::trace("Control node {} is not an Assign node, skipping", control);
+                    auto element = original.control.getElement(control);
+                    continue;
+                }
+
+                auto assignNode = assignNodeOpt.value();
+
+                if(assignNode.expression == nullptr)
+                {
+                    Log::trace("Assign node {} has no expression, skipping", control);
+                    continue;
+                }
+
+                auto usedTags = extractDataFlowTags(*assignNode.expression);
+                for(auto tag : usedTags)
+                {
+                    Log::info("Assign node {} uses DataFlowTag {} with loopNode {}",
+                              control,
+                              tag,
+                              loopNode);
+                }
+                AssertFatal(false, "made it here!");
             }
         }
 
@@ -266,7 +267,6 @@ namespace rocRoller::KernelGraph
             file << original.toDOT(true);
         }
 
-        AssertFatal(false);
         return original;
     }
 
@@ -280,11 +280,73 @@ namespace rocRoller::KernelGraph
     {
         for(int parentNode : kgraph.control.nodesContaining(controlNode))
         {
+            // TODO: handle other loop types
             if(kgraph.control.get<ForLoopOp>(parentNode).has_value())
             {
                 return parentNode;
             }
         }
         return std::nullopt;
+    }
+
+    bool HoistLoopInvariant::isCoordinateWrittenInLoop(KernelGraph const&         kgraph,
+                                                       int                        loopNode,
+                                                       int                        coordinate,
+                                                       ControlFlowRWTracer const& tracer)
+    {
+        // Get all control nodes that write to this coordinate
+        auto records = tracer.coordinatesReadWrite(coordinate);
+
+        // Helper lambda to check if a node is a descendant of the loop
+        std::function<bool(int, std::set<int>&)> isDescendantOfLoop;
+        isDescendantOfLoop = [&](int node, std::set<int>& visited) -> bool {
+            // Avoid infinite recursion
+            if(visited.count(node) > 0)
+                return false;
+            visited.insert(node);
+
+            // Check if this node is directly output of the loop via Initialize, Body, or ForLoopIncrement edges
+            for(int initNode : kgraph.control.getOutputNodeIndices<Initialize>(loopNode))
+            {
+                if(initNode == node)
+                    return true;
+                if(isDescendantOfLoop(initNode, visited))
+                    return true;
+            }
+
+            for(int bodyNode : kgraph.control.getOutputNodeIndices<Body>(loopNode))
+            {
+                if(bodyNode == node)
+                    return true;
+                if(isDescendantOfLoop(bodyNode, visited))
+                    return true;
+            }
+
+            for(int incNode : kgraph.control.getOutputNodeIndices<ForLoopIncrement>(loopNode))
+            {
+                if(incNode == node)
+                    return true;
+                if(isDescendantOfLoop(incNode, visited))
+                    return true;
+            }
+
+            return false;
+        };
+
+        // Check if any write operation is within the loop
+        for(const auto& record : records)
+        {
+            if(record.rw == ControlFlowRWTracer::WRITE
+               || record.rw == ControlFlowRWTracer::READWRITE)
+            {
+                std::set<int> visited;
+                if(isDescendantOfLoop(record.control, visited))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }
