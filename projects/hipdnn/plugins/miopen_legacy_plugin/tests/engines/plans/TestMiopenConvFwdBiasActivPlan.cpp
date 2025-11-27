@@ -13,6 +13,7 @@
 using namespace miopen_legacy_plugin;
 using namespace hipdnn_sdk::data_objects;
 using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_sdk::utilities;
 
 class TestGpuConvFwdBiasActivPlan : public ::testing::Test
 {
