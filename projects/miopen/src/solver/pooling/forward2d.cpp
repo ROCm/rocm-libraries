@@ -343,6 +343,7 @@ bool PerformanceConfigPoolingForward2d::IsValidValue() const
         return false;
     if(!IsTwoPower<min_local_size1, max_local_size1>(local_size1))
         return false;
+    // this constraint is enforced to avoid grp_tile1 becoming zero in GetSolutionImpl
     if(local_size1 / out_pix_tile1 < 1)
         return false;
     return true;

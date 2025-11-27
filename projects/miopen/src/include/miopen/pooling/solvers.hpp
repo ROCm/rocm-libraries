@@ -53,12 +53,12 @@ struct PerformanceConfigPoolingForward2d : PerfConfigBase<PerformanceConfigPooli
     int out_pix_tile1;
     int local_size0;
     int local_size1;
+    static constexpr int min_out_pix_tile1 = 1;
+    static constexpr int max_out_pix_tile1 = 16;
     static constexpr int min_local_size0   = 8;
     static constexpr int max_local_size0   = 32;
     static constexpr int min_local_size1   = 8;
     static constexpr int max_local_size1   = 128;
-    static constexpr int min_out_pix_tile1 = 1;
-    static constexpr int max_out_pix_tile1 = 16;
 
     PerformanceConfigPoolingForward2d(int out_pix_tile1_, int local_size0_, int local_size1_)
         : out_pix_tile1(out_pix_tile1_), local_size0(local_size0_), local_size1(local_size1_)
@@ -103,6 +103,7 @@ struct PoolingForward2d final : PoolingTunableSolver<PerformanceConfigPoolingFor
     GetSolutionImpl(const ExecutionContext& context,
                     const miopen::pooling::ProblemDescription& problem,
                     const std::optional<PerformanceConfigPoolingForward2d>& config) const;
+    // This method is added to maintain compatibility with TransposedPoolingFwd2d solver
     ConvSolution GetSolution(const ExecutionContext& context,
                              const miopen::pooling::ProblemDescription& problem) const
     {
@@ -209,16 +210,97 @@ struct TransposedPoolingFwdNd final : PoolingFwdNCHWTransposingSolver<PoolingFor
     }
 };
 
-struct PoolingBackward2d final : PoolingSolver
+struct PerformanceConfigPoolingBackward2d : PerfConfigBase<PerformanceConfigPoolingBackward2d>
+{
+    int out_pix_tile0;
+    int out_pix_tile1;
+    int local_size0;
+    int local_size1;
+    static constexpr int min_out_pix_tile0 = 1;
+    static constexpr int max_out_pix_tile0 = 4;
+    static constexpr int min_out_pix_tile1 = 1;
+    static constexpr int max_out_pix_tile1 = 8;
+    static constexpr int min_local_size0   = 4;
+    static constexpr int max_local_size0   = 32;
+    static constexpr int min_local_size1   = 4;
+    static constexpr int max_local_size1   = 16;
+
+    PerformanceConfigPoolingBackward2d(int out_pix_tile0_,
+                                       int out_pix_tile1_,
+                                       int local_size0_,
+                                       int local_size1_)
+        : out_pix_tile0(out_pix_tile0_),
+          out_pix_tile1(out_pix_tile1_),
+          local_size0(local_size0_),
+          local_size1(local_size1_)
+    {
+    }
+    PerformanceConfigPoolingBackward2d()
+        : PerformanceConfigPoolingBackward2d(
+              static_cast<int>(1), static_cast<int>(1), static_cast<int>(4), static_cast<int>(4))
+    {
+    }
+    PerformanceConfigPoolingBackward2d(bool)
+        : PerformanceConfigPoolingBackward2d(
+              static_cast<int>(1), static_cast<int>(1), static_cast<int>(4), static_cast<int>(4))
+    {
+    }
+
+    void HeuristicInit(const miopen::pooling::ProblemDescription&);
+    bool SetNextValue(const miopen::pooling::ProblemDescription&);
+    bool IsValidValue() const;
+    bool IsValid(const ExecutionContext&, const miopen::pooling::ProblemDescription&) const;
+    bool operator==(const PerformanceConfigPoolingBackward2d& other) const;
+
+    template <class Self, class F>
+    static void Visit(Self&& self, F f)
+    {
+        f(self.out_pix_tile0, "out_pix_tile0");
+        f(self.out_pix_tile1, "out_pix_tile1");
+        f(self.local_size0, "local_size0");
+        f(self.local_size1, "local_size1");
+    }
+
+private:
+    void Init(const miopen::pooling::ProblemDescription&);
+};
+
+struct PoolingBackward2d final : PoolingTunableSolver<PerformanceConfigPoolingBackward2d>
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<PoolingBackward2d>(); }
 
     bool IsApplicable(const ExecutionContext& context,
                       const miopen::pooling::ProblemDescription& problem) const override;
+    ConvSolution
+    GetSolutionImpl(const ExecutionContext& context,
+                    const miopen::pooling::ProblemDescription& problem,
+                    const std::optional<PerformanceConfigPoolingBackward2d>& config) const;
+    // This method is added to maintain compatibility with TransposedPoolingBwd2d solver
     ConvSolution GetSolution(const ExecutionContext& context,
-                             const miopen::pooling::ProblemDescription& problem) const override;
+                             const miopen::pooling::ProblemDescription& problem) const
+    {
+        return GetSolutionImpl(context, problem, std::nullopt);
+    }
+    ConvSolution GetSolution(const ExecutionContext& context,
+                             const miopen::pooling::ProblemDescription& problem,
+                             const PerformanceConfigPoolingBackward2d& config) const override
+    {
+        return GetSolutionImpl(context, problem, config);
+    }
     std::size_t GetWorkspaceSize(const ExecutionContext& context,
                                  const miopen::pooling::ProblemDescription& problem) const override;
+    PerformanceConfigPoolingBackward2d
+    GetDefaultPerformanceConfig(const ExecutionContext&,
+                                const miopen::pooling::ProblemDescription&) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::pooling::ProblemDescription&,
+                                  const PerformanceConfigPoolingBackward2d&) const override;
+    PerformanceConfigPoolingBackward2d Search(const ExecutionContext& context,
+                                             const miopen::pooling::ProblemDescription& problem,
+                                             const AnyInvokeParams& invoke_context) const override
+    {
+        return GenericSearch(*this, context, problem, invoke_context);
+    }
 };
 
 struct PoolingBackwardNd final : PoolingSolver
