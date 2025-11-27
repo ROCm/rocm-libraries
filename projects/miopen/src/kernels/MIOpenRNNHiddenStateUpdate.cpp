@@ -71,7 +71,7 @@ __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
 
     FLOAT_ACCUM cx_dat[READ_BLOCK];
 
-    for(int gid = blockIdx.x * LOCAL_SIZE + threadIdx.x; gid < total_items; gid += LOCAL_SIZE)
+    for(int gid = blockIdx.x * LOCAL_SIZE + threadIdx.x; gid < total_items; gid += GLOBAL_SIZE)
     {
         int b_idx   = (gid * READ_BLOCK) / hy_h;
         int h_idx   = (gid * READ_BLOCK) % hy_h;
@@ -225,7 +225,7 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
     FLOAT_ACCUM cx_dat[READ_BLOCK];
     FLOAT_ACCUM dcx_dat[READ_BLOCK];
 
-    for(int gid = blockIdx.x * LOCAL_SIZE + threadIdx.x; gid < total_items; gid += LOCAL_SIZE)
+    for(int gid = blockIdx.x * LOCAL_SIZE + threadIdx.x; gid < total_items; gid += GLOBAL_SIZE)
     {
         int b_idx   = (gid * READ_BLOCK) / hy_h;
         int h_idx   = (gid * READ_BLOCK) % hy_h;
@@ -255,13 +255,6 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
 
         ActivationFunction_TanH_Diff(
             dcx_dat, s_dat, cx_dat, cx_dat, activ_param, activ_param, activ_param, activ_param);
-
-        accumvec_to_tvec<T>(dh_dat);
-        *reinterpret_cast<T_VEC*>(&workspace[rsv_idx + dcell_offset]) =
-            *reinterpret_cast<T_VEC*>(dh_dat);
-        accumvec_to_tvec<T>(o_dat);
-        *reinterpret_cast<T_VEC*>(&workspace[rsv_idx + dhidden_offset]) =
-            *reinterpret_cast<T_VEC*>(o_dat);
 
         if constexpr(IS_SEQ_END)
         {
