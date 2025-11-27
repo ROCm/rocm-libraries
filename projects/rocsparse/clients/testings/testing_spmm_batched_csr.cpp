@@ -203,7 +203,7 @@ void testing_spmm_batched_csr(const Arguments& arg)
                             nnz_A,
                             base);
 
-    // Redfine values
+    // Redefine values
     rocsparse_init_1d_array<A>(
         hcsr_val_temp, nnz_A, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
 
@@ -251,7 +251,7 @@ void testing_spmm_batched_csr(const Arguments& arg)
         for(size_t j = 0; j < nnz_A; j++)
         {
             hcsr_col_ind[nnz_A * i + j] = hcsr_col_ind_temp[j];
-            hcsr_val[nnz_A * i + j] = hcsr_val_temp[j];
+            hcsr_val[nnz_A * i + j]     = hcsr_val_temp[j];
         }
     }
 
@@ -262,8 +262,10 @@ void testing_spmm_batched_csr(const Arguments& arg)
     host_vector<C> hC_gold(batch_count_C * nnz_C);
 
     // Initialize data on CPU
-    rocsparse_init_1d_array<B>(hB, batch_count_B * nnz_B, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
-    rocsparse_init_1d_array<C>(hC_1, batch_count_C * nnz_C, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
+    rocsparse_init_1d_array<B>(
+        hB, batch_count_B * nnz_B, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
+    rocsparse_init_1d_array<C>(
+        hC_1, batch_count_C * nnz_C, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
 
     hC_2    = hC_1;
     hC_gold = hC_1;

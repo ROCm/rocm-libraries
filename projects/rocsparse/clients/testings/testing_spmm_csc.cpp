@@ -158,7 +158,7 @@ void testing_spmm_csc(const Arguments& arg)
                             nnz_A,
                             base);
 
-    // Redfine values
+    // Redefine values
     rocsparse_init_1d_array<A>(
         hcsc_val, nnz_A, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
 

@@ -24,8 +24,6 @@
 #include "testing.hpp"
 #include "testing_v2_spmv.hpp"
 
-#include <algorithm>
-
 template <typename I, typename J, typename A, typename X, typename Y, typename T>
 void testing_v2_spmv_sell_bad_arg(const Arguments& arg)
 {

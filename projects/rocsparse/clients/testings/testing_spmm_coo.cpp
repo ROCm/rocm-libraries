@@ -23,8 +23,6 @@
 
 #include "testing.hpp"
 
-#include <algorithm>
-
 template <typename I, typename A, typename B, typename C, typename T>
 void testing_spmm_coo_bad_arg(const Arguments& arg)
 {
@@ -146,7 +144,7 @@ void testing_spmm_coo(const Arguments& arg)
                             nnz_A,
                             base);
 
-    // Redfine values
+    // Redefine values
     rocsparse_init_1d_array<A>(
         hcoo_val, nnz_A, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
 

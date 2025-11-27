@@ -147,9 +147,8 @@ void testing_spmm_csr(const Arguments& arg)
                             (trans_A == rocsparse_operation_none) ? K : M,
                             nnz_A,
                             base);
-            
-    
-    // Redfine values
+
+    // Redefine values
     rocsparse_init_1d_array<A>(
         hcsr_val, nnz_A, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
 
