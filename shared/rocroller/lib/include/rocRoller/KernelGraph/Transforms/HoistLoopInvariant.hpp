@@ -73,6 +73,18 @@ namespace rocRoller
                                            int          loopNode,
                                            int          predecessorNode,
                                            int          sequenceEdge);
+
+            /**
+             * @brief Find the enclosing ForLoopOp for a given control node
+             * 
+             * This function traverses up the control graph to find the first
+             * ForLoopOp that contains the given node in its body.
+             * 
+             * @param kgraph The kernel graph to search
+             * @param controlNode The control node to find the enclosing loop for
+             * @return The node index of the enclosing ForLoopOp, or std::nullopt if none exists
+             */
+            static std::optional<int> findEnclosingLoop(KernelGraph const& kgraph, int controlNode);
         };
     }
 }

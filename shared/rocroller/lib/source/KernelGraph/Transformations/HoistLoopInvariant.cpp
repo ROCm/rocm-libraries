@@ -124,111 +124,6 @@ namespace rocRoller::KernelGraph
         return visitor.tags;
     }
 
-    /**
-     * @brief Check if an Assign node depends on loop variables
-     */
-    bool isLoopInvariant(KernelGraph const& kgraph, int assignNode, int loopNode)
-    {
-        // Get the Assign operation
-        auto assign = kgraph.control.get<Assign>(assignNode);
-        if(!assign)
-            return false;
-
-        // Extract all DataFlowTags from the expression
-        auto tags = extractDataFlowTags(*assign->expression);
-
-        // Get the loop's index coordinate (destination)
-        auto loopIndexCoord = kgraph.mapper.get(loopNode, NaryArgument::DEST);
-
-        // Check if any of the tags in the expression match the loop index
-        for(auto tag : tags)
-        {
-            if(tag == loopIndexCoord)
-                return false; // Depends on loop variable, not invariant
-        }
-
-        // Also check if any tags come from operations inside the loop
-        // that might be variant
-        auto loopBody  = *only(kgraph.control.getOutputNodeIndices<Body>(loopNode));
-        auto bodyNodes = kgraph.control.depthFirstVisit(loopBody, Graph::Direction::Downstream)
-                             .to<std::vector>();
-
-        for(auto tag : tags)
-        {
-            // Check if this DataFlowTag is produced by an operation inside the loop
-            for(auto nodeTag : bodyNodes)
-            {
-                auto element = kgraph.control.getElement(nodeTag);
-                if(std::holds_alternative<Operation>(element))
-                {
-                    // Check if this operation produces the DataFlowTag
-                    // Get all connections from this control node
-                    auto connections = kgraph.mapper.getConnections(nodeTag);
-                    for(const auto& conn : connections)
-                    {
-                        if(conn.coordinate == tag && nodeTag != assignNode)
-                        {
-                            // This tag is produced by another operation in the loop
-                            return false;
-                        }
-                    }
-                }
-            }
-        }
-
-        return true; // No dependencies on loop variables found
-    }
-
-    /**
-     * @brief Find all Assign nodes that are loop-invariant within a given loop
-     */
-    std::vector<int> findLoopInvariantAssigns(KernelGraph const& kgraph, int loopNode)
-    {
-        std::vector<int> invariantAssigns;
-
-        // Get the loop body
-        auto bodyEdges = kgraph.control.getNeighbours<Graph::Direction::Downstream>(loopNode);
-        int  loopBody  = -1;
-        for(auto edge : bodyEdges)
-        {
-            auto edgeElem = kgraph.control.getElement(edge);
-            if(std::holds_alternative<ControlEdge>(edgeElem))
-            {
-                auto controlEdge = std::get<ControlEdge>(edgeElem);
-                if(std::holds_alternative<Body>(controlEdge))
-                {
-                    loopBody = *only(kgraph.control.getOutputNodeIndices<Body>(loopNode));
-                    break;
-                }
-            }
-        }
-
-        if(loopBody == -1)
-            return invariantAssigns;
-
-        // Traverse the loop body to find Assign nodes
-        auto bodyNodes = kgraph.control.depthFirstVisit(loopBody, Graph::Direction::Downstream)
-                             .to<std::vector>();
-
-        for(auto nodeTag : bodyNodes)
-        {
-            auto element = kgraph.control.getElement(nodeTag);
-            if(std::holds_alternative<Operation>(element))
-            {
-                auto op = std::get<Operation>(element);
-                if(std::holds_alternative<Assign>(op))
-                {
-                    if(isLoopInvariant(kgraph, nodeTag, loopNode))
-                    {
-                        invariantAssigns.push_back(nodeTag);
-                    }
-                }
-            }
-        }
-
-        return invariantAssigns;
-    }
-
     int HoistLoopInvariant::hoistNodeBeforeLoop(
         KernelGraph& kgraph, int nodeToHoist, int loopNode, int predecessorNode, int sequenceEdge)
     {
@@ -351,8 +246,19 @@ namespace rocRoller::KernelGraph
                 }
             }
 
-            Log::info("Found {} coordinates with single write-only access",
-                      singleWriteCoordinates.size());
+            for(const auto& [coordinate, control] : singleWriteCoordinates)
+            {
+                auto enclosingLoopOpt = findEnclosingLoop(original, control);
+                if(!enclosingLoopOpt.has_value())
+                {
+                    Log::info("No enclosing loop found for control node {}, skipping hoisting",
+                              control);
+                    continue;
+                }
+
+                int loopNode = enclosingLoopOpt.value();
+                Log::info("Enclosing loop for control node {} is loop node {}", control, loopNode);
+            }
         }
 
         {
@@ -367,5 +273,18 @@ namespace rocRoller::KernelGraph
     std::string HoistLoopInvariant::name() const
     {
         return "HoistLoopInvariant";
+    }
+
+    std::optional<int> HoistLoopInvariant::findEnclosingLoop(KernelGraph const& kgraph,
+                                                             int                controlNode)
+    {
+        for(int parentNode : kgraph.control.nodesContaining(controlNode))
+        {
+            if(kgraph.control.get<ForLoopOp>(parentNode).has_value())
+            {
+                return parentNode;
+            }
+        }
+        return std::nullopt;
     }
 }
