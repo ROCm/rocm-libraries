@@ -269,7 +269,11 @@ namespace rocRoller
             auto [loopIterator, loopCondition] = split<Expression::LessThan>(forLoopOp.condition);
 
             auto [cloneForLoopCoordTag, clonedForLoopOpTag]
-                = rangeFor(graph, forLoopSize, name ? *name : forLoopOp.loopName, DataType::None, forLoopCoordTag);
+                = rangeFor(graph,
+                           forLoopSize,
+                           name ? *name : forLoopOp.loopName,
+                           DataType::None,
+                           forLoopCoordTag);
 
             // Reset the condition to match the original loop more
             // precisely.  This is necessary for, eg, StreamK loops
