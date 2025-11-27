@@ -11,9 +11,7 @@
 #include <limits>
 #include <type_traits>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
+namespace hipdnn_sdk::test_utilities
 {
 namespace pointwise
 {
@@ -101,5 +99,4 @@ struct Negation
 };
 
 } // namespace pointwise
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::test_utilities

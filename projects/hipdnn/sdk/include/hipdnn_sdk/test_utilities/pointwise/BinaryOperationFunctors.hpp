@@ -10,9 +10,7 @@
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 #include <type_traits>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
+namespace hipdnn_sdk::test_utilities
 {
 namespace pointwise
 {
@@ -142,5 +140,4 @@ struct TanhBackward
 };
 
 } // namespace pointwise
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::test_utilities
