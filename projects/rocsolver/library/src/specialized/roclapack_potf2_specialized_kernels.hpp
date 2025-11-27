@@ -33,6 +33,7 @@
 #pragma once
 
 #include "rocblas.hpp"
+#include "roclapack_gemm_device_functions.hpp"
 #include "rocsolver_run_specialized_kernels.hpp"
 #include <algorithm>
 #include <cmath>
@@ -92,6 +93,8 @@ __device__ static I idx_lower(I i, I j, I n)
 template <typename T, typename I, typename INFO>
 __device__ static void potf2_simple(bool const is_upper, I const n, T* const A, INFO* const info)
 {
+    using T4 = typename mfma_16x16x4<T>::AccT;
+
     auto const lda = n;
     bool const is_lower = (!is_upper);
 
@@ -105,8 +108,29 @@ __device__ static void potf2_simple(bool const is_upper, I const n, T* const A, 
         + hipThreadIdx_z * (hipBlockDim_x * hipBlockDim_y);
     auto const nthreads = (hipBlockDim_x * hipBlockDim_y) * hipBlockDim_z;
 
+    auto const wid = tid / warpSize;
+    auto const lid = tid % warpSize;
+    auto const nwarps = nthreads / warpSize;
+
+    I constexpr nwarps_i = 4;
+    auto const nwarps_j = nwarps / nwarps_i;
+    auto const wid_i = wid % nwarps_i;
+    auto const wid_j = wid / nwarps_i;
+
+    const I cmajor_i_16x4 = lid % 16;
+    const I cmajor_j_16x4 = lid / 16;
+
     auto const j0_start = tid;
     auto const j0_inc = nthreads;
+
+    I constexpr panel_size = 8;
+    I panel_start = 0;
+    I panel_end = panel_size;
+
+    auto const ngemms = panel_size / 4;
+
+    auto const block_size_i = nwarps_i * 16;
+    auto const block_size_j = nwarps_j * 16;
 
     if(is_lower)
     {
@@ -170,24 +194,102 @@ __device__ static void potf2_simple(bool const is_upper, I const n, T* const A, 
             //   note: update lower triangular part
             // ------------------------------------------------------------
 
-            for(I j = (kcol + 1) + j_start; j < n; j += j_inc)
+            if(kcol % panel_size < panel_size - 1)
             {
-                auto const vj = A[idx_lower(j, kcol, lda)];
-                for(I i = (kcol + 1) + i_start; i < n; i += i_inc)
+                // update panel
+                for(I j = (kcol + 1) + j_start; (j < panel_end) && (j < n); j += j_inc)
                 {
-                    bool const lower_part = (i >= j);
-                    if(lower_part)
+                    auto const vj = A[idx_lower(j, kcol, lda)];
+                    for(I i = (kcol + 1) + i_start; i < n; i += i_inc)
                     {
-                        auto const vi = A[idx_lower(i, kcol, lda)];
-                        auto const ij = idx_lower(i, j, lda);
+                        bool const lower_part = (i >= j);
+                        if(lower_part)
+                        {
+                            auto const vi = A[idx_lower(i, kcol, lda)];
+                            auto const ij = idx_lower(i, j, lda);
 
-                        A[ij] = A[ij] - vi * conj(vj);
+                            A[ij] = A[ij] - vi * conj(vj);
+                        }
                     }
                 }
             }
+            else
+            {
+                // update trailing triangular matrix
+                // - A(k+1:n-1, k+1:n-1) = A(k+1:n-1, k-3:k) * A(k+1:n-1, k-3:k)^T
+                // for(I j = (kcol + 1) + j_start; j < n; j += j_inc)
+                // {
+                //     // auto const vj = A[idx_lower(j, kcol, lda)];
+                //     for(I i = (kcol + 1) + i_start; i < n; i += i_inc)
+                //     {
+                //         bool const lower_part = (i >= j);
+                //         if(lower_part)
+                //         {
+                //             // auto const vi = A[idx_lower(i, kcol, lda)];
+                //             auto const ij = idx_lower(i, j, lda);
+                //             T acc = 0;
+
+                //             for(I a = panel_start; a < panel_end; a++)
+                //             {
+                //                 acc += A[idx_lower(i, a, lda)] * conj(A[idx_lower(j, a, lda)]);
+                //             }
+
+                //             // printf("%d, %d, %f\n", i, j, std::real(acc));
+                //             if constexpr (rocblas_is_complex<T>)
+                //                 printf("%d, %d, %f, %f\n", i, j, std::real(acc), std::imag(acc));
+                //             A[ij] = A[ij] - acc;
+
+                //         }
+                //     }
+                // }
+
+                // const auto k = panel_start + cmajor_j_16x4;
+                for(I wj = kcol + 1 + (wid_j * 16); wj < n; wj += block_size_j)
+                {
+                    const auto j = wj + cmajor_i_16x4;
+                    // auto const vj = (j < n) ? conj(A[idx_lower(j, k, lda)]) : 0;
+
+                    for(I wi = wj + (wid_i * 16); wi < n; wi += block_size_i)
+                    {
+                        const auto i = wi + cmajor_i_16x4;
+                        // auto const vi = (i < n) ? A[idx_lower(i, k, lda)] : 0;
+
+                        T4 dmn = {0};
+
+                        for(I wk = 0; wk < ngemms; wk++)
+                        {
+                            auto const k = panel_start + cmajor_j_16x4 + wk * 4;
+                            auto const vj = (j < n) ? conj(A[idx_lower(j, k, lda)]) : 0;
+                            auto const vi = (i < n) ? A[idx_lower(i, k, lda)] : 0;
+                            dmn = mfma_16x16x4<T>()(vi, vj, dmn);
+                        }
+
+#pragma unroll
+                        for(I reg = 0; reg < 4; ++reg)
+                        {
+                            const auto c_row = wi
+                                + get_c_row<T>(cmajor_j_16x4, cmajor_i_16x4, reg, (I)0,
+                                               (I)0); // reg + cmajor_j_16x4 * 4;
+                            const auto c_col = wj
+                                + get_c_col<T>(cmajor_j_16x4, cmajor_i_16x4, reg, (I)0,
+                                               (I)0); // cmajor_i_16x4;
+
+                            if(c_col < n && c_row < n && c_row >= c_col)
+                            {
+                                // if constexpr (rocblas_is_complex<T>)
+                                //     printf("%d, %d, %f, %f\n", c_row, c_col, std::real(dmn[reg]), std::imag(dmn[reg]));
+                                const auto idx = idx_lower(c_row, c_col, lda);
+                                A[idx] = A[idx] - dmn[reg];
+                            }
+                        }
+                    }
+                }
+
+                panel_start = panel_end;
+                panel_end += panel_size;
+            }
 
             __syncthreads();
-
         } // end for kcol
     }
     else
@@ -415,8 +517,8 @@ rocblas_status potf2_run_small(rocblas_handle handle,
 
     bool const is_upper = (uplo == rocblas_fill_upper);
     ROCSOLVER_LAUNCH_KERNEL((potf2_kernel_small<T, I, INFO, U>), dim3(1, 1, batch_count),
-                            dim3(BS2, BS2, 1), lmemsize, stream, is_upper, n, A, shiftA, lda,
-                            strideA, info);
+                            dim3(128, 8, 1), lmemsize, stream, is_upper, n, A, shiftA, lda, strideA,
+                            info);
 
     return rocblas_status_success;
 }
