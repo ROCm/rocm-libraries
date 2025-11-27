@@ -29,7 +29,9 @@ exclude: |
     # Binary files
     projects/hipdnn/.*\.bin$|
     # Reference data
-    projects/hipdnn/hipdnn_reference_data/.*
+    projects/hipdnn/hipdnn_reference_data/.*|
+    # Generated hipDNN FlatBuffers headers
+    projects/hipdnn/sdk/include/hipdnn_sdk/data_objects/.*_generated\.h
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -40,7 +42,7 @@ repos:
       - id: check-yaml
         exclude: |
           (?x)
-          ^projects/hipdnn/\.clang-format$|
+          ^projects/hipdnn/\.clang-format$
       - id: check-added-large-files
 
   - repo: https://github.com/psf/black
