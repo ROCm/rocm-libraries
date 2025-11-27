@@ -378,7 +378,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
                 move_tile_window(b_flat_dram_windows(nIter)(kIter),
                                  {nIter * flatNPerWarp, kIter * flatKPerWarp});
 
-                load_int4_tile<BDataType, BTypeToUse, UnaryOpSize_>(
+                load_and_convert_tile<BDataType, BTypeToUse, UnaryOpSize_>(
                     b_warp_tensor_ping(nIter)(kIter), b_flat_dram_windows(nIter)(kIter));
             });
         });
@@ -426,7 +426,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
         static_for<0, m_preload, 1>{}([&](auto loadIter) {
             constexpr auto mIter = loadIter % MIterPerWarp;
             constexpr auto kIter = loadIter / MIterPerWarp;
-            load_int4_tile<ADataType, ATypeToUse, UnaryOpSize_>(
+            load_and_convert_tile<ADataType, ATypeToUse, UnaryOpSize_>(
                 a_warp_tensor(loadIter), a_warp_windows_ping(number<mIter>{})(number<kIter>{}));
         });
         __builtin_amdgcn_sched_barrier(0);
@@ -460,7 +460,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
 
                     move_tile_window(b_flat_dram_windows(nIter)(kIter),
                                      {nIter * flatNPerWarp, kIter * flatKPerWarp});
-                    load_int4_tile<BDataType, BTypeToUse, UnaryOpSize_>(
+                    load_and_convert_tile<BDataType, BTypeToUse, UnaryOpSize_>(
                         b_warp_tensor_pong(nIter)(kIter), b_flat_dram_windows(nIter)(kIter));
                 });
             });
@@ -476,7 +476,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
                 constexpr auto mIter = loadIter % MIterPerWarp;
                 constexpr auto kIter = loadIter / MIterPerWarp;
-                load_int4_tile<ADataType, ATypeToUse, UnaryOpSize_>(
+                load_and_convert_tile<ADataType, ATypeToUse, UnaryOpSize_>(
                     a_warp_tensor(loadIter), a_warp_windows_pong(number<mIter>{})(number<kIter>{}));
             });
 
@@ -489,7 +489,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
 
                     move_tile_window(b_flat_dram_windows(nIter)(kIter),
                                      {nIter * flatNPerWarp, kIter * flatKPerWarp});
-                    load_int4_tile<BDataType, BTypeToUse, UnaryOpSize_>(
+                    load_and_convert_tile<BDataType, BTypeToUse, UnaryOpSize_>(
                         b_warp_tensor_ping(nIter)(kIter), b_flat_dram_windows(nIter)(kIter));
                 });
             });
@@ -521,7 +521,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
                 constexpr auto mIter = loadIter % MIterPerWarp;
                 constexpr auto kIter = loadIter / MIterPerWarp;
-                load_int4_tile<ADataType, ATypeToUse, UnaryOpSize_>(
+                load_and_convert_tile<ADataType, ATypeToUse, UnaryOpSize_>(
                     a_warp_tensor(loadIter), a_warp_windows_ping(number<mIter>{})(number<kIter>{}));
             });
             iCounter--;
@@ -539,7 +539,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
                     move_tile_window(b_flat_dram_windows(nIter)(kIter),
                                      {nIter * flatNPerWarp, kIter * flatKPerWarp});
 
-                    load_int4_tile<BDataType, BTypeToUse, UnaryOpSize_>(
+                    load_and_convert_tile<BDataType, BTypeToUse, UnaryOpSize_>(
                         b_warp_tensor_pong(nIter)(kIter), b_flat_dram_windows(nIter)(kIter));
                 });
             });
@@ -561,7 +561,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
                 constexpr auto mIter = loadIter % MIterPerWarp;
                 constexpr auto kIter = loadIter / MIterPerWarp;
-                load_int4_tile<ADataType, ATypeToUse, UnaryOpSize_>(
+                load_and_convert_tile<ADataType, ATypeToUse, UnaryOpSize_>(
                     a_warp_tensor(loadIter), a_warp_windows_pong(number<mIter>{})(number<kIter>{}));
             });
 

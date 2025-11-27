@@ -11,7 +11,7 @@
 namespace ck_tile {
 
 template <typename SrcDataType, typename DstDataType, index_t UnaryOpSize>
-struct InterleavedPKTypeLoader
+struct ConverterLoader
 {
     template <typename WarpWindow, typename WarpTile>
     CK_TILE_DEVICE static void load_interleaved_pk_type(WarpTile& dst, const WarpWindow& src)
@@ -41,12 +41,12 @@ template <typename SrcDataType,
           bool LoadTranspose = false,
           typename WarpTile,
           typename WarpWindow>
-CK_TILE_DEVICE void load_int4_tile(WarpTile& dst, const WarpWindow& src)
+CK_TILE_DEVICE void load_and_convert_tile(WarpTile& dst, const WarpWindow& src)
 {
     if constexpr(is_packed_type_v<SrcDataType>)
     {
         static_assert(!LoadTranspose, "LoadTranspose not supported with pk_int4_t or pk_fp4_t");
-        InterleavedPKTypeLoader<SrcDataType, DstDataType, UnaryOpSize>::load_interleaved_pk_type(
+        ConverterLoader<SrcDataType, DstDataType, UnaryOpSize>::load_interleaved_pk_type(
             dst, src);
     }
     else if constexpr(LoadTranspose)

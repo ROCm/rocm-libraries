@@ -248,9 +248,9 @@ struct AQuantBlockUniversalGemmAsBsCr
             // while ADatatype might not be the same as BDataType at the time of problem
             // initialization, we can safely use BDataType here because when A would be int4 we will
             // ensure A is converted to BDataType prior to loading
-            load_int4_tile<BDataType, ComputeDataType, UnaryOpSize_, ALoadTranspose>(
+            load_and_convert_tile<BDataType, ComputeDataType, UnaryOpSize_, ALoadTranspose>(
                 a_warp_tile_, a_block_window);
-            load_int4_tile<BDataType, ComputeDataType, UnaryOpSize_, BLoadTranspose>(
+            load_and_convert_tile<BDataType, ComputeDataType, UnaryOpSize_, BLoadTranspose>(
                 b_warp_tile_, b_block_window);
         }
 
@@ -395,9 +395,9 @@ struct AQuantBlockUniversalGemmAsBsCr
             auto b_lds_gemm_window = make_tile_window(
                 b_block_window.get_bottom_tensor_view(), b_lds_shape, b_offset, b_lds_load_distr);
 
-            load_int4_tile<BDataType, ComputeDataType, UnaryOpSize_, ALoadTranspose>(
+            load_and_convert_tile<BDataType, ComputeDataType, UnaryOpSize_, ALoadTranspose>(
                 a_warp_tile_, a_lds_gemm_window);
-            load_int4_tile<BDataType, ComputeDataType, UnaryOpSize_, BLoadTranspose>(
+            load_and_convert_tile<BDataType, ComputeDataType, UnaryOpSize_, BLoadTranspose>(
                 b_warp_tile_, b_lds_gemm_window);
         }
 

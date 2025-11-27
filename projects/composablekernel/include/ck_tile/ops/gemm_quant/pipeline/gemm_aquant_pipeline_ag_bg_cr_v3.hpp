@@ -177,7 +177,7 @@ struct AQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Prob
             using DestDataType            = typename ABlockTile_::DataType;
             using SrcDataType             = typename ADramWindow::Base::TileWindowBase::DataType;
             constexpr index_t UnaryOpSize = 8;
-            load_int4_tile<SrcDataType, DestDataType, UnaryOpSize>(a_block_tile, a_dram_window);
+            load_and_convert_tile<SrcDataType, DestDataType, UnaryOpSize>(a_block_tile, a_dram_window);
             move_tile_window(a_dram_window, dram_tile_window_step);
         }
 
