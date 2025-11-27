@@ -1,0 +1,349 @@
+# primbench
+
+primbench is a single-header HIP benchmarking library.
+
+![primbench demo](./assets/primbench.gif)
+
+## Features
+
+- Simple benchmarking API
+- Colored progress output
+- GPU warming and cooling
+- GPU cache clearing
+- Batching and stream blocking
+- Detailed JSON output
+
+## Dependencies
+
+primbench only has three dependencies:
+- HIP
+- AMD SMI (for querying live GPU statistics)
+- C++17 or newer
+
+## Example
+
+Here is an example `copy_benchmark.cpp`:
+```cpp
+// Only include this in one translation unit
+#include "primbench.hpp"
+
+// All benchmarked types must be declared
+// This allows you to for example format `long long` as `int64_t`, or `i64`
+PRIMBENCH_REGISTER_TYPE(char, "char")
+PRIMBENCH_REGISTER_TYPE(long long, "long long")
+
+// Simple copy kernel
+template<typename T, unsigned int BlockSize, unsigned int ItemsPerThread>
+__global__ __launch_bounds__(BlockSize)
+void copy_kernel(const T* input, T* output)
+{
+    unsigned int idx = threadIdx.x + blockIdx.x * BlockSize * ItemsPerThread;
+#pragma unroll
+    for(unsigned int i = 0; i < ItemsPerThread; ++i)
+        output[idx + i * BlockSize] = input[idx + i * BlockSize];
+}
+
+template<typename T>
+struct copy_benchmark : public primbench::benchmark_interface
+{
+    primbench::json meta() const override
+    {
+        return primbench::json{}.add("algo", "copy").add("type", primbench::name<T>());
+    }
+
+    // This contains both the setup and running of the benchmark
+    void run(primbench::state& state) override
+    {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+
+        // primbench::log() calls report progress in gray
+        // They help with discovering slow setup steps
+        primbench::log("Calculating items");
+        size_t                 N              = bytes / sizeof(T);
+        constexpr unsigned int BlockSize      = 256;
+        constexpr unsigned int ItemsPerThread = 4;
+
+        const size_t items_per_block = BlockSize * ItemsPerThread;
+        const size_t items = items_per_block * ((N + items_per_block - 1) / items_per_block);
+
+        primbench::log("Generating input data");
+        std::vector<T> h_input(items);
+        for(size_t i = 0; i < items; ++i)
+            h_input[i] = T(i);
+
+        primbench::log("Allocating output vector");
+        std::vector<T> h_output(items);
+
+        primbench::log("Allocating device memory");
+        T* d_input;
+        T* d_output;
+        primbench::exit_on_hip_error(hipMalloc(&d_input, items * sizeof(T)));
+        primbench::exit_on_hip_error(hipMalloc(&d_output, items * sizeof(T)));
+
+        primbench::log("Copying to device");
+        primbench::exit_on_hip_error(hipMemcpyAsync(d_input,
+                                                    h_input.data(),
+                                                    items * sizeof(T),
+                                                    hipMemcpyHostToDevice,
+                                                    stream));
+
+        dim3 grid(items / items_per_block);
+        dim3 block(BlockSize);
+
+        // primbench uses this to calculates the items/sec and bytes/sec
+        state.set_items(items);
+        state.add_reads<T>(items);
+        state.add_writes<T>(items);
+
+        // This passes a lambda to primbench, which calls it many times
+        // primbench completely handles synchronization
+        state.run(
+            [&]
+            {
+                copy_kernel<T, BlockSize, ItemsPerThread>
+                    <<<grid, block, 0, stream>>>(d_input, d_output);
+            });
+
+        primbench::exit_on_hip_error(hipFree(d_input));
+        primbench::exit_on_hip_error(hipFree(d_output));
+    }
+};
+
+int main(int argc, char* argv[])
+{
+    // Sets the default benchmark size (128 MiB), available as state.bytes in run().
+    // Can be overridden from the command line with `--bytes`.
+    primbench::executor executor(argc, argv, 128 * primbench::MiB);
+
+    executor.queue<copy_benchmark<char>>();
+    executor.queue<copy_benchmark<long long>>();
+
+    executor.run();
+}
+```
+
+After putting `primbench.hpp` next to it, the benchmark can be compiled and run like so:
+```bash
+hipcc -o copy_benchmark copy_benchmark.cpp -lamd_smi && ./copy_benchmark
+```
+
+It output this `results.json`:
+```json
+{
+    "context": {
+        "results_version": "1.0.0",
+        "general": {
+            "algorithm": "copy",
+            "specialization_count": 2,
+            "gpu_name": "AMD Instinct MI210",
+            "gpu_arch": "gfx90a",
+            "library_build_type": "debug",
+            "host_name": "host",
+            "date": "2025-11-24T15:01:50+00:00",
+            "hip_version": "6.4.43482-0f2d60242",
+            "clang_version": "19.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-6.4.0 25133 c7fe45cf4b819c5991fe208aaa96edf142730f1d)"
+        },
+        "cli_settings": {
+            "bytes": 134217728,
+            "hot": false,
+            "seed": 42,
+            "json_out": "results.json",
+            "csv_out": "",
+            "min_gpu_ms_per_batch": 10,
+            "min_secs": 1,
+            "noise_timeout_secs": 10,
+            "batch_window_size": 10,
+            "noise_tolerance_percent": 1,
+            "min_gpu_temp": 50,
+            "max_gpu_temp": 60,
+            "max_warming_secs": 60,
+            "max_cooling_secs": 60,
+            "output_hip_device_properties_context": false,
+            "output_amdsmi_context": false,
+            "output_batches": false,
+            "spaces_per_indent": 4,
+            "stream_blocking_timeout_secs": 10
+        },
+        "flags": {
+            "sync": false
+        }
+    },
+    "specializations": [
+        {
+            "index": 0,
+            "human_name": "type: char",
+            "bytes_per_second": 7.53499e+11,
+            "items_per_second": 3.7675e+11,
+            "bytes_per_item": 2,
+            "items": 134217728,
+            "noise_timeout": false,
+            "noise_percent": 0.0378893,
+            "meta": {
+                "algo": "copy",
+                "type": "char"
+            },
+            "elapsed_secs": {
+                "host": 1.00539,
+                "gpu": 0.547248
+            },
+            "gpu_temp_celsius": {
+                "start": 50,
+                "end": 51
+            },
+            "calls": {
+                "kernel_calls_per_batch": 32,
+                "ms_per_batch": 11.393,
+                "batches": 48,
+                "kernel_calls": 1536
+            }
+        },
+        {
+            "index": 1,
+            "human_name": "type: long long",
+            "bytes_per_second": 1.29973e+12,
+            "items_per_second": 8.12334e+10,
+            "bytes_per_item": 16,
+            "items": 16777216,
+            "noise_timeout": false,
+            "noise_percent": 0.0586062,
+            "meta": {
+                "algo": "copy",
+                "type": "long long"
+            },
+            "elapsed_secs": {
+                "host": 1.02063,
+                "gpu": 0.449733
+            },
+            "gpu_temp_celsius": {
+                "start": 51,
+                "end": 52
+            },
+            "calls": {
+                "kernel_calls_per_batch": 64,
+                "ms_per_batch": 13.2306,
+                "batches": 34,
+                "kernel_calls": 2176
+            }
+        }
+    ],
+    "summary": {
+        "noise_timeouts": 0,
+        "elapsed_secs": {
+            "host": 2.66022,
+            "gpu": 0.996981
+        }
+    }
+}
+```
+
+## Command-line Options
+
+You can pass `--help` to benchmarks to print all available options. They are all optional:
+
+| Option                                   | Description                                                                                                                                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--help`                                 | Display this help message.                                                                                                                                                         |
+| `--bytes`                                | Sets the size (in bytes) of the randomly generated input array, overriding the value provided to `primbench::executor`.                                                            |
+| `--hot`                                  | Skip clearing the GPU cache between batch iterations. (default: 0)                                                                                                                 |
+| `--seed`                                 | Seed used for input generation. (default: 42)                                                                                                                                      |
+| `--json-out`                             | JSON path to write benchmark results to. (default: results.json)                                                                                                                   |
+| `--csv-out`                              | CSV path to write benchmark results to.                                                                                                                                            |
+| `--min-gpu-ms-per-batch`                 | Minimum duration of a batch in milliseconds (GPU time). (default: 10)                                                                                                              |
+| `--min-secs`                             | Minimum total benchmark duration in seconds (wall time). (default: 1)                                                                                                              |
+| `--noise-timeout-secs`                   | Maximum total benchmark duration in seconds before timing out a noisy run (wall time). (default: 10)                                                                               |
+| `--batch-window-size`                    | Number of batch times used in the noise (coefficient of variation) window to decide early stopping. (default: 10)                                                                  |
+| `--noise-tolerance-percent`              | Noise tolerance of batch times in percent, used to determine early benchmark stopping. (default: 1)                                                                                |
+| `--min-gpu-temp`                         | Minimum GPU temperature in °C. Too low slows benchmarks; too high increases noise. (default: 50)                                                                                   |
+| `--max-gpu-temp`                         | Maximum GPU temperature in °C. Too low slows benchmarks; too high increases noise. (default: 60)                                                                                   |
+| `--max-warming-secs`                     | Maximum seconds allowed for GPU warming before an error is thrown. (default: 60)                                                                                                   |
+| `--max-cooling-secs`                     | Maximum seconds allowed for GPU cooling before an error is thrown. (default: 60)                                                                                                   |
+| `--output-hip-device-properties-context` | Output a `hip_device_properties` object in the context, containing GPU details. (default: 0)                                                                                       |
+| `--output-amdsmi-context`                | Output an `amdsmi` object in the context, containing GPU details. (default: 0)                                                                                                     |
+| `--output-batches`                       | Output a `batches` array for each specialization, containing per-batch details. (default: 0)                                                                                       |
+| `--spaces-per-indent`                    | Number of spaces per indentation level in JSON output. Set to 0 for no indentation. (default: 4)                                                                                   |
+| `--stream-blocking-timeout-secs`         | Maximum stream blocking duration in seconds before timing out. Stream is blocked while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous. (default: 10) |
+
+## Noise
+
+Noise is the variance in throughput between runs. It is measured as the [coefficient of variation](https://en.wikipedia.org/wiki/Coefficient_of_variation), which is the standard deviation divided by the mean.
+
+The main goal of primbench is to reduce the amount of noise, because when a benchmark has say 10% noise, it means that a 4% performance improvement can't be distinguished from noise.
+
+Other processes running on the same GPU can introduce noise, so those processes should be stopped before running any benchmarks.
+
+Benchmarks that have been noisy for more than 10 seconds are automatically timed out (`--noise-timeout-secs`):
+
+![primbench noisy demo](./assets/noisy.gif)
+
+### GPU Warming and Cooling
+
+To reduce noise and ensure consistent timings, primbench keeps the GPU within a stable temperature range. Cold GPUs boost and inflate performance; hot GPUs throttle and add variance.
+
+Before each specialization, primbench:
+
+* Warms the GPU to ≥ 50 °C (`--min-gpu-temp`).
+* Cools it if it exceeds 60 °C (`--max-gpu-temp`).
+
+Temperatures are read via AMD SMI. Warming uses short GPU workloads; cooling waits until the GPU naturally drops back into range. If either process takes more than 60 seconds, primbench aborts (`--max-warming-secs`, `--max-cooling-secs`).
+
+### GPU Cache Clearing
+
+primbench clears the GPU cache before each batch by default to reduce noise and ensure consistent timings. This simulates a "cold run" by preventing leftover data from previous kernel executions from affecting results.
+
+* The `--hot` flag skips cache clearing, allowing a "hot cache" scenario where data is reused between batches.
+* The default cache size is 256 MiB, but `GPU_CACHE_SIZE` can be overridden at compile time to match your GPU's cache size.
+
+### Timing Details
+
+Kernels often only take a few microseconds to run on the GPU, leading to a lot of variance in how long each kernel call takes. For this reason, primbench calculates the noise across the last 10 *batches*, rather than the noise across the last 10 *kernel calls* (`--batch-window-size`).
+
+The number of kernel calls in a batch is dynamically decided, by doubling the number of kernel calls, until the batch takes *at least* 10 milliseconds to run on the GPU (`--min-gpu-ms-per-batch`).
+
+In some cases, the recorded start time occurs before the kernel actually begins executing, since event recording is asynchronous. To reduce this timing noise, primbench queues the start, kernel, and stop events together in one atomic sequence.
+
+It does this by briefly blocking GPU execution with a lightweight spinlock kernel until all events are enqueued. Once queued, the block is released and execution proceeds:
+```c++
+block(stream);
+hipEventRecord(start, stream);
+kernel(stream);
+hipEventRecord(stop, stream);
+unblock(stream);
+elapsed = stop - start;
+```
+
+When benchmarking synchronous algorithms, the `primbench::flags::sync` flag must be passed to the executor to disable stream blocking, since the spinlock will otherwise deadlock after 10 seconds (`--stream-blocking-timeout-secs`).
+
+## Outputting CSV
+
+Benchmarks can produce a CSV file alongside the JSON output by passing `--csv-out results.csv`.
+
+This CSV is a condensed version of the full `results.json` shown earlier in the readme. It includes only the most essential metrics: index, human-readable name, throughput, and noise, making it easier to read at a glance:
+
+```
+index,human_name,bytes_per_second,items_per_second,noise_timeout,noise_percent
+0,type: char,7.53499e+11,3.7675e+11,0,0.0378893
+1,type: long long,1.29973e+12,8.12334e+10,0,0.0586062
+```
+
+If you only want CSV output and don't need the JSON file, pass `--json-out /dev/null`.
+
+## Preserving Input Between Kernel Calls
+
+For benchmarks that modify input data in-place, `state.run_before_every_iteration(lambda)` allows you to restore inputs before each kernel call. This ensures every kernel call starts from a clean state, producing deterministic results. Note that this is **not** related to noise reduction; it only prevents mutated inputs from affecting subsequent kernel calls.
+
+## Outputting the Commit Hash
+
+If the macro `COMMIT_HASH` is defined at compile time, the corresponding Git commit hash is automatically included in `results.json` as `context.general.git_commit`:
+
+```bash
+hipcc -o copy_benchmark copy_benchmark.cpp -lamd_smi -DCOMMIT_HASH=\"$(git rev-parse --short HEAD)\" && ./copy_benchmark
+```
+
+## CLI Colors
+
+primbench follows the [Standard for ANSI Colors in Terminals](https://bixense.com/clicolors/):
+
+* Colors are **enabled by default only when stdout is a terminal**.
+* Colors can be **forced off** by setting the `NO_COLOR` environment variable.
+* Colors can be **forced on** by setting the `CLICOLOR_FORCE` environment variable.
