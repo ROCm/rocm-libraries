@@ -28,10 +28,10 @@
 
 #include "GEMMTestBase.hpp"
 
-using namespace rocRoller;
-
 namespace GEMMTests
 {
+    using namespace rocRoller;
+
     // Params are: A & B type, K tile size, (transA, transB), loadPathA, and loadPathB
     class GEMMF16TestGPU
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,

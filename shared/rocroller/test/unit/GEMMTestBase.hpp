@@ -35,7 +35,6 @@
 
 namespace GEMMTests
 {
-
     template <typename T>
     concept isF8 = std::is_same_v<T, rocRoller::FP8> || std::is_same_v<T, rocRoller::BF8>;
 

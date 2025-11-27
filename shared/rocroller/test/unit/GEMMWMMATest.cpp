@@ -29,34 +29,13 @@
 #include <hip/hip_runtime.h>
 #endif /* ROCROLLER_USE_HIP */
 
-// #include <rocRoller/AssemblyKernel.hpp>
-// #include <rocRoller/CodeGen/ArgumentLoader.hpp>
-// #include <rocRoller/CodeGen/Utils.hpp>
-// #include <rocRoller/CommandSolution.hpp>
-// #include <rocRoller/DataTypes/DataTypes.hpp>
-// #include <rocRoller/Expression.hpp>
-// #include <rocRoller/ExpressionTransformations.hpp>
-// #include <rocRoller/KernelGraph/KernelGraph.hpp>
-// #include <rocRoller/Operations/Command.hpp>
-// #include <rocRoller/Parameters/Solution/StreamK.hpp>
-// #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
-// #include <rocRoller/TensorDescriptor.hpp>
-// #include <rocRoller/Utilities/Error.hpp>
-// #include <rocRoller/Utilities/Logging.hpp>
-// #include <rocRoller/Utilities/Timer.hpp>
-
-#include "GEMMTestBase.hpp"
-
-//#include "common/SourceMatcher.hpp"
-// #include "Utilities.hpp"
-
 #include "GEMMF8F6F4.hpp"
-
-using namespace rocRoller;
-//namespace SolutionParams = rocRoller::Parameters::Solution;
+#include "GEMMTestBase.hpp"
 
 namespace GEMMTests
 {
+    using namespace rocRoller;
+
     // Params are: A & B type, K tile size, (transA, transB)
     class GEMMTestWMMAGPU
         : public BaseGEMMContextFixture<

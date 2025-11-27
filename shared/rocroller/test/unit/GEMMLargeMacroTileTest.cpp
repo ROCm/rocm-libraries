@@ -32,11 +32,11 @@
 #include "GEMMF8F6F4.hpp"
 #include "GEMMTestBase.hpp"
 
-using namespace rocRoller;
-namespace SolutionParams = rocRoller::Parameters::Solution;
-
 namespace GEMMTests
 {
+    using namespace rocRoller;
+    namespace SolutionParams = rocRoller::Parameters::Solution;
+
     class GEMMTestLargeMacroTileGPU : public BaseGEMMContextFixture<>
     {
     };

@@ -31,11 +31,10 @@
 
 #include "GEMMTestBase.hpp"
 
-using namespace rocRoller;
-namespace SolutionParams = rocRoller::Parameters::Solution;
-
 namespace GEMMTests
 {
+    using namespace rocRoller;
+    namespace SolutionParams = rocRoller::Parameters::Solution;
 
     class GEMMTestStreamKGPU
         : public BaseGEMMContextFixture<std::tuple<StreamKMode,

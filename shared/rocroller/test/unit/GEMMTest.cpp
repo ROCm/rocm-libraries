@@ -36,11 +36,11 @@
 
 #include "common/SourceMatcher.hpp"
 
-using namespace rocRoller;
-namespace SolutionParams = rocRoller::Parameters::Solution;
-
 namespace GEMMTests
 {
+    using namespace rocRoller;
+    namespace SolutionParams = rocRoller::Parameters::Solution;
+
     class GEMMTestGPU : public BaseGEMMContextFixture<>
     {
     };
