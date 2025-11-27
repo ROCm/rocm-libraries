@@ -440,7 +440,10 @@ std::tuple<size_t, int32_t> select_best_wgm(const hardware_t& hardware, size_t M
     bool MallIsImportant = (splitFactor == 1 && batch == 1 && numMTs > 2 * hardware.N_CU &&
                             numMT_M > 8 && numMT_N > 8);
     if (MallIsImportant && !isWGMXCCset) {
-        out_wgmxcc = defaultWGMXCC;
+        if (hardware.arch == hardware_t::architecture_t::gfx942)
+            out_wgmxcc = 1;
+        else
+            out_wgmxcc = defaultWGMXCC;
         isWGMXCCset = true;
     }
 
@@ -471,7 +474,10 @@ std::tuple<size_t, int32_t> select_best_wgm(const hardware_t& hardware, size_t M
     // Cases where we have multiple rounds of computation per each CU
     // To avoid regressions, it's set to defaultWGM. However, I think WGM=1 should be the winner
     if (MallIsImportant && !isWGMset) {
-        out_wgm = defaultWGM;
+        if (hardware.arch == hardware_t::architecture_t::gfx942)
+            out_wgm = 1;
+        else
+            out_wgm = defaultWGM;
         isWGMset = true;
     }
 
