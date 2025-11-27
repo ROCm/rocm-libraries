@@ -135,10 +135,10 @@ public:
             *tensorMap.at(nodeAttributes->x_tensor_uid()),
             *tensorMap.at(nodeAttributes->dw_tensor_uid()),
             *tensorMap.at(nodeAttributes->dy_tensor_uid()),
-            convertFlatBufferVectorToStdVector(nodeAttributes->pre_padding()),
-            convertFlatBufferVectorToStdVector(nodeAttributes->post_padding()),
-            convertFlatBufferVectorToStdVector(nodeAttributes->stride()),
-            convertFlatBufferVectorToStdVector(nodeAttributes->dilation()),
+            utilities::convertFlatBufferVectorToStdVector(nodeAttributes->pre_padding()),
+            utilities::convertFlatBufferVectorToStdVector(nodeAttributes->post_padding()),
+            utilities::convertFlatBufferVectorToStdVector(nodeAttributes->stride()),
+            utilities::convertFlatBufferVectorToStdVector(nodeAttributes->dilation()),
             nodeAttributes->conv_mode());
 
         return std::make_unique<

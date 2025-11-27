@@ -9,9 +9,6 @@
 #include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
-using namespace hipdnn_sdk::utilities;
-using namespace hipdnn_sdk::data_objects;
-
 namespace hipdnn_sdk_test_utils
 {
 
@@ -22,7 +19,7 @@ struct ConvolutionFwdTensorBundle
                                const std::vector<int64_t>& wDims,
                                const std::vector<int64_t>& yDims,
                                unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
-                               const TensorLayout& layout = TensorLayout::NCHW)
+                               const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW)
         : xTensor(xDims, layout)
         , wTensor(wDims, layout)
         , yTensor(yDims, layout)
@@ -45,9 +42,9 @@ struct ConvolutionFwdTensorBundle
         return variantPack;
     }
 
-    Tensor<InputType> xTensor;
-    Tensor<InputType> wTensor;
-    Tensor<InputType> yTensor;
+    hipdnn_sdk::utilities::Tensor<InputType> xTensor;
+    hipdnn_sdk::utilities::Tensor<InputType> wTensor;
+    hipdnn_sdk::utilities::Tensor<InputType> yTensor;
 };
 
 template <typename InputDataType>
@@ -57,7 +54,7 @@ struct ConvolutionBwdTensorBundle
                                const std::vector<int64_t>& wDims,
                                const std::vector<int64_t>& dyDims,
                                unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
-                               const TensorLayout& layout = TensorLayout::NCHW)
+                               const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW)
         : dxTensor(dxDims, layout)
         , wTensor(wDims, layout)
         , dyTensor(dyDims, layout)
@@ -84,9 +81,9 @@ struct ConvolutionBwdTensorBundle
     }
 
     std::vector<int64_t> derivedDims;
-    Tensor<InputDataType> dxTensor;
-    Tensor<InputDataType> wTensor;
-    Tensor<InputDataType> dyTensor;
+    hipdnn_sdk::utilities::Tensor<InputDataType> dxTensor;
+    hipdnn_sdk::utilities::Tensor<InputDataType> wTensor;
+    hipdnn_sdk::utilities::Tensor<InputDataType> dyTensor;
 };
 
 template <typename InputDataType>
@@ -96,7 +93,7 @@ struct ConvolutionWrwTensorBundle
                                const std::vector<int64_t>& dwDims,
                                const std::vector<int64_t>& dyDims,
                                unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
-                               const TensorLayout& layout = TensorLayout::NCHW)
+                               const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW)
         : xTensor(xDims, layout)
         , dwTensor(dwDims, layout)
         , dyTensor(dyDims, layout)
@@ -123,9 +120,9 @@ struct ConvolutionWrwTensorBundle
     }
 
     std::vector<int64_t> derivedDims;
-    Tensor<InputDataType> xTensor;
-    Tensor<InputDataType> dwTensor;
-    Tensor<InputDataType> dyTensor;
+    hipdnn_sdk::utilities::Tensor<InputDataType> xTensor;
+    hipdnn_sdk::utilities::Tensor<InputDataType> dwTensor;
+    hipdnn_sdk::utilities::Tensor<InputDataType> dyTensor;
 };
 
 }
