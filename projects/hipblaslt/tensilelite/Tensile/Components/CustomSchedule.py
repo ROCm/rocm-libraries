@@ -1427,7 +1427,6 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
             'LRB1': [[80, 98, 99, 100]],
             'LCC': [[102, 103]]
         }
-        num_gr = len(optSchedule["GRA"][0])//2 + len(optSchedule["GRB"][0])//2
         syncCode = [
             SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration"),
 
@@ -1438,10 +1437,10 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRB0 to complete before GRB start"),
             SBarrier(comment=""),
 
-            SWaitCnt(dscnt=-1, vlcnt=num_gr, vscnt=-1, comment="wait for previous set of global reads"),
+            SWaitCnt(dscnt=-1, vlcnt=28, vscnt=-1, comment="wait for previous set of global reads"),
             SBarrier(comment="")
         ]
-        nglshift = nllshift = num_gr
+        nglshift = nllshift = 28
 
     elif isNN(kernel) and useLDSTr and TLDS==1:
         numMfma = 104
