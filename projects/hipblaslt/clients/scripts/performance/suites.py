@@ -137,16 +137,17 @@ def all():
         # Put focused tests set for gfx942
         yield from matmul_set_1() # this problemset is an initial test example for gfx942
         yield from matmul_set_2()
+        yield from matmul_set_3()
     elif "gfx950" in target_arch:
         # Put focused tests set for gfx950
         yield from matmul_set_2()
     elif "gfx90a" in target_arch:
         # FIXME- please replace the examples with the real interested problems for gfx90a
-        yield from matmul_examples()
+        yield from matmul_set_3()
     elif "gfx110" in target_arch:
         # FIXME- please replace the examples with the real interested problems for gfx110?
-        yield from matmul_examples()
+        yield from matmul_set_3()
     elif "gfx120" in target_arch:
         # FIXME- please replace the examples with the real interested problems for gfx120?
-        yield from matmul_examples()
+        yield from matmul_set_3()
 

@@ -3,14 +3,6 @@ include: ../../../tests/data/hipblaslt_common.yaml
 include: ../../../tests/data/matmul_common.yaml
 
 Definitions:
-  # - &transA_transB_range
-  #   - { transA: N, transB: N }
-  #   - { transA: N, transB: T }
-  #   - { transA: T, transB: N }
-  #   - { transA: T, transB: T }
-
-# change to f8 for gfx950, otherwise we'll get "no solution found"
-# This also works for gfx942 since client automatically converts f8 to f8n on gfx942
 Tests:
 - name: hpa_half_precision_rcmt_mphb_nn
   function:
@@ -32,6 +24,7 @@ Tests:
   transB: N
   iters: 1000
   cold_iters: 1000
+  rotating: 512
 
 - name: hpa_half_precision_rcmt_mphb_b_nn
   function:
@@ -46,6 +39,7 @@ Tests:
   batch_count: 16
   iters: 1000
   cold_iters: 1000
+  rotating: 512
 
 - name: hpa_half_precision_rcmt_mphb_b_nt
   function:
@@ -62,6 +56,7 @@ Tests:
   batch_count: 16
   iters: 1000
   cold_iters: 1000
+  rotating: 512
 
 - name: hpa_half_precision_rcmt_mhb_tn
   function:
