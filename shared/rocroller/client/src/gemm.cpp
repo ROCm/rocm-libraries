@@ -826,6 +826,8 @@ namespace rocRoller::Client::GEMMClient
             try
             {
                 auto elfKernels    = AssemblyKernels::fromELF(io.loadCOPath).kernels;
+                AssertFatal(elfKernels.size() == 1,
+                            "Expected exactly one kernel in ELF file, found ", elfKernels.size());
                 auto kernelFromELF = elfKernels.at(0);
                 auto metadataYaml  = kernelFromELF.amdgpu_metadata_yaml();
                 std::cout << metadataYaml << std::endl;

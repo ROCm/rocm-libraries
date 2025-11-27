@@ -155,7 +155,7 @@ namespace rocRoller
         {
             return ctx->ldsAllocator()->maxUsed();
         }
-        AssertFatal(m_group_segment_fixed_size.has_value(), "Context is empty");
+        AssertFatal(m_group_segment_fixed_size.has_value(), "Context is null or expired");
         return m_group_segment_fixed_size.value();
     }
 
@@ -185,7 +185,7 @@ namespace rocRoller
         {
             return ctx->allocator(Register::Type::Scalar)->useCount();
         }
-        AssertFatal(m_sgprCount.has_value(), "Context is empty");
+        AssertFatal(m_sgprCount.has_value(), "Context is null or expired");
         return m_sgprCount.value();
     }
 
@@ -196,7 +196,7 @@ namespace rocRoller
         {
             return ctx->allocator(Register::Type::Vector)->useCount();
         }
-        AssertFatal(m_vgprCount.has_value(), "Context is empty");
+        AssertFatal(m_vgprCount.has_value(), "Context is null or expired");
         return m_vgprCount.value();
     }
 
@@ -207,7 +207,7 @@ namespace rocRoller
         {
             return ctx->allocator(Register::Type::Accumulator)->useCount();
         }
-        AssertFatal(m_agprCount.has_value(), "Context is empty");
+        AssertFatal(m_agprCount.has_value(), "Context is null or expired");
         return m_agprCount.value();
     }
 

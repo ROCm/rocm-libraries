@@ -232,6 +232,7 @@ namespace rocRoller
         CommandPtr                  m_command;
 
         // In case context is not available
+        // Context does not get serialized but sometimes we need these values after serialization
         std::optional<int> m_sgprCount;
         std::optional<int> m_vgprCount;
         std::optional<int> m_agprCount;

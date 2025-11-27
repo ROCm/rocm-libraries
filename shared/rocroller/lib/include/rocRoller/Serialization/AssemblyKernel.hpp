@@ -135,6 +135,7 @@ namespace rocRoller
                 {
                     AssertFatal(workgroupSize.size() == 3);
                     kern.m_workgroupSize = {workgroupSize[0], workgroupSize[1], workgroupSize[2]};
+                    // The following fields are context-dependent and must be set here
                     kern.m_sgprCount     = sgpr_count;
                     kern.m_vgprCount     = vgpr_count;
                     kern.m_agprCount     = agpr_count;
