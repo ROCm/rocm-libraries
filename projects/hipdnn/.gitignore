@@ -14,6 +14,9 @@
 *.dylib
 *.dll
 
+# Hipdnn Local install
+install/
+
 # Fortran module files
 *.mod
 
@@ -67,6 +70,7 @@ build*/
 
 # Python virtualenv
 .venv/
+hipdnn_env/
 
 # Python cache
 __pycache__/
