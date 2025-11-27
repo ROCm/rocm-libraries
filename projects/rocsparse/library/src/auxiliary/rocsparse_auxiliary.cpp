@@ -4711,23 +4711,6 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
-rocsparse_status rocsparse_dnvec_set_inc(rocsparse_dnvec_descr descr, int64_t inc)
-try
-{
-    ROCSPARSE_ROUTINE_TRACE;
-
-    ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
-    descr->inc = inc;
-    return rocsparse_status_success;
-    // LCOV_EXCL_START
-}
-catch(...)
-{
-    RETURN_ROCSPARSE_EXCEPTION();
-}
-// LCOV_EXCL_STOP
-
 /********************************************************************************
  * \brief rocsparse_destroy_dnvec_descr destroys a dense vector descriptor.
  *******************************************************************************/
@@ -4839,34 +4822,6 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, values);
 
     *values = descr->const_values;
-
-    return rocsparse_status_success;
-    // LCOV_EXCL_START
-}
-catch(...)
-{
-    RETURN_ROCSPARSE_EXCEPTION();
-}
-// LCOV_EXCL_STOP
-
-/********************************************************************************
- * \brief rocsparse_dnvec_set_strided_batch sets the dense vector batch count
- * and batch stride.
- *******************************************************************************/
-rocsparse_status rocsparse_dnvec_set_strided_batch(rocsparse_dnvec_descr descr,
-                                                   rocsparse_int         batch_count,
-                                                   int64_t               batch_stride)
-try
-{
-    ROCSPARSE_ROUTINE_TRACE;
-
-    ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
-    ROCSPARSE_CHECKARG(2, batch_stride, (batch_stride < 0), rocsparse_status_invalid_value);
-
-    descr->batch_count  = batch_count;
-    descr->batch_stride = batch_stride;
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
