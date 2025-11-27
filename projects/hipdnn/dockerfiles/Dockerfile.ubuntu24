@@ -127,8 +127,13 @@ RUN if [ "$ROCM_LIBRARIES_REF" != "default" ]; then \
         git submodule update --init rocm-libraries && \
         cd rocm-libraries && \
         git fetch origin && \
-        git checkout $ROCM_LIBRARIES_REF; \
+        git checkout $ROCM_LIBRARIES_REF && \
+        cd .. && \
+        git add rocm-libraries && \
+        git commit -m "Update rocm-libraries submodule to $ROCM_LIBRARIES_REF"; \
     fi
+
+RUN git log -2
 
 RUN python3 -m venv /opt/venv
 
@@ -142,6 +147,11 @@ RUN pip install -r requirements.txt
 RUN git config --global url."https://github.com/".insteadOf git@github.com: && \
 git config --global credential.helper "!f() { echo username=anonymous; echo password=; }; f" && \
 python ./build_tools/fetch_sources.py
+
+RUN echo "rocm-libraries pinned to commit:" && \
+    cd rocm-libraries && \
+    git rev-parse HEAD && \
+    cd ..
 
 # Do this after fetch_sources.py or you wont have the repos pulled this file references.
 RUN pip install -r requirements-external.txt
