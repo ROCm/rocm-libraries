@@ -21,6 +21,11 @@
 from enum import Enum
 
 
+class lds_config(Enum):
+    SIZE_64KiB = 64 * 1024
+    SIZE_160KiB = 160 * 1024
+
+
 class supported_arch(Enum):
     GFX_GENERIC = "gfx_generic"
     GFX_803 = "gfx803"

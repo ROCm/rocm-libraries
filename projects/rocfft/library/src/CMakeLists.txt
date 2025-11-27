@@ -151,7 +151,7 @@ set( kgen_logic_files
      # python code that decides kernel parameters
      ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py
      ${CMAKE_SOURCE_DIR}/library/src/device/generator.py
-     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_lds.py
+     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_arch.py
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbrr.py
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbcc.py
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbcr.py

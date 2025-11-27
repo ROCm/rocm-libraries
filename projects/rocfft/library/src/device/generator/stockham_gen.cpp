@@ -22,6 +22,7 @@
 using namespace std::placeholders;
 
 #include "../../../../shared/arithmetic.h"
+#include "../../../../shared/device_properties.h"
 #include "../../../../shared/precision_type.h"
 #include "generator.h"
 #include "stockham_gen.h"
@@ -796,8 +797,11 @@ int main()
                 specs2d.threads_per_transform = threads_per_transform.back();
 
             // 2D_SINGLE kernels use the specified workgroup size
-            // directly
-            if(scheme == "CS_KERNEL_2D_SINGLE")
+            // directly.
+            // Kernels with an architecture other than generic will
+            // also use the workgroup size directly, as the calculations
+            // for wgs_is_derived=false assume an LDS size of 64KiB.
+            if(scheme == "CS_KERNEL_2D_SINGLE" || gcn_arch_name != generic_gcn_arch_name)
             {
                 specs.wgs_is_derived   = true;
                 specs2d.wgs_is_derived = true;

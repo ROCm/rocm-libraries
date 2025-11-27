@@ -87,13 +87,14 @@ def cjoin(xs):
 # Helpers
 #
 def get_kernel_key(kernel):
-    """Return a key tuple for a kernel based on (length, scheme, lds_size_bytes)."""
+    """Return a key tuple for a kernel based on (length, scheme, lds_size_bytes, gcn_arch_name)."""
     if isinstance(kernel.length, list):
         length_key = tuple(kernel.length)
     else:
         length_key = kernel.length
 
-    key = (length_key, kernel.scheme, kernel.lds_size_bytes)
+    key = (length_key, kernel.scheme, kernel.lds_size_bytes,
+           kernel.gcn_arch_name)
 
     return key
 
@@ -101,45 +102,72 @@ def get_kernel_key(kernel):
 def merge_kernel_list(kernels, all_precisions):
     """Merge precision and architecture lists with kernel list. 
     Check for duplicated kernel and invalid precision/arch entries."""
+
     r, s = list(), set()
+
     all_archs = [member.value for member in config_arch.supported_arch]
+    all_lds_configs = [member.value for member in config_arch.lds_config]
+
+    lds_size_err_msg = "Error: invalid lds_size_bytes in kernel configuration: \n"
+    arch_err_msg = "Error: invalid architecture in kernel configuration: \n"
+    prec_err_msg = "Error: invalid precision in kernel configuration: \n"
+    dup_err_msg = "Error: duplicated entry in kernel configuration: \n"
 
     for kernel in kernels:
         if hasattr(kernel, 'precision'):
+            if not isinstance(kernel.precision, list):
+                kernel.precision = [kernel.precision]
+
             precisions = kernel.precision
         else:
             precisions = all_precisions
 
         if hasattr(kernel, 'gcn_arch_name'):
-            archs = [member.value for member in kernel.gcn_arch_name]
+            if not isinstance(kernel.gcn_arch_name, list):
+                kernel.gcn_arch_name = [kernel.gcn_arch_name]
+            archs = kernel.gcn_arch_name
+            if hasattr(kernel, 'lds_size_bytes'):
+                # lds size not allowed to be specified per arch
+                print(lds_size_err_msg + str(kernel))
+                sys.exit(1)
+            # lds size will be determined at runtime based on arch
+            kernel.lds_size_bytes = 0
         else:
+            # default to gfx generic if no arch specified
             archs = [config_arch.supported_arch.GFX_GENERIC.value]
+            if hasattr(kernel, 'lds_size_bytes'):
+                if isinstance(kernel.lds_size_bytes, list):
+                    # only one lds size allowed if gfx generic
+                    print(lds_size_err_msg + str(kernel))
+                    sys.exit(1)
+
+                if kernel.lds_size_bytes not in all_lds_configs:
+                    print(lds_size_err_msg + str(kernel))
+                    sys.exit(1)
+            else:
+                # default lds size to 64KiB
+                kernel.lds_size_bytes = config_arch.lds_config.SIZE_64KiB.value
+
         for a in archs:
             if a not in all_archs:
-                print(
-                    "Error: invalid architecture in kernel configuration: \n" +
-                    str(kernel))
+                print(arch_err_msg + str(kernel))
                 sys.exit(1)
             for p in precisions:
                 if p not in all_precisions:
-                    print(
-                        "Error: invalid precision in kernel configuration: \n"
-                        + str(kernel))
+                    print(prec_err_msg + str(kernel))
                     sys.exit(1)
 
                 kernel_cpy = copy.copy(kernel)
                 kernel_cpy.precision = p
                 kernel_cpy.gcn_arch_name = a
 
-                key = (get_kernel_key(kernel_cpy), kernel_cpy.precision,
-                       kernel_cpy.gcn_arch_name)
+                key = (get_kernel_key(kernel_cpy), kernel_cpy.precision)
 
                 if key not in s:
                     s.add(key)
                     r.append(kernel_cpy)
                 else:
-                    print("Error: duplicated entry in kernel configuration: " +
-                          str(kernel))
+                    print(dup_err_msg + str(kernel))
                     sys.exit(1)
     return r
 
@@ -741,13 +769,8 @@ def cli():
 
     kernels += all_kernels + kernels_2d + kernel_3d_pp
 
-    # set default lds size (64k) on kernels if not specified
-    for k in kernels:
-        if not hasattr(k, 'lds_size_bytes'):
-            k.lds_size_bytes = 65536
-
     #
-    # merge kernel list with additional precision entries if required
+    # merge kernel list with additional precision/arch entries if required
     #
     kernels = merge_kernel_list(kernels, list(precisions_dict))
 
