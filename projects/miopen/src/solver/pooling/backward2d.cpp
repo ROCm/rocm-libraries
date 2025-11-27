@@ -58,7 +58,8 @@ struct kernel_params
     std::size_t grp_tile1;
 
     kernel_params(const miopen::pooling::ProblemDescription& problem,
-                  const std::optional<PerformanceConfigPoolingBackward2d>& config = std::nullopt)
+                  const std::optional<PerformanceConfigPooling2d<OperationType::Backward>>& config =
+                      std::nullopt)
     {
         const auto& pd = problem.GetPooling();
 
@@ -136,15 +137,25 @@ std::size_t sizeof_local_memory(const miopen::pooling::ProblemDescription& probl
     const kernel_params kp(problem);
 
     // aliases to ease programming
-    const auto& MLO_POOLING_KERNEL_SZ0      = kp.kernel_size_w;
-    const auto& MLO_POOLING_KERNEL_SZ1      = kp.kernel_size_h;
-    const auto& MLO_POOLING_STRIDE0         = kp.kernel_stride_w;
-    const auto& MLO_POOLING_STRIDE1         = kp.kernel_stride_h;
+    const auto& MLO_POOLING_KERNEL_SZ0 = kp.kernel_size_w;
+    const auto& MLO_POOLING_KERNEL_SZ1 = kp.kernel_size_h;
+    const auto& MLO_POOLING_STRIDE0    = kp.kernel_stride_w;
+    const auto& MLO_POOLING_STRIDE1    = kp.kernel_stride_h;
     // safer estimates of memory with max values of tunable parameters
-    const auto& MLO_POOLBWD_N_HORIZ_OUT_PIX = PerformanceConfigPoolingBackward2d::max_out_pix_tile0;
-    const auto& MLO_POOLBWD_N_VERT_OUT_PIX  = PerformanceConfigPoolingBackward2d::max_out_pix_tile1;
-    const auto& MLO_POOLBWD_GROUP_SZ0       = PerformanceConfigPoolingBackward2d::max_local_size0;
-    const auto& MLO_POOLBWD_GROUP_SZ1       = PerformanceConfigPoolingBackward2d::max_local_size1;
+    assert(kp.out_pix_tile0 <=
+           PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile0);
+    const auto& MLO_POOLBWD_N_HORIZ_OUT_PIX =
+        PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile0;
+    assert(kp.out_pix_tile1 <=
+           PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile1);
+    const auto& MLO_POOLBWD_N_VERT_OUT_PIX =
+        PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile1;
+    assert(kp.grp_tile0 <= PerformanceConfigPooling2d<OperationType::Backward>::max_local_size0);
+    const auto& MLO_POOLBWD_GROUP_SZ0 =
+        PerformanceConfigPooling2d<OperationType::Backward>::max_local_size0;
+    assert(kp.grp_tile1 <= PerformanceConfigPooling2d<OperationType::Backward>::max_local_size1);
+    const auto& MLO_POOLBWD_GROUP_SZ1 =
+        PerformanceConfigPooling2d<OperationType::Backward>::max_local_size1;
 
     const auto MLO_POOLBWD_LCL_DATA_WIDTH =
         (static_cast<std::size_t>(MLO_POOLBWD_GROUP_SZ0) * MLO_POOLBWD_N_HORIZ_OUT_PIX +
@@ -199,7 +210,7 @@ bool PoolingBackward2d::IsApplicable(const ExecutionContext&,
 ConvSolution PoolingBackward2d::GetSolutionImpl(
     const ExecutionContext&,
     const miopen::pooling::ProblemDescription& problem,
-    const std::optional<PerformanceConfigPoolingBackward2d>& config) const
+    const std::optional<PerformanceConfigPooling2d<OperationType::Backward>>& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
@@ -317,117 +328,18 @@ PoolingBackward2d::GetWorkspaceSize(const ExecutionContext&,
     return problem.GetYDesc().GetElementSize() * get_data_size(problem.GetPooling().GetIndexType());
 }
 
-void PerformanceConfigPoolingBackward2d::Init(const miopen::pooling::ProblemDescription&)
-{
-    // initialize with minimum values
-    out_pix_tile0 = min_out_pix_tile0;
-    out_pix_tile1 = min_out_pix_tile1;
-    local_size0   = min_local_size0;
-    local_size1   = min_local_size1;
-}
-
-void PerformanceConfigPoolingBackward2d::HeuristicInit(
-    const miopen::pooling::ProblemDescription& problem)
-{
-#if !MIOPEN_BACKEND_HIP
-    std::ignore = problem;
-#else
-    switch(problem.GetXDesc().GetType())
-    {
-    case miopenHalf:
-    case miopenFloat: Init(problem); break;
-    case miopenBFloat16:
-    case miopenDouble:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenInt8:
-    case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
-    }
-#endif
-}
-
-bool PerformanceConfigPoolingBackward2d::SetNextValue(
-    const miopen::pooling::ProblemDescription& problem)
-{
-#if !MIOPEN_BACKEND_HIP
-    std::ignore = problem;
-    return false;
-#else
-    do
-    {
-        if(!NextTwoPower<min_out_pix_tile0, max_out_pix_tile0>(out_pix_tile0))
-            break;
-        if(!NextTwoPower<min_out_pix_tile1, max_out_pix_tile1>(out_pix_tile1))
-            break;
-        if(!NextTwoPower<min_local_size0, max_local_size0>(local_size0))
-            break;
-        if(!NextTwoPower<min_local_size1, max_local_size1>(local_size1))
-            break;
-        return false;
-    } while(false);
-    return true;
-#endif
-}
-
-bool PerformanceConfigPoolingBackward2d::IsValidValue() const
-{
-    if(!IsTwoPower<min_out_pix_tile0, max_out_pix_tile0>(out_pix_tile0))
-        return false;
-    if(!IsTwoPower<min_out_pix_tile1, max_out_pix_tile1>(out_pix_tile1))
-        return false;
-    if(!IsTwoPower<min_local_size0, max_local_size0>(local_size0))
-        return false;
-    if(!IsTwoPower<min_local_size1, max_local_size1>(local_size1))
-        return false;
-    return true;
-}
-
-bool PerformanceConfigPoolingBackward2d::IsValid(
-    const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
-{
-#if !MIOPEN_BACKEND_HIP
-    std::ignore = problem;
-    return false;
-#else
-    switch(problem.GetXDesc().GetType())
-    {
-    case miopenHalf:
-    case miopenFloat:
-        return IsValidValue(); // perform further checks for problem & parameter set compatibility?
-    case miopenBFloat16:
-    case miopenDouble:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenInt8:
-    case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
-    }
-    return false;
-#endif
-}
-
-bool PerformanceConfigPoolingBackward2d::operator==(
-    const PerformanceConfigPoolingBackward2d& other) const
-{
-    return out_pix_tile0 == other.out_pix_tile0 && out_pix_tile1 == other.out_pix_tile1 &&
-           local_size0 == other.local_size0 && local_size1 == other.local_size1;
-}
-
 bool PoolingBackward2d::IsValidPerformanceConfig(
     const ExecutionContext& context,
     const miopen::pooling::ProblemDescription& problem,
-    const PerformanceConfigPoolingBackward2d& config) const
+    const PerformanceConfigPooling2d<OperationType::Backward>& config) const
 {
     return config.IsValid(context, problem);
 }
 
-PerformanceConfigPoolingBackward2d PoolingBackward2d::GetDefaultPerformanceConfig(
+PerformanceConfigPooling2d<OperationType::Backward> PoolingBackward2d::GetDefaultPerformanceConfig(
     const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
 {
-    PerformanceConfigPoolingBackward2d config;
+    PerformanceConfigPooling2d<OperationType::Backward> config;
     config.HeuristicInit(problem);
     return config;
 }
