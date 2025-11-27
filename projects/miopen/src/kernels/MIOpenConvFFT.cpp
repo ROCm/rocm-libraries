@@ -349,7 +349,7 @@ __forceinline__ __device__ void FwdPassWE(unsigned int batch,
     inOffset =
         ((batch * 16) % CFF_CHANNELS) * 25 * CFF_NFILTER + ((batch * 16) / CFF_CHANNELS) * 25;
 #else
-    inOffset = batch * 25 * 16;
+    inOffset                                = batch * 25 * 16;
 #endif
 
 #ifdef CFF_BACKWARD
@@ -1421,7 +1421,7 @@ __forceinline__ __device__ void FwdPassWE(unsigned int batch,
     unsigned int met = me % 32;
 
 #ifdef CFF_BACKWARD
-    inOffset = ((batch * 4 + (me / 32)) % CFF_CHANNELS) * 25 * CFF_NFILTER +
+    inOffset         = ((batch * 4 + (me / 32)) % CFF_CHANNELS) * 25 * CFF_NFILTER +
                ((batch * 4 + (me / 32)) / CFF_CHANNELS) * 25;
 #else
     inOffset = batch * 25 * 4 + (me / 32) * 25;
@@ -1435,7 +1435,7 @@ __forceinline__ __device__ void FwdPassWE(unsigned int batch,
 
     if(met < 25)
     {
-        R0 = bufIn[inOffset + met];
+        R0                              = bufIn[inOffset + met];
 
 #ifdef CFF_BACKWARD
         ldsf[(me / 32) * 180 * 2 + met] = R0;
@@ -1451,7 +1451,7 @@ __forceinline__ __device__ void FwdPassWE(unsigned int batch,
 #ifdef CFF_BACKWARD
         R0 = ldsf[(me / 32) * 180 * 2 + ((met / 10) * 10 + (met % 2) * 5 + ((met % 10) / 2))];
 #else
-        R0 = ldsf[(me / 32) * 180 * 2 + 5 +
+        R0                                  = ldsf[(me / 32) * 180 * 2 + 5 +
                   (24 - (met / 10) * 10 - (met % 2) * 5 - ((met % 10) / 2))];
 #endif
     }
@@ -2692,7 +2692,7 @@ extern "C" __global__
 extern "C" __global__
     __launch_bounds__(256) void MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
 {
-    unsigned int me    = threadIdx.x;
+    unsigned int me = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[1024];
@@ -2710,12 +2710,12 @@ extern "C" __global__
     iOffset = bm * 32 + bd * 544 * 32;
     oOffset = CFF_HALFW + bm * (CFF_CHANNELS * CFF_BATCH + 64) * 32 + bd * 32;
 
-    lwbIn  = gb + iOffset;
+    lwbIn = gb + iOffset;
     lwbOut = gb + oOffset;
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0                                      = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
+        R0 = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
         lds[(me % 32) * 32 + (me / 32) + t * 8] = R0;
     }
 
@@ -2723,7 +2723,7 @@ extern "C" __global__
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0                                              = lds[me + t * 256];
+        R0 = lds[me + t * 256];
         lwbOut[(me % 32) + (me / 32) * (CFF_CHANNELS * CFF_BATCH + 64) +
                t * 8 * (CFF_CHANNELS * CFF_BATCH + 64)] = R0;
     }
@@ -2772,7 +2772,7 @@ extern "C" __global__
 extern "C" __global__
     __launch_bounds__(256) void MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
 {
-    unsigned int me    = threadIdx.x;
+    unsigned int me = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[1024];
@@ -2791,12 +2791,12 @@ extern "C" __global__
     oOffset = CFF_HALFW + 544 * (CFF_CHANNELS * CFF_BATCH + 64) +
               bm * (CFF_CHANNELS * CFF_NFILTER + 64) * 32 + bd * 32;
 
-    lwbIn  = gb + iOffset;
+    lwbIn = gb + iOffset;
     lwbOut = gb + oOffset;
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0                                      = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
+        R0 = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
         lds[(me % 32) * 32 + (me / 32) + t * 8] = R0;
     }
 
@@ -2804,7 +2804,7 @@ extern "C" __global__
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0                                                = lds[me + t * 256];
+        R0 = lds[me + t * 256];
         lwbOut[(me % 32) + (me / 32) * (CFF_CHANNELS * CFF_NFILTER + 64) +
                t * 8 * (CFF_CHANNELS * CFF_NFILTER + 64)] = R0;
     }
@@ -2852,7 +2852,7 @@ extern "C" __global__
 extern "C" __global__
     __launch_bounds__(256) void MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
 {
-    unsigned int me    = threadIdx.x;
+    unsigned int me = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[1024];
@@ -2870,7 +2870,7 @@ extern "C" __global__
     iOffset = bm * (CFF_NFILTER * CFF_BATCH + 64) * 32 + bd * 32;
     oOffset = CFF_HALFW + bm * 32 + bd * 544 * 32;
 
-    lwbIn  = gb + iOffset;
+    lwbIn = gb + iOffset;
     lwbOut = gb + oOffset;
 
     for(unsigned int t = 0; t < 4; t++)
@@ -2884,7 +2884,7 @@ extern "C" __global__
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0                                                = lds[me + t * 256];
+        R0 = lds[me + t * 256];
         lwbOut[(me % 32) + (me / 32) * 544 + t * 8 * 544] = R0;
     }
 }
@@ -3313,9 +3313,9 @@ extern "C" __global__
 #define LS_PERP_B (MT_1J / NL_PERP_B)
 
 /* global memory indices */
-#define GLOBAL_C(IDX0I, IDX1J, IDXK) ((IDX0I) * strideC0I + (IDX1J) * strideC1J + (IDXK) * strideCK)
-#define GLOBAL_A(IDXL, IDX0I, IDXK) ((IDXL) * strideAL + (IDX0I) * strideA0I + (IDXK) * strideAK)
-#define GLOBAL_B(IDXL, IDX1J, IDXK) ((IDXL) * strideBL + (IDX1J) * strideB1J + (IDXK) * strideBK)
+#define GLOBAL_C(IDX0I, IDX1J, IDXK) ((IDX0I)*strideC0I + (IDX1J)*strideC1J + (IDXK)*strideCK)
+#define GLOBAL_A(IDXL, IDX0I, IDXK) ((IDXL)*strideAL + (IDX0I)*strideA0I + (IDXK)*strideAK)
+#define GLOBAL_B(IDXL, IDX1J, IDXK) ((IDXL)*strideBL + (IDX1J)*strideB1J + (IDXK)*strideBK)
 
 /* data types */
 #define TYPE_A float2
@@ -3734,12 +3734,9 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
 #define LDS_NUM_ELEMENTS 1024
 
 /* global memory indices */
-#define GLOBAL_C(IDX0I, IDX1J, IDXK) \
-    (((IDX0I) * strideC0I + (IDX1J) * strideC1J + (IDXK) * strideCK))
-#define GLOBAL_OFFSET_A(IDXL, IDX0I, IDXK) \
-    (((IDXL) * strideAL + (IDX0I) * strideA0I + (IDXK) * strideAK))
-#define GLOBAL_OFFSET_B(IDXL, IDX1J, IDXK) \
-    (((IDXL) * strideBL + (IDX1J) * strideB1J + (IDXK) * strideBK))
+#define GLOBAL_C(IDX0I, IDX1J, IDXK) (((IDX0I)*strideC0I + (IDX1J)*strideC1J + (IDXK)*strideCK))
+#define GLOBAL_OFFSET_A(IDXL, IDX0I, IDXK) (((IDXL)*strideAL + (IDX0I)*strideA0I + (IDXK)*strideAK))
+#define GLOBAL_OFFSET_B(IDXL, IDX1J, IDXK) (((IDXL)*strideBL + (IDX1J)*strideB1J + (IDXK)*strideBK))
 
 /* data types */
 #define DATA_TYPE float2
@@ -3790,20 +3787,20 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
 /* Begin Kernel                         */
 /****************************************/
 extern "C" __global__
-__launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
-                                                        unsigned int const offsetC,
-                                                        unsigned int const offsetA,
-                                                        unsigned int const offsetB,
-                                                        unsigned int const strideC1J,
-                                                        unsigned int const strideCK,
-                                                        unsigned int const strideA0I,
-                                                        unsigned int const strideAK,
-                                                        unsigned int const strideB1J,
-                                                        unsigned int const strideBK,
-                                                        unsigned int const size0I,
-                                                        unsigned int const size1J,
-                                                        unsigned int const sizeK,
-                                                        unsigned int const sizeL)
+    __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
+                                                            unsigned int const offsetC,
+                                                            unsigned int const offsetA,
+                                                            unsigned int const offsetB,
+                                                            unsigned int const strideC1J,
+                                                            unsigned int const strideCK,
+                                                            unsigned int const strideA0I,
+                                                            unsigned int const strideAK,
+                                                            unsigned int const strideB1J,
+                                                            unsigned int const strideBK,
+                                                            unsigned int const size0I,
+                                                            unsigned int const size1J,
+                                                            unsigned int const sizeK,
+                                                            unsigned int const sizeL)
 {
 
     /* apply offsets */
@@ -4300,12 +4297,9 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
 #define LDS_NUM_ELEMENTS 256
 
 /* global memory indices */
-#define GLOBAL_C(IDX0I, IDX1J, IDXK) \
-    (((IDX0I) * strideC0I + (IDX1J) * strideC1J + (IDXK) * strideCK))
-#define GLOBAL_OFFSET_A(IDXL, IDX0I, IDXK) \
-    (((IDXL) * strideAL + (IDX0I) * strideA0I + (IDXK) * strideAK))
-#define GLOBAL_OFFSET_B(IDXL, IDX1J, IDXK) \
-    (((IDXL) * strideBL + (IDX1J) * strideB1J + (IDXK) * strideBK))
+#define GLOBAL_C(IDX0I, IDX1J, IDXK) (((IDX0I)*strideC0I + (IDX1J)*strideC1J + (IDXK)*strideCK))
+#define GLOBAL_OFFSET_A(IDXL, IDX0I, IDXK) (((IDXL)*strideAL + (IDX0I)*strideA0I + (IDXK)*strideAK))
+#define GLOBAL_OFFSET_B(IDXL, IDX1J, IDXK) (((IDXL)*strideBL + (IDX1J)*strideB1J + (IDXK)*strideBK))
 
 /* data types */
 #define DATA_TYPE float2
@@ -4334,20 +4328,20 @@ __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
 /* Begin Kernel                           */
 /******************************************/
 extern "C" __global__
-__launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
-                                                        unsigned int const offsetC,
-                                                        unsigned int const offsetA,
-                                                        unsigned int const offsetB,
-                                                        unsigned int const strideC1J,
-                                                        unsigned int const strideCK,
-                                                        unsigned int const strideA0I,
-                                                        unsigned int const strideAK,
-                                                        unsigned int const strideB1J,
-                                                        unsigned int const strideBK,
-                                                        unsigned int const size0I,
-                                                        unsigned int const size1J,
-                                                        unsigned int const sizeK,
-                                                        unsigned int const sizeL)
+    __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
+                                                            unsigned int const offsetC,
+                                                            unsigned int const offsetA,
+                                                            unsigned int const offsetB,
+                                                            unsigned int const strideC1J,
+                                                            unsigned int const strideCK,
+                                                            unsigned int const strideA0I,
+                                                            unsigned int const strideAK,
+                                                            unsigned int const strideB1J,
+                                                            unsigned int const strideBK,
+                                                            unsigned int const size0I,
+                                                            unsigned int const size1J,
+                                                            unsigned int const sizeK,
+                                                            unsigned int const sizeL)
 {
 
     /* apply offsets */
