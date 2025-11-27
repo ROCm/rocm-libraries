@@ -183,9 +183,8 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
     SECTION("bitFieldExtract")
     {
         CHECK_THAT(simplify(bfe(DataType::Int32, v, 0, 32)), IdenticalTo(v));
-        // TODO: Enable this simplification with a reinterpret_cast expression
-        // CHECK_THAT(simplify(bfe(DataType::UInt32, v, 0, 32)),
-        //            IdenticalTo(reinterpret(DataType::UInt32, v)));
+        CHECK_THAT(simplify(bfe(DataType::UInt32, v, 0, 32)),
+                   IdenticalTo(reinterpret(DataType::UInt32, v)));
 
         auto expr  = bfe(DataType::Int32, v, 16, 16);
         auto expr2 = bfe(DataType::Int32, expr, 0, 16);
