@@ -150,7 +150,7 @@ python ./build_tools/fetch_sources.py
 
 RUN echo "rocm-libraries pinned to commit:" && \
     cd rocm-libraries && \
-    git rev-parse HEAD && \
+    git log -10 && \
     cd ..
 
 # Do this after fetch_sources.py or you wont have the repos pulled this file references.
