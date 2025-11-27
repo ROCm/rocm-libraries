@@ -569,9 +569,6 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                 miopen::batchnorm::_accumulate(db, dyvalue);
                 miopen::batchnorm::_accumulate_mad(ds, xhat, dyvalue);
             }
-
-            // This is strange; spamming synctheads makes the kernel faster...
-            __syncthreads();
         }};
 
         if constexpr(rem4 > 0)

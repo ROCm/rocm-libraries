@@ -332,10 +332,7 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                                   {"MIOPEN_NRN_OP_ID", problem.GetActivationDesc().GetMode()}};
 
         {
-            bool useHip = true;
-            // OpenCL kernels for variant 0-4
-            kernel.kernel_file =
-                useHip ? "MIOpenBatchNormBwdSpatialHIP.cpp" : "MIOpenBatchNormBwdSpatial.cl";
+            kernel.kernel_file = "MIOpenBatchNormBwdSpatial.cpp";
             std::string kernel_name = "MIOpenBatchNormBwdSpatial";
 
             build_params << KernelBuildParameters{
@@ -345,8 +342,7 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                 {"MIO_BN_GFX115X", (StartsWith(handle.GetDeviceName(), "gfx115") ? "1" : "0")},
             };
 
-            kernel.comp_options = useHip ? build_params.GenerateFor(kbp::HIP())
-                                         : build_params.GenerateFor(kbp::OpenCL{});
+            kernel.comp_options = build_params.GenerateFor(kbp::HIP());
 
             kernel.l_wk.push_back(xlocalsize);
             kernel.l_wk.push_back(ylocalsize);
