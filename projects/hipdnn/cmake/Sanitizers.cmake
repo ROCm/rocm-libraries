@@ -2,8 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 # Enable Address Sanitizer and set linker flags for security
-message(STATUS "Building with Sanitizers: ${BUILD_ADDRESS_SANITIZER}")
-
+# This configuration is for standalone builds outside of TheRock
 if (BUILD_ADDRESS_SANITIZER)
 
     # Address Sanitizer requires specific GPU targets which
@@ -31,7 +30,14 @@ if (BUILD_ADDRESS_SANITIZER)
     # Apply sanitizer flags globally (can be overridden per target)
     add_compile_options(${SANITIZER_COMPILE_FLAGS})
     add_link_options(${SANITIZER_LINK_FLAGS})
-    
+
+endif()
+
+# These settings are applied whether building with TheRock or standalone
+if (BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
+
+    message(STATUS "Building with Address Sanitizer: ON")
+
     # Add compile definition for conditional compilation
     add_compile_definitions(ADDRESS_SANITIZER)
 
@@ -44,4 +50,5 @@ if (BUILD_ADDRESS_SANITIZER)
         "HSA_XNACK=1"
         #"ASAN_OPTIONS=halt_on_error=1:abort_on_error=1"
     )
+    
 endif()
