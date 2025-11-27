@@ -253,12 +253,43 @@ namespace rocRoller::KernelGraph
                 auto usedTags = extractDataFlowTags(*assignNode.expression);
                 for(auto tag : usedTags)
                 {
-                    Log::info("Assign node {} uses DataFlowTag {} with loopNode {}",
-                              control,
-                              tag,
-                              loopNode);
+                    const auto isWrittenInLoop
+                        = isCoordinateWrittenInLoop(original, loopNode, tag, tracer);
+
+                    Log::info(
+                        "Assign node {} uses DataFlowTag {} with loopNode {}, isWrittenInLoop: {}",
+                        control,
+                        tag,
+                        loopNode,
+                        isWrittenInLoop);
+
+                    if(!isWrittenInLoop)
+                    {
+                        Log::info("Hoisting Assign node {} before loop node {} for DataFlowTag {}",
+                                  control,
+                                  loopNode,
+                                  tag);
+
+                        auto loopPredecessors
+                            = original.control.getInputNodeIndices<ControlEdge>(loopNode)
+                                  .to<std::vector>();
+
+                        AssertFatal(loopPredecessors.size() == 1,
+                                    "Expected exactly one predecessor for loop node {} {}",
+                                    loopNode,
+                                    Graph::variantToString(original.control.getElement(loopNode)));
+
+                        int predecessorNode = loopPredecessors[0]; // Take the first predecessor
+
+                        hoistNodeBeforeLoop(const_cast<KernelGraph&>(original),
+                                            control,
+                                            loopNode,
+                                            predecessorNode,
+                                            -1);
+
+                        Log::info("Successfully hoisted Assign node {}", control);
+                    }
                 }
-                AssertFatal(false, "made it here!");
             }
         }
 
