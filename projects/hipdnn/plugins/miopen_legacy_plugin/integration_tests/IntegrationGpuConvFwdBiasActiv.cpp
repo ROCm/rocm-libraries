@@ -24,6 +24,9 @@ class ConvFwdBiasActiv
 protected:
     void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
     {
+        // Skipping until CK is working on Windows
+        SKIP_IF_WINDOWS();
+
         const auto& [convTestCase, doBias, activTestCase] = this->GetParam();
 
         graph::Graph graphObj;
