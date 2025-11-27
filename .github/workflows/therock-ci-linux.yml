@@ -53,6 +53,10 @@ jobs:
         run: |
           pip install -r TheRock/requirements.txt
 
+      - name: Install external python deps
+        run: |
+          pip install -r TheRock/requirements-external.txt
+
       # safe.directory must be set before Runner health status
       - name: Adjust git config
         run: |
