@@ -128,74 +128,28 @@ namespace rocRoller::KernelGraph
     int HoistLoopInvariant::hoistNodeBeforeLoop(
         KernelGraph& kgraph, int nodeToHoist, int loopNode, int predecessorNode, int sequenceEdge)
     {
-        // First, completely disconnect the node from the loop body
-        // Get all edges connected to the node
-        auto upstreamEdges = kgraph.control.getNeighbours<Graph::Direction::Upstream>(nodeToHoist);
-        auto downstreamEdges
-            = kgraph.control.getNeighbours<Graph::Direction::Downstream>(nodeToHoist);
+        // Duplicate the node we want to hoist
+        int hoistedNode = duplicateControlNode(kgraph, nodeToHoist);
 
-        // Collect predecessors and successors before removing edges
-        auto nodePredecessors
-            = kgraph.control.getInputNodeIndices<Sequence>(nodeToHoist).to<std::vector>();
-        auto nodeSuccessors
-            = kgraph.control.getOutputNodeIndices<Sequence>(nodeToHoist).to<std::vector>();
+        // Insert the duplicated node before the loop
+        // insertBefore will handle redirecting incoming edges and creating the sequence
+        insertBefore(kgraph, loopNode, hoistedNode, hoistedNode);
 
-        // Remove all upstream edges to the node
-        for(auto edge : upstreamEdges)
-        {
-            kgraph.control.deleteElement(edge);
-        }
-
-        // Remove all downstream edges from the node
-        for(auto edge : downstreamEdges)
-        {
-            kgraph.control.deleteElement(edge);
-        }
-
-        // Connect predecessors directly to successors to maintain control flow inside loop
-        for(auto pred : nodePredecessors)
-        {
-            for(auto succ : nodeSuccessors)
-            {
-                // Only add the bypass edge if it doesn't already exist
-                auto existingEdges
-                    = kgraph.control.getNeighbours<Graph::Direction::Downstream>(pred);
-                bool alreadyConnected = false;
-                for(auto edge : existingEdges)
-                {
-                    auto targets = kgraph.control.getOutputNodeIndices<Sequence>(pred);
-                    if(std::find(targets.begin(), targets.end(), succ) != targets.end())
-                    {
-                        alreadyConnected = true;
-                        break;
-                    }
-                }
-                if(!alreadyConnected)
-                {
-                    kgraph.control.addElement(Sequence{}, {pred}, {succ});
-                }
-            }
-        }
-
-        // Now insert the node before the loop
-        // Remove the original sequence edge if it's valid
-        if(sequenceEdge != -1)
-        {
-            kgraph.control.deleteElement(sequenceEdge);
-        }
-
-        // Add sequence from predecessor to hoisted node
-        kgraph.control.addElement(Sequence{}, {predecessorNode}, {nodeToHoist});
-
-        // Add sequence from hoisted node to loop
-        kgraph.control.addElement(Sequence{}, {nodeToHoist}, {loopNode});
+        // Remove the original node from inside the loop while maintaining connectivity
+        bypassAndDelete(kgraph, nodeToHoist);
 
         // Return the hoisted node as the new predecessor for subsequent hoisting
-        return nodeToHoist;
+        return hoistedNode;
     }
 
     KernelGraph HoistLoopInvariant::apply(KernelGraph const& original)
     {
+
+        {
+            // std::fstream file("HoistLoopInvariant_before.dot");
+            // file << original.toDOT(true);
+        }
+
         {
             ControlFlowRWTracer tracer(original);
             const auto          result = tracer.coordinatesReadWrite();
@@ -251,51 +205,56 @@ namespace rocRoller::KernelGraph
                 }
 
                 auto usedTags = extractDataFlowTags(*assignNode.expression);
+
+                bool allTagsLoopInvariant = true;
                 for(auto tag : usedTags)
                 {
                     const auto isWrittenInLoop
                         = isCoordinateWrittenInLoop(original, loopNode, tag, tracer);
 
-                    Log::info(
-                        "Assign node {} uses DataFlowTag {} with loopNode {}, isWrittenInLoop: {}",
-                        control,
-                        tag,
-                        loopNode,
-                        isWrittenInLoop);
-
-                    if(!isWrittenInLoop)
+                    if(isWrittenInLoop)
                     {
-                        Log::info("Hoisting Assign node {} before loop node {} for DataFlowTag {}",
-                                  control,
-                                  loopNode,
-                                  tag);
-
-                        auto loopPredecessors
-                            = original.control.getInputNodeIndices<ControlEdge>(loopNode)
-                                  .to<std::vector>();
-
-                        AssertFatal(loopPredecessors.size() == 1,
-                                    "Expected exactly one predecessor for loop node {} {}",
-                                    loopNode,
-                                    Graph::variantToString(original.control.getElement(loopNode)));
-
-                        int predecessorNode = loopPredecessors[0]; // Take the first predecessor
-
-                        hoistNodeBeforeLoop(const_cast<KernelGraph&>(original),
-                                            control,
-                                            loopNode,
-                                            predecessorNode,
-                                            -1);
-
-                        Log::info("Successfully hoisted Assign node {}", control);
+                        allTagsLoopInvariant = false;
+                        break;
                     }
+                }
+
+                if(allTagsLoopInvariant && !usedTags.empty())
+                {
+                    Log::info("Hoisting Assign node {} before loop node {}, uses tags {}",
+                              control,
+                              loopNode,
+                              usedTags);
+
+                    auto loopPredecessors
+                        = original.control.getInputNodeIndices<ControlEdge>(loopNode)
+                              .to<std::vector>();
+
+                    for(auto pred : loopPredecessors)
+                    {
+                        Log::info("pred {} {}",
+                                  pred,
+                                  Graph::variantToString(original.control.getElement(pred)));
+                    }
+
+                    AssertFatal(
+                        loopPredecessors.size() == 1,
+                        fmt::format("Got {} predecessors for loop node {} {}",
+                                    loopPredecessors.size(),
+                                    loopNode,
+                                    Graph::variantToString(original.control.getElement(loopNode))));
+
+                    int predecessorNode = loopPredecessors[0]; // Take the first predecessor
+
+                    hoistNodeBeforeLoop(
+                        const_cast<KernelGraph&>(original), control, loopNode, predecessorNode, -1);
                 }
             }
         }
 
         {
-            std::fstream file("HoistLoopInvariant_Before.dot", std::ios::out);
-            file << original.toDOT(true);
+            // std::fstream file("HoistLoopInvariant_after.dot");
+            // file << original.toDOT(true);
         }
 
         return original;
