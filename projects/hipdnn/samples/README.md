@@ -4,7 +4,7 @@
 
 1. **Prerequisites:**
 
-   - Follow the instructions in [Building.md](../docs/Building.md) to install the needed dependencies, compilers, and libraries needed for building hipDNN projects. Specifically:
+   - Follow the instructions in [Building.md](../docs/Building.md) to install the needed dependencies, compilers, and libraries for building hipDNN projects. Specifically:
      * CMake
      * Ninja
      * ROCm / TheRock
@@ -101,7 +101,7 @@ The fused graph consists of three operations:
 3. **Batchnorm Backward**: Computes gradients with respect to inputs and parameters
    ```python
    dbias = sum(dx_drelu)
-   x_hat = (x - mean) * inv_variance  
+   x_hat = (x - mean) * inv_variance
    dscale = sum(dx_drelu * x_hat)
    dx = (scale * inv_variance) * (dx_drelu - (dbias + x_hat * dscale) / nhw)
    ```
@@ -117,7 +117,7 @@ Inputs: x, dy, scale, bias, mean, inv_variance
         ↓
     bn_y = batchnorm_inference(x, mean, inv_variance, scale, bias)
         ↓ (virtual tensor)
-    dx_drelu = activation_backward(bn_y, dy)  
+    dx_drelu = activation_backward(bn_y, dy)
         ↓ (virtual tensor)
     [dx, dscale, dbias] = batchnorm_backward(dx_drelu, x, scale, mean, inv_variance)
         ↓
