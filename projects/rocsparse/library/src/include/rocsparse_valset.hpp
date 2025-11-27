@@ -47,7 +47,8 @@ namespace rocsparse
     template <typename T>
     inline rocsparse_status valset(rocsparse_handle handle, int32_t length, T value, T* array)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::valset<T>(handle, length, value, array));
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::valset(handle, length, value, rocsparse::get_indextype<T>(), array));
         return rocsparse_status_success;
     }
 
