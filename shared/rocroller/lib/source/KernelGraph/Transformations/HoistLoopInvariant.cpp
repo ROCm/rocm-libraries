@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/HoistLoopInvariant.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
@@ -299,60 +300,68 @@ namespace rocRoller::KernelGraph
 
     KernelGraph HoistLoopInvariant::apply(KernelGraph const& original)
     {
-        auto kgraph = original;
-
-        // Find all ForLoopOp nodes
-        auto forLoops = kgraph.control.getNodes<ForLoopOp>().to<std::vector>();
-
-        for(auto loopNode : forLoops)
         {
-            // Find loop-invariant assigns in this loop
-            auto invariantAssigns = findLoopInvariantAssigns(kgraph, loopNode);
+            ControlFlowRWTracer tracer(original);
+            const auto          result = tracer.coordinatesReadWrite();
 
-            if(invariantAssigns.empty())
-                continue;
+            std::unordered_map<int, std::vector<std::pair<int, ControlFlowRWTracer::ReadWrite>>>
+                coordinateAccessMap;
 
-            // Find the sequence edge that leads into the loop
-            auto upstreamEdges = kgraph.control.getNeighbours<Graph::Direction::Upstream>(loopNode);
-            if(upstreamEdges.empty())
-                continue;
-
-            int sequenceEdge    = -1;
-            int predecessorNode = -1;
-            for(auto edge : upstreamEdges)
+            for(const auto& [control, coordinate, rw] : result)
             {
-                auto edgeElem = kgraph.control.getElement(edge);
-                if(std::holds_alternative<ControlEdge>(edgeElem))
+                std::string rwStr;
+                switch(rw)
                 {
-                    auto controlEdge = std::get<ControlEdge>(edgeElem);
-                    if(std::holds_alternative<Sequence>(controlEdge))
+                    using enum ControlFlowRWTracer::ReadWrite;
+                case READ:
+                    rwStr = "Read";
+                    break;
+                case WRITE:
+                    rwStr = "Write";
+                    break;
+                case READWRITE:
+                    rwStr = "Read/Write";
+                    break;
+                default:
+                    rwStr = "None";
+                    break;
+                }
+                Log::trace("Control Node: {}, Coordinate Node: {}, Access Type: {}",
+                           control,
+                           coordinate,
+                           rwStr);
+
+                coordinateAccessMap[coordinate].emplace_back(control, rw);
+            }
+
+            std::vector<std::pair<int, int>> singleWriteCoordinates; // (coordinate, control)
+
+            for(const auto& [coordinate, accessList] : coordinateAccessMap)
+            {
+                if(accessList.size() == 1)
+                {
+                    const auto& [control, rw] = accessList[0];
+                    if(rw == ControlFlowRWTracer::ReadWrite::WRITE)
                     {
-                        sequenceEdge    = edge;
-                        auto inputNodes = kgraph.control.getInputNodeIndices<Sequence>(loopNode)
-                                              .to<std::vector>();
-                        if(!inputNodes.empty())
-                            predecessorNode = inputNodes[0];
-                        break;
+                        singleWriteCoordinates.emplace_back(coordinate, control);
+                        Log::info("Coordinate {} has single write-only access from control node {}",
+                                  coordinate,
+                                  control);
                     }
                 }
             }
 
-            if(sequenceEdge == -1 || predecessorNode == -1)
-                continue;
-
-            // Hoist each invariant assign using the helper function
-            for(auto assignNode : invariantAssigns)
-            {
-                // Use the helper function to hoist the node
-                predecessorNode = hoistNodeBeforeLoop(
-                    kgraph, assignNode, loopNode, predecessorNode, sequenceEdge);
-
-                // Mark sequence edge as invalid after first hoist (it gets deleted in the helper)
-                sequenceEdge = -1;
-            }
+            Log::info("Found {} coordinates with single write-only access",
+                      singleWriteCoordinates.size());
         }
 
-        return kgraph;
+        {
+            std::fstream file("HoistLoopInvariant_Before.dot", std::ios::out);
+            file << original.toDOT(true);
+        }
+
+        AssertFatal(false);
+        return original;
     }
 
     std::string HoistLoopInvariant::name() const
