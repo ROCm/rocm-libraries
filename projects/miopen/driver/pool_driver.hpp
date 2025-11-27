@@ -115,6 +115,7 @@ private:
     std::vector<Tref> outhost;
 
     miopenPoolingDescriptor_t poolDesc;
+    PoolingConfig pc;
     bool do_backward;
 
     miopenTensorDescriptor_t dInputTensor;
@@ -181,6 +182,98 @@ int PoolDriver_impl<Tgpu, Tref, Index>::GetandSetData()
     auto doutput = inflags.GetValueTensor("doutput").FillMissing(output);
     if(doutput.SetTensordDescriptor(dOutputTensor, data_type) != miopenStatusSuccess)
         MIOPEN_THROW("Error parsing doutput tensor: " + inflags.GetValueStr("doutput") + ".");
+
+    int nInStride, cInStride, dInStride, hInStride, wInStride;
+    int nIn, cIn, dIn, hIn, wIn;
+    int nOutStride, cOutStride, dOutStride, hOutStride, wOutStride;
+    int nOut, cOut, dOut, hOut, wOut;
+    miopenPoolingMode_t mode  = miopenPoolingMax;
+    miopenPaddingMode_t pmode = miopen::deref(poolDesc).pmode;
+    int windowDepth, windowHeight, windowWidth;
+    int pad_d, pad_h, pad_w;
+    int stride_d, stride_h, stride_w;
+
+    if(spatial_dim == 2)
+    {
+        miopenGet4dTensorDescriptorStrides(
+            inputTensor, &nInStride, &cInStride, &hInStride, &wInStride);
+        dInStride = hInStride;
+        miopenGet4dTensorDescriptorLengths(inputTensor, &nIn, &cIn, &hIn, &wIn);
+        dIn = 1;
+        miopenGet4dTensorDescriptorStrides(
+            outputTensor, &nOutStride, &cOutStride, &hOutStride, &wOutStride);
+        dOutStride = hOutStride;
+        miopenGet4dTensorDescriptorLengths(outputTensor, &nOut, &cOut, &hOut, &wOut);
+        dOut = 1;
+
+        miopenGet2dPoolingDescriptor(
+            poolDesc, &mode, &windowHeight, &windowWidth, &pad_h, &pad_w, &stride_h, &stride_w);
+        windowDepth = 1;
+        pad_d       = 0;
+        stride_d    = 1;
+    }
+    else if(spatial_dim == 3)
+    {
+        std::vector<int> winV(spatial_dim);
+        std::vector<int> padV(spatial_dim);
+        std::vector<int> strV(spatial_dim);
+
+        miopenGet5dTensorDescriptorStrides(
+            inputTensor, &nInStride, &cInStride, &dInStride, &hInStride, &wInStride);
+        miopenGet5dTensorDescriptorLengths(inputTensor, &nIn, &cIn, &dIn, &hIn, &wIn);
+        miopenGet5dTensorDescriptorStrides(
+            outputTensor, &nOutStride, &cOutStride, &dOutStride, &hOutStride, &wOutStride);
+        miopenGet5dTensorDescriptorLengths(outputTensor, &nOut, &cOut, &dOut, &hOut, &wOut);
+
+        miopenGetNdPoolingDescriptor(
+            poolDesc, spatial_dim, &mode, nullptr, winV.data(), padV.data(), strV.data());
+        std::tie(windowDepth, windowHeight, windowWidth) = miopen::tien<3>(winV);
+        std::tie(pad_d, pad_h, pad_w)                    = miopen::tien<3>(padV);
+        std::tie(stride_d, stride_h, stride_w)           = miopen::tien<3>(strV);
+    }
+    else
+    {
+        MIOPEN_THROW("Unsupported spatial dimension");
+    }
+
+    if(pmode == miopenPaddingSame)
+    {
+        pad_d = (dIn % stride_d == 0) ? (std::max((windowDepth - stride_d), 0))
+                                      : (std::max((windowDepth - (dIn % stride_d)), 0));
+        pad_h = (hIn % stride_h == 0) ? (std::max((windowHeight - stride_h), 0))
+                                      : (std::max((windowHeight - (hIn % stride_h)), 0));
+        pad_w = (wIn % stride_w == 0) ? (std::max((windowWidth - stride_w), 0))
+                                      : (std::max((windowWidth - (wIn % stride_w)), 0));
+
+        pad_d /= 2;
+        pad_h /= 2;
+        pad_w /= 2;
+    }
+    else if(pmode == miopenPaddingValid)
+    {
+        pad_d = 0;
+        pad_h = 0;
+        pad_w = 0;
+    }
+
+    if(dOut <= 0 || hOut <= 0 || wOut <= 0)
+        throw std::runtime_error("Invalid Test Case: Check Output Dimension.");
+
+    int pooling_method =
+        (mode == miopenPoolingMax)
+            ? MLO_POOLING_OP_MAX
+            : ((mode == miopenPoolingAverage) ? MLO_POOLING_OP_AVE : MLO_POOLING_OP_AVE_INCLUSIVE);
+
+    pc = PoolingConfig(pooling_method,
+                       pad_d,
+                       stride_d,
+                       windowDepth,
+                       pad_h,
+                       stride_h,
+                       windowHeight,
+                       pad_w,
+                       stride_w,
+                       windowWidth);
 
     return (0);
 }
@@ -595,87 +688,6 @@ int PoolDriver_impl<Tgpu, Tref, Index>::RunBackwardGPU()
 template <typename Tgpu, typename Tref, typename Index>
 int PoolDriver_impl<Tgpu, Tref, Index>::VerifyForward()
 {
-    int nInStride, cInStride, dInStride, hInStride, wInStride;
-    int nIn, cIn, dIn, hIn, wIn;
-    int nOutStride, cOutStride, dOutStride, hOutStride, wOutStride;
-    int nOut, cOut, dOut, hOut, wOut;
-    miopenPoolingMode_t mode  = miopenPoolingMax;
-    miopenPaddingMode_t pmode = miopen::deref(poolDesc).pmode;
-    int windowDepth, windowHeight, windowWidth;
-    int pad_d, pad_h, pad_w;
-    int stride_d, stride_h, stride_w;
-
-    if(spatial_dim == 2)
-    {
-        miopenGet4dTensorDescriptorStrides(
-            inputTensor, &nInStride, &cInStride, &hInStride, &wInStride);
-        dInStride = hInStride;
-        miopenGet4dTensorDescriptorLengths(inputTensor, &nIn, &cIn, &hIn, &wIn);
-        dIn = 1;
-        miopenGet4dTensorDescriptorStrides(
-            outputTensor, &nOutStride, &cOutStride, &hOutStride, &wOutStride);
-        dOutStride = hOutStride;
-        miopenGet4dTensorDescriptorLengths(outputTensor, &nOut, &cOut, &hOut, &wOut);
-        dOut = 1;
-
-        miopenGet2dPoolingDescriptor(
-            poolDesc, &mode, &windowHeight, &windowWidth, &pad_h, &pad_w, &stride_h, &stride_w);
-        windowDepth = 1;
-        pad_d       = 0;
-        stride_d    = 1;
-    }
-    else if(spatial_dim == 3)
-    {
-        std::vector<int> winV(spatial_dim);
-        std::vector<int> padV(spatial_dim);
-        std::vector<int> strV(spatial_dim);
-
-        miopenGet5dTensorDescriptorStrides(
-            inputTensor, &nInStride, &cInStride, &dInStride, &hInStride, &wInStride);
-        miopenGet5dTensorDescriptorLengths(inputTensor, &nIn, &cIn, &dIn, &hIn, &wIn);
-        miopenGet5dTensorDescriptorStrides(
-            outputTensor, &nOutStride, &cOutStride, &dOutStride, &hOutStride, &wOutStride);
-        miopenGet5dTensorDescriptorLengths(outputTensor, &nOut, &cOut, &dOut, &hOut, &wOut);
-
-        miopenGetNdPoolingDescriptor(
-            poolDesc, spatial_dim, &mode, nullptr, winV.data(), padV.data(), strV.data());
-        std::tie(windowDepth, windowHeight, windowWidth) = miopen::tien<3>(winV);
-        std::tie(pad_d, pad_h, pad_w)                    = miopen::tien<3>(padV);
-        std::tie(stride_d, stride_h, stride_w)           = miopen::tien<3>(strV);
-    }
-    else
-    {
-        MIOPEN_THROW("Unsupported spatial dimension");
-    }
-
-    if(pmode == miopenPaddingSame)
-    {
-        pad_d = (dIn % stride_d == 0) ? (std::max((windowDepth - stride_d), 0))
-                                      : (std::max((windowDepth - (dIn % stride_d)), 0));
-        pad_h = (hIn % stride_h == 0) ? (std::max((windowHeight - stride_h), 0))
-                                      : (std::max((windowHeight - (hIn % stride_h)), 0));
-        pad_w = (wIn % stride_w == 0) ? (std::max((windowWidth - stride_w), 0))
-                                      : (std::max((windowWidth - (wIn % stride_w)), 0));
-
-        pad_d /= 2;
-        pad_h /= 2;
-        pad_w /= 2;
-    }
-    else if(pmode == miopenPaddingValid)
-    {
-        pad_d = 0;
-        pad_h = 0;
-        pad_w = 0;
-    }
-
-    if(dOut <= 0 || hOut <= 0 || wOut <= 0)
-        throw std::runtime_error("Invalid Test Case: Check Output Dimension.");
-
-    int pooling_method =
-        (mode == miopenPoolingMax)
-            ? MLO_POOLING_OP_MAX
-            : ((mode == miopenPoolingAverage) ? MLO_POOLING_OP_AVE : MLO_POOLING_OP_AVE_INCLUSIVE);
-
     const Tref tolerance =          //
         sizeof(Tgpu) == 8   ? 1e-6  // double
         : sizeof(Tgpu) == 4 ? 1e-5  // float
@@ -686,16 +698,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::VerifyForward()
     if(use_multithread)
     {
         match = mloPoolingForwardRunHostAndVerify_mt<Tgpu, Tref, Index>(
-            pooling_method,
-            pad_d,
-            stride_d,
-            windowDepth,
-            pad_h,
-            stride_h,
-            windowHeight,
-            pad_w,
-            stride_w,
-            windowWidth,
+            pc,
             inputTensor,
             outputTensor,
             in.data(),
@@ -710,16 +713,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::VerifyForward()
     else
     {
         match = mloPoolingForwardRunHostAndVerify<Tgpu, Tref, Index>(
-            pooling_method,
-            pad_d,
-            stride_d,
-            windowDepth,
-            pad_h,
-            stride_h,
-            windowHeight,
-            pad_w,
-            stride_w,
-            windowWidth,
+            pc,
             inputTensor,
             outputTensor,
             in.data(),
@@ -752,93 +746,6 @@ int PoolDriver_impl<Tgpu, Tref, Index>::RunBackwardCPU()
 template <typename Tgpu, typename Tref, typename Index>
 int PoolDriver_impl<Tgpu, Tref, Index>::VerifyBackward()
 {
-    int ndInStride, cdInStride, ddInStride, hdInStride, wdInStride;
-    int nIn, cIn, dIn, hIn, wIn;
-    int ndOutStride, cdOutStride, ddOutStride, hdOutStride, wdOutStride;
-    int nOut, cOut, dOut, hOut, wOut;
-    int ndIn, cdIn, ddIn, hdIn, wdIn;
-    int ndOut, cdOut, ddOut, hdOut, wdOut;
-    miopenPoolingMode_t mode  = miopenPoolingMax;
-    miopenPaddingMode_t pmode = miopen::deref(poolDesc).pmode;
-    int windowDepth, windowHeight, windowWidth;
-    int pad_d, pad_h, pad_w;
-    int stride_d, stride_h, stride_w;
-
-    if(spatial_dim == 2)
-    {
-        miopenGet4dTensorDescriptorLengths(inputTensor, &nIn, &cIn, &hIn, &wIn);
-        dIn = 1;
-        miopenGet4dTensorDescriptorLengths(outputTensor, &nOut, &cOut, &hOut, &wOut);
-        dOut = 1;
-        miopenGet4dTensorDescriptorStrides(
-            dInputTensor, &ndInStride, &cdInStride, &hdInStride, &wdInStride);
-        ddInStride = hdInStride;
-        miopenGet4dTensorDescriptorLengths(dInputTensor, &ndIn, &cdIn, &hdIn, &wdIn);
-        ddIn = 1;
-        miopenGet4dTensorDescriptorStrides(
-            dOutputTensor, &ndOutStride, &cdOutStride, &hdOutStride, &wdOutStride);
-        ddOutStride = hdOutStride;
-        miopenGet4dTensorDescriptorLengths(dOutputTensor, &ndOut, &cdOut, &hdOut, &wdOut);
-        ddOut = 1;
-
-        miopenGet2dPoolingDescriptor(
-            poolDesc, &mode, &windowHeight, &windowWidth, &pad_h, &pad_w, &stride_h, &stride_w);
-        windowDepth = 1;
-        pad_d       = 0;
-        stride_d    = 1;
-    }
-    else if(spatial_dim == 3)
-    {
-        std::vector<int> winV(spatial_dim);
-        std::vector<int> padV(spatial_dim);
-        std::vector<int> strV(spatial_dim);
-
-        miopenGet5dTensorDescriptorLengths(inputTensor, &nIn, &cIn, &dIn, &hIn, &wIn);
-        miopenGet5dTensorDescriptorLengths(outputTensor, &nOut, &cOut, &dOut, &hOut, &wOut);
-        miopenGet5dTensorDescriptorStrides(
-            dInputTensor, &ndInStride, &cdInStride, &ddInStride, &hdInStride, &wdInStride);
-        miopenGet5dTensorDescriptorLengths(dInputTensor, &ndIn, &cdIn, &ddIn, &hdIn, &wdIn);
-        miopenGet5dTensorDescriptorStrides(
-            dOutputTensor, &ndOutStride, &cdOutStride, &ddOutStride, &hdOutStride, &wdOutStride);
-        miopenGet5dTensorDescriptorLengths(dOutputTensor, &ndOut, &cdOut, &ddOut, &hdOut, &wdOut);
-
-        miopenGetNdPoolingDescriptor(
-            poolDesc, spatial_dim, &mode, nullptr, winV.data(), padV.data(), strV.data());
-        std::tie(windowDepth, windowHeight, windowWidth) = miopen::tien<3>(winV);
-        std::tie(pad_d, pad_h, pad_w)                    = miopen::tien<3>(padV);
-        std::tie(stride_d, stride_h, stride_w)           = miopen::tien<3>(strV);
-    }
-    else
-    {
-        MIOPEN_THROW("Unsupported spatial dimension");
-    }
-
-    if(dOut <= 0 || hOut <= 0 || wOut <= 0)
-        throw std::runtime_error("Invalid Test Case: Check Output Dimension.");
-
-    if(pmode == miopenPaddingSame)
-    {
-        pad_d = (dIn % stride_d == 0) ? (std::max((windowDepth - stride_d), 0))
-                                      : (std::max((windowDepth - (dIn % stride_d)), 0));
-        pad_h = (hIn % stride_h == 0) ? (std::max((windowHeight - stride_h), 0))
-                                      : (std::max((windowHeight - (hIn % stride_h)), 0));
-        pad_w = (wIn % stride_w == 0) ? (std::max((windowWidth - stride_w), 0))
-                                      : (std::max((windowWidth - (wIn % stride_w)), 0));
-        pad_d /= 2;
-        pad_h /= 2;
-        pad_w /= 2;
-    }
-    else if(pmode == miopenPaddingValid)
-    {
-        pad_d = 0;
-        pad_h = 0;
-        pad_w = 0;
-    }
-    int pooling_method =
-        (mode == miopenPoolingMax)
-            ? MLO_POOLING_OP_MAX
-            : ((mode == miopenPoolingAverage) ? MLO_POOLING_OP_AVE : MLO_POOLING_OP_AVE_INCLUSIVE);
-
     float ulps_tolerance = 4;
     Tref diff_tolerance  = (sizeof(Tgpu) == 4 || sizeof(Tgpu) == 8) ? static_cast<Tref>(1e-6)
                                                                     : static_cast<Tref>(5e-3);
@@ -848,16 +755,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::VerifyBackward()
     bool match = false;
     if(use_multithread)
     {
-        mloPoolingBackwardRunHost_mt<Tgpu, Tref>(pooling_method,
-                                                 windowDepth,
-                                                 pad_d,
-                                                 stride_d,
-                                                 windowHeight,
-                                                 pad_h,
-                                                 stride_h,
-                                                 windowWidth,
-                                                 pad_w,
-                                                 stride_w,
+        mloPoolingBackwardRunHost_mt<Tgpu, Tref>(pc,
                                                  dInputTensor,
                                                  dOutputTensor,
                                                  // host output
@@ -878,16 +776,7 @@ int PoolDriver_impl<Tgpu, Tref, Index>::VerifyBackward()
     }
     else
     {
-        mloPoolingBackwardRunHost<Tgpu, Tref>(pooling_method,
-                                              windowDepth,
-                                              pad_d,
-                                              stride_d,
-                                              windowHeight,
-                                              pad_h,
-                                              stride_h,
-                                              windowWidth,
-                                              pad_w,
-                                              stride_w,
+        mloPoolingBackwardRunHost<Tgpu, Tref>(pc,
                                               dInputTensor,
                                               dOutputTensor,
                                               // host output
