@@ -184,6 +184,7 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(
                     rocsparse::coosv_solve_buffer_size(handle, trans, mat, &buffer_size_solve));
                 *buffer_size = rocsparse::max(buffer_size_analysis, buffer_size_solve);
+                *buffer_size = rocsparse::max(static_cast<size_t>(4), *buffer_size);
                 return rocsparse_status_success;
             }
             case rocsparse_spsv_stage_preprocess:
