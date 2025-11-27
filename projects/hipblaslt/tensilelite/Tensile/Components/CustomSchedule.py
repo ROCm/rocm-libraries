@@ -40,6 +40,37 @@ from Tensile.Utilities.Decorators.Shared import CallableGuard
 from copy import deepcopy
 from typing import Dict
 
+class SyncSchedule:
+    schedule : list[tuple[int, SWaitCnt | SBarrier]] = []
+
+    def add(self, idx:int, dscnt:int=-1, vlcnt:int=-1, vscnt:int=-1, comment:str="", barrier:bool=False, barrier_idx:int|None=None, barrier_comment:str=""):
+        """ Add a SWaitCnt (and optionally a SBarrier) to the schedule at the given index.
+
+        Args:
+            idx:             The index at which to add the SWaitCnt.
+            dscnt:           The dscnt value for the SWaitCnt.
+            vlcnt:           The vlcnt value for the SWaitCnt.
+            vscnt:           The vscnt value for the SWaitCnt.
+            comment:         An optional comment for the SWaitCnt.
+            barrier:         If True, also add a SBarrier.
+            barrier_idx:     The index at which to add the SBarrier. If None, uses idx.
+            barrier_comment: An optional comment for the SBarrier.
+
+        Example:
+            wait.add(2, dscnt=3)                                   adds SWaitCnt at index 2 with dscnt=3
+            wait.add(5, dscnt=0, sbarrier=True)                    adds SWaitCnt at index 5 with dscnt=0 and a SBarrier at the same index
+            wait.add(5, dscnt=0, sbarrier=True, barrier_idx=6)     adds SWaitCnt at index 5 with dscnt=0 and a SBarrier at index 6
+        """
+        self.schedule.append( (idx, SWaitCnt(dscnt=dscnt, vlcnt=vlcnt, vscnt=vscnt, comment=comment)) )
+        if barrier:
+            barrier_idx = barrier_idx if barrier_idx is not None else idx
+            self.schedule.append( (barrier_idx, SBarrier(comment=barrier_comment)) )
+
+    def get_indicies(self):
+        return [item[0] for item in self.schedule]
+    def get_code(self):
+        return [item[1] for item in self.schedule]
+
 
 def verifyAscendingOrder(scheduleInfo, context: Dict = {}):
     """
@@ -1400,7 +1431,7 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
         syncCode = [
             SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration"),
 
-            SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for the rest of LRB0 to complete"),
+            SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for the rest of LRB1 to complete"),
 
             SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for all LRA0 to complete before GRA start"),
             SBarrier(comment=""),
@@ -1413,35 +1444,67 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = num_gr
 
     elif isNN(kernel) and useLDSTr and TLDS==1:
-        print("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
         numMfma = 104
         kernel["SwapGlobalReadOrder"] = False
+
+        # fmt: off            
+        syncs = SyncSchedule()
+        syncs.add(-1, dscnt=3) 
+        grinca = [8,9,10, 11,13,14, 15,16,17]
+        grincb = [19,20,21, 22,23,24, 25,26,27]
+        
+        syncs.add(      12, dscnt=12) 
+        lra0   = [0,  1, 2, 3, 4,  5, 6, 7, 8, 9, 
+                  10,11,12,13,14, 15,16,17,18,19,
+                                20,21,22,23,24, 25] # 26 loads
+
+        syncs.add(                                       30, dscnt=2, barrier=True)
+        lrb0   = [                                 26,28,30,   33] # 4 loads
+
+        syncs.add(                                                       38, dscnt=0, barrier=True)
+        gra    = [                                         31,32,34,36,37, 39,41,43,45,46,
+                                                            48,50,52,53,55, 57,59,60,62,64,
+                                                                            66,67,68,69,70, 71] # 26 loads
+        grb    = [                                                                             73,74, 81, 83,87,91,92,93] # 8 loads
+        num_gr = len(gra) + len(grb)
+
+        syncs.add(                                                                            72, vlcnt=num_gr-8, barrier=True)
+        lra1   = [                                                                             73,75,76,77,78, 79,80,81,82,83,
+                                                                                                     84,85,86,87,88, 89,90,91,92,93, 
+                                                                                                        94,95,96,97,98, 99] # 26 loads
+        lrb1   = [                                                                               74,                      100,101,102] # 4 loads
+
+        lrsa   = [                                            49]
+        lrsb   = [                                              51]
+        lwsa    = [                                                                                  84]
+        lwsb    = [                                                                                     85]
+        # ========== iter done ==========
+        # fmt: on
+
+        def extend_list(input_list, repeat_count):
+            """Example: extend_list([1, 2, 3], 3) => [1,1,1, 2,2,2, 3,3,3]"""
+            return [item for item in input_list for _ in range(repeat_count)]
+        gra    = extend_list(gra, 2)
+        grb    = extend_list(grb, 2)   
+
         optSchedule = {
-            'GRA': [[24,24,25,25,27,27,29,29,31,31,32,32,34,34,36,36,38,38,39,39,41,41,43,43,45,45,46,46,48,48,50,50,52,52,53,53,55,55,57,57,59,59,60,60,62,62,64,64,66,66,67,67]],
-            'GRB': [[69,69,71,71,73,73,74,74,76,76,78,78,80,80,81,81]],
-            'GRIncA': [[0,0,0,1,1,1,2,2,2]],
-            'GRIncB': [[3,3,3,4,4,4,5,5,5]],
-            'LCC': [[103,103]],
-            'LRA0': [[0,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,14]],
-            'LRA1': [[84,85,85,86,86,87,87,88,88,89,89,90,90,91,91,92,92,93,93,94,94,95,95,96,96,97]],
-            'LRB0': [[1,15,16,17]],
-            'LRB1': [[84,98,99,100]],
-            'LRSA': [[50]],
-            'LRSB': [[50]],
-            'LWSA': [[81]],
-            'LWSB': [[81]],
-            'SYNC': [[-1,12,24,24,51,83,83]]
+            'SYNC':   [syncs.get_indicies()],
+            'LRA0':   [lra0],
+            'GRIncA': [grinca],
+            'LRB0':   [lrb0],
+            'GRIncB': [grincb],
+            'GRA':    [gra],
+            'GRB':    [grb],
+            'LRSA':   [lrsa],
+            'LRSB':   [lrsb],
+            'LWSA':   [lwsa],
+            'LWSB':   [lwsb],
+            'LRA1':   [lra1],
+            'LRB1':   [lrb1],
+            'LCC':    [[numMfma-2, numMfma-1]],
         }
-        num_gr = len(optSchedule["GRA"][0])//2 + len(optSchedule["GRB"][0])//2
-        syncCode = [
-            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=3 newLW=0 newLR=3 for iteration == 0"),
-            SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
-            SBarrier(comment=""),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
-            SWaitCnt(dscnt=-1, vlcnt=num_gr, vscnt=-1, comment="wait for previous set of global reads"),
-            SBarrier(comment="")
-        ]
+        syncCode = syncs.get_code()
+               
         nglshift = nllshift = num_gr
     else:
         return False, None
