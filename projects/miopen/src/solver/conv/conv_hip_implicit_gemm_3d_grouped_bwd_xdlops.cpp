@@ -647,7 +647,7 @@ ConvSolution ConvHipImplicitGemm3DGroupBwdXdlops::GetSolution(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     return MakeSolutionGroupConvImplicitGemmXdlops(
         problem,
-        [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
+        [&](auto data_type_val) {
             using T = decltype(data_type_val);
             switch(problem.GetAlphaBetaCase())
             {
@@ -674,7 +674,7 @@ ConvSolution ConvHipImplicitGemm3DGroupBwdXdlops::GetSolution(
                     ctx, problem, config.kernel_id);
             }
         },
-        [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
+        [&](auto data_type_val) {
             using T = decltype(data_type_val);
             switch(problem.GetAlphaBetaCase())
             {

@@ -45,7 +45,7 @@ inline std::string removeNewlines(const std::string& str)
 // Converts a vector of numbers to a string "[1, 2, 3...]".
 template <typename T>
 std::enable_if_t<std::is_arithmetic_v<T>, std::string> // Restrict template to numeric types
-vecToString(const std::vector<T>& vec)
+    vecToString(const std::vector<T>& vec)
 {
     std::string result = "[";
     if(!vec.empty())
