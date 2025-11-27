@@ -171,6 +171,7 @@ install(TARGETS hipdnn_sdk ${_hipdnn_sdk_local_export_targets} EXPORT hipdnn_sdk
         COMPONENT Development
 )
 
+# cmake-lint: disable=E1122
 install(
     DIRECTORY ${HIP_DNN_SDK_INCLUDE_DIR}/
     DESTINATION ${HIP_DNN_SDK_INSTALL_INCLUDE_DIR}
@@ -189,6 +190,7 @@ install(EXPORT hipdnn_sdk_targets DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipd
 # those headers. If we don't have any local dependencies to export, then we generate a config file
 # that uses find_package to find the dependencies.
 if(_hipdnn_sdk_local_export_includes)
+    # cmake-lint: disable=E1122
     install(
         DIRECTORY ${_hipdnn_sdk_local_export_includes}/
         DESTINATION ${HIP_DNN_SDK_INSTALL_INCLUDE_DIR}

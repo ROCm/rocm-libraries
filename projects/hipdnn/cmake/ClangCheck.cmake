@@ -19,14 +19,20 @@ if(ENABLE_CLANG_FORMAT)
     findandcheckclangformat()
 
     add_custom_target(
-        check_format COMMAND find . ${CLANG_FORMAT_PRUNE} -regex ".*\\.\\(cpp\\|hpp\\|c\\|h\\)"
-                             -exec ${CLANG_FORMAT_BINARY} --dry-run --Werror {} +
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} VERBATIM
+        check_format
+        COMMAND find . ${CLANG_FORMAT_PRUNE} -regex ".*\\.\\(cpp\\|hpp\\|c\\|h\\)" -exec
+                ${CLANG_FORMAT_BINARY} --dry-run --Werror {} +
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        VERBATIM
+        COMMENT "Checking code format"
     )
 
     add_custom_target(
-        format COMMAND find . ${CLANG_FORMAT_PRUNE} -regex ".*\\.\\(cpp\\|hpp\\|c\\|h\\)" -exec
-                       ${CLANG_FORMAT_BINARY} --verbose -i {} +
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} VERBATIM
+        format
+        COMMAND find . ${CLANG_FORMAT_PRUNE} -regex ".*\\.\\(cpp\\|hpp\\|c\\|h\\)" -exec
+                ${CLANG_FORMAT_BINARY} --verbose -i {} +
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        VERBATIM
+        COMMENT "Formatting code"
     )
-endif()
+endif() # ENABLE_CLANG_FORMAT

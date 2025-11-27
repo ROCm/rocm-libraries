@@ -36,6 +36,7 @@ set(INTEGRATION_CHECK_DEPENDS_GLOBAL "" CACHE INTERNAL "Accumulated integration 
                                               FORCE
 )
 
+# Creates a custom target to validate test names using a Python script
 function(create_test_name_validation_target)
     if(Python3_FOUND)
         # Write list of test executables with their paths to a file
@@ -58,15 +59,19 @@ function(create_test_name_validation_target)
             VERBATIM
         )
 
-        add_custom_target(validate_test_names DEPENDS ${CMAKE_BINARY_DIR}/test_names_validated)
+        add_custom_target(
+            validate_test_names DEPENDS ${CMAKE_BINARY_DIR}/test_names_validated
+            COMMENT "Validating test names"
+        )
     else()
         message(WARNING "Python3 not found. Test name validation will be skipped.")
         add_custom_target(
             validate_test_names COMMAND ${CMAKE_COMMAND} -E echo
                                         "Test name validation skipped - Python3 not found"
+            COMMENT "Skipping test name validation"
         )
-    endif()
-endfunction()
+    endif() # Python3_FOUND
+endfunction() # create_test_name_validation_target
 
 # Generic internal function to append tests to check targets
 function(_append_test_to_check_target_internal TARGET WORKING_DIR TEST_TYPE STATUS_MESSAGE)
@@ -121,7 +126,7 @@ function(_append_test_to_check_target_internal TARGET WORKING_DIR TEST_TYPE STAT
     set(CHECK_EXECUTABLE_PATHS_GLOBAL ${CHECK_EXECUTABLE_PATHS_GLOBAL} ${EXECUTABLE_PATH}
         CACHE INTERNAL "Accumulated check executable paths" FORCE
     )
-endfunction()
+endfunction() # _append_test_to_check_target_internal
 
 # Generic internal function to finalize check targets
 function(_finalize_check_target_internal TARGET_NAME COMMAND_VAR DEPENDS_VAR)
@@ -131,25 +136,29 @@ function(_finalize_check_target_internal TARGET_NAME COMMAND_VAR DEPENDS_VAR)
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         DEPENDS ${${DEPENDS_VAR}}
         VERBATIM
+        COMMENT "Running ${TARGET_NAME}"
     )
     message(STATUS "Created ${TARGET_NAME} target")
-endfunction()
+endfunction() # _finalize_check_target_internal
 
+# Finalizes the custom check target
 function(finalize_custom_check_target)
     _finalize_check_target_internal("check" "CHECK_COMMAND_GLOBAL" "CHECK_DEPENDS_GLOBAL")
-endfunction()
+endfunction() # finalize_custom_check_target
 
+# Finalizes the unit check target
 function(finalize_unit_check_target)
     _finalize_check_target_internal(
         "unit-check" "UNIT_CHECK_COMMAND_GLOBAL" "UNIT_CHECK_DEPENDS_GLOBAL"
     )
-endfunction()
+endfunction() # finalize_unit_check_target
 
+# Finalizes the integration check target
 function(finalize_integration_check_target)
     _finalize_check_target_internal(
         "integration-check" "INTEGRATION_CHECK_COMMAND_GLOBAL" "INTEGRATION_CHECK_DEPENDS_GLOBAL"
     )
-endfunction()
+endfunction() # finalize_integration_check_target
 
 enable_testing() # Cmake wont discover or run tests without this line
 
@@ -157,8 +166,10 @@ enable_testing() # Cmake wont discover or run tests without this line
 add_custom_target(
     check_ctest COMMAND ${CMAKE_COMMAND} -E env ${TEST_ENVIRONMENT} ${CMAKE_CTEST_COMMAND}
                         --output-on-failure -C ${CMAKE_CFG_INTDIR}
+    COMMENT "Running tests via ctest"
 )
 
+# Internal function to add a GTest target
 function(_add_gtest_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
     if("${APPEND_FUNCTION_SUFFIX}" STREQUAL "test")
         _append_test_to_check_target_internal(${TARGET} ${WORKING_DIR} "" "Appending check target")
@@ -199,22 +210,22 @@ function(_add_gtest_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
 
     add_dependencies(check_ctest ${TARGET})
     add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
-endfunction()
+endfunction() # _add_gtest_target_internal
 
 # Adds a generic test target
 function(add_target_to_check_targets TARGET WORKING_DIR)
     _add_gtest_target_internal(test ${TARGET} ${WORKING_DIR})
-endfunction()
+endfunction() # add_target_to_check_targets
 
 # Adds a unit test target
 function(add_unit_test_target TARGET WORKING_DIR)
     _add_gtest_target_internal(unit_test ${TARGET} ${WORKING_DIR})
-endfunction()
+endfunction() # add_unit_test_target
 
 # Adds an integration test target
 function(add_integration_test_target TARGET WORKING_DIR)
     _add_gtest_target_internal(integration_test ${TARGET} ${WORKING_DIR})
-endfunction()
+endfunction() # add_integration_test_target
 
 # Define the CTest installation directory
 set(HIPDNN_CTEST_FILE_INSTALL_PATH "${CMAKE_INSTALL_BINDIR}/hipdnn")
@@ -242,4 +253,4 @@ function(install_hipdnn_ctest_files)
             RENAME CTestTestfile.cmake
     )
 
-endfunction()
+endfunction() # install_hipdnn_ctest_files

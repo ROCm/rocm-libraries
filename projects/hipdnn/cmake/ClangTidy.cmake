@@ -13,6 +13,7 @@ if(ENABLE_CLANG_TIDY)
     )
 endif()
 
+# Adds clang-tidy check to a target
 function(clang_tidy_check TARGET)
     if(ENABLE_CLANG_TIDY)
         set_target_properties(${TARGET} PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_COMMAND}")

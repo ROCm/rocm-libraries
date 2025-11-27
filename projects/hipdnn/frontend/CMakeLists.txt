@@ -34,6 +34,7 @@ export(
 
 install(TARGETS hipdnn_frontend EXPORT hipdnn_frontend_targets COMPONENT Development)
 
+# cmake-lint: disable=E1122
 install(
     DIRECTORY ${HIP_DNN_FRONTEND_INCLUDE_DIR}/
     DESTINATION ${HIP_DNN_FRONTEND_INSTALL_INCLUDE_DIR}

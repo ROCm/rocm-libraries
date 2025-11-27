@@ -11,6 +11,7 @@ set(LLVM_TOOL_PATHS /usr/bin /opt/rocm/llvm/bin)
 get_filename_component(COMPILER_PATH "${CMAKE_CXX_COMPILER}" PATH)
 list(APPEND LLVM_TOOL_PATHS ${COMPILER_PATH})
 
+# Checks the version of a tool
 function(checkToolVersion TOOL_BINARY TOOL_NAME EXPECTED_VERSION VERSION_REGEX
          SUCCESS_MESSAGE_FORMAT
 )
@@ -41,6 +42,7 @@ function(checkToolVersion TOOL_BINARY TOOL_NAME EXPECTED_VERSION VERSION_REGEX
     endif()
 endfunction()
 
+# Finds and checks clang-format
 function(findAndCheckClangFormat)
     find_program(
         CLANG_FORMAT_BINARY NAMES clang-format-${EXPECTED_CLANG_FORMAT_VERSION} clang-format
@@ -63,6 +65,7 @@ function(findAndCheckClangFormat)
     set(CLANG_FORMAT_BINARY ${CLANG_FORMAT_BINARY} PARENT_SCOPE)
 endfunction()
 
+# Finds and checks clang-tidy
 function(findAndCheckClangTidy)
     find_program(
         CLANG_TIDY_EXE NAMES clang-tidy-${EXPECTED_CLANG_TIDY_VERSION} clang-tidy
@@ -85,6 +88,7 @@ function(findAndCheckClangTidy)
     set(CLANG_TIDY_EXE ${CLANG_TIDY_EXE} PARENT_SCOPE)
 endfunction()
 
+# Finds and checks LLVM tools
 function(findAndCheckLlvmTools)
     # Define the tools we need
     set(LLVM_TOOLS llvm-profdata llvm-cov llvm-cxxfilt)
@@ -115,6 +119,7 @@ function(findAndCheckLlvmTools)
     endforeach()
 endfunction()
 
+# Finds and checks llvm-symbolizer
 function(findAndCheckLlvmSymbolizer)
     find_program(
         LLVM_SYMBOLIZER_EXE NAMES llvm-symbolizer-${EXPECTED_LLVM_VERSION} llvm-symbolizer

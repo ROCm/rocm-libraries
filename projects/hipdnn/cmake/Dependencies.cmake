@@ -21,6 +21,8 @@ set(_hipdnn_all_remote_deps)
 # hipdnn_add_dependency( dep_name [NO_LOCAL] [VERSION version] [FIND_PACKAGE_ARGS args...]
 # [COMPONENT component] [PACKAGE_NAME [package_name] [DEB deb_package_name] [RPM rpm_package_name]]
 # )
+#
+# Adds a dependency to the project.
 function(hipdnn_add_dependency dep_name)
     set(options NO_LOCAL)
     set(oneValueArgs VERSION HASH)
@@ -51,6 +53,7 @@ function(hipdnn_add_dependency dep_name)
     endif()
 endfunction()
 
+# Builds a dependency locally
 macro(_build_local)
     cmake_policy(PUSH)
     if(BUILD_VERBOSE)
@@ -69,6 +72,7 @@ macro(_build_local)
     endforeach()
 endmacro()
 
+# Fetches GoogleTest
 function(_fetch_gtest VERSION HASH)
     if(VERSION AND VERSION STREQUAL 1.16.0)
         set(GIT_TAG v1.16.0)
@@ -96,6 +100,7 @@ function(_fetch_gtest VERSION HASH)
     target_compile_options(gmock PUBLIC ${EXTRA_COMPILE_OPTIONS})
 endfunction()
 
+# Fetches FlatBuffers
 function(_fetch_flatbuffers VERSION HASH)
     _determine_git_tag(v 23.1.21)
 
@@ -138,6 +143,7 @@ function(_fetch_flatbuffers VERSION HASH)
     _mark_targets_as_system(${flatbuffers_SOURCE_DIR})
 endfunction()
 
+# Fetches spdlog
 function(_fetch_spdlog VERSION HASH)
     _determine_git_tag(v v1.15.2)
 
@@ -159,6 +165,8 @@ endfunction()
 
 # Doesn't conform with the others and ignores the VERSION and HASH arguments, but this will change
 # very soon
+#
+# Fetches nlohmann_json
 function(_fetch_nlohmann_json VERSION HASH)
     fetchcontent_declare(
         json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
@@ -176,6 +184,8 @@ function(_fetch_nlohmann_json VERSION HASH)
 endfunction()
 
 # Utility functions, pulled from rocroller repo
+#
+# Determines the git tag to use
 macro(_determine_git_tag PREFIX DEFAULT)
     if(HASH)
         set(GIT_TAG ${HASH})
@@ -186,6 +196,7 @@ macro(_determine_git_tag PREFIX DEFAULT)
     endif()
 endmacro()
 
+# Saves a variable
 macro(_save_var _name)
     if(DEFINED CACHE{${_name}})
         set(_old_cache_${_name} $CACHE{${_name}})
@@ -205,6 +216,7 @@ macro(_save_var _name)
     endif()
 endmacro()
 
+# Restores a variable
 macro(_restore_var _name)
     if(DEFINED _old_${_name})
         set(${_name} ${_old_${_name}})
@@ -227,6 +239,8 @@ macro(_restore_var _name)
 endmacro()
 
 # not actually a stack, but that shouldn't be relevant
+#
+# Pushes the current state
 macro(_pushstate)
     _save_var(CMAKE_CXX_CPPCHECK)
     unset(CMAKE_CXX_CPPCHECK)
@@ -235,16 +249,19 @@ macro(_pushstate)
     _save_var(CPACK_GENERATOR)
 endmacro()
 
+# Pops the previous state
 macro(_popstate)
     _restore_var(CPACK_GENERATOR)
     _restore_var(CMAKE_MESSAGE_INDENT)
     _restore_var(CMAKE_CXX_CPPCHECK)
 endmacro()
 
+# Excludes a directory from all
 macro(_exclude_from_all _dir)
     set_property(DIRECTORY ${_dir} PROPERTY EXCLUDE_FROM_ALL ON)
 endmacro()
 
+# Marks targets as system
 macro(_mark_targets_as_system _dirs)
     foreach(_dir ${_dirs})
         get_directory_property(_targets DIRECTORY ${_dir} BUILDSYSTEM_TARGETS)
