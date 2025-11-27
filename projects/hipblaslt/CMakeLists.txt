@@ -32,12 +32,7 @@ string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
 list(GET VERSION_LIST 0 PROJECT_VERSION_MAJOR)
 list(GET VERSION_LIST 1 PROJECT_VERSION_MINOR)
 list(GET VERSION_LIST 2 PROJECT_VERSION_PATCH)
-list(LENGTH VERSION_LIST list_size)
-if(list_size EQUAL 4)
-    list(GET VERSION_LIST 3 PROJECT_VERSION_TWEAK)
-else()
-    rocm_get_git_commit_tag(PROJECT_VERSION_TWEAK)
-endif()
+rocm_get_git_commit_tag(PROJECT_VERSION_TWEAK)
 
 set(hipblaslt_VERSION_MAJOR "${PROJECT_VERSION_MAJOR}")
 set(hipblaslt_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
@@ -121,6 +116,13 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
     if(HIPBLASLT_ENABLE_MARKER)
         find_library(rocTracer roctx64 REQUIRED)
+        get_filename_component(ROCTRACER_LIB_DIR ${rocTracer} DIRECTORY)
+        get_filename_component(ROCTRACER_ROOT_DIR ${ROCTRACER_LIB_DIR} DIRECTORY)
+    
+        find_path(ROCTRACER_INCLUDE_DIR "roctracer/roctx.h" 
+            HINTS ${ROCTRACER_ROOT_DIR}
+            PATH_SUFFIXES include
+            REQUIRED)
     else()
         set(rocTracer)
     endif()
@@ -219,7 +221,11 @@ if(HIPBLASLT_ENABLE_MSGPACK)
 endif()
 
 if(NOT ROCM_LIBS_SUPERBUILD)
-    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
+    # TODO: This is a temporary solution to prevent the installation of the origami license files.
+    block(SCOPE_FOR VARIABLES)
+        set(ORIGAMI_ENABLE_INSTALL OFF)
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
+    endblock()
 endif()
 
 add_subdirectory(tensilelite)
@@ -272,6 +278,7 @@ if(HIPBLASLT_ENABLE_HOST)
 
     if(HIPBLASLT_ENABLE_MARKER)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_MARKER)
+        target_include_directories(hipblaslt PRIVATE ${ROCTRACER_INCLUDE_DIR})
     endif()
 
     target_include_directories(hipblaslt

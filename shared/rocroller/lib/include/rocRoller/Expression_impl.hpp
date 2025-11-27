@@ -335,11 +335,11 @@ namespace rocRoller
         {
             return dt == DataType::Half || dt == DataType::Halfx2 || dt == DataType::BFloat16
                    || dt == DataType::BFloat16x2 || dt == DataType::FP8 || dt == DataType::BF8
-                   || dt == DataType::FP8x4 || dt == DataType::BF8x4 || dt == DataType::Float
-                   || dt == DataType::FP6x16 || dt == DataType::BF6x16 || dt == DataType::FP4x8
-                   || dt == DataType::Double || dt == DataType::Int32 || dt == DataType::Int64
-                   || dt == DataType::UInt32 || dt == DataType::UInt64 || dt == DataType::Bool
-                   || dt == DataType::Bool32 || dt == DataType::Bool64;
+                   || dt == DataType::E8M0x4 || dt == DataType::FP8x4 || dt == DataType::BF8x4
+                   || dt == DataType::Float || dt == DataType::FP6x16 || dt == DataType::BF6x16
+                   || dt == DataType::FP4x8 || dt == DataType::Double || dt == DataType::Int32
+                   || dt == DataType::Int64 || dt == DataType::UInt32 || dt == DataType::UInt64
+                   || dt == DataType::Bool || dt == DataType::Bool32 || dt == DataType::Bool64;
         }
 
         inline ExpressionPtr convert(DataType dt, ExpressionPtr a)
@@ -375,6 +375,16 @@ namespace rocRoller
         inline ExpressionPtr literal(T value)
         {
             return std::make_shared<Expression>(value);
+        }
+
+        inline ExpressionPtr literal(Buffer value)
+        {
+            std::vector<ExpressionPtr> operands{literal(value.desc0),
+                                                literal(value.desc1),
+                                                literal(value.desc2),
+                                                literal(value.desc3)};
+            return std::make_shared<Expression>(
+                Concatenate{{operands}, {DataType::None, PointerType::Buffer}});
         }
 
         template <CCommandArgumentValue T>

@@ -113,6 +113,7 @@ set(rocsparse_source
   src/level2/rocsparse_coomv_aos_impl.cpp
   src/level2/rocsparse_coomv_aos.cpp
   #
+  src/level2/rocsparse_csrmv_helpers.cpp
   src/level2/rocsparse_csrmv_template_rowsplit.cpp
   src/level2/rocsparse_csrmv_template_adaptive.cpp
   src/level2/rocsparse_csrmv_template_lrb.cpp
@@ -130,6 +131,9 @@ set(rocsparse_source
   #
   src/level2/rocsparse_ellmv_impl.cpp
   src/level2/rocsparse_ellmv.cpp
+  #
+  src/level2/rocsparse_sellmv_impl.cpp
+  src/level2/rocsparse_sellmv.cpp
   #
   src/level2/rocsparse_csrsv.cpp
   src/level2/rocsparse_csrsv_zero_pivot.cpp

@@ -197,7 +197,7 @@ namespace TensileLite
         {
         }
         void PerformanceReporter::preProblem(ContractionProblem* const problem) {}
-        void PerformanceReporter::preSolution(ContractionSolution const& solution) {}
+        void PerformanceReporter::preSolution(ContractionSolution* const solution) {}
         void PerformanceReporter::finalizeReport() {}
 
     } // namespace Client

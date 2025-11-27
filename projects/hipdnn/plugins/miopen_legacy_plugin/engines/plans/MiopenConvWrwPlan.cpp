@@ -4,7 +4,9 @@
 #include <array>
 
 #include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvWrwPlan.hpp"
@@ -21,11 +23,17 @@ ConvWrwParams::ConvWrwParams(
     , _x(miopen_utils::createTensor(tensorMap, attributes.x_tensor_uid()))
     , _dw(miopen_utils::createTensor(tensorMap, attributes.dw_tensor_uid()))
     , _dy(miopen_utils::createTensor(tensorMap, attributes.dy_tensor_uid()))
-    , _conv(_spatialDimCount, attributes)
 {
     const auto& attrX = miopen_utils::findTensorAttributes(tensorMap, _x.uid());
     const auto& attrDW = miopen_utils::findTensorAttributes(tensorMap, _dw.uid());
     const auto& attrDY = miopen_utils::findTensorAttributes(tensorMap, _dy.uid());
+
+    const auto inputDims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrX.dims());
+    const auto weightDims
+        = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attrDW.dims());
+    const auto groupCount = hipdnn_sdk::utilities::calculateGroupCount(inputDims, weightDims);
+
+    _conv = MiopenConvDescriptor(_spatialDimCount, attributes, static_cast<int>(groupCount));
 
     _tensorsValid = (!attrX.virtual_() && !attrDW.virtual_() && !attrDY.virtual_());
 }
@@ -94,26 +102,6 @@ ConvWrwPlan::ConvWrwPlan(const HipdnnEnginePluginHandle& handle, ConvWrwParams&&
           });
 
     THROW_ON_MIOPEN_FAILURE(miopenGetSolutionWorkspaceSize(_solution.get(), &_workspaceSize));
-}
-
-ConvWrwPlan::ConvWrwPlan(ConvWrwPlan&& other) noexcept
-    : _params(std::move(other._params))
-    , _solution(std::move(other._solution))
-    , _workspaceSize(other._workspaceSize)
-{
-    other._workspaceSize = 0;
-}
-
-ConvWrwPlan& ConvWrwPlan::operator=(ConvWrwPlan&& other) noexcept
-{
-    if(this != &other)
-    {
-        _params = std::move(other._params);
-        _solution = std::move(other._solution);
-        _workspaceSize = other._workspaceSize;
-        other._workspaceSize = 0;
-    }
-    return *this;
 }
 
 size_t ConvWrwPlan::getWorkspaceSize([[maybe_unused]] const HipdnnEnginePluginHandle& handle) const

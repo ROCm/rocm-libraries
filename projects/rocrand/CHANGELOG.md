@@ -3,6 +3,20 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 4.2.0 for ROCm 7.2
+
+### Removed
+
+* For performance reasons in the `mrg31k3p_state`, `mrg32k3a_state`, `xorwow_state` and `philox4x32_10_state` states are the `boxmuller_float_state` and `boxmuller_double_state` removed now and the `boxmuller_float` and `boxmuller_double` are set with NaN when the value is not set.
+
+### Added
+
+* Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
+
+### Changed
+
+* Changed the `launch` method in `host_system` and `device_system`, so that kernels with all supported arches can be compiled with correct configuration during host pass. All generators are updated accordingly for support of SPIR-V. To invoke SIPR-V, it should be built with `-DAMDGPU_TARGETS=amdgcnspirv`.
+
 ## rocRAND 4.1.0 for ROCm 7.1
 
 ### Changed

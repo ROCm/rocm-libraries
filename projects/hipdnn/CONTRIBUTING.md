@@ -83,9 +83,9 @@ When contributing to hipDNN, please keep these architectural principles in mind:
 
 ```bash
 # Fork the repository on GitHub, then:
-git clone https://github.com/YOUR_USERNAME/hipDNN.git
-cd hipDNN
-git remote add upstream https://github.com/ROCm/hipDNN.git
+git clone https://github.com/YOUR_USERNAME/rocm-libraries.git
+cd rocm-libraries
+git remote add upstream https://github.com/ROCm/rocm-libraries.git
 ```
 
 ### 2. Create a Feature Branch
@@ -98,7 +98,40 @@ git checkout -b feature/your-feature-name
 
 Follow the remaining instructions in the [Quick Start Guide](./docs/Building.md#quick-start-guide) to build hipDNN.
 
-### 4. Run All Required Checks
+### 4. Set Up Pre-commit Hooks
+
+hipDNN uses pre-commit hooks to automatically validate code quality. See the [main contributing guide](../../CONTRIBUTING.md#pre-commit-hooks) for general pre-commit setup instructions.
+
+#### Installing flatc (Required for hipDNN)
+
+hipDNN requires `flatc` version **25.9.23** for the FlatBuffers schema compiler. Install it before setting up pre-commit:
+
+**Linux:**
+```bash
+wget https://github.com/google/flatbuffers/releases/download/v25.9.23/Linux.flatc.binary.g++-13.zip
+unzip Linux.flatc.binary.g++-13.zip
+sudo mv flatc /usr/local/bin/
+sudo chmod +x /usr/local/bin/flatc
+rm Linux.flatc.binary.g++-13.zip
+```
+
+**Windows:**
+1. Download: https://github.com/google/flatbuffers/releases/download/v25.9.23/Windows.flatc.binary.zip.
+2. Extract `flatc.exe` and add it to your system PATH.
+
+**Verify installation:**
+```bash
+flatc --version
+# Should output: flatc version 25.9.23
+```
+
+After `flatc` is installed, set up pre-commit:
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+### 5. Run All Required Checks
 
 Before submitting your PR, ensure all checks pass:
 

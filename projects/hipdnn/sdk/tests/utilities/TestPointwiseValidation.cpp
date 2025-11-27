@@ -134,32 +134,59 @@ TEST(TestPointwiseValidation, ImplementedTernaryModesAreSubset)
 
 TEST(TestPointwiseValidation, KnownImplementedUnaryOperations)
 {
-    // Verify specific operations we know are implemented
-    EXPECT_TRUE(isImplementedUnaryPointwiseMode(PointwiseMode::RELU_FWD));
-    EXPECT_TRUE(isImplementedUnaryPointwiseMode(PointwiseMode::SIGMOID_FWD));
-    EXPECT_TRUE(isImplementedUnaryPointwiseMode(PointwiseMode::TANH_FWD));
-    EXPECT_TRUE(isImplementedUnaryPointwiseMode(PointwiseMode::ABS));
-    EXPECT_TRUE(isImplementedUnaryPointwiseMode(PointwiseMode::NEG));
+    // Define which unary operations are currently implemented
+    std::set<PointwiseMode> expectedImplementedUnary = {PointwiseMode::RELU_FWD,
+                                                        PointwiseMode::SIGMOID_FWD,
+                                                        PointwiseMode::TANH_FWD,
+                                                        PointwiseMode::ABS,
+                                                        PointwiseMode::NEG};
 
-    // Verify some operations we know are NOT implemented
-    EXPECT_FALSE(isImplementedUnaryPointwiseMode(PointwiseMode::EXP));
-    EXPECT_FALSE(isImplementedUnaryPointwiseMode(PointwiseMode::LOG));
+    // Check all unary modes
+    for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)
+    {
+        auto mode = static_cast<PointwiseMode>(i);
+
+        // Only check modes that are classified as unary
+        if(!isUnaryPointwiseMode(mode))
+        {
+            continue;
+        }
+
+        bool isExpectedImplemented = expectedImplementedUnary.count(mode) > 0;
+        bool isActuallyImplemented = isImplementedUnaryPointwiseMode(mode);
+
+        EXPECT_EQ(isActuallyImplemented, isExpectedImplemented)
+            << "Mode " << static_cast<int>(mode) << " implementation status mismatch";
+    }
 }
 
 TEST(TestPointwiseValidation, KnownImplementedBinaryOperations)
 {
-    // Verify specific operations we know are implemented
-    EXPECT_TRUE(isImplementedBinaryPointwiseMode(PointwiseMode::ADD));
-    EXPECT_TRUE(isImplementedBinaryPointwiseMode(PointwiseMode::SUB));
-    EXPECT_TRUE(isImplementedBinaryPointwiseMode(PointwiseMode::MUL));
-    EXPECT_TRUE(isImplementedBinaryPointwiseMode(PointwiseMode::RELU_BWD));
-    EXPECT_TRUE(isImplementedBinaryPointwiseMode(PointwiseMode::SIGMOID_BWD));
-    EXPECT_TRUE(isImplementedBinaryPointwiseMode(PointwiseMode::TANH_BWD));
+    // Define which binary operations are currently implemented
+    std::set<PointwiseMode> expectedImplementedBinary = {PointwiseMode::ADD,
+                                                         PointwiseMode::SUB,
+                                                         PointwiseMode::MUL,
+                                                         PointwiseMode::RELU_BWD,
+                                                         PointwiseMode::SIGMOID_BWD,
+                                                         PointwiseMode::TANH_BWD};
 
-    // Verify some operations we know are NOT implemented
-    EXPECT_FALSE(isImplementedBinaryPointwiseMode(PointwiseMode::DIV));
-    EXPECT_FALSE(isImplementedBinaryPointwiseMode(PointwiseMode::MAX_OP));
-    EXPECT_FALSE(isImplementedBinaryPointwiseMode(PointwiseMode::MIN_OP));
+    // Check all binary modes
+    for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)
+    {
+        auto mode = static_cast<PointwiseMode>(i);
+
+        // Only check modes that are classified as binary
+        if(!isBinaryPointwiseMode(mode))
+        {
+            continue;
+        }
+
+        bool isExpectedImplemented = expectedImplementedBinary.count(mode) > 0;
+        bool isActuallyImplemented = isImplementedBinaryPointwiseMode(mode);
+
+        EXPECT_EQ(isActuallyImplemented, isExpectedImplemented)
+            << "Mode " << static_cast<int>(mode) << " implementation status mismatch";
+    }
 }
 
 TEST(TestPointwiseValidation, BitsetConsistencyUnary)
@@ -206,31 +233,20 @@ TEST(TestPointwiseValidation, BitsetConsistencyBinary)
 
 TEST(TestPointwiseValidation, AllModesAccountedFor)
 {
-    // Every mode should be in at least one category (unary, binary, or ternary)
-    int unclassifiedCount = 0;
+    // UNSET is a special case - it should NOT be classified
+    EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::UNSET));
+    EXPECT_FALSE(isBinaryPointwiseMode(PointwiseMode::UNSET));
+    EXPECT_FALSE(isTernaryPointwiseMode(PointwiseMode::UNSET));
 
-    for(int i = static_cast<int>(PointwiseMode::UNSET);
-        i <= static_cast<int>(PointwiseMode::TANH_FWD);
-        ++i)
+    // All other modes MUST be classified as unary, binary, or ternary
+    for(size_t i = 1; i < POINTWISE_MODE_COUNT; ++i) // Start from 1 to skip UNSET
     {
         auto mode = static_cast<PointwiseMode>(i);
 
-        bool isUnary = isUnaryPointwiseMode(mode);
-        bool isBinary = isBinaryPointwiseMode(mode);
-        bool isTernary = isTernaryPointwiseMode(mode);
+        bool isClassified = isUnaryPointwiseMode(mode) || isBinaryPointwiseMode(mode)
+                            || isTernaryPointwiseMode(mode);
 
-        if(!isUnary && !isBinary && !isTernary)
-        {
-            ++unclassifiedCount;
-            // It's OK to have some unclassified modes (NONE, future extensions)
-            // but log them for awareness
-            std::cout << "Unclassified mode: " << static_cast<int>(mode) << "\n";
-        }
+        EXPECT_TRUE(isClassified) << "Mode " << static_cast<int>(mode)
+                                  << " must be classified as unary, binary, or ternary";
     }
-
-    // Most modes should be classified
-    int totalModes
-        = static_cast<int>(PointwiseMode::TANH_FWD) - static_cast<int>(PointwiseMode::UNSET) + 1;
-    EXPECT_LT(unclassifiedCount, totalModes / 2)
-        << "Too many unclassified modes - check PointwiseValidation.hpp";
 }

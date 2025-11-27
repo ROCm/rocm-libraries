@@ -23,6 +23,7 @@ namespace origami
         Int32,
         BFloat16,
         Int8,
+        Int4,
         Int64,
         XFloat32,
         Float8_fnuz,
@@ -67,6 +68,8 @@ namespace origami
             return 16;
         case data_type_t::Int8:
             return 8;
+        case data_type_t::Int4:
+            return 4;
         case data_type_t::Int64:
             return 64;
         case data_type_t::XFloat32:
@@ -120,6 +123,8 @@ namespace origami
             return "BFloat16";
         case data_type_t::Int8:
             return "Int8";
+        case data_type_t::Int4:
+            return "Int4";
         case data_type_t::Int64:
             return "Int64";
         case data_type_t::XFloat32:
@@ -170,6 +175,8 @@ namespace origami
             return data_type_t::BFloat16;
         if (s == "i8")
             return data_type_t::Int8;
+        if (s == "i4")
+            return data_type_t::Int4;
         if (s == "xf32")
             return data_type_t::XFloat32;
         if (s == "f8")
@@ -259,6 +266,9 @@ namespace origami
             gfx90a,
             gfx942,
             gfx950,
+            gfx1201,
+            gfx1100,
+            gfx1151,
             Count
         };
 
@@ -267,7 +277,10 @@ namespace origami
             static const std::unordered_map<std::string, architecture_t> str_to_enum_map
                 = {{"gfx90a", architecture_t::gfx90a},
                     {"gfx942", architecture_t::gfx942},
-                    {"gfx950", architecture_t::gfx950}};
+                    {"gfx950", architecture_t::gfx950},
+                    {"gfx1201", architecture_t::gfx1201},
+                    {"gfx1100", architecture_t::gfx1100},
+                    {"gfx1151", architecture_t::gfx1151}};
 
             auto it = str_to_enum_map.find(str);
             if(it != str_to_enum_map.end())
@@ -319,7 +332,16 @@ namespace origami
                 // hardware_t::architecture_constants(
                 //     8, 17, 1.21875121875121875122 * 7, 6, 4, std::make_tuple(-0.000013, 0.007070, 0.027355), 1.5)}};
                 hardware_t::architecture_constants(
-                    8, 17, 1.21875121875121875122 * 7, 6, 4, std::make_tuple(0, 0.008, 0), 1.5)}};
+                    8, 17, 1.21875121875121875122 * 7, 6, 4, std::make_tuple(0, 0.008, 0), 1.5)},
+               {hardware_t::architecture_t::gfx1201,
+                hardware_t::architecture_constants(
+                    1, 5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5)},
+               {hardware_t::architecture_t::gfx1100,
+                hardware_t::architecture_constants(
+                    1, 7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5)},
+               {hardware_t::architecture_t::gfx1151,
+                hardware_t::architecture_constants(
+                    1, 2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5)}};
 
         inline static const std::unordered_map<architecture_t,
                                         std::unordered_map<matrix_instruction, size_t>> INSTRUCTION_MAP
@@ -473,6 +495,48 @@ namespace origami
                     // DOT2
                     {matrix_instruction( 1,  1,  64, data_type_t::Half), 16}, // V_DOT2_F32_F16
                     {matrix_instruction( 1,  1,  64, data_type_t::BFloat16), 16}, // V_DOT2_F32_BF16
+                }},
+               {hardware_t::architecture_t::gfx1201,
+                {
+                    // F16
+                    {matrix_instruction(16, 16, 16, data_type_t::Half), 16}, // v_wmma_f16_16x16x16_f16/v_wmma_f32_16x16x16_f16
+                    // BF16
+                    {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 16}, // v_wmma_bf16_16x16x16_bf16/v_wmma_f32_16x16x16_bf16
+                    // F8
+                    {matrix_instruction(16, 16, 16, data_type_t::Float8), 8}, // v_wmma_f32_16x16x16_fp8_fp8
+                    // F8B8
+                    {matrix_instruction(16, 16, 16, data_type_t::Float8BFloat8), 8}, // v_wmma_f32_16x16x16_fp8_bf8
+                    // B8F8
+                    {matrix_instruction(16, 16, 16, data_type_t::BFloat8Float8), 8}, // v_wmma_f32_16x16x16_bf8_fp8
+                    // B8
+                    {matrix_instruction(16, 16, 16, data_type_t::BFloat8), 8}, // v_wmma_f32_16x16x16_bf8_bf8
+                    // I8
+                    {matrix_instruction(16, 16, 16, data_type_t::Int8), 8}, // v_wmma_i32_16x16x16_iu8
+                    // I4
+                    {matrix_instruction(16, 16, 16, data_type_t::Int4), 8}, // v_wmma_i32_16x16x16_iu4
+                    {matrix_instruction(16, 16, 32, data_type_t::Int4), 8}, // v_wmma_i32_16x16x32_iu4
+                }},
+               {hardware_t::architecture_t::gfx1100,
+                {
+                    // F16
+                    {matrix_instruction(16, 16, 16, data_type_t::Half), 32}, // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
+                    // BF16
+                    {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 32}, // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
+                    // I8
+                    {matrix_instruction(16, 16, 16, data_type_t::Int8), 32}, // v_wmma_i32_16x16x16_iu8
+                    // I4
+                    {matrix_instruction(16, 16, 16, data_type_t::Int4), 16}, // v_wmma_i32_16x16x16_iu4
+                }},
+               {hardware_t::architecture_t::gfx1151,
+                {
+                    // F16
+                    {matrix_instruction(16, 16, 16, data_type_t::Half), 32}, // v_wmma_f32_16x16x16_f16/v_wmma_f16_16x16x16_f16
+                    // BF16
+                    {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 32}, // v_wmma_f32_16x16x16_bf16/v_wmma_bf16_16x16x16_bf16
+                    // I8
+                    {matrix_instruction(16, 16, 16, data_type_t::Int8), 32}, // v_wmma_i32_16x16x16_iu8
+                    // I4
+                    {matrix_instruction(16, 16, 16, data_type_t::Int4), 16}, // v_wmma_i32_16x16x16_iu4
                 }}};
 
         architecture_t                      arch;

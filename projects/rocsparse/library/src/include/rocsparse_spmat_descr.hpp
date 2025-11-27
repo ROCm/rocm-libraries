@@ -60,6 +60,8 @@ struct _rocsparse_spmat_descr
     int64_t             block_dim{};
     int64_t             ell_cols{};
     int64_t             ell_width{};
+    int64_t             sell_slice_size{};
+    int64_t             sell_colval_size{};
 
     int64_t batch_count{};
     int64_t batch_stride{};

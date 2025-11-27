@@ -55,6 +55,8 @@
 
 #include "GEMMF8F6F4.hpp"
 
+namespace SolutionParams = rocRoller::Parameters::Solution;
+
 namespace GEMMDriverTest
 {
     template <typename T>
@@ -542,24 +544,8 @@ namespace GEMMDriverTest
                 params->streamK                       = gemm.streamK;
             }
 
-            auto memoryTypeA = MemoryType::WAVE;
-            auto memoryTypeB = MemoryType::WAVE;
-            if(gemm.direct2LDSA)
-            {
-                memoryTypeA = MemoryType::WAVE_Direct2LDS;
-            }
-            else if(gemm.loadLDSA)
-            {
-                memoryTypeA = MemoryType::LDS;
-            }
-            if(gemm.direct2LDSB)
-            {
-                memoryTypeB = MemoryType::WAVE_Direct2LDS;
-            }
-            else if(gemm.loadLDSB)
-            {
-                memoryTypeB = MemoryType::LDS;
-            }
+            auto memoryTypeA = GetMemoryType(gemm.loadPathA);
+            auto memoryTypeB = GetMemoryType(gemm.loadPathB);
 
             {
                 auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
@@ -910,6 +896,12 @@ namespace GEMMDriverTest
     {
     };
 
+    // Params are: mi K tile size, unroll factor
+    class GEMMMXFP4TNSwizzleScaledUnrollTestGPU
+        : public BaseGEMMContextFixture<std::tuple<int, int>>
+    {
+    };
+
     class GEMMF8TestGPU : public BaseGEMMContextFixture<>
     {
     };
@@ -963,6 +955,22 @@ namespace GEMMDriverTest
     {
     };
 
+    class GEMMTestStreamKWGMGPU
+        : public BaseGEMMContextFixture<std::tuple<int, /* workgroupMapping dim */
+                                                   int, /* workgroupMapping value */
+                                                   bool, /* workgroupRemapXCC */
+                                                   StreamKMode>>
+    {
+    };
+
+    class GEMMTestStreamKGPU
+        : public BaseGEMMContextFixture<std::tuple<StreamKMode,
+                                                   SolutionParams::LoadPath, /* loadPathA */
+                                                   SolutionParams::LoadPath, /* loadPathB */
+                                                   bool /* storeLDSD */>>
+    {
+    };
+
     // This test is to ensure each scheduler properly yields insts for a basic GEMM
     TEST_P(GEMMTestGPU, GPU_BasicGEMM_Schedulers)
     {
@@ -971,8 +979,8 @@ namespace GEMMDriverTest
         gemm.macK = 8;
 
         // TODO: Re-enable LDS once LDS deallocations are fixed
-        gemm.loadLDSA = false;
-        gemm.loadLDSB = false;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
 
         auto settings = Settings::getInstance();
 
@@ -1045,8 +1053,8 @@ namespace GEMMDriverTest
         GEMMProblem gemm;
         gemm.macM             = 128;
         gemm.macN             = 256;
-        gemm.loadLDSA         = true;
-        gemm.loadLDSB         = true;
+        gemm.loadPathA        = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB        = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD        = true;
         gemm.prefetchInFlight = 1;
         auto maxLDS = m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize);
@@ -1107,8 +1115,8 @@ namespace GEMMDriverTest
         //gemm.prefetch         = true;
         //gemm.prefetchInFlight = 2;
 
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = true;
 
         gemm.beta = 0;
@@ -1116,7 +1124,7 @@ namespace GEMMDriverTest
         for(auto twoTile : {true, false})
         {
             gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
-            basicGEMM<float>(gemm);
+            basicGEMM<float>(gemm, false, false, 1, true);
         }
     }
 
@@ -1146,8 +1154,8 @@ namespace GEMMDriverTest
         //gemm.prefetch         = true;
         //gemm.prefetchInFlight = 2;
 
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = true;
 
         for(auto twoTile : {true, false})
@@ -1169,15 +1177,15 @@ namespace GEMMDriverTest
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
         gemm.k = gemm.macK * 8;
 
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = true;
         gemm.streamK   = StreamKMode::TwoTileDPFirst;
 
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
+    TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamK)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1211,26 +1219,13 @@ namespace GEMMDriverTest
         //gemm.prefetch         = true;
         //gemm.prefetchInFlight = 2;
 
-        for(auto twoTile : {true, false})
-        {
-            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
-            for(auto loadLDSA : {false, true})
-            {
-                gemm.loadLDSA = loadLDSA;
-                for(auto loadLDSB : {false, true})
-                {
-                    gemm.loadLDSB = loadLDSB;
-                    for(auto storeLDSD : {false, true})
-                    {
-                        gemm.storeLDSD = storeLDSD;
-                        basicGEMM<Half>(gemm);
-                    }
-                }
-            }
-        }
+        std::tie(gemm.streamK, gemm.loadPathA, gemm.loadPathB, gemm.storeLDSD)
+            = std::get<1>(GetParam());
+
+        basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
+    TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamKSmall)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1256,14 +1251,83 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = StreamKMode::Standard;
-        gemm.k       = gemm.macK * 8;
+        gemm.k = gemm.macK * 8;
 
-        for(auto twoTile : {true, false})
+        std::tie(gemm.streamK, gemm.loadPathA, gemm.loadPathB, gemm.storeLDSD)
+            = std::get<1>(GetParam());
+
+        basicGEMM<Half>(gemm);
+    }
+
+    TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamK_MultipleFixups)
+    {
+        if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
-            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
-            basicGEMM<Half>(gemm);
+            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
+
+        GEMMProblem gemm;
+
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+
+        gemm.macM = 128;
+        gemm.macN = 128;
+        gemm.macK = 16;
+
+        gemm.waveK = 8;
+
+        gemm.workgroupSizeX = 128;
+        gemm.workgroupSizeY = 2;
+
+        gemm.numWGs = 128;
+
+        auto numTilesM = 1;
+        auto numTilesN = 2;
+        auto numTilesK = 249;
+
+        gemm.m = numTilesM * gemm.macM;
+        gemm.n = numTilesN * gemm.macN;
+        gemm.k = numTilesK * gemm.macK;
+
+        // assert that the number of output tiles is smaller than number of WGs
+        // which means there is not enough data-parallel tiles, and has to split
+        // K dimension into multiple tiles
+        ASSERT_GE(gemm.numWGs, gemm.m * gemm.n / gemm.macM / gemm.macN);
+
+        std::tie(gemm.streamK, gemm.loadPathA, gemm.loadPathB, gemm.storeLDSD)
+            = std::get<1>(GetParam());
+
+        basicGEMM<Half>(gemm);
+    }
+
+    TEST_P(GEMMTestStreamKWGMGPU, GPU_BasicGEMMStreamKWorkgroupMapping)
+    {
+        if(m_context->targetArchitecture().target().isCDNA1GPU())
+        {
+            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamKWorkgroupMapping test";
+        }
+
+        GEMMProblem gemm;
+
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        gemm.numWGs = deviceProperties.multiProcessorCount;
+
+        gemm.m = gemm.macM * 8;
+        gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
+
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
+
+        gemm.k = gemm.macK * 8;
+
+        std::tie(gemm.workgroupMappingDim,
+                 gemm.workgroupMappingValue,
+                 gemm.workgroupRemapXCC,
+                 gemm.streamK)
+            = std::get<1>(GetParam());
+
+        basicGEMM<float>(gemm);
     }
 
     TEST_P(GEMMTestGPU, DISABLED_GPU_BasicGEMMMultipleOutputTiles)
@@ -1279,8 +1343,8 @@ namespace GEMMDriverTest
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
-        gemm.loadLDSA  = false;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.fuseLoops = false;
         basicGEMM<float>(gemm);
     }
@@ -1289,8 +1353,8 @@ namespace GEMMDriverTest
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = false;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
         gemm.fuseLoops = false;
         basicGEMM<float>(gemm);
     }
@@ -1299,8 +1363,8 @@ namespace GEMMDriverTest
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
-        gemm.loadLDSA  = false;
-        gemm.loadLDSB  = false;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
         gemm.fuseLoops = false;
         basicGEMM<float>(gemm);
     }
@@ -1310,14 +1374,14 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
         gemm.k         = 64 * 4 * 2;
-        gemm.loadLDSA  = false;
-        gemm.loadLDSB  = false;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
         gemm.storeLDSD = false;
         gemm.fuseLoops = true;
         gemm.unrollK   = 2;
 
-        gemm.loadLDSA = true;
-        gemm.loadLDSB = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
         gemm.macM = 128;
         gemm.macK = 4;
@@ -1333,8 +1397,8 @@ namespace GEMMDriverTest
         gemm.n         = 128;
         gemm.transA    = "T";
         gemm.transB    = "N";
-        gemm.loadLDSA  = false;
-        gemm.loadLDSB  = false;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
         gemm.storeLDSD = false;
         gemm.fuseLoops = true;
         gemm.tailLoops = true;
@@ -1352,8 +1416,8 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
         gemm.k         = 64 * 4 * 2;
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
         gemm.unrollK   = 2;
@@ -1366,8 +1430,8 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
         gemm.k         = 64 * 4 * 2;
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
         gemm.unrollK   = 8;
@@ -1380,8 +1444,8 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
         gemm.k         = 64 * 4 * 2;
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = false;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToVGPR;
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
         gemm.unrollK   = 8;
@@ -1394,8 +1458,8 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
         gemm.k         = 64 * 4 * 2;
-        gemm.loadLDSA  = false;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
         gemm.unrollK   = 8;
@@ -1407,8 +1471,8 @@ namespace GEMMDriverTest
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = true;
         gemm.fuseLoops = true;
         gemm.unrollK   = 2;
@@ -1437,8 +1501,8 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
         gemm.k         = 64 * 16 * 2;
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = true;
         gemm.fuseLoops = true;
         gemm.unrollK   = 2;
@@ -1471,8 +1535,8 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
         gemm.k         = 64 * 4 * 3;
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
         gemm.unrollK   = 3;
@@ -1501,8 +1565,8 @@ namespace GEMMDriverTest
         gemm.m                 = 4096;
         gemm.n                 = 4096;
         gemm.k                 = 2048 * 3;
-        gemm.loadLDSA          = true;
-        gemm.loadLDSB          = true;
+        gemm.loadPathA         = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB         = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD         = false;
         gemm.fuseLoops         = false;
         gemm.unrollK           = 3;
@@ -1634,8 +1698,8 @@ namespace GEMMDriverTest
         gemm.macN = wavesPerWGY * gemm.waveN;
         gemm.macK = 2 * gemm.waveK;
 
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = false;
 
         gemm.workgroupSizeX = 256;
@@ -1648,8 +1712,8 @@ namespace GEMMDriverTest
         gemm.alpha = 2.1;
         gemm.beta  = 0.75;
 
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = false;
 
         gemm.transA = "N";
@@ -1795,12 +1859,14 @@ namespace GEMMDriverTest
         auto [typeAB, tileSizeM, transOp, directLDSA, directLDSB] = std::get<1>(GetParam());
 
         GEMMProblem gemm;
-        gemm.macM        = tileSizeM;
-        gemm.transA      = transOp.first;
-        gemm.transB      = transOp.second;
-        gemm.direct2LDSA = directLDSA;
-        gemm.direct2LDSB = directLDSB;
-        gemm.storeLDSD   = false;
+        gemm.macM      = tileSizeM;
+        gemm.transA    = transOp.first;
+        gemm.transB    = transOp.second;
+        gemm.loadPathA = directLDSA ? SolutionParams::LoadPath::BufferToLDS
+                                    : SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = directLDSB ? SolutionParams::LoadPath::BufferToLDS
+                                    : SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.storeLDSD = false;
 
         if(typeAB == DataType::Float)
         {
@@ -1834,8 +1900,8 @@ namespace GEMMDriverTest
         gemm.macN = wavesPerWGY * gemm.waveN;
         gemm.macK = 2 * gemm.waveK;
 
-        gemm.loadLDSA = true;
-        gemm.loadLDSB = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
         gemm.workgroupSizeX = 256;
         gemm.workgroupSizeY = 1;
@@ -1942,8 +2008,8 @@ namespace GEMMDriverTest
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.loadLDSA      = true;
-        gemm.loadLDSB      = true;
+        gemm.loadPathA     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadLDSScaleA = false;
         gemm.loadLDSScaleB = false;
 
@@ -2199,134 +2265,208 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_SwizzleScaledGEMMMXF4TN)
+    struct GEMMF4SwizzleScaledTNGPU
+        : public BaseGEMMContextFixture<int, bool, bool, int, SolutionParams::LoadPath>
     {
+    };
+
+    TEST_P(GEMMF4SwizzleScaledTNGPU, GEMMF4SwizzleScaledTNGPU)
+    {
+        auto const& [arch, waveK, loadLDSScaleA, loadLDSScaleB, unrollK, loadPathAB] = GetParam();
+
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
 
-        for(auto waveK : {64, 128})
+        if(unrollK == 4
+           && (loadPathAB == SolutionParams::LoadPath::BufferToLDSViaVGPR || waveK == 128))
         {
-            int waveM = (waveK == 128) ? 16 : 32;
-            int waveN = (waveK == 128) ? 16 : 32;
+            GTEST_SKIP() << "FIXME: Re-visit when ClusterParallelChains is implemented";
+        }
 
-            auto gemm = setup_GEMMF8F6F4(waveM, waveN, waveK);
+        int waveM = (waveK == 128) ? 16 : 32;
+        int waveN = (waveK == 128) ? 16 : 32;
 
-            gemm.macM = 256;
-            gemm.macN = 256;
-            gemm.macK = 128;
-            gemm.m    = 2 * gemm.macM;
-            gemm.n    = 3 * gemm.macN;
-            gemm.k    = 4 * gemm.macK;
+        auto gemm = setup_GEMMF8F6F4(waveM, waveN, waveK);
 
-            gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
-            gemm.workgroupSizeY = 4;
+        gemm.macM = 256;
+        gemm.macN = 256;
+        gemm.macK = 128;
+        gemm.m    = 2 * gemm.macM;
+        gemm.n    = 3 * gemm.macN;
+        gemm.k    = 4 * gemm.macK;
 
-            gemm.loadLDSA = false;
-            gemm.loadLDSB = false;
+        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 2;
 
-            gemm.scaleAMode = Operations::ScaleMode::Separate;
-            gemm.scaleBMode = Operations::ScaleMode::Separate;
+        gemm.loadPathA = loadPathAB;
+        gemm.loadPathB = loadPathAB;
 
-            gemm.scaleTypeA = DataType::E8M0;
-            gemm.scaleTypeB = DataType::E8M0;
+        gemm.scaleAMode = Operations::ScaleMode::Separate;
+        gemm.scaleBMode = Operations::ScaleMode::Separate;
 
-            gemm.swizzleScale = true;
+        gemm.scaleTypeA = DataType::E8M0;
+        gemm.scaleTypeB = DataType::E8M0;
 
-            gemm.scaleBlockSize = m_context->targetArchitecture().GetCapability(
-                GPUCapability::DefaultScaleBlockSize);
+        gemm.swizzleScale = true;
 
-            for(auto loadLDSScaleA : {false, true})
-            {
-                gemm.loadLDSScaleA = loadLDSScaleA;
-                for(auto loadLDSScaleB : {false, true})
-                {
-                    gemm.loadLDSScaleB = loadLDSScaleB;
-                    for(auto unrollK : {0, 2})
-                    {
-                        gemm.unrollK = unrollK;
-                        basicGEMM<FP4, FP4, float>(gemm);
+        gemm.scaleBlockSize
+            = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
 
-                        std::string generatedCode = m_context->instructions()->toString();
-                        // when both the scales are loaded directly from buffer into VGPRs
-                        if(!loadLDSScaleA && !loadLDSScaleB)
-                            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
-                        // when either scale is loaded via LDS -- no swizzle applied
-                        if(loadLDSScaleA || loadLDSScaleB)
-                            EXPECT_GT(countSubstring(generatedCode, "ds_read_u8 "), 0);
-                    }
-                }
-            }
+        gemm.loadLDSScaleA = loadLDSScaleA;
+        gemm.loadLDSScaleB = loadLDSScaleB;
+        gemm.unrollK       = unrollK;
+
+        basicGEMM<FP4, FP4, float>(gemm);
+
+        std::string generatedCode = m_context->instructions()->toString();
+        // when both the scales are loaded directly from buffer into VGPRs
+        if(!loadLDSScaleA && !loadLDSScaleB)
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
+        // when either scale is loaded via LDS -- no swizzle applied
+        if(loadLDSScaleA || loadLDSScaleB)
+            EXPECT_GT(countSubstring(generatedCode, "ds_read_u8 "), 0);
+
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMF4SwizzleScaledTNGPU,
+        GEMMF4SwizzleScaledTNGPU,
+        ::testing::Combine(currentGPUISA(),
+                           ::testing::Values(64, 128),
+                           ::testing::Values(false, true),
+                           ::testing::Values(false, true),
+                           ::testing::Values(0, 2, 4),
+                           ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                             SolutionParams::LoadPath::BufferToVGPR)));
+
+    TEST_P(GEMMMXFP4TNSwizzleScaledUnrollTestGPU, GPU_GEMMMXFP4TNSwizzleScaled64x4Unroll)
+    {
+
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
+
+        auto [waveK, unrollK] = std::get<1>(GetParam());
+
+        int waveM = (waveK == 128) ? 16 : 32;
+        int waveN = (waveK == 128) ? 16 : 32;
+
+        auto gemm = setup_GEMMF8F6F4(waveM, waveN, waveK);
+
+        gemm.macM = 256;
+        gemm.macN = 256;
+        gemm.macK = 128;
+
+        gemm.m = 2 * gemm.macM;
+        gemm.n = 3 * gemm.macN;
+        gemm.k = 4 * gemm.macK;
+
+        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 2;
+
+        gemm.loadPathA     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadLDSScaleA = false;
+        gemm.loadLDSScaleB = false;
+
+        gemm.scaleAMode = Operations::ScaleMode::Separate;
+        gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+        gemm.scaleTypeA = DataType::E8M0;
+        gemm.scaleTypeB = DataType::E8M0;
+
+        gemm.swizzleScale = true;
+
+        gemm.scaleBlockSize
+            = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
+
+        // #FIXME: Support for unrollK = 4 and waveK = 128
+        if(unrollK == 4 && waveK == 128)
+            GTEST_SKIP() << "Skipping GPU_GEMMMXFP4TNSwizzleScaled64x4Unroll test";
+        gemm.unrollK = unrollK;
+        if(unrollK > 1)
+            gemm.swizzleK = 4 * unrollK;
+        basicGEMM<FP4, FP4, float>(gemm);
+
+        std::string generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
+        if(unrollK == 0)
+        {
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 4);
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 0);
+        }
+        else if(unrollK == 2)
+        {
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
+            // 2x2 wave config: NumAScaleLoadTiles = 256/2/64 = 2 and NumBScaleLoadTiles = 256/2/64 = 2
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 4);
+        }
+        else if(unrollK == 4)
+        {
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 0);
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_SwizzleScaledUnrollGEMMMXF4TN)
+    TEST_P(GEMMMXFP4TNSwizzleScaledUnrollTestGPU, GPU_GEMMMXFP4TNSwizzleScaled32x8Unroll)
     {
 
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
-        for(auto waveK : {64, 128})
+
+        auto [waveK, unrollK] = std::get<1>(GetParam());
+
+        int waveM = (waveK == 128) ? 16 : 32;
+        int waveN = (waveK == 128) ? 16 : 32;
+
+        auto gemm = setup_GEMMF8F6F4(waveM, waveN, waveK);
+
+        gemm.macM = 128;
+        gemm.macN = 128;
+        gemm.macK = 256;
+
+        gemm.m = 2 * gemm.macM;
+        gemm.n = 3 * gemm.macN;
+        gemm.k = 4 * gemm.macK;
+
+        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 2;
+
+        gemm.loadPathA     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadLDSScaleA = false;
+        gemm.loadLDSScaleB = false;
+
+        gemm.scaleAMode = Operations::ScaleMode::Separate;
+        gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+        gemm.scaleTypeA = DataType::E8M0;
+        gemm.scaleTypeB = DataType::E8M0;
+
+        gemm.swizzleScale = true;
+        gemm.swizzleM     = 32;
+        gemm.swizzleN     = 32;
+        gemm.swizzleK     = 8;
+
+        gemm.scaleBlockSize
+            = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
+
+        gemm.unrollK = unrollK;
+        basicGEMM<FP4, FP4, float>(gemm);
+
+        std::string generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
+        if(unrollK == 0)
         {
-            int waveM = (waveK == 128) ? 16 : 32;
-            int waveN = (waveK == 128) ? 16 : 32;
-
-            auto gemm = setup_GEMMF8F6F4(waveM, waveN, waveK);
-
-            gemm.macM = 256;
-            gemm.macN = 256;
-            gemm.macK = 128;
-
-            gemm.m = 2 * gemm.macM;
-            gemm.n = 3 * gemm.macN;
-            gemm.k = 4 * gemm.macK;
-
-            gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
-            gemm.workgroupSizeY = 2;
-
-            gemm.loadLDSA      = true;
-            gemm.loadLDSB      = true;
-            gemm.loadLDSScaleA = false;
-            gemm.loadLDSScaleB = false;
-
-            gemm.scaleAMode = Operations::ScaleMode::Separate;
-            gemm.scaleBMode = Operations::ScaleMode::Separate;
-
-            gemm.scaleTypeA = DataType::E8M0;
-            gemm.scaleTypeB = DataType::E8M0;
-
-            gemm.swizzleScale = true;
-
-            gemm.scaleBlockSize = m_context->targetArchitecture().GetCapability(
-                GPUCapability::DefaultScaleBlockSize);
-
-            for(auto unrollK : {0, 2, 4})
-            {
-                // #FIXME: Support for unrollK = 4 and waveK = 128
-                if(unrollK == 4 && waveK == 128)
-                    continue;
-                gemm.unrollK = unrollK;
-                if(unrollK > 1)
-                    gemm.swizzleK = 4 * unrollK;
-                basicGEMM<FP4, FP4, float>(gemm);
-
-                std::string generatedCode = m_context->instructions()->toString();
-                EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
-                if(unrollK == 0)
-                {
-                    EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 4);
-                    EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 0);
-                }
-                else if(unrollK == 2)
-                {
-                    EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
-                    // 2x2 wave config: NumAScaleLoadTiles = 256/2/64 = 2 and NumBScaleLoadTiles = 256/2/64 = 2
-                    EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 4);
-                }
-                else if(unrollK == 4)
-                {
-                    EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
-                    EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 0);
-                }
-            }
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 4);
+        }
+        else if(unrollK == 2)
+        {
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 8);
+        }
+        else if(unrollK == 4)
+        {
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 16);
         }
     }
 
@@ -2353,8 +2493,8 @@ namespace GEMMDriverTest
             gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
             gemm.workgroupSizeY = 4;
 
-            gemm.loadLDSA      = true;
-            gemm.loadLDSB      = true;
+            gemm.loadPathA     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+            gemm.loadPathB     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
             gemm.loadLDSScaleA = false;
             gemm.loadLDSScaleB = false;
 
@@ -2407,8 +2547,8 @@ namespace GEMMDriverTest
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.loadLDSA      = true;
-        gemm.loadLDSB      = true;
+        gemm.loadPathA     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadLDSScaleA = true;
         gemm.loadLDSScaleB = true;
 
@@ -2454,12 +2594,10 @@ namespace GEMMDriverTest
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.loadLDSA      = true;
-        gemm.loadLDSB      = true;
         gemm.loadLDSScaleA = false;
         gemm.loadLDSScaleB = false;
-        gemm.direct2LDSA   = true;
-        gemm.direct2LDSB   = true;
+        gemm.loadPathA     = SolutionParams::LoadPath::BufferToLDS;
+        gemm.loadPathB     = SolutionParams::LoadPath::BufferToLDS;
 
         gemm.unrollK           = 2;
         gemm.prefetch          = true;
@@ -2514,12 +2652,10 @@ namespace GEMMDriverTest
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.loadLDSA      = true;
-        gemm.loadLDSB      = true;
         gemm.loadLDSScaleA = false;
         gemm.loadLDSScaleB = false;
-        gemm.direct2LDSA   = true;
-        gemm.direct2LDSB   = true;
+        gemm.loadPathA     = SolutionParams::LoadPath::BufferToLDS;
+        gemm.loadPathB     = SolutionParams::LoadPath::BufferToLDS;
 
         gemm.unrollK           = 2;
         gemm.prefetch          = true;
@@ -2590,8 +2726,8 @@ namespace GEMMDriverTest
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.loadLDSA      = true;
-        gemm.loadLDSB      = true;
+        gemm.loadPathA     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadLDSScaleA = false;
         gemm.loadLDSScaleB = false;
 
@@ -2662,8 +2798,8 @@ namespace GEMMDriverTest
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.loadLDSA      = false;
-        gemm.loadLDSB      = false;
+        gemm.loadPathA     = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadPathB     = SolutionParams::LoadPath::BufferToVGPR;
         gemm.loadLDSScaleA = false;
         gemm.loadLDSScaleB = false;
 
@@ -2709,8 +2845,8 @@ namespace GEMMDriverTest
         gemm.n    = 3 * gemm.macN;
         gemm.k    = 4 * gemm.macK;
 
-        gemm.loadLDSA      = true;
-        gemm.loadLDSB      = true;
+        gemm.loadPathA     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.loadLDSScaleA = true;
         gemm.loadLDSScaleB = true;
 
@@ -2795,8 +2931,8 @@ namespace GEMMDriverTest
         problem.scaleTypeA = DataType::E8M0;
         problem.scaleTypeB = DataType::E8M0;
 
-        problem.loadLDSA      = true;
-        problem.loadLDSB      = true;
+        problem.loadPathA     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        problem.loadPathB     = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         problem.loadLDSScaleA = true;
         problem.loadLDSScaleB = true;
 
@@ -2905,8 +3041,8 @@ namespace GEMMDriverTest
         gemm.macM             = 128;
         gemm.macN             = 128;
         gemm.macK             = 256;
-        gemm.loadLDSA         = true;
-        gemm.loadLDSB         = true;
+        gemm.loadPathA        = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB        = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.prefetchInFlight = 2;
 
         basicGEMM<FP8, FP8, float>(gemm);
@@ -2951,9 +3087,9 @@ namespace GEMMDriverTest
         problem.scaleTypeA = DataType::E8M0;
         problem.scaleTypeB = DataType::E8M0;
 
-        problem.direct2LDSA = true;
-        problem.direct2LDSB = true;
-        problem.storeLDSD   = false;
+        problem.loadPathA = SolutionParams::LoadPath::BufferToLDS;
+        problem.loadPathB = SolutionParams::LoadPath::BufferToLDS;
+        problem.storeLDSD = false;
 
         problem.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
@@ -3011,9 +3147,9 @@ namespace GEMMDriverTest
 
         std::tie(problem.transA, problem.transB) = transOp;
 
-        problem.direct2LDSA = true;
-        problem.direct2LDSB = true;
-        problem.storeLDSD   = false;
+        problem.loadPathA = SolutionParams::LoadPath::BufferToLDS;
+        problem.loadPathB = SolutionParams::LoadPath::BufferToLDS;
+        problem.storeLDSD = false;
 
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
 
@@ -3056,18 +3192,18 @@ namespace GEMMDriverTest
     TEST_P(GEMMTestGPU, GPU_GEMM_FP8_Direct2LDS_MT256x256x128_MI32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm        = setup_GEMMF8F6F4(32, 32, 64);
-        gemm.m           = 512;
-        gemm.n           = 256;
-        gemm.k           = 512;
-        gemm.macM        = 256;
-        gemm.macN        = 256;
-        gemm.macK        = 128;
-        gemm.direct2LDSA = true;
-        gemm.direct2LDSB = true;
-        gemm.storeLDSD   = false;
-        gemm.transA      = "T";
-        gemm.transB      = "N";
+        auto gemm      = setup_GEMMF8F6F4(32, 32, 64);
+        gemm.m         = 512;
+        gemm.n         = 256;
+        gemm.k         = 512;
+        gemm.macM      = 256;
+        gemm.macN      = 256;
+        gemm.macK      = 128;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
+        gemm.storeLDSD = false;
+        gemm.transA    = "T";
+        gemm.transB    = "N";
 
         basicGEMM<FP8, FP8, float>(gemm);
 
@@ -3085,18 +3221,18 @@ namespace GEMMDriverTest
     TEST_P(GEMMTestGPU, GPU_GEMM_BF8_Direct2LDS_MT256x256x128_MI32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm        = setup_GEMMF8F6F4(32, 32, 64);
-        gemm.m           = 512;
-        gemm.n           = 256;
-        gemm.k           = 512;
-        gemm.macM        = 256;
-        gemm.macN        = 256;
-        gemm.macK        = 128;
-        gemm.direct2LDSA = true;
-        gemm.direct2LDSB = true;
-        gemm.storeLDSD   = false;
-        gemm.transA      = "T";
-        gemm.transB      = "N";
+        auto gemm      = setup_GEMMF8F6F4(32, 32, 64);
+        gemm.m         = 512;
+        gemm.n         = 256;
+        gemm.k         = 512;
+        gemm.macM      = 256;
+        gemm.macN      = 256;
+        gemm.macK      = 128;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
+        gemm.storeLDSD = false;
+        gemm.transA    = "T";
+        gemm.transB    = "N";
 
         basicGEMM<BF8, BF8, float>(gemm);
 
@@ -3114,18 +3250,18 @@ namespace GEMMDriverTest
     TEST_P(GEMMTestGPU, GPU_GEMM_FP4_Direct2LDS_MT256x256x128_MI32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm        = setup_GEMMF8F6F4(32, 32, 64);
-        gemm.m           = 512;
-        gemm.n           = 256;
-        gemm.k           = 512;
-        gemm.macM        = 256;
-        gemm.macN        = 256;
-        gemm.macK        = 128;
-        gemm.direct2LDSA = true;
-        gemm.direct2LDSB = true;
-        gemm.storeLDSD   = false;
-        gemm.transA      = "T";
-        gemm.transB      = "N";
+        auto gemm      = setup_GEMMF8F6F4(32, 32, 64);
+        gemm.m         = 512;
+        gemm.n         = 256;
+        gemm.k         = 512;
+        gemm.macM      = 256;
+        gemm.macN      = 256;
+        gemm.macK      = 128;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDS;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDS;
+        gemm.storeLDSD = false;
+        gemm.transA    = "T";
+        gemm.transB    = "N";
 
         basicGEMM<FP4, FP4, float>(gemm);
 
@@ -3161,9 +3297,9 @@ namespace GEMMDriverTest
         problem.scaleTypeA = DataType::E8M0;
         problem.scaleTypeB = DataType::E8M0;
 
-        problem.direct2LDSA = true;
-        problem.direct2LDSB = true;
-        problem.storeLDSD   = false;
+        problem.loadPathA = SolutionParams::LoadPath::BufferToLDS;
+        problem.loadPathB = SolutionParams::LoadPath::BufferToLDS;
+        problem.storeLDSD = false;
 
         problem.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
@@ -3219,9 +3355,9 @@ namespace GEMMDriverTest
 
         std::tie(problem.transA, problem.transB) = transOp;
 
-        problem.direct2LDSA = true;
-        problem.direct2LDSB = true;
-        problem.storeLDSD   = false;
+        problem.loadPathA = SolutionParams::LoadPath::BufferToLDS;
+        problem.loadPathB = SolutionParams::LoadPath::BufferToLDS;
+        problem.storeLDSD = false;
 
         problem.prefetch         = true;
         problem.prefetchInFlight = 2;
@@ -3277,7 +3413,7 @@ namespace GEMMDriverTest
         gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.loadLDSA  = false;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
 
@@ -3594,8 +3730,8 @@ namespace GEMMDriverTest
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = true;
 
         basicGEMM<Half>(gemm);
@@ -3619,8 +3755,8 @@ namespace GEMMDriverTest
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = true;
 
         basicGEMM<Half>(gemm);
@@ -3659,8 +3795,8 @@ namespace GEMMDriverTest
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = true;
 
         gemm.splitStoreTileIntoWaveBlocks = true;
@@ -3692,8 +3828,8 @@ namespace GEMMDriverTest
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.loadLDSA  = true;
-        gemm.loadLDSB  = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
         gemm.storeLDSD = true;
 
         basicGEMM<Half>(gemm);
@@ -3715,8 +3851,8 @@ namespace GEMMDriverTest
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.loadLDSA      = false;
-        gemm.loadLDSB      = false;
+        gemm.loadPathA     = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadPathB     = SolutionParams::LoadPath::BufferToVGPR;
         gemm.loadLDSScaleA = true;
         gemm.loadLDSScaleB = true;
 
@@ -3958,8 +4094,8 @@ namespace GEMMDriverTest
         gemm.macN = 256;
         gemm.macK = 128;
 
-        gemm.loadLDSA = true;
-        gemm.loadLDSB = true;
+        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
         // Use unrollK will significantly increase the kernel generation time.
         // To enable unrollK, maxVGPR has to be increased as well.
@@ -4019,6 +4155,12 @@ namespace GEMMDriverTest
                                                  std::pair<std::string, std::string>("N", "T"),
                                                  std::pair<std::string, std::string>("T", "N"),
                                                  std::pair<std::string, std::string>("T", "T")))));
+
+    INSTANTIATE_TEST_SUITE_P(GEMMMXFP4TNSwizzleScaledUnrollTest,
+                             GEMMMXFP4TNSwizzleScaledUnrollTestGPU,
+                             ::testing::Combine(currentGPUISA(),
+                                                ::testing::Combine(::testing::Values(64, 128),
+                                                                   ::testing::Values(0, 2, 4))));
 
     INSTANTIATE_TEST_SUITE_P(GEMMF8Test, GEMMF8TestGPU, currentGPUISA());
 
@@ -4111,4 +4253,31 @@ namespace GEMMDriverTest
                                   std::pair<std::string, std::string>("N", "T"),
                                   std::pair<std::string, std::string>("T", "N"),
                                   std::pair<std::string, std::string>("T", "T")))));
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMTestStreamKWGM,
+        GEMMTestStreamKWGMGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(::testing::Values(0, 1), /* workgroupMapping dim */
+                               ::testing::Values(1, 2, 6), /* workgroupMapping value */
+                               ::testing::Values(true, false), /* remapWorkgroupXCC */
+                               ::testing::Values(StreamKMode::Standard,
+                                                 StreamKMode::TwoTile,
+                                                 StreamKMode::TwoTileDPFirst))));
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMTestStreamK,
+        GEMMTestStreamKGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(
+                ::testing::Values(
+                    StreamKMode::Standard, StreamKMode::TwoTile, StreamKMode::TwoTileDPFirst),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::BufferToVGPR), /* loadPathA */
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::BufferToVGPR), /* loadPathB */
+                ::testing::Values(true, false) /* storeLDSD */
+                )));
 }

@@ -89,13 +89,6 @@ foreach( sample ${sample_list} )
       target_compile_options( ${sample} PRIVATE -arch sm_53 -gencode=arch=compute_53,code=sm_53 -Xptxas=-w)
     endif()
     target_link_libraries( ${sample} PRIVATE ${CUDA_LIBRARIES} )
-  else()
-    if( USE_HIPRAND AND NOT hiprand_FOUND )
-      find_package( hiprand REQUIRED )
-    endif()
-    if ( USE_HIPRAND )
-      target_link_libraries( ${sample} PRIVATE hip::hiprand )
-    endif()
   endif()
 
   target_include_directories( ${sample}

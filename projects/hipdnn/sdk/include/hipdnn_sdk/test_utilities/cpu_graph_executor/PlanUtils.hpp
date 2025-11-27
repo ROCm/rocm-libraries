@@ -22,3 +22,16 @@
             return false;                                        \
         }                                                        \
     } while(0)
+
+#define CHECK_OPTIONAL_TENSOR_EXISTS(tensor_map, optional_tensor_uid) \
+    do                                                                \
+    {                                                                 \
+        if(!optional_tensor_uid.has_value())                          \
+        {                                                             \
+            return false;                                             \
+        }                                                             \
+        CHECK_TENSOR_EXISTS(tensor_map, *(optional_tensor_uid));      \
+    } while(0)
+
+#define CHECK_OPTIONAL_TENSOR_TYPE(tensor_map, optional_tensor_uid, datatype_enum) \
+    CHECK_TENSOR_TYPE(tensor_map, *(optional_tensor_uid), datatype_enum)
