@@ -544,6 +544,8 @@ namespace rocRoller::KernelGraph
         auto graph = original;
         removeRedundantSequenceEdges(graph);
         removeRedundantBodyEdges(graph);
+        removeRedundantNOPs(graph);
+        removeRedundantSequenceEdges(graph);
         return graph;
     }
 
