@@ -145,25 +145,19 @@ public:
     RNNCombTimeLogger(hipStream_t main_stream, size_t size, int mode)
         : stream(main_stream), clockMode(static_cast<ClockMode>(mode))
     {
-        if(clockMode != ClockMode::Disabled)
-        {
-            hostTimePerLaunch.reserve(size);
+        hostTimePerLaunch.reserve(size);
 
-            startEvent.reserve(size);
-            endEvent.reserve(size);
-            for(auto i = size; i > 0; --i)
-            {
-                startEvent.push_back(miopen::make_hip_event());
-                endEvent.push_back(miopen::make_hip_event());
-            }
+        startEvent.reserve(size);
+        endEvent.reserve(size);
+        for(auto i = size; i > 0; --i)
+        {
+            startEvent.push_back(miopen::make_hip_event());
+            endEvent.push_back(miopen::make_hip_event());
         }
     }
 
     void Start()
     {
-        if(clockMode == ClockMode::Disabled)
-            return;
-
         auto launchCount = hostTimePerLaunch.size();
 
         if(launchCount >= startEvent.size())
@@ -177,9 +171,6 @@ public:
     }
     void StopAndPush()
     {
-        if(clockMode == ClockMode::Disabled)
-            return;
-
         auto end         = std::chrono::steady_clock::now();
         auto launchCount = hostTimePerLaunch.size();
 
@@ -190,7 +181,7 @@ public:
         }
         hipEventRecord(endEvent[launchCount].get(), stream);
 
-        if(clockMode == ClockMode::OldWallClock)
+        if(clockMode == ClockMode::KernelOnly || clockMode == ClockMode::OldWallClock)
         {
             std::chrono::time_point<std::chrono::steady_clock> st2 =
                 std::chrono::steady_clock::now();
@@ -217,10 +208,10 @@ public:
         }
     }
 
-    void Print() const
+    void Print(bool wall) const
     {
         auto n_iter = hostTimePerLaunch.size();
-        if(clockMode == ClockMode::Disabled || n_iter == 0)
+        if(n_iter == 0)
             return;
 
         float gpu_avg  = 0.0f;
@@ -234,7 +225,8 @@ public:
         {
             hipEventElapsedTime(&gpu_time, startEvent[i].get(), endEvent[i].get());
 
-            if(clockMode != ClockMode::OldWallClock)
+            if(clockMode == ClockMode::SeparateClocksNotSynced ||
+               clockMode == ClockMode::SeparateClocksSynced)
             {
                 printf("launch#%llu, host_time= %f ms, gpu_time= %f ms\n",
                        i,
@@ -253,13 +245,16 @@ public:
             hipEventElapsedTime(&gpu_time, startEvent[0].get(), endEvent[0].get());
 
         printf("GPU Kernel Time Elapsed: %f ms\n", n_iter > 1 ? gpu_avg / (n_iter - 1) : gpu_time);
-        printf("Wall-clock Time Elapsed: %f ms\n",
-               n_iter > 1 ? host_avg / (n_iter - 1) : hostTimePerLaunch[0]);
+        if(wall)
+        {
+            printf("Wall-clock Time Elapsed: %f ms\n",
+                   n_iter > 1 ? host_avg / (n_iter - 1) : hostTimePerLaunch[0]);
+        }
     }
 
     enum class ClockMode
     {
-        Disabled                = 0,
+        KernelOnly              = 0,
         OldWallClock            = 1,
         SeparateClocksSynced    = 2,
         SeparateClocksNotSynced = 3
