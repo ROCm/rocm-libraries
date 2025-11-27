@@ -129,6 +129,7 @@ Datatypes:
         HIPSPARSE_SPMV_CSR_ALG1: 2
         HIPSPARSE_SPMV_CSR_ALG2: 3
         HIPSPARSE_SPMV_COO_ALG2: 4
+        HIPSPARSE_SPMV_SELL_ALG1: 5
   - hipsparseSpSVAlg_t:
       bases: [c_int ]
       attr:

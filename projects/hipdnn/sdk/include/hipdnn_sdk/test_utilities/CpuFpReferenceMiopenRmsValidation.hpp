@@ -19,8 +19,6 @@ namespace hipdnn_sdk
 namespace test_utilities
 {
 
-using namespace hipdnn_sdk::utilities;
-
 // CPU validator that uses MIOpen RMS calculation for comparing tensor likes.
 // Can be used to replicate MIOpen's RMS tolerance checks in unit tests.
 // Note that this class does not use the absolute tolerance value, as MIOpen's
@@ -41,7 +39,7 @@ public:
 
     ~CpuFpReferenceMiopenRmsValidation() override = default;
 
-    bool allClose(ITensor& reference, ITensor& implementation) const override
+    bool allClose(utilities::ITensor& reference, utilities::ITensor& implementation) const override
     {
         if(reference.elementCount() != implementation.elementCount()
            || reference.dims() != implementation.dims())
@@ -58,8 +56,8 @@ public:
         std::atomic<double> maxRefMagnitude(0.0);
         std::atomic<double> maxImplMagnitude(0.0);
 
-        TensorView<T> refView(reference);
-        TensorView<T> implView(implementation);
+        utilities::TensorView<T> refView(reference);
+        utilities::TensorView<T> implView(implementation);
 
         auto validateFunc = [&](const std::vector<int64_t>& indices) {
             T refValueT = refView.getHostValue(indices);
