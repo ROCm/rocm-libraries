@@ -74,13 +74,6 @@ def checkCDBufferAndStrides(problemType, problemSizes, isCEqualD):
                 printExit("LDD({}) != LDC({}) causes unpredictable result when CEqualD(True)" \
                         .format(ldd, ldc))
 
-def checkStaggerUStride(configParams):
-    """Ensures StaggerU == 0 when StaggerUStride = 0"""
-    msgBase = "Invalid parameter value: StaggerUStride = 0 necessitates StaggerU = 0."
-    if "StaggerUStride" not in configParams or "StaggerU" not in configParams:
-        return
-    if configParams["StaggerUStride"] == 0 and configParams["StaggerU"] != 0:
-        raise Exception(msgBase)
 
 class BenchmarkProcess:
     """Representation of benchmarking parameters and resulting steps"""
@@ -189,8 +182,6 @@ class BenchmarkProcess:
         configParams = {**benchmarkCommonParams, **forkParams}
         for param in configParams.items():
             checkParametersAreValid(param, validParameters)
-
-        checkStaggerUStride(configParams)
 
         # TODO other checks on groups (same params for each entry? no dups between groups?)
         for list in self.paramGroups:
