@@ -104,6 +104,12 @@ def matmul_set_2():
     problemlist = [Problem(args={"--log_function_name" : "" , "--yaml" : "matmul_probset2_bench.yaml"})]
     yield ProblemSet(benchType="matmul", name="benchset_2", problems=problemlist)
 
+def matmul_set_3():
+    """gemm benchset 3"""
+
+    problemlist = [Problem(args={"--log_function_name" : "" , "--yaml" : "matmul_probset3_bench.yaml"})]
+    yield ProblemSet(benchType="matmul", name="benchset_3", problems=problemlist)
+
 def ci_perf_job():
     """run basic job for PR-CI"""
 
