@@ -32,9 +32,9 @@
 #include "tensor_driver.hpp"
 #include "timer.hpp"
 
-#include "../test/ford.hpp"
 #include "../test/verify.hpp"
 
+#include <miopen/ford.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 
@@ -160,7 +160,7 @@ void mloAdamRunHost_mt(miopenTensorDescriptor_t paramDesc,
     const float one_minus_beta1              = 1.0 - beta1;
     const float one_minus_beta2              = 1.0 - beta2;
 
-    par_ford(numel)([&](int32_t i) {
+    miopen::par_ford(numel)([&](int32_t i) {
         Tref exp_avg    = exp_avgs[i];
         Tref exp_avg_sq = exp_avg_sqs[i];
 

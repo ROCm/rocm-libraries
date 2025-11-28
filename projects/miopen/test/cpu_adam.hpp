@@ -125,7 +125,7 @@ void cpu_adam_updated(tensor<T1>& params,
     const float one_minus_beta2              = 1.0 - beta2;
     const float inv_grad_scale               = 1.0f / static_cast<float>(grad_scale);
 
-    par_ford(params.GetSize())([&](int32_t i) {
+    miopen::par_ford(params.GetSize())([&](int32_t i) {
         T1 param          = params[i];
         T1 exp_avg        = exp_avgs[i];
         T1 exp_avg_sq     = exp_avg_sqs[i];
