@@ -23,7 +23,7 @@ public:
 
     template <typename... Args>
     static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                 TensorBase<OutputType>& output,
+                                 utilities::TensorBase<OutputType>& output,
                                  Args&&... args)
     {
         ReferencePointwiseBase<DeviceExecutor, OutputType, InputTypes...>::pointwiseCompute(
