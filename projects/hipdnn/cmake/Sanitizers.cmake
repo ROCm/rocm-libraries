@@ -13,8 +13,12 @@ if(BUILD_ADDRESS_SANITIZER)
         gfx942:xnack+ # MI300X (GPU)
     )
 
-    string(REGEX MATCH "^[0-9]+" CLANG_MAJOR_VERSION ${CMAKE_CXX_COMPILER_VERSION})
-    link_directories(${ROCM_LLVM_LIB_DIR}/clang/${CLANG_MAJOR_VERSION}/lib/linux)
+    # Query the compiler for the resource directory to locate sanitizer libraries reliably
+    execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} -print-resource-dir OUTPUT_VARIABLE CLANG_RESOURCE_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    link_directories(${CLANG_RESOURCE_DIR}/lib/linux)
 
     # Define sanitizer flags as variables for reuse
     set(SANITIZER_COMPILE_FLAGS -fsanitize=address -fno-omit-frame-pointer)
