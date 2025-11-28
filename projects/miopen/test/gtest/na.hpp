@@ -25,6 +25,7 @@
  *******************************************************************************/
 #pragma once
 
+#include <gtest/gtest.h>
 #include <miopen/solver_id.hpp>
 #include <serialize.hpp>
 #include <fusionHost.hpp>

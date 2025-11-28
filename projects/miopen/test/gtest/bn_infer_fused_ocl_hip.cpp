@@ -24,7 +24,6 @@
  *
  *******************************************************************************/
 
-#include <gtest/gtest.h>
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/batchnorm/problem_description.hpp>
 
