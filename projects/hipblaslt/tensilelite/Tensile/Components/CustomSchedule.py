@@ -403,10 +403,10 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
     elif isTN(kernel) and not useLDSTr and TLDS == 1:
         #index and code pair
         syncTable = [-1, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="for LRB1-0"),
-                      5, SWaitCnt(dscnt=6+5, vlcnt=-1, vscnt=-1, comment="for LRB1"),
+                      5, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="for LRB1"),
                      14, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="for LRA0 complete"),
                      14, SBarrier(comment="for GRA start"),
-                     47, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="for LRB0"),
+                     46, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="for LRB0"),
                      50, SWaitCnt(dscnt=-1, vlcnt=14+1, vscnt=-1, comment="for LRA1"),
                      50, SBarrier(comment="for LRA1 start"),
                      65, SWaitCnt(dscnt=-1, vlcnt=6+5, vscnt=-1, comment="for LRB0"),
