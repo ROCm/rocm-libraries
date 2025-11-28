@@ -73,7 +73,7 @@ struct PointwiseSignatureKey
         outputDataType = outputTensorAttr->data_type();
 
         // Get second input tensor if this is a binary operation
-        if(hipdnn_sdk::utilities::isBinaryPointwiseMode(operation))
+        if(utilities::isBinaryPointwiseMode(operation))
         {
             if(nodeAttributes->in_1_tensor_uid().has_value())
             {

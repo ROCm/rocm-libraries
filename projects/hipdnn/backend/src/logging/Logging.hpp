@@ -24,9 +24,7 @@
 #define HIPDNN_LOG_FATAL(...) _HIPDNN_BACKEND_LOG_ACTION(critical, __VA_ARGS__)
 #endif // HIPDNN_BACKEND_COMPILATION
 
-namespace hipdnn_backend
-{
-namespace logging
+namespace hipdnn_backend::logging
 {
 
 void initialize();
@@ -41,5 +39,4 @@ std::shared_ptr<spdlog::logger> getCallbackReceiverLogger();
 
 void hipdnnLoggingCallback(hipdnnSeverity_t severity, const char* msg);
 
-} // namespace logging
-} // namespace hipdnn_backend
+} // namespace hipdnn_backend::logging

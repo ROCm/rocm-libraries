@@ -31,15 +31,11 @@ std::filesystem::path getCurrentModuleDirectory()
 
 PluginLibHandle openLibrary(const std::filesystem::path& libraryPath)
 {
-// If dlopen throws due to undefined symbols, a temporary workaround is to use RTLD_LAZY
-// loading to bypass this. However, it's less safe since RTLD_NOW catches undefined
-// symbols at load-time.
-#if __has_feature(address_sanitizer)
-    // Address Sanitizer does not support RTLD_DEEPBIND, so we use RTLD_NOW only
+    // We should only load plugins wtih RTLD_NOW to avoid issues.
+    // RTLD_DEEPBIND can NOT be used as it can cause symbol issues that are hard to debug.
+    // In order to ensure plugins work correctly with RTLD_NOW, plugins must be built with -fvisibility=hidden
+    // or accidental symbol collisions may occur.
     PluginLibHandle handle = dlopen(libraryPath.string().c_str(), RTLD_NOW);
-#else
-    PluginLibHandle handle = dlopen(libraryPath.string().c_str(), RTLD_NOW | RTLD_DEEPBIND);
-#endif
 
     if(handle == nullptr)
     {
