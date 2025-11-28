@@ -228,6 +228,18 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
                             {DataType::UInt64})),
             IdenticalTo(v3));
     }
+
+    SECTION("convert")
+    {
+        CHECK_THAT(simplify(convert(DataType::Int32, v)), IdenticalTo(v));
+        CHECK_THAT(simplify(convert(DataType::UInt64, v3)), IdenticalTo(v3));
+    }
+
+    SECTION("reinterpret")
+    {
+        CHECK_THAT(simplify(reinterpret(DataType::Int32, v)), IdenticalTo(v));
+        CHECK_THAT(simplify(reinterpret(DataType::UInt64, v3)), IdenticalTo(v3));
+    }
 }
 
 TEST_CASE("FuseAssociative ExpressionTransformation works",
