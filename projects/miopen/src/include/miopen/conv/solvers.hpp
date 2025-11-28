@@ -4949,9 +4949,6 @@ struct PerformanceConfigConvDepthwiseFwd : PerfConfigBaseCK<PerformanceConfigCon
     }
     MIOPEN_INTERNALS_EXPORT bool IsValid(const miopen::conv::ProblemDescription&) const;
     MIOPEN_INTERNALS_EXPORT bool operator==(const PerformanceConfigConvDepthwiseFwd& other) const;
-    MIOPEN_INTERNALS_EXPORT bool
-    IsModelApplicable(const ExecutionContext& ctx,
-                      const miopen::conv::ProblemDescription& problem) const;
 
 private:
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING

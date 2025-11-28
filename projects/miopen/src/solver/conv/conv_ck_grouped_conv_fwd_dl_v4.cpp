@@ -454,16 +454,6 @@ bool PerformanceConfigConvDepthwiseFwd::IsValid(
     return IsValidValue();
 }
 
-bool PerformanceConfigConvDepthwiseFwd::IsModelApplicable(const ExecutionContext& ctx,
-                                                          const ProblemDescription& problem) const
-{
-    if(ctx.GetStream().GetDeviceName() != "gfx90a" && ctx.GetStream().GetDeviceName() != "gfx942")
-        return false;
-    if(problem.GetInDataType() != miopenHalf)
-        return false;
-    return true;
-}
-
 ConvDepthwiseFwd::ConvDepthwiseFwd() {}
 
 bool ConvDepthwiseFwd::IsApplicable(const ExecutionContext& ctx,
@@ -472,6 +462,10 @@ bool ConvDepthwiseFwd::IsApplicable(const ExecutionContext& ctx,
     if(env::disabled(MIOPEN_DEBUG_CONV_DEPTHWISE_FWD))
         return false;
     if(!ctx.use_hip_kernels)
+        return false;
+
+    const std::string& arch = ctx.GetStream().GetDeviceName();
+    if((arch != "gfx908") && (arch != "gfx90a") && (arch != "gfx942"))
         return false;
 
     // TODO: support NHWC layout

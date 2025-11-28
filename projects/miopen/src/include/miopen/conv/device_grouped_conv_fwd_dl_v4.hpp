@@ -793,9 +793,6 @@ struct DeviceGroupedConvFwdDlV4 : public DeviceGroupedConvFwdMultipleABD<NDimSpa
 
     static_assert(NDimSpatial == 2);
     static_assert(RequirePadding == false);
-    // static_assert(is_same_v<InElementwiseOperation, element_wise::PassThrough>);
-    // static_assert(is_same_v<WeiElementwiseOperation, element_wise::PassThrough>);
-    // static_assert(is_same_v<OutElementwiseOperation, element_wise::PassThrough>);
 
     using GridwiseConvFwd = GridwiseGroupedConv2DFwdDlV4<BlockSize,
                                                          InDataType,
