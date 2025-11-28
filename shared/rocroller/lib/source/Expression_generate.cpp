@@ -944,8 +944,9 @@ namespace rocRoller
             Generator<Instruction> operator()(Register::ValuePtr& dest, Reinterpret const& expr)
             {
                 co_yield call(dest, expr.arg);
-                if(dest != nullptr)
-                    dest->setVariableType(expr.destinationType);
+                AssertFatal(dest != nullptr,
+                            "Reinterpret expression must have a destination register.");
+                dest->setVariableType(expr.destinationType);
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, ScaledMatrixMultiply expr)
