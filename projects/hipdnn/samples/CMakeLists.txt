@@ -30,4 +30,5 @@ add_hipdnn_sample(fused_bn_inference_drelu_bn_backward batchnorm/FusedBnInfDRelu
 
 add_hipdnn_sample(conv_dgrad convolution/ConvDgrad.cpp)
 add_hipdnn_sample(conv_fprop convolution/ConvFprop.cpp)
+add_hipdnn_sample(fused_conv_fprop_activ convolution/FusedConvFpropActiv.cpp)
 add_hipdnn_sample(conv_wgrad convolution/ConvWgrad.cpp)
