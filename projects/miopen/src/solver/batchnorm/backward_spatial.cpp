@@ -332,7 +332,7 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                                   {"MIOPEN_NRN_OP_ID", problem.GetActivationDesc().GetMode()}};
 
         {
-            kernel.kernel_file = "MIOpenBatchNormBwdSpatial.cpp";
+            kernel.kernel_file      = "MIOpenBatchNormBwdSpatial.cpp";
             std::string kernel_name = "MIOpenBatchNormBwdSpatial";
 
             build_params << KernelBuildParameters{
