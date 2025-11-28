@@ -67,11 +67,11 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr uint32_t __bit_log2(_Tp __t) noexcept
     if constexpr (sizeof(_Tp) <= 8)
     {
       using _Up [[maybe_unused]] = _If<sizeof(_Tp) <= 4, uint32_t, uint64_t>;
-      NV_IF_TARGET(NV_IS_DEVICE, (return _CUDA_VPTX::bfind(static_cast<_Up>(__t));))
+      NV_IF_TARGET_LIBHIPCXX(NV_IS_DEVICE_LIBHIPCXX, (return _CUDA_VPTX::bfind(static_cast<_Up>(__t));))
     }
     else
     {
-      NV_IF_TARGET(NV_IS_DEVICE,
+      NV_IF_TARGET_LIBHIPCXX(NV_IS_DEVICE_LIBHIPCXX,
                    (auto __high = _CUDA_VPTX::bfind(static_cast<uint64_t>(__t >> 64));
                     return __high == ~uint32_t{0} ? _CUDA_VPTX::bfind(static_cast<uint64_t>(__t)) : __high + 64;))
     }
@@ -106,7 +106,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr _Tp bit_ceil(_Tp __t) noexce
     {
       // CUDA right shift (ptx::shr) returns 0 if the right operand is larger than the number of bits of the type
       // The result is computed as max(1, bit_width(__t - 1)) because it is more efficient than the ternary operator
-      NV_IF_TARGET(NV_IS_DEVICE, //
+      NV_IF_TARGET_LIBHIPCXX(NV_IS_DEVICE_LIBHIPCXX, //
                    (auto __shift = _CUDA_VPTX::shl(_Up{1}, __width); // 2^(ceil(log2(__t - 1)))
                     auto __ret   = static_cast<_Tp>(_CUDA_VSTD::max(_Up{1}, __shift)); //
                     _CCCL_BUILTIN_ASSUME(__ret >= __t);
@@ -134,7 +134,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr _Tp bit_floor(_Tp __t) noexc
     {
       // CUDA left shift (ptx::shl) returns 0 if the right operand is larger than the number of bits of the type
       // -> the result is 0 if __t == 0
-      NV_IF_TARGET(NV_IS_DEVICE, //
+      NV_IF_TARGET_LIBHIPCXX(NV_IS_DEVICE_LIBHIPCXX, //
                    (auto __ret = static_cast<_Tp>(_CUDA_VPTX::shl(_Up{1}, __log2)); // 2^(log2(t))
                     _CCCL_BUILTIN_ASSUME(__ret >= __t / 2 && __ret <= __t);
                     return __ret;))

@@ -62,7 +62,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr _Tp __shl(const _Tp __value,
   {
     if constexpr (sizeof(_Tp) <= sizeof(uint64_t))
     {
-      NV_DISPATCH_TARGET(NV_IS_DEVICE,
+      NV_DISPATCH_TARGET(NV_IS_DEVICE_LIBHIPCXX,
                          (using _Up = _CUDA_VSTD::_If<sizeof(_Tp) <= sizeof(uint32_t), uint32_t, uint64_t>;
                           return _CUDA_VPTX::shl(static_cast<_Up>(__value), __shift);))
     }
@@ -80,7 +80,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr _Tp __shr(const _Tp __value,
   {
     if constexpr (sizeof(_Tp) <= sizeof(uint64_t))
     {
-      NV_DISPATCH_TARGET(NV_IS_DEVICE,
+      NV_DISPATCH_TARGET(NV_IS_DEVICE_LIBHIPCXX,
                          (using _Up = _CUDA_VSTD::_If<sizeof(_Tp) <= sizeof(uint32_t), uint32_t, uint64_t>;
                           return _CUDA_VPTX::shr(static_cast<_Up>(__value), __shift);))
     }
@@ -103,7 +103,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr _Tp bitmask(int __start, int
   {
     if constexpr (sizeof(_Tp) <= sizeof(uint32_t))
     {
-      NV_IF_TARGET(NV_PROVIDES_SM_70, (return _CUDA_VPTX::bmsk_clamp(__start, __width);))
+      NV_IF_TARGET_LIBHIPCXX(NV_PROVIDES_SM_70, (return _CUDA_VPTX::bmsk_clamp(__start, __width);))
     }
   }
   */

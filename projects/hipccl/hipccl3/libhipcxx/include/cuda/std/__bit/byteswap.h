@@ -131,9 +131,9 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr uint16_t __byteswap_impl(uin
   if (!_CUDA_VSTD::__cccl_default_is_constant_evaluated())
   {
 #  if _CCCL_COMPILER(MSVC)
-    NV_IF_TARGET(NV_IS_HOST, return ::_byteswap_ushort(__val);)
+    NV_IF_TARGET_LIBHIPCXX(NV_IS_HOST_LIBHIPCXX, return ::_byteswap_ushort(__val);)
 #  endif // _CCCL_COMPILER(MSVC)
-    NV_IF_TARGET(NV_IS_DEVICE, return _CUDA_VSTD::__byteswap_impl_device(__val);)
+    NV_IF_TARGET_LIBHIPCXX(NV_IS_DEVICE_LIBHIPCXX, return _CUDA_VSTD::__byteswap_impl_device(__val);)
   }
   return _CUDA_VSTD::__byteswap_impl_recursive(__val);
 #endif // !_CCCL_BUILTIN_BSWAP16
@@ -147,9 +147,9 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr uint32_t __byteswap_impl(uin
   if (!_CUDA_VSTD::__cccl_default_is_constant_evaluated())
   {
 #  if _CCCL_COMPILER(MSVC)
-    NV_IF_TARGET(NV_IS_HOST, return ::_byteswap_ulong(__val);)
+    NV_IF_TARGET_LIBHIPCXX(NV_IS_HOST_LIBHIPCXX, return ::_byteswap_ulong(__val);)
 #  endif // _CCCL_COMPILER(MSVC)
-    NV_IF_TARGET(NV_IS_DEVICE, return _CUDA_VSTD::__byteswap_impl_device(__val);)
+    NV_IF_TARGET_LIBHIPCXX(NV_IS_DEVICE_LIBHIPCXX, return _CUDA_VSTD::__byteswap_impl_device(__val);)
   }
   return _CUDA_VSTD::__byteswap_impl_recursive(__val);
 #endif // !_CCCL_BUILTIN_BSWAP32
@@ -163,9 +163,9 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr uint64_t __byteswap_impl(uin
   if (!_CUDA_VSTD::__cccl_default_is_constant_evaluated())
   {
 #  if _CCCL_COMPILER(MSVC)
-    NV_IF_TARGET(NV_IS_HOST, return ::_byteswap_uint64(__val);)
+    NV_IF_TARGET_LIBHIPCXX(NV_IS_HOST_LIBHIPCXX, return ::_byteswap_uint64(__val);)
 #  endif // _CCCL_COMPILER(MSVC)
-    NV_IF_TARGET(NV_IS_DEVICE, return _CUDA_VSTD::__byteswap_impl_device(__val);)
+    NV_IF_TARGET_LIBHIPCXX(NV_IS_DEVICE_LIBHIPCXX, return _CUDA_VSTD::__byteswap_impl_device(__val);)
   }
   return _CUDA_VSTD::__byteswap_impl_recursive(__val);
 #endif // !_CCCL_BUILTIN_BSWAP64

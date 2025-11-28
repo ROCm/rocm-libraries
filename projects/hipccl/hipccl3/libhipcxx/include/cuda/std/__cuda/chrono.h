@@ -70,10 +70,10 @@ _LIBCUDACXX_HIDE_FROM_ABI system_clock::time_point system_clock::now() noexcept
 // FIXME(HIP): simplify logic and use NV_DISPATCH_TARGET macros
 #ifdef __CUDA_ARCH__
   NV_DISPATCH_TARGET(
-    NV_IS_DEVICE,
+    NV_IS_DEVICE_LIBHIPCXX,
     (uint64_t __time; asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(__time)::);
      return time_point(duration_cast<duration>(nanoseconds(__time)));),
-    NV_IS_HOST,
+    NV_IS_HOST_LIBHIPCXX,
     (return time_point(duration_cast<duration>(nanoseconds(
       ::std::chrono::duration_cast<::std::chrono::nanoseconds>(::std::chrono::system_clock::now().time_since_epoch())
         .count())));));

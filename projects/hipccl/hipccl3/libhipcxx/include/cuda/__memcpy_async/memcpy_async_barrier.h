@@ -9,6 +9,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #ifndef _CUDA_PTX__MEMCPY_ASYNC_MEMCPY_ASYNC_BARRIER_H_
 #define _CUDA_PTX__MEMCPY_ASYNC_MEMCPY_ASYNC_BARRIER_H_
 
@@ -108,7 +130,7 @@ _LIBCUDACXX_HIDE_FROM_ABI async_contract_fulfillment __memcpy_async_barrier(
   // 2. Issue actual copy instructions.
   _CUDA_VSTD::uint64_t* __bh = nullptr;
 #if __cccl_ptx_isa >= 800
-  NV_IF_TARGET(NV_PROVIDES_SM_90,
+  NV_IF_TARGET_LIBHIPCXX(NV_PROVIDES_SM_90,
                (__bh = __is_local_smem_barrier(__barrier) ? __try_get_barrier_handle(__barrier) : nullptr;))
 #endif // __cccl_ptx_isa >= 800
   auto __cm = __dispatch_memcpy_async<__align>(__group, __dest_char, __src_char, __size, __allowed_completions, __bh);

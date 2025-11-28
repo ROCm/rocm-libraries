@@ -62,7 +62,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _Tp* get_device_address(_Tp& __device_
 {
 #if _CCCL_HAS_CUDA_COMPILER()
   NV_IF_ELSE_TARGET(
-    NV_IS_DEVICE,
+    NV_IS_DEVICE_LIBHIPCXX,
     (return _CUDA_VSTD::addressof(__device_object);),
     (void* __device_ptr = nullptr; _CCCL_TRY_CUDA_API(
        ::hipGetSymbolAddress,

@@ -7,6 +7,29 @@
 // SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES.
 //
 //===----------------------------------------------------------------------===//
+
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #ifndef __LIBCUDACXX___ATOMIC_FUNCTIONS_CUDA_LOCAL_H
 #define __LIBCUDACXX___ATOMIC_FUNCTIONS_CUDA_LOCAL_H
 
@@ -102,7 +125,7 @@ _CCCL_DEVICE inline bool __cuda_load_weak_if_local(const volatile void* __ptr, v
   }
   _CUDA_VSTD::memcpy(__ret, const_cast<const void*>(__ptr), __size);
   // Required to workaround a compiler bug, see nvbug/4064730
-  NV_IF_TARGET(NV_PROVIDES_SM_70, (__nanosleep(0);))
+  NV_IF_TARGET_LIBHIPCXX(NV_PROVIDES_SM_70, (__nanosleep(0);))
   return true;
 }
 
@@ -134,7 +157,7 @@ __cuda_compare_exchange_weak_if_local(volatile _Type* __ptr, _Type* __expected, 
     _CUDA_VSTD::memcpy(const_cast<_Type*>(__expected), const_cast<_Type const*>(__ptr), sizeof(_Type));
     *__success = false;
   }
-  NV_IF_TARGET(NV_PROVIDES_SM_70, (__nanosleep(0);))
+  NV_IF_TARGET_LIBHIPCXX(NV_PROVIDES_SM_70, (__nanosleep(0);))
   return true;
 }
 
@@ -147,7 +170,7 @@ _CCCL_DEVICE bool __cuda_exchange_weak_if_local(volatile _Type* __ptr, _Type* __
   }
   _CUDA_VSTD::memcpy(const_cast<_Type*>(__ret), const_cast<const _Type*>(__ptr), sizeof(_Type));
   _CUDA_VSTD::memcpy(const_cast<_Type*>(__ptr), const_cast<const _Type*>(__val), sizeof(_Type));
-  NV_IF_TARGET(NV_PROVIDES_SM_70, (__nanosleep(0);))
+  NV_IF_TARGET_LIBHIPCXX(NV_PROVIDES_SM_70, (__nanosleep(0);))
   return true;
 }
 
@@ -160,7 +183,7 @@ _CCCL_DEVICE bool __cuda_fetch_weak_if_local(volatile _Type* __ptr, _Type __val,
   }
   _CUDA_VSTD::memcpy(const_cast<_Type*>(__ret), const_cast<const _Type*>(__ptr), sizeof(_Type));
   __bop(*__ptr, __val);
-  NV_IF_TARGET(NV_PROVIDES_SM_70, (__nanosleep(0);))
+  NV_IF_TARGET_LIBHIPCXX(NV_PROVIDES_SM_70, (__nanosleep(0);))
   return true;
 }
 

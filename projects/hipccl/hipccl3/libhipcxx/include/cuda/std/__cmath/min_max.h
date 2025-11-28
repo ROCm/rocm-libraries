@@ -8,6 +8,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #ifndef _LIBCUDACXX___CMATH_MIN_MAX_H
 #define _LIBCUDACXX___CMATH_MIN_MAX_H
 
@@ -86,7 +108,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI long double fmaxl(long double __x, lon
 #if _LIBCUDACXX_HAS_NVFP16()
 _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __half fmax(__half __x, __half __y) noexcept
 {
-  NV_IF_ELSE_TARGET(NV_IS_DEVICE,
+  NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX,
                     (return ::__hmax(__x, __y);),
                     (return __float2half(_CUDA_VSTD::fmaxf(__half2float(__x), __half2float(__y)));))
 }
@@ -106,7 +128,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __promote_t<_A1, float> fmax(_A1 __x, 
 #if _LIBCUDACXX_HAS_NVBF16()
 _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __nv_bfloat16 fmax(__nv_bfloat16 __x, __nv_bfloat16 __y) noexcept
 {
-  NV_IF_ELSE_TARGET(NV_IS_DEVICE,
+  NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX,
                     (return ::__hmax(__x, __y);),
                     (return __float2bfloat16(_CUDA_VSTD::fmaxf(__bfloat162float(__x), __bfloat162float(__y)));))
 }
@@ -182,7 +204,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI long double fminl(long double __x, lon
 #if _LIBCUDACXX_HAS_NVFP16()
 _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __half fmin(__half __x, __half __y) noexcept
 {
-  NV_IF_ELSE_TARGET(NV_IS_DEVICE,
+  NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX,
                     (return ::__hmin(__x, __y);),
                     (return __float2half(_CUDA_VSTD::fminf(__half2float(__x), __half2float(__y)));))
 }

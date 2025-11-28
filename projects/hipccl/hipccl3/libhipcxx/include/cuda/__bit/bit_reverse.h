@@ -8,6 +8,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #ifndef _CUDA___BIT_BIT_REVERSE_H
 #define _CUDA___BIT_BIT_REVERSE_H
 
@@ -75,19 +97,19 @@ _CCCL_NODISCARD _CCCL_HIDE_FROM_ABI _CCCL_DEVICE constexpr _Tp __bit_reverse_dev
 #  endif // _CCCL_HAS_INT128()
   if constexpr (sizeof(_Tp) == sizeof(uint64_t))
   {
-    NV_IF_TARGET(NV_IS_DEVICE, (return __brevll(__value);))
+    NV_IF_TARGET_LIBHIPCXX(NV_IS_DEVICE_LIBHIPCXX, (return __brevll(__value);))
   }
   else if constexpr (sizeof(_Tp) == sizeof(uint32_t))
   {
-    NV_IF_TARGET(NV_IS_DEVICE, (return __brev(__value);))
+    NV_IF_TARGET_LIBHIPCXX(NV_IS_DEVICE_LIBHIPCXX, (return __brev(__value);))
   }
   else if constexpr (sizeof(_Tp) == sizeof(uint16_t))
   {
-    NV_IF_TARGET(NV_IS_DEVICE, (return __brev(static_cast<uint32_t>(__value) << 16);))
+    NV_IF_TARGET_LIBHIPCXX(NV_IS_DEVICE_LIBHIPCXX, (return __brev(static_cast<uint32_t>(__value) << 16);))
   }
   else
   {
-    NV_IF_TARGET(NV_IS_DEVICE, (return __brev(static_cast<uint32_t>(__value) << 24);))
+    NV_IF_TARGET_LIBHIPCXX(NV_IS_DEVICE_LIBHIPCXX, (return __brev(static_cast<uint32_t>(__value) << 24);))
   }
   _CCCL_UNREACHABLE();
 }
@@ -153,7 +175,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr _Tp bit_reverse(_Tp __value)
   static_assert(_CUDA_VSTD::__cccl_is_unsigned_integer_v<_Tp>, "bit_reverse() requires unsigned integer types");
   if (!_CUDA_VSTD::__cccl_default_is_constant_evaluated())
   {
-    NV_IF_TARGET(NV_IS_DEVICE, (return ::cuda::__bit_reverse_device(__value);))
+    NV_IF_TARGET_LIBHIPCXX(NV_IS_DEVICE_LIBHIPCXX, (return ::cuda::__bit_reverse_device(__value);))
   }
 #if defined(_CCCL_BUILTIN_BITREVERSE32)
   return ::cuda::__bit_reverse_builtin(__value);

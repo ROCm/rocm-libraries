@@ -8,6 +8,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #ifndef __CCCL_CUDA_CAPABILITIES
 #define __CCCL_CUDA_CAPABILITIES
 
@@ -50,10 +72,10 @@
 #if _CCCL_HAS_PDL()
 // Waits for the previous kernel to complete (when it reaches its final membar). Should be put before the first global
 // memory access in a kernel.
-#  define _CCCL_PDL_GRID_DEPENDENCY_SYNC() NV_IF_TARGET(NV_PROVIDES_SM_90, cudaGridDependencySynchronize();)
+#  define _CCCL_PDL_GRID_DEPENDENCY_SYNC() NV_IF_TARGET_LIBHIPCXX(NV_PROVIDES_SM_90, cudaGridDependencySynchronize();)
 // Allows the subsequent kernel in the same stream to launch. Can be put anywhere in a kernel.
 // Heuristic(ahendriksen): put it after the last load.
-#  define _CCCL_PDL_TRIGGER_NEXT_LAUNCH() NV_IF_TARGET(NV_PROVIDES_SM_90, cudaTriggerProgrammaticLaunchCompletion();)
+#  define _CCCL_PDL_TRIGGER_NEXT_LAUNCH() NV_IF_TARGET_LIBHIPCXX(NV_PROVIDES_SM_90, cudaTriggerProgrammaticLaunchCompletion();)
 #else // _CCCL_HAS_PDL()
 #  define _CCCL_PDL_GRID_DEPENDENCY_SYNC()
 #  define _CCCL_PDL_TRIGGER_NEXT_LAUNCH()

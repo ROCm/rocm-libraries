@@ -8,6 +8,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #ifndef _CUDA___MEMCPY_ASYNC_MEMCPY_COMPLETION_H
 #define _CUDA___MEMCPY_ASYNC_MEMCPY_COMPLETION_H
 
@@ -68,7 +90,7 @@ struct __memcpy_completion_impl
     {
       case __completion_mechanism::__async_group:
         // Pre-SM80, the async_group mechanism is not available.
-        NV_IF_TARGET(
+        NV_IF_TARGET_LIBHIPCXX(
           NV_PROVIDES_SM_80,
           (
             // Non-Blocking: unbalance barrier by 1, barrier will be
@@ -87,7 +109,7 @@ struct __memcpy_completion_impl
       case __completion_mechanism::__mbarrier_complete_tx:
 #if __cccl_ptx_isa >= 800
         // Pre-sm90, the mbarrier_complete_tx completion mechanism is not available.
-        NV_IF_TARGET(NV_PROVIDES_SM_90,
+        NV_IF_TARGET_LIBHIPCXX(NV_PROVIDES_SM_90,
                      (
                        // Only perform the expect_tx operation with the leader thread
                        if (__group.thread_rank() == 0) { ::cuda::device::barrier_expect_tx(__barrier, __size); }));
@@ -119,7 +141,7 @@ struct __memcpy_completion_impl
     {
       case __completion_mechanism::__async_group:
         // Pre-SM80, the async_group mechanism is not available.
-        NV_IF_TARGET(NV_PROVIDES_SM_80,
+        NV_IF_TARGET_LIBHIPCXX(NV_PROVIDES_SM_80,
                      (
                        // Blocking: wait for all thread-local cp.async instructions to have
                        // completed writing to shared memory.

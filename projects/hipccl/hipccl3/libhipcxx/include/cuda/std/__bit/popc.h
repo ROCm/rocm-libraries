@@ -107,7 +107,7 @@ _CCCL_HIDE_FROM_ABI int __host_runtime_popc(_Tp __x) noexcept
 template <typename _Tp>
 _LIBCUDACXX_HIDE_FROM_ABI int __runtime_popc(_Tp __x) noexcept
 {
-  NV_IF_ELSE_TARGET(NV_IS_DEVICE,
+  NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX,
                     (return sizeof(_Tp) == sizeof(uint32_t) ? __popc(static_cast<uint32_t>(__x)) //
                                                             : __popcll(static_cast<uint64_t>(__x));),
                     (return _CUDA_VSTD::__host_runtime_popc(__x);))

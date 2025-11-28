@@ -168,10 +168,10 @@
 #  define _CCCL_BUILTIN_ASSUME(...) __builtin_assume(__VA_ARGS__)
 #elif _CCCL_COMPILER(GCC, >=, 13)
 #  define _CCCL_BUILTIN_ASSUME(...) \
-    NV_IF_ELSE_TARGET(NV_IS_DEVICE, (__builtin_assume(__VA_ARGS__);), (__attribute__((__assume__(__VA_ARGS__)));))
+    NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX, (__builtin_assume(__VA_ARGS__);), (__attribute__((__assume__(__VA_ARGS__)));))
 #elif _CCCL_COMPILER(MSVC)
 #  define _CCCL_BUILTIN_ASSUME(...) \
-    NV_IF_ELSE_TARGET(NV_IS_DEVICE, (__builtin_assume(__VA_ARGS__);), (__assume(__VA_ARGS__);))
+    NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX, (__builtin_assume(__VA_ARGS__);), (__assume(__VA_ARGS__);))
 #else
 #  define _CCCL_BUILTIN_ASSUME(...)
 #endif // _CCCL_CHECK_BUILTIN(builtin_assume)
@@ -777,7 +777,7 @@
 #endif // _CCCL_CUDA_COMPILER(CLANG)
 
 #if _CCCL_CHECK_BUILTIN(builtin_prefetch) || _CCCL_COMPILER(GCC)
-#  define _CCCL_BUILTIN_PREFETCH(...) NV_IF_TARGET(NV_IS_HOST, __builtin_prefetch(__VA_ARGS__);)
+#  define _CCCL_BUILTIN_PREFETCH(...) NV_IF_TARGET_LIBHIPCXX(NV_IS_HOST_LIBHIPCXX, __builtin_prefetch(__VA_ARGS__);)
 #else
 #  define _CCCL_BUILTIN_PREFETCH(...)
 #endif // _CCCL_CHECK_BUILTIN(builtin_prefetch)

@@ -117,7 +117,7 @@ NV_IF_TARGET_LIBHIPCXX(
     )
   )
 #else
-  NV_IF_TARGET(NV_IS_DEVICE,
+  NV_IF_TARGET_LIBHIPCXX(NV_IS_DEVICE_LIBHIPCXX,
                (auto const __step = __ns.count(); assert(__step < numeric_limits<unsigned>::max());
                 asm volatile("nanosleep.u32 %0;" ::"r"((unsigned) __step) :);))
 #endif

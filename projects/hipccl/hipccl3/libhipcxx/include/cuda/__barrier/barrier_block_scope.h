@@ -8,6 +8,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #ifndef _CUDA___BARRIER_BARRIER_BLOCK_SCOPE_H
 #define _CUDA___BARRIER_BARRIER_BLOCK_SCOPE_H
 
@@ -119,7 +141,7 @@ public:
                        "r"(static_cast<_CUDA_VSTD::uint32_t>(__expected))
                        : "memory");
         } else { new (&__b->__barrier) __barrier_base(__expected); }),
-      NV_ANY_TARGET,
+      NV_ANY_TARGET_LIBHIPCXX,
       (new (&__b->__barrier) __barrier_base(__expected);))
   }
 
@@ -164,7 +186,7 @@ public:
         if (__leader == static_cast<int>(__laneid)) {
           __token = __barrier.arrive(__inc);
         } __token = __shfl_sync(__active, __token, __leader);),
-      NV_IS_HOST,
+      NV_IS_HOST_LIBHIPCXX,
       (__token = __barrier.arrive(__update);))
     return __token;
   }
@@ -208,7 +230,7 @@ private:
       (if (!__isShared(&__barrier)) {
         return _CUDA_VSTD::__call_try_wait(__barrier, _CUDA_VSTD::move(__token));
       } return __test_wait_sm_80(__token);),
-      NV_ANY_TARGET,
+      NV_ANY_TARGET_LIBHIPCXX,
       (return _CUDA_VSTD::__call_try_wait(__barrier, _CUDA_VSTD::move(__token));))
   }
 
@@ -262,7 +284,7 @@ private:
           __ready = __test_wait_sm_80(__token);
         } while (!__ready && __nanosec > (_CUDA_VSTD::chrono::high_resolution_clock::now() - __start));
         return __ready;),
-      NV_ANY_TARGET,
+      NV_ANY_TARGET_LIBHIPCXX,
       (return _CUDA_VSTD::__cccl_thread_poll_with_backoff(
                 _CUDA_VSTD::__barrier_poll_tester_phase<barrier>(this, _CUDA_VSTD::move(__token)),
                 _CUDA_VSTD::chrono::nanoseconds(__nanosec));))
@@ -304,7 +326,7 @@ private:
       (if (!__isShared(&__barrier)) { return _CUDA_VSTD::__call_try_wait_parity(__barrier, __phase_parity); }
 
        return __test_wait_parity_sm_80(__phase_parity);),
-      NV_ANY_TARGET,
+      NV_ANY_TARGET_LIBHIPCXX,
       (return _CUDA_VSTD::__call_try_wait_parity(__barrier, __phase_parity);))
   }
 
@@ -359,7 +381,7 @@ private:
         } while (!__ready && __nanosec > (_CUDA_VSTD::chrono::high_resolution_clock::now() - __start));
 
         return __ready;),
-      NV_ANY_TARGET,
+      NV_ANY_TARGET_LIBHIPCXX,
       (return _CUDA_VSTD::__cccl_thread_poll_with_backoff(
                 _CUDA_VSTD::__barrier_poll_tester_parity<barrier>(this, __phase_parity), __nanosec);))
   }
@@ -403,7 +425,7 @@ public:
 
         asm volatile("mbarrier.arrive_drop.shared.b64 _, [%0];" ::"r"(
           static_cast<_CUDA_VSTD::uint32_t>(__cvta_generic_to_shared(&__barrier))) : "memory");),
-      NV_ANY_TARGET,
+      NV_ANY_TARGET_LIBHIPCXX,
       (
         // Fallback to slowpath on device
         __barrier.arrive_and_drop();))
