@@ -92,7 +92,7 @@ bool GemmBwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     }
     if(problem.HasNonPackedTensors())
         return false;
-        
+
     return problem.IsDirectionBackwardData() && problem.IsLayoutDefault() &&
            !(gemm::IsAnyBufferBf16(dxDesc, dyDesc, wDesc) && !gemm::IsBf16Supported) &&
            !(gemm::IsAnyBufferFp16(dxDesc, dyDesc, wDesc) && !gemm::IsFp16Supported);

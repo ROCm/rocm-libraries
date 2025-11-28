@@ -120,10 +120,10 @@ bool fft::IsApplicable(const ExecutionContext& ctx, const ProblemDescription& pr
 
     if(!problem.IsLayoutDefault())
         return false;
-    
+
     if(problem.HasNonPackedTensors())
         return false;
-        
+
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
 
