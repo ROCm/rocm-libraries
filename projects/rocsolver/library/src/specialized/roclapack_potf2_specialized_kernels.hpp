@@ -378,7 +378,7 @@ __device__ static void potf2_panel_mfma(bool const is_upper, I const n, T* const
             //   note: update lower triangular part
             // ------------------------------------------------------------
 
-            if(kcol % panel_size < panel_size - 1)
+            if(kcol < panel_end - 1)
             {
                 // update panel
                 for(I j = (kcol + 1) + j_start; (j < panel_end) && (j < n); j += j_inc)
