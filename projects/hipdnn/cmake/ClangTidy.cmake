@@ -24,7 +24,7 @@ if(ENABLE_CLANG_TIDY)
 
     # Alternatively, this could be separate from the ENABLE_CLANG_TIDY flag
     if(RUN_CLANG_TIDY_EXE)
-        message(STATUS "Found run-clang-tidy at ${RUN_CLANG_TIDY_EXE}")
+        message(STATUS "Found run-clang-tidy-20 at ${RUN_CLANG_TIDY_EXE}")
 
         processorcount(N)
         if(NOT N EQUAL 0)
