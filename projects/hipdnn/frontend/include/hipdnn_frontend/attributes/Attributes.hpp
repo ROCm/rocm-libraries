@@ -81,4 +81,4 @@ public:
         return {};
     }
 };
-}
+} // namespace hipdnn_frontend::graph

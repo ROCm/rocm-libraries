@@ -187,4 +187,4 @@ private:
     }
 };
 typedef BatchnormInferenceAttributes Batchnorm_inference_attributes;
-}
+} // namespace hipdnn_frontend::graph

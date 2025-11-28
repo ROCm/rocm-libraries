@@ -201,4 +201,4 @@ protected:
 
 template <typename DerivedT>
 using NodeCRTP = BaseNode<DerivedT>; // NOLINT
-}
+} // namespace hipdnn_frontend::graph

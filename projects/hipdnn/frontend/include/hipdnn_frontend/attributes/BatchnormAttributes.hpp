@@ -346,4 +346,4 @@ private:
 };
 
 typedef BatchnormAttributes Batchnorm_attributes;
-}
+} // namespace hipdnn_frontend::graph

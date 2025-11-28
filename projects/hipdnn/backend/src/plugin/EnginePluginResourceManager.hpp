@@ -18,7 +18,7 @@ namespace hipdnn_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
 struct EngineDetails;
-} // hipdnn_sdk::data_objects
+} // namespace hipdnn_sdk::data_objects
 
 namespace hipdnn_backend
 {

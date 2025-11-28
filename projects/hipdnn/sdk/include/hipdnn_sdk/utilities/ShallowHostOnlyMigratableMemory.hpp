@@ -117,4 +117,4 @@ private:
     size_t _count;
 };
 
-}
+} // namespace hipdnn_sdk::utilities

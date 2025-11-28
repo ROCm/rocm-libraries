@@ -246,4 +246,4 @@ private:
     }
 };
 typedef PointwiseAttributes Pointwise_attributes;
-}
+} // namespace hipdnn_frontend::graph

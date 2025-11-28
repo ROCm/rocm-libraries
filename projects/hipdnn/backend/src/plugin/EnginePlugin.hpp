@@ -110,4 +110,4 @@ private:
     friend class PluginManagerBase<EnginePlugin>;
 };
 
-} // namespace plugin // hipdnn_backend
+} // namespace hipdnn_backend::plugin

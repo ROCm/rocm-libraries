@@ -105,4 +105,4 @@ private:
     bool _packed;
 };
 
-}
+} // namespace hipdnn_sdk::utilities

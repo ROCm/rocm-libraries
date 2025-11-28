@@ -265,4 +265,4 @@ private:
     }
 };
 typedef BatchnormBackwardAttributes Batchnorm_backward_attributes;
-}
+} // namespace hipdnn_frontend::graph

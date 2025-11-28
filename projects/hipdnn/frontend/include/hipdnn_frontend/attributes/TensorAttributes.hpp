@@ -282,4 +282,4 @@ private:
     ValueVariant _value;
 };
 typedef TensorAttributes Tensor_attributes;
-}
+} // namespace hipdnn_frontend::graph

@@ -310,4 +310,4 @@ inline int64_t calculateGroupCount(const std::vector<int64_t>& inputDims,
     return inChannels / wChannels;
 }
 
-}
+} // namespace hipdnn_sdk::utilities

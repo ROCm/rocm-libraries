@@ -243,4 +243,4 @@ private:
     }
 };
 typedef ConvDgradAttributes Conv_dgrad_attributes;
-}
+} // namespace hipdnn_frontend::graph

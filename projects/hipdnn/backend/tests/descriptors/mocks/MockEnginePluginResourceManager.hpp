@@ -53,4 +53,4 @@ public:
                 (const, override));
 };
 
-}
+} // namespace hipdnn_backend::plugin

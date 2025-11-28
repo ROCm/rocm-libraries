@@ -48,4 +48,4 @@ private:
     hipdnn_backend::platform_utilities::PluginLibHandle _libraryHandle;
 };
 
-} // namespace plugin // hipdnn_backend
+} // namespace hipdnn_backend::plugin

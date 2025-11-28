@@ -993,4 +993,4 @@ public:
     }
 };
 
-}
+} // namespace hipdnn_frontend::graph

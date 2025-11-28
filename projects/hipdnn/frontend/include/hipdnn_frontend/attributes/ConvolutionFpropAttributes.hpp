@@ -245,4 +245,4 @@ private:
     }
 };
 typedef ConvFpropAttributes Conv_fprop_attributes;
-}
+} // namespace hipdnn_frontend::graph

@@ -12,4 +12,4 @@ namespace hipdnn_backend::flatbuffer_utilities
 void convertSerializedGraphToGraph(const uint8_t* buffer,
                                    size_t size,
                                    std::unique_ptr<hipdnn_sdk::data_objects::GraphT>& graphOut);
-}
+} // namespace hipdnn_backend::flatbuffer_utilities

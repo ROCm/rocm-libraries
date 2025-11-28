@@ -20,4 +20,4 @@ inline const std::string& getTestPluginDefaultDir()
     return s_defaultDir;
 }
 
-}
+} // namespace hipdnn_backend::plugin_constants
