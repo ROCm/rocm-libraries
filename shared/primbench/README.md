@@ -112,8 +112,9 @@ struct copy_benchmark : public primbench::benchmark_interface
 
 int main(int argc, char* argv[])
 {
-    // Sets the default benchmark size (128 MiB), available as state.bytes in run().
-    // Can be overridden from the command line with `--bytes`.
+    // Sets the number of input bytes (128 MiB), available as state.bytes in run().
+    // The number can be overridden from the command line with `--bytes`.
+    // The bytes/sec primbench reports isn't based on this number.
     primbench::executor executor(argc, argv, 128 * primbench::MiB);
 
     executor.queue<copy_benchmark<char>>();
@@ -239,12 +240,12 @@ It output this `results.json`:
 
 ## Command-line Options
 
-You can pass `--help` to benchmarks to print all available options. They are all optional:
+You can pass `--help` to benchmarks to print the available options. They are all optional:
 
 | Option                                   | Description                                                                                                                                                                        |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--help`                                 | Display this help message.                                                                                                                                                         |
-| `--bytes`                                | Sets the size (in bytes) of the randomly generated input array, overriding the value provided to `primbench::executor`.                                                            |
+| `--help`                                 | Display this help and exit.                                                                                                                                                        |
+| `--bytes`                                | Overrides the number of input bytes passed to `primbench::executor`.                                                                                                               |
 | `--hot`                                  | Skip clearing the GPU cache between batch iterations. (default: 0)                                                                                                                 |
 | `--seed`                                 | Seed used for input generation. (default: 42)                                                                                                                                      |
 | `--json-out`                             | JSON path to write benchmark results to. (default: results.json)                                                                                                                   |
@@ -263,6 +264,11 @@ You can pass `--help` to benchmarks to print all available options. They are all
 | `--output-batches`                       | Output a `batches` array for each specialization, containing per-batch details. (default: 0)                                                                                       |
 | `--spaces-per-indent`                    | Number of spaces per indentation level in JSON output. Set to 0 for no indentation. (default: 4)                                                                                   |
 | `--stream-blocking-timeout-secs`         | Maximum stream blocking duration in seconds before timing out. Stream is blocked while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous. (default: 10) |
+
+Benchmarks can register additional custom options, which will also be listed by `--help`:
+```c++
+size_t dimensions = executor.get<size_t>("dimensions", 42, "The number of dimensions");
+```
 
 ## Noise
 

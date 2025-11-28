@@ -2444,451 +2444,104 @@ class state {
 };  // class state
 
 /**
- * \brief CmdParser: C++ command-line argument parser utility.
- *
- * Provides functionality to define required, optional, and variadic
- * command-line parameters, supports callbacks, automatic help
- * generation, and type-safe argument parsing.
- *
- * Inlined from cmdparser.hpp.
- *
- * Copyright (c) 2015 - 2016 Florian Rappl
+ * \brief Simple command-line argument parser.
  */
-namespace cli {
-
-// -----------------------------------------------------------------------
-// The MIT License (MIT)
-//
-// Copyright (c) 2015 - 2016 Florian Rappl
-// Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-// -----------------------------------------------------------------------
-
-struct CallbackArgs {
-    const std::vector<std::string>& arguments;
-    std::ostream& output;
-    std::ostream& error;
-};
-class Parser {
-   private:
-    class CmdBase {
-       public:
-        explicit CmdBase(const std::string& name, const std::string& description, bool required,
-                         bool dominant, bool variadic)
-            : name(name),
-              command(name.size() > 0 ? "--" + name : ""),
-              description(description),
-              required(required),
-              handled(false),
-              arguments({}),
-              dominant(dominant),
-              variadic(variadic) {}
-
-        virtual ~CmdBase() {}
-
-        std::string name;
-        std::string command;
-        std::string description;
-        bool required;
-        bool handled;
-        std::vector<std::string> arguments;
-        bool const dominant;
-        bool const variadic;
-
-        virtual std::string print_value() const = 0;
-        virtual bool parse(std::ostream& output, std::ostream& error) = 0;
-
-        bool is(const std::string& given) const {
-            return given == command;
-        }
-    };
-
-    template <typename T>
-    struct ArgumentCountChecker {
-        static constexpr bool Variadic = false;
-    };
-
-    template <typename T>
-    struct ArgumentCountChecker<std::vector<T>> {
-        static constexpr bool Variadic = true;
-    };
-
-    template <typename T>
-    class CmdFunction final : public CmdBase {
-       public:
-        explicit CmdFunction(const std::string& name, const std::string& description, bool required,
-                             bool dominant)
-            : CmdBase(name, description, required, dominant, ArgumentCountChecker<T>::Variadic) {}
-
-        virtual bool parse(std::ostream& output, std::ostream& error) override {
-            try {
-                CallbackArgs args{arguments, output, error};
-                value = callback(args);
-                return true;
-            } catch (...) {
-                return false;
-            }
-        }
-
-        virtual std::string print_value() const override {
-            return "";
-        }
-
-        std::function<T(CallbackArgs&)> callback;
-        T value;
-    };
-
-    template <typename T>
-    class CmdArgument final : public CmdBase {
-       public:
-        explicit CmdArgument(const std::string& name, const std::string& description, bool required,
-                             bool dominant)
-            : CmdBase(name, description, required, dominant, ArgumentCountChecker<T>::Variadic),
-              value(T()) {}
-
-        virtual bool parse(std::ostream&, std::ostream&) override {
-            try {
-                value = Parser::parse(arguments, value);
-                return true;
-            } catch (...) {
-                return false;
-            }
-        }
-
-        virtual std::string print_value() const override {
-            return stringify(value);
-        }
-
-        T value;
-    };
-
-    static int parse(const std::vector<std::string>& elements, const int&) {
-        if (elements.size() != 1) throw std::bad_cast();
-
-        return std::stoi(elements[0]);
-    }
-
-    static bool parse(const std::vector<std::string>& elements, const bool& defval) {
-        if (elements.size() != 0)
-            throw std::runtime_error("A boolean command line parameter cannot have any arguments.");
-
-        return !defval;
-    }
-
-    static double parse(const std::vector<std::string>& elements, const double&) {
-        if (elements.size() != 1) throw std::bad_cast();
-
-        return std::stod(elements[0]);
-    }
-
-    static float parse(const std::vector<std::string>& elements, const float&) {
-        if (elements.size() != 1) throw std::bad_cast();
-
-        return std::stof(elements[0]);
-    }
-
-    static long double parse(const std::vector<std::string>& elements, const long double&) {
-        if (elements.size() != 1) throw std::bad_cast();
-
-        return std::stold(elements[0]);
-    }
-
-    static unsigned int parse(const std::vector<std::string>& elements, const unsigned int&) {
-        if (elements.size() != 1) throw std::bad_cast();
-
-        return static_cast<unsigned int>(std::stoul(elements[0]));
-    }
-
-    static unsigned long parse(const std::vector<std::string>& elements, const unsigned long&) {
-        if (elements.size() != 1) throw std::bad_cast();
-
-        return std::stoul(elements[0]);
-    }
-
-    static unsigned long long parse(const std::vector<std::string>& elements,
-                                    const unsigned long long&) {
-        if (elements.size() != 1) throw std::bad_cast();
-
-        return std::stoull(elements[0]);
-    }
-
-    static long parse(const std::vector<std::string>& elements, const long&) {
-        if (elements.size() != 1) throw std::bad_cast();
-
-        return std::stol(elements[0]);
-    }
-
-    static std::string parse(const std::vector<std::string>& elements, const std::string&) {
-        if (elements.size() != 1) throw std::bad_cast();
-
-        return elements[0];
-    }
-
-    template <class T>
-    static std::vector<T> parse(const std::vector<std::string>& elements, const std::vector<T>&) {
-        const T defval = T();
-        std::vector<T> values{};
-        std::vector<std::string> buffer(1);
-
-        for (const auto& element : elements) {
-            buffer[0] = element;
-            values.push_back(parse(buffer, defval));
-        }
-
-        return values;
-    }
-
-    template <class T>
-    static std::string stringify(const T& value) {
-        std::string s = std::to_string(value);
-        if (s.find('.') != std::string::npos) {
-            while (!s.empty() && s.back() == '0') s.pop_back();
-            if (!s.empty() && s.back() == '.') s.pop_back();
-        }
-        return s;
-    }
-
-    template <class T>
-    static std::string stringify(const std::vector<T>& values) {
-        std::stringstream ss{};
-        ss << "[ ";
-
-        for (const auto& value : values) {
-            ss << stringify(value) << " ";
-        }
-
-        ss << "]";
-        return ss.str();
-    }
-
-    static std::string stringify(const std::string& str) {
-        return str;
-    }
-
+class parser {
    public:
-    explicit Parser(int argc, char** argv) : _appname(argv[0]) {
+    parser(int argc, char** argv) : _appname(argv[0]) {
+        // Always register --help.
+        register_description("help", "Display this help and exit.");
+
         for (int i = 1; i < argc; ++i) {
-            _arguments.push_back(argv[i]);
-        }
-        enable_help();
-    }
+            std::string arg = argv[i];
 
-    ~Parser() {
-        for (int i = 0, n = _commands.size(); i < n; ++i) {
-            delete _commands[i];
-        }
-    }
+            if (arg.rfind("--", 0) != 0) continue;
 
-    void enable_help() {
-        auto command = new CmdFunction<bool>{"help", "Display this help message.", false, true};
-        command->callback = [this](CallbackArgs& args) -> bool {
-            args.output << this->usage();
-            exit(EXIT_SUCCESS);
-            return false;
-        };
-        _commands.push_back(command);
+            std::string key = arg.substr(2);
+            std::string value =
+                (i + 1 < argc && std::string(argv[i + 1]).rfind("--", 0) != 0) ? argv[++i] : "";
+            _parsed[key] = value;
+        }
     }
 
     template <typename T>
-    void set_default(bool is_required, const std::string& description = "") {
-        auto command = new CmdArgument<T>{"", description, is_required, false};
-        _commands.push_back(command);
-    }
+    T get(std::string_view name, const T& default_val, std::string_view description) {
+        std::string key{name};
 
-    template <typename T>
-    void set_required(const std::string& name, const std::string& description = "",
-                      bool dominant = false) {
-        auto command = new CmdArgument<T>{name, description, true, dominant};
-        _commands.push_back(command);
-    }
+        // Save description in order of registration.
+        if (!description.empty() &&
+            _description_keys_set.find(key) == _description_keys_set.end()) {
+            register_description(key, description);
 
-    template <typename T>
-    void set_optional(const std::string& name, const T& defaultValue,
-                      const std::string& description = "", bool dominant = false) {
-        auto command = new CmdArgument<T>{name, description, false, dominant};
-        command->value = defaultValue;
-        _commands.push_back(command);
-    }
-
-    inline void run_and_exit_if_error() {
-        if (run(std::cout, std::cerr) == false) {
-            exit(1);
-        }
-    }
-
-    bool run(std::ostream& output, std::ostream& error) {
-        if (_arguments.size() > 0) {
-            auto current = find_default();
-
-            for (int i = 0, n = _arguments.size(); i < n; ++i) {
-                auto isarg = _arguments[i].size() > 0 && _arguments[i][0] == '-';
-                auto associated = isarg ? find(_arguments[i]) : nullptr;
-
-                if (associated != nullptr) {
-                    current = associated;
-                    associated->handled = true;
-                } else if (isarg) {
-                    error << _appname << ": unrecognized option '" << _arguments[i] << "'\n";
-                    error << "Try '" << _appname << " --help' for more information\n";
-                    exit(EXIT_FAILURE);
-                } else if (current == nullptr) {
-                    error << _appname << ": unrecognized argument '" << _arguments[i] << "'\n";
-                    error << "Try '" << _appname << " --help' for more information\n";
-                    exit(EXIT_FAILURE);
-                } else {
-                    current->arguments.push_back(_arguments[i]);
-                    current->handled = true;
-                    if (!current->variadic) {
-                        // If the current command is not variadic, then no more arguments
-                        // should be added to it. In this case, switch back to the default
-                        // command.
-                        current = find_default();
-                    }
-                }
-            }
+            std::ostringstream oss;
+            oss << default_val;
+            _defaults[key] = oss.str();
         }
 
-        // First, parse dominant arguments since they succeed even if required
-        // arguments are missing.
-        for (auto command : _commands) {
-            if (command->handled && command->dominant && !command->parse(output, error)) {
-                error << howto_use(command);
-                return false;
-            }
+        auto it = _parsed.find(key);
+        if (it == _parsed.end()) return default_val;
+
+        if constexpr (std::is_same_v<T, bool>) return it->second.empty() ? true : default_val;
+
+        T out{};
+        std::istringstream ss(it->second);
+        ss >> out;
+
+        if (!ss || !ss.eof()) {
+            std::cerr << "Error: failed to parse --" << key << ": invalid value \"" << it->second
+                      << "\"\n";
+            std::exit(EXIT_FAILURE);
         }
 
-        // Next, check for any missing arguments.
-        for (auto command : _commands) {
-            if (command->required && !command->handled) {
-                error << howto_required(command);
-                return false;
+        return out;
+    }
+
+    void possibly_print_help() const {
+        if (_parsed.find("help") == _parsed.end()) return;
+
+        std::cout << "Usage: " << _appname << " [options]\n\n";
+        for (const auto& [key, desc] : _descriptions) {
+            std::cout << "  --" << key;
+
+            // Print default if available.
+            auto it_def = _defaults.find(key);
+            if (it_def != _defaults.end() && !it_def->second.empty()) {
+                std::cout << " (default: " << it_def->second << ")";
+            }
+            std::cout << "\n";
+
+            if (!desc.empty()) {
+                std::cout << "      " << desc << "\n";
             }
         }
-
-        // Finally, parse all remaining arguments.
-        for (auto command : _commands) {
-            if (command->handled && !command->dominant && !command->parse(output, error)) {
-                error << howto_use(command);
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    template <typename T>
-    T get(const std::string& name) const {
-        for (const auto& command : _commands) {
-            if (command->name == name) {
-                auto cmd = dynamic_cast<CmdArgument<T>*>(command);
-
-                if (cmd == nullptr) {
-                    throw std::runtime_error("Invalid usage of the parameter " + name +
-                                             " detected.");
-                }
-
-                return cmd->value;
-            }
-        }
-
-        throw std::runtime_error("The parameter " + name + " could not be found.");
-    }
-
-   protected:
-    CmdBase* find(const std::string& name) {
-        for (auto command : _commands) {
-            if (command->is(name)) {
-                return command;
-            }
-        }
-
-        return nullptr;
-    }
-
-    CmdBase* find_default() {
-        for (auto command : _commands) {
-            if (command->name == "") {
-                return command;
-            }
-        }
-
-        return nullptr;
-    }
-
-    std::string usage() const {
-        std::stringstream ss{};
-        ss << "Available parameters:\n\n";
-
-        for (const auto& command : _commands) {
-            ss << "  " << command->command;
-
-            if (command->required == true) {
-                ss << "\t(required)";
-            }
-
-            ss << "\n   " << command->description;
-
-            if (!command->print_value().empty()) {
-                ss << " (default: " << command->print_value() << ")";
-            }
-
-            ss << "\n\n";
-        }
-
-        return ss.str();
-    }
-
-    void print_help(std::stringstream& ss) const {
-        ss << "For more help use --help.\n";
-    }
-
-    std::string howto_required(CmdBase* command) const {
-        std::stringstream ss{};
-        ss << "The parameter " << command->name << " is required.\n";
-        ss << command->description << '\n';
-        print_help(ss);
-        return ss.str();
-    }
-
-    std::string howto_use(CmdBase* command) const {
-        std::stringstream ss{};
-        ss << "The parameter " << command->name << " has invalid arguments.\n";
-        ss << command->description << '\n';
-        print_help(ss);
-        return ss.str();
-    }
-
-    std::string no_default() const {
-        std::stringstream ss{};
-        ss << "No default parameter has been specified.\n";
-        ss << "The given argument must be used with a parameter.\n";
-        print_help(ss);
-        return ss.str();
+        std::exit(EXIT_SUCCESS);
     }
 
    private:
-    const std::string _appname;
-    std::vector<std::string> _arguments;
-    std::vector<CmdBase*> _commands;
-};
-}  // namespace cli
+    std::string _appname;
+    std::unordered_map<std::string, std::string> _parsed;
+
+    // Preserves insertion order.
+    std::vector<std::pair<std::string, std::string>> _descriptions;
+
+    // Prevents duplicate descriptions being printed.
+    std::unordered_set<std::string> _description_keys_set;
+
+    // Store string representation of default values.
+    std::unordered_map<std::string, std::string> _defaults;
+
+    void register_description(const std::string& key, std::string_view description) {
+        std::string desc{description};
+
+        // All descriptions should be sentences ending with a period.
+        if (!desc.empty() && desc.back() != '.') {
+            desc.push_back('.');
+        }
+
+        _descriptions.emplace_back(key, desc);
+        _description_keys_set.insert(key);
+    }
+};  // class parser
 
 }  // namespace detail
 
@@ -3038,16 +2691,10 @@ class executor {
      */
     executor(int argc, char* argv[], size_t default_bytes,
              detail::flags::FlagTag flags = flags::none, hipStream_t stream = hipStreamDefault)
-        : m_stream(stream), m_flags(flags) {
+        : m_stream(stream), m_flags(flags), m_parser(argc, argv) {
         get_logger().save_program_start_time();
 
-        detail::cli::Parser parser(argc, argv);
-
-        set_optional_parser_flags(parser, default_bytes);
-
-        parser.run_and_exit_if_error();
-
-        m_cli_settings = parse(parser);
+        m_cli_settings = parse(m_parser, default_bytes);
 
         m_stream_blocker = std::make_unique<detail::stream_blocker>(
             m_stream, m_cli_settings.stream_blocking_timeout_secs.count());
@@ -3100,6 +2747,8 @@ class executor {
             exit(EXIT_FAILURE);
         }
         run_called = true;
+
+        m_parser.possibly_print_help();
 
         // Sort to get a consistent order.
         std::sort(static_specializations.begin(), static_specializations.end(),
@@ -3173,117 +2822,60 @@ class executor {
         get_logger().output_summary();
     }
 
-   private:
     /**
-     * \brief Set optional CLI flags for benchmark execution.
-     * \param parser CLI parser object.
-     * \param default_bytes Default input size in bytes.
+     * \brief Parses a command-line argument.
      */
-    void set_optional_parser_flags(detail::cli::Parser& parser, size_t default_bytes) {
-        parser.set_optional<size_t>(
-            "bytes", default_bytes,
-            "Sets the size (in bytes) of the randomly generated input array, overriding the value "
-            "provided to `primbench::executor`.");
-
-        parser.set_optional<bool>("hot", false,
-                                  "Skip clearing the GPU cache between batch iterations.");
-
-        parser.set_optional<uint32_t>("seed", 42, "Seed used for input generation.");
-
-        parser.set_optional<std::string>("json-out", "results.json",
-                                         "JSON path to write benchmark results to.");
-
-        parser.set_optional<std::string>("csv-out", "", "CSV path to write benchmark results to.");
-
-        parser.set_optional<double>("min-gpu-ms-per-batch", 10.0,
-                                    "Minimum duration of a batch in milliseconds (GPU time).");
-
-        parser.set_optional<double>("min-secs", 1.0,
-                                    "Minimum total benchmark duration in seconds (wall time).");
-
-        parser.set_optional<double>("noise-timeout-secs", 10.0,
-                                    "Maximum total benchmark duration in seconds before timing out "
-                                    "a noisy run (wall time).");
-
-        parser.set_optional<size_t>(
-            "batch-window-size", 10,
-            "Number of batch times used in the noise (coefficient of variation) "
-            "window to decide early benchmark stopping.");
-
-        parser.set_optional<double>("noise-tolerance-percent", 1.0,
-                                    "Noise tolerance of batch times in percent, used to determine "
-                                    "whether a benchmark can be stopped early.");
-
-        parser.set_optional<uint16_t>(
-            "min-gpu-temp", 50,
-            "Minimum GPU temperature in °C. Too low slows benchmarks; too high increases noise.");
-
-        parser.set_optional<uint16_t>(
-            "max-gpu-temp", 60,
-            "Maximum GPU temperature in °C. Too low slows benchmarks; too high increases noise.");
-
-        parser.set_optional<double>(
-            "max-warming-secs", 60.0,
-            "Maximum seconds allowed for GPU warming before an error is thrown.");
-
-        parser.set_optional<double>(
-            "max-cooling-secs", 60.0,
-            "Maximum seconds allowed for GPU cooling before an error is thrown.");
-
-        parser.set_optional<bool>("output-hip-device-properties-context", false,
-                                  "Output a `hip_device_properties` object in the context object, "
-                                  "containing details about the GPU.");
-
-        parser.set_optional<bool>(
-            "output-amdsmi-context", false,
-            "Output an `amdsmi` object in the context object, containing details about the GPU.");
-
-        parser.set_optional<bool>(
-            "output-batches", false,
-            "Output a `batches` array for each specialization, containing per-batch details.");
-
-        parser.set_optional<uint32_t>(
-            "spaces-per-indent", 4,
-            "Number of spaces per indentation level in JSON output. Set to 0 for no indentation.");
-
-        parser.set_optional<double>(
-            "stream-blocking-timeout-secs", 10.0,
-            "Maximum stream blocking duration in seconds before timing out. Stream is blocked "
-            "while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous.");
+    template <typename T>
+    T get(std::string_view name, const T& default_val, std::string_view description) {
+        return m_parser.get<T>(name, default_val, description);
     }
 
-    detail::cli_settings parse(detail::cli::Parser& parser) const {
+   private:
+    /**
+     * \brief Parse optional arguments.
+     */
+    detail::cli_settings parse(detail::parser& parser, size_t default_bytes) {
         detail::cli_settings s{};
 
-        s.bytes = parser.get<size_t>("bytes");
+        s.bytes =
+            parser.get<size_t>("bytes", default_bytes,
+                               "Sets the size (in bytes) of the randomly generated input array, "
+                               "overriding the value provided to `primbench::executor`.");
         if (s.bytes == 0) {
             std::cerr << "Error: --bytes must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
-        s.hot = parser.get<bool>("hot");
+        s.hot =
+            parser.get<bool>("hot", false, "Skip clearing the GPU cache between batch iterations.");
 
-        s.seed = parser.get<uint32_t>("seed");
+        s.seed = parser.get<uint32_t>("seed", 42, "Seed used for input generation.");
 
-        s.json_out = parser.get<std::string>("json-out");
+        s.json_out = parser.get<std::string>("json-out", "results.json",
+                                             "JSON path to write benchmark results to.");
 
-        s.csv_out = parser.get<std::string>("csv-out");
+        s.csv_out =
+            parser.get<std::string>("csv-out", "", "CSV path to write benchmark results to.");
 
-        s.min_gpu_ms_per_batch =
-            std::chrono::duration<double>(parser.get<double>("min-gpu-ms-per-batch"));
+        s.min_gpu_ms_per_batch = std::chrono::duration<double>(
+            parser.get<double>("min-gpu-ms-per-batch", 10.0,
+                               "Minimum duration of a batch in milliseconds (GPU time)."));
         if (s.min_gpu_ms_per_batch.count() <= 0.0) {
             std::cerr << "Error: --min_gpu_ms_per_batch must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
-        s.min_secs = std::chrono::duration<double>(parser.get<double>("min-secs"));
+        s.min_secs = std::chrono::duration<double>(parser.get<double>(
+            "min-secs", 1.0, "Minimum total benchmark duration in seconds (wall time)."));
         if (s.min_secs.count() <= 0.0) {
             std::cerr << "Error: --min_secs must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
-        s.noise_timeout_secs =
-            std::chrono::duration<double>(parser.get<double>("noise-timeout-secs"));
+        s.noise_timeout_secs = std::chrono::duration<double>(
+            parser.get<double>("noise-timeout-secs", 10.0,
+                               "Maximum total benchmark duration in seconds before timing out a "
+                               "noisy run (wall time)."));
         if (s.noise_timeout_secs.count() <= 0.0) {
             std::cerr << "Error: --noise_timeout_secs must be greater than 0\n";
             exit(EXIT_FAILURE);
@@ -3293,45 +2885,72 @@ class executor {
             exit(EXIT_FAILURE);
         }
 
-        s.batch_window_size = parser.get<size_t>("batch-window-size");
+        s.batch_window_size =
+            parser.get<size_t>("batch-window-size", 10,
+                               "Number of batch times used in the noise (coefficient of variation) "
+                               "window to decide early benchmark stopping.");
         if (s.batch_window_size == 0) {
             std::cerr << "Error: --batch_window_size must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
-        s.noise_tolerance_percent = parser.get<double>("noise-tolerance-percent");
+        s.noise_tolerance_percent =
+            parser.get<double>("noise-tolerance-percent", 1.0,
+                               "Noise tolerance of batch times in percent, used to determine "
+                               "whether a benchmark can be stopped early.");
         if (s.noise_tolerance_percent <= 0.0) {
             std::cerr << "Error: --noise_tolerance_percent must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
-        s.min_gpu_temp = parser.get<uint16_t>("min-gpu-temp");
-        s.max_gpu_temp = parser.get<uint16_t>("max-gpu-temp");
+        s.min_gpu_temp = parser.get<uint16_t>(
+            "min-gpu-temp", 50,
+            "Minimum GPU temperature in °C. Too low slows benchmarks; too high increases noise.");
+        s.max_gpu_temp = parser.get<uint16_t>(
+            "max-gpu-temp", 60,
+            "Maximum GPU temperature in °C. Too low slows benchmarks; too high increases noise.");
         if (s.min_gpu_temp > s.max_gpu_temp) {
             std::cerr << "Error: --min_gpu_temp must be equal to or less than --max_gpu_temp\n";
             exit(EXIT_FAILURE);
         }
 
-        s.max_warming_secs = std::chrono::duration<double>(parser.get<double>("max-warming-secs"));
+        s.max_warming_secs = std::chrono::duration<double>(parser.get<double>(
+            "max-warming-secs", 60.0,
+            "Maximum seconds allowed for GPU warming before an error is thrown."));
         if (s.max_warming_secs.count() <= 0.0) {
             std::cerr << "Error: --max_warming_secs must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
-        s.max_cooling_secs = std::chrono::duration<double>(parser.get<double>("max-cooling-secs"));
+
+        s.max_cooling_secs = std::chrono::duration<double>(parser.get<double>(
+            "max-cooling-secs", 60.0,
+            "Maximum seconds allowed for GPU cooling before an error is thrown."));
         if (s.max_cooling_secs.count() <= 0.0) {
             std::cerr << "Error: --max_cooling_secs must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
         s.output_hip_device_properties_context =
-            parser.get<bool>("output-hip-device-properties-context");
-        s.output_amdsmi_context = parser.get<bool>("output-amdsmi-context");
-        s.output_batches = parser.get<bool>("output-batches");
+            parser.get<bool>("output-hip-device-properties-context", false,
+                             "Output a `hip_device_properties` object in the context object, "
+                             "containing details about the GPU.");
 
-        s.spaces_per_indent = parser.get<uint32_t>("spaces-per-indent");
+        s.output_amdsmi_context = parser.get<bool>(
+            "output-amdsmi-context", false,
+            "Output an `amdsmi` object in the context object, containing details about the GPU.");
 
-        s.stream_blocking_timeout_secs =
-            std::chrono::duration<double>(parser.get<double>("stream-blocking-timeout-secs"));
+        s.output_batches = parser.get<bool>(
+            "output-batches", false,
+            "Output a `batches` array for each specialization, containing per-batch details.");
+
+        s.spaces_per_indent = parser.get<uint32_t>(
+            "spaces-per-indent", 4,
+            "Number of spaces per indentation level in JSON output. Set to 0 for no indentation.");
+
+        s.stream_blocking_timeout_secs = std::chrono::duration<double>(parser.get<double>(
+            "stream-blocking-timeout-secs", 10.0,
+            "Maximum stream blocking duration in seconds before timing out. Stream is blocked "
+            "while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous."));
         if (s.stream_blocking_timeout_secs.count() <= 0.0) {
             std::cerr << "Error: --stream_blocking_timeout_secs must be greater than 0\n";
             exit(EXIT_FAILURE);
@@ -3375,8 +2994,11 @@ class executor {
 
     hipStream_t m_stream; /**< HIP stream used for execution */
 
+    detail::flags::FlagTag m_flags; /**< Executor flags */
+
+    detail::parser m_parser; /**< Command-line argument parser */
+
     detail::cli_settings m_cli_settings; /**< CLI user settings */
-    detail::flags::FlagTag m_flags;      /**< Executor flags */
 
     std::unique_ptr<detail::stream_blocker>
         m_stream_blocker; /**< Stream blocker to serialize output */
