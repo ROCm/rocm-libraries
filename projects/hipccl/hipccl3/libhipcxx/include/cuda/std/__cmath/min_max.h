@@ -126,20 +126,20 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __promote_t<_A1, float> fmax(_A1 __x, 
 #endif // _LIBCUDACXX_HAS_NVFP16()
 
 #if _LIBCUDACXX_HAS_NVBF16()
-_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __nv_bfloat16 fmax(__nv_bfloat16 __x, __nv_bfloat16 __y) noexcept
+_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 fmax(__hip_bfloat16 __x, __hip_bfloat16 __y) noexcept
 {
   NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX,
                     (return ::__hmax(__x, __y);),
                     (return __float2bfloat16(_CUDA_VSTD::fmaxf(__bfloat162float(__x), __bfloat162float(__y)));))
 }
 template <class _A1, enable_if_t<_CCCL_TRAIT(is_arithmetic, _A1), int> = 0>
-_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __promote_t<float, _A1> fmax(__nv_bfloat16 __x, _A1 __y) noexcept
+_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __promote_t<float, _A1> fmax(__hip_bfloat16 __x, _A1 __y) noexcept
 {
   return _CUDA_VSTD::fmaxf(__bfloat162float(__x), __y);
 }
 
 template <class _A1, enable_if_t<_CCCL_TRAIT(is_arithmetic, _A1), int> = 0>
-_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __promote_t<_A1, float> fmax(_A1 __x, __nv_bfloat16 __y) noexcept
+_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __promote_t<_A1, float> fmax(_A1 __x, __hip_bfloat16 __y) noexcept
 {
   return _CUDA_VSTD::fmaxf(__x, __bfloat162float(__y));
 }
@@ -222,20 +222,20 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __promote_t<_A1, float> fmin(_A1 __x, 
 #endif // _LIBCUDACXX_HAS_NVFP16()
 
 #if _LIBCUDACXX_HAS_NVBF16()
-_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __nv_bfloat16 fmin(__nv_bfloat16 __x, __nv_bfloat16 __y) noexcept
+_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 fmin(__hip_bfloat16 __x, __hip_bfloat16 __y) noexcept
 {
-  NV_IF_ELSE_TARGET(NV_IS_DEVICE,
+  NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX,
                     (return ::__hmin(__x, __y);),
                     (return __float2bfloat16(_CUDA_VSTD::fminf(__bfloat162float(__x), __bfloat162float(__y)));))
 }
 template <class _A1, enable_if_t<_CCCL_TRAIT(is_arithmetic, _A1), int> = 0>
-_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __promote_t<float, _A1> fmin(__nv_bfloat16 __x, _A1 __y) noexcept
+_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __promote_t<float, _A1> fmin(__hip_bfloat16 __x, _A1 __y) noexcept
 {
   return _CUDA_VSTD::fminf(__bfloat162float(__x), __y);
 }
 
 template <class _A1, enable_if_t<_CCCL_TRAIT(is_arithmetic, _A1), int> = 0>
-_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __promote_t<_A1, float> fmin(_A1 __x, __nv_bfloat16 __y) noexcept
+_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __promote_t<_A1, float> fmin(_A1 __x, __hip_bfloat16 __y) noexcept
 {
   return _CUDA_VSTD::fminf(__x, __bfloat162float(__y));
 }

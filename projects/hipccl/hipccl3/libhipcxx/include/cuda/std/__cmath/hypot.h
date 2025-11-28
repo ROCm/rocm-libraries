@@ -8,6 +8,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #ifndef _LIBCUDACXX___CMATH_HYPOT_H
 #define _LIBCUDACXX___CMATH_HYPOT_H
 
@@ -98,7 +120,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __half hypot(__half __x, __half __y) n
 #endif // _LIBCUDACXX_HAS_NVFP16()
 
 #if _LIBCUDACXX_HAS_NVBF16()
-_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __nv_bfloat16 hypot(__nv_bfloat16 __x, __nv_bfloat16 __y) noexcept
+_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 hypot(__hip_bfloat16 __x, __hip_bfloat16 __y) noexcept
 {
   return __float2bfloat16(_CUDA_VSTD::hypotf(__bfloat162float(__x), __bfloat162float(__y)));
 }
@@ -185,8 +207,8 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __half hypot(__half __x, __half __y, _
 #endif // _LIBCUDACXX_HAS_NVFP16()
 
 #if _LIBCUDACXX_HAS_NVBF16()
-_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __nv_bfloat16
-hypot(__nv_bfloat16 __x, __nv_bfloat16 __y, __nv_bfloat16 __z) noexcept
+_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16
+hypot(__hip_bfloat16 __x, __hip_bfloat16 __y, __hip_bfloat16 __z) noexcept
 {
   return __float2bfloat16(_CUDA_VSTD::__hypot(__bfloat162float(__x), __bfloat162float(__y), __bfloat162float(__z)));
 }

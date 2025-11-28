@@ -130,7 +130,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __half log(__half __x) noexcept
 #endif // _LIBCUDACXX_HAS_NVFP16()
 
 #if _LIBCUDACXX_HAS_NVBF16()
-_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __nv_bfloat16 log(__nv_bfloat16 __x) noexcept
+_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 log(__hip_bfloat16 __x) noexcept
 {
   NV_IF_ELSE_TARGET(
     NV_IS_DEVICE_LIBHIPCXX, (return ::hlog(__x);), (return __float2bfloat16(_CUDA_VSTD::logf(__bfloat162float(__x)));))
@@ -205,7 +205,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __half log10(__half __x) noexcept
 #endif // _LIBCUDACXX_HAS_NVFP16()
 
 #if _LIBCUDACXX_HAS_NVBF16()
-_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __nv_bfloat16 log10(__nv_bfloat16 __x) noexcept
+_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 log10(__hip_bfloat16 __x) noexcept
 {
   NV_IF_ELSE_TARGET(
     NV_IS_DEVICE_LIBHIPCXX, (return ::hlog10(__x);), (return __float2bfloat16(_CUDA_VSTD::log10f(__bfloat162float(__x)));))
@@ -279,7 +279,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI int ilogb(__half __x) noexcept
 #endif // _LIBCUDACXX_HAS_NVFP16()
 
 #if _LIBCUDACXX_HAS_NVBF16()
-_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI int ilogb(__nv_bfloat16 __x) noexcept
+_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI int ilogb(__hip_bfloat16 __x) noexcept
 {
   return _CUDA_VSTD::ilogbf(__bfloat162float(__x));
 }
@@ -352,7 +352,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __half log1p(__half __x) noexcept
 #endif // _LIBCUDACXX_HAS_NVFP16()
 
 #if _LIBCUDACXX_HAS_NVBF16()
-_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __nv_bfloat16 log1p(__nv_bfloat16 __x) noexcept
+_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 log1p(__hip_bfloat16 __x) noexcept
 {
   return __float2bfloat16(_CUDA_VSTD::log1pf(__bfloat162float(__x)));
 }
@@ -426,7 +426,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __half log2(__half __x) noexcept
 #endif // _LIBCUDACXX_HAS_NVFP16()
 
 #if _LIBCUDACXX_HAS_NVBF16()
-_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __nv_bfloat16 log2(__nv_bfloat16 __x) noexcept
+_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 log2(__hip_bfloat16 __x) noexcept
 {
   NV_IF_ELSE_TARGET(
     NV_IS_DEVICE_LIBHIPCXX, (return ::hlog2(__x);), (return __float2bfloat16(_CUDA_VSTD::log2f(__bfloat162float(__x)));))
@@ -500,7 +500,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __half logb(__half __x) noexcept
 #endif // _LIBCUDACXX_HAS_NVFP16()
 
 #if _LIBCUDACXX_HAS_NVBF16()
-_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __nv_bfloat16 logb(__nv_bfloat16 __x) noexcept
+_CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 logb(__hip_bfloat16 __x) noexcept
 {
   return __float2bfloat16(_CUDA_VSTD::logbf(__bfloat162float(__x)));
 }

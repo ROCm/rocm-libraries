@@ -8,6 +8,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #ifndef _LIBCUDACXX___FLOATING_POINT_CAST_H
 #define _LIBCUDACXX___FLOATING_POINT_CAST_H
 
@@ -54,7 +76,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _To __fp_cast(_From __v) noexcept
     }
 #endif // _CCCL_HAS_NVFP16()
 #if _CCCL_HAS_NVBF16()
-    else if constexpr (_CCCL_TRAIT(is_same, _To, __nv_bfloat16))
+    else if constexpr (_CCCL_TRAIT(is_same, _To, __hip_bfloat16))
     {
       return ::__float2bfloat16(__v);
     }
@@ -123,7 +145,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _To __fp_cast(_From __v) noexcept
     }
 #endif // _CCCL_HAS_NVFP16()
 #if _CCCL_HAS_NVBF16()
-    else if constexpr (_CCCL_TRAIT(is_same, _To, __nv_bfloat16))
+    else if constexpr (_CCCL_TRAIT(is_same, _To, __hip_bfloat16))
     {
       return ::__double2bfloat16(__v);
     }
@@ -191,9 +213,9 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _To __fp_cast(_From __v) noexcept
     }
 #  endif // _CCCL_HAS_NVFP16()
 #  if _CCCL_HAS_NVBF16()
-    else if constexpr (_CCCL_TRAIT(is_same, _To, __nv_bfloat16))
+    else if constexpr (_CCCL_TRAIT(is_same, _To, __hip_bfloat16))
     {
-      return _CUDA_VSTD::__fp_cast<__nv_bfloat16>(_CUDA_VSTD::__fp_cast<float>(__v));
+      return _CUDA_VSTD::__fp_cast<__hip_bfloat16>(_CUDA_VSTD::__fp_cast<float>(__v));
     }
 #  endif // _CCCL_HAS_NVBF16()
 #  if _CCCL_HAS_NVFP8_E4M3()
@@ -260,9 +282,9 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _To __fp_cast(_From __v) noexcept
       return __v;
     }
 #  if _CCCL_HAS_NVBF16()
-    else if constexpr (_CCCL_TRAIT(is_same, _To, __nv_bfloat16))
+    else if constexpr (_CCCL_TRAIT(is_same, _To, __hip_bfloat16))
     {
-      return _CUDA_VSTD::__fp_cast<__nv_bfloat16>(_CUDA_VSTD::__fp_cast<float>(__v));
+      return _CUDA_VSTD::__fp_cast<__hip_bfloat16>(_CUDA_VSTD::__fp_cast<float>(__v));
     }
 #  endif // _CCCL_HAS_NVFP16()
 #  if _CCCL_HAS_NVFP8_E4M3()
@@ -308,7 +330,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _To __fp_cast(_From __v) noexcept
   }
 #endif // _CCCL_HAS_NVFP16()
 #if _CCCL_HAS_NVBF16()
-  else if constexpr (_CCCL_TRAIT(is_same, _From, __nv_bfloat16))
+  else if constexpr (_CCCL_TRAIT(is_same, _From, __hip_bfloat16))
   {
     if constexpr (_CCCL_TRAIT(is_same, _To, float))
     {
@@ -330,7 +352,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _To __fp_cast(_From __v) noexcept
       return _CUDA_VSTD::__fp_cast<__half>(_CUDA_VSTD::__fp_cast<float>(__v));
     }
 #  endif // _CCCL_HAS_NVFP16()
-    else if constexpr (_CCCL_TRAIT(is_same, _To, __nv_bfloat16))
+    else if constexpr (_CCCL_TRAIT(is_same, _To, __hip_bfloat16))
     {
       return __v;
     }
@@ -404,9 +426,9 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _To __fp_cast(_From __v) noexcept
     }
 #  endif // _CCCL_HAS_NVFP16()
 #  if _CCCL_HAS_NVBF16()
-    else if constexpr (_CCCL_TRAIT(is_same, _To, __nv_bfloat16))
+    else if constexpr (_CCCL_TRAIT(is_same, _To, __hip_bfloat16))
     {
-      return _CUDA_VSTD::__fp_cast<__nv_bfloat16>(_CUDA_VSTD::__fp_cast<float>(__v));
+      return _CUDA_VSTD::__fp_cast<__hip_bfloat16>(_CUDA_VSTD::__fp_cast<float>(__v));
     }
 #  endif // _CCCL_HAS_NVBF16()
     else if constexpr (_CCCL_TRAIT(is_same, _To, __nv_fp8_e4m3))
@@ -473,9 +495,9 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _To __fp_cast(_From __v) noexcept
     }
 #  endif // _CCCL_HAS_NVFP16()
 #  if _CCCL_HAS_NVBF16()
-    else if constexpr (_CCCL_TRAIT(is_same, _To, __nv_bfloat16))
+    else if constexpr (_CCCL_TRAIT(is_same, _To, __hip_bfloat16))
     {
-      return _CUDA_VSTD::__fp_cast<__nv_bfloat16>(_CUDA_VSTD::__fp_cast<float>(__v));
+      return _CUDA_VSTD::__fp_cast<__hip_bfloat16>(_CUDA_VSTD::__fp_cast<float>(__v));
     }
 #  endif // _CCCL_HAS_NVBF16()
 #  if _CCCL_HAS_NVFP8_E4M3()
@@ -523,16 +545,16 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _To __fp_cast(_From __v) noexcept
   {
     if constexpr (_CCCL_TRAIT(is_same, _To, float))
     {
-      return _CUDA_VSTD::__fp_cast<float>(_CUDA_VSTD::__fp_cast<__nv_bfloat16>(__v));
+      return _CUDA_VSTD::__fp_cast<float>(_CUDA_VSTD::__fp_cast<__hip_bfloat16>(__v));
     }
     else if constexpr (_CCCL_TRAIT(is_same, _To, double))
     {
-      return _CUDA_VSTD::__fp_cast<double>(_CUDA_VSTD::__fp_cast<__nv_bfloat16>(__v));
+      return _CUDA_VSTD::__fp_cast<double>(_CUDA_VSTD::__fp_cast<__hip_bfloat16>(__v));
     }
 #  if _CCCL_HAS_LONG_DOUBLE()
     else if constexpr (_CCCL_TRAIT(is_same, _To, long double))
     {
-      return _CUDA_VSTD::__fp_cast<long double>(_CUDA_VSTD::__fp_cast<__nv_bfloat16>(__v));
+      return _CUDA_VSTD::__fp_cast<long double>(_CUDA_VSTD::__fp_cast<__hip_bfloat16>(__v));
     }
 #  endif // _CCCL_HAS_LONG_DOUBLE()
 #  if _CCCL_HAS_NVFP16()
@@ -542,7 +564,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _To __fp_cast(_From __v) noexcept
     }
 #  endif // _CCCL_HAS_NVFP16()
 #  if _CCCL_HAS_NVBF16()
-    else if constexpr (_CCCL_TRAIT(is_same, _To, __nv_bfloat16))
+    else if constexpr (_CCCL_TRAIT(is_same, _To, __hip_bfloat16))
     {
       return ::__nv_cvt_e8m0_to_bf16raw(__v.__x);
     }
@@ -611,9 +633,9 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _To __fp_cast(_From __v) noexcept
     }
 #  endif // _CCCL_HAS_NVFP16()
 #  if _CCCL_HAS_NVBF16()
-    else if constexpr (_CCCL_TRAIT(is_same, _To, __nv_bfloat16))
+    else if constexpr (_CCCL_TRAIT(is_same, _To, __hip_bfloat16))
     {
-      return _CUDA_VSTD::__fp_cast<__nv_bfloat16>(_CUDA_VSTD::__fp_cast<float>(__v));
+      return _CUDA_VSTD::__fp_cast<__hip_bfloat16>(_CUDA_VSTD::__fp_cast<float>(__v));
     }
 #  endif // _CCCL_HAS_NVBF16()
 #  if _CCCL_HAS_NVFP8_E4M3()
@@ -680,9 +702,9 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _To __fp_cast(_From __v) noexcept
     }
 #  endif // _CCCL_HAS_NVFP16()
 #  if _CCCL_HAS_NVBF16()
-    else if constexpr (_CCCL_TRAIT(is_same, _To, __nv_bfloat16))
+    else if constexpr (_CCCL_TRAIT(is_same, _To, __hip_bfloat16))
     {
-      return _CUDA_VSTD::__fp_cast<__nv_bfloat16>(_CUDA_VSTD::__fp_cast<float>(__v));
+      return _CUDA_VSTD::__fp_cast<__hip_bfloat16>(_CUDA_VSTD::__fp_cast<float>(__v));
     }
 #  endif // _CCCL_HAS_NVBF16()
 #  if _CCCL_HAS_NVFP8_E4M3()
@@ -749,9 +771,9 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _To __fp_cast(_From __v) noexcept
     }
 #  endif // _CCCL_HAS_NVFP16()
 #  if _CCCL_HAS_NVBF16()
-    else if constexpr (_CCCL_TRAIT(is_same, _To, __nv_bfloat16))
+    else if constexpr (_CCCL_TRAIT(is_same, _To, __hip_bfloat16))
     {
-      return _CUDA_VSTD::__fp_cast<__nv_bfloat16>(_CUDA_VSTD::__fp_cast<float>(__v));
+      return _CUDA_VSTD::__fp_cast<__hip_bfloat16>(_CUDA_VSTD::__fp_cast<float>(__v));
     }
 #  endif // _CCCL_HAS_NVBF16()
 #  if _CCCL_HAS_NVFP8_E4M3()

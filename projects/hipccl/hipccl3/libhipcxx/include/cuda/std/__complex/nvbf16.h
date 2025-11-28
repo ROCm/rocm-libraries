@@ -316,28 +316,28 @@ _LIBCUDACXX_HIDE_FROM_ABI complex<__hip_bfloat16> acos(const complex<__hip_bfloa
 }
 
 template <>
-struct __get_complex_impl<__nv_bfloat16>
+struct __get_complex_impl<__hip_bfloat16>
 {
   template <size_t _Index>
-  static _LIBCUDACXX_HIDE_FROM_ABI constexpr __nv_bfloat16& get(complex<__nv_bfloat16>& __z) noexcept
+  static _LIBCUDACXX_HIDE_FROM_ABI constexpr __hip_bfloat16& get(complex<__hip_bfloat16>& __z) noexcept
   {
     return (_Index == 0) ? __z.__repr_.x : __z.__repr_.y;
   }
 
   template <size_t _Index>
-  static _LIBCUDACXX_HIDE_FROM_ABI constexpr __nv_bfloat16&& get(complex<__nv_bfloat16>&& __z) noexcept
+  static _LIBCUDACXX_HIDE_FROM_ABI constexpr __hip_bfloat16&& get(complex<__hip_bfloat16>&& __z) noexcept
   {
     return _CUDA_VSTD::move((_Index == 0) ? __z.__repr_.x : __z.__repr_.y);
   }
 
   template <size_t _Index>
-  static _LIBCUDACXX_HIDE_FROM_ABI constexpr const __nv_bfloat16& get(const complex<__nv_bfloat16>& __z) noexcept
+  static _LIBCUDACXX_HIDE_FROM_ABI constexpr const __hip_bfloat16& get(const complex<__hip_bfloat16>& __z) noexcept
   {
     return (_Index == 0) ? __z.__repr_.x : __z.__repr_.y;
   }
 
   template <size_t _Index>
-  static _LIBCUDACXX_HIDE_FROM_ABI constexpr const __nv_bfloat16&& get(const complex<__nv_bfloat16>&& __z) noexcept
+  static _LIBCUDACXX_HIDE_FROM_ABI constexpr const __hip_bfloat16&& get(const complex<__hip_bfloat16>&& __z) noexcept
   {
     return _CUDA_VSTD::move((_Index == 0) ? __z.__repr_.x : __z.__repr_.y);
   }

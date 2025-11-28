@@ -8,6 +8,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #ifndef _LIBCUDACXX___FLOATING_POINT_STORAGE_H
 #define _LIBCUDACXX___FLOATING_POINT_STORAGE_H
 
@@ -76,9 +98,9 @@ struct __cccl_nvfp16_manip_helper : __half
 #endif // _CCCL_HAS_NVFP16()
 
 #if _CCCL_HAS_NVBF16()
-struct __cccl_nvbf16_manip_helper : __nv_bfloat16
+struct __cccl_nvbf16_manip_helper : __hip_bfloat16
 {
-  using __nv_bfloat16::__x;
+  using __hip_bfloat16::__x;
 };
 #endif // _CCCL_HAS_NVBF16()
 
@@ -91,14 +113,14 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr _Tp __fp_from_storage(__fp_s
   }
 #if _CCCL_HAS_NVFP16()
   else if constexpr (_CCCL_TRAIT(is_same, _Tp, __half))
-  {
-    __cccl_nvfp16_manip_helper __helper{};
-    __helper.__x = __v;
-    return __helper;
+  { return __half_raw{.x = __v};
+    //__cccl_nvfp16_manip_helper __helper{.__x = __v};
+    //__helper.__x = __v;
+    //return __helper;
   }
 #endif // _CCCL_HAS_NVFP16()
 #if _CCCL_HAS_NVBF16()
-  else if constexpr (_CCCL_TRAIT(is_same, _Tp, __nv_bfloat16))
+  else if constexpr (_CCCL_TRAIT(is_same, _Tp, __hip_bfloat16))
   {
     __cccl_nvbf16_manip_helper __helper{};
     __helper.__x = __v;
@@ -182,7 +204,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI constexpr __fp_storage_t<_Tp> __fp_get
   }
 #endif // _CCCL_HAS_NVFP16()
 #if _CCCL_HAS_NVBF16()
-  else if constexpr (_CCCL_TRAIT(is_same, _Tp, __nv_bfloat16))
+  else if constexpr (_CCCL_TRAIT(is_same, _Tp, __hip_bfloat16))
   {
     return __cccl_nvbf16_manip_helper{__v}.__x;
   }
