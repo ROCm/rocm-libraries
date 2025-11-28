@@ -49,6 +49,7 @@ struct StockhamGeneratorSpecs
 
     std::vector<unsigned int> factors;
     std::vector<unsigned int> factors2d;
+    std::vector<unsigned int> factors_pp;
     unsigned int              precision; // mapped from rocfft_precision
     std::string               gcn_arch_name;
     unsigned int              length;

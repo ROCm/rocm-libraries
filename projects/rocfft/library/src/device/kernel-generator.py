@@ -584,6 +584,7 @@ def generate_kernel_functions(precisions_type_dict, kernels, launchers_json):
                                  use_3steps_large_twd=use_3steps_large_twd,
                                  lds_size_bytes=kernel.lds_size_bytes,
                                  pp_child_scheme=pp_child_scheme,
+                                 pp_threads_per_transform=pp_threads_per_transform,
                                  pp_factors_curr=pp_factors_curr,
                                  pp_factors_other=pp_factors_other,
                                  pp_current_dim=pp_current_dim,
