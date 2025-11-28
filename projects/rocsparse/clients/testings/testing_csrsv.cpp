@@ -280,7 +280,6 @@ void testing_csrsv(const Arguments& arg)
 
             CHECK_ROCSPARSE_ERROR(
                 testing::rocsparse_csrsv_solve<T>(PARAMS_SOLVE(h_alpha, dA, dx, dy)));
-            CHECK_HIP_ERROR(hipStreamSynchronize(stream));
             {
                 auto st = rocsparse_csrsv_zero_pivot(handle, descr, info, solve_pivot);
                 CHECK_HIP_ERROR(hipStreamSynchronize(stream));

@@ -67,22 +67,7 @@ struct _rocsparse_spmat_descr
     int64_t batch_stride{};
     int64_t offsets_batch_stride{};
     int64_t columns_values_batch_stride{};
-#if 0
-  int64_t * row_batch_dist{};
-  int64_t * col_batch_dist{};
-  int64_t * val_batch_dist{};
 
-  int64_t row_inc{};
-  int64_t col_inc{};
-  int64_t val_inc{};
-    new_descr->row_batch_dist = &new_descr->offsets_batch_stride;
-    new_descr->col_batch_dist = &new_descr->columns_values_batch_stride;
-    new_descr->val_batch_dist = &new_descr->batch_stride;
-
-    new_descr->row_inc = 1;
-    new_descr->col_inc = 1;
-    new_descr->val_inc = 1;
-#endif
     _rocsparse_spmat_descr() = default;
     _rocsparse_spmat_descr(rocsparse_format     format,
                            bool                 analysed,
