@@ -511,8 +511,9 @@ std::vector<BNTestCase> BNFusedInferTestConfigs(miopenBatchNormMode_t mode)
     INSTANTIATE_TEST_SUITE_P(
         Smoke,
         GPU_bn_infer_fused_spatial_FP16,
-        testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                         testing::ValuesIn(BNFusedInferTestConfigs<half_float::half>(miopenBNSpatial))));
+        testing::Combine(
+            testing::ValuesIn(ActivationConfigs()),
+            testing::ValuesIn(BNFusedInferTestConfigs<half_float::half>(miopenBNSpatial))));
 
     TEST_P(GPU_bn_infer_fused_per_act_FP16, PortTest)
     {
@@ -526,5 +527,6 @@ std::vector<BNTestCase> BNFusedInferTestConfigs(miopenBatchNormMode_t mode)
     INSTANTIATE_TEST_SUITE_P(
         Smoke,
         GPU_bn_infer_fused_per_act_FP16,
-        testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                         testing::ValuesIn(BNFusedInferTestConfigs<half_float::half>(miopenBNPerActivation))));
+        testing::Combine(
+            testing::ValuesIn(ActivationConfigs()),
+            testing::ValuesIn(BNFusedInferTestConfigs<half_float::half>(miopenBNPerActivation))));
