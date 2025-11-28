@@ -30,6 +30,7 @@ target_sources(rocroller-tests-catch
 
         "${CMAKE_CURRENT_SOURCE_DIR}/AddDeallocateTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddPrefetchTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AddStreamKTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AliasDataFlowTagsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AnnotateInstructionsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArgumentTracerTest.cpp"
@@ -63,6 +64,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphConstraintsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphRemoveDuplicatesTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphSimplifyTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphUtilsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LDSAllocationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LDSBankModelTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LargerLDSTest.cpp"
@@ -71,6 +73,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/MFMACoexecObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MultipleLDSAllocationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/NaryExpressionTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/OrderMultiplyNodesTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RandomNumberExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RandomNumberGenerationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RegisterTagManagerTest.cpp"

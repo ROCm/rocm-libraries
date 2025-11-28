@@ -33,12 +33,38 @@ Tests:
   precision: *single_double_precisions_complex_real
 
 - name: axpby
+  category: quick
+  function: axpby
+  indextype: *i32
+  precision: *single_double_precisions
+  N: [5000]
+  nnz: [0, 500, 2500]
+  alpha: [1.0]
+  alphai: [0.0]
+  beta: [1.0]
+  betai: [0.0]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+
+- name: axpby
   category: pre_checkin
   function: axpby
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   N: [22031]
   nnz: [0, 5, 1000, 10000]
+  alpha: [1.0]
+  alphai: [0.0]
+  beta: [1.0]
+  betai: [0.0]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: axpby
+  category: nightly
+  function: axpby
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  N: [100000, 500000]
+  nnz: [0, 10000, 50000, 100000]
   alpha: [1.0]
   alphai: [0.0]
   beta: [1.0]
