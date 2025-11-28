@@ -282,4 +282,21 @@ __device__ void gemm_16x16xp(rocblas_operation transA,
 
 #endif // ROCSOLVER_MFMA_ENABLED
 
+inline bool rocsolver_has_mfma(rocblas_handle handle)
+{
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+
+    std::string deviceArch(props->gcnArchName);
+
+    if((deviceArch.find("gfx90a") != std::string::npos)
+       || (deviceArch.find("gfx940") != std::string::npos)
+       || (deviceArch.find("gfx941") != std::string::npos)
+       || (deviceArch.find("gfx942") != std::string::npos))
+    {
+        return true;
+    }
+
+    return false;
+}
+
 ROCSOLVER_END_NAMESPACE

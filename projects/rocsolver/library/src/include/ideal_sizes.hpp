@@ -305,6 +305,24 @@
 #define POTF2_MAX_SMALL_SIZE(T) ((sizeof(T) == 4) ? 180 : (sizeof(T) == 8) ? 127 : 90)
 #endif
 
+/*! \brief Determines the panel size of the rocSOLVER POTF2 panel kernel */
+#ifndef POTF2_PANEL_SIZE
+#define POTF2_PANEL_SIZE(T) 8
+#endif
+
+/*! \brief Determines the minimum size at which rocSOLVER POTF2 uses the panel kernel */
+#ifndef POTF2_PANEL_SWITCH_SIZE
+#define POTF2_PANEL_SWITCH_SIZE(T) 32
+#endif
+
+/*! \brief Determines the thread dimensions of the rocSOLVER POTF2 panel kernel */
+#ifndef POTF2_PANEL_THREAD_DIMX
+#define POTF2_PANEL_THREAD_DIMX(T) 128
+#endif
+#ifndef POTF2_PANEL_THREAD_DIMY
+#define POTF2_PANEL_THREAD_DIMY(T) 8
+#endif
+
 /************************** syevj/heevj ***************************************
 *******************************************************************************/
 /*! \brief Determines the size at which rocSOLVER switches from

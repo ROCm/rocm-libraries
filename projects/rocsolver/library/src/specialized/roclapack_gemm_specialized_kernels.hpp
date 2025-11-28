@@ -238,12 +238,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_gemm(rocblas_handle handle,
     // get warp size
     const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
 
-    std::string deviceArch(props->gcnArchName);
-
-    if((deviceArch.find("gfx90a") != std::string::npos)
-       || (deviceArch.find("gfx940") != std::string::npos)
-       || (deviceArch.find("gfx941") != std::string::npos)
-       || (deviceArch.find("gfx942") != std::string::npos))
+    if(rocsolver_has_mfma(handle))
     {
         const auto warpSize = props->warpSize;
 

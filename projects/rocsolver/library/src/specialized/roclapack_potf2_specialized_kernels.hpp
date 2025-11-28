@@ -93,10 +93,194 @@ __device__ static I idx_lower(I i, I j, I n)
 template <typename T, typename I, typename INFO>
 __device__ static void potf2_simple(bool const is_upper, I const n, T* const A, INFO* const info)
 {
+    auto const lda = n;
+    bool const is_lower = (!is_upper);
+
+    auto const i_start = hipThreadIdx_x;
+    auto const i_inc = hipBlockDim_x;
+    auto const j_start = hipThreadIdx_y;
+    auto const j_inc = hipBlockDim_y;
+    assert(hipBlockDim_z == 1);
+
+    auto const tid = hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x
+        + hipThreadIdx_z * (hipBlockDim_x * hipBlockDim_y);
+    auto const nthreads = (hipBlockDim_x * hipBlockDim_y) * hipBlockDim_z;
+
+    auto const j0_start = tid;
+    auto const j0_inc = nthreads;
+
+    if(is_lower)
+    {
+        // ---------------------------------------------------
+        // [  l11     ]  * [ l11'   vl21' ]  =  [ a11       ]
+        // [ vl21  L22]    [        L22' ]     [ va21, A22 ]
+        //
+        //
+        //   assume l11 is scalar 1x1 matrix
+        //
+        //   (1) l11 * l11' = a11 =>  l11 = sqrt( abs(a11) ), scalar computation
+        //   (2) vl21 * l11' = va21 =>  vl21 = va21/ l11', scale vector
+        //   (3) L22 * L22' + vl21 * vl21' = A22
+        //
+        //   (3a) A22 = A22 - vl21 * vl21',  symmetric rank-1 update
+        //   (3b) L22 * L22' = A22,   cholesky factorization, tail recursion
+        // ---------------------------------------------------
+
+        for(I kcol = 0; kcol < n; kcol++)
+        {
+            auto kk = idx_lower(kcol, kcol, lda);
+            auto const akk = std::real(A[kk]);
+            bool const isok = (akk > 0) && (std::isfinite(akk));
+            if(!isok)
+            {
+                if(tid == 0)
+                {
+                    A[kk] = akk;
+                    // Fortran 1-based index
+                    if(*info == 0)
+                        *info = kcol + 1;
+                }
+                break;
+            }
+
+            auto const lkk = std::sqrt(akk);
+            if(tid == 0)
+            {
+                A[kk] = lkk;
+            }
+
+            __syncthreads();
+
+            // ------------------------------------------------------------
+            //   (2) vl21 * l11' = va21 =>  vl21 = va21/ l11', scale vector
+            // ------------------------------------------------------------
+
+            auto const conj_lkk = conj(lkk);
+            for(I j0 = (kcol + 1) + j0_start; j0 < n; j0 += j0_inc)
+            {
+                auto const j0k = idx_lower(j0, kcol, lda);
+
+                A[j0k] = (A[j0k] / conj_lkk);
+            }
+
+            __syncthreads();
+
+            // ------------------------------------------------------------
+            //   (3a) A22 = A22 - vl21 * vl21',  symmetric rank-1 update
+            //
+            //   note: update lower triangular part
+            // ------------------------------------------------------------
+
+            for(I j = (kcol + 1) + j_start; j < n; j += j_inc)
+            {
+                auto const vj = A[idx_lower(j, kcol, lda)];
+                for(I i = (kcol + 1) + i_start; i < n; i += i_inc)
+                {
+                    bool const lower_part = (i >= j);
+                    if(lower_part)
+                    {
+                        auto const vi = A[idx_lower(i, kcol, lda)];
+                        auto const ij = idx_lower(i, j, lda);
+
+                        A[ij] = A[ij] - vi * conj(vj);
+                    }
+                }
+            }
+
+            __syncthreads();
+
+        } // end for kcol
+    }
+    else
+    {
+        // --------------------------------------------------
+        // [u11'        ] * [u11    vU12 ] = [ a11     vA12 ]
+        // [vU12'   U22']   [       U22  ]   [ vA12'   A22  ]
+        //
+        // (1) u11' * u11 = a11 =?  u11 = sqrt( abs( a11 ) )
+        // (2) vU12' * u11 = vA12', or u11' * vU12 = vA12
+        //     or vU12 = vA12/u11'
+        // (3) vU12' * vU12 + U22'*U22 = A22
+        //
+        // (3a) A22 = A22 - vU12' * vU12
+        // (3b) U22' * U22 = A22,  cholesky factorization, tail recursion
+        // --------------------------------------------------
+
+        for(I kcol = 0; kcol < n; kcol++)
+        {
+            auto const kk = idx_upper(kcol, kcol, lda);
+            auto const akk = std::real(A[kk]);
+            bool const isok = (akk > 0) && (std::isfinite(akk));
+            if(!isok)
+            {
+                if(tid == 0)
+                {
+                    A[kk] = akk;
+                    // Fortran 1-based index
+                    if(*info == 0)
+                        *info = kcol + 1;
+                }
+
+                break;
+            }
+
+            auto const ukk = std::sqrt(akk);
+            if(tid == 0)
+            {
+                A[kk] = ukk;
+            }
+            __syncthreads();
+
+            // ----------------------------------------------
+            // (2) vU12' * u11 = vA12', or u11' * vU12 = vA12
+            // ----------------------------------------------
+            for(I j0 = (kcol + 1) + j0_start; j0 < n; j0 += j0_inc)
+            {
+                auto const kj0 = idx_upper(kcol, j0, lda);
+
+                A[kj0] = A[kj0] / ukk;
+            }
+
+            __syncthreads();
+
+            // -----------------------------
+            // (3a) A22 = A22 - vU12' * vU12
+            //
+            // note: update upper triangular part
+            // -----------------------------
+            for(I j = (kcol + 1) + j_start; j < n; j += j_inc)
+            {
+                auto const vj = A[idx_upper(kcol, j, lda)];
+                for(I i = (kcol + 1) + i_start; i < n; i += i_inc)
+                {
+                    bool const upper_part = (i <= j);
+                    if(upper_part)
+                    {
+                        auto const vi = A[idx_upper(kcol, i, lda)];
+                        auto const ij = idx_upper(i, j, lda);
+
+                        A[ij] = A[ij] - conj(vi) * vj;
+                    }
+                }
+            }
+
+            __syncthreads();
+
+        } // end for kcol
+    }
+}
+
+#if ROCSOLVER_MFMA_ENABLED
+template <typename T, typename I, typename INFO>
+__device__ static void potf2_panel_mfma(bool const is_upper, I const n, T* const A, INFO* const info)
+{
     using T4 = typename mfma_16x16x4<T>::AccT;
 
     auto const lda = n;
     bool const is_lower = (!is_upper);
+
+    // Currently only supports lower uplo compute
+    assert(is_lower);
 
     auto const i_start = hipThreadIdx_x;
     auto const i_inc = hipBlockDim_x;
@@ -123,7 +307,7 @@ __device__ static void potf2_simple(bool const is_upper, I const n, T* const A, 
     auto const j0_start = tid;
     auto const j0_inc = nthreads;
 
-    I constexpr panel_size = 8;
+    I constexpr panel_size = POTF2_PANEL_SIZE(T);
     I panel_start = 0;
     I panel_end = panel_size;
 
@@ -215,44 +399,14 @@ __device__ static void potf2_simple(bool const is_upper, I const n, T* const A, 
             }
             else
             {
-                // update trailing triangular matrix
-                // - A(k+1:n-1, k+1:n-1) = A(k+1:n-1, k-3:k) * A(k+1:n-1, k-3:k)^T
-                // for(I j = (kcol + 1) + j_start; j < n; j += j_inc)
-                // {
-                //     // auto const vj = A[idx_lower(j, kcol, lda)];
-                //     for(I i = (kcol + 1) + i_start; i < n; i += i_inc)
-                //     {
-                //         bool const lower_part = (i >= j);
-                //         if(lower_part)
-                //         {
-                //             // auto const vi = A[idx_lower(i, kcol, lda)];
-                //             auto const ij = idx_lower(i, j, lda);
-                //             T acc = 0;
-
-                //             for(I a = panel_start; a < panel_end; a++)
-                //             {
-                //                 acc += A[idx_lower(i, a, lda)] * conj(A[idx_lower(j, a, lda)]);
-                //             }
-
-                //             // printf("%d, %d, %f\n", i, j, std::real(acc));
-                //             if constexpr (rocblas_is_complex<T>)
-                //                 printf("%d, %d, %f, %f\n", i, j, std::real(acc), std::imag(acc));
-                //             A[ij] = A[ij] - acc;
-
-                //         }
-                //     }
-                // }
-
-                // const auto k = panel_start + cmajor_j_16x4;
+                // update trailing matrix after panel
                 for(I wj = kcol + 1 + (wid_j * 16); wj < n; wj += block_size_j)
                 {
                     const auto j = wj + cmajor_i_16x4;
-                    // auto const vj = (j < n) ? conj(A[idx_lower(j, k, lda)]) : 0;
 
                     for(I wi = wj + (wid_i * 16); wi < n; wi += block_size_i)
                     {
                         const auto i = wi + cmajor_i_16x4;
-                        // auto const vi = (i < n) ? A[idx_lower(i, k, lda)] : 0;
 
                         T4 dmn = {0};
 
@@ -267,17 +421,13 @@ __device__ static void potf2_simple(bool const is_upper, I const n, T* const A, 
 #pragma unroll
                         for(I reg = 0; reg < 4; ++reg)
                         {
-                            const auto c_row = wi
-                                + get_c_row<T>(cmajor_j_16x4, cmajor_i_16x4, reg, (I)0,
-                                               (I)0); // reg + cmajor_j_16x4 * 4;
-                            const auto c_col = wj
-                                + get_c_col<T>(cmajor_j_16x4, cmajor_i_16x4, reg, (I)0,
-                                               (I)0); // cmajor_i_16x4;
+                            const auto c_row
+                                = wi + get_c_row<T>(cmajor_j_16x4, cmajor_i_16x4, reg, (I)0, (I)0);
+                            const auto c_col
+                                = wj + get_c_col<T>(cmajor_j_16x4, cmajor_i_16x4, reg, (I)0, (I)0);
 
                             if(c_col < n && c_row < n && c_row >= c_col)
                             {
-                                // if constexpr (rocblas_is_complex<T>)
-                                //     printf("%d, %d, %f, %f\n", c_row, c_col, std::real(dmn[reg]), std::imag(dmn[reg]));
                                 const auto idx = idx_lower(c_row, c_col, lda);
                                 A[idx] = A[idx] - dmn[reg];
                             }
@@ -292,84 +442,8 @@ __device__ static void potf2_simple(bool const is_upper, I const n, T* const A, 
             __syncthreads();
         } // end for kcol
     }
-    else
-    {
-        // --------------------------------------------------
-        // [u11'        ] * [u11    vU12 ] = [ a11     vA12 ]
-        // [vU12'   U22']   [       U22  ]   [ vA12'   A22  ]
-        //
-        // (1) u11' * u11 = a11 =?  u11 = sqrt( abs( a11 ) )
-        // (2) vU12' * u11 = vA12', or u11' * vU12 = vA12
-        //     or vU12 = vA12/u11'
-        // (3) vU12' * vU12 + U22'*U22 = A22
-        //
-        // (3a) A22 = A22 - vU12' * vU12
-        // (3b) U22' * U22 = A22,  cholesky factorization, tail recursion
-        // --------------------------------------------------
-
-        for(I kcol = 0; kcol < n; kcol++)
-        {
-            auto const kk = idx_upper(kcol, kcol, lda);
-            auto const akk = std::real(A[kk]);
-            bool const isok = (akk > 0) && (std::isfinite(akk));
-            if(!isok)
-            {
-                if(tid == 0)
-                {
-                    A[kk] = akk;
-                    // Fortran 1-based index
-                    if(*info == 0)
-                        *info = kcol + 1;
-                }
-
-                break;
-            }
-
-            auto const ukk = std::sqrt(akk);
-            if(tid == 0)
-            {
-                A[kk] = ukk;
-            }
-            __syncthreads();
-
-            // ----------------------------------------------
-            // (2) vU12' * u11 = vA12', or u11' * vU12 = vA12
-            // ----------------------------------------------
-            for(I j0 = (kcol + 1) + j0_start; j0 < n; j0 += j0_inc)
-            {
-                auto const kj0 = idx_upper(kcol, j0, lda);
-
-                A[kj0] = A[kj0] / ukk;
-            }
-
-            __syncthreads();
-
-            // -----------------------------
-            // (3a) A22 = A22 - vU12' * vU12
-            //
-            // note: update upper triangular part
-            // -----------------------------
-            for(I j = (kcol + 1) + j_start; j < n; j += j_inc)
-            {
-                auto const vj = A[idx_upper(kcol, j, lda)];
-                for(I i = (kcol + 1) + i_start; i < n; i += i_inc)
-                {
-                    bool const upper_part = (i <= j);
-                    if(upper_part)
-                    {
-                        auto const vi = A[idx_upper(kcol, i, lda)];
-                        auto const ij = idx_upper(i, j, lda);
-
-                        A[ij] = A[ij] - conj(vi) * vj;
-                    }
-                }
-            }
-
-            __syncthreads();
-
-        } // end for kcol
-    }
 }
+#endif // ROCSOLVER_MFMA_ENABLED
 
 /*************************************************************
     Templated kernels are instantiated in separate cpp
@@ -377,7 +451,7 @@ __device__ static void potf2_simple(bool const is_upper, I const n, T* const A, 
     the library size.
 *************************************************************/
 
-template <typename T, typename I, typename INFO, typename U>
+template <bool PANEL, typename T, typename I, typename INFO, typename U>
 ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
                                          const I n,
                                          U AA,
@@ -454,7 +528,13 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
     __syncthreads();
 
     bool const is_up = (use_compute_lower) ? false : is_upper;
-    potf2_simple<T>(is_up, n, Ash, info_bid);
+
+#if ROCSOLVER_MFMA_ENABLED
+    if(PANEL && !is_up)
+        potf2_panel_mfma<T>(is_up, n, Ash, info_bid);
+    else
+#endif
+        potf2_simple<T>(is_up, n, Ash, info_bid);
 
     __syncthreads();
 
@@ -516,9 +596,19 @@ rocblas_status potf2_run_small(rocblas_handle handle,
     size_t lmemsize = sizeof(T) * (n * (n + 1)) / 2;
 
     bool const is_upper = (uplo == rocblas_fill_upper);
-    ROCSOLVER_LAUNCH_KERNEL((potf2_kernel_small<T, I, INFO, U>), dim3(1, 1, batch_count),
-                            dim3(128, 8, 1), lmemsize, stream, is_upper, n, A, shiftA, lda, strideA,
-                            info);
+    bool const use_mfma = rocsolver_has_mfma(handle) && n > POTF2_PANEL_SWITCH_SIZE(T);
+    if(use_mfma)
+    {
+        ROCSOLVER_LAUNCH_KERNEL((potf2_kernel_small<true, T, I, INFO, U>), dim3(1, 1, batch_count),
+                                dim3(POTF2_PANEL_THREAD_DIMX(T), POTF2_PANEL_THREAD_DIMY(T), 1),
+                                lmemsize, stream, is_upper, n, A, shiftA, lda, strideA, info);
+    }
+    else
+    {
+        ROCSOLVER_LAUNCH_KERNEL((potf2_kernel_small<false, T, I, INFO, U>), dim3(1, 1, batch_count),
+                                dim3(BS2, BS2, 1), lmemsize, stream, is_upper, n, A, shiftA, lda,
+                                strideA, info);
+    }
 
     return rocblas_status_success;
 }
