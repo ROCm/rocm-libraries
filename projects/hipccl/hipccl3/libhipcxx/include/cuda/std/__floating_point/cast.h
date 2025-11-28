@@ -141,7 +141,10 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _To __fp_cast(_From __v) noexcept
 #if _CCCL_HAS_NVFP16()
     else if constexpr (_CCCL_TRAIT(is_same, _To, __half))
     {
-      return ::__double2half(__v);
+      // NOTE(HIP/AMD): fp16 currently does not provide a __double2half conversion
+      // (see https://github.com/ROCm/clr/blob/amd-staging/hipamd/include/hip/amd_detail/amd_hip_fp16.h)
+      // corresponding ticket SWDEV-529927
+      return __float2half(static_cast<float>(__v));
     }
 #endif // _CCCL_HAS_NVFP16()
 #if _CCCL_HAS_NVBF16()
