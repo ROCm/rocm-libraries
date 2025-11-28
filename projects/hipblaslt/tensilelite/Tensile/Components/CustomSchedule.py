@@ -1460,48 +1460,79 @@ def _get_schedule_192x128x128_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     optSchedule = dict()
     syncCode = []
-    if isNN(kernel) and  useLDSTr and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = False
-        
-        syncTable = [
-            -1, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=3 newLW=0 newLR=3 for iteration == 0"),
-            5, SWaitCnt(dscnt=10, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
-            23, SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=16, new=16 newLW=0 newLR=0"),
-            37, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
-            37, SBarrier(comment=""),
-            47, SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=16, new=16 newLW=0 newLR=0"),
-            71, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
-            82, SWaitCnt(dscnt=-1, vlcnt=20, vscnt=-1, comment="wait for previous set of global reads"),
-            82, SBarrier(comment=""),
-        ]
-        optSchedule = {
-        'SYNC': [syncTable[::2]],
-        'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
-        'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
-        'LRA0': [[0, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7]],
-        'LRB0': [[1, 8, 9, 10]],
-        'GRA': [[37, 37, 39, 39, 41, 41, 43, 43, 46, 46, 48, 48, 50, 50, 52, 52, 55, 55, 57, 57, 59, 59, 62, 62]],
-        'GRB': [[64, 64, 66, 66, 68, 68, 71, 71, 73, 73, 75, 75, 77, 77, 80, 80]],
-        'LRA1': [[11, 13, 13, 14, 14, 15, 15, 16, 16, 17, 17, 18]],
-        'LRB1': [[12, 19, 20, 21]],
-        'LRSA': [[70]],
-        'LRSB': [[70]],
-        'LWSA': [[80]],
-        'LWSB': [[80]],
-        'LRA2': [[22, 24, 24, 25, 25, 26, 26, 27, 27, 28, 28, 29]],
-        'LRA3': [[83, 84, 84, 85, 85, 86, 86, 87, 87, 88, 88, 89]],
-        'LRB2': [[23, 30, 31, 32]],
-        'LRB3': [[83, 90, 91, 92]],
-        'LCC' : [[95, 95]]
-        }
-        syncCode = syncTable[1::2]
-
+    if isNN(kernel) and useLDSTr and TLDS == 1:
         numMfma = 96
+        kernel["SwapGlobalReadOrder"] = False
+
+        # Optimized schedule for 192x128x128 tile with DepthU=128 (4 sub-iterations)
+        # 12 LRA per sub-iter, 4 LRB per sub-iter
+        # 24 GRA (12 buffer_load pairs), 16 GRB (8 buffer_load pairs)
+        # Key optimizations:
+        # 1. Spread local reads evenly across mfma slots to hide LDS latency
+        # 2. Start GRA immediately after current-tile LR barrier (mfma 36)
+        # 3. Pack GRA/GRB tightly to finish before sub-iter 3 needs LDS
+        # 4. Single barrier pair for DirectToLDS synchronization
+
+        # syncTable: [mfma_index, sync_instruction, ...] pairs
+        syncTable = [
+            -1, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LRA3/LRB3 from prior iter"),
+            10, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for LRA0/LRB0 data ready"),
+            22, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for LRA1/LRB1 data ready"),
+
+            36, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="all current-tile LR done"),
+            36, SBarrier(comment="barrier before GRA/GRB DirectToLds"),
+
+            76, SWaitCnt(dscnt=-1, vlcnt=20, vscnt=-1, comment="wait for all GRA/GRB to complete"),
+            76, SBarrier(comment="barrier before LRA3/LRB3 next-tile prefetch"),
+        ]
+
+        syncCode = syncTable[1::2]
+        optSchedule = {
+            'SYNC': [syncTable[::2]],
+
+            # Global read address increments - spread across early mfma slots
+            'GRIncA': [[0, 1, 2, 3, 4, 5, 6, 7, 8]],
+            'GRIncB': [[9, 10, 11, 12, 13, 14, 15, 16, 17]],
+
+            # Sub-iteration 0: LRA0/LRB0 - prefetch during mfma 0-14
+            'LRA0': [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]],
+            'LRB0': [[0, 12, 13, 14]],
+
+            # Sub-iteration 1: LRA1/LRB1 - prefetch during mfma 11-25
+            'LRA1': [[11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]],
+            'LRB1': [[11, 23, 24, 25]],
+
+            # Sub-iteration 2: LRA2/LRB2 - prefetch during mfma 22-36
+            'LRA2': [[22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33]],
+            'LRB2': [[22, 34, 35, 36]],
+
+            # Global reads DirectToLDS - start after barrier at mfma 36
+            # GRA: 24 instructions across mfma 37-60, 1 per slot
+            'GRA': [[37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
+                     49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60]],
+            # GRB: 16 instructions across mfma 61-76, 1 per slot
+            'GRB': [[61, 62, 63, 64, 65, 66, 67, 68,
+                     69, 70, 71, 72, 73, 74, 75, 76]],
+
+            # Local read/write swap pointers
+            'LRSA': [[60]],
+            'LRSB': [[60]],
+            'LWSA': [[77]],
+            'LWSB': [[77]],
+
+            # Sub-iteration 3: LRA3/LRB3 - prefetch next tile after barrier at 76
+            'LRA3': [[77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88]],
+            'LRB3': [[77, 89, 90, 91]],
+
+            # Loop counter code
+            'LCC': [[94, 95]],
+        }
+
         nglshift = nllshift = 20
     else:
         return False, None
 
-    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
 def hasCustomSchedule(kernel):
