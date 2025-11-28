@@ -106,6 +106,8 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
         }
         else
         {
+            // Kernel threads to process continous pixels. Based on the test in the miopen repo this
+            // approach performced better than the HW block per thead block apporach.
             xlocalsize = 128;
             ylocalsize = 1;
         }
