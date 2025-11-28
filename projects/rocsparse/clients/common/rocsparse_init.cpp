@@ -55,6 +55,14 @@ void rocsparse_init_exact(
 }
 
 template <typename T>
+void rocsparse_init_1d_array(T* A, size_t size, bool use_exact, T a, T b)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    rocsparse_init(A, size, 1, 1, use_exact, 0, 1, a, b);
+}
+
+template <typename T>
 void rocsparse_init(T*     A,
                     size_t M,
                     size_t N,
@@ -169,6 +177,14 @@ void rocsparse_init_exact(std::vector<T>& A,
     ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_exact(A.data(), M, N, lda, stride, batch_count, a, b);
+}
+
+template <typename T>
+void rocsparse_init_1d_array(std::vector<T>& A, size_t size, bool use_exact, T a, T b)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    rocsparse_init(A.data(), size, 1, 1, use_exact, 0, 1, a, b);
 }
 
 template <typename T>
@@ -1744,6 +1760,11 @@ void rocsparse_init_gebsr_pentadiagonal(std::vector<I>&      row_ptr,
                                              size_t batch_count,                                   \
                                              int    a = 1,                                         \
                                              int    b = 10);                                          \
+    template void rocsparse_init_1d_array<TYPE>(std::vector<TYPE> & A,                             \
+                                                size_t size,                                       \
+                                                bool   use_exact,                                  \
+                                                TYPE   a = static_cast<TYPE>(0),                   \
+                                                TYPE   b = static_cast<TYPE>(1));                    \
     template void rocsparse_init<TYPE>(std::vector<TYPE> & A,                                      \
                                        size_t M,                                                   \
                                        size_t N,                                                   \
@@ -1780,6 +1801,11 @@ void rocsparse_init_gebsr_pentadiagonal(std::vector<I>&      row_ptr,
                                            size_t batch_count);
 
 #define INSTANTIATE(TYPE)                                                         \
+    template void rocsparse_init_1d_array<TYPE>(TYPE * A,                         \
+                                                size_t size,                      \
+                                                bool   use_exact,                 \
+                                                TYPE   a = static_cast<TYPE>(0),  \
+                                                TYPE   b = static_cast<TYPE>(1));   \
     template void rocsparse_init<TYPE>(TYPE * A,                                  \
                                        size_t M,                                  \
                                        size_t N,                                  \

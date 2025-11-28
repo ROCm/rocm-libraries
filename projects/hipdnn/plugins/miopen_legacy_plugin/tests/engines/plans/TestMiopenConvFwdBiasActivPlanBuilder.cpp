@@ -27,6 +27,9 @@ class TestGpuMiopenConvFwdBiasActivPlanBuilder : public TestMiopenConvFwdBiasAct
 protected:
     void SetUp() override
     {
+        // Re-enable in Windows once CK is supported
+        SKIP_IF_WINDOWS();
+
         SKIP_IF_NO_DEVICES();
         ASSERT_EQ(miopenCreate(&_handle.miopenHandle), miopenStatusSuccess);
     }
@@ -108,13 +111,6 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForWrongNo
 
 TEST_F(TestGpuMiopenConvFwdBiasActivPlanBuilder, IsApplicableVariousLayouts)
 {
-    char** s = environ;
-
-    for(; *s != nullptr; s++)
-    {
-        std::cout << *s << "\n";
-    }
-
     std::vector<std::pair<std::vector<int64_t>, bool>> layoutsAndExpectedResults
         = {{{3, 2, 1, 0}, true},
            {{3, 0, 2, 1}, true},

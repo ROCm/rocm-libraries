@@ -64,7 +64,22 @@ cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON
 cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installation when building tests" OFF BUILD_TEST OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Force download of non-ROCm dependencies (eg. Google Test, Google Benchmark)" OFF)
 
-check_language(HIP)
+set(DEVICE_SYSTEM_OPTIONS "HIP" "CUDA" "CPP" "OpenMP" "TBB")
+set(ROCTHRUST_DEVICE_SYSTEM "HIP" CACHE STRING "Set device system for thrust (options are ${DEVICE_SYSTEM_OPTIONS})")
+
+if(NOT ${ROCTHRUST_DEVICE_SYSTEM} IN_LIST DEVICE_SYSTEM_OPTIONS)
+  message(FATAL_ERROR "Unrecognized ROCTHRUST_DEVICE_SYSTEM option \"${ROCTHRUST_DEVICE_SYSTEM}\". Valid options are: ${DEVICE_SYSTEM_OPTIONS}")
+endif()
+
+if((BUILD_TEST OR BUILD_BENCHMARK OR BUILD_EXAMPLE) AND
+    NOT (${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP" OR $ROCTHRUST_DEVICE_SYSTEM STREQUAL "CUDA"))
+    message(FATAL_ERROR "rocThrust tests, benchmarks, and examples must be built with ROCTHRUST_DEVICE_SYSTEM=HIP|CUDA since they require device acceleration.")
+endif()
+
+if(${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP")
+  check_language(HIP)
+endif()
+
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
 
 include(CheckCXXCompilerFlag)

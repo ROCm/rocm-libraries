@@ -595,6 +595,8 @@ Arguments:
   - boostval: c_double
   - boostvali: c_double
   - tolm: c_double
+  - rand_gen_min: c_double
+  - rand_gen_max: c_double
   - graph_test: c_bool
   - skip_reproducibility: c_bool
   - sparsity_pattern_statistics: c_bool
@@ -746,6 +748,8 @@ Defaults:
   boostval: 1.0
   boostvali: 0.0
   tolm: 1.0
+  rand_gen_min: 0.0
+  rand_gen_max: 1.0
   graph_test: false
   skip_reproducibility: false
   sparsity_pattern_statistics: false

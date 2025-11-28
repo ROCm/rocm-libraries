@@ -236,9 +236,10 @@ function(fetch_dep method repo_name repo_path download_branch)
   endif()
 endfunction()
 
-fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH ROCM_DEP_RELEASE_BRANCH)
+if(${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP")
+  fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH ROCM_DEP_RELEASE_BRANCH)
 
-if(${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO")
+  if(${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO")
     # The fetch_dep call above should have downloaded/located the source. We just need to make it available.
     message(STATUS "Configuring rocPRIM")
     FetchContent_Declare(
@@ -258,6 +259,7 @@ if(${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD" OR ${ROCPRIM_FETCH_METHOD} STREQU
       add_library(roc::rocprim_hip ALIAS rocprim_hip)
     endif()
   endif()
+endif()
 
 # Test dependencies
 if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)

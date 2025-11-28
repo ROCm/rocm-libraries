@@ -127,13 +127,25 @@ void testing_v2_spmv_sell(const Arguments& arg)
 
     matrix_factory.init_sell(hA, M, N, sell_slice_size, base);
 
+    // Redefine matrix values
+    rocsparse_init_1d_array<A>(
+        hA.val, hA.val.size(), arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
+
     // Allocate host memory for vectors
     host_vector<X> hx((trans == rocsparse_operation_none) ? N : M);
     host_vector<Y> hy((trans == rocsparse_operation_none) ? M : N);
 
     // Initialize data on CPU
-    rocsparse_init<X>(hx, (trans == rocsparse_operation_none) ? N : M, 1, 1, arg.convert_to_int);
-    rocsparse_init<Y>(hy, (trans == rocsparse_operation_none) ? M : N, 1, 1, arg.convert_to_int);
+    rocsparse_init_1d_array<X>(hx,
+                               (trans == rocsparse_operation_none) ? N : M,
+                               arg.convert_to_int,
+                               arg.rand_gen_min,
+                               arg.rand_gen_max);
+    rocsparse_init_1d_array<Y>(hy,
+                               (trans == rocsparse_operation_none) ? M : N,
+                               arg.convert_to_int,
+                               arg.rand_gen_min,
+                               arg.rand_gen_max);
 
     host_vector<Y> hy_gold(hy);
 
