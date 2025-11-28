@@ -22,6 +22,7 @@ if(ENABLE_CLANG_TIDY)
                                                          /usr/bin /usr/local/bin
     )
 
+    # Alternatively, this could be separate from the ENABLE_CLANG_TIDY flag
     if(RUN_CLANG_TIDY_EXE)
         message(STATUS "Found run-clang-tidy at ${RUN_CLANG_TIDY_EXE}")
 
@@ -32,8 +33,6 @@ if(ENABLE_CLANG_TIDY)
             set(CLANG_TIDY_JOBS 1)
         endif()
 
-        # Create the tidy target The .clang-tidy file's ExcludeHeaderFilterRegex handles excluding
-        # _deps and build directories
         add_custom_target(
             tidy
             COMMAND
@@ -46,7 +45,7 @@ if(ENABLE_CLANG_TIDY)
             VERBATIM
         )
     else()
-        message(WARNING "run-clang-tidy not found. The 'tidy' target will not be available.")
+        message(WARNING "run-clang-tidy-20 not found. The 'tidy' target will not be available.")
     endif()
 endif()
 
