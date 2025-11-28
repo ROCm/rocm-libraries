@@ -414,17 +414,16 @@ TEST(RocprimConfigDispatchTests, ExecuteLaunchPlan)
     target* d_output;
     HIP_CHECK(hipMalloc(&d_output, sizeof(target)));
 
-    auto kernel = [=](auto arch_config, auto t)
-    {
-        (void)arch_config;
-        *d_output = target{t};
-    };
+    auto kernel = [=](auto arch_config) { *d_output = decltype(arch_config)::config_target; };
 
-    HIP_CHECK(
-        (execute_launch_plan<Config,
-                             TestSelector<block_size, ipt, EmptyTargets>,
-                             default_config_static_selector,
-                             true>(current_target, kernel, dim3(1), dim3(block_size), 0, stream)));
+    HIP_CHECK((execute_launch_plan<Config,
+                                   TestSelector<block_size, ipt, EmptyTargets>,
+                                   default_config_static_selector>(current_target,
+                                                                   kernel,
+                                                                   dim3(1),
+                                                                   dim3(block_size),
+                                                                   0,
+                                                                   stream)));
 
     // Impossible target
     target h_output{gen::cdna4, target_arch::gfx942, gpu::rx6900, rep::spirv};
@@ -432,11 +431,14 @@ TEST(RocprimConfigDispatchTests, ExecuteLaunchPlan)
     // Compared to targets with only unknown inside.
     ASSERT_EQ(target(), h_output);
 
-    HIP_CHECK(
-        (execute_launch_plan<Config,
-                             TestSelector<block_size, ipt, Targets>,
-                             default_config_static_selector,
-                             true>(current_target, kernel, dim3(1), dim3(block_size), 0, stream)));
+    HIP_CHECK((execute_launch_plan<Config,
+                                   TestSelector<block_size, ipt, Targets>,
+                                   default_config_static_selector>(current_target,
+                                                                   kernel,
+                                                                   dim3(1),
+                                                                   dim3(block_size),
+                                                                   0,
+                                                                   stream)));
 
     // Impossible target
     h_output = target{gen::cdna4, target_arch::gfx942, gpu::rx6900, rep::spirv};

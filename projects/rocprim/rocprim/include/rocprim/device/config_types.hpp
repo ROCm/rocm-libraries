@@ -382,28 +382,20 @@ constexpr void for_each_arch(F&& f)
                        std::make_index_sequence<std::size(target_arch_descriptors)>{});
 }
 
-constexpr arch::wavefront::target arch_wavefront_size(const target_arch target_arch)
+constexpr arch::wavefront::target gen_wavefront_size(const gen gen)
 {
-    switch(target_arch)
+    switch(gen)
     {
-        case target_arch::unknown: return arch::wavefront::get_target();
-        case target_arch::gfx803: return arch::wavefront::target::size64;
-        case target_arch::gfx900: return arch::wavefront::target::size64;
-        case target_arch::gfx906: return arch::wavefront::target::size64;
-        case target_arch::gfx908: return arch::wavefront::target::size64;
-        case target_arch::gfx90a: return arch::wavefront::target::size64;
-        case target_arch::gfx942: return arch::wavefront::target::size64;
-        case target_arch::gfx950: return arch::wavefront::target::size64;
-        case target_arch::gfx1030: return arch::wavefront::target::size32;
-        case target_arch::gfx1100: return arch::wavefront::target::size32;
-        case target_arch::gfx1102: return arch::wavefront::target::size32;
-        case target_arch::gfx1152: return arch::wavefront::target::size32;
-        case target_arch::gfx1153: return arch::wavefront::target::size32;
-        case target_arch::gfx1200: return arch::wavefront::target::size32;
-        case target_arch::gfx1201: return arch::wavefront::target::size32;
-
-        // Unreachable
-        case target_arch::invalid: return arch::wavefront::target::dynamic;
+        case gen::unknown: return arch::wavefront::get_target();
+        case gen::gcn3:
+        case gen::gcn5:
+        case gen::cdna1:
+        case gen::cdna2:
+        case gen::cdna3:
+        case gen::cdna4: return arch::wavefront::target::size64;
+        case gen::rdna2:
+        case gen::rdna3:
+        case gen::rdna4: return arch::wavefront::target::size32;
     }
 }
 
@@ -516,9 +508,9 @@ constexpr typename Selector::param_type get_config(Config config, target t)
 template<class Config, class Selector, class Target>
 struct target_config
 {
-    constexpr static auto params    = get_config<Selector>(Config{}, target{Target{}});
-    constexpr static auto wavefront = arch_wavefront_size(Target::i);
-    constexpr static auto arch      = Target::i;
+    constexpr static target config_target = target{Target{}};
+    constexpr static auto   params        = get_config<Selector>(Config{}, config_target);
+    constexpr static auto   wavefront     = gen_wavefront_size(Target::g);
 };
 
 template<class Config, class Selector, class Target>
@@ -536,8 +528,7 @@ template<class Config,
          class Kernel,
          class Target,
          template<class, class, class>
-         class LaunchSelector,
-         bool PassTarget = false>
+         class LaunchSelector>
 ROCPRIM_KERNEL __launch_bounds__((LaunchSelector<Config, Selector, Target>::block_size))
 void trampoline_kernel(Kernel kernel)
 {
@@ -550,14 +541,7 @@ void trampoline_kernel(Kernel kernel)
     if constexpr(Target::i == device_arch_target.i)
 #endif
     {
-        if constexpr(PassTarget)
-        {
-            kernel(ArchConfig{}, Target{});
-        }
-        else
-        {
-            kernel(ArchConfig{});
-        }
+        kernel(ArchConfig{});
     }
 #if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
     else
@@ -570,7 +554,6 @@ void trampoline_kernel(Kernel kernel)
 template<class Config,
          class ConfigSelector,
          template<class, class, class> class LaunchSelector = default_config_static_selector,
-         bool PassTarget                                    = false,
          class Kernel>
 auto make_launch_plan(target target_current, Kernel kernel) -> launch_plan<Kernel>
 {
@@ -590,8 +573,7 @@ auto make_launch_plan(target target_current, Kernel kernel) -> launch_plan<Kerne
                                                  ConfigSelector,
                                                  Kernel,
                                                  decltype(t),
-                                                 LaunchSelector,
-                                                 PassTarget>;
+                                                 LaunchSelector>;
             }
         });
 
@@ -601,13 +583,11 @@ auto make_launch_plan(target target_current, Kernel kernel) -> launch_plan<Kerne
 template<class Config,
          class ConfigSelector,
          template<class, class, class> class LaunchSelector = default_config_static_selector,
-         bool PassTarget                                    = false,
          class Kernel>
 hipError_t execute_launch_plan(
     target t, Kernel kernel, dim3 grid_size, dim3 block_size, size_t shmem, hipStream_t stream)
 {
-    const auto launch_plan
-        = make_launch_plan<Config, ConfigSelector, LaunchSelector, PassTarget>(t, kernel);
+    const auto launch_plan = make_launch_plan<Config, ConfigSelector, LaunchSelector>(t, kernel);
     launch_plan.launch(grid_size, block_size, shmem, stream);
     return hipGetLastError();
 }
