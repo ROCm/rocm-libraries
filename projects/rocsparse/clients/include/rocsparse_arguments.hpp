@@ -50,6 +50,7 @@ struct Arguments
     rocsparse_int col_block_dimA;
     rocsparse_int row_block_dimB;
     rocsparse_int col_block_dimB;
+    rocsparse_int sell_slice_size;
 
     rocsparse_int dimx;
     rocsparse_int dimy;
@@ -111,8 +112,10 @@ struct Arguments
     rocsparse_sddmm_alg            sddmm_alg;
     rocsparse_spmv_alg             spmv_alg;
     rocsparse_spsv_alg             spsv_alg;
+    rocsparse_sptrsv_alg           sptrsv_alg;
     rocsparse_spitsv_alg           spitsv_alg;
     rocsparse_spsm_alg             spsm_alg;
+    rocsparse_sptrsm_alg           sptrsm_alg;
     rocsparse_spmm_alg             spmm_alg;
     rocsparse_spgemm_alg           spgemm_alg;
     rocsparse_spgeam_alg           spgeam_alg;
@@ -148,6 +151,8 @@ struct Arguments
     double boostvali;
 
     double tolm;
+    double rand_gen_min;
+    double rand_gen_max;
 
     bool graph_test;
     bool skip_reproducibility;
@@ -209,6 +214,7 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(col_block_dimA);
         ROCSPARSE_FORMAT_CHECK(row_block_dimB);
         ROCSPARSE_FORMAT_CHECK(col_block_dimB);
+        ROCSPARSE_FORMAT_CHECK(sell_slice_size);
         ROCSPARSE_FORMAT_CHECK(dimx);
         ROCSPARSE_FORMAT_CHECK(dimy);
         ROCSPARSE_FORMAT_CHECK(dimz);
@@ -261,8 +267,10 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(sddmm_alg);
         ROCSPARSE_FORMAT_CHECK(spmv_alg);
         ROCSPARSE_FORMAT_CHECK(spsv_alg);
+        ROCSPARSE_FORMAT_CHECK(sptrsv_alg);
         ROCSPARSE_FORMAT_CHECK(spitsv_alg);
         ROCSPARSE_FORMAT_CHECK(spsm_alg);
+        ROCSPARSE_FORMAT_CHECK(sptrsm_alg);
         ROCSPARSE_FORMAT_CHECK(spmm_alg);
         ROCSPARSE_FORMAT_CHECK(spgemm_alg);
         ROCSPARSE_FORMAT_CHECK(spgeam_alg);
@@ -292,6 +300,8 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(boostval);
         ROCSPARSE_FORMAT_CHECK(boostvali);
         ROCSPARSE_FORMAT_CHECK(tolm);
+        ROCSPARSE_FORMAT_CHECK(rand_gen_min);
+        ROCSPARSE_FORMAT_CHECK(rand_gen_max);
         ROCSPARSE_FORMAT_CHECK(graph_test);
         ROCSPARSE_FORMAT_CHECK(skip_reproducibility);
         ROCSPARSE_FORMAT_CHECK(sparsity_pattern_statistics);
@@ -457,6 +467,7 @@ private:
         print("col_block_dimA", arg.col_block_dimA);
         print("row_block_dimB", arg.row_block_dimB);
         print("col_block_dimB", arg.col_block_dimB);
+        print("sell_slice_size", arg.sell_slice_size);
         print("dim_x", arg.dimx);
         print("dim_y", arg.dimy);
         print("dim_z", arg.dimz);
@@ -489,8 +500,10 @@ private:
         print("sddmm_alg", rocsparse_sddmmalg2string(arg.sddmm_alg));
         print("spmv_alg", rocsparse_spmvalg2string(arg.spmv_alg));
         print("spsv_alg", rocsparse_spsvalg2string(arg.spsv_alg));
+        print("sptrsv_alg", rocsparse_sptrsvalg2string(arg.sptrsv_alg));
         print("spitsv_alg", rocsparse_spitsvalg2string(arg.spitsv_alg));
         print("spsm_alg", rocsparse_spsmalg2string(arg.spsm_alg));
+        print("sptrsm_alg", rocsparse_sptrsmalg2string(arg.sptrsm_alg));
         print("spmm_alg", rocsparse_spmmalg2string(arg.spmm_alg));
         print("spgemm_alg", rocsparse_spgemmalg2string(arg.spgemm_alg));
         print("spgeam_alg", rocsparse_spgeamalg2string(arg.spgeam_alg));
@@ -508,6 +521,8 @@ private:
         print("boost_val", arg.boostval);
         print("boost_vali", arg.boostvali);
         print("tolm", arg.tolm);
+        print("rand_gen_min", arg.rand_gen_min);
+        print("rand_gen_max", arg.rand_gen_max);
         print("graph_test", arg.graph_test);
         print("skip_reproducibility", arg.skip_reproducibility);
         print("sparsity_pattern_statistics", arg.sparsity_pattern_statistics);

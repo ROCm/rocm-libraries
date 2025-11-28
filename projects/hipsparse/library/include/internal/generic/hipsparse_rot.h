@@ -62,6 +62,10 @@ extern "C" {
 *  <tr><td>HIP_C_64F
 *  </table>
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be 
+*  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
 *  handle      handle to the hipsparse library context queue.
 *  @param[in]
@@ -73,83 +77,10 @@ extern "C" {
 *  @param[inout]
 *  vecY        dense vector descriptor \f$y\f$.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p c_coeff, \p s_coeff, \p vecX or \p vecY pointer is
-*              invalid.
-*
-*  \par Example
-*  \code{.c}
-*    // Number of non-zeros of the sparse vector
-*    int nnz = 3;
-*
-*    // Size of sparse and dense vector
-*    int size = 9;
-*
-*    // Sparse index vector
-*    std::vector<int> hxInd = {0, 3, 5};
-*
-*    // Sparse value vector
-*    std::vector<float> hxVal = {1.0f, 2.0f, 3.0f};
-*
-*    // Dense vector
-*    std::vector<float> hy = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
-*
-*    // Scalar c
-*    float c = 3.7f;
-*
-*    // Scalar s
-*    float s = 1.2f;
-*
-*    // Offload data to device
-*    int* dxInd;
-*    float* dxVal;
-*    float* dy;
-*    hipMalloc((void**)&dxInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dxVal, sizeof(float) * nnz);
-*    hipMalloc((void**)&dy, sizeof(float) * size);
-*
-*    hipMemcpy(dxInd, hxInd.data(), sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dxVal, hxVal.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dy, hy.data(), sizeof(float) * size, hipMemcpyHostToDevice);
-*
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Create sparse vector X
-*    hipsparseSpVecDescr_t vecX;
-*    hipsparseCreateSpVec(&vecX,
-*                                size,
-*                                nnz,
-*                                dxInd,
-*                                dxVal,
-*                                HIPSPARSE_INDEX_32I,
-*                                HIPSPARSE_INDEX_BASE_ZERO,
-*                                HIP_R_32F);
-*
-*    // Create dense vector Y
-*    hipsparseDnVecDescr_t vecY;
-*    hipsparseCreateDnVec(&vecY, size, dy, HIP_R_32F);
-*
-*    // Call rot
-*    hipsparseRot(handle, (void*)&c, (void*)&s, vecX, vecY);
-*
-*    hipsparseSpVecGetValues(vecX, (void**)&dxVal);
-*    hipsparseDnVecGetValues(vecY, (void**)&dy);
-*
-*    // Copy result back to host
-*    hipMemcpy(hxVal.data(), dxVal, sizeof(float) * nnz, hipMemcpyDeviceToHost);
-*    hipMemcpy(hy.data(), dy, sizeof(float) * size, hipMemcpyDeviceToHost);
-*
-*    // Clear hipSPARSE
-*    hipsparseDestroySpVec(vecX);
-*    hipsparseDestroyDnVec(vecY);
-*    hipsparseDestroy(handle);
-*
-*    // Clear device memory
-*    hipFree(dxInd);
-*    hipFree(dxVal);
-*    hipFree(dy);
-*  \endcode
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p c_coeff, \p s_coeff, \p vecX or \p vecY is nullptr,
+*          or the vector sizes or data types are incompatible.
 */
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 13000))
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")

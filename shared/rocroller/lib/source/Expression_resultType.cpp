@@ -73,6 +73,11 @@ namespace rocRoller
                 {
                     varType = lhsVal.varType;
                 }
+                // A bitfieldCombine's type is the same as the destination type.
+                else if constexpr(std::same_as<T, BitfieldCombine>)
+                {
+                    varType = rhsVal.varType;
+                }
                 else if(std::same_as<T, Subtract> && lhsVal.varType.isPointer()
                         && lhsVal.varType == rhsVal.varType)
                 {
@@ -328,7 +333,7 @@ namespace rocRoller
             ResultType operator()(Concatenate const& expr)
             {
                 auto         registerType = Register::Type::Literal;
-                VariableType variableType{expr.destinationType};
+                VariableType variableType = expr.destinationType;
 
                 auto expectedNumRegister   = DataTypeInfo::Get(expr.destinationType).registerCount;
                 unsigned actualNumRegister = 0;
@@ -350,8 +355,7 @@ namespace rocRoller
 
                     registerType = Register::PromoteType(registerType, operandRegisterType);
                     actualNumRegister
-                        = actualNumRegister
-                          + DataTypeInfo::Get(operandVariableType.dataType).registerCount;
+                        = actualNumRegister + DataTypeInfo::Get(operandVariableType).registerCount;
                 }
 
                 AssertFatal(expectedNumRegister == actualNumRegister,

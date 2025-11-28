@@ -75,14 +75,18 @@ extern "C" {
 *  This function is non blocking and executed asynchronously with respect to the host.
 *  It may return before the actual computation has finished.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
 *  handle          handle to the hipsparse library context queue.
 *  @param[in]
-*  m               number of rows of the sparse CSR matrix.
+*  m               number of rows of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  n               number of columns of the sparse CSR matrix.
+*  n               number of columns of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  nnz             number of non-zero entries of the sparse CSR matrix.
+*  nnz             number of non-zero entries of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
 *  csrSortedVal    array of \p nnz elements of the sparse CSR matrix.
 *  @param[in]
@@ -102,64 +106,19 @@ extern "C" {
 *  @param[in]
 *  copyValues      \ref HIPSPARSE_ACTION_SYMBOLIC or \ref HIPSPARSE_ACTION_NUMERIC.
 *  @param[in]
-*  idxBase         \ref HIPSPARSE_INDEX_BASE_ZERO or \ref HIPSPARSE_INDEX_BASE_ONE.
+*  idxBase         index base. \ref HIPSPARSE_INDEX_BASE_ZERO for zero-based indexing or
+*                  \ref HIPSPARSE_INDEX_BASE_ONE for one-based indexing.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p csrSortedVal, \p csrSortedRowPtr,
-*              \p csrSortedColInd, \p cscSortedVal, \p cscSortedRowInd or \p cscSortedColPtr pointer is invalid.
-*  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
-*  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p m, \p n or \p nnz is negative,
+*          \p csrSortedVal, \p csrSortedRowPtr, \p csrSortedColInd, \p cscSortedVal, \p cscSortedRowInd
+*          or \p cscSortedColPtr is nullptr when \p nnz is greater than zero, \p copyValues is neither
+*          \ref HIPSPARSE_ACTION_SYMBOLIC nor \ref HIPSPARSE_ACTION_NUMERIC, or \p idxBase is neither
+*          \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *
-*  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Sparse matrix in CSR format
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    int hcsrRowPtr[4] = {0, 3, 5, 8};
-*    int hcsrColInd[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcsrVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
-*
-*    int m         = 3;
-*    int n         = 5;
-*    int nnz       = 8;
-*    hipsparseIndexBase_t base = HIPSPARSE_INDEX_BASE_ZERO;
-*    hipsparseAction_t action = HIPSPARSE_ACTION_NUMERIC;
-*
-*    int* dcsrRowPtr = nullptr;
-*    int* dcsrColInd = nullptr;
-*    float* dcsrVal = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz);
-*
-*    hipMemcpy(dcsrRowPtr, hcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColInd, hcsrColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrVal, hcsrVal, sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*    int* dcscRowInd = nullptr;
-*    int* dcscColPtr = nullptr;
-*    float* dcsc_val   = nullptr;
-*    hipMalloc((void**)&dcscRowInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcscColPtr, sizeof(int) * (n + 1));
-*    hipMalloc((void**)&dcsc_val, sizeof(float) * nnz);
-*
-*    hipsparseScsr2csc(handle, m, n, nnz, dcsrVal, dcsrRowPtr, dcsrColInd, dcsc_val, dcscRowInd, dcscColPtr, action, base);
-*
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*
-*    hipFree(dcscRowInd);
-*    hipFree(dcscColPtr);
-*    hipFree(dcsc_val);
-*
-*    hipsparseDestroy(handle);
-*  \endcode
 */
 /**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")
@@ -358,94 +317,6 @@ hipsparseStatus_t hipsparseCsr2cscEx2_bufferSize(hipsparseHandle_t     handle,
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnz, \p csrRowPtr, \p csrColInd or
 *              \p pBufferSizeInBytes pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
-*
-*  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Sparse matrix in CSR format
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    int hcsrRowPtr[4] = {0, 3, 5, 8};
-*    int hcsrColInd[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcsrVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
-*
-*    int m         = 3;
-*    int n         = 5;
-*    int nnz       = 8;
-*    hipsparseIndexBase_t base = HIPSPARSE_INDEX_BASE_ZERO;
-*    hipsparseAction_t action = HIPSPARSE_ACTION_NUMERIC;
-*    hipsparseCsr2CscAlg_t alg = HIPSPARSE_CSR2CSC_ALG_DEFAULT;
-*
-*    int* dcsrRowPtr = nullptr;
-*    int* dcsrColInd = nullptr;
-*    float* dcsrVal = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz);
-*
-*    hipMemcpy(dcsrRowPtr, hcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColInd, hcsrColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrVal, hcsrVal, sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*    int* dcscRowInd = nullptr;
-*    int* dcscColPtr = nullptr;
-*    float* dcsc_val   = nullptr;
-*    hipMalloc((void**)&dcscRowInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcscColPtr, sizeof(int) * (n + 1));
-*    hipMalloc((void**)&dcsc_val, sizeof(float) * nnz);
-*
-*    size_t bufferSize;
-*    hipsparseCsr2cscEx2_bufferSize(handle,
-*                                   m,
-*                                   n,
-*                                   nnz,
-*                                   dcsrVal,
-*                                   dcsrRowPtr,
-*                                   dcsrColInd,
-*                                   dcsc_val,
-*                                   dcscColPtr,
-*                                   dcscRowInd,
-*                                   HIP_R_32F,
-*                                   action,
-*                                   base,
-*                                   alg,
-*                                   &bufferSize);
-*
-*    void* dbuffer = nullptr;
-*    hipMalloc((void**)&dbuffer, bufferSize);
-*
-*    hipsparseCsr2cscEx2(handle,
-*                        m,
-*                        n,
-*                        nnz,
-*                        dcsrVal,
-*                        dcsrRowPtr,
-*                        dcsrColInd,
-*                        dcsc_val,
-*                        dcscColPtr,
-*                        dcscRowInd,
-*                        HIP_R_32F,
-*                        action,
-*                        base,
-*                        alg,
-*                        dbuffer);
-*
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*
-*    hipFree(dcscRowInd);
-*    hipFree(dcscColPtr);
-*    hipFree(dcsc_val);
-*
-*    hipFree(dbuffer);
-*
-*    hipsparseDestroy(handle);
-*  \endcode
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCsr2cscEx2(hipsparseHandle_t     handle,

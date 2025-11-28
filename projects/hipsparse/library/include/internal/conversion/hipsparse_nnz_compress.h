@@ -76,53 +76,6 @@ extern "C" {
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p tol, \p csrValA, \p csrRowPtrA, \p nnzPerRow or \p nnzC
 *              pointer is invalid.
-*
-*  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Matrix descriptor
-*    hipsparseMatDescr_t descr_A;
-*    hipsparseCreateMatDescr(&descr_A);
-*
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    float tol = 4.2f;
-*
-*    int m     = 3;
-*    int n     = 5;
-*    int nnz_A = 8;
-*
-*    int hcsrRowPtr_A[4] = {0, 3, 5, 8};
-*    float hcsrVal_A[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
-*
-*    int* dcsrRowPtr_A = nullptr;
-*    float* dcsrVal_A = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr_A, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrVal_A, sizeof(float) * nnz_A);
-*
-*    hipMemcpy(dcsrRowPtr_A, hcsrRowPtr_A, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrVal_A, hcsrVal_A, sizeof(float) * nnz_A, hipMemcpyHostToDevice);
-*
-*    // Allocate memory for the nnz_per_row array
-*    int* dnnz_per_row;
-*    hipMalloc((void**)&dnnz_per_row, sizeof(int) * m);
-*
-*    // Call snnz_compress() which fills in nnz_per_row array and finds the number
-*    // of entries that will be in the compressed CSR matrix
-*    int nnz_C;
-*    hipsparseSnnz_compress(handle, m, descr_A, dcsrVal_A, dcsrRowPtr_A, dnnz_per_row, &nnz_C, tol);
-*
-*    hipFree(dcsrRowPtr_A);
-*    hipFree(dcsrVal_A);
-*    hipFree(dnnz_per_row);
-*
-*    hipsparseDestroyMatDescr(descr_A);
-*    hipsparseDestroy(handle);
-*  \endcode
 */
 /**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")

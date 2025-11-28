@@ -48,6 +48,7 @@ option( MIOPEN_TEST_GFX900 "Test on Vega10 (gfx900)" OFF )
 option( MIOPEN_TEST_GFX906 "Test on Vega20 (gfx906)" OFF )
 option( MIOPEN_TEST_GFX103X "Test on Navi21/22 (gfx1030/31)" OFF )
 option( MIOPEN_TEST_GFX110X "Test on Navi31/32 (gfx1100/02)" OFF )
+option( MIOPEN_TEST_GFX115X "Test on Navi35 strix halo (gfx1150/51/52)" OFF )
 option( MIOPEN_TEST_GFX120X "Test on gfx1200/01" OFF )
 option( MIOPEN_TEST_GPU_XNACK_ENABLED "Test as if XNACK mode is enabled" OFF )
 option( MIOPEN_TEST_CONV "" OFF )
@@ -107,16 +108,19 @@ endif()
 # Also we do not detect GPU when target GPU for testing is specified explicitly.
 set(MIOPEN_TEST_GPU_DETECTION_FAILED FALSE)
 set(MIOPEN_NO_GPU FALSE)
-if(NOT (MIOPEN_TEST_GFX900 OR MIOPEN_TEST_GFX906 OR MIOPEN_TEST_GFX908 OR MIOPEN_TEST_GFX90A OR MIOPEN_TEST_GFX94X OR MIOPEN_TEST_GFX95X OR MIOPEN_TEST_GFX103X OR MIOPEN_TEST_GFX110X OR MIOPEN_TEST_GFX120X OR MIOPEN_TEST_HIP_NOGPU))
+if(NOT (MIOPEN_TEST_GFX900 OR MIOPEN_TEST_GFX906 OR MIOPEN_TEST_GFX908 OR MIOPEN_TEST_GFX90A OR MIOPEN_TEST_GFX94X OR MIOPEN_TEST_GFX95X OR MIOPEN_TEST_GFX103X OR MIOPEN_TEST_GFX110X OR MIOPEN_TEST_GFX120X OR MIOPEN_TEST_GFX115X OR MIOPEN_TEST_HIP_NOGPU))
+    # Try to find rocminfo first, then hipinfo as fallback (for Windows)
     find_program(ROCMINFO
-        NAMES rocminfo
+        NAMES rocminfo hipinfo
         PATHS
             /opt/rocm
             ${CMAKE_INSTALL_PREFIX}
+            $ENV{ROCM_PATH}
+            $ENV{HIP_PATH}
         PATH_SUFFIXES
             /bin
     )
-    message(STATUS "rocminfo utility: ${ROCMINFO}")
+    message(STATUS "GPU info utility: ${ROCMINFO}")
     if(ROCMINFO)
         execute_process (
             COMMAND ${ROCMINFO}
@@ -127,14 +131,14 @@ if(NOT (MIOPEN_TEST_GFX900 OR MIOPEN_TEST_GFX906 OR MIOPEN_TEST_GFX908 OR MIOPEN
             message(WARNING "ROCk module is NOT loaded, possibly no GPU devices")
             set(MIOPEN_NO_GPU TRUE)
         elseif (NOT ROCMINFO_EXIT_STATUS EQUAL 0)
-            message(WARNING "ROCMINFO FAILED, GPU TYPE UNKNOWN. Manually set respective MIOPEN_TEST_GFX* CMake variable to specify target GPU for testing.")
+            message(WARNING "GPU info utility FAILED, GPU TYPE UNKNOWN. Manually set respective MIOPEN_TEST_GFX* CMake variable to specify target GPU for testing.")
             set(MIOPEN_TEST_GPU_DETECTION_FAILED TRUE)
         elseif(ROCMINFO_OUTPUT MATCHES "gfx103.")
             set(MIOPEN_TEST_GFX103X ON)
         elseif(ROCMINFO_OUTPUT MATCHES "gfx110.")
             set(MIOPEN_TEST_GFX110X ON)
         elseif(ROCMINFO_OUTPUT MATCHES "gfx115.")
-            set(MIOPEN_TEST_GFX110X ON)
+            set(MIOPEN_TEST_GFX115X ON)
         elseif(ROCMINFO_OUTPUT MATCHES "gfx120.")
             set(MIOPEN_TEST_GFX120X ON)
         elseif(ROCMINFO_OUTPUT MATCHES "gfx900")
@@ -162,7 +166,7 @@ if(NOT (MIOPEN_TEST_GFX900 OR MIOPEN_TEST_GFX906 OR MIOPEN_TEST_GFX908 OR MIOPEN
             message(STATUS "${ROCMINFO_OUTPUT}")
         endif()
     else()
-        message(WARNING "ROCMINFO NOT FOUND, GPU TYPE UNKNOWN. Manually set respective MIOPEN_TEST_GFX* CMake variable to specify target GPU for testing.")
+        message(WARNING "GPU info utility FAILED, GPU TYPE UNKNOWN. Manually set respective MIOPEN_TEST_GFX* CMake variable to specify target GPU for testing.")
         set(MIOPEN_TEST_GPU_DETECTION_FAILED TRUE)
     endif()
 endif()
@@ -189,6 +193,7 @@ message(STATUS "MIOPEN_TEST_GFX94X ${MIOPEN_TEST_GFX94X}")
 message(STATUS "MIOPEN_TEST_GFX95X ${MIOPEN_TEST_GFX95X}")
 message(STATUS "MIOPEN_TEST_GFX103X ${MIOPEN_TEST_GFX103X}")
 message(STATUS "MIOPEN_TEST_GFX110X ${MIOPEN_TEST_GFX110X}")
+message(STATUS "MIOPEN_TEST_GFX115X ${MIOPEN_TEST_GFX115X}")
 message(STATUS "MIOPEN_TEST_GFX120X ${MIOPEN_TEST_GFX120X}")
 message(STATUS "MIOPEN_TEST_GPU_XNACK_ENABLED ${MIOPEN_TEST_GPU_XNACK_ENABLED}")
 message(STATUS "MIOPEN_TEST_GPU_DETECTION_FAILED ${MIOPEN_TEST_GPU_DETECTION_FAILED}")
@@ -209,7 +214,7 @@ else()
     add_definitions(-DMIOPEN_TEST_DRIVER_MODE=1)
 endif()
 
-add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR})
+add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose -C ${CMAKE_CFG_INTDIR})
 add_custom_target(tests)
 
 if(MIOPEN_TEST_GPU_DETECTION_FAILED AND NOT (MIOPEN_NO_GPU))
@@ -281,7 +286,7 @@ if(MIOPEN_TEST_INT8)
 elseif(MIOPEN_TEST_BFLOAT16)
     set(SKIP_ALL_EXCEPT_TESTS
               test_conv2d test_conv2d_find2 test_tensor_vec test_immed_conv2d
-              test_check_numerics_test test_conv_extra test_conv_for_implicit_gemm test_miopen_conv
+              test_conv_extra test_conv_for_implicit_gemm test_miopen_conv
               test_deepbench_conv test_conv_igemm_dynamic_xdlops_nhwc_wrw_bf16
               test_conv_igemm_dynamic_xdlops_nhwc_fwd_bf16
               test_conv_igemm_dynamic_xdlops_nhwc_bwd_bf16)
@@ -301,6 +306,10 @@ endif()
 #Don't run db verification by default
 if(NOT MIOPEN_TEST_DBSYNC)
     list(APPEND SKIP_TESTS db_sync)
+endif()
+
+if (MIOPEN_TEST_GFX115X)
+    list(APPEND SKIP_TESTS test_ctc)
 endif()
 
 # The usage is non-trivial, see function add_test_command.

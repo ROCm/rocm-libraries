@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -53,6 +53,9 @@ struct BlockwiseGemmXdlops_pipeline_base
 
     static constexpr auto xdlops_gemm =
         XdlopsGemm<ComputeDataType, MPerXDL, NPerXDL, KPack, ComputeDataType, TransposeC>{};
+
+    using ComputeDataTypeBuf =
+        conditional_t<std::is_same<ComputeDataType, ck::tf32_t>::value, float, ComputeDataType>;
 
     static constexpr index_t AMmaKStride = KPack;
     static constexpr index_t BMmaKStride = KPack;
@@ -376,7 +379,7 @@ struct BlockwiseGemmXdlops_pipeline_base
         make_tuple(Number<MRepeat>{}, Number<NRepeat>{}, xdlops_gemm.GetRegSizePerXdlops()));
 
     using AThreadCopy = ThreadwiseTensorSliceTransfer_v4<ADataType,
-                                                         ComputeDataType,
+                                                         ComputeDataTypeBuf,
                                                          decltype(a_block_desc_m0_m1_m2_k),
                                                          decltype(a_thread_desc_),
                                                          Sequence<1, 1, 1, KPack>,
@@ -386,7 +389,7 @@ struct BlockwiseGemmXdlops_pipeline_base
                                                          A_K1>;
 
     using BThreadCopy = ThreadwiseTensorSliceTransfer_v4<BDataType,
-                                                         ComputeDataType,
+                                                         ComputeDataTypeBuf,
                                                          decltype(b_block_desc_n0_n1_n2_k),
                                                          decltype(b_thread_desc_),
                                                          Sequence<1, 1, 1, KPack>,

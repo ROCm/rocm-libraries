@@ -7,7 +7,7 @@ on:
         type: string
       project_to_test:
         type: string
-      subtree_checkout:
+      test_type:
         type: string
 
 permissions:
@@ -15,8 +15,10 @@ permissions:
 
 jobs:
   therock-build-windows:
-    name: Build Windows Packages
+    name: Build
     runs-on: azure-windows-scale-rocm
+    # Skip hipDNN & plugin build on Windows since it's not supported yet https://github.com/ROCm/TheRock/issues/1822
+    if: ${{ !contains(inputs.project_to_test, 'hipdnn') && !contains(inputs.project_to_test, 'miopen_plugin') }}
     outputs:
       AMDGPU_FAMILIES: ${{ env.AMDGPU_FAMILIES }}
     permissions:
@@ -33,19 +35,27 @@ jobs:
       # To get a fast signal of windows building for TheRock, adding gfx1151
       AMDGPU_FAMILIES: "gfx1151"
     steps:
+      - name: Configure GitHub longpath
+        run: |
+          git config --global core.longpaths true
+
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+       # We only want to build MIOpen HEAD against CK HEAD, not applicable for other projects
+      - name: Checkout composable_kernel repository
+        if: ${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen_plugin') }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          sparse-checkout: |
-            .github
-            ${{ inputs.subtree_checkout }}
+          repository: "ROCm/composable_kernel"
+          path: "composable_kernel"
 
       - name: Checkout TheRock repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 85c8db9207bdd8b7e917cdd5cbf7f9f86b0ef62d
+          ref: a1f6b57cc31890c05ab0094212ae0b269765db8e # 2025-11-25 commit
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -56,10 +66,21 @@ jobs:
         run: |
           pip install -r TheRock/requirements.txt
 
-      - name: Install requirements
+      - name: Patch rocm-libraries
         run: |
+          # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
+          # rm ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
+          git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./TheRock/patches/amd-mainline/rocm-libraries/*.patch
+
+      - name: Install requirements
+        # The first two lines removes the default commmunity feed and uses the internal proxy feed
+        run: |
+          choco source disable -n=chocolatey
+          choco source add -n=internal -s http://10.0.167.96:8081/repository/choco-group/ --priority=1
           choco install --no-progress -y ccache
-          choco install --no-progress -y ninja
+          # ninja pinned due to a bug in the 1.13.0 release:
+          # https://github.com/ninja-build/ninja/issues/2616
+          choco install --no-progress -y ninja --version 1.12.1
           choco install --no-progress -y strawberryperl
           echo "$PATH;C:\Strawberry\c\bin" >> $GITHUB_PATH
           choco install --no-progress -y awscli
@@ -73,17 +94,26 @@ jobs:
       - name: Configure MSVC
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
+      - name: Runner health status
+        run: |
+          ccache --zero-stats
+          python ./TheRock/build_tools/health_status.py
+
       - name: Fetch sources
         timeout-minutes: 30
         run: |
           git config --global core.longpaths true
-          python ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-math-libs
+          python ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
+
+      - name: Install external python deps
+        run: |
+          pip install -r TheRock/requirements-external.txt
 
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: "ADHOCBUILD"
-          extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=${{ github.workspace }} ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=${{ github.workspace }} ${{ inputs.cmake_options }}"
         run: |
           # clear cache before build and after download
           ccache -z
@@ -125,50 +155,27 @@ jobs:
         uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 # v5.0.0
         with:
           aws-region: us-east-2
-          role-to-assume: arn:aws:iam::692859939525:role/therock-artifacts-external
+          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+          special-characters-workaround: true
 
-      - name: Create Log archive
+      - name: Post Build Upload
         if: always()
         run: |
-          python3 TheRock/build_tools/create_log_archive.py \
-            --build-dir=${{ env.BUILD_DIR }}
-
-      - name: Create Logs index Files
-        if: always()
-        run: |
-          python3 TheRock/build_tools/github_actions/create_log_index.py \
-            --build-dir=${{ env.BUILD_DIR }} \
-            --amdgpu-family=${{ env.AMDGPU_FAMILIES }}
-
-      - name: Upload artifacts
-        run: |
-          python TheRock/build_tools/github_actions/upload_build_artifacts.py \
+          python3 TheRock/build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
-            --amdgpu-family ${{ env.AMDGPU_FAMILIES }} \
-            --build-dir ${{ env.BUILD_DIR }}
-
-      - name: Upload Logs
-        if: always()
-        run: |
-          python3 TheRock/build_tools/github_actions/upload_build_logs_to_s3.py \
-            --build-dir=${{ env.BUILD_DIR }} \
-            --run-id ${{ github.run_id }} \
-            --amdgpu-family ${{ env.AMDGPU_FAMILIES }}
-
-      - name: Add Links to Job Summary
-        if: always()
-        run: |
-          python TheRock/build_tools/github_actions/upload_build_summary.py \
-            --run-id ${{ github.run_id }} \
-            --amdgpu-family ${{ env.AMDGPU_FAMILIES }} \
-            --build-dir ${{ env.BUILD_DIR }}
+            --artifact-group ${{ env.AMDGPU_FAMILIES }} \
+            --build-dir ${{ env.BUILD_DIR }} \
+            --upload
 
   therock-test-windows:
     name: "Test"
     needs: [therock-build-windows]
+    # Skip hipDNN & plugin tests on Windows since it's not supported yet https://github.com/ROCm/TheRock/issues/1822
+    if: ${{ !contains(inputs.project_to_test, 'hipdnn') && !contains(inputs.project_to_test, 'miopen_plugin') }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       project_to_test: ${{ inputs.project_to_test }}
       amdgpu_families: ${{ needs.therock-build-windows.outputs.AMDGPU_FAMILIES }}
       test_runs_on: "windows-strix-halo-gpu-rocm"
       platform: "windows"
+      test_type: ${{ inputs.test_type }}

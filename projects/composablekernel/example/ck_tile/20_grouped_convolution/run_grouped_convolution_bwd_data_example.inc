@@ -1,9 +1,9 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 #pragma once
-
 template <ck_tile::index_t NDimSpatial,
-          typename GemmWarpConfig,
+          typename ConvConfig,
+          typename Invoker,
           typename InDataType,
           typename WeiDataType,
           typename AccDataType,
@@ -15,15 +15,15 @@ float invoke_grouped_conv_bwd_data(ck_tile::GroupedConvBwdDataHostArgs& args,
                                    int n_warmup,
                                    int n_repeat)
 {
-    float ave_time = grouped_conv_bwd_data<NDimSpatial,
-                                           GemmWarpConfig,
-                                           InDataType,
-                                           WeiDataType,
-                                           AccDataType,
-                                           OutDataType,
-                                           InLayout,
-                                           WeiLayout,
-                                           OutLayout>(
+    float ave_time = Invoker::template grouped_conv_bwd_data<NDimSpatial,
+                                                             ConvConfig,
+                                                             InDataType,
+                                                             WeiDataType,
+                                                             AccDataType,
+                                                             OutDataType,
+                                                             InLayout,
+                                                             WeiLayout,
+                                                             OutLayout>(
         args, ck_tile::stream_config{nullptr, true, 1, n_warmup, n_repeat});
 
     std::size_t flop     = args.GetFlops();
@@ -38,7 +38,8 @@ float invoke_grouped_conv_bwd_data(ck_tile::GroupedConvBwdDataHostArgs& args,
 }
 
 template <ck_tile::index_t NDimSpatial,
-          typename GemmWarpConfig,
+          typename ConvConfig,
+          typename Invoker,
           typename InDataType,
           typename WeiDataType = InDataType,
           typename OutDataType = InDataType,
@@ -139,7 +140,8 @@ int run_grouped_conv_bwd_data_example_with_layouts(
     std::cout << "output: " << output.mDesc << std::endl;
 
     invoke_grouped_conv_bwd_data<NDimSpatial,
-                                 GemmWarpConfig,
+                                 ConvConfig,
+                                 Invoker,
                                  InDataType,
                                  WeiDataType,
                                  AccDataType,
@@ -187,4 +189,60 @@ int run_grouped_conv_bwd_data_example_with_layouts(
     }
 
     return pass;
+}
+
+template <typename Invoker,
+          typename ConvConfig,
+          typename InPrecType,
+          typename WeiPrecType = InPrecType,
+          typename OutPrecType = InPrecType>
+int run_grouped_conv_bwd_data_example_prec_type(
+    std::string in_layout, std::string wei_layout, std::string out_layout, int argc, char* argv[])
+{
+    using NWGC   = ck_tile::tensor_layout::convolution::NWGC;
+    using NHWGC  = ck_tile::tensor_layout::convolution::NHWGC;
+    using NDHWGC = ck_tile::tensor_layout::convolution::NDHWGC;
+
+    using GKXC   = ck_tile::tensor_layout::convolution::GKXC;
+    using GKYXC  = ck_tile::tensor_layout::convolution::GKYXC;
+    using GKZYXC = ck_tile::tensor_layout::convolution::GKZYXC;
+
+    using NWGK   = ck_tile::tensor_layout::convolution::NWGK;
+    using NHWGK  = ck_tile::tensor_layout::convolution::NHWGK;
+    using NDHWGK = ck_tile::tensor_layout::convolution::NDHWGK;
+
+    if(in_layout == "NWGC" && wei_layout == "GKXC" && out_layout == "NWGK")
+    {
+        return run_grouped_conv_bwd_data_example_with_layouts<ck_tile::number<1>{},
+                                                              ConvConfig,
+                                                              Invoker,
+                                                              InPrecType,
+                                                              WeiPrecType,
+                                                              OutPrecType>(
+            argc, argv, NWGC{}, GKXC{}, NWGK{});
+    }
+    else if(in_layout == "NHWGC" && wei_layout == "GKYXC" && out_layout == "NHWGK")
+    {
+        return run_grouped_conv_bwd_data_example_with_layouts<ck_tile::number<2>{},
+                                                              ConvConfig,
+                                                              Invoker,
+                                                              InPrecType,
+                                                              WeiPrecType,
+                                                              OutPrecType>(
+            argc, argv, NHWGC{}, GKYXC{}, NHWGK{});
+    }
+    else if(in_layout == "NDHWGC" && wei_layout == "GKZYXC" && out_layout == "NDHWGK")
+    {
+        return run_grouped_conv_bwd_data_example_with_layouts<ck_tile::number<3>{},
+                                                              ConvConfig,
+                                                              Invoker,
+                                                              InPrecType,
+                                                              WeiPrecType,
+                                                              OutPrecType>(
+            argc, argv, NDHWGC{}, GKZYXC{}, NDHWGK{});
+    }
+    else
+    {
+        throw std::runtime_error("Unsupported memory layout!");
+    }
 }

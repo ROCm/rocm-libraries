@@ -54,6 +54,10 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
         = Register::Value::Placeholder(context.get(), Register::Type::Vector, DataType::Int32, 1);
     r2->allocateNow();
     auto v2 = r2->expression();
+    auto r3
+        = Register::Value::Placeholder(context.get(), Register::Type::Vector, DataType::UInt64, 1);
+    r3->allocateNow();
+    auto v3 = r3->expression();
 
     auto zero  = literal(0);
     auto one   = literal(1);
@@ -173,6 +177,53 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
         CHECK_THAT(simplify(fuseTernary(a + b << one + one)),
                    IdenticalTo(std::make_shared<rocRoller::Expression::Expression>(
                        AddShiftL{literal(33), literal(100), literal(2)})));
+    }
+
+    SECTION("bitFieldExtract")
+    {
+        CHECK_THAT(simplify(bfe(DataType::Int32, v, 0, 32)), IdenticalTo(v));
+        CHECK_THAT(simplify(bfe(DataType::UInt32, v, 0, 32)),
+                   IdenticalTo(convert(DataType::UInt32, v)));
+
+        auto expr  = bfe(DataType::Int32, v, 16, 16);
+        auto expr2 = bfe(DataType::Int32, expr, 0, 16);
+        CHECK_THAT(simplify(expr2), IdenticalTo(expr));
+
+        expr  = bfe(DataType::Int32, v, 8, 16);
+        expr2 = bfe(DataType::Int32, expr, 0, 4);
+        CHECK_THAT(simplify(expr2), IdenticalTo(bfe(DataType::Int32, v, 8, 4)));
+
+        expr  = bfe(DataType::Int32, v, 8, 16);
+        expr2 = bfe(DataType::Int32, expr, 8, 16);
+        CHECK_THAT(simplify(expr2), IdenticalTo(expr2));
+    }
+
+    SECTION("bitFieldCombine")
+    {
+        CHECK_THAT(simplify(bfc(v2, v, 16, 8, 0)), IdenticalTo(v));
+        CHECK_THAT(simplify(bfc(v2, v, 0, 0, 32)), IdenticalTo(v2));
+        CHECK_THAT(simplify(bfc(v3, v, 16, 0, 32)), IdenticalTo(bfe(DataType::Int32, v3, 16, 32)));
+
+        auto expr  = bfc(v2, zero, 0, 0, 16);
+        auto expr2 = bfc(v, expr, 0, 0, 16);
+        CHECK_THAT(simplify(expr2), IdenticalTo(bfc(v, zero, 0, 0, 16)));
+
+        expr  = bfc(v2, zero, 0, 8, 16);
+        expr2 = bfc(v, expr, 0, 0, 32);
+        CHECK_THAT(simplify(expr2), IdenticalTo(v));
+
+        expr  = bfc(v2, zero, 0, 8, 16);
+        expr2 = bfc(v, expr, 0, 9, 32);
+        CHECK_THAT(simplify(expr2), IdenticalTo(expr2));
+    }
+
+    SECTION("concatenate")
+    {
+        CHECK_THAT(simplify(concat({v}, {DataType::Int32})), IdenticalTo(v));
+        CHECK_THAT(
+            simplify(concat({bfe(DataType::UInt32, v3, 0, 32), bfe(DataType::UInt32, v3, 32, 32)},
+                            {DataType::UInt64})),
+            IdenticalTo(v3));
     }
 }
 
@@ -405,6 +456,64 @@ TEST_CASE("FastArithmetic includes translate time evaluation",
     Expression::FastArithmetic fastArith(context.get());
     CHECK(fastArith(nullptr).get() == nullptr);
     CHECK_THAT(fastArith(c * zero), IdenticalTo(literal(0.f)));
+}
+
+TEST_CASE("FastArithmetic pipeline properly simplifies expressions",
+          "[expression][expression-transformation]")
+{
+    using namespace rocRoller;
+    using Expression::literal;
+    auto context = TestContext::ForDefaultTarget();
+
+    Expression::FastArithmetic fastArith(context.get());
+    auto                       transforms = fastArith.getTransforms();
+
+    auto isSimplify = [](const Expression::ExpressionTransformType& transformFunction) {
+        using ExprTransformFuncPtrType = Expression::ExpressionPtr (*)(Expression::ExpressionPtr);
+        const auto* funcPtr            = transformFunction.target<ExprTransformFuncPtrType>();
+        return funcPtr && *funcPtr == Expression::simplify;
+    };
+
+    // Create a version with extra simplifies after each non-simplify transform
+    std::vector<Expression::ExpressionTransformType> transformsExtraSimplify;
+    for(const auto& transform : transforms)
+    {
+        transformsExtraSimplify.push_back(transform);
+        if(!isSimplify(transform))
+            transformsExtraSimplify.push_back(Expression::simplify);
+    }
+
+    // Create a version with only one simplify
+    std::vector<Expression::ExpressionTransformType> transformsOneSimplify;
+    bool                                             hasSimplify = false;
+    for(const auto& transform : transforms)
+    {
+        if(isSimplify(transform))
+        {
+            if(hasSimplify)
+                continue;
+
+            hasSimplify = true;
+        }
+        transformsOneSimplify.push_back(transform);
+    }
+
+    auto tag83 = Expression::dataFlowTag(83, Register::Type::Vector, DataType::UInt32);
+    auto expr  = (tag83 % literal(4)) * literal(32);
+    expr       = (tag83 / literal(4)) * literal(128u) + expr;
+    expr       = expr * literal(4u);
+    expr       = expr / literal(8u);
+    expr       = expr + literal(0u);
+    expr       = std::make_shared<Expression::Expression>(Expression::ToScalar{expr});
+    expr       = Expression::convert(DataType::UInt32, expr);
+
+    // One simplify is not enough
+    CHECK(!Expression::identical(fastArith.applyTransforms(expr, transforms),
+                                 fastArith.applyTransforms(expr, transformsOneSimplify)));
+
+    // There are enough simplifies
+    CHECK_THAT(fastArith.applyTransforms(expr, transforms),
+               IdenticalTo(fastArith.applyTransforms(expr, transformsExtraSimplify)));
 }
 
 TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
@@ -849,6 +958,234 @@ TEST_CASE("combineShifts works", "[expression][expression-transformation]")
     }
 }
 
+TEST_CASE("splitBitFieldCombine works", "[expression][expression-transformation]")
+{
+    using namespace rocRoller;
+    auto context = TestContext::ForDefaultTarget();
+
+    auto zero64  = Expression::literal(0, DataType::UInt64);
+    auto zero32  = Expression::literal(0, DataType::UInt32);
+    auto zero128 = Expression::literal(Buffer{0, 0, 0, 0});
+
+    auto ones64 = Expression::literal(0xffffffffffffffffull, DataType::UInt64);
+    auto ones32 = Expression::literal(0xfffffffful, DataType::UInt32);
+    auto four   = Expression::literal(4, DataType::UInt32);
+
+    auto r
+        = Register::Value::Placeholder(context.get(), Register::Type::Scalar, DataType::UInt32, 1);
+    r->allocateNow();
+    auto reg32 = r->expression();
+
+    auto r2
+        = Register::Value::Placeholder(context.get(), Register::Type::Scalar, DataType::UInt64, 1);
+    r2->allocateNow();
+    auto reg64 = r2->expression();
+
+    SECTION("Combine into the first dword of 64 bit dst and fold to constant")
+    {
+        auto expr = bfc(ones32, zero64, 0, 16, 8);
+
+        std::vector<Expression::ExpressionPtr> operands{
+            Expression::literal(0x00ff0000ul, DataType::UInt32), zero32};
+        auto expected = concat(operands, DataType::UInt64);
+
+        CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Combine into the second dword of 64 bit dst and fold to constant")
+    {
+        auto expr = bfc(ones32, zero64, 0, 48, 8);
+
+        std::vector<Expression::ExpressionPtr> operands{
+            zero32, Expression::literal(0x00ff0000ul, DataType::UInt32)};
+        auto expected = concat(operands, DataType::UInt64);
+
+        CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Combine into the first and second dwords of 64 bit dst and fold to constant")
+    {
+        auto expr = bfc(ones32, zero64, 0, 24, 16);
+
+        std::vector<Expression::ExpressionPtr> operands{
+            Expression::literal(0xff000000ul, DataType::UInt32),
+            Expression::literal(0x000000fful, DataType::UInt32)};
+        auto expected = concat(operands, DataType::UInt64);
+
+        CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Combine into the first dword of 64 bit dst")
+    {
+        auto expr = bfc(reg32, zero64, 0, 16, 8);
+
+        auto                                   expect_1 = bfc(reg32, zero32, 0, 16, 8);
+        std::vector<Expression::ExpressionPtr> operands{expect_1, zero32};
+        auto                                   expected = concat(operands, DataType::UInt64);
+
+        CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Combine into the second dword of 64 bit dst")
+    {
+        auto expr = bfc(reg32, zero64, 0, 48, 8);
+
+        auto                                   expect1 = bfc(reg32, zero32, 0, 16, 8);
+        std::vector<Expression::ExpressionPtr> operands{zero32, expect1};
+        auto                                   expected = concat(operands, DataType::UInt64);
+
+        CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Combine into the first and second dwords of 64 bit dst")
+    {
+        auto expr = bfc(reg32, zero64, 0, 24, 16);
+
+        // zero64     00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        // expr       00000000 00000000 00000000 XXXXXXXX XXXXXXXX 00000000 00000000 00000000
+        // expect1    XXXXXXXX 00000000 00000000 00000000
+        // expect2    00000000 00000000 00000000 XXXXXXXX
+
+        auto                                   expect1 = bfc(reg32, zero32, 0, 24, 8);
+        auto                                   expect2 = bfc(reg32, zero32, 8, 0, 8);
+        std::vector<Expression::ExpressionPtr> operands{expect1, expect2};
+        auto                                   expected = concat(operands, DataType::UInt64);
+
+        CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Chain two BitfieldCombines into 64 bit dst")
+    {
+        auto expr  = bfc(reg32, zero64, 0, 16, 8);
+        auto expr2 = bfc(ones32, expr, 0, 48, 8);
+
+        // zero64     00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        // expr       00000000 00000000 00000000 00000000 00000000 XXXXXXXX 00000000 00000000
+        // expr2      00000000 11111111 00000000 00000000 00000000 XXXXXXXX 00000000 00000000
+        // expect1    00000000 XXXXXXXX 00000000 00000000
+        // expect2    00000000 11111111 00000000 00000000
+
+        auto                                   expect1 = bfc(reg32, zero32, 0, 16, 8);
+        std::vector<Expression::ExpressionPtr> operands{
+            expect1, Expression::literal(0x00ff0000ul, DataType::UInt32)};
+        auto expected = concat(operands, DataType::UInt64);
+
+        CHECK_THAT(splitBitfieldCombine(expr2), IdenticalTo(expected));
+    }
+
+    SECTION("Chain two BitfieldCombines into 64 bit dst, the second bfc goes into the first and "
+            "second dwords of dst")
+    {
+        auto expr  = bfc(reg32, zero64, 0, 16, 8);
+        auto expr2 = bfc(ones32, expr, 0, 24, 16);
+
+        // zero64     00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        // expr       00000000 00000000 00000000 00000000 00000000 XXXXXXXX 00000000 00000000
+        // expr2      00000000 00000000 00000000 11111111 11111111 XXXXXXXX 00000000 00000000
+        // expect1    11111111 XXXXXXXX 00000000 00000000
+        // expect2    00000000 00000000 00000000 11111111
+
+        auto expect1 = bfc(reg32, Expression::literal(0xff000000ul, DataType::UInt32), 0, 16, 8);
+        std::vector<Expression::ExpressionPtr> operands{
+            expect1, Expression::literal(0x000000fful, DataType::UInt32)};
+        auto expected = concat(operands, DataType::UInt64);
+
+        CHECK_THAT(splitBitfieldCombine(expr2), IdenticalTo(expected));
+    }
+
+    SECTION("Chain two BitfieldCombines into 64 bit dst and fold to constant")
+    {
+        auto expr  = bfc(ones32, zero64, 0, 16, 8);
+        auto expr2 = bfc(ones32, expr, 0, 40, 8);
+
+        std::vector<Expression::ExpressionPtr> operands{
+            Expression::literal(0x00ff0000ul, DataType::UInt32),
+            Expression::literal(0x0000ff00ul, DataType::UInt32)};
+        auto expected = concat(operands, DataType::UInt64);
+
+        CHECK_THAT(splitBitfieldCombine(expr2), IdenticalTo(expected));
+    }
+
+    SECTION("Combine into the first dword of 128 bit dst and fold to constant")
+    {
+        auto expr = bfc(ones32, zero128, 0, 16, 8);
+
+        std::vector<Expression::ExpressionPtr> operands{
+            Expression::literal(0x00ff0000ul, DataType::UInt32), zero32, zero32, zero32};
+        auto expected = concat(operands, {DataType::UInt32, PointerType::Buffer});
+
+        CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Combine 64 bit register into 128 bit dst")
+    {
+        auto expr = bfc(reg64, zero128, 0, 0, 64);
+
+        // zero128    0x 00000000 00000000 00000000 00000000
+        // expr       0x 00000000 00000000 XXXXXXXX XXXXXXXX
+
+        std::vector<Expression::ExpressionPtr> operands{reg64, zero32, zero32};
+        auto expected = concat(operands, {DataType::UInt32, PointerType::Buffer});
+
+        CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Combine into the first dword of 128 bit dst, across src dword boundary")
+    {
+        auto expr = bfc(reg64, zero128, 16, 0, 32);
+
+        // zero128    0x 00000000 00000000 00000000 00000000
+        // reg64      0x 0000XXXX XXXX0000
+        // expr       0x 00000000 00000000 00000000 XXXXXXXX
+
+        std::vector<Expression::ExpressionPtr> operands{
+            bfe(DataType::UInt32, reg64, 16, 32), zero32, zero32, zero32};
+        auto expected = concat(operands, {DataType::UInt32, PointerType::Buffer});
+
+        CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Combine into the first and second dwords of 128 bit dst, across src dword boundary")
+    {
+        auto expr = bfc(reg64, zero128, 16, 16, 32);
+
+        // zero128    0x 00000000 00000000 00000000 00000000
+        // reg64      0x 0000XXXX XXXX0000
+        // expr       0x 00000000 00000000 0000XXXX XXXX0000
+
+        std::vector<Expression::ExpressionPtr> operands{
+            bfc(bfe(DataType::UInt32, reg64, 16, 16), zero32, 0, 16, 16),
+            bfc(bfe(DataType::UInt32, reg64, 32, 16), zero32, 0, 0, 16),
+            zero32,
+            zero32};
+        auto expected = concat(operands, {DataType::UInt32, PointerType::Buffer});
+
+        CHECK_THAT(splitBitfieldCombine(expr), IdenticalTo(expected));
+    }
+
+    SECTION("BitfieldCombine chain into 128 bit")
+    {
+        auto expr  = bfc(reg32, zero128, 0, 90, 12);
+        auto expr2 = bfc(four, expr, 0, 110, 8);
+
+        // zero128  00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        // expr     00000000 00000000 00000000 00XXXXXX XXXXXX00 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        // four     00000000 00000000 00000000 00000100
+        // expr2    00000000 00000001 00000000 00XXXXXX XXXXXX00 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        // expect1  XXXXXX00 00000000 00000000 00000000
+        // expect2  00000000 00000001 00000000 00XXXXXX
+
+        // four is combined with an offset of 110, so its bit 1 goes to position 110 + 2. The other 7 bits from four are all zeros.
+
+        auto expect1 = bfc(reg32, zero32, 0, 26, 6);
+        auto expect2 = bfc(reg32, Expression::literal(0x00010000ul, DataType::UInt32), 6, 0, 6);
+        std::vector<Expression::ExpressionPtr> operands{zero32, zero32, expect1, expect2};
+        auto expected = concat(operands, {DataType::UInt32, PointerType::Buffer});
+
+        CHECK_THAT(splitBitfieldCombine(expr2), IdenticalTo(expected));
+    }
+}
+
 TEST_CASE("Simplify Shift ExpressionTransformation works",
           "[expression][expression-transformation]")
 {
@@ -945,5 +1282,79 @@ TEST_CASE("LowerUnsignedArithmeticShiftR ExpressionTransformation works",
         auto expr = std::make_shared<rocRoller::Expression::Expression>(
             rocRoller::Expression::ArithmeticShiftR{v, a});
         CHECK_THAT(lowerUnsignedArithmeticShiftR(expr), IdenticalTo(expr));
+    }
+}
+
+TEST_CASE("BitfieldCombine expression and lowering", "[expression][expression-transformation]")
+{
+    using namespace rocRoller;
+
+    auto context = TestContext::ForDefaultTarget();
+
+    Register::AllocationOptions allocOptions{.contiguousChunkWidth = Register::FULLY_CONTIGUOUS};
+
+    auto src = std::make_shared<Register::Value>(
+        context.get(), Register::Type::Vector, DataType::UInt32, 1, allocOptions);
+    src->allocateNow();
+    auto srcExpr = src->expression();
+
+    auto dst = std::make_shared<Register::Value>(
+        context.get(), Register::Type::Vector, DataType::UInt32, 1, allocOptions);
+    dst->allocateNow();
+    auto dstExpr = dst->expression();
+
+    auto const srcOffset = 10u;
+    auto const dstOffset = 4u;
+    auto const width     = 7u;
+
+    auto offsetDiff = Expression::literal(srcOffset - dstOffset);
+
+    SECTION("Lowering Basic")
+    {
+        auto bfc = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{srcExpr, dstExpr, "", srcOffset, dstOffset, width});
+
+        auto expected
+            = logicalShiftR(
+                  (Expression::literal(Raw32(((1u << width) - 1u) << srcOffset)) & srcExpr),
+                  offsetDiff)
+              | (Expression::literal(Raw32(~(((1u << width) - 1u) << dstOffset))) & dstExpr);
+
+        CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
+    }
+
+    SECTION("Lowering with srcIsZero")
+    {
+        auto bfc = std::make_shared<Expression::Expression>(
+            Expression::BitfieldCombine{srcExpr, dstExpr, "", srcOffset, dstOffset, width, true});
+
+        auto expected
+            = logicalShiftR(srcExpr, offsetDiff)
+              | (Expression::literal(Raw32(~(((1u << width) - 1u) << dstOffset))) & dstExpr);
+
+        CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
+    }
+
+    SECTION("Lowering with dstIsZero")
+    {
+        auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+            srcExpr, dstExpr, "", srcOffset, dstOffset, width, std::nullopt, true});
+
+        auto expected = logicalShiftR((Expression::literal(Raw32(((1u << width) - 1u) << srcOffset))
+                                       & srcExpr),
+                                      offsetDiff)
+                        | dstExpr;
+
+        CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
+    }
+
+    SECTION("Lowering with srcIsZero & dstIsZero")
+    {
+        auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+            srcExpr, dstExpr, "", srcOffset, dstOffset, width, true, true});
+
+        auto expected = logicalShiftR(srcExpr, offsetDiff) | dstExpr;
+
+        CHECK_THAT(lowerBitfieldCombine(bfc), IdenticalTo(expected));
     }
 }

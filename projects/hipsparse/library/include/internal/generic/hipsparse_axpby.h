@@ -77,88 +77,16 @@ extern "C" {
 *  @param[in]
 *  alpha       scalar \f$\alpha\f$.
 *  @param[in]
-*  vecX        sparse matrix descriptor.
+*  vecX        sparse vector descriptor.
 *  @param[in]
 *  beta        scalar \f$\beta\f$.
 *  @param[inout]
-*  vecY        dense matrix descriptor.
+*  vecY        dense vector descriptor.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p vecX, \p beta or \p vecY pointer is
-*          invalid.
-*
-*  \par Example
-*  \code{.c}
-*    // Number of non-zeros of the sparse vector
-*    int nnz = 3;
-*
-*    // Size of sparse and dense vector
-*    int size = 9;
-*
-*    // Sparse index vector
-*    std::vector<int> hxInd = {0, 3, 5};
-*
-*    // Sparse value vector
-*    std::vector<float> hxVal = {1.0f, 2.0f, 3.0f};
-*
-*    // Dense vector
-*    std::vector<float> hy = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f};
-*
-*    // Scalar alpha
-*    float alpha = 3.7f;
-*
-*    // Scalar beta
-*    float beta = 1.2f;
-*
-*    // Offload data to device
-*    int* dxInd;
-*    float* dxVal;
-*    float* dy;
-*    hipMalloc((void**)&dxInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dxVal, sizeof(float) * nnz);
-*    hipMalloc((void**)&dy, sizeof(float) * size);
-*
-*    hipMemcpy(dxInd, hxInd.data(), sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dxVal, hxVal.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dy, hy.data(), sizeof(float) * size, hipMemcpyHostToDevice);
-*
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Create sparse vector X
-*    hipsparseSpVecDescr_t vecX;
-*    hipsparseCreateSpVec(&vecX,
-*                        size,
-*                        nnz,
-*                        dxInd,
-*                        dxVal,
-*                        HIPSPARSE_INDEX_32I,
-*                        HIPSPARSE_INDEX_BASE_ZERO,
-*                        HIP_R_32F);
-*
-*    // Create dense vector Y
-*    hipsparseDnVecDescr_t vecY;
-*    hipsparseCreateDnVec(&vecY, size, dy, HIP_R_32F);
-*
-*    // Call axpby to perform y = beta * y + alpha * x
-*    hipsparseAxpby(handle, &alpha, vecX, &beta, vecY);
-*
-*    hipsparseDnVecGetValues(vecY, (void**)&dy);
-*
-*    // Copy result back to host
-*    hipMemcpy(hy.data(), dy, sizeof(float) * size, hipMemcpyDeviceToHost);
-*
-*
-*    // Clear hipSPARSE
-*    hipsparseDestroySpVec(vecX);
-*    hipsparseDestroyDnVec(vecY);
-*    hipsparseDestroy(handle);
-*
-*    // Clear device memory
-*    hipFree(dxInd);
-*    hipFree(dxVal);
-*    hipFree(dy);
-*  \endcode
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p vecX, \p beta or \p vecY is nullptr,
+*          or the vector sizes or data types are incompatible.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

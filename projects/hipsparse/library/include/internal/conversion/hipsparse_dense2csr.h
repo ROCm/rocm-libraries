@@ -69,18 +69,18 @@ extern "C" {
 *  @param[in]
 *  handle       handle to the hipsparse library context queue.
 *  @param[in]
-*  m            number of rows of the dense matrix \p A.
+*  m            number of rows of the dense matrix \p A. Must be non-negative.
 *  @param[in]
-*  n            number of columns of the dense matrix \p A.
+*  n            number of columns of the dense matrix \p A. Must be non-negative.
 *  @param[in]
 *  descr        the descriptor of the dense matrix \p A, the supported matrix type is  \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also
 *               any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
-*  A            array of dimensions (\p ld, \p n)
+*  A            array of dimensions (\p ld, \p n).
 *  @param[in]
-*  ld           leading dimension of dense array \p A.
+*  ld           leading dimension of dense array \p A. Must be at least \p m.
 *  @param[in]
-*  nnzPerRow    array of size \p n containing the number of non-zero elements per row.
+*  nnzPerRow    array of size \p m containing the number of non-zero elements per row.
 *  @param[out]
 *  csrVal       array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) nonzero elements of matrix \p A.
 *  @param[out]
@@ -88,60 +88,10 @@ extern "C" {
 *  @param[out]
 *  csrColInd    integer array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) column indices of the non-zero elements of matrix \p A.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ld, \p A, \p nnzPerRow, \p csrVal \p csrRowPtr or \p csrColInd
-*              pointer is invalid.
-*
-*  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Matrix descriptor
-*    hipsparseMatDescr_t descr;
-*    hipsparseCreateMatDescr(&descr);
-*
-*    // Dense matrix in column order
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    float hdense_A[15] = {1.0f, 0.0f, 6.0f, 2.0f, 4.0f, 0.0f, 0.0f, 5.0f, 0.0f, 3.0f, 0.0f, 7.0f, 0.0f, 0.0f, 8.0f};
-*
-*    int m         = 3;
-*    int n         = 5;
-*    hipsparseDirection_t dir = HIPSPARSE_DIRECTION_ROW;
-*
-*    float* ddense_A = nullptr;
-*    hipMalloc((void**)&ddense_A, sizeof(float) * m * n);
-*    hipMemcpy(ddense_A, hdense_A, sizeof(float) * m * n, hipMemcpyHostToDevice);
-*
-*    // Allocate memory for the nnz_per_row_columns array
-*    int* dnnz_per_row;
-*    hipMalloc((void**)&dnnz_per_row, sizeof(int) * m);
-*
-*    int nnz_A;
-*    hipsparseSnnz(handle, dir, m, n, descr, ddense_A, m, dnnz_per_row, &nnz_A);
-*
-*    // Allocate sparse CSR matrix
-*    int* dcsrRowPtr = nullptr;
-*    int* dcsrColInd = nullptr;
-*    float* dcsrVal = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz_A);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz_A);
-*
-*    hipsparseSdense2csr(handle, m, n, descr, ddense_A, m, dnnz_per_row, dcsrVal, dcsrRowPtr, dcsrColInd);
-*
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*    hipFree(dnnz_per_row);
-*    hipFree(ddense_A);
-*
-*    hipsparseDestroyMatDescr(descr);
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p A, \p nnzPerRow, \p csrVal,
+*          \p csrRowPtr or \p csrColInd is nullptr, \p m or \p n is negative, or \p ld is invalid.
 */
 /**@{*/
 HIPSPARSE_EXPORT

@@ -135,7 +135,7 @@ extern "C" {
 *  dirA        direction that specified whether to count nonzero elements by \ref HIPSPARSE_DIRECTION_ROW or by
 *              \ref HIPSPARSE_DIRECTION_COLUMN.
 *  @param[in]
-*  m           number of rows of the sparse CSR matrix.
+*  m           number of rows of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
 *  n           number of columns of the sparse CSR matrix.
 *  @param[in]
@@ -288,73 +288,6 @@ hipsparseStatus_t hipsparseXcsr2bsrNnz(hipsparseHandle_t         handle,
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p blockDim, \p bsrValC, \p bsrRowPtrC,
 *              \p bsrColIndC, \p csrValA, \p csrRowPtrA or \p csrColIndA pointer is invalid.
-*
-*  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Matrix descriptor
-*    hipsparseMatDescr_t csr_descr;
-*    hipsparseCreateMatDescr(&csr_descr);
-*
-*    hipsparseMatDescr_t bsr_descr;
-*    hipsparseCreateMatDescr(&bsr_descr);
-*
-*    // Sparse matrix in CSR format
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    int hcsrRowPtr[4] = {0, 3, 5, 8};
-*    int hcsrColInd[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcsrVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
-*
-*    int m         = 3;
-*    int n         = 5;
-*    int nnz       = 8;
-*    int blockDim  = 3;
-*    hipsparseDirection_t dir = HIPSPARSE_DIRECTION_ROW;
-*
-*    int mb = (m + blockDim - 1) / blockDim;
-*    int nb = (n + blockDim - 1) / blockDim;
-*
-*    int* dcsrRowPtr = nullptr;
-*    int* dcsrColInd = nullptr;
-*    float* dcsrVal = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz);
-*
-*    hipMemcpy(dcsrRowPtr, hcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColInd, hcsrColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrVal, hcsrVal, sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*    int* dbsrRowPtr = nullptr;
-*    hipMalloc((void**)&dbsrRowPtr, sizeof(int) * (mb + 1));
-*
-*    int nnzb;
-*    hipsparseXcsr2bsrNnz(handle, dir, m, n, csr_descr, dcsrRowPtr, dcsrColInd, blockDim, bsr_descr, dbsrRowPtr, &nnzb);
-*
-*    int* dbsrColInd = nullptr;
-*    float* dbsrVal = nullptr;
-*    hipMalloc((void**)&dbsrColInd, sizeof(int) * nnzb);
-*    hipMalloc((void**)&dbsrVal, sizeof(float) * blockDim * blockDim * nnzb);
-*
-*    hipsparseScsr2bsr(handle, dir, m, n, csr_descr, dcsrVal, dcsrRowPtr, dcsrColInd, blockDim, bsr_descr, dbsrVal, dbsrRowPtr, dbsrColInd);
-*
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*
-*    hipFree(dbsrRowPtr);
-*    hipFree(dbsrColInd);
-*    hipFree(dbsrVal);
-*
-*    hipsparseDestroyMatDescr(csr_descr);
-*    hipsparseDestroyMatDescr(bsr_descr);
-*    hipsparseDestroy(handle);
-*  \endcode
 */
 /**@{*/
 HIPSPARSE_EXPORT

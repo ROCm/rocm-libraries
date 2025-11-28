@@ -50,6 +50,9 @@ void PrintTo(const CandidateSelectionParams& p, std::ostream* os)
     *os << p.arch << "_" << p.solver << "_" << p.kernel_name << "_splitk" << p.split_k;
 }
 
+// Default validation function: accepts all kernel/split_k combinations
+inline constexpr auto accept_all_combinations = [](int, int) { return true; };
+
 std::vector<std::vector<std::string>> GenerateValidKernelParams(
     const CandidateSelectionMetadata& meta, const std::string& kernel_name, int num_candidates = 3)
 {
@@ -224,7 +227,14 @@ TEST_P(CPU_CandidateSelection_NONE, EncodeKernelParamsBadValueThrows_Test)
     CandidateSelectionMetadata meta(params.arch, params.solver);
     std::vector<std::vector<std::string>> bad_params = {
         {params.kernel_name, "nonexistent_value", "nan"}};
-    EXPECT_THROW(EncodeKernelParams(bad_params, meta), std::exception);
+
+    // The function should not throw, but should return empty result due to invalid mapping
+    std::vector<std::vector<float>> result;
+    EXPECT_NO_THROW(result = EncodeKernelParams(bad_params, meta));
+
+    // Verify that the invalid candidate was skipped (empty result)
+    EXPECT_TRUE(result.empty())
+        << "Expected empty result when all candidates have invalid mappings";
 }
 
 TEST_P(CPU_CandidateSelection_NONE, SelectBestCandidateValid_Test)
@@ -239,9 +249,17 @@ TEST_P(CPU_CandidateSelection_NONE, SelectBestCandidateValid_Test)
     auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
     auto encoded_candidates  = EncodeKernelParams(valid_kernel_params, meta);
     auto encoded_configs     = model.EncodeKernelConfigs(encoded_candidates);
-    int idx                  = model.SelectBestCandidateIdx(encoded_features, encoded_configs);
-    ASSERT_GE(idx, 0);
-    ASSERT_LT(idx, static_cast<int>(valid_kernel_params.size()));
+    std::vector<std::pair<int, float>> ids =
+        model.SelectBestCandidateIndices(encoded_features, encoded_configs);
+    ASSERT_FALSE(ids.empty()) << "No candidates were selected!";
+    for(const auto& candidate : ids)
+    {
+        const int idx = candidate.first;
+        ASSERT_GE(idx, 0) << "Candidate index is negative!";
+        ASSERT_LT(idx, static_cast<int>(valid_kernel_params.size()))
+            << "Candidate index " << idx << " out of range [0, " << valid_kernel_params.size() - 1
+            << "]";
+    }
 }
 
 TEST_P(CPU_CandidateSelection_NONE, SelectBestCandidateEmptyInput_Test)
@@ -250,7 +268,8 @@ TEST_P(CPU_CandidateSelection_NONE, SelectBestCandidateEmptyInput_Test)
     CandidateSelectionModel model(params.arch, params.solver);
     std::vector<float> encoded_features;
     std::vector<std::vector<float>> encoded_configs;
-    EXPECT_THROW(model.SelectBestCandidateIdx(encoded_features, encoded_configs), std::exception);
+    EXPECT_THROW(model.SelectBestCandidateIndices(encoded_features, encoded_configs),
+                 std::exception);
 }
 
 TEST_P(CPU_CandidateSelection_NONE, ModelSelectBestCandidate_Test)
@@ -261,10 +280,19 @@ TEST_P(CPU_CandidateSelection_NONE, ModelSelectBestCandidate_Test)
     for(const auto& name : meta.input_params())
         features[name] = 1.0f;
     auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
-    auto result              = ModelSelectBestCandidate(
-        params.arch, params.solver, features, valid_kernel_params, /*use_split_k=*/false);
-    ASSERT_GE(result.kernel_index, 0);
-    ASSERT_LT(result.kernel_index, static_cast<int>(valid_kernel_params.size()));
+    auto result              = ModelSelectBestCandidate(params.arch,
+                                           params.solver,
+                                           features,
+                                           valid_kernel_params,
+                                           /*use_split_k=*/false,
+                                           accept_all_combinations);
+    for(const auto& idx : result.kernel_indices)
+    {
+        ASSERT_GE(idx, 0) << "Candidate index is negative!";
+        ASSERT_LT(idx, static_cast<int>(valid_kernel_params.size()))
+            << "Candidate index " << idx << " out of range [0, " << valid_kernel_params.size() - 1
+            << "]";
+    }
 }
 
 TEST_P(CPU_CandidateSelection_NONE, ExpandKernelParamsWithSplitK_Test)
@@ -273,7 +301,8 @@ TEST_P(CPU_CandidateSelection_NONE, ExpandKernelParamsWithSplitK_Test)
     std::vector<std::vector<std::string>> kernels = {{"typeA", "p1"}, {"typeB", "p2"}};
     std::vector<int> indexes                      = {0, 1};
     std::vector<int> split_ks = miopen::solver::conv::GenerateSplitK(params.split_k);
-    auto [expanded, mapping]  = ExpandKernelParamsWithSplitK(kernels, indexes, split_ks);
+    auto [expanded, mapping] =
+        ExpandKernelParamsWithSplitK(kernels, indexes, split_ks, accept_all_combinations);
     ASSERT_EQ(expanded.size(), 8u);
     ASSERT_EQ(mapping.size(), 8u);
     std::vector<std::vector<std::string>> expected_expanded = {
@@ -302,7 +331,8 @@ TEST_P(CPU_CandidateSelection_NONE, ExpandKernelParamsWithSplitKFunctionality_Te
         {"DeviceGroupedConvBwdWeight_Xdl_CShuffle", "p1"}};
     std::vector<int> indexes  = {0};
     std::vector<int> split_ks = miopen::solver::conv::GenerateSplitK(params.split_k);
-    auto [expanded, mapping]  = ExpandKernelParamsWithSplitK(kernels, indexes, split_ks);
+    auto [expanded, mapping] =
+        ExpandKernelParamsWithSplitK(kernels, indexes, split_ks, accept_all_combinations);
     ASSERT_EQ(expanded.size(), split_ks.size());
     ASSERT_EQ(mapping.size(), split_ks.size());
     for(size_t i = 0; i < split_ks.size(); ++i)

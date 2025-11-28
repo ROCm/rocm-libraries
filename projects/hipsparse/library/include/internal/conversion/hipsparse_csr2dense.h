@@ -67,12 +67,16 @@ extern "C" {
 *  It is executed asynchronously with respect to the host and may return control to the application
 *  on the host before the entire result is ready.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 11.0+) and will be 
+*  removed in CUDA 12.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
 *  handle      handle to the hipsparse library context queue.
 *  @param[in]
-*  m           number of rows of the dense matrix \p A.
+*  m           number of rows of the dense matrix \p A. Must be non-negative.
 *  @param[in]
-*  n           number of columns of the dense matrix \p A.
+*  n           number of columns of the dense matrix \p A. Must be non-negative.
 *  @param[in]
 *  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref HIPSPARSE_MATRIX_TYPE_GENERAL and
 *              also any valid value of the \ref hipsparseIndexBase_t.
@@ -83,61 +87,14 @@ extern "C" {
 *  @param[in]
 *  csrColInd   integer array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) column indices of the non-zero elements of matrix \p A.
 *  @param[out]
-*  A           array of dimensions (\p ld, \p n)
-*  @param[out]
-*  ld          leading dimension of dense array \p A.
+*  A           array of dimensions (\p ld, \p n).
+*  @param[in]
+*  ld          leading dimension of dense array \p A. Must be at least \p m.
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ld, \p A, \p csrVal, \p csrRowPtr or \p csrColInd
-*              pointer is invalid.
-*
-*  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Matrix descriptor
-*    hipsparseMatDescr_t descr;
-*    hipsparseCreateMatDescr(&descr);
-*
-*    // Sparse matrix in CSR format
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    int hcsrRowPtr[4] = {0, 3, 5, 8};
-*    int hcsrColInd[8] = {0, 1, 3, 1, 2, 0, 3, 4};
-*    float hcsrVal[8]   = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
-*
-*    int m         = 3;
-*    int n         = 5;
-*    int ld        = 3;
-*    int nnz       = 8;
-*
-*    int* dcsrRowPtr = nullptr;
-*    int* dcsrColInd = nullptr;
-*    float* dcsrVal = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz);
-*
-*    hipMemcpy(dcsrRowPtr, hcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColInd, hcsrColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrVal, hcsrVal, sizeof(float) * nnz, hipMemcpyHostToDevice);
-*
-*    float* ddense_A = nullptr;
-*    hipMalloc((void**)&ddense_A, sizeof(float) * ld * n);
-*
-*    hipsparseScsr2dense(handle, m, n, descr, dcsrVal, dcsrRowPtr, dcsrColInd, ddense_A, ld);
-*
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*    hipFree(ddense_A);
-*
-*    hipsparseDestroyMatDescr(descr);
-*    hipsparseDestroy(handle);
-*  \endcode
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p csrVal, \p csrRowPtr,
+*          \p csrColInd or \p A is nullptr, \p m or \p n is negative, or \p ld is invalid.
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

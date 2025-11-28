@@ -56,6 +56,10 @@ extern "C" {
 *  \note
 *  Currently, only \p transA == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
 *  handle      handle to the hipsparse library context queue.
 *  @param[in]
@@ -76,88 +80,15 @@ extern "C" {
 *  y           array of \p m elements (\f$op(A) == A\f$) or \p n elements
 *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha,
-*              \p hybA, \p x, \p beta or \p y is invalid.
-*  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
-*  \retval     HIPSPARSE_STATUS_ALLOC_FAILED the buffer could not be allocated.
-*  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
-*  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
-*              \p transA != \ref HIPSPARSE_OPERATION_NON_TRANSPOSE or
-*              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
-*
-*  \par Example
-*  \code{.c}
-*      // hipSPARSE handle
-*      hipsparseHandle_t handle;
-*      hipsparseCreate(&handle);
-*
-*      // A sparse matrix
-*      // 1 0 3 4
-*      // 0 0 5 1
-*      // 0 2 0 0
-*      // 4 0 0 8
-*      int hAptr[5] = {0, 3, 5, 6, 8};
-*      int hAcol[8] = {0, 2, 3, 2, 3, 1, 0, 3};
-*      double hAval[8] = {1.0, 3.0, 4.0, 5.0, 1.0, 2.0, 4.0, 8.0};
-*
-*      int m = 4;
-*      int n = 4;
-*      int nnz = 8;
-*
-*      double halpha = 1.0;
-*      double hbeta  = 0.0;
-*
-*      double  hx[4] = {1.0, 2.0, 3.0, 4.0};
-*      double  hy[4] = {4.0, 5.0, 6.0, 7.0};
-*
-*      // Matrix descriptor
-*      hipsparseMatDescr_t descrA;
-*      hipsparseCreateMatDescr(&descrA);
-*
-*      // Offload data to device
-*      int* dAptr = NULL;
-*      int* dAcol = NULL;
-*      double*        dAval = NULL;
-*      double*        dx    = NULL;
-*      double*        dy    = NULL;
-*
-*      hipMalloc((void**)&dAptr, sizeof(int) * (m + 1));
-*      hipMalloc((void**)&dAcol, sizeof(int) * nnz);
-*      hipMalloc((void**)&dAval, sizeof(double) * nnz);
-*      hipMalloc((void**)&dx, sizeof(double) * n);
-*      hipMalloc((void**)&dy, sizeof(double) * m);
-*
-*      hipMemcpy(dAptr, hAptr, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*      hipMemcpy(dAcol, hAcol, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dAval, hAval, sizeof(double) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dx, hx, sizeof(double) * n, hipMemcpyHostToDevice);
-*
-*      // Convert CSR matrix to HYB format
-*      hipsparseHybMat_t hybA;
-*      hipsparseCreateHybMat(&hybA);
-*
-*      hipsparseDcsr2hyb(handle, m, n, descrA, dAval, dAptr, dAcol, hybA, 0, HIPSPARSE_HYB_PARTITION_AUTO);
-*
-*      // Clean up CSR structures
-*      hipFree(dAptr);
-*      hipFree(dAcol);
-*      hipFree(dAval);
-*
-*      // Call hipsparse hybmv
-*      hipsparseDhybmv(handle, HIPSPARSE_OPERATION_NON_TRANSPOSE, &halpha, descrA, hybA, dx, &hbeta, dy);
-*
-*      // Copy result back to host
-*      hipMemcpy(hy, dy, sizeof(double) * m, hipMemcpyDeviceToHost);
-*
-*      // Clear up on device
-*      hipsparseDestroyHybMat(hybA);
-*      hipsparseDestroyMatDescr(descrA);
-*      hipsparseDestroy(handle);
-*
-*      hipFree(dx);
-*      hipFree(dy);
-*  \endcode
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, \p beta or \p hybA is nullptr,
+*          or \p x or \p y is nullptr.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_ALLOC_FAILED the buffer could not be allocated.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
+*          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 */
 /**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")

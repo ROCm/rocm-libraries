@@ -325,12 +325,6 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
     {
-        auto memoryTypeA = MemoryType::WAVE;
-        if(gemm->direct2LDSA)
-            memoryTypeA = MemoryType::WAVE_Direct2LDS;
-        else if(gemm->loadLDSA)
-            memoryTypeA = MemoryType::LDS;
-
         auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
             {gemm->workgroupTile.m, gemm->workgroupTile.k},
             LayoutType::MATRIX_A,
@@ -338,7 +332,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
              gemm->machineInstruction.n,
              gemm->machineInstruction.k,
              gemm->machineInstruction.b},
-            memoryTypeA);
+            GetMemoryType(gemm->loadPathA));
         params->setDimensionInfo(tagLoadA, macTileA);
     }
 
@@ -359,12 +353,6 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     }
 
     {
-        auto memoryTypeB = MemoryType::WAVE;
-        if(gemm->direct2LDSB)
-            memoryTypeB = MemoryType::WAVE_Direct2LDS;
-        else if(gemm->loadLDSB)
-            memoryTypeB = MemoryType::LDS;
-
         auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
             {gemm->workgroupTile.k, gemm->workgroupTile.n},
             LayoutType::MATRIX_B,
@@ -372,7 +360,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
              gemm->machineInstruction.n,
              gemm->machineInstruction.k,
              gemm->machineInstruction.b},
-            memoryTypeB);
+            GetMemoryType(gemm->loadPathB));
         params->setDimensionInfo(tagLoadB, macTileB);
     }
 
@@ -449,7 +437,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
             "Only 0 (M) or 1 (N) are supported dimensions for workgroup mapping.",
             ShowValue(dim));
 
-        params->workgroupMapping = {dim, nullptr};
+        params->workgroupMappingDim = dim;
     }
 
     if(gemm->workgroupRemapXCC)
@@ -459,10 +447,12 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
 
     if(gemm->streamK)
     {
-        params->streamK = true;
-        params->loopOverOutputTilesDimensions = {0, 1};
+        StreamKMode streamKMode = StreamKMode::Standard;
         if(gemm->streamKTwoTile)
-            params->streamKTwoTile = true;
+            streamKMode = StreamKMode::TwoTile;
+        params->streamK = streamKMode;
+
+        params->loopOverOutputTilesDimensions = {0, 1};
     }
 
     params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});

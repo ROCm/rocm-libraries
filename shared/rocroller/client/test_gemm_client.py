@@ -32,11 +32,11 @@ import functools
 import itertools
 import os
 import pathlib
-import pytest
 import subprocess
-import yaml
-
 from dataclasses import dataclass
+
+import pytest
+import yaml
 
 build = pathlib.Path(__file__).parent.parent / "build"
 if os.getenv("ROCROLLER_BUILD_DIR") is not None:
@@ -246,11 +246,9 @@ workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
 unroll_x: 0
 unroll_y: 0
-loadLDS_A: true
-loadLDS_B: true
+load_A: BufferToLDSViaVGPR
+load_B: BufferToLDSViaVGPR
 storeLDS_D: true
-direct2LDS_A: false
-direct2LDS_B: false
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -276,10 +274,16 @@ types:
   scaleSkipPermlane: false
 streamK: false
 streamKTwoTile: false
+streamKTwoTileDPFirst: false
 matchMemoryAccess: true
 loadLDSScale_A: false
 loadLDSScale_B: false
 swizzleScale: false
+swizzleTileSize:
+  m: 0
+  k: 0
+  n: 0
+  l: 0
 prefetchScale: false
 ...
 
@@ -305,11 +309,9 @@ workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
 unroll_x: 0
 unroll_y: 0
-loadLDS_A: true
-loadLDS_B: true
+load_A: BufferToLDSViaVGPR
+load_B: BufferToLDSViaVGPR
 storeLDS_D: true
-direct2LDS_A: false
-direct2LDS_B: false
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -337,9 +339,15 @@ types:
 loadLDSScale_A: false
 loadLDSScale_B: false
 swizzleScale: false
+swizzleTileSize:
+  m: 0
+  k: 0
+  n: 0
+  l: 0
 prefetchScale: false
 streamK: false
 streamKTwoTile: false
+streamKTwoTileDPFirst: false
 ...
 """
 
@@ -363,11 +371,9 @@ workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
 unroll_x: 0
 unroll_y: 0
-loadLDS_A: true
-loadLDS_B: true
+load_A: BufferToLDSViaVGPR
+load_B: BufferToLDSViaVGPR
 storeLDS_D: true
-direct2LDS_A: false
-direct2LDS_B: false
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0
@@ -395,9 +401,15 @@ types:
 loadLDSScale_A: false
 loadLDSScale_B: false
 swizzleScale: false
+swizzleTileSize:
+  m: 0
+  k: 0
+  n: 0
+  l: 0
 prefetchScale: false
 streamK: false
 streamKTwoTile: false
+streamKTwoTileDPFirst: false
 ...
 """
 
@@ -482,6 +494,9 @@ def build_solution_params():
 
         scaleA.maybe_add_block_size(params)
         scaleB.maybe_add_block_size(params)
+
+        if scaleA.mode == "Separate" or scaleB.mode == "Separate":
+            params.extend(["--sts", "64x4/64x4"])
 
         solution_params.append(params)
 
@@ -595,6 +610,192 @@ def test_gemm_example(tmp_path):
     example = tmp_path / "example.yaml"
     subprocess.run([gemm, "example", example], check=True)
     assert example.exists()
+
+
+def test_gemm_options(tmp_path):
+    """GEMM options."""
+
+    example = tmp_path / "example.yaml"
+    example_problem = tmp_path / "example_problem.yaml"
+
+    def run_and_load_example_yaml(cmd):
+        subprocess.run(cmd, check=True)
+        yaml_contents = example.read_text()
+        return yaml.load(yaml_contents, Loader=yaml.Loader)
+
+    def run_and_load_example_problem_yaml(cmd):
+        subprocess.run(cmd, check=True)
+        yaml_contents = example_problem.read_text()
+        return yaml.load(yaml_contents, Loader=yaml.Loader)
+
+    # fails
+    with pytest.raises(subprocess.CalledProcessError):
+        # overspecify tile size is bad
+        subprocess.run(
+            [
+                gemm,
+                "example",
+                example,
+                "--arch=gfx950",
+                "--wgts=128x128x128",
+                "--mac_M=256",
+            ],
+            check=True,
+        )
+
+    # setting tile size via shortcut
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--wgts=1024x2048x4096"]
+    )
+    assert post["mac_m"] == 1024
+    assert post["mac_n"] == 2048
+    assert post["mac_k"] == 4096
+
+    # setting mi via shortcut
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--mi=2x4x8"]
+    )
+    assert post["wave_m"] == 2
+    assert post["wave_n"] == 4
+    assert post["wave_k"] == 8
+    assert post["wave_b"] == 1
+
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--mi=4x8x16x2"]
+    )
+    assert post["wave_m"] == 4
+    assert post["wave_n"] == 8
+    assert post["wave_k"] == 16
+    assert post["wave_b"] == 2
+
+    # setting lds options
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--lds=AB"]
+    )
+    assert post["load_A"] == "BufferToLDSViaVGPR"
+    assert post["load_B"] == "BufferToLDSViaVGPR"
+    assert not post["storeLDS_D"]
+
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--lds=BD"]
+    )
+    assert post["load_A"] == "BufferToVGPR"
+    assert post["load_B"] == "BufferToLDSViaVGPR"
+    assert post["storeLDS_D"]
+
+    # setting d2l options
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--d2lds=AB"]
+    )
+    assert post["load_A"] == "BufferToLDS"
+    assert post["load_B"] == "BufferToLDS"
+
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--d2lds=A"]
+    )
+    assert post["load_A"] == "BufferToLDS"
+    assert post["load_B"] == "BufferToVGPR"
+
+    # setting mxlds options
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--mxlds=AB"]
+    )
+    assert post["loadLDSScale_A"]
+    assert post["loadLDSScale_B"]
+
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--mxlds=B"]
+    )
+    assert not post["loadLDSScale_A"]
+    assert post["loadLDSScale_B"]
+
+    # setting swizzle tile size
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--sts=5x7/11x13"]
+    )
+    assert post["swizzleTileSize"]["m"] == 5
+    assert post["swizzleTileSize"]["k"] == 7
+    assert post["swizzleTileSize"]["n"] == 11
+    assert post["swizzleTileSize"]["l"] == 13
+
+    # can also use a big X
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--arch=gfx950", "--sts=5x7X11x13"]
+    )
+    assert post["swizzleTileSize"]["m"] == 5
+    assert post["swizzleTileSize"]["k"] == 7
+    assert post["swizzleTileSize"]["n"] == 11
+    assert post["swizzleTileSize"]["l"] == 13
+
+    # setting data initialization modes
+    post = run_and_load_example_problem_yaml(
+        [
+            gemm,
+            "exampleProblem",
+            example_problem,
+            "--arch=gfx950",
+            "--initMode_A=Bounded",
+            "--initMode_B=BoundedAlternatingSign",
+            "--initMode_C=Unbounded",
+        ]
+    )
+    assert post["initMode_A"] == "DataInitMode(Bounded)"
+    assert post["initMode_B"] == "DataInitMode(BoundedAlternatingSign)"
+    assert post["initMode_C"] == "DataInitMode(Unbounded)"
+
+    post = run_and_load_example_problem_yaml(
+        [
+            gemm,
+            "exampleProblem",
+            example_problem,
+            "--arch=gfx950",
+            "--initMode_A=Identity",
+            "--initMode_B=Ones",
+            "--initMode_C=Zeros",
+        ]
+    )
+    assert post["initMode_A"] == "DataInitMode(Identity)"
+    assert post["initMode_B"] == "DataInitMode(Ones)"
+    assert post["initMode_C"] == "DataInitMode(Zeros)"
+
+    mean_B = 0.0
+    std_dev_B = 1.0
+    mean_C = 2.0
+    std_dev_C = 3.0
+    post = run_and_load_example_problem_yaml(
+        [
+            gemm,
+            "exampleProblem",
+            example_problem,
+            "--arch=gfx950",
+            "--initMode_A=TrigonometricFromFloat",
+            f"--initMode_B=NormalFromFloat({mean_B}, {std_dev_B})",
+            f"--initMode_C=NormalFromFloat({mean_C}, {std_dev_C})",
+        ]
+    )
+    assert post["initMode_A"] == "DataInitMode(TrigonometricFromFloat)"
+
+    initMode_B = post["initMode_B"]
+    assert initMode_B.startswith("DataInitMode(NormalFromFloat(")
+    mean, std_dev = initMode_B.split("(")[-1][:-2].split(", ")
+    assert float(mean) == mean_B
+    assert float(std_dev) == std_dev_B
+
+    initMode_C = post["initMode_C"]
+    assert initMode_C.startswith("DataInitMode(NormalFromFloat(")
+    mean, std_dev = initMode_C.split("(")[-1][:-2].split(", ")
+    assert float(mean) == mean_C
+    assert float(std_dev) == std_dev_C
+
+
+def test_gemm_generate_from_example(tmp_path):
+    """GEMM 'generate' from the output of 'example'."""
+
+    example = tmp_path / "example.yaml"
+    subprocess.run([gemm, "example", example], check=True)
+
+    # We should be able to generate a kernel from the config file
+    subprocess.run([gemm, "generate", "--config", example], check=True)
 
 
 def test_gemm_config(tmp_path):

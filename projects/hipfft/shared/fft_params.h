@@ -1,4 +1,4 @@
-// Copyright (C) 2023 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,39 +40,13 @@
 #include "../shared/array_validator.h"
 #include "../shared/data_gen_device.h"
 #include "../shared/data_gen_host.h"
+#include "../shared/data_layout.h"
 #include "../shared/device_properties.h"
+#include "../shared/fft_enums.h"
 #include "../shared/gpubuf.h"
 #include "../shared/printbuffer.h"
 #include "../shared/ptrdiff.h"
 #include "../shared/rocfft_complex.h"
-
-enum fft_status
-{
-    fft_status_success,
-    fft_status_failure,
-    fft_status_invalid_arg_value,
-    fft_status_invalid_dimensions,
-    fft_status_invalid_array_type,
-    fft_status_invalid_strides,
-    fft_status_invalid_distance,
-    fft_status_invalid_offset,
-    fft_status_invalid_work_buffer,
-};
-
-enum fft_transform_type
-{
-    fft_transform_type_complex_forward,
-    fft_transform_type_complex_inverse,
-    fft_transform_type_real_forward,
-    fft_transform_type_real_inverse,
-};
-
-enum fft_precision
-{
-    fft_precision_half,
-    fft_precision_single,
-    fft_precision_double,
-};
 
 // Used for CLI11 parsing of precision enum
 static bool lexical_cast(const std::string& word, fft_precision& precision)
@@ -88,13 +62,6 @@ static bool lexical_cast(const std::string& word, fft_precision& precision)
     return true;
 }
 
-enum fft_auto_allocation
-{
-    fft_auto_allocation_on,
-    fft_auto_allocation_off,
-    fft_auto_allocation_default
-};
-
 // Used for CLI11 parsing of auto-allocation enum
 static bool lexical_cast(const std::string& word, fft_auto_allocation& auto_allocation)
 {
@@ -109,16 +76,6 @@ static bool lexical_cast(const std::string& word, fft_auto_allocation& auto_allo
             "Invalid auto-allocation behavior specified (choose \"on\", \"off\", or \"default\")");
     return true;
 }
-
-// fft_input_generator: linearly spaced sequence in [-0.5,0.5]
-// fft_input_random_generator: pseudo-random sequence in [-0.5,0.5]
-enum fft_input_generator
-{
-    fft_input_random_generator_device,
-    fft_input_random_generator_host,
-    fft_input_generator_device,
-    fft_input_generator_host,
-};
 
 // Used for CLI11 parsing of input gen enum
 static bool lexical_cast(const std::string& word, fft_input_generator& gen)
@@ -140,22 +97,6 @@ static bool lexical_cast(const std::string& word, fft_input_generator& gen)
 #endif
     return true;
 }
-
-enum fft_array_type
-{
-    fft_array_type_complex_interleaved,
-    fft_array_type_complex_planar,
-    fft_array_type_real,
-    fft_array_type_hermitian_interleaved,
-    fft_array_type_hermitian_planar,
-    fft_array_type_unset,
-};
-
-enum fft_result_placement
-{
-    fft_placement_inplace,
-    fft_placement_notinplace,
-};
 
 // Determine the size of the data type given the precision and type.
 template <typename Tsize>
@@ -218,6 +159,9 @@ inline void set_input(std::vector<gpubuf>&       input,
                       const Tint1&               field_contig_stride,
                       const size_t               field_contig_dist)
 {
+    if(igen == fft_input_generator_host || igen == fft_input_random_generator_host)
+        throw std::runtime_error("Host input generation is not available for gpu buffers");
+
     auto isize = count_iters(whole_length) * nbatch;
 
     switch(itype)
@@ -343,6 +287,9 @@ inline void set_input(std::vector<hostbuf>&      input,
                       const Tint1                field_contig_stride,
                       const size_t               field_contig_dist)
 {
+    if(igen == fft_input_generator_device || igen == fft_input_random_generator_device)
+        throw std::runtime_error("Device input generation is not available for host buffers");
+
     switch(itype)
     {
     case fft_array_type_complex_interleaved:
@@ -560,22 +507,37 @@ public:
         // location of the brick
         int rank   = 0;
         int device = 0;
+
+        bool operator==(const fft_brick& other) const
+        {
+            return this->lower == other.lower && this->upper == other.upper
+                   && this->stride == other.stride && this->rank == other.rank
+                   && this->device == other.device;
+        }
+        bool operator!=(const fft_brick& other) const
+        {
+            return !(*this == other);
+        }
     };
 
     struct fft_field
     {
         std::vector<fft_brick> bricks;
 
-        void sort_by_rank()
+        // Brick ordering is significant - a rank needs to pass
+        // pointers to execute() in the order that the bricks were
+        // added to the field.
+        //
+        // But we also want to sort the bricks by rank, so that we can
+        // efficiently find the bricks for a given rank.  So do a
+        // stable sort to preserve the relative order of bricks on any
+        // rank, even after they're sorted.
+        void stable_sort_by_rank()
         {
-            std::sort(bricks.begin(), bricks.end(), [](const fft_brick& a, const fft_brick& b) {
-                if(a.rank != b.rank)
+            std::stable_sort(
+                bricks.begin(), bricks.end(), [](const fft_brick& a, const fft_brick& b) {
                     return a.rank < b.rank;
-                if(a.device != b.device)
-                    return a.device < b.device;
-                return std::lexicographical_compare(
-                    a.lower.begin(), a.lower.end(), b.lower.begin(), b.lower.end());
-            });
+                });
         }
     };
 
@@ -663,7 +625,7 @@ public:
             }
         }
 
-        if(selected_grid[0] * selected_grid[1] == mp_ranks)
+        if(selected_grid[0] * selected_grid[1] != mp_ranks)
         {
             throw std::runtime_error("Grid dimensions do not multiply to mp_ranks.");
         }
@@ -707,9 +669,8 @@ public:
         }
 
         // sanity checks
-        int ingrid_size = std::accumulate(ingrid.begin(), ingrid.end(), 1, std::multiplies<int>());
-        int outgrid_size
-            = std::accumulate(outgrid.begin(), outgrid.end(), 1, std::multiplies<int>());
+        int ingrid_size  = product(ingrid.begin(), ingrid.end());
+        int outgrid_size = product(outgrid.begin(), outgrid.end());
 
         if((ingrid.size() != length.size()) || (outgrid.size() != length.size()))
         {
@@ -727,6 +688,21 @@ public:
     // optional brick decomposition of inputs/outputs
     std::vector<fft_field> ifields;
     std::vector<fft_field> ofields;
+
+    // Check that a supplied vector of callback pointers has an
+    // expected size.  Optionally also check that each pointer is
+    // non-null.  Throws an exception if a check fails.  The vector
+    // itself can be null, as callbacks are optional.
+    static void check_callback_vec(std::vector<void*>* cb, size_t expected_size, bool nonnull)
+    {
+        if(!cb)
+            return;
+        if(cb->size() != expected_size)
+            throw std::invalid_argument("expected " + std::to_string(expected_size)
+                                        + " callback pointers, got " + std::to_string(cb->size()));
+        if(nonnull && std::any_of(cb->begin(), cb->end(), [](void* p) { return p == nullptr; }))
+            throw std::invalid_argument("null callback function");
+    }
 
     // simple "multi-GPU" count, meaning the library decides on the
     // decomposition instead of it being explicit as bricks.  only
@@ -804,13 +780,12 @@ public:
 
     bool is_inverse() const
     {
-        return transform_type == fft_transform_type_complex_inverse
-               || transform_type == fft_transform_type_real_inverse;
+        return is_bwd(transform_type);
     }
 
     bool is_forward() const
     {
-        return !is_inverse();
+        return is_fwd(transform_type);
     }
 
     // Convert to string for output.
@@ -1664,7 +1639,8 @@ public:
             bool       samestride = true;
             for(unsigned int i = 0; i < stridesize; ++i)
             {
-                if(istride[i] != ostride[i])
+                // (strides are irrelevant for unit lengths)
+                if(istride[i] != ostride[i] && length[i] > 1)
                     samestride = false;
             }
             if((transform_type == fft_transform_type_complex_forward
@@ -1704,7 +1680,7 @@ public:
 
             if((transform_type == fft_transform_type_real_forward
                 || transform_type == fft_transform_type_real_inverse)
-               && (istride.back() != 1 || ostride.back() != 1))
+               && (istride.back() != 1 || ostride.back() != 1) && length.back() > 1)
             {
                 // In-place real/complex transforms require unit strides.
                 if(verbose)
@@ -1908,52 +1884,18 @@ public:
     // checks if the parameters are consistent with a "default" data layout (considering strides and distances)
     bool is_using_default_layout() const
     {
-        auto is_zero                = [](const decltype(ioffset)::value_type& i) { return i == 0; };
-        bool default_layout_is_used = std::all_of(ioffset.begin(), ioffset.end(), is_zero)
-                                      && std::all_of(ooffset.begin(), ooffset.end(), is_zero);
-        size_t default_ival = 1;
-        size_t default_oval = 1;
-        default_layout_is_used
-            &= (default_ival == istride.back()) && (default_oval == ostride.back());
-        switch(transform_type)
-        {
-        case fft_transform_type_complex_forward:
-        case fft_transform_type_complex_inverse:
-        {
-            default_ival *= length.back();
-            default_oval *= length.back();
-            break;
-        }
-        case fft_transform_type_real_forward:
-        case fft_transform_type_real_inverse:
-        {
-            const size_t hermitian_symmetric_length = length.back() / 2 + 1;
-            size_t*      ptr_default_real_val       = &default_ival;
-            size_t*      ptr_default_cmplx_val      = &default_oval;
-            if(transform_type == fft_transform_type_real_inverse)
-                std::swap(ptr_default_real_val, ptr_default_cmplx_val);
-            *ptr_default_cmplx_val *= hermitian_symmetric_length;
-            if(placement == fft_placement_inplace)
-                *ptr_default_real_val *= 2 * hermitian_symmetric_length; // padding to be used
-            else
-                *ptr_default_real_val *= length.back();
-            break;
-        }
-        default:
-            throw std::runtime_error("Invalid transform type");
-        }
-        // check strides for multi-dimensional cases
-        for(int stride_idx = static_cast<int>(dim()) - 2; stride_idx >= 0 && default_layout_is_used;
-            stride_idx--)
-        {
-            default_layout_is_used
-                &= (default_ival == istride[stride_idx]) && (default_oval == ostride[stride_idx]);
-            default_ival *= length[stride_idx];
-            default_oval *= length[stride_idx];
-        }
-        // check distances
-        default_layout_is_used &= (idist == default_ival) && (odist == default_oval);
-        return default_layout_is_used;
+        static_assert(std::is_same_v<decltype(ioffset), decltype(ooffset)>);
+        auto is_zero = [](const decltype(ioffset)::value_type& i) { return i == 0; };
+        return std::all_of(ioffset.begin(), ioffset.end(), is_zero)
+               && std::all_of(ooffset.begin(), ooffset.end(), is_zero)
+               && istride == default_strides(transform_type, placement, fft_io::fft_io_in, length)
+               && ostride == default_strides(transform_type, placement, fft_io::fft_io_out, length)
+               && idist
+                      == default_distance(
+                          transform_type, placement, fft_io::fft_io_in, length, nbatch)
+               && odist
+                      == default_distance(
+                          transform_type, placement, fft_io::fft_io_out, length, nbatch);
     }
 
     // Given a data type and dimensions, fill the buffer, imposing Hermitian symmetry if necessary.
@@ -2029,19 +1971,19 @@ public:
             case fft_precision_half:
             {
                 buffer_printer<rocfft_complex<rocfft_fp16>> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_half(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             case fft_precision_single:
             {
                 buffer_printer<rocfft_complex<float>> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_single(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             case fft_precision_double:
             {
                 buffer_printer<rocfft_complex<double>> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_double(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             }
@@ -2056,19 +1998,19 @@ public:
             case fft_precision_half:
             {
                 buffer_printer<rocfft_fp16> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_half(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             case fft_precision_single:
             {
                 buffer_printer<float> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_single(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             case fft_precision_double:
             {
                 buffer_printer<double> s;
-                s.print_buffer(buf, ilength(), istride, nbatch, idist, ioffset);
+                s.print_buffer_double(buf, ilength(), istride, nbatch, idist, ioffset);
                 break;
             }
             }
@@ -2092,18 +2034,18 @@ public:
             case fft_precision_half:
             {
                 buffer_printer<rocfft_complex<rocfft_fp16>> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_half(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             case fft_precision_single:
             {
                 buffer_printer<rocfft_complex<float>> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_single(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             case fft_precision_double:
                 buffer_printer<rocfft_complex<double>> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_double(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             break;
@@ -2117,19 +2059,19 @@ public:
             case fft_precision_half:
             {
                 buffer_printer<rocfft_fp16> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_half(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             case fft_precision_single:
             {
                 buffer_printer<float> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_single(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             case fft_precision_double:
             {
                 buffer_printer<double> s;
-                s.print_buffer(buf, olength(), ostride, nbatch, odist, ooffset);
+                s.print_buffer_double(buf, olength(), ostride, nbatch, odist, ooffset);
                 break;
             }
             }
@@ -2262,12 +2204,18 @@ public:
         }
     }
 
-    virtual fft_status set_callbacks(void*  load_cb_host,
-                                     void*  load_cb_data,
-                                     void*  store_cb_host,
-                                     void*  store_cb_data,
-                                     size_t load_cb_shared_mem_bytes,
-                                     size_t store_cb_shared_mem_bytes)
+    // A callback is expressed as a pair of device function pointer +
+    // device function data.
+    //
+    // Load and store callbacks are provided as vectors of those
+    // pointers, as we need a separate function+data for each device
+    // being loaded from or stored to.
+    virtual fft_status set_callbacks(std::vector<void*>* load_cb_func,
+                                     std::vector<void*>* load_cb_data,
+                                     std::vector<void*>* store_cb_func,
+                                     std::vector<void*>* store_cb_data,
+                                     size_t              load_cb_shared_mem_bytes,
+                                     size_t              store_cb_shared_mem_bytes)
     {
         return fft_status_success;
     }
@@ -2285,11 +2233,11 @@ public:
     virtual size_t vram_footprint()
     {
         const auto ibuf_size = ibuffer_sizes();
-        size_t     val       = std::accumulate(ibuf_size.begin(), ibuf_size.end(), (size_t)1);
+        size_t val = std::accumulate(ibuf_size.begin(), ibuf_size.end(), static_cast<size_t>(1));
         if(placement == fft_placement_notinplace)
         {
             const auto obuf_size = obuffer_sizes();
-            val += std::accumulate(obuf_size.begin(), obuf_size.end(), (size_t)1);
+            val += std::accumulate(obuf_size.begin(), obuf_size.end(), static_cast<size_t>(1));
         }
         return val;
     }
@@ -2357,29 +2305,43 @@ public:
         scale_factor = 1 / params_forward.scale_factor;
     }
 
-    // prepare for multi-GPU transform.  Generated input is in ibuffer.
-    // pibuffer, pobuffer are the pointers that will be passed to the
-    // FFT library's "execute" API.
-    virtual void multi_gpu_prepare(std::vector<gpubuf>& ibuffer,
-                                   std::vector<void*>&  pibuffer,
-                                   std::vector<void*>&  pobuffer)
+    // prepare for multi-GPU transform.  cpu_input has contiguous
+    // input on the host, ibuffer has device input, which can be
+    // discarded if it's turned into multi-GPU bricks.  pibuffer,
+    // pobuffer are the pointers that will be passed to the FFT
+    // library's "execute" API.
+    virtual void multi_gpu_prepare(std::vector<hostbuf>& cpu_input,
+                                   std::vector<gpubuf>&  ibuffer,
+                                   std::vector<void*>&   pibuffer,
+                                   std::vector<void*>&   pobuffer)
     {
     }
 
     // finalize multi-GPU transform.  pobuffers are the pointers
     // provided to the FFT library's "execute" API.  obuffer is the
-    // buffer where transform output needs to go for validation
-    virtual void multi_gpu_finalize(std::vector<gpubuf>& obuffer, std::vector<void*>& pobuffer) {}
+    // normal GPU buffer that is used for single-device FFTs.
+    // gpu_output is the host buffer where transform output needs to
+    // go for validation
+    // Field is distributed among ranks and then among the number
+    // of GPUs per rank (which defaults to 1).
+    virtual void multi_gpu_finalize(std::vector<hostbuf>& gpu_output,
+                                    std::vector<gpubuf>&  obuffer,
+                                    std::vector<void*>&   pobuffer)
+    {
+    }
 
     // Create bricks in the specified field.  brick_grid has an
     // integer per dimension (batch and FFT dimensions), with the
     // number of bricks to split that dimension on.  Field length
     // starts with batch dimension, followed by FFT dimensions
     // slowest to fastest.
-    void distribute_field(int                              localDeviceCount,
+    // num_ranks represents the number of ranks used in the parallel
+    // computer, which are assumed to have at least gpusperrank each
+    void distribute_field(int                              gpusperrank,
                           const std::vector<unsigned int>& brick_grid,
                           std::vector<fft_field>&          fields,
-                          const std::vector<size_t>&       field_length)
+                          const std::vector<size_t>&       field_length,
+                          int                              num_ranks)
     {
         if(brick_grid.size() != field_length.size())
             throw std::runtime_error(
@@ -2394,11 +2356,11 @@ public:
 
         auto& field = fields.emplace_back();
 
-        // start with empty brick in field
+        // Start with empty brick in field
         field.bricks.reserve(total_bricks);
         field.bricks.emplace_back();
 
-        // go over the grid
+        // Go over the grid
         for(size_t i = 0; i < brick_grid.size(); ++i)
         {
             std::vector<fft_brick> cur_bricks;
@@ -2418,21 +2380,25 @@ public:
                     new_brick.lower.push_back(cur_length / brick_count * ibrick);
                     // last brick needs to include the whole split len
                     if(ibrick == brick_count - 1)
+                    {
                         new_brick.upper.push_back(cur_length);
+                    }
                     else
+                    {
                         new_brick.upper.push_back(std::min(
                             cur_length, new_brick.lower.back() + cur_length / brick_count));
+                    }
                 }
             }
         }
 
-        // give all bricks contiguous strides
+        // Give all bricks contiguous strides
         int brickIdx = 0;
         for(auto& b : field.bricks)
         {
             b.stride.resize(b.upper.size());
 
-            // fill strides from fastest to slowest
+            // Fill strides from fastest to slowest
             size_t brick_dist = 1;
             for(size_t distIdx = 0; distIdx < b.upper.size(); ++distIdx)
             {
@@ -2440,41 +2406,204 @@ public:
                 brick_dist *= *(b.upper.rbegin() + distIdx) - *(b.lower.rbegin() + distIdx);
             }
 
-            // split across ranks for a multi-process transform,
+            // Split across ranks for a multi-process transform,
             // otherwise split across bricks.  assume there's one
             // rank/device per brick
             if(mp_lib == fft_mp_lib_none)
-                b.device = brickIdx++;
+            {
+                b.device = brickIdx;
+            }
             else
             {
-                b.rank = brickIdx++;
+                int rank = brickIdx / gpusperrank; // determine MPI rank
+                int gpu  = brickIdx % gpusperrank; // determine GPU within rank
 
-                // if there are at least as many devices as bricks,
-                // give each rank a separate device
-                if(localDeviceCount >= static_cast<int>(field.bricks.size()))
-                    b.device = b.rank;
+                b.rank   = rank;
+                b.device = gpu;
             }
+            brickIdx++;
         }
     }
 
     // Distribute problem input among specified grid of devices/processors.
     // Grid specifies number of bricks per dimension, starting with batch
-    // and ending with fastest FFT dimension.
-    void distribute_input(int localDeviceCount, const std::vector<unsigned int>& brick_grid)
+    // and ending with fastest FFT dimension. For single-proc single-proc
+    // multi-gpu, gpusperrank represents the number of GPUs to use;
+    // while for multi-proc it represents the number of GPUs on each rank.
+    void distribute_input(int                              gpusperrank,
+                          const std::vector<unsigned int>& brick_grid,
+                          int                              num_ranks = 1)
     {
         auto len = length;
         len.insert(len.begin(), nbatch);
-        distribute_field(localDeviceCount, brick_grid, ifields, len);
+        distribute_field(gpusperrank, brick_grid, ifields, len, num_ranks);
     }
 
     // Distribute problem output among specified grid of devices/processors.
     // Grid specifies number of bricks per dimension, starting with batch
     // and ending with fastest FFT dimension.
-    void distribute_output(int localDeviceCount, const std::vector<unsigned int>& brick_grid)
+    void distribute_output(int                              gpusperrank,
+                           const std::vector<unsigned int>& brick_grid,
+                           int                              num_ranks = 1)
     {
         auto len = olength();
         len.insert(len.begin(), nbatch);
-        distribute_field(localDeviceCount, brick_grid, ofields, len);
+        distribute_field(gpusperrank, brick_grid, ofields, len, num_ranks);
+    }
+
+    // Apply load operations specified by this struct to the host-side
+    // input before we pass it to the reference FFT
+    void apply_host_load_ops(std::vector<hostbuf>& input) const
+    {
+        // Currently no load operations can be specified
+    }
+
+    // Apply store operations specified by this struct to the host-side
+    // output after we get it from the reference FFT
+    void apply_host_store_ops(std::vector<hostbuf>& output) const
+    {
+        // Store ops like result scaling are only supported on AMD
+        // backend, and CUDA implements some conflicting
+        // half-precision operators that prevent result scaling from
+        // compiling
+#ifdef __HIP_PLATFORM_AMD__
+        // Don't bother iterating over the data if we don't have to
+        if(scale_factor == 1.0)
+            return;
+#ifdef _OPENMP
+        auto partition_count = compute_partition_count(output.front().size());
+#endif
+
+        switch(otype)
+        {
+            // Reference FFT always works with complex-interleaved data even if
+            // params specifies planar
+        case fft_array_type_complex_interleaved:
+        case fft_array_type_hermitian_interleaved:
+        case fft_array_type_complex_planar:
+        case fft_array_type_hermitian_planar:
+        {
+            switch(precision)
+            {
+            case fft_precision_half:
+            {
+                const size_t elem_size = sizeof(rocfft_complex<rocfft_fp16>);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin
+                    = reinterpret_cast<rocfft_complex<rocfft_fp16>*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            case fft_precision_single:
+            {
+                const size_t elem_size = sizeof(rocfft_complex<float>);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin = reinterpret_cast<rocfft_complex<float>*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            case fft_precision_double:
+            {
+                const size_t elem_size = sizeof(rocfft_complex<double>);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin
+                    = reinterpret_cast<rocfft_complex<double>*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            }
+        }
+        break;
+        case fft_array_type_real:
+        {
+            switch(precision)
+            {
+            case fft_precision_half:
+            {
+                const size_t elem_size = sizeof(rocfft_fp16);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin = reinterpret_cast<rocfft_fp16*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            case fft_precision_single:
+            {
+                const size_t elem_size = sizeof(float);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin = reinterpret_cast<float*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            case fft_precision_double:
+            {
+                const size_t elem_size = sizeof(double);
+                const size_t num_elems = output.front().size() / elem_size;
+
+                auto output_begin = reinterpret_cast<double*>(output.front().data());
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(partition_count)
+#endif
+                for(size_t i = 0; i < num_elems; ++i)
+                {
+                    auto& element = output_begin[i];
+                    if(scale_factor != 1.0)
+                        element = element * scale_factor;
+                }
+                break;
+            }
+            }
+        }
+        break;
+        default:
+            // this is FFTW data which should always be interleaved (if complex)
+            abort();
+        }
+#endif
     }
 };
 
@@ -2949,6 +3078,26 @@ inline void copy_buffers(const std::vector<hostbuf>& input,
                             odist,
                             ioffset,
                             ooffset);
+    case 4:
+    {
+        // treat 4D brick as 3D + batch, but this needs to be
+        // unbatched until we add 4D support for copy_buffers
+        if(nbatch != 1)
+            throw std::runtime_error("cannot copy batched 4D bricks");
+        return copy_buffers(input,
+                            output,
+                            std::make_tuple(length[1], length[2], length[3]),
+                            length[0],
+                            precision,
+                            itype,
+                            std::make_tuple(istride[1], istride[2], istride[3]),
+                            istride[0],
+                            otype,
+                            std::make_tuple(ostride[1], ostride[2], istride[3]),
+                            ostride[0],
+                            ioffset,
+                            ooffset);
+    }
     default:
         abort();
     }
@@ -2991,7 +3140,8 @@ inline VectorNorms distance_1to1_complex(const Tcomplex*                        
     for(size_t b = 0; b < nbatch; b++, idx_base += idist, odx_base += odist)
     {
 #ifdef _OPENMP
-#pragma omp parallel for reduction(max : linf) reduction(+ : l2) num_threads(partitions.size()) private(linf_failures_private)
+#pragma omp parallel for reduction(max : linf) reduction(+ : l2) \
+    num_threads(partitions.size()) private(linf_failures_private)
 #endif
         for(size_t part = 0; part < partitions.size(); ++part)
         {
@@ -3076,7 +3226,8 @@ inline VectorNorms distance_1to1_real(const Tfloat*                           in
     for(size_t b = 0; b < nbatch; b++, idx_base += idist, odx_base += odist)
     {
 #ifdef _OPENMP
-#pragma omp parallel for reduction(max : linf) reduction(+ : l2) num_threads(partitions.size()) private(linf_failures_private)
+#pragma omp parallel for reduction(max : linf) reduction(+ : l2) \
+    num_threads(partitions.size()) private(linf_failures_private)
 #endif
         for(size_t part = 0; part < partitions.size(); ++part)
         {
@@ -3149,7 +3300,8 @@ inline VectorNorms distance_1to2(const rocfft_complex<Tval>*             input,
     for(size_t b = 0; b < nbatch; b++, idx_base += idist, odx_base += odist)
     {
 #ifdef _OPENMP
-#pragma omp parallel for reduction(max : linf) reduction(+ : l2) num_threads(partitions.size()) private(linf_failures_private)
+#pragma omp parallel for reduction(max : linf) reduction(+ : l2) \
+    num_threads(partitions.size()) private(linf_failures_private)
 #endif
         for(size_t part = 0; part < partitions.size(); ++part)
         {
@@ -3848,6 +4000,118 @@ inline size_t twiddle_table_vram_footprint(const fft_params& params)
     }
 
     return vram_footprint;
+}
+
+// set input for a brick in a field
+// functor to search for bricks on a rank, in a container of bricks
+// sorted by rank
+struct match_rank
+{
+    bool operator()(const fft_params::fft_brick& b, int rank) const
+    {
+        return b.rank < rank;
+    }
+    bool operator()(int rank, const fft_params::fft_brick& b) const
+    {
+        return rank < b.rank;
+    }
+};
+
+// Initialize input for the bricks on the specified comm rank
+// (assumed to be the local rank)
+template <typename Tparams, typename Tbuff>
+void init_local_input(int                                       comm_rank,
+                      const Tparams&                            params,
+                      const std::vector<fft_params::fft_brick>& bricks,
+                      size_t                                    elem_size,
+                      const std::vector<void*>&                 input_ptrs)
+{
+    // get bricks for this rank
+    auto range = std::equal_range(bricks.begin(), bricks.end(), comm_rank, match_rank());
+
+    const bool is_planar = params.itype == fft_array_type_complex_planar
+                           || params.itype == fft_array_type_hermitian_planar;
+
+    size_t ptr_idx = 0;
+    for(auto brick = range.first; brick != range.second; ++brick, ++ptr_idx)
+    {
+        rocfft_scoped_device dev(brick->device);
+
+        // some utility code below needs batch separated from brick lengths
+        std::vector<size_t> brick_len_nobatch = brick->length();
+        auto                brick_batch       = brick_len_nobatch.front();
+        brick_len_nobatch.erase(brick_len_nobatch.begin());
+        std::vector<size_t> brick_stride_nobatch = brick->stride;
+        auto                brick_dist           = brick_stride_nobatch.front();
+        brick_stride_nobatch.erase(brick_stride_nobatch.begin());
+        std::vector<size_t> brick_lower_nobatch = brick->lower;
+        auto                brick_lower_batch   = brick_lower_nobatch.front();
+        brick_lower_nobatch.erase(brick_lower_nobatch.begin());
+
+        auto contiguous_stride = params.compute_stride(params.ilength());
+        auto contiguous_dist   = params.compute_idist();
+
+        std::vector<Tbuff> bufvec(1);
+        size_t brick_size_bytes = compute_ptrdiff(brick->length(), brick->stride, 0, 0) * elem_size
+                                  / (is_planar ? 2 : 1);
+        bufvec.back() = Tbuff::make_nonowned(input_ptrs[ptr_idx], brick_size_bytes);
+        // grab a second pointer for planar
+        if(is_planar)
+        {
+            ++ptr_idx;
+            bufvec.push_back(Tbuff::make_nonowned(input_ptrs[ptr_idx], brick_size_bytes));
+        }
+
+        // generate data (in device mem)
+        switch(params.precision)
+        {
+        case fft_precision_half:
+            set_input<Tbuff, rocfft_fp16>(bufvec,
+                                          params.igen,
+                                          params.itype,
+                                          brick_len_nobatch,
+                                          brick_len_nobatch,
+                                          brick_stride_nobatch,
+                                          brick_dist,
+                                          brick_batch,
+                                          get_curr_device_prop(),
+                                          brick_lower_nobatch,
+                                          brick_lower_batch,
+                                          contiguous_stride,
+                                          contiguous_dist);
+            break;
+        case fft_precision_single:
+            set_input<Tbuff, float>(bufvec,
+                                    params.igen,
+                                    params.itype,
+                                    brick_len_nobatch,
+                                    brick_len_nobatch,
+                                    brick_stride_nobatch,
+                                    brick_dist,
+                                    brick_batch,
+                                    get_curr_device_prop(),
+                                    brick_lower_nobatch,
+                                    brick_lower_batch,
+                                    contiguous_stride,
+                                    contiguous_dist);
+            break;
+        case fft_precision_double:
+            set_input<Tbuff, double>(bufvec,
+                                     params.igen,
+                                     params.itype,
+                                     brick_len_nobatch,
+                                     brick_len_nobatch,
+                                     brick_stride_nobatch,
+                                     brick_dist,
+                                     brick_batch,
+                                     get_curr_device_prop(),
+                                     brick_lower_nobatch,
+                                     brick_lower_batch,
+                                     contiguous_stride,
+                                     contiguous_dist);
+            break;
+        }
+    }
 }
 
 #endif

@@ -49,19 +49,18 @@ import hashlib
 import itertools
 import math
 import multiprocessing
-import numpy as np
 import os
 import pathlib
 import random
 import subprocess
+from dataclasses import asdict, dataclass, field, fields
+from typing import List, Tuple
+
+import numpy as np
+import rrperf
 
 # import tempfile
 import yaml
-
-import rrperf
-
-from dataclasses import dataclass, field, fields, asdict
-from typing import List, Tuple
 
 gpus = {}
 mp_pool = None

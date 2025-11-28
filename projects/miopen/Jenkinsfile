@@ -2,7 +2,7 @@ def repoName = scm.getUserRemoteConfigs()[0].getUrl().tokenize('/').last().repla
 
 def repoDir = "./"
 if (repoName == "rocm-libraries") {
-    repoDir = "/projects/miopen"
+    repoDir = "projects/miopen"
 }
 
 def rocmnode(name) {
@@ -37,32 +37,52 @@ def get_branch_name(){
 ///   * "Performance Dataset" is a performance test with a specified dataset.
 /// Target := { gfx908 | gfx90a | gfx942 } [ Xnack+ ]
 
-def utils
+utils = null
 
 def withWorkingDir(Closure body) {
     checkout scm
     dir("${env.WORKSPACE}/${env.REPO_DIR}") {
+        if (utils == null) {
+            utils = load "vars/utils.groovy"
+        }
         body()
     }
 }
 
-def runDbSyncJob(def utils)
+def runDbSyncJob(def flags)
 {
     script {
         withWorkingDir {
-            utils.buildHipClangJobAndReboot(dvc_pull: true,
-                                setup_flags: "-DMIOPEN_TEST_DBSYNC=1",
+            utils.buildHipClangJob(dvc_pull: true,
+                                setup_flags: "-DMIOPEN_TEST_DBSYNC=1" + flags,
                                 make_targets: 'test_db_sync',
                                 execute_cmd: './bin/test_db_sync',
                                 needs_gpu:false,
-                                needs_reboot:false,
                                 build_install: true)
         }
     }
 }
 
+def runBuildAndSingleGtestJob(def flags, def build_timeout_minutes=420)
+{
+    script {
+        withWorkingDir {
+            def single_gtest_flags = " -DMIOPEN_TEST_DISCRETE=OFF -DGTEST_PARALLEL_LEVEL=4 "
+            utils.buildHipClangJob(
+                setup_flags: single_gtest_flags + flags, 
+                build_cmd: "LLVM_PATH=/opt/rocm/llvm CTEST_PARALLEL_LEVEL=4 make -j\$(nproc) install miopen_gtest check",
+                build_install:true,
+                build_timeout:build_timeout_minutes)
+        }
+    }
+}
+
 //launch develop branch nightly jobs
-CRON_SETTINGS = BRANCH_NAME == "develop" ? '''0 0 * * * % RUN_NIGHTLY_TESTS=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX908=true;TARGET_GFX90A=true;TARGET_GFX942=true''' : ""
+CRON_SETTINGS = BRANCH_NAME == "develop" ? '''
+0 0 * * * % RUN_NIGHTLY_TESTS=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX908=false;TARGET_GFX90A=true;TARGET_GFX942=true
+0 1 * * * % NONCRITICAL_HW_NIGHTLY=true;BUILD_PACKAGE_AND_CHECKS=false;BUILD_FULL_TESTS=false;TARGET_GFX908=true;TARGET_NAVI35=true;TARGET_GFX90A=false;TARGET_GFX942=false
+''' : ""
+
 
 pipeline {
     agent none
@@ -106,7 +126,7 @@ pipeline {
             description: "")
         booleanParam(
             name: "TARGET_GFX908",
-            defaultValue: env.BRANCH_NAME == "develop" ? true : false,
+            defaultValue: false,
             description: "")
         booleanParam(
             name: "TARGET_GFX90A",
@@ -114,12 +134,16 @@ pipeline {
             description: "")
         booleanParam(
             name: "TARGET_GFX942",
-            defaultValue: env.BRANCH_NAME == "develop" ? true : false,
+            defaultValue: true,
             description: "")
         booleanParam(
             name: "TARGET_NAVI32",
             defaultValue: false,
             description: "Navi3 currently fails to build with instruction not supported on this GPU error")
+        booleanParam(
+            name: "TARGET_NAVI35",
+            defaultValue: false,
+            description: "Navi3.5 Strix Halo")
         booleanParam(
             name: "TARGET_NAVI4",
             defaultValue: false,
@@ -163,6 +187,10 @@ pipeline {
             name: "RUN_NIGHTLY_TESTS",
             defaultValue: false,
             description: "Run the nightly tests (default: OFF)")
+        booleanParam(
+            name: "NONCRITICAL_HW_NIGHTLY",
+            defaultValue: false,
+            description: "Nightly builds for non-critical hardware (gfx908, Navi 3.5) (default: OFF)")
     }
 
     environment{
@@ -171,11 +199,23 @@ pipeline {
         Bf16_flags      = " -DMIOPEN_TEST_BFLOAT16=On"
         Int8_flags      = " -DMIOPEN_TEST_INT8=On"
         Full_test       = " -DMIOPEN_TEST_ALL=On"
+
+        gfx908_flags    = " -DMIOPEN_INSTALL_GPU_DATABASES=gfx908"
+        gfx90a_flags    = " -DMIOPEN_INSTALL_GPU_DATABASES=gfx90a"
+        gfx942_flags    = " -DMIOPEN_INSTALL_GPU_DATABASES=gfx942"
+        gfx1151_flags   = " -DMIOPEN_INSTALL_GPU_DATABASES=gfx1151"
+        gfx1101_flags   = " -DMIOPEN_INSTALL_GPU_DATABASES=gfx1101"
+
         Smoke_targets   = " check MIOpenDriver"
         NOCOMGR_flags   = " -DMIOPEN_USE_COMGR=Off"
         NOMLIR_flags    = " -DMIOPEN_USE_MLIR=Off"
         REPO_DIR        = "${repoDir}"
         REPO_NAME       = "${repoName}"
+
+        Build_timeout_minutes = 420
+
+
+        
     }
     stages{
         stage('Build Docker'){
@@ -186,9 +226,13 @@ pipeline {
             steps{
                 script {
                     withWorkingDir {
-                        utils = load "vars/utils.groovy"
-                        utils.getDockerImage()
+                        utils.getDockerImageWithStatus()
                     }
+                }
+            }
+            post {
+                always {
+                    cleanWs()
                 }
             }
         }
@@ -203,29 +247,29 @@ pipeline {
                     steps {
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJobAndReboot( package_build:true, needs_gpu:false, needs_reboot:false)
+                                utils.buildHipClangJob( package_build:true, needs_gpu:false)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
                 stage('Clang Format') {
                     agent{ label rocmnode("nogpu") }
-                    environment{
-                        execute_cmd = "find ${repoDir} -iname \'*.h\' \
-                                -o -iname \'*.hpp\' \
-                                -o -iname \'*.cpp\' \
-                                -o -iname \'*.h.in\' \
-                                -o -iname \'*.hpp.in\' \
-                                -o -iname \'*.cpp.in\' \
-                                -o -iname \'*.cl\' \
-                                | grep -v -E '(build/)|(install/)|(fin/)' \
-                                | xargs -n 1 -P 1 -I{} -t sh -c \'clang-format-12 -style=file {} | diff - {}\'"
-                    }
+                    
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJobAndReboot(setup_cmd: "", build_cmd: "", execute_cmd: execute_cmd, needs_gpu:false, needs_reboot:false)
+                                utils.buildHipClangJob(make_targets: "check_format", needs_gpu:false)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -239,6 +283,11 @@ pipeline {
                             withWorkingDir {
                                 sh 'cd ./test/utils && python3 gtest_formating_checks.py'
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -255,13 +304,17 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJob( build_type: 'debug', setup_flags: HipNoGPU_flags, build_cmd: build_cmd, needs_gpu:false, needs_reboot:false)
+                                utils.buildHipClangJob( build_type: 'debug', setup_flags: HipNoGPU_flags, build_cmd: build_cmd, needs_gpu:false)
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
-                stage('Tuna Fin Build Test')
-                {
+                stage('Tuna Fin Build Test') {
                     agent{ label rocmnode("nogpu") }
                     environment{
                       fin_flags = "-DMIOPEN_BACKEND=HIPNOGPU"
@@ -269,8 +322,13 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJobAndReboot(setup_flags: fin_flags, make_targets: "all", build_fin: "ON", needs_gpu:false, needs_reboot:false, build_install: true)
+                                utils.buildHipClangJob(setup_flags: fin_flags, make_targets: "all", build_fin: "ON", needs_gpu:false, build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -290,24 +348,17 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJobAndReboot(setup_cmd: setup_cmd, build_cmd: build_cmd, needs_gpu:false, needs_reboot:false)
+                                utils.buildHipClangJob(setup_cmd: setup_cmd, build_cmd: build_cmd, needs_gpu:false)
                             }
                         }
                     }
-                }
-                stage('Dbsync gfx908') {
-                    when {
-                        beforeAgent true
-                        expression { params.DBSYNC_TEST && params.TARGET_GFX908 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx908") }
-                    steps{
-                        runDbSyncJob(utils)
+                    post {
+                        always {
+                            cleanWs()
+                        }
                     }
                 }
+                // GFX90A Tests
                 stage('Dbsync gfx90a') {
                     when {
                         beforeAgent true
@@ -318,36 +369,11 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
-                        runDbSyncJob(utils)
+                        runDbSyncJob(gfx90a_flags)
                     }
-                }
-                stage('Dbsync gfx942') {
-                    when {
-                        beforeAgent true
-                        expression { params.DBSYNC_TEST && (params.TARGET_GFX942 || params.WORKAROUND__TARGET_GFX942_MINIMUM_TEST_ENABLE) }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx942") }
-                    steps{
-                        runDbSyncJob(utils)
-                    }
-                }
-                stage('Bf16 Hip Install All gfx908') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_GFX908 && params.DATATYPE_BF16 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx908") }
-                    steps{
-                        script {
-                            withWorkingDir {
-                                utils.buildHipClangJobAndReboot(setup_flags: Bf16_flags + Full_test, build_install: true)
-                            }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -361,13 +387,69 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
-                        script {
-                            withWorkingDir {
-                                utils.buildHipClangJobAndReboot(setup_flags: Bf16_flags + Full_test, build_install: true)
-                            }
+                        runBuildAndSingleGtestJob(Full_test + Bf16_flags + gfx90a_flags, Build_timeout_minutes)
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
+                stage('Fp16 Hip Install All gfx90a') {
+                    when {
+                        beforeAgent true
+                        expression { params.TARGET_GFX90A && params.DATATYPE_FP16 }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("gfx90a") }
+                    steps{
+                        runBuildAndSingleGtestJob(Full_test + Fp16_flags + gfx90a_flags, Build_timeout_minutes)
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
+                stage('Fp32 Hip Install All gfx90a') {
+                    when {
+                        beforeAgent true
+                        expression { params.TARGET_GFX90A && params.DATATYPE_FP32 }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("gfx90a") }
+                    steps{
+                        runBuildAndSingleGtestJob(Full_test + gfx90a_flags, Build_timeout_minutes)
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
+                // GFX942 Tests
+                stage('Dbsync gfx942') {
+                    when {
+                        beforeAgent true
+                        expression { params.DBSYNC_TEST && (params.TARGET_GFX942 || params.WORKAROUND__TARGET_GFX942_MINIMUM_TEST_ENABLE) }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("gfx942") }
+                    steps{
+                        runDbSyncJob(gfx942_flags)
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }               
                 stage('Bf16 Hip Install All gfx942') {
                     when {
                         beforeAgent true
@@ -378,48 +460,10 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
-                        script {
-                            withWorkingDir {
-                                utils.buildHipClangJobAndReboot(setup_flags: Bf16_flags + Full_test, build_install: true, needs_reboot:false)
-                            }
-                        }
+                        runBuildAndSingleGtestJob(Full_test + Bf16_flags + gfx942_flags, Build_timeout_minutes)
                     }
-                }
-                stage('Fp16 Hip All Install gfx908') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_GFX908 && params.DATATYPE_FP16 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx908") }
-                    steps{
-                        script {
-                            withWorkingDir {
-                                utils.buildHipClangJobAndReboot(setup_flags: Full_test + Fp16_flags, build_install: true)
-                            }
-                        }
-                    }
-                }
-                stage('Fp16 Hip All Install gfx90a') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_GFX90A && params.DATATYPE_FP16 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx90a") }
-                    steps{
-                        script {
-                            withWorkingDir {
-                                utils.buildHipClangJobAndReboot(setup_flags: Full_test + Fp16_flags, build_install: true)
-                            }
-                        }
-                    }
-                }
-                stage('Fp16 Hip All Install gfx942') {
+                }               
+                stage('Fp16 Hip Install All gfx942') {
                     when {
                         beforeAgent true
                         expression { params.TARGET_GFX942 && params.DATATYPE_FP16 }
@@ -429,65 +473,15 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
-                        script {
-                            withWorkingDir {
-                                utils.buildHipClangJobAndReboot(setup_flags: Full_test + Fp16_flags, build_install: true, needs_reboot:false)
-                            }
+                        runBuildAndSingleGtestJob(Full_test + Fp16_flags + gfx942_flags, Build_timeout_minutes)
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
-                stage('Fp16 Hip All gfx1101') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_NAVI32 && params.DATATYPE_FP16 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("navi32") }
-                    steps{
-                        script {
-                            withWorkingDir {
-                                utils.buildHipClangJobAndReboot(setup_flags: Full_test + Fp16_flags)
-                            }
-                        }
-                    }
-                }
-                stage('Fp32 Hip All gfx908') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_GFX908 && params.DATATYPE_FP32 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx908") }
-                    steps{
-                        script {
-                            withWorkingDir {
-                                utils.buildHipClangJobAndReboot(setup_flags: Full_test)
-                            }
-                        }
-                    }
-                }
-                stage('Fp32 Hip All gfx90a') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_GFX90A && params.DATATYPE_FP32 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx90a") }
-                    steps{
-                        script {
-                            withWorkingDir {
-                                utils.buildHipClangJobAndReboot(setup_flags: Full_test)
-                            }
-                        }
-                    }
-                }
-                stage('Fp32 Hip All gfx942') {
+                stage('Fp32 Hip Install All gfx942') {
                     when {
                         beforeAgent true
                         expression { params.TARGET_GFX942 && params.DATATYPE_FP32 }
@@ -497,14 +491,29 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
-                        script {
-                            withWorkingDir {
-                                utils.buildHipClangJobAndReboot(setup_flags: Full_test, needs_reboot:false)
-                            }
+                        runBuildAndSingleGtestJob(Full_test + gfx942_flags, Build_timeout_minutes)
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
-                stage('Fp32 Hip All Install gfx1101') {
+                // GFX1101 Tests
+                stage('Fp16 Hip Install All gfx1101') {
+                    when {
+                        beforeAgent true
+                        expression { params.TARGET_NAVI32 && params.DATATYPE_FP16 }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("navi32") }
+                    steps{
+                        runBuildAndSingleGtestJob(Full_test + Fp16_flags + gfx1101_flags, Build_timeout_minutes)
+                    }
+                }                
+                stage('Fp32 Hip Install All gfx1101') {
                     when {
                         beforeAgent true
                         expression { params.TARGET_NAVI32 && params.DATATYPE_FP32 }
@@ -514,11 +523,7 @@ pipeline {
                     }
                     agent{ label rocmnode("navi32") }
                     steps{
-                        script {
-                            withWorkingDir {
-                                utils.buildHipClangJobAndReboot(setup_flags: Full_test, build_install: true)
-                            }
-                        }
+                        runBuildAndSingleGtestJob(Full_test + gfx1101_flags, Build_timeout_minutes)
                     }
                 }
             }
@@ -538,7 +543,13 @@ pipeline {
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
+                // GFX90A Tests
                 stage('Fp32 Hip Debug NOMLIR gfx90a') {
                     when {
                         beforeAgent true
@@ -555,8 +566,13 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJobAndReboot( build_type: 'debug', setup_flags: NOMLIR_flags, build_cmd: NOMLIR_build_cmd, test_flags: ' --verbose ', build_install: true)
+                                utils.buildHipClangJob( build_type: 'debug', setup_flags: NOMLIR_flags + gfx90a_flags, build_cmd: NOMLIR_build_cmd, test_flags: ' --verbose ', build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -572,8 +588,13 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJobAndReboot( build_type: 'debug', setup_flags: "-DMIOPEN_USE_COMPOSABLEKERNEL=Off", make_targets: "", build_install: true)
+                                utils.buildHipClangJob( build_type: 'debug', setup_flags: "-DMIOPEN_USE_COMPOSABLEKERNEL=Off" + gfx90a_flags, make_targets: "", build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -589,8 +610,13 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJobAndReboot( setup_flags: "-DBUILD_SHARED_LIBS=Off", mlir_build: 'OFF', build_install: true)
+                                utils.buildHipClangJob( setup_flags: "-DBUILD_SHARED_LIBS=Off" + gfx90a_flags, mlir_build: 'OFF', build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -610,8 +636,13 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJobAndReboot(make_targets: make_targets, execute_cmd: execute_cmd, find_mode: "Normal", build_install: true)
+                                utils.buildHipClangJob(setup_flags: gfx90a_flags, make_targets: make_targets, execute_cmd: execute_cmd, find_mode: "Normal", build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -631,8 +662,13 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJobAndReboot( make_targets: make_targets, execute_cmd: execute_cmd, build_install: true)
+                                utils.buildHipClangJob(setup_flags: gfx90a_flags, make_targets: make_targets, execute_cmd: execute_cmd, build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -648,8 +684,13 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJobAndReboot(make_targets: Smoke_targets, setup_flags: "-DMIOPEN_USE_SQLITE_PERF_DB=On", build_install: true)
+                                utils.buildHipClangJob(make_targets: Smoke_targets, setup_flags: "-DMIOPEN_USE_SQLITE_PERF_DB=On" + gfx90a_flags, build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -665,27 +706,15 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJobAndReboot(setup_flags: "-DMIOPEN_ENABLE_FIN_INTERFACE=On",
+                                utils.buildHipClangJob(setup_flags: "-DMIOPEN_ENABLE_FIN_INTERFACE=On" + gfx90a_flags,
                                                             make_targets: "test_unit_FinInterface",
                                                             execute_cmd: "bin/test_unit_FinInterface")
                             }
                         }
                     }
-                }
-                stage('Fp32 Hip Debug gfx908') {
-                    when {
-                        beforeAgent true
-                        expression { params.TARGET_GFX908 }
-                    }
-                    options {
-                        retry(2)
-                    }
-                    agent{ label rocmnode("gfx908") }
-                    steps{
-                        script {
-                            withWorkingDir {
-                                utils.buildHipClangJobAndReboot(build_type: 'debug', make_targets: Smoke_targets, build_install: true)
-                            }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }
@@ -701,11 +730,17 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJobAndReboot(build_type: 'debug', make_targets: Smoke_targets, build_install: true)
+                                utils.buildHipClangJob(setup_flags: gfx90a_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true)
                             }
                         }
                     }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
                 }
+                // GFX942 Tests
                 stage('Fp32 Hip Debug gfx942') {
                     when {
                         beforeAgent true
@@ -718,8 +753,197 @@ pipeline {
                     steps{
                         script {
                             withWorkingDir {
-                                utils.buildHipClangJobAndReboot(build_type: 'debug', make_targets: Smoke_targets, needs_reboot:false, build_install: true)
+                                utils.buildHipClangJob(setup_flags: gfx942_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true)
                             }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
+            }
+        }
+        stage("Non-Critical HW Nightly Tests") {
+            when {
+                expression { params.NONCRITICAL_HW_NIGHTLY }
+            }
+            parallel{
+                stage('Mark Build As Nightly') {
+                    agent{ label rocmnode("nogpu") }
+                    steps{
+                        script {
+                            withWorkingDir {
+                                // Adds a comment under the jenkins build number so you can tell it is a nightly build.
+                                currentBuild.description = "Non-Critical HW Nightly Build"
+                            }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
+                // GFX908 Tests
+                stage('Dbsync gfx908') {
+                    when {
+                        beforeAgent true
+                        expression { params.DBSYNC_TEST && params.TARGET_GFX908 }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("gfx908") }
+                    steps{
+                        runDbSyncJob(gfx908_flags)
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
+                stage('Bf16 Hip Install All gfx908') {
+                    when {
+                        beforeAgent true
+                        expression { params.TARGET_GFX908 && params.DATATYPE_BF16 }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("gfx908") }
+                    steps{
+                        runBuildAndSingleGtestJob(Full_test + Bf16_flags + gfx908_flags, Build_timeout_minutes)
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
+                stage('Fp16 Hip Install All gfx908') {
+                    when {
+                        beforeAgent true
+                        expression { params.TARGET_GFX908 && params.DATATYPE_FP16 }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("gfx908") }
+                    steps{
+                        runBuildAndSingleGtestJob(Full_test + Fp16_flags + gfx908_flags, Build_timeout_minutes)
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
+                stage('Fp32 Hip Install All gfx908') {
+                    when {
+                        beforeAgent true
+                        expression { params.TARGET_GFX908 && params.DATATYPE_FP32 }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("gfx908") }
+                    steps{
+                        runBuildAndSingleGtestJob(Full_test + gfx908_flags, Build_timeout_minutes)
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
+                stage('Fp32 Hip Debug gfx908') {
+                    when {
+                        beforeAgent true
+                        expression { params.TARGET_GFX908 }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("gfx908") }
+                    steps{
+                        script {
+                            withWorkingDir {
+                                utils.buildHipClangJob(setup_flags: gfx908_flags, build_type: 'debug', make_targets: Smoke_targets, build_install: true)
+                            }
+                        }
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
+                // GFX115X Strix Halo Tests
+                stage('Bf16 Hip Install All gfx115X') {
+                    when {
+                        beforeAgent true
+                        expression { params.TARGET_NAVI35 && params.DATATYPE_BF16 }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("strix") }
+                    environment{
+                        gfx115x_filter_flags = " -DMIOPEN_TEST_GFX115X=On "
+                    }
+                    steps{
+                        runBuildAndSingleGtestJob(gfx115x_filter_flags + Full_test + Bf16_flags + gfx1151_flags, Build_timeout_minutes)
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
+                stage('Fp16 Hip Install All gfx115X') {
+                    when {
+                        beforeAgent true
+                        expression { params.TARGET_NAVI35 && params.DATATYPE_FP16 }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("strix") }
+                    environment{
+                        gfx115x_filter_flags = " -DMIOPEN_TEST_GFX115X=On "
+                        build_timeout_minutes = 420
+                    }
+                    steps{
+                        runBuildAndSingleGtestJob(gfx115x_filter_flags + Full_test + Fp16_flags + gfx1151_flags, Build_timeout_minutes)
+                    }
+                    post {
+                        always {
+                            cleanWs()
+                        }
+                    }
+                }
+                stage('Fp32 Hip Install All gfx115X') {
+                    when {
+                        beforeAgent true
+                        expression { params.TARGET_NAVI35 && params.DATATYPE_FP32 }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("strix") }
+                    environment{
+                        gfx115x_filter_flags = " -DMIOPEN_TEST_GFX115X=On "
+                        build_timeout_minutes = 420
+                    }
+                    steps{
+                        runBuildAndSingleGtestJob(gfx115x_filter_flags + Full_test + gfx1151_flags, Build_timeout_minutes)
+                    }
+                    post {
+                        always {
+                            cleanWs()
                         }
                     }
                 }

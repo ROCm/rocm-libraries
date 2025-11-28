@@ -579,3 +579,10 @@ bool norm_check(double norm_error, hipDataType type)
         return false;
     }
 }
+
+bool norm_check(double norm_error, hipDataType type, hipblasComputeType_t compute_type)
+{
+    if(compute_type == HIPBLAS_COMPUTE_32F_FAST_16BF && type == HIP_R_32F)
+        return norm_error < 0.5;
+    return norm_check(norm_error, type);
+}

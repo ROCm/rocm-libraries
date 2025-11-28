@@ -70,133 +70,50 @@ extern "C" {
 *  \note
 *  Currently, only \p transA == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported.
 *
+*  \deprecated
+*  This function is deprecated when using the CUDA backend (CUDA 10.0+) and will be 
+*  removed in CUDA 11.0. This deprecation does not apply to the ROCm backend.
+*
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle              handle to the hipsparse library context queue.
 *  @param[in]
-*  transA      matrix operation type.
+*  transA              matrix operation type.
 *  @param[in]
-*  m           number of rows of the sparse CSR matrix.
+*  m                   number of rows of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  n           number of columns of the sparse CSR matrix.
+*  n                   number of columns of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  nnz         number of non-zero entries of the sparse CSR matrix.
+*  nnz                 number of non-zero entries of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha               scalar \f$\alpha\f$.
 *  @param[in]
-*  descrA      descriptor of the sparse CSR matrix. Currently, only
-*              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
+*  descrA              descriptor of the sparse CSR matrix. Currently, only
+*                      \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
 *  @param[in]
-*  csrSortedValA array of \p nnz elements of the sparse CSR matrix.
+*  csrSortedValA       array of \p nnz elements of the sparse CSR matrix.
 *  @param[in]
-*  csrSortedRowPtrA array of \p m+1 elements that point to the start
-*              of every row of the sparse CSR matrix.
+*  csrSortedRowPtrA    array of \p m+1 elements that point to the start
+*                      of every row of the sparse CSR matrix.
 *  @param[in]
-*  csrSortedColIndA array of \p nnz elements containing the column indices of the sparse
-*              CSR matrix.
+*  csrSortedColIndA    array of \p nnz elements containing the column indices of the sparse
+*                      CSR matrix.
 *  @param[in]
-*  x           array of \p n elements (\f$op(A) == A\f$) or \p m elements
-*              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
+*  x                   array of \p n elements (\f$op(A) == A\f$) or \p m elements
+*                      (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
 *  @param[in]
-*  beta        scalar \f$\beta\f$.
+*  beta                scalar \f$\beta\f$.
 *  @param[inout]
-*  y           array of \p m elements (\f$op(A) == A\f$) or \p n elements
-*              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
+*  y                   array of \p m elements (\f$op(A) == A\f$) or \p n elements
+*                      (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n or \p nnz, \p descr,
-*              \p alpha, \p csrSortedValA, \p csrSortedRowPtrA, \p csrSortedColIndA, \p x,
-*              \p beta or \p y is invalid.
-*  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
-*  \retval     HIPSPARSE_STATUS_NOT_SUPPORTED
-*              \ref hipsparseMatrixType_t != \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
-*
-*  \par Example
-*  \code{.c}
-*      // hipSPARSE handle
-*      hipsparseHandle_t handle;
-*      hipsparseCreate(&handle);
-*
-*      // alpha * ( 1.0  0.0  2.0 ) * ( 1.0 ) + beta * ( 4.0 ) = (  31.1 )
-*      //         ( 3.0  0.0  4.0 ) * ( 2.0 )          ( 5.0 ) = (  62.0 )
-*      //         ( 5.0  6.0  0.0 ) * ( 3.0 )          ( 6.0 ) = (  70.7 )
-*      //         ( 7.0  0.0  8.0 ) *                  ( 7.0 ) = ( 123.8 )
-*
-*      int m = 4;
-*      int n = 3;
-*      int nnz = 8;
-*
-*      // CSR row pointers
-*      int hcsrRowPtr[5] = {0, 2, 4, 6, 8};
-*
-*      // CSR column indices
-*      int hcsrColInd[8] = {0, 2, 0, 2, 0, 1, 0, 2};
-*
-*      // CSR values
-*      double hcsrVal[8] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
-*
-*      // Transposition of the matrix
-*      hipsparseOperation_t trans = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-*
-*      // Scalar alpha and beta
-*      double alpha = 3.7;
-*      double beta  = 1.3;
-*
-*      // x and y
-*      double hx[3] = {1.0, 2.0, 3.0};
-*      double hy[4] = {4.0, 5.0, 6.0, 7.0};
-*
-*      // Matrix descriptor
-*      hipsparseMatDescr_t descr;
-*      hipsparseCreateMatDescr(&descr);
-*
-*      // Offload data to device
-*      int* dcsrRowPtr;
-*      int* dcsrColInd;
-*      double*        dcsrVal;
-*      double*        dx;
-*      double*        dy;
-*
-*      hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*      hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
-*      hipMalloc((void**)&dcsrVal, sizeof(double) * nnz);
-*      hipMalloc((void**)&dx, sizeof(double) * n);
-*      hipMalloc((void**)&dy, sizeof(double) * m);
-*
-*      hipMemcpy(dcsrRowPtr, hcsrRowPtr, sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*      hipMemcpy(dcsrColInd, hcsrColInd, sizeof(int) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dcsrVal, hcsrVal, sizeof(double) * nnz, hipMemcpyHostToDevice);
-*      hipMemcpy(dx, hx, sizeof(double) * n, hipMemcpyHostToDevice);
-*      hipMemcpy(dy, hy, sizeof(double) * m, hipMemcpyHostToDevice);
-*
-*      // Call dcsrmv to perform y = alpha * A x + beta * y
-*      hipsparseDcsrmv(handle,
-*                      trans,
-*                      m,
-*                      n,
-*                      nnz,
-*                      &alpha,
-*                      descr,
-*                      dcsrVal,
-*                      dcsrRowPtr,
-*                      dcsrColInd,
-*                      dx,
-*                      &beta,
-*                      dy);
-*
-*      // Copy result back to host
-*      hipMemcpy(hy, dy, sizeof(double) * m, hipMemcpyDeviceToHost);
-*
-*      // Clear hipSPARSE
-*      hipsparseDestroyMatDescr(descr);
-*      hipsparseDestroy(handle);
-*
-*      // Clear device memory
-*      hipFree(dcsrRowPtr);
-*      hipFree(dcsrColInd);
-*      hipFree(dcsrVal);
-*      hipFree(dx);
-*      hipFree(dy);
-*  \endcode
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha or \p beta is nullptr,
+*          \p m, \p n or \p nnz is negative, or \p csrSortedValA, \p csrSortedRowPtrA,
+*          \p csrSortedColIndA, \p x or \p y is nullptr.
+*  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \ref hipsparseMatrixType_t is not 
+*          \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 */
 /**@{*/
 DEPRECATED_CUDA_10000("The routine will be removed in CUDA 11")

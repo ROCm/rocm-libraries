@@ -39,6 +39,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/HIPTimer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelArguments.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/KernelOptions.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LDSBankModel.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LDSAllocator.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Logging.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Random.cpp"
@@ -59,6 +60,8 @@ add_subdirectory(ExpressionTransformations)
 add_subdirectory(Observers)
 add_subdirectory(Utilities)
 add_subdirectory(Operations)
+add_subdirectory(Parameters)
+add_subdirectory(Graph)
 add_subdirectory(KernelGraph)
 
 add_library(rocroller-no-rtti
@@ -86,7 +89,6 @@ target_link_libraries(rocroller-no-rtti
         hip::host
         $<BUILD_INTERFACE:spdlog::spdlog_header_only>
         fmt::fmt-header-only
-        Boost::headers
 )
 
 target_link_libraries(rocroller PRIVATE $<BUILD_INTERFACE:rocroller-no-rtti>)

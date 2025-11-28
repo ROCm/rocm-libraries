@@ -34,7 +34,7 @@
 
 #include _THRUST_STD_INCLUDE(type_traits)
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD && _THRUST_USE_ROCPRIM
 #  include <rocprim/type_traits.hpp>
 #  include <rocprim/type_traits_functions.hpp>
 #endif // !_THRUST_HAS_DEVICE_SYSTEM_STD
@@ -75,7 +75,11 @@ template <typename T>
 using make_unsigned_t = typename ::std::make_unsigned<T>::type;
 
 template <typename Invokable, typename InputT, typename InitT = InputT>
+#if _THRUST_USE_ROCPRIM
 using accumulator_t = ::rocprim::accumulator_t<Invokable, InputT, InitT>;
+#else
+using accumulator_t = _THRUST_STD::decay_t<_THRUST_STD::invoke_result_t<Invokable, InitT, InputT>>;
+#endif
 template <typename T>
 // If we're not on Windows and we have libstdc++ >= 10, we can use the __decay_t
 // builtin to reduce compilation time.
@@ -135,6 +139,21 @@ struct is_non_bool_integral<bool> : public false_type
 template <typename T>
 struct is_non_bool_arithmetic : public ::internal::is_arithmetic<T>
 {};
+
+template <typename T>
+struct is_unbounded_array : public thrust::detail::false_type
+{};
+template <typename T>
+struct is_unbounded_array<T[]> : public thrust::detail::true_type
+{};
+
+template <typename T>
+struct is_bounded_array : public thrust::detail::false_type
+{};
+template <typename T, _THRUST_STD::size_t N>
+struct is_bounded_array<T[N]> : public thrust::detail::true_type
+{};
+
 template <>
 struct is_non_bool_arithmetic<bool> : public false_type
 {};
@@ -170,6 +189,12 @@ struct identity_
 {
   using type = T;
 }; // end identity
+
+template <class Tp, bool>
+struct dependent_type
+{
+  using type = Tp;
+}; // end dependent_type
 
 template <bool, typename T>
 struct lazy_enable_if
@@ -212,8 +237,10 @@ struct larger_type
 template <class F, class... Us>
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 using invoke_result = _THRUST_STD::__invoke_of<F, Us...>;
-#else // !_THRUST_HAS_DEVICE_SYSTEM_STD
+#elif _THRUST_USE_ROCPRIM // !_THRUST_HAS_DEVICE_SYSTEM_STD
 using invoke_result = ::rocprim::invoke_result<F, Us...>;
+#else
+using invoke_result = _THRUST_STD::invoke_result<F, Us...>;
 #endif // _THRUST_HAS_DEVICE_SYSTEM_STD
 
 template <class F, class... Us>
@@ -232,7 +259,7 @@ namespace internal
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 
 template <typename... Tp>
-using promoted_numerical_type = _THRUST_STD::common_type_t<Tp...>;
+using promoted_numerical_type = _THRUST_STD::common_type<Tp...>;
 
 #else // !_THRUST_HAS_DEVICE_SYSTEM_STD
 

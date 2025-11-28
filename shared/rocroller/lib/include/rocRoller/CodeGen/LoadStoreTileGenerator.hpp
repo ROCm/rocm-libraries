@@ -122,26 +122,38 @@ namespace rocRoller
                                                    CoordinateGraph::Transformer      coords);
 
             /**
-             * Information needed in order to load or store a tile.
+             * @brief Information needed in order to load or store a tile.
+             *
+             * @field tag The tag of the control graph node generating the load or store
+             * @field kind The kind of memory instruction to use
+             * @field m Number of rows in the tile
+             * @field n Number of columns in the tile
+             * @field dataType The type of the data being loaded
+             * @field isTransposedTile if tile needs to be transposed
+             * @field vgpr The registers to store the data in (null is loading)
+             * @field offset Offset from the starting index
              */
             struct LoadStoreTileInfo
             {
+                int                               tag  = -1;
                 MemoryInstructions::MemoryKind    kind = MemoryInstructions::MemoryKind::Count;
                 uint64_t                          m    = 0;
                 uint64_t                          n    = 0;
                 uint32_t                          elementBits    = 0;
                 uint32_t                          packedAmount   = 0;
                 uint32_t                          ldsWriteStride = 0;
-                Register::ValuePtr                data;
-                Register::ValuePtr                rowOffsetReg;
-                Register::ValuePtr                rowStrideReg;
+                Register::ValuePtr                data           = nullptr;
+                VariableType                      varType        = VariableType{DataType::Count};
+                Register::ValuePtr                rowOffsetReg   = nullptr;
+                Register::ValuePtr                rowStrideReg   = nullptr;
                 RegisterExpressionAttributes      rowStrideAttributes;
-                Register::ValuePtr                colStrideReg;
+                Register::ValuePtr                colStrideReg = nullptr;
                 RegisterExpressionAttributes      colStrideAttributes;
-                Register::ValuePtr                offset;
-                std::shared_ptr<BufferDescriptor> bufDesc;
-                BufferInstructionOptions          bufOpts;
-                bool                              isTransposedTile;
+                Register::ValuePtr                offset           = nullptr;
+                std::shared_ptr<BufferDescriptor> bufDesc          = nullptr;
+                BufferInstructionOptions          bufOpts          = {};
+                bool                              isTransposedTile = false;
+                bool                              isPadded         = false;
             };
 
         private:
@@ -156,13 +168,12 @@ namespace rocRoller
             // Index calculation Helpers
             std::shared_ptr<BufferDescriptor> getBufferDesc(int tag);
             Expression::ExpressionPtr         getOffsetExpr(int  opTag,
-                                                            bool isDirect2LDS,
+                                                            bool isStorePartOfGlobalToLDS,
                                                             CoordinateGraph::Transformer const& coords);
             Generator<Instruction>            getOffset(LoadStoreTileInfo&           info,
                                                         CoordinateGraph::Transformer coords,
-                                                        int                          tag,
                                                         bool                         preserveOffset,
-                                                        bool                         direct2LDS = false);
+                                                        bool isStorePartOfGlobalToLDS = false);
 
             /**
              * @brief Generate stride (in bytes).
@@ -201,17 +212,8 @@ namespace rocRoller
 
             // Move Tile Helpers
             template <MemoryInstructions::MemoryDirection Dir>
-            Generator<Instruction> moveTile(MemoryInstructions::MemoryKind kind,
-                                            uint64_t                       m,
-                                            uint64_t                       n,
-                                            VariableType                   dataType,
-                                            int                            tag,
-                                            Register::ValuePtr             vgpr,
-                                            Register::ValuePtr             offset,
-                                            CoordinateGraph::Transformer&  coords,
-                                            BufferInstructionOptions       bufOpts          = {},
-                                            bool                           isTransposedTile = false,
-                                            bool                           isPadded = false);
+            Generator<Instruction> moveTile(LoadStoreTileInfo&            info,
+                                            CoordinateGraph::Transformer& coords);
             template <MemoryInstructions::MemoryDirection Dir>
             Generator<Instruction> moveTileLiteralStrides(LoadStoreTileInfo& info);
             template <MemoryInstructions::MemoryDirection Dir>

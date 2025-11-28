@@ -380,65 +380,6 @@ hipsparseStatus_t hipsparseDpruneDense2csrNnzByPercentage(hipsparseHandle_t     
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p lda, \p percentage, \p A, \p descr, \p info, \p csrVal
 *              \p csrRowPtr, \p csrColInd or \p buffer pointer is invalid.
-*
-*  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    // Matrix descriptor
-*    hipsparseMatDescr_t descr;
-*    hipsparseCreateMatDescr(&descr);
-*
-*    // Dense matrix in column order
-*    //     1 2 0 3 0
-*    // A = 0 4 5 0 0
-*    //     6 0 0 7 8
-*    float hdense_A[15] = {1.0f, 0.0f, 6.0f, 2.0f, 4.0f, 0.0f, 0.0f, 5.0f, 0.0f, 3.0f, 0.0f, 7.0f, 0.0f, 0.0f, 8.0f};
-*
-*    int m         = 3;
-*    int n         = 5;
-*    int lda       = m;
-*    float percentage = 70.0f;
-*
-*    float* ddense_A = nullptr;
-*    hipMalloc((void**)&ddense_A, sizeof(float) * lda * n);
-*    hipMemcpy(ddense_A, hdense_A, sizeof(float) * lda * n, hipMemcpyHostToDevice);
-*
-*    // Allocate sparse CSR matrix
-*    int* dcsrRowPtr = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*
-*    pruneInfo_t info;
-*    hipsparseCreatePruneInfo(&info);
-*
-*    size_t bufferSize;
-*    hipsparseSpruneDense2csrByPercentage_bufferSize(handle, m, n, ddense_A, lda, percentage, descr, nullptr, dcsrRowPtr, nullptr, info, &bufferSize);
-*
-*    void* dbuffer = nullptr;
-*    hipMalloc((void**)&dbuffer, bufferSize);
-*
-*    int nnz_A;
-*    hipsparseSpruneDense2csrNnzByPercentage(handle, m, n, ddense_A, lda, percentage, descr, dcsrRowPtr, &nnz_A, info, dbuffer);
-*
-*    int* dcsrColInd = nullptr;
-*    float* dcsrVal = nullptr;
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz_A);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz_A);
-*
-*    hipsparseSpruneDense2csrByPercentage(handle, m, n, ddense_A, lda, percentage, descr, dcsrVal, dcsrRowPtr, dcsrColInd, info, dbuffer);
-*
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*    hipFree(ddense_A);
-*    hipFree(dbuffer);
-*
-*    hipsparseDestroyPruneInfo(info);
-*    hipsparseDestroyMatDescr(descr);
-*    hipsparseDestroy(handle);
-*  \endcode
 */
 /**@{*/
 DEPRECATED_CUDA_12000("The routine will be removed in CUDA 13")

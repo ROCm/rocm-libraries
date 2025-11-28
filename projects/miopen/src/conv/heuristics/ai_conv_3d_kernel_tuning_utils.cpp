@@ -26,15 +26,15 @@
  * general AI-related code for kernel tuning and heuristics. To be called in the
  * solver-specific code.
  *******************************************************************************/
-#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
-#include <sstream>
 #include <algorithm>
+#include <iterator>
+#include <map>
+#include <sstream>
+#include <string>
+
+#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
 #include <miopen/logger.hpp>
-#include <miopen/solver/problem_description_interpreter.hpp>
-#include <miopen/conv/problem_description.hpp>
-#include <map>
-#include <string>
 
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 namespace miopen {
@@ -46,11 +46,11 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 int LayoutStringToCode(const std::string& layout)
 {
     if(layout == "NCDHW")
-        return 0.0;
+        return 0;
     if(layout == "NDHWC")
-        return 1.0;
+        return 1;
     // Add more as needed
-    return -1.0; // Unknown
+    return -1; // Unknown
 }
 
 // Helper: Extract 3D convolution features
@@ -137,9 +137,12 @@ std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
     auto lt_pos = kernel.find('<');
     if(lt_pos != std::string::npos)
     {
-        // Add the entire prefix (before '<') as a single token
-        std::string prefix = kernel.substr(0, lt_pos);
-        prefix.erase(remove_if(prefix.begin(), prefix.end(), isspace), prefix.end());
+        // Add the entire prefix (before '<') as a single token, removing whitespace
+        std::string prefix;
+        std::remove_copy_if(kernel.begin(),
+                            kernel.begin() + lt_pos,
+                            std::back_inserter(prefix),
+                            [](char c) { return std::isspace(c); });
         if(!prefix.empty())
             tokens.push_back(prefix);
 
@@ -152,9 +155,13 @@ std::vector<std::string> GetKernelAsTokens(const std::string& kernel)
             std::string token;
             while(std::getline(ps, token, ','))
             {
-                token.erase(remove_if(token.begin(), token.end(), isspace), token.end());
-                if(!token.empty())
-                    tokens.push_back(token);
+                std::string clean_token;
+                std::remove_copy_if(token.begin(),
+                                    token.end(),
+                                    std::back_inserter(clean_token),
+                                    [](char c) { return std::isspace(c); });
+                if(!clean_token.empty())
+                    tokens.push_back(clean_token);
             }
         }
     }
@@ -199,110 +206,57 @@ std::vector<int> GenerateSplitK(int max_split_k)
     return split_ks;
 }
 
-// Main template implementation
-template <typename DataType>
-bool RunParameterPredictionModel(
-    const miopen::ExecutionContext& ctx,
-    const miopen::conv::ProblemDescription& problem,
-    std::vector<std::string>& valid_kernels,
-    int& index,
-    int& split_k,
-    std::string& kernel_id,
-    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
-        fill_valid_kernels,
-    std::string solver_name)
-{
-    valid_kernels = fill_valid_kernels(problem);
-
-    // Filter kernels by type
-    std::vector<int> heuristic_indexes;
-    std::vector<std::vector<std::string>> heuristic_kernels;
-    FillHeuristicKernels(valid_kernels, heuristic_indexes, heuristic_kernels);
-    // Prepare features and split_k values
-    const std::string& arch = ctx.GetStream().GetDeviceName();
-
-    // Use AI model to select best candidate
-    try
-    {
-        std::map<std::string, float> features =
-            GetFeatures3D(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
-
-        bool use_split_k = split_k == 1;
-        if(split_k > 1)
-        {
-            MIOPEN_THROW("Invalid initial split_k value for performing AI Heuristics: " +
-                         std::to_string(split_k) + ". Expected 0 (no split) or 1 (default split).");
-        }
-
-        auto result = ai::tuning::candidate_selection::ModelSelectBestCandidate(
-            arch, solver_name, features, heuristic_kernels, use_split_k);
-
-        if(result.kernel_index >= 0 && result.kernel_index < static_cast<int>(valid_kernels.size()))
-        {
-            index   = result.kernel_index;
-            split_k = result.split_k;
-            if(use_split_k)
-            {
-                kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
-            }
-            else
-            {
-                kernel_id = valid_kernels[index];
-            }
-            return true;
-        }
-        MIOPEN_LOG_I("AI prediction returned invalid kernel index, falling back");
-        return false;
-    }
-    catch(const miopen::Exception& ex)
-    {
-        MIOPEN_LOG_I2("[Warning] AI model failed: " << ex.what());
-        return false;
-    }
-}
-
 // Explicit template instantiations for common types
-template bool RunParameterPredictionModel<float>(
-    const ExecutionContext&,
+// Note: We instantiate with a generic lambda type for the validation function
+template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel<float, bool (*)(int, int)>(
+    const miopen::ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
     int&,
     int&,
     std::string&,
     std::function<std::vector<std::string>(const ProblemDescription&)>,
-    std::string);
+    std::string,
+    bool (*&&)(int, int));
 
-template bool RunParameterPredictionModel<int8_t>(
-    const ExecutionContext&,
+template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel<int8_t, bool (*)(int, int)>(
+    const miopen::ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
     int&,
     int&,
     std::string&,
     std::function<std::vector<std::string>(const ProblemDescription&)>,
-    std::string);
+    std::string,
+    bool (*&&)(int, int));
 #if MIOPEN_USE_COMPOSABLEKERNEL
 
-template bool RunParameterPredictionModel<ck::half_t>(
-    const ExecutionContext&,
+template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel<ck::half_t, bool (*)(int, int)>(
+    const miopen::ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
     int&,
     int&,
     std::string&,
     std::function<std::vector<std::string>(const ProblemDescription&)>,
-    std::string);
+    std::string,
+    bool (*&&)(int, int));
 
-template bool RunParameterPredictionModel<ck::bhalf_t>(
-    const ExecutionContext&,
+template std::pair<bool, miopen::ai::tuning::candidate_selection::CandidateSelectionResult>
+RunParameterPredictionModel<ck::bhalf_t, bool (*)(int, int)>(
+    const miopen::ExecutionContext&,
     const ProblemDescription&,
     std::vector<std::string>&,
     int&,
     int&,
     std::string&,
     std::function<std::vector<std::string>(const ProblemDescription&)>,
-    std::string);
-#endif
+    std::string,
+    bool (*&&)(int, int));
+#endif // MIOPEN_USE_COMPOSABLEKERNEL
 
 // helper function to get a dummy execution context for when we do not have a real context
 const miopen::ExecutionContext& GetDummyCtx()
