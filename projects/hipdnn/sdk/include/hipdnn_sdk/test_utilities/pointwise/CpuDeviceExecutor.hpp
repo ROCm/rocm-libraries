@@ -9,9 +9,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
+namespace hipdnn_sdk::test_utilities
 {
 
 template <class OutputType, class... InputTypes>
@@ -121,5 +119,4 @@ private:
     }
 };
 
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::test_utilities

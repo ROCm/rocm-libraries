@@ -10,16 +10,14 @@
 #include <thread>
 #include <vector>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
+namespace hipdnn_sdk::test_utilities
 {
 
 class CpuFpReferenceConvolution
 {
 public:
     // Check if this CPU implementation supports the given node configuration
-    static bool isApplicable(const hipdnn_sdk::data_objects::Node& node)
+    static bool isApplicable(const data_objects::Node& node)
     {
         using namespace hipdnn_sdk::data_objects;
 
@@ -536,5 +534,4 @@ private:
     }
 };
 
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::test_utilities

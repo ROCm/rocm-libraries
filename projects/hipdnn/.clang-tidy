@@ -9,6 +9,7 @@ Checks: >
   performance-*,
   portability-*,
   readability-*,
+  google-global-names-in-headers,
   -fuchsia-trailing-return,
   -modernize-use-trailing-return-type,
   -modernize-concat-nested-namespaces,

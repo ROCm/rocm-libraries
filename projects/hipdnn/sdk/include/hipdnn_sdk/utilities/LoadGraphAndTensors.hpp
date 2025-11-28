@@ -56,7 +56,7 @@ using DataTypeFromTensor =
 
 inline std::unique_ptr<ITensor>
     tensorFromFileAndAttributes(const std::filesystem::path& filepath,
-                                const hipdnn_sdk::data_objects::TensorAttributes& attributes)
+                                const data_objects::TensorAttributes& attributes)
 {
     auto tensor = hipdnn_sdk::test_utilities::createTensorFromAttribute(attributes);
     detail::fillTensorFromFile(*tensor, filepath);
@@ -203,8 +203,7 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
     }(path);
 
     flatbuffers::FlatBufferBuilder graphBuilder;
-    auto graphOffset
-        = hipdnn_sdk::json::to<hipdnn_sdk::data_objects::Graph>(graphBuilder, graphJson);
+    auto graphOffset = hipdnn_sdk::json::to<data_objects::Graph>(graphBuilder, graphJson);
     graphBuilder.Finish(graphOffset);
 
     auto graph = data_objects::GetGraph(graphBuilder.GetBufferPointer());

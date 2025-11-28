@@ -11,6 +11,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
+using namespace miopen_legacy_plugin::test_utilities;
 
 namespace
 {
@@ -24,6 +25,9 @@ class ConvFwdBiasActiv
 protected:
     void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
     {
+        // Skipping until CK is working on Windows
+        SKIP_IF_WINDOWS();
+
         const auto& [convTestCase, doBias, activTestCase] = this->GetParam();
 
         graph::Graph graphObj;
