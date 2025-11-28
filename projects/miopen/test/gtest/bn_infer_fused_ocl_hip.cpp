@@ -25,7 +25,6 @@
  *******************************************************************************/
 
 #include <gtest/gtest.h>
-#include <miopen/miopen.h>
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/batchnorm/problem_description.hpp>
 
@@ -290,9 +289,9 @@ protected:
             << "Non finite number found in the GPU data";
         EXPECT_FALSE(miopen::find_idx(ref_out, miopen::not_finite) >= 0)
             << "Non finite number found in the CPU/GPU data";
-        auto error             = miopen::max_diff(ref_out, output);
-        const double tolerance = 20;
-        double threshold       = std::numeric_limits<YDataType>::epsilon() * tolerance;
+        auto error = miopen::max_diff(ref_out, output);
+        const double tolerance{20.0};
+        double threshold = std::numeric_limits<YDataType>::epsilon() * tolerance;
         EXPECT_LE(error, threshold);
     }
 
@@ -477,6 +476,11 @@ std::vector<BNTestCase> BNFusedInferTestConfigs(miopenBatchNormMode_t mode)
         // Compare the outputs, we expect the outputs to be exactly the same
         Verify();
     };
+    INSTANTIATE_TEST_SUITE_P(
+        Smoke,
+        GPU_bn_infer_fused_spatial_FP32,
+        testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                         testing::ValuesIn(BNFusedInferTestConfigs<float>(miopenBNSpatial))));
 
     TEST_P(GPU_bn_infer_fused_per_act_FP32, PortTest)
     {
@@ -489,6 +493,11 @@ std::vector<BNTestCase> BNFusedInferTestConfigs(miopenBatchNormMode_t mode)
         // Compare the outputs, we expect the outputs to be exactly the same
         Verify();
     };
+    INSTANTIATE_TEST_SUITE_P(
+        Smoke,
+        GPU_bn_infer_fused_per_act_FP32,
+        testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                         testing::ValuesIn(BNFusedInferTestConfigs<float>(miopenBNPerActivation))));
 
     TEST_P(GPU_bn_infer_fused_spatial_FP16, PortTest)
     {
@@ -499,6 +508,11 @@ std::vector<BNTestCase> BNFusedInferTestConfigs(miopenBatchNormMode_t mode)
         // Compare the outputs.
         Verify();
     };
+    INSTANTIATE_TEST_SUITE_P(
+        Smoke,
+        GPU_bn_infer_fused_spatial_FP16,
+        testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                         testing::ValuesIn(BNFusedInferTestConfigs<half_float::half>(miopenBNSpatial))));
 
     TEST_P(GPU_bn_infer_fused_per_act_FP16, PortTest)
     {
@@ -509,26 +523,8 @@ std::vector<BNTestCase> BNFusedInferTestConfigs(miopenBatchNormMode_t mode)
         // Compare the outputs.
         Verify();
     };
-
-    INSTANTIATE_TEST_SUITE_P(
-        Smoke,
-        GPU_bn_infer_fused_spatial_FP32,
-        testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                         testing::ValuesIn(BNFusedInferTestConfigs<float>(miopenBNSpatial))));
-    INSTANTIATE_TEST_SUITE_P(
-        Smoke,
-        GPU_bn_infer_fused_per_act_FP32,
-        testing::Combine(testing::ValuesIn(ActivationConfigs()),
-                         testing::ValuesIn(BNFusedInferTestConfigs<float>(miopenBNPerActivation))));
-    INSTANTIATE_TEST_SUITE_P(
-        Smoke,
-        GPU_bn_infer_fused_spatial_FP16,
-        testing::Combine(
-            testing::ValuesIn(ActivationConfigs()),
-            testing::ValuesIn(BNFusedInferTestConfigs<half_float::half>(miopenBNSpatial))));
     INSTANTIATE_TEST_SUITE_P(
         Smoke,
         GPU_bn_infer_fused_per_act_FP16,
-        testing::Combine(
-            testing::ValuesIn(ActivationConfigs()),
-            testing::ValuesIn(BNFusedInferTestConfigs<half_float::half>(miopenBNPerActivation))));
+        testing::Combine(testing::ValuesIn(ActivationConfigs()),
+                         testing::ValuesIn(BNFusedInferTestConfigs<half_float::half>(miopenBNPerActivation))));

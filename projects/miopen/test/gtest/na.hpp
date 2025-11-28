@@ -25,8 +25,6 @@
  *******************************************************************************/
 #pragma once
 
-#include <gtest/gtest.h>
-#include <miopen/miopen.h>
 #include <miopen/solver_id.hpp>
 #include <serialize.hpp>
 #include <fusionHost.hpp>
@@ -34,6 +32,7 @@
 #include "tensor_util.hpp"
 #include "get_handle.hpp"
 #include "random.hpp"
+
 struct BNTestCase
 {
     size_t N;

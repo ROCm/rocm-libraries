@@ -468,7 +468,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
-/*
+
 using GPU_OpTensorFwdBiasGenericTest_FP32 = OpTensorFwdBiasGenericTest<float>;
 
 TEST_P(GPU_OpTensorFwdBiasGenericTest_FP32, PortTest)
@@ -484,7 +484,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(1.0),
                                           testing::Values(1.0),
                                           testing::Values(0.0, 1.0)));
-*/
+
 using GPU_OpTensorFwdBiasGenericTest_FP64 = OpTensorFwdBiasGenericTest<double>;
 
 TEST_P(GPU_OpTensorFwdBiasGenericTest_FP64, PortTest)
