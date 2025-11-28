@@ -105,7 +105,7 @@ hipsparseStatus_t testing_gather(Arguments argus)
 
     // Initial Data on CPU
     srand(12345ULL);
-    hipsparseInitIndex(hx_ind.data(), nnz, 1, size);
+    hipsparseInitIndex(hx_ind.data(), nnz, idxBase, size + idxBase);
     hipsparseInit<T>(hy, 1, size);
 
     // Allocate memory on device

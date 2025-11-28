@@ -16,8 +16,6 @@ namespace hipdnn_sdk
 namespace test_utilities
 {
 
-using namespace hipdnn_sdk::utilities;
-
 template <class DeviceExecutor, class OutputType, class... InputTypes>
 class ReferencePointwiseBase
 {
@@ -48,16 +46,16 @@ public:
     // Unary operations
     template <typename InputType, typename ComputeType = double>
     static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                 TensorBase<OutputType>& output,
-                                 const TensorBase<InputType>& input)
+                                 utilities::TensorBase<OutputType>& output,
+                                 const utilities::TensorBase<InputType>& input)
     {
         executeUnaryOperation<InputType, ComputeType>(operation, output, input);
     }
 
     template <typename InputType, typename ParamType, typename ComputeType = double>
     static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                 TensorBase<OutputType>& output,
-                                 const TensorBase<InputType>& input,
+                                 utilities::TensorBase<OutputType>& output,
+                                 const utilities::TensorBase<InputType>& input,
                                  const ParamType lowerClip,
                                  const ParamType upperClip,
                                  const ParamType lowerSlope)
@@ -71,9 +69,9 @@ public:
     // Binary operations
     template <typename Input1Type, typename Input2Type, typename ComputeType = double>
     static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                 TensorBase<OutputType>& output,
-                                 const TensorBase<Input1Type>& input1,
-                                 const TensorBase<Input2Type>& input2)
+                                 utilities::TensorBase<OutputType>& output,
+                                 const utilities::TensorBase<Input1Type>& input1,
+                                 const utilities::TensorBase<Input2Type>& input2)
     {
         executeBinaryOperation<Input1Type, Input2Type, ComputeType>(
             operation, output, input1, input2);
@@ -85,9 +83,9 @@ public:
               typename ParamType,
               typename ComputeType = double>
     static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                 TensorBase<OutputType>& output,
-                                 const TensorBase<Input1Type>& input1,
-                                 const TensorBase<Input2Type>& input2,
+                                 utilities::TensorBase<OutputType>& output,
+                                 const utilities::TensorBase<Input1Type>& input1,
+                                 const utilities::TensorBase<Input2Type>& input2,
                                  const ParamType lowerClip,
                                  const ParamType upperClip,
                                  const ParamType lowerSlope)
@@ -101,8 +99,8 @@ public:
 private:
     template <typename InputType, typename ComputeType>
     static void executeUnaryOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                      TensorBase<OutputType>& output,
-                                      const TensorBase<InputType>& input)
+                                      utilities::TensorBase<OutputType>& output,
+                                      const utilities::TensorBase<InputType>& input)
     {
         DeviceExecutor policy;
 
@@ -137,8 +135,8 @@ private:
     template <typename InputType, typename ParamType, typename ComputeType>
     static void
         executeParameterizedUnaryOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                           TensorBase<OutputType>& output,
-                                           const TensorBase<InputType>& input,
+                                           utilities::TensorBase<OutputType>& output,
+                                           const utilities::TensorBase<InputType>& input,
                                            const ParamType lowerClip,
                                            const ParamType upperClip,
                                            const ParamType lowerSlope)
@@ -165,9 +163,9 @@ private:
 
     template <typename Input1Type, typename Input2Type, typename ComputeType>
     static void executeBinaryOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                       TensorBase<OutputType>& output,
-                                       const TensorBase<Input1Type>& input1,
-                                       const TensorBase<Input2Type>& input2)
+                                       utilities::TensorBase<OutputType>& output,
+                                       const utilities::TensorBase<Input1Type>& input1,
+                                       const utilities::TensorBase<Input2Type>& input2)
     {
         DeviceExecutor policy;
 
@@ -205,9 +203,9 @@ private:
     template <typename Input1Type, typename Input2Type, typename ParamType, typename ComputeType>
     static void
         executeParameterizedBinaryOperation(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                            TensorBase<OutputType>& output,
-                                            const TensorBase<Input1Type>& input1,
-                                            const TensorBase<Input2Type>& input2,
+                                            utilities::TensorBase<OutputType>& output,
+                                            const utilities::TensorBase<Input1Type>& input1,
+                                            const utilities::TensorBase<Input2Type>& input2,
                                             const ParamType lowerClip,
                                             const ParamType upperClip,
                                             const ParamType lowerSlope)
@@ -273,15 +271,15 @@ private:
 
         PointwiseMode operation = attrs->operation();
 
-        if(hipdnn_sdk::utilities::isImplementedUnaryPointwiseMode(operation))
+        if(utilities::isImplementedUnaryPointwiseMode(operation))
         {
             return canExecuteUnaryOperation(attrs);
         }
-        if(hipdnn_sdk::utilities::isImplementedBinaryPointwiseMode(operation))
+        if(utilities::isImplementedBinaryPointwiseMode(operation))
         {
             return canExecuteBinaryOperation(attrs);
         }
-        if(hipdnn_sdk::utilities::isImplementedTernaryPointwiseMode(operation))
+        if(utilities::isImplementedTernaryPointwiseMode(operation))
         {
             return canExecuteTernaryOperation(attrs);
         }

@@ -34,7 +34,7 @@ protected:
 
         // Note: The plugin paths has to be set before we create the hipdnn handle.
         auto pluginPath
-            = std::filesystem::weakly_canonical(getCurrentExecutableDirectory() / PLUGIN_PATH);
+            = std::filesystem::weakly_canonical(utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
         const std::string pluginPathStr = pluginPath.string();
         const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
@@ -59,7 +59,7 @@ protected:
         }
     }
 
-    virtual void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW)
+    virtual void runGraphTest(DataType tolerance, const utilities::TensorLayout& layout = utilities::TensorLayout::NCHW)
         = 0;
 
 protected:
@@ -76,7 +76,7 @@ protected:
         initializeBundle(graph, gpuBundle, seed);
         initializeBundle(graph, cpuBundle, seed);
 
-        executeGpuGraph(_handle, graph, gpuBundle);
+        ASSERT_NO_FATAL_FAILURE(executeGpuGraph(_handle, graph, gpuBundle));
         executeCpuGraph(graph, cpuBundle);
 
         ASSERT_GE(outputTensorIds.size(), 1)
@@ -183,7 +183,7 @@ private:
         result = graph.get_workspace_size(workspaceSize);
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
         ASSERT_GE(workspaceSize, 0) << result.err_msg;
-        Workspace workspace(static_cast<size_t>(workspaceSize));
+        utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
         auto variantPack = bundle.toDeviceVariantPack();
         result = graph.execute(handle, variantPack, workspace.get());
