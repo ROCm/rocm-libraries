@@ -20,41 +20,11 @@ jobs:
           repository: ROCm/TheRock
           path: TheRock
 
-      - name: Show disk usage before cleanup
-        run: |
-          echo "=== Overall disk usage ==="
-          df -h /
-          echo ""
-          echo "=== /usr/share contents ==="
-          sudo du -sh /usr/share/* 2>/dev/null | sort -hr | head -20
-          echo ""
-          echo "=== /usr/local contents ==="
-          sudo du -sh /usr/local/* 2>/dev/null | sort -hr | head -20
-          echo ""
-          echo "=== /opt contents ==="
-          sudo du -sh /opt/* 2>/dev/null | sort -hr | head -20
-          echo ""
-          echo "=== AGENT_TOOLSDIRECTORY ($AGENT_TOOLSDIRECTORY) ==="
-          sudo du -sh "$AGENT_TOOLSDIRECTORY"/* 2>/dev/null | sort -hr | head -20 || echo "Directory not found"
-          echo ""
-          echo "=== Docker images ==="
-          sudo docker system df 2>/dev/null || echo "Docker not available"
-          echo ""
-          echo "=== Large directories in /home ==="
-          sudo du -sh /home/*/* 2>/dev/null | sort -hr | head -10
-
       - name: Free Disk Space
         run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-          sudo rm -rf /usr/share/swift
-          sudo rm -rf /usr/local/graalvm
-          sudo rm -rf /usr/local/.ghcup
-          sudo rm -rf /usr/local/share/powershell
-          sudo docker system prune -a -f
+          sudo rm -rf /usr/share/dotnet          # 4.0G
+          sudo rm -rf /usr/share/swift           # 3.2G
+          sudo rm -rf /usr/local/lib/android     # ~13G
 
       - name: Install dependencies
         run: |
