@@ -20,20 +20,20 @@ inline hipdnn_sdk::data_objects::TensorAttributesT
 }
 
 template <typename T>
-inline std::unique_ptr<hipdnn_sdk::utilities::ShallowTensor<T>>
+inline std::unique_ptr<utilities::ShallowTensor<T>>
     createShallowTensor(const hipdnn_sdk::data_objects::TensorAttributesT& tensorDetails, void* ptr)
 {
-    return std::make_unique<hipdnn_sdk::utilities::ShallowTensor<T>>(
+    return std::make_unique<utilities::ShallowTensor<T>>(
         ptr, tensorDetails.dims, tensorDetails.strides);
 }
 
-inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
+inline std::unique_ptr<utilities::ITensor>
     createTensorFromAttribute(const hipdnn_sdk::data_objects::TensorAttributes& attribute)
 {
-    auto dims = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.dims());
-    auto strides = hipdnn_sdk::utilities::convertFlatBufferVectorToStdVector(attribute.strides());
+    auto dims = utilities::convertFlatBufferVectorToStdVector(attribute.dims());
+    auto strides = utilities::convertFlatBufferVectorToStdVector(attribute.strides());
 
-    return hipdnn_sdk::utilities::createTensor(attribute.data_type(), dims, strides);
+    return utilities::createTensor(attribute.data_type(), dims, strides);
 }
 
 } // namespace hipdnn_sdk::test_utilities

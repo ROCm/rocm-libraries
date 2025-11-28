@@ -92,12 +92,12 @@ private:
         auto shallowOut0Tensor = createShallowTensor<OutputType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
 
-        if(isUnaryPointwiseMode(_params.mode))
+        if(utilities::isUnaryPointwiseMode(_params.mode))
         {
             CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
                 _params.mode, *shallowOut0Tensor, *shallowIn0Tensor);
         }
-        else if(isBinaryPointwiseMode(_params.mode))
+        else if(utilities::isBinaryPointwiseMode(_params.mode))
         {
             if(!_params.in1Tensor.has_value())
             {
@@ -124,7 +124,7 @@ private:
         auto shallowOut0Tensor = createShallowTensor<OutputType>(
             _params.out0Tensor, variantPack.at(_params.out0Tensor.uid));
 
-        if(isUnaryPointwiseMode(_params.mode))
+        if(utilities::isUnaryPointwiseMode(_params.mode))
         {
             CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
                 _params.mode,
@@ -139,7 +139,7 @@ private:
                                             ? _params.reluLowerClipSlope.value()
                                             : 0.0f));
         }
-        else if(isBinaryPointwiseMode(_params.mode))
+        else if(utilities::isBinaryPointwiseMode(_params.mode))
         {
             if(!_params.in1Tensor.has_value())
             {
@@ -203,13 +203,13 @@ public:
         // Check that the operation is implemented
         auto mode = nodeAttributes->operation();
         bool isImplemented = false;
-        if(isUnaryPointwiseMode(mode))
+        if(utilities::isUnaryPointwiseMode(mode))
         {
-            isImplemented = isImplementedUnaryPointwiseMode(mode);
+            isImplemented = utilities::isImplementedUnaryPointwiseMode(mode);
         }
-        else if(isBinaryPointwiseMode(mode))
+        else if(utilities::isBinaryPointwiseMode(mode))
         {
-            isImplemented = isImplementedBinaryPointwiseMode(mode);
+            isImplemented = utilities::isImplementedBinaryPointwiseMode(mode);
         }
 
         if(!isImplemented)
@@ -226,7 +226,7 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->out_0_tensor_uid(), OutputDataTypeEnum);
 
         // Check optional tensors based on operation mode
-        if(isBinaryPointwiseMode(mode))
+        if(utilities::isBinaryPointwiseMode(mode))
         {
             CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->in_1_tensor_uid());
             CHECK_OPTIONAL_TENSOR_TYPE(
