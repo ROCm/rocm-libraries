@@ -50,6 +50,7 @@
 
 #if !defined(_WIN32)
 #include <unistd.h>
+
 unsigned long long get_available_host_memory()
 {
     // See "man sysconf 3" for more information on this system call.
@@ -339,6 +340,12 @@ TYPED_TEST(DeviceMergeInplaceTests, MergeInplace)
         size_t size_b     = std::get<1>(size);
         size_t size_total = size_a + size_b;
         size_t total_bytes = sizeof(value_type) * size_total;
+
+#if HAS_VALGRIND_H
+        //Disable large tests to reduce valgrind run time
+        if(RUNNING_ON_VALGRIND && total_bytes > (1LL << 25) /* Anything bigger than 32 MB*/)
+            continue;
+#endif // HAS_VALGRIND_H
 
         // hipMallocManaged() currently doesnt support zero byte allocation
         if((size_a == 0 || size_b == 0) && common::use_hmm())

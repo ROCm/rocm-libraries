@@ -527,5 +527,11 @@ void testLargeIndices()
 
 TEST(RocprimDeviceSortTests, LargeIndices)
 {
+#if HAS_VALGRIND_H
+    //Disable large tests to reduce valgrind run time
+    if(RUNNING_ON_VALGRIND)
+        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
+#endif // HAS_VALGRIND_H
+
     testLargeIndices();
 }
