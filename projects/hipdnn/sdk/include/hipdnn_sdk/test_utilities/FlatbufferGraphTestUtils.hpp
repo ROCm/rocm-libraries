@@ -55,34 +55,6 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferenceGraph(
         builder, 5, "est_mean", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
 
     tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
->>>>>>> origin/develop
-        builder, 6, "est_variance", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, 2, "y", inputDataType, &strides, &dims));
-
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, 3, "scale", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
-
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, 4, "bias", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
-
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, 5, "est_mean", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
-
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, 6, "est_variance", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
-=======
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, 3, "scale", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
-
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, 4, "bias", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
-
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, 5, "est_mean", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
-
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
->>>>>>> origin/develop
         builder, 6, "est_variance", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
 
     auto bnormAttributes = data_objects::CreateBatchnormInferenceAttributes(builder,

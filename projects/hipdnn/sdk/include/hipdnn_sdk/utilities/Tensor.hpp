@@ -520,21 +520,12 @@ private:
     bool _packed;
 };
 
-inline std::unique_ptr<utilities::ITensor>
-    createTensor(data_objects::DataType dataType,
->>>>>>> origin/develop
-                 const std::vector<int64_t>& dims,
-                 const std::vector<int64_t>& strides) template <typename T>
-    using PinnedTensor = Tensor<T, PinnedHostAllocator<T>>;
+template <typename T>
+using PinnedTensor = Tensor<T, PinnedHostAllocator<T>>;
 
 inline std::unique_ptr<utilities::ITensor> createTensor(data_objects::DataType dataType,
                                                         const std::vector<int64_t>& dims,
                                                         const std::vector<int64_t>& strides)
-=======
-    inline std::unique_ptr<utilities::ITensor> createTensor(data_objects::DataType dataType,
->>>>>>> origin/develop
-                                                            const std::vector<int64_t>& dims,
-                                                            const std::vector<int64_t>& strides)
 {
     switch(dataType)
     {
