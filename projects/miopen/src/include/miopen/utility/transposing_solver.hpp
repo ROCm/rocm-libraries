@@ -184,10 +184,13 @@ struct UniversalTransposeSolver : TransposePseudoSolver
 
             const auto build_params = GetDataTypeKBP(problem.input.GetType());
 
+            constexpr std::size_t max_block_size = 256;
+            const auto local_size = std::min<std::size_t>(group_size * 16, max_block_size);
+
             transposeKernel.kernel_file  = "UniversalTranspose.cl";
             transposeKernel.kernel_name  = "UniversalTranspose";
             transposeKernel.g_wk         = {group_size * 16, 1, 1};
-            transposeKernel.l_wk         = {group_size * 16, 1, 1};
+            transposeKernel.l_wk         = {local_size, 1, 1};
             transposeKernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
 
             sln.construction_params.emplace_back(std::move(transposeKernel));
