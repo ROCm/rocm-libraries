@@ -30,7 +30,6 @@
 #include "rocRoller/Parameters/Solution/LoadOption.hpp"
 #include <common/SourceMatcher.hpp>
 
-
 namespace MatrixMultiplyTest
 {
     using namespace rocRoller;
@@ -256,7 +255,7 @@ namespace MatrixMultiplyTest
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_16x16x32_NN)
     {
         const auto [typeAB, loadPathB] = std::get<1>(GetParam());
-        bool const isFP8 = typeAB == rocRoller::DataType::FP8;
+        bool const isFP8               = typeAB == rocRoller::DataType::FP8;
         if(isFP8)
             matrixMultiplyMacroTile<FP8, FP8, float>(16, 16, 32, 1, loadPathB, "N", "N");
         else
@@ -315,13 +314,11 @@ namespace MatrixMultiplyTest
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_32x32x16_NN)
     {
         const auto [typeAB, loadPathB] = std::get<1>(GetParam());
-        bool const isFP8 = typeAB == rocRoller::DataType::FP8;
+        bool const isFP8               = typeAB == rocRoller::DataType::FP8;
         if(isFP8)
-            matrixMultiplyMacroTile<FP8, FP8, float>(
-                32, 32, 16, 1, loadPathB, "N", "N");
+            matrixMultiplyMacroTile<FP8, FP8, float>(32, 32, 16, 1, loadPathB, "N", "N");
         else
-            matrixMultiplyMacroTile<BF8, BF8, float>(
-                32, 32, 16, 1, loadPathB, "N", "N");
+            matrixMultiplyMacroTile<BF8, BF8, float>(32, 32, 16, 1, loadPathB, "N", "N");
 
         if(!commandKernel)
             return;
@@ -377,11 +374,9 @@ namespace MatrixMultiplyTest
     {
         const auto [typeAB, loadPathB] = std::get<1>(GetParam());
         if(typeAB == rocRoller::DataType::FP8)
-            matrixMultiplyMacroTile<FP8, FP8, float>(
-                16, 16, 32, 1, loadPathB, "T", "N");
+            matrixMultiplyMacroTile<FP8, FP8, float>(16, 16, 32, 1, loadPathB, "T", "N");
         else
-            matrixMultiplyMacroTile<BF8, BF8, float>(
-                16, 16, 32, 1, loadPathB, "T", "N");
+            matrixMultiplyMacroTile<BF8, BF8, float>(16, 16, 32, 1, loadPathB, "T", "N");
     }
 
     TEST_P(MatrixMultiplyF8F6F4TestGPU, GPU_MatrixMultiplyMacroTileF8F6F4)
@@ -664,20 +659,22 @@ namespace MatrixMultiplyTest
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiplyTest,
         MatrixMultiplyTestGPU,
-        ::testing::Combine(mfmaSupportedISATuples(),
+        ::testing::Combine(mfmaSupportedISAValues(),
                            ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
-                                             SolutionParams::LoadPath::BufferToLDSViaVGPR)));
+                                             SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                             SolutionParams::LoadPath::GlobalToVGPR,
+                                             SolutionParams::LoadPath::GlobalToLDSViaVGPR)));
 
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiplyTest,
         MatrixMultiplyNoLDSBTestGPU,
-        ::testing::Combine(mfmaSupportedISATuples(),
+        ::testing::Combine(mfmaSupportedISAValues(),
                            ::testing::Values(SolutionParams::LoadPath::BufferToVGPR)));
 
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiplyTest,
         MatrixMultiplyABCTestGPU,
-        ::testing::Combine(mfmaSupportedISATuples(),
+        ::testing::Combine(mfmaSupportedISAValues(),
                            ::testing::Values(SolutionParams::LoadPath::BufferToVGPR)));
 
     INSTANTIATE_TEST_SUITE_P(

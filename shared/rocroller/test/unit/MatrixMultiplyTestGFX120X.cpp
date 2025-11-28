@@ -26,7 +26,6 @@
 
 #include "MatrixMultiplyTestBase.hpp"
 
-
 namespace MatrixMultiplyTest
 {
     using namespace rocRoller;
@@ -59,15 +58,16 @@ namespace MatrixMultiplyTest
     };
 
     // Params: waveK, laodPathAB
-    class ABCWMMATestGFX120X : public BaseMatrixMultiplyContextFixture<std::tuple<int, SolutionParams::LoadPath>>
+    class ABCWMMATestGFX120X
+        : public BaseMatrixMultiplyContextFixture<std::tuple<int, SolutionParams::LoadPath>>
     {
     };
 
     TEST_P(WMMATestGFX120X, GPU_MatrixMultiplyMacroTileWMMA)
     {
         const auto [typeAndWaveK, transOp, loadPathB] = std::get<1>(GetParam());
-        const auto [typeAB, waveK]         = typeAndWaveK;
-        const auto [transA, transB]        = transOp;
+        const auto [typeAB, waveK]                    = typeAndWaveK;
+        const auto [transA, transB]                   = transOp;
         auto typeStr{"f16"};
         switch(typeAB)
         {
@@ -269,7 +269,7 @@ namespace MatrixMultiplyTest
     TEST_P(MixedWMMATestGFX120X, GPU_MatrixMultiplyABMixedWMMA)
     {
         const auto [typeA, typeB, waveK, transOp, loadPathAB] = std::get<1>(GetParam());
-        const auto [transA, transB]               = transOp;
+        const auto [transA, transB]                           = transOp;
         std::string typeStr;
 
         if(typeA == typeB)
@@ -295,7 +295,8 @@ namespace MatrixMultiplyTest
         {
             AssertFatal(typeB == DataType::BF8,
                         "Unexpected data type: " + ShowValue(typeB) + "(Allowed: BF8)");
-            matrixMultiplyAB<FP8, BF8, float>(16, 16, waveK, 1, loadPathAB, transA == "T", transB == "T");
+            matrixMultiplyAB<FP8, BF8, float>(
+                16, 16, waveK, 1, loadPathAB, transA == "T", transB == "T");
             typeStr = "fp8_bf8";
         }
         else
@@ -304,7 +305,8 @@ namespace MatrixMultiplyTest
                         "Unexpected data type: " + ShowValue(typeA) + "(Allowed: BF8)");
             AssertFatal(typeB == DataType::FP8,
                         "Unexpected data type: " + ShowValue(typeB) + "(Allowed: FP8)");
-            matrixMultiplyAB<BF8, FP8, float>(16, 16, waveK, 1, loadPathAB, transA == "T", transB == "T");
+            matrixMultiplyAB<BF8, FP8, float>(
+                16, 16, waveK, 1, loadPathAB, transA == "T", transB == "T");
             typeStr = "bf8_fp8";
         }
 
