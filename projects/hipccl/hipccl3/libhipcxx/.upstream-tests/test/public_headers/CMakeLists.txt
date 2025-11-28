@@ -57,11 +57,9 @@ function(libcudacxx_add_public_header_test header)
 
   # Create the default target for that file
   set(headertest_${header_name} verify_${header_name})
-  # NOTE(HIP/AMD): Barrier and PTX headers are skipped for AMD devices (no support as of October 2025).
-  if(header_name MATCHES "ptx.*")
-    return()
-  endif()
-  if(headertest_src MATCHES "barrier.*")
+  # NOTE(HIP/AMD): Skipp unsupported headers for AMD devices (no support as of November 2025).
+  string(REGEX MATCH "ptx|barrier|latch|semaphore|annotated_ptr|pipeline|memcpy_async" match "${header}")
+  if(match)
     return()
   endif()
   # NOTE(HIP/AMD): unsupported headers are skipped for AMD devices (no support as of October 2025).
@@ -82,7 +80,7 @@ function(libcudacxx_add_public_header_test header)
   target_link_libraries(headertest_${header_name} hip::device)
 
   # Ensure that if this is an atomic header, we only include the right architectures
-  string(REGEX MATCH "ptx|barrier|latch|semaphore|annotated_ptr|pipeline" match "${header}")
+  string(REGEX MATCH "ptx|barrier|latch|semaphore|annotated_ptr|pipeline|memcpy_async" match "${header}")
   if(match)
     # Ensure that we only compile the header when we have some architectures enabled
     if (NOT architectures_at_least_sm70)

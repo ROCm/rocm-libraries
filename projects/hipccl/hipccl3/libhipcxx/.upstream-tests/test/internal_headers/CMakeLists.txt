@@ -68,7 +68,7 @@ function(libcudacxx_create_internal_header_test header_name, headertest_src, fal
   endif()
 
   # cuda internal headers should not be tested against a host compiler
-  add_library(headertest_${header_name} SHARED "${headertest_src}.cu")
+  add_library(headertest_${header_name} SHARED "${headertest_src}.cpp")
 
   set_source_files_properties("${headertest_src}.cpp" PROPERTIES LANGUAGE HIP)
   target_include_directories(headertest_${header_name} PRIVATE "${libhipcxx_SOURCE_DIR}/include")
@@ -98,9 +98,15 @@ function(libcudacxx_add_internal_header_test header)
   # ${header} contains the "/" from the subfolder, replace by "_" for actual names
   string(REPLACE "/" "_" header_name "${header}")
 
+  # NOTE(HIP/AMD): Skipp unsupported headers for AMD devices (no support as of November 2025).
+  string(REGEX MATCH "ptx|barrier|latch|semaphore|annotated_ptr|pipeline|memcpy_async" match "${header}")
+  if(match)
+    return()
+  endif()
+
   # Create the source file for the header target from the template and add the file to the global project
   set(headertest_src "headers/${header_name}")
-  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/header_test.cpp.in" "${headertest_src}.cu")
+  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/header_test.cpp.in" "${headertest_src}.cpp")
 
   # Create the default target for that file
   libcudacxx_create_internal_header_test(${header_name}, ${headertest_src}, "")

@@ -42,6 +42,12 @@ function(libcudacxx_add_std_header_test header)
   # ${header} contains the "/" from the subfolder, replace by "_" for actual names
   string(REPLACE "/" "_" header_name "${header}")
 
+  # NOTE(HIP/AMD): Skipp unsupported headers for AMD devices (no support as of November 2025).
+  string(REGEX MATCH "ptx|barrier|latch|semaphore|annotated_ptr|pipeline|memcpy_async" match "${header}")
+  if(match)
+    return()
+  endif()
+
   # Create the source file for the header target from the template and add the file to the global project
   set(headertest_src "headers/${header_name}")
   configure_file("${CMAKE_CURRENT_SOURCE_DIR}/header_test.cpp.in" "${headertest_src}.cpp")
@@ -54,12 +60,13 @@ function(libcudacxx_add_std_header_test header)
   target_compile_definitions(headertest_std_${header_name} PRIVATE CCCL_ENABLE_ASSERTIONS)
   target_compile_definitions(headertest_std_${header_name} PRIVATE CCCL_IGNORE_DEPRECATED_CPP_DIALECT)
   target_compile_definitions(headertest_std_${header_name} PRIVATE CCCL_ENABLE_OPTIONAL_REF)
+  set_source_files_properties(headertest_std_${header_name} PROPERTIES LANGUAGE HIP)
 
   # We want to ensure that we can build headers within <cuda/> with a host compiler but we need cuda_runtime_api.h
   if ("NVHPC" STREQUAL "${CMAKE_CXX_COMPILER_ID}")
     target_link_libraries(headertest_std_${header_name} NVHPC::CUDART)
   else()
-    target_link_libraries(headertest_std_${header_name} CUDA::cudart)
+    target_link_libraries(headertest_std_${header_name} hip::device)
   endif()
 
   add_dependencies(libcudacxx.test.public_headers_host_only headertest_std_${header_name})

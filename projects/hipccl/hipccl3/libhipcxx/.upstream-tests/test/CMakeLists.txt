@@ -276,13 +276,13 @@ else()
 endif()
 
 # Libcudacxx auto-generated internal header tests
-#add_subdirectory(internal_headers)
+add_subdirectory(internal_headers)
 
 # Libcudacxx auto-generated public header tests
-#add_subdirectory(public_headers)
+add_subdirectory(public_headers)
 
 # Libcudacxx auto-generated public header as std tests
-#add_subdirectory(public_headers_host_only)
+add_subdirectory(public_headers_host_only)
 
 if(LIBCUDACXX_ENABLE_CUDA)
   # Enable building the nvrtcc project if NVRTC is enabled
