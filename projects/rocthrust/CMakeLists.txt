@@ -259,6 +259,8 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
     enable_testing()
   endif()
 
+  set(DEFAULT_GPU_RESOURCE_TYPE "gpus")
+  
   # We still want the testing to be compiled to catch some errors
   #TODO: Get testing folder working with HIP on Windows
   if (NOT WIN32 AND BUILD_TEST)

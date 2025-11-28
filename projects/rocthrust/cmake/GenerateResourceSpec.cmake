@@ -1,5 +1,8 @@
-#!/usr/bin/cmake -P
+# ########################################################################
+# Copyright 2019-2025 Advanced Micro Devices, Inc.
+# ########################################################################
 
+# Alternatively, we can use the rocm_agent_enumerator command
 find_program(ROCMINFO_EXECUTABLE
   rocminfo
 )
@@ -21,7 +24,7 @@ if(ROCMINFO_EXIT_CODE)
   message(FATAL_ERROR ${ROCMINFO_STDERR})
 endif()
 
-string(REGEX MATCHALL [[--(gfx[0-9a-f]+)]]
+string(REGEX MATCHALL [[Name:[ \t]+(gfx[0-9a-f]+)]]
   ROCMINFO_MATCHES
   ${ROCMINFO_STDOUT}
 )
@@ -51,7 +54,7 @@ set(GFXIP_AND_ID)
 set(ID 0)
 foreach(ROCMINFO_MATCH IN LISTS ROCMINFO_MATCHES)
   string(REGEX REPLACE
-    "--"
+    [[Name:[ \t]+]]
     ""
     ROCMINFO_MATCH
     ${ROCMINFO_MATCH}
@@ -86,13 +89,13 @@ list(SORT GFXIP_AND_ID)
 set(JSON_PAYLOAD)
 set(IT1 0)
 list(GET GFXIP_AND_ID ${IT1} I1)
-string(REGEX REPLACE ":[0-9a-f]+" "" IP1 ${I1})
+string(REGEX REPLACE [[:[0-9]+$]] "" IP1 ${I1})
 list(LENGTH GFXIP_AND_ID COUNT)
 while(IT1 LESS COUNT)
   string(APPEND JSON_PAYLOAD "\n      \"${IP1}\": [")
   set(IT2 ${IT1})
   list(GET GFXIP_AND_ID ${IT2} I2)
-  string(REGEX REPLACE [[:[0-9a-f]+$]] "" IP2 ${I2})
+  string(REGEX REPLACE [[:[0-9]+$]] "" IP2 ${I2})
   string(REGEX REPLACE [[^gfx[0-9a-f]+:]] "" ID2 ${I2})
   while(${IP2} STREQUAL ${IP1} AND IT2 LESS COUNT)
     string(APPEND JSON_PAYLOAD
@@ -103,7 +106,7 @@ while(IT1 LESS COUNT)
     math(EXPR IT2 "${IT2} + 1")
     if(IT2 LESS COUNT)
       list(GET GFXIP_AND_ID ${IT2} I2)
-      string(REGEX REPLACE [[:[0-9a-f]+$]] "" IP2 ${I2})
+      string(REGEX REPLACE [[:[0-9]+$]] "" IP2 ${I2})
       string(REGEX REPLACE [[^gfx[0-9a-f]+:]] "" ID2 ${I2})
     endif()
   endwhile()
@@ -113,6 +116,24 @@ while(IT1 LESS COUNT)
   set(IP1 ${IP2})
 endwhile()
 string(REGEX REPLACE [[,$]] "" JSON_PAYLOAD ${JSON_PAYLOAD})
+
+# In addition, write out all GPU devices under the resource type "gpus" -- this
+# could be used as the default resource for tests to define their requirements
+#
+set(IT1 0)
+if(IT1 LESS COUNT)
+  string(APPEND JSON_PAYLOAD ",\n      \"gpus\": [")
+  while(IT1 LESS COUNT)
+    string(APPEND JSON_PAYLOAD
+             "\n        {\n"
+             "           \"id\": \"${IT1}\"\n"
+             "        },"
+    )
+    math(EXPR IT1 "${IT1} + 1")
+  endwhile()
+  string(REGEX REPLACE [[,$]] "" JSON_PAYLOAD ${JSON_PAYLOAD})
+  string(APPEND JSON_PAYLOAD "\n      ]")
+endif()
 
 set(JSON_HEAD [[{
   "version": {

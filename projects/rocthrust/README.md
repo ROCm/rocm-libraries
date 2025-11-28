@@ -207,12 +207,14 @@ There is a utility script in the repo that may be called independently:
 # Go to rocThrust build directory
 cd projects/rocthrust; cd build
 
-# Invoke directly or use CMake script mode via cmake -P
-../cmake/GenerateResourceSpec.cmake
+# Generate the resource spec file by the name "resources.json"
+cmake -P ../cmake/GenerateResourceSpec.cmake
 
-# Assuming you have 2 compatible GPUs in the system
-ctest --resource-spec-file ./resources.json --parallel 2
+# Run tests in parallel with the resource spec file and specify the number of jobs
+ctest --resource-spec-file ./resources.json --parallel <number-of-jobs>
 ```
+
+Then `ctest` will launch up to the specified number of jobs to run tests in parallel, while honoring the available GPU resources and their allocation defined by `--resource-spec-file` and `RESOURCE_GROUPS`.
 
 #### Manual
 

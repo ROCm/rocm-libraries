@@ -109,6 +109,7 @@ function(add_rocthrust_test TEST)
         add_relative_test(${TEST_TARGET} ${TEST_TARGET})
         set_tests_properties(${TEST_TARGET}
             PROPERTIES
+                RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE_TYPE}:1"
                 LABELS "hip"
         )
     endif()
