@@ -377,6 +377,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/ControlToCoordinateMapper.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/CoordinateGraph.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/ELF.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/ELF_detail.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/ELF_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/Enum.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Serialization/Expression.hpp"
