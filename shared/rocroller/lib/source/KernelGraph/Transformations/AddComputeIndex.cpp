@@ -227,8 +227,9 @@ namespace rocRoller::KernelGraph
             if(maybeForLoop)
             {
                 auto forLoopCoord = graph.mapper.get<ForLoop>(location);
-                auto coord        = getNeighbourNodeInPath(forLoopCoord, direction, path, graph);
+                forLoopCoord      = followIdentify(forLoopCoord, graph);
 
+                auto coord = getNeighbourNodeInPath(forLoopCoord, direction, path, graph);
                 if(coord != -1)
                 {
                     ordered.push_back(coord);
@@ -246,6 +247,7 @@ namespace rocRoller::KernelGraph
                 neighbourNodes = graph.coordinates.childNodes(unroll).to<std::vector>();
             else
                 neighbourNodes = graph.coordinates.parentNodes(unroll).to<std::vector>();
+
             for(auto neighbourNode : neighbourNodes)
             {
                 if(path.contains(neighbourNode) && !isForLoop.contains(neighbourNode))
@@ -332,40 +334,35 @@ namespace rocRoller::KernelGraph
 
         for(auto const& unroll : unrolls)
         {
-            {
-                {
-                    auto const subDimension
-                        = kgraph.mapper.getConnectionSubdimension(candidate, unroll);
-                    // Find the neighbour of the Unroll that:
-                    // 1. is in the load/store coordinate transform path
-                    // 2. has a Stride edge connected to it
-                    std::vector<int> neighbourNodes;
-                    if(direction == Graph::Direction::Downstream)
-                        neighbourNodes = kgraph.coordinates.parentNodes(unroll).to<std::vector>();
-                    else
-                        neighbourNodes = kgraph.coordinates.childNodes(unroll).to<std::vector>();
+            auto proxy = followIdentify(unroll, kgraph);
 
-                    for(auto neighbourNode : neighbourNodes)
+            auto const subDimension = kgraph.mapper.getConnectionSubdimension(candidate, unroll);
+            // Find the neighbour of the Unroll that:
+            // 1. is in the load/store coordinate transform path
+            // 2. has a Stride edge connected to it
+            std::vector<int> neighbourNodes;
+            if(direction == Graph::Direction::Downstream)
+                neighbourNodes = kgraph.coordinates.parentNodes(proxy).to<std::vector>();
+            else
+                neighbourNodes = kgraph.coordinates.childNodes(proxy).to<std::vector>();
+
+            for(auto neighbourNode : neighbourNodes)
+            {
+                if(path.contains(neighbourNode))
+                {
+                    auto neighbourEdges = kgraph.coordinates.getNeighbours(
+                        neighbourNode, Graph::opposite(direction));
+                    for(auto neighbourEdge : neighbourEdges)
                     {
-                        if(path.contains(neighbourNode))
+                        auto maybeStride = kgraph.coordinates.get<Stride>(neighbourEdge);
+                        if(maybeStride
+                           && std::find(strideCoords.begin(), strideCoords.end(), neighbourEdge)
+                                  != strideCoords.end())
                         {
-                            auto neighbourEdges = kgraph.coordinates.getNeighbours(
-                                neighbourNode, Graph::opposite(direction));
-                            for(auto neighbourEdge : neighbourEdges)
-                            {
-                                auto maybeStride = kgraph.coordinates.get<Stride>(neighbourEdge);
-                                if(maybeStride
-                                   && std::find(
-                                          strideCoords.begin(), strideCoords.end(), neighbourEdge)
-                                          != strideCoords.end())
-                                {
-                                    auto maybeStrideTag = neighbourEdge;
-                                    auto newConnection
-                                        = makeConnection<Stride, Connections::UnrollStride>(
-                                            maybeStrideTag, subDimension);
-                                    connections.push_back(newConnection);
-                                }
-                            }
+                            auto maybeStrideTag = neighbourEdge;
+                            auto newConnection  = makeConnection<Stride, Connections::UnrollStride>(
+                                maybeStrideTag, subDimension);
+                            connections.push_back(newConnection);
                         }
                     }
                 }
@@ -395,14 +392,11 @@ namespace rocRoller::KernelGraph
         std::vector<int>                chain;
         std::vector<DeferredConnection> connections;
         std::map<int, int>              offsetOfCoord;
-        bool                            hasUnroll = false;
         std::vector<int>                strideCoords;
 
         for(auto info :
             getRequiredCoordinatesInfo(op, spec.location, graph, spec.isStorePartOfGlobalToLDSOp))
         {
-            if(info.isUnroll)
-                hasUnroll = true;
             // Add ComputeIndex operation
             int offset = -1, stride = -1, buffer = -1;
 

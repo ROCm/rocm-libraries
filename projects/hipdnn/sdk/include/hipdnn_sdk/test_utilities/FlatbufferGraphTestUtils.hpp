@@ -16,16 +16,16 @@ namespace hipdnn_sdk::test_utilities
 
 inline flatbuffers::FlatBufferBuilder createEmptyValidGraph()
 {
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
     flatbuffers::FlatBufferBuilder builder;
-    auto graphOffset = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                                   "test",
-                                                                   data_objects::DataType::FLOAT,
-                                                                   data_objects::DataType::HALF,
-                                                                   data_objects::DataType::BFLOAT16,
-                                                                   &tensorAttributes,
-                                                                   &nodes);
+    auto graphOffset = data_objects::CreateGraphDirect(builder,
+                                                       "test",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::HALF,
+                                                       data_objects::DataType::BFLOAT16,
+                                                       &tensorAttributes,
+                                                       &nodes);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -37,75 +37,54 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferenceGraph(
     data_objects::DataType computeDataType = data_objects::DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
 
     std::vector<int64_t> derivedStrides = utilities::getDerivedShape(strides);
     std::vector<int64_t> derivedDims = utilities::getDerivedShape(dims);
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 2, "y", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        3,
-        "scale",
-        data_objects::DataType::FLOAT,
-        &derivedStrides,
-        &derivedDims));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, 3, "scale", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        4,
-        "bias",
-        data_objects::DataType::FLOAT,
-        &derivedStrides,
-        &derivedDims));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, 4, "bias", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        5,
-        "est_mean",
-        data_objects::DataType::FLOAT,
-        &derivedStrides,
-        &derivedDims));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, 5, "est_mean", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        6,
-        "est_variance",
-        data_objects::DataType::FLOAT,
-        &derivedStrides,
-        &derivedDims));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, 6, "est_variance", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
 
-    auto bnormAttributes
-        = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(builder,
-                                                                       1, // x uid
-                                                                       5, // mean uid
-                                                                       6, // inv_variance uid
-                                                                       3, // scale uid
-                                                                       4, // bias uid
-                                                                       2 // y uid
-        );
+    auto bnormAttributes = data_objects::CreateBatchnormInferenceAttributes(builder,
+                                                                            1, // x uid
+                                                                            5, // mean uid
+                                                                            6, // inv_variance uid
+                                                                            3, // scale uid
+                                                                            4, // bias uid
+                                                                            2 // y uid
+    );
 
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_sdk::data_objects::CreateNodeDirect(
-        builder,
-        "batchnorm",
-        computeDataType,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
-        bnormAttributes.Union());
+    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
+    auto node
+        = data_objects::CreateNodeDirect(builder,
+                                         "batchnorm",
+                                         computeDataType,
+                                         data_objects::NodeAttributes::BatchnormInferenceAttributes,
+                                         bnormAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                                   "test",
-                                                                   data_objects::DataType::FLOAT,
-                                                                   data_objects::DataType::HALF,
-                                                                   data_objects::DataType::BFLOAT16,
-                                                                   &tensorAttributes,
-                                                                   &nodes);
+    auto graphOffset = data_objects::CreateGraphDirect(builder,
+                                                       "test",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::HALF,
+                                                       data_objects::DataType::BFLOAT16,
+                                                       &tensorAttributes,
+                                                       &nodes);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -119,39 +98,39 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormBwdGraph(
     data_objects::DataType meanVarianceDataType = data_objects::DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
 
     std::vector<int64_t> derivedDims = utilities::getDerivedShape(dims);
     std::vector<int64_t> derivedStrides = utilities::generateStrides(derivedDims);
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 2, "dy", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 3, "dx", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 4, "scale", scaleBiasDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 5, "dscale", scaleBiasDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 6, "dbias", scaleBiasDataType, &derivedStrides, &derivedDims));
 
     if(hasOptionalAttributes)
     {
-        tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
             builder, 7, "mean", meanVarianceDataType, &derivedStrides, &derivedDims));
 
-        tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
             builder, 8, "inv_variance", meanVarianceDataType, &derivedStrides, &derivedDims));
     }
 
-    auto bnormAttributes = hipdnn_sdk::data_objects::CreateBatchnormBackwardAttributes(
+    auto bnormAttributes = data_objects::CreateBatchnormBackwardAttributes(
         builder,
         2, // dy_tensor_uid
         1, // x_tensor_uid
@@ -166,22 +145,22 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormBwdGraph(
         6 // dbias_tensor_uid
     );
 
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
-    auto node = hipdnn_sdk::data_objects::CreateNodeDirect(
-        builder,
-        "batchnorm_bwd",
-        data_objects::DataType::FLOAT,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
-        bnormAttributes.Union());
+    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
+    auto node
+        = data_objects::CreateNodeDirect(builder,
+                                         "batchnorm_bwd",
+                                         data_objects::DataType::FLOAT,
+                                         data_objects::NodeAttributes::BatchnormBackwardAttributes,
+                                         bnormAttributes.Union());
     nodes.push_back(node);
 
-    auto graphOffset = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                                   "test",
-                                                                   data_objects::DataType::FLOAT,
-                                                                   data_objects::DataType::HALF,
-                                                                   data_objects::DataType::BFLOAT16,
-                                                                   &tensorAttributes,
-                                                                   &nodes);
+    auto graphOffset = data_objects::CreateGraphDirect(builder,
+                                                       "test",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::HALF,
+                                                       data_objects::DataType::BFLOAT16,
+                                                       &tensorAttributes,
+                                                       &nodes);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -193,81 +172,81 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormFwdInferActGraph(
     data_objects::DataType intermediateDataType = data_objects::DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
 
     std::vector<int64_t> derivedDims = utilities::getDerivedShape(dims);
     std::vector<int64_t> derivedStrides = utilities::generateStrides(derivedDims);
 
     // inputs
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 2, "scale", intermediateDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 3, "bias", intermediateDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 4, "mean", intermediateDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 5, "inv_variance", intermediateDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 6, "y", inputDataType, &strides, &dims, true));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 7, "Dy", inputDataType, &strides, &dims, false)); // is_virtual = true
 
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
 
     // Node 0: Batchnorm Inference
-    auto bnInfAttributes = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(
-        builder,
-        1, // x_tensor_uid
-        4, // mean_tensor_uid
-        5, // inv_variance_tensor_uid
-        2, // scale_tensor_uid
-        3, // bias_tensor_uid
-        6 // y_tensor_uid (BN_Y - virtual)
-    );
+    auto bnInfAttributes
+        = data_objects::CreateBatchnormInferenceAttributes(builder,
+                                                           1, // x_tensor_uid
+                                                           4, // mean_tensor_uid
+                                                           5, // inv_variance_tensor_uid
+                                                           2, // scale_tensor_uid
+                                                           3, // bias_tensor_uid
+                                                           6 // y_tensor_uid (BN_Y - virtual)
+        );
 
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
-        builder,
-        "batchnorm_inference",
-        intermediateDataType,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
-        bnInfAttributes.Union()));
+    nodes.push_back(
+        data_objects::CreateNodeDirect(builder,
+                                       "batchnorm_inference",
+                                       intermediateDataType,
+                                       data_objects::NodeAttributes::BatchnormInferenceAttributes,
+                                       bnInfAttributes.Union()));
 
     // Node 1: Pointwise (RELU_FWD)
-    auto pointwiseAttributes = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
-        builder,
-        hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
-        std::nullopt, // relu_lower_clip
-        std::nullopt, // relu_upper_clip
-        std::nullopt, // relu_lower_clip_slope
-        flatbuffers::nullopt, // axis_tensor_uid
-        6, // in_0_tensor_uid (BN_Y)
-        flatbuffers::nullopt, // in_1_tensor_uid
-        flatbuffers::nullopt, // in_2_tensor_uid
-        7 // out_0_tensor_uid (Dy - not virtual)
-    );
+    auto pointwiseAttributes
+        = data_objects::CreatePointwiseAttributes(builder,
+                                                  data_objects::PointwiseMode::RELU_FWD,
+                                                  std::nullopt, // relu_lower_clip
+                                                  std::nullopt, // relu_upper_clip
+                                                  std::nullopt, // relu_lower_clip_slope
+                                                  flatbuffers::nullopt, // axis_tensor_uid
+                                                  6, // in_0_tensor_uid (BN_Y)
+                                                  flatbuffers::nullopt, // in_1_tensor_uid
+                                                  flatbuffers::nullopt, // in_2_tensor_uid
+                                                  7 // out_0_tensor_uid (Dy - not virtual)
+        );
 
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
-        builder,
-        "relu_fwd",
-        intermediateDataType,
-        hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
-        pointwiseAttributes.Union()));
+    nodes.push_back(
+        data_objects::CreateNodeDirect(builder,
+                                       "relu_fwd",
+                                       intermediateDataType,
+                                       data_objects::NodeAttributes::PointwiseAttributes,
+                                       pointwiseAttributes.Union()));
 
-    auto graphOffset = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                                   "test",
-                                                                   data_objects::DataType::FLOAT,
-                                                                   data_objects::DataType::FLOAT,
-                                                                   data_objects::DataType::FLOAT,
-                                                                   &tensorAttributes,
-                                                                   &nodes);
+    auto graphOffset = data_objects::CreateGraphDirect(builder,
+                                                       "test",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       &tensorAttributes,
+                                                       &nodes);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -280,54 +259,54 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
     data_objects::DataType intermediateDataType = data_objects::DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::TensorAttributes>> tensorAttributes;
+    std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
 
     std::vector<int64_t> derivedDims = utilities::getDerivedShape(dims);
     std::vector<int64_t> derivedStrides = utilities::generateStrides(derivedDims);
 
     // inputs
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 2, "scale", intermediateDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 3, "bias", intermediateDataType, &derivedStrides, &derivedDims));
 
     if(hasOptionalAttributes)
     {
-        tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
             builder, 4, "mean", intermediateDataType, &derivedStrides, &derivedDims));
 
-        tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
             builder, 5, "inv_variance", intermediateDataType, &derivedStrides, &derivedDims));
     }
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 6, "dy", inputDataType, &strides, &dims));
 
     // output tensors
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 7, "dx", inputDataType, &strides, &dims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 8, "dscale", intermediateDataType, &derivedStrides, &derivedDims));
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 9, "dbias", intermediateDataType, &derivedStrides, &derivedDims));
 
     // virtual tensors
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 10, "BN_Y", inputDataType, &strides, &dims, true)); // is_virtual = true
 
-    tensorAttributes.push_back(hipdnn_sdk::data_objects::CreateTensorAttributesDirect(
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 11, "DX_drelu", inputDataType, &strides, &dims, true)); // is_virtual = true
 
-    std::vector<::flatbuffers::Offset<hipdnn_sdk::data_objects::Node>> nodes;
+    std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
 
     // Node 0: Batchnorm Inference
-    auto bnInfAttributes = hipdnn_sdk::data_objects::CreateBatchnormInferenceAttributes(
+    auto bnInfAttributes = data_objects::CreateBatchnormInferenceAttributes(
         builder,
         1, // x_tensor_uid
         hasOptionalAttributes ? 4 : 0, // mean_tensor_uid
@@ -337,17 +316,17 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
         10 // y_tensor_uid (BN_Y - virtual)
     );
 
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
-        builder,
-        "batchnorm_inference",
-        intermediateDataType,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormInferenceAttributes,
-        bnInfAttributes.Union()));
+    nodes.push_back(
+        data_objects::CreateNodeDirect(builder,
+                                       "batchnorm_inference",
+                                       intermediateDataType,
+                                       data_objects::NodeAttributes::BatchnormInferenceAttributes,
+                                       bnInfAttributes.Union()));
 
     // Node 1: Pointwise (RELU_BWD)
-    auto pointwiseAttributes = hipdnn_sdk::data_objects::CreatePointwiseAttributes(
+    auto pointwiseAttributes = data_objects::CreatePointwiseAttributes(
         builder,
-        hipdnn_sdk::data_objects::PointwiseMode::RELU_BWD,
+        data_objects::PointwiseMode::RELU_BWD,
         std::nullopt, // relu_lower_clip
         std::nullopt, // relu_upper_clip
         std::nullopt, // relu_lower_clip_slope
@@ -358,15 +337,15 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
         11 // out_0_tensor_uid (DX_drelu - virtual)
     );
 
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
-        builder,
-        "relu_bwd",
-        intermediateDataType,
-        hipdnn_sdk::data_objects::NodeAttributes::PointwiseAttributes,
-        pointwiseAttributes.Union()));
+    nodes.push_back(
+        data_objects::CreateNodeDirect(builder,
+                                       "relu_bwd",
+                                       intermediateDataType,
+                                       data_objects::NodeAttributes::PointwiseAttributes,
+                                       pointwiseAttributes.Union()));
 
     // Node 2: Batchnorm Backward
-    auto bnBwdAttributes = hipdnn_sdk::data_objects::CreateBatchnormBackwardAttributes(
+    auto bnBwdAttributes = data_objects::CreateBatchnormBackwardAttributes(
         builder,
         11, // dy_tensor_uid (DX_drelu)
         1, // x_tensor_uid
@@ -381,20 +360,20 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
         9 // dbias_tensor_uid
     );
 
-    nodes.push_back(hipdnn_sdk::data_objects::CreateNodeDirect(
-        builder,
-        "batchnorm_backward",
-        intermediateDataType,
-        hipdnn_sdk::data_objects::NodeAttributes::BatchnormBackwardAttributes,
-        bnBwdAttributes.Union()));
+    nodes.push_back(
+        data_objects::CreateNodeDirect(builder,
+                                       "batchnorm_backward",
+                                       intermediateDataType,
+                                       data_objects::NodeAttributes::BatchnormBackwardAttributes,
+                                       bnBwdAttributes.Union()));
 
-    auto graphOffset = hipdnn_sdk::data_objects::CreateGraphDirect(builder,
-                                                                   "test",
-                                                                   data_objects::DataType::FLOAT,
-                                                                   data_objects::DataType::FLOAT,
-                                                                   data_objects::DataType::FLOAT,
-                                                                   &tensorAttributes,
-                                                                   &nodes);
+    auto graphOffset = data_objects::CreateGraphDirect(builder,
+                                                       "test",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       &tensorAttributes,
+                                                       &nodes);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -411,10 +390,10 @@ inline flatbuffers::FlatBufferBuilder
     std::vector<int64_t> derivedDims = utilities::getDerivedShape(dims);
 
     // Required tensors
-    tensorAttributes.push_back(
-        data_objects::CreateTensorAttributesDirect(builder, 1, "x", data_objects::DataType::FLOAT, &strides, &dims));
-    tensorAttributes.push_back(
-        data_objects::CreateTensorAttributesDirect(builder, 2, "y", data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, 1, "x", data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, 2, "y", data_objects::DataType::FLOAT, &strides, &dims));
     tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 3, "scale", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
     tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
@@ -425,14 +404,14 @@ inline flatbuffers::FlatBufferBuilder
     data_objects::Float32Value epsilonVal(1e-5f);
     tensorAttributes.push_back(
         data_objects::CreateTensorAttributesDirect(builder,
-                                     5,
-                                     "epsilon",
-                                     data_objects::DataType::FLOAT,
-                                     &passByValueDims,
-                                     &passByValueDims,
-                                     false,
-                                     data_objects::TensorValue::Float32Value,
-                                     builder.CreateStruct(epsilonVal).Union()));
+                                                   5,
+                                                   "epsilon",
+                                                   data_objects::DataType::FLOAT,
+                                                   &passByValueDims,
+                                                   &passByValueDims,
+                                                   false,
+                                                   data_objects::TensorValue::Float32Value,
+                                                   builder.CreateStruct(epsilonVal).Union()));
 
     flatbuffers::Optional<int64_t> meanUid = flatbuffers::nullopt;
     flatbuffers::Optional<int64_t> invVarUid = flatbuffers::nullopt;
@@ -442,44 +421,49 @@ inline flatbuffers::FlatBufferBuilder
         // Optional mean/variance output tensors
         tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
             builder, 6, "mean", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
-        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-            builder, 7, "inv_variance", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
+        tensorAttributes.push_back(
+            data_objects::CreateTensorAttributesDirect(builder,
+                                                       7,
+                                                       "inv_variance",
+                                                       data_objects::DataType::FLOAT,
+                                                       &derivedStrides,
+                                                       &derivedDims));
         meanUid = flatbuffers::Optional<int64_t>(6);
         invVarUid = flatbuffers::Optional<int64_t>(7);
     }
 
-    auto bnormAttributes
-        = data_objects::CreateBatchnormAttributes(builder,
-                                    1, // x_tensor_uid
-                                    3, // scale_tensor_uid
-                                    4, // bias_tensor_uid
-                                    5, // epsilon_tensor_uid
-                                    0, // peer_stats_tensor_uid
-                                    flatbuffers::nullopt, // prev_running_mean_tensor_uid
-                                    flatbuffers::nullopt, // prev_running_variance_tensor_uid
-                                    flatbuffers::nullopt, // momentum_tensor_uid
-                                    2, // y_tensor_uid
-                                    meanUid, // mean_tensor_uid
-                                    invVarUid, // inv_variance_tensor_uid
-                                    flatbuffers::nullopt, // next_running_mean_tensor_uid
-                                    flatbuffers::nullopt // next_running_variance_tensor_uid
-        );
+    auto bnormAttributes = data_objects::CreateBatchnormAttributes(
+        builder,
+        1, // x_tensor_uid
+        3, // scale_tensor_uid
+        4, // bias_tensor_uid
+        5, // epsilon_tensor_uid
+        0, // peer_stats_tensor_uid
+        flatbuffers::nullopt, // prev_running_mean_tensor_uid
+        flatbuffers::nullopt, // prev_running_variance_tensor_uid
+        flatbuffers::nullopt, // momentum_tensor_uid
+        2, // y_tensor_uid
+        meanUid, // mean_tensor_uid
+        invVarUid, // inv_variance_tensor_uid
+        flatbuffers::nullopt, // next_running_mean_tensor_uid
+        flatbuffers::nullopt // next_running_variance_tensor_uid
+    );
 
     std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
     auto node = data_objects::CreateNodeDirect(builder,
-                                 "batchnorm_training",
-                                 data_objects::DataType::FLOAT,
-                                 data_objects::NodeAttributes::BatchnormAttributes,
-                                 bnormAttributes.Union());
+                                               "batchnorm_training",
+                                               data_objects::DataType::FLOAT,
+                                               data_objects::NodeAttributes::BatchnormAttributes,
+                                               bnormAttributes.Union());
     nodes.push_back(node);
 
     auto graphOffset = data_objects::CreateGraphDirect(builder,
-                                         "test",
-                                         data_objects::DataType::FLOAT,
-                                         data_objects::DataType::HALF,
-                                         data_objects::DataType::BFLOAT16,
-                                         &tensorAttributes,
-                                         &nodes);
+                                                       "test",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::HALF,
+                                                       data_objects::DataType::BFLOAT16,
+                                                       &tensorAttributes,
+                                                       &nodes);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -487,7 +471,8 @@ inline flatbuffers::FlatBufferBuilder
 inline flatbuffers::FlatBufferBuilder
     createValidBatchnormFwdTrainingActivGraph(bool withMeanVariance = true,
                                               bool withRunningStats = false,
-                                              data_objects::PointwiseMode activMode = data_objects::PointwiseMode::RELU_FWD,
+                                              data_objects::PointwiseMode activMode
+                                              = data_objects::PointwiseMode::RELU_FWD,
                                               const std::vector<int64_t>& strides = {1, 3, 14, 14},
                                               const std::vector<int64_t>& dims = {1, 3, 14, 14})
 {
@@ -501,39 +486,56 @@ inline flatbuffers::FlatBufferBuilder
 
     // Required tensors
     const auto xTensorUid = uid++;
-    tensorAttributes.push_back(
-        data_objects::CreateTensorAttributesDirect(builder, xTensorUid, "x", data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, xTensorUid, "x", data_objects::DataType::FLOAT, &strides, &dims));
 
     const auto scaleTensorUid = uid++;
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, scaleTensorUid, "scale", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
+    tensorAttributes.push_back(
+        data_objects::CreateTensorAttributesDirect(builder,
+                                                   scaleTensorUid,
+                                                   "scale",
+                                                   data_objects::DataType::FLOAT,
+                                                   &derivedStrides,
+                                                   &derivedDims));
 
     const auto biasTensorUid = uid++;
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, biasTensorUid, "bias", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
+    tensorAttributes.push_back(
+        data_objects::CreateTensorAttributesDirect(builder,
+                                                   biasTensorUid,
+                                                   "bias",
+                                                   data_objects::DataType::FLOAT,
+                                                   &derivedStrides,
+                                                   &derivedDims));
 
     // Epsilon (pass-by-value)
     const auto epsilonTensorUid = uid++;
     data_objects::Float32Value epsilonVal(1e-5f);
-    tensorAttributes.push_back(data_objects::CreateTensorAttributes(builder,
-                                                      epsilonTensorUid,
-                                                      builder.CreateString("epsilon"),
-                                                      data_objects::DataType::FLOAT,
-                                                      0,
-                                                      0,
-                                                      false,
-                                                      data_objects::TensorValue::Float32Value,
-                                                      builder.CreateStruct(epsilonVal).Union()));
+    tensorAttributes.push_back(
+        data_objects::CreateTensorAttributes(builder,
+                                             epsilonTensorUid,
+                                             builder.CreateString("epsilon"),
+                                             data_objects::DataType::FLOAT,
+                                             0,
+                                             0,
+                                             false,
+                                             data_objects::TensorValue::Float32Value,
+                                             builder.CreateStruct(epsilonVal).Union()));
 
     // BN output (virtual - intermediate between BN and activation)
     const auto yBnTensorUid = uid++;
-    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, yBnTensorUid, "y_bn", data_objects::DataType::FLOAT, &strides, &dims, true)); // virtual
+    tensorAttributes.push_back(
+        data_objects::CreateTensorAttributesDirect(builder,
+                                                   yBnTensorUid,
+                                                   "y_bn",
+                                                   data_objects::DataType::FLOAT,
+                                                   &strides,
+                                                   &dims,
+                                                   true)); // virtual
 
     // Final activation output (non-virtual)
     const auto yTensorUid = uid++;
-    tensorAttributes.push_back(
-        data_objects::CreateTensorAttributesDirect(builder, yTensorUid, "y", data_objects::DataType::FLOAT, &strides, &dims));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, yTensorUid, "y", data_objects::DataType::FLOAT, &strides, &dims));
 
     flatbuffers::Optional<int64_t> meanUid = flatbuffers::nullopt;
     flatbuffers::Optional<int64_t> invVarUid = flatbuffers::nullopt;
@@ -541,17 +543,23 @@ inline flatbuffers::FlatBufferBuilder
     if(withMeanVariance)
     {
         const auto meanTensorUid = uid++;
-        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
-            builder, meanTensorUid, "mean", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
+        tensorAttributes.push_back(
+            data_objects::CreateTensorAttributesDirect(builder,
+                                                       meanTensorUid,
+                                                       "mean",
+                                                       data_objects::DataType::FLOAT,
+                                                       &derivedStrides,
+                                                       &derivedDims));
         meanUid = flatbuffers::Optional<int64_t>(meanTensorUid);
 
         const auto invVarTensorUid = uid++;
-        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                invVarTensorUid,
-                                                                "inv_variance",
-                                                                data_objects::DataType::FLOAT,
-                                                                &derivedStrides,
-                                                                &derivedDims));
+        tensorAttributes.push_back(
+            data_objects::CreateTensorAttributesDirect(builder,
+                                                       invVarTensorUid,
+                                                       "inv_variance",
+                                                       data_objects::DataType::FLOAT,
+                                                       &derivedStrides,
+                                                       &derivedDims));
         invVarUid = flatbuffers::Optional<int64_t>(invVarTensorUid);
     }
 
@@ -564,53 +572,57 @@ inline flatbuffers::FlatBufferBuilder
     if(withRunningStats)
     {
         const auto prevMeanUid = uid++;
-        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                prevMeanUid,
-                                                                "prev_running_mean",
-                                                                data_objects::DataType::FLOAT,
-                                                                &derivedStrides,
-                                                                &derivedDims));
+        tensorAttributes.push_back(
+            data_objects::CreateTensorAttributesDirect(builder,
+                                                       prevMeanUid,
+                                                       "prev_running_mean",
+                                                       data_objects::DataType::FLOAT,
+                                                       &derivedStrides,
+                                                       &derivedDims));
         prevRunningMeanUid = flatbuffers::Optional<int64_t>(prevMeanUid);
 
         const auto prevVarUid = uid++;
-        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                prevVarUid,
-                                                                "prev_running_variance",
-                                                                data_objects::DataType::FLOAT,
-                                                                &derivedStrides,
-                                                                &derivedDims));
+        tensorAttributes.push_back(
+            data_objects::CreateTensorAttributesDirect(builder,
+                                                       prevVarUid,
+                                                       "prev_running_variance",
+                                                       data_objects::DataType::FLOAT,
+                                                       &derivedStrides,
+                                                       &derivedDims));
         prevRunningVarUid = flatbuffers::Optional<int64_t>(prevVarUid);
 
         const auto momUid = uid++;
         data_objects::Float32Value momentumVal(0.1f);
         tensorAttributes.push_back(
             data_objects::CreateTensorAttributes(builder,
-                                   momUid,
-                                   builder.CreateString("momentum"),
-                                   data_objects::DataType::FLOAT,
-                                   0,
-                                   0,
-                                   false,
-                                   data_objects::TensorValue::Float32Value,
-                                   builder.CreateStruct(momentumVal).Union()));
+                                                 momUid,
+                                                 builder.CreateString("momentum"),
+                                                 data_objects::DataType::FLOAT,
+                                                 0,
+                                                 0,
+                                                 false,
+                                                 data_objects::TensorValue::Float32Value,
+                                                 builder.CreateStruct(momentumVal).Union()));
         momentumUid = flatbuffers::Optional<int64_t>(momUid);
 
         const auto nextMeanUid = uid++;
-        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                nextMeanUid,
-                                                                "next_running_mean",
-                                                                data_objects::DataType::FLOAT,
-                                                                &derivedStrides,
-                                                                &derivedDims));
+        tensorAttributes.push_back(
+            data_objects::CreateTensorAttributesDirect(builder,
+                                                       nextMeanUid,
+                                                       "next_running_mean",
+                                                       data_objects::DataType::FLOAT,
+                                                       &derivedStrides,
+                                                       &derivedDims));
         nextRunningMeanUid = flatbuffers::Optional<int64_t>(nextMeanUid);
 
         const auto nextVarUid = uid++;
-        tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(builder,
-                                                                nextVarUid,
-                                                                "next_running_variance",
-                                                                data_objects::DataType::FLOAT,
-                                                                &derivedStrides,
-                                                                &derivedDims));
+        tensorAttributes.push_back(
+            data_objects::CreateTensorAttributesDirect(builder,
+                                                       nextVarUid,
+                                                       "next_running_variance",
+                                                       data_objects::DataType::FLOAT,
+                                                       &derivedStrides,
+                                                       &derivedDims));
         nextRunningVarUid = flatbuffers::Optional<int64_t>(nextVarUid);
     }
 
@@ -618,51 +630,54 @@ inline flatbuffers::FlatBufferBuilder
 
     // Node 0: Batchnorm forward training
     auto bnormAttributes = data_objects::CreateBatchnormAttributes(builder,
-                                                     xTensorUid,
-                                                     scaleTensorUid,
-                                                     biasTensorUid,
-                                                     epsilonTensorUid,
-                                                     0, // peer_stats_tensor_uid
-                                                     prevRunningMeanUid,
-                                                     prevRunningVarUid,
-                                                     momentumUid,
-                                                     yBnTensorUid, // Virtual output
-                                                     meanUid,
-                                                     invVarUid,
-                                                     nextRunningMeanUid,
-                                                     nextRunningVarUid);
+                                                                   xTensorUid,
+                                                                   scaleTensorUid,
+                                                                   biasTensorUid,
+                                                                   epsilonTensorUid,
+                                                                   0, // peer_stats_tensor_uid
+                                                                   prevRunningMeanUid,
+                                                                   prevRunningVarUid,
+                                                                   momentumUid,
+                                                                   yBnTensorUid, // Virtual output
+                                                                   meanUid,
+                                                                   invVarUid,
+                                                                   nextRunningMeanUid,
+                                                                   nextRunningVarUid);
 
-    nodes.push_back(data_objects::CreateNodeDirect(builder,
-                                     "batchnorm_training",
-                                     data_objects::DataType::FLOAT,
-                                     data_objects::NodeAttributes::BatchnormAttributes,
-                                     bnormAttributes.Union()));
+    nodes.push_back(
+        data_objects::CreateNodeDirect(builder,
+                                       "batchnorm_training",
+                                       data_objects::DataType::FLOAT,
+                                       data_objects::NodeAttributes::BatchnormAttributes,
+                                       bnormAttributes.Union()));
 
     // Node 1: Activation
-    auto activAttributes = data_objects::CreatePointwiseAttributes(builder,
-                                                     activMode,
-                                                     flatbuffers::nullopt, // relu_lower_clip
-                                                     flatbuffers::nullopt, // relu_upper_clip
-                                                     flatbuffers::nullopt, // relu_lower_clip_slope
-                                                     flatbuffers::nullopt, // axis_tensor_uid
-                                                     yBnTensorUid, // in_0_tensor_uid (virtual)
-                                                     flatbuffers::nullopt, // in_1_tensor_uid
-                                                     flatbuffers::nullopt, // in_2_tensor_uid
-                                                     yTensorUid); // out_0_tensor_uid
+    auto activAttributes
+        = data_objects::CreatePointwiseAttributes(builder,
+                                                  activMode,
+                                                  flatbuffers::nullopt, // relu_lower_clip
+                                                  flatbuffers::nullopt, // relu_upper_clip
+                                                  flatbuffers::nullopt, // relu_lower_clip_slope
+                                                  flatbuffers::nullopt, // axis_tensor_uid
+                                                  yBnTensorUid, // in_0_tensor_uid (virtual)
+                                                  flatbuffers::nullopt, // in_1_tensor_uid
+                                                  flatbuffers::nullopt, // in_2_tensor_uid
+                                                  yTensorUid); // out_0_tensor_uid
 
-    nodes.push_back(data_objects::CreateNodeDirect(builder,
-                                     "activation",
-                                     data_objects::DataType::FLOAT,
-                                     data_objects::NodeAttributes::PointwiseAttributes,
-                                     activAttributes.Union()));
+    nodes.push_back(
+        data_objects::CreateNodeDirect(builder,
+                                       "activation",
+                                       data_objects::DataType::FLOAT,
+                                       data_objects::NodeAttributes::PointwiseAttributes,
+                                       activAttributes.Union()));
 
     auto graphOffset = data_objects::CreateGraphDirect(builder,
-                                         "test",
-                                         data_objects::DataType::FLOAT,
-                                         data_objects::DataType::HALF,
-                                         data_objects::DataType::BFLOAT16,
-                                         &tensorAttributes,
-                                         &nodes);
+                                                       "test",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::HALF,
+                                                       data_objects::DataType::BFLOAT16,
+                                                       &tensorAttributes,
+                                                       &nodes);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -692,31 +707,33 @@ inline flatbuffers::FlatBufferBuilder
     tensorAttributes.push_back(
         data_objects::CreateTensorAttributesDirect(builder, 3, "y", dataType, &yStrides, &yDims));
 
-    auto convAttributes = data_objects::CreateConvolutionFwdAttributesDirect(builder,
-                                                               1, // x tensor uid
-                                                               2, // w tensor uid
-                                                               3, // y tensor uid
-                                                               &convPrePadding,
-                                                               &convPostPadding,
-                                                               &convStrides,
-                                                               &convDilation,
-                                                               data_objects::ConvMode::CROSS_CORRELATION);
+    auto convAttributes = data_objects::CreateConvolutionFwdAttributesDirect(
+        builder,
+        1, // x tensor uid
+        2, // w tensor uid
+        3, // y tensor uid
+        &convPrePadding,
+        &convPostPadding,
+        &convStrides,
+        &convDilation,
+        data_objects::ConvMode::CROSS_CORRELATION);
 
     std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
-    auto node = data_objects::CreateNodeDirect(builder,
-                                 "conv_fwd",
-                                 data_objects::DataType::FLOAT,
-                                 data_objects::NodeAttributes::ConvolutionFwdAttributes,
-                                 convAttributes.Union());
+    auto node
+        = data_objects::CreateNodeDirect(builder,
+                                         "conv_fwd",
+                                         data_objects::DataType::FLOAT,
+                                         data_objects::NodeAttributes::ConvolutionFwdAttributes,
+                                         convAttributes.Union());
     nodes.push_back(node);
 
     auto graphOffset = data_objects::CreateGraphDirect(builder,
-                                         "test",
-                                         data_objects::DataType::FLOAT,
-                                         data_objects::DataType::FLOAT,
-                                         data_objects::DataType::FLOAT,
-                                         &tensorAttributes,
-                                         &nodes);
+                                                       "test",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       &tensorAttributes,
+                                                       &nodes);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -737,40 +754,42 @@ inline flatbuffers::FlatBufferBuilder
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<data_objects::TensorAttributes>> tensorAttributes;
 
-    tensorAttributes.push_back(
-        data_objects::CreateTensorAttributesDirect(builder, 1, "dy", dataType, &dyStrides, &dyDims));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, 1, "dy", dataType, &dyStrides, &dyDims));
 
     tensorAttributes.push_back(
         data_objects::CreateTensorAttributesDirect(builder, 2, "w", dataType, &wStrides, &wDims));
 
-    tensorAttributes.push_back(
-        data_objects::CreateTensorAttributesDirect(builder, 3, "dx", dataType, &dxStrides, &dxDims));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, 3, "dx", dataType, &dxStrides, &dxDims));
 
-    auto convAttributes = data_objects::CreateConvolutionBwdAttributesDirect(builder,
-                                                               1, // dy tensor uid
-                                                               2, // w tensor uid
-                                                               3, // dx tensor uid
-                                                               &convPrePadding,
-                                                               &convPostPadding,
-                                                               &convStrides,
-                                                               &convDilation,
-                                                               data_objects::ConvMode::CROSS_CORRELATION);
+    auto convAttributes = data_objects::CreateConvolutionBwdAttributesDirect(
+        builder,
+        1, // dy tensor uid
+        2, // w tensor uid
+        3, // dx tensor uid
+        &convPrePadding,
+        &convPostPadding,
+        &convStrides,
+        &convDilation,
+        data_objects::ConvMode::CROSS_CORRELATION);
 
     std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
-    auto node = data_objects::CreateNodeDirect(builder,
-                                 "conv_bwd",
-                                 data_objects::DataType::FLOAT,
-                                 data_objects::NodeAttributes::ConvolutionBwdAttributes,
-                                 convAttributes.Union());
+    auto node
+        = data_objects::CreateNodeDirect(builder,
+                                         "conv_bwd",
+                                         data_objects::DataType::FLOAT,
+                                         data_objects::NodeAttributes::ConvolutionBwdAttributes,
+                                         convAttributes.Union());
     nodes.push_back(node);
 
     auto graphOffset = data_objects::CreateGraphDirect(builder,
-                                         "test",
-                                         data_objects::DataType::FLOAT,
-                                         data_objects::DataType::FLOAT,
-                                         data_objects::DataType::FLOAT,
-                                         &tensorAttributes,
-                                         &nodes);
+                                                       "test",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       &tensorAttributes,
+                                                       &nodes);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -794,37 +813,39 @@ inline flatbuffers::FlatBufferBuilder
     tensorAttributes.push_back(
         data_objects::CreateTensorAttributesDirect(builder, 1, "x", dataType, &xStrides, &xDims));
 
-    tensorAttributes.push_back(
-        data_objects::CreateTensorAttributesDirect(builder, 2, "dy", dataType, &dyStrides, &dyDims));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, 2, "dy", dataType, &dyStrides, &dyDims));
 
-    tensorAttributes.push_back(
-        data_objects::CreateTensorAttributesDirect(builder, 3, "dw", dataType, &dwStrides, &dwDims));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, 3, "dw", dataType, &dwStrides, &dwDims));
 
-    auto convAttributes = data_objects::CreateConvolutionWrwAttributesDirect(builder,
-                                                               1, // x tensor uid
-                                                               2, // dy tensor uid
-                                                               3, // w tensor uid
-                                                               &convPrePadding,
-                                                               &convPostPadding,
-                                                               &convStrides,
-                                                               &convDilation,
-                                                               data_objects::ConvMode::CROSS_CORRELATION);
+    auto convAttributes = data_objects::CreateConvolutionWrwAttributesDirect(
+        builder,
+        1, // x tensor uid
+        2, // dy tensor uid
+        3, // w tensor uid
+        &convPrePadding,
+        &convPostPadding,
+        &convStrides,
+        &convDilation,
+        data_objects::ConvMode::CROSS_CORRELATION);
 
     std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
-    auto node = data_objects::CreateNodeDirect(builder,
-                                 "conv_wrw",
-                                 data_objects::DataType::FLOAT,
-                                 data_objects::NodeAttributes::ConvolutionWrwAttributes,
-                                 convAttributes.Union());
+    auto node
+        = data_objects::CreateNodeDirect(builder,
+                                         "conv_wrw",
+                                         data_objects::DataType::FLOAT,
+                                         data_objects::NodeAttributes::ConvolutionWrwAttributes,
+                                         convAttributes.Union());
     nodes.push_back(node);
 
     auto graphOffset = data_objects::CreateGraphDirect(builder,
-                                         "test",
-                                         data_objects::DataType::FLOAT,
-                                         data_objects::DataType::FLOAT,
-                                         data_objects::DataType::FLOAT,
-                                         &tensorAttributes,
-                                         &nodes);
+                                                       "test",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       &tensorAttributes,
+                                                       &nodes);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -836,25 +857,27 @@ inline flatbuffers::FlatBufferBuilder createPointwiseGraph()
     flatbuffers::FlatBufferBuilder builder;
 
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
-    auto pointwiseNode = data_objects::CreatePointwiseAttributes(builder,
-                                                   data_objects::PointwiseMode::DIV, // operation
-                                                   1.f, // relu_lower_clip
-                                                   2.f, // relu_upper_clip
-                                                   3.f, // relu_lower_clip_slope
-                                                   0, // axis_tensor_uid
-                                                   1, // in_0_tensor_uid
-                                                   2, // in_1_tensor_uid
-                                                   3, // in_2_tensor_uid
-                                                   4, // out_0_tensor_uid
-                                                   4.f, // swish_beta
-                                                   5.f, // elu_alpha
-                                                   6.f); // softplus_beta
+    auto pointwiseNode
+        = data_objects::CreatePointwiseAttributes(builder,
+                                                  data_objects::PointwiseMode::DIV, // operation
+                                                  1.f, // relu_lower_clip
+                                                  2.f, // relu_upper_clip
+                                                  3.f, // relu_lower_clip_slope
+                                                  0, // axis_tensor_uid
+                                                  1, // in_0_tensor_uid
+                                                  2, // in_1_tensor_uid
+                                                  3, // in_2_tensor_uid
+                                                  4, // out_0_tensor_uid
+                                                  4.f, // swish_beta
+                                                  5.f, // elu_alpha
+                                                  6.f); // softplus_beta
 
-    nodes.push_back(data_objects::CreateNodeDirect(builder,
-                                     "data_objects::Node",
-                                     data_objects::DataType::FLOAT,
-                                     data_objects::NodeAttributes::PointwiseAttributes,
-                                     pointwiseNode.Union()));
+    nodes.push_back(
+        data_objects::CreateNodeDirect(builder,
+                                       "data_objects::Node",
+                                       data_objects::DataType::FLOAT,
+                                       data_objects::NodeAttributes::PointwiseAttributes,
+                                       pointwiseNode.Union()));
 
     std::array tensorNames = {"axis", "in_0", "in_1", "in_2", "out_0"};
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
@@ -869,12 +892,12 @@ inline flatbuffers::FlatBufferBuilder createPointwiseGraph()
     }
 
     auto graph = data_objects::CreateGraphDirect(builder,
-                                   "PointwiseGraph",
-                                   data_objects::DataType::FLOAT,
-                                   data_objects::DataType::HALF,
-                                   data_objects::DataType::BFLOAT16,
-                                   &tensors,
-                                   &nodes);
+                                                 "PointwiseGraph",
+                                                 data_objects::DataType::FLOAT,
+                                                 data_objects::DataType::HALF,
+                                                 data_objects::DataType::BFLOAT16,
+                                                 &tensors,
+                                                 &nodes);
 
     builder.Finish(graph);
 
@@ -908,12 +931,12 @@ inline flatbuffers::FlatBufferBuilder
     int64_t tensorUid = 1;
 
     const auto xTensorUid = tensorUid++;
-    tensorAttributes.push_back(
-        data_objects::CreateTensorAttributesDirect(builder, xTensorUid, "x", dataType, &xStrides, &xDims));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, xTensorUid, "x", dataType, &xStrides, &xDims));
 
     const auto wTensorUid = tensorUid++;
-    tensorAttributes.push_back(
-        data_objects::CreateTensorAttributesDirect(builder, wTensorUid, "w", dataType, &wStrides, &wDims));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, wTensorUid, "w", dataType, &wStrides, &wDims));
 
     // Virtual y_conv tensor
     const auto yConvTensorUid = tensorUid++;
@@ -925,7 +948,8 @@ inline flatbuffers::FlatBufferBuilder
     if(doBias)
     {
         const auto biasDims = utilities::getDerivedShape(yDims);
-        const auto biasStrides = utilities::generateStrides(biasDims, utilities::extractStrideOrder(yDims));
+        const auto biasStrides
+            = utilities::generateStrides(biasDims, utilities::extractStrideOrder(yDims));
 
         biasTensorUid = tensorUid++;
         tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
@@ -937,71 +961,77 @@ inline flatbuffers::FlatBufferBuilder
     }
 
     const auto yTensorUid = tensorUid;
-    tensorAttributes.push_back(
-        data_objects::CreateTensorAttributesDirect(builder, yTensorUid, "y", dataType, &yStrides, &yDims));
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, yTensorUid, "y", dataType, &yStrides, &yDims));
 
     std::vector<::flatbuffers::Offset<data_objects::Node>> nodes;
 
-    auto convAttributes = data_objects::CreateConvolutionFwdAttributesDirect(builder,
-                                                               xTensorUid,
-                                                               wTensorUid,
-                                                               yConvTensorUid,
-                                                               &convPrePadding,
-                                                               &convPostPadding,
-                                                               &convStrides,
-                                                               &convDilation,
-                                                               data_objects::ConvMode::CROSS_CORRELATION);
-    nodes.push_back(data_objects::CreateNodeDirect(builder,
-                                     "conv_fwd",
-                                     data_objects::DataType::FLOAT,
-                                     data_objects::NodeAttributes::ConvolutionFwdAttributes,
-                                     convAttributes.Union()));
+    auto convAttributes = data_objects::CreateConvolutionFwdAttributesDirect(
+        builder,
+        xTensorUid,
+        wTensorUid,
+        yConvTensorUid,
+        &convPrePadding,
+        &convPostPadding,
+        &convStrides,
+        &convDilation,
+        data_objects::ConvMode::CROSS_CORRELATION);
+    nodes.push_back(
+        data_objects::CreateNodeDirect(builder,
+                                       "conv_fwd",
+                                       data_objects::DataType::FLOAT,
+                                       data_objects::NodeAttributes::ConvolutionFwdAttributes,
+                                       convAttributes.Union()));
 
     if(doBias)
     {
-        auto biasAttributes = data_objects::CreatePointwiseAttributes(builder,
-                                                        data_objects::PointwiseMode::ADD,
-                                                        flatbuffers::nullopt,
-                                                        flatbuffers::nullopt,
-                                                        flatbuffers::nullopt,
-                                                        flatbuffers::nullopt,
-                                                        yConvTensorUid,
-                                                        biasTensorUid,
-                                                        flatbuffers::nullopt,
-                                                        yBiasTensorUid);
-        nodes.push_back(data_objects::CreateNodeDirect(builder,
-                                         "bias",
-                                         data_objects::DataType::FLOAT,
-                                         data_objects::NodeAttributes::PointwiseAttributes,
-                                         biasAttributes.Union()));
+        auto biasAttributes
+            = data_objects::CreatePointwiseAttributes(builder,
+                                                      data_objects::PointwiseMode::ADD,
+                                                      flatbuffers::nullopt,
+                                                      flatbuffers::nullopt,
+                                                      flatbuffers::nullopt,
+                                                      flatbuffers::nullopt,
+                                                      yConvTensorUid,
+                                                      biasTensorUid,
+                                                      flatbuffers::nullopt,
+                                                      yBiasTensorUid);
+        nodes.push_back(
+            data_objects::CreateNodeDirect(builder,
+                                           "bias",
+                                           data_objects::DataType::FLOAT,
+                                           data_objects::NodeAttributes::PointwiseAttributes,
+                                           biasAttributes.Union()));
     }
 
-    auto activAttributes = data_objects::CreatePointwiseAttributes(builder,
-                                                     activMode,
-                                                     reluLowerClip,
-                                                     reluUpperClip,
-                                                     reluLowerClipSlope,
-                                                     flatbuffers::nullopt,
-                                                     doBias ? yBiasTensorUid : yConvTensorUid,
-                                                     flatbuffers::nullopt,
-                                                     flatbuffers::nullopt,
-                                                     yTensorUid,
-                                                     swishBeta,
-                                                     eluAlpha,
-                                                     softplusBeta);
-    nodes.push_back(data_objects::CreateNodeDirect(builder,
-                                     "activ",
-                                     data_objects::DataType::FLOAT,
-                                     data_objects::NodeAttributes::PointwiseAttributes,
-                                     activAttributes.Union()));
+    auto activAttributes
+        = data_objects::CreatePointwiseAttributes(builder,
+                                                  activMode,
+                                                  reluLowerClip,
+                                                  reluUpperClip,
+                                                  reluLowerClipSlope,
+                                                  flatbuffers::nullopt,
+                                                  doBias ? yBiasTensorUid : yConvTensorUid,
+                                                  flatbuffers::nullopt,
+                                                  flatbuffers::nullopt,
+                                                  yTensorUid,
+                                                  swishBeta,
+                                                  eluAlpha,
+                                                  softplusBeta);
+    nodes.push_back(
+        data_objects::CreateNodeDirect(builder,
+                                       "activ",
+                                       data_objects::DataType::FLOAT,
+                                       data_objects::NodeAttributes::PointwiseAttributes,
+                                       activAttributes.Union()));
 
     auto graphOffset = data_objects::CreateGraphDirect(builder,
-                                         "test",
-                                         data_objects::DataType::FLOAT,
-                                         data_objects::DataType::FLOAT,
-                                         data_objects::DataType::FLOAT,
-                                         &tensorAttributes,
-                                         &nodes);
+                                                       "test",
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       data_objects::DataType::FLOAT,
+                                                       &tensorAttributes,
+                                                       &nodes);
     builder.Finish(graphOffset);
     return builder;
 }
@@ -1017,7 +1047,8 @@ inline flatbuffers::FlatBufferBuilder
                                  const std::vector<int64_t>& convPostPadding = {0, 0},
                                  const std::vector<int64_t>& convStrides = {1, 1},
                                  const std::vector<int64_t>& convDilation = {1, 1},
-                                 data_objects::PointwiseMode activMode = data_objects::PointwiseMode::RELU_FWD,
+                                 data_objects::PointwiseMode activMode
+                                 = data_objects::PointwiseMode::RELU_FWD,
                                  std::optional<float> reluLowerClip = std::nullopt,
                                  std::optional<float> reluUpperClip = std::nullopt,
                                  std::optional<float> reluLowerClipSlope = std::nullopt,
@@ -1047,25 +1078,25 @@ inline flatbuffers::FlatBufferBuilder
                                             dataType);
 }
 
-inline flatbuffers::FlatBufferBuilder
-    createValidConvFwdBiasActivGraph(const std::vector<int64_t>& xDims = {4, 4, 4, 4},
-                                     const std::vector<int64_t>& xStrides = {64, 16, 4, 1},
-                                     const std::vector<int64_t>& wDims = {4, 4, 1, 1},
-                                     const std::vector<int64_t>& wStrides = {4, 1, 1, 1},
-                                     const std::vector<int64_t>& yDims = {4, 4, 4, 4},
-                                     const std::vector<int64_t>& yStrides = {64, 16, 4, 1},
-                                     const std::vector<int64_t>& convPrePadding = {0, 0},
-                                     const std::vector<int64_t>& convPostPadding = {0, 0},
-                                     const std::vector<int64_t>& convStrides = {1, 1},
-                                     const std::vector<int64_t>& convDilation = {1, 1},
-                                     data_objects::PointwiseMode activMode = data_objects::PointwiseMode::RELU_FWD,
-                                     std::optional<float> reluLowerClip = std::nullopt,
-                                     std::optional<float> reluUpperClip = std::nullopt,
-                                     std::optional<float> reluLowerClipSlope = std::nullopt,
-                                     std::optional<float> swishBeta = std::nullopt,
-                                     std::optional<float> eluAlpha = std::nullopt,
-                                     std::optional<float> softplusBeta = std::nullopt,
-                                     data_objects::DataType dataType = data_objects::DataType::FLOAT)
+inline flatbuffers::FlatBufferBuilder createValidConvFwdBiasActivGraph(
+    const std::vector<int64_t>& xDims = {4, 4, 4, 4},
+    const std::vector<int64_t>& xStrides = {64, 16, 4, 1},
+    const std::vector<int64_t>& wDims = {4, 4, 1, 1},
+    const std::vector<int64_t>& wStrides = {4, 1, 1, 1},
+    const std::vector<int64_t>& yDims = {4, 4, 4, 4},
+    const std::vector<int64_t>& yStrides = {64, 16, 4, 1},
+    const std::vector<int64_t>& convPrePadding = {0, 0},
+    const std::vector<int64_t>& convPostPadding = {0, 0},
+    const std::vector<int64_t>& convStrides = {1, 1},
+    const std::vector<int64_t>& convDilation = {1, 1},
+    data_objects::PointwiseMode activMode = data_objects::PointwiseMode::RELU_FWD,
+    std::optional<float> reluLowerClip = std::nullopt,
+    std::optional<float> reluUpperClip = std::nullopt,
+    std::optional<float> reluLowerClipSlope = std::nullopt,
+    std::optional<float> swishBeta = std::nullopt,
+    std::optional<float> eluAlpha = std::nullopt,
+    std::optional<float> softplusBeta = std::nullopt,
+    data_objects::DataType dataType = data_objects::DataType::FLOAT)
 {
     return createValidConvFwdBiasActivGraph(xDims,
                                             xStrides,

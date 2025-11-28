@@ -16,7 +16,7 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 #include <hipdnn_sdk/utilities/Workspace.hpp>
 
-namespace hipdnn_sdk::test_utilities
+namespace miopen_legacy_plugin::test_utilities
 {
 
 // NOLINTBEGIN (portability-template-virtual-member-function)
@@ -33,8 +33,8 @@ protected:
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
         // Note: The plugin paths has to be set before we create the hipdnn handle.
-        auto pluginPath
-            = std::filesystem::weakly_canonical(utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
+        auto pluginPath = std::filesystem::weakly_canonical(
+            hipdnn_sdk::utilities::getCurrentExecutableDirectory() / PLUGIN_PATH);
         const std::string pluginPathStr = pluginPath.string();
         const std::array<const char*, 1> paths = {pluginPathStr.c_str()};
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
@@ -59,13 +59,15 @@ protected:
         }
     }
 
-    virtual void runGraphTest(DataType tolerance, const utilities::TensorLayout& layout = utilities::TensorLayout::NCHW)
+    virtual void runGraphTest(DataType tolerance,
+                              const hipdnn_sdk::utilities::TensorLayout& layout
+                              = hipdnn_sdk::utilities::TensorLayout::NCHW)
         = 0;
 
 protected:
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
     {
-        GraphTensorBundle gpuBundle, cpuBundle;
+        hipdnn_sdk::test_utilities::GraphTensorBundle gpuBundle, cpuBundle;
         std::vector<int64_t> outputTensorIds;
 
         auto result = graph.validate();
@@ -117,24 +119,25 @@ protected:
                            float absoluteTolerance,
                            float relativeTolerance)
     {
-        _tensorIdToValidatorMap.insert({attr->get_uid(),
-                                        createAllCloseValidator(toSdkType(attr->get_data_type()),
-                                                                absoluteTolerance,
-                                                                relativeTolerance)});
+        _tensorIdToValidatorMap.insert(
+            {attr->get_uid(),
+             hipdnn_sdk::test_utilities::createAllCloseValidator(
+                 toSdkType(attr->get_data_type()), absoluteTolerance, relativeTolerance)});
         _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
     }
 
     void registerRmsValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
                               float rmsThreshold)
     {
-        _tensorIdToValidatorMap.insert(
-            {attr->get_uid(), createRmsValidator(toSdkType(attr->get_data_type()), rmsThreshold)});
+        _tensorIdToValidatorMap.insert({attr->get_uid(),
+                                        hipdnn_sdk::test_utilities::createRmsValidator(
+                                            toSdkType(attr->get_data_type()), rmsThreshold)});
         _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
     }
 
     virtual void generateBundles(hipdnn_frontend::graph::Graph& graph,
-                                 GraphTensorBundle& cpuBundle,
-                                 GraphTensorBundle& gpuBundle,
+                                 hipdnn_sdk::test_utilities::GraphTensorBundle& cpuBundle,
+                                 hipdnn_sdk::test_utilities::GraphTensorBundle& gpuBundle,
                                  std::vector<int64_t>& outputTensorIds)
     {
         graph.visit([&](const hipdnn_frontend::graph::INode& node) {
@@ -153,7 +156,7 @@ protected:
     }
 
     virtual void initializeBundle([[maybe_unused]] const hipdnn_frontend::graph::Graph& graph,
-                                  GraphTensorBundle& bundle,
+                                  hipdnn_sdk::test_utilities::GraphTensorBundle& bundle,
                                   unsigned int seed)
     {
         for(auto& tensorPair : bundle.tensors)
@@ -165,7 +168,7 @@ protected:
 private:
     void executeGpuGraph(hipdnnHandle_t handle,
                          hipdnn_frontend::graph::Graph& graph,
-                         GraphTensorBundle& bundle)
+                         hipdnn_sdk::test_utilities::GraphTensorBundle& bundle)
     {
         auto result = graph.build_operation_graph(handle);
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
@@ -183,14 +186,15 @@ private:
         result = graph.get_workspace_size(workspaceSize);
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
         ASSERT_GE(workspaceSize, 0) << result.err_msg;
-        utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+        hipdnn_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
 
         auto variantPack = bundle.toDeviceVariantPack();
         result = graph.execute(handle, variantPack, workspace.get());
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
     }
 
-    void executeCpuGraph(hipdnn_frontend::graph::Graph& graph, GraphTensorBundle& bundle)
+    void executeCpuGraph(hipdnn_frontend::graph::Graph& graph,
+                         hipdnn_sdk::test_utilities::GraphTensorBundle& bundle)
     {
         auto flatbufferGraph = graph.buildFlatbufferOperationGraph();
 
@@ -205,8 +209,8 @@ private:
 
     bool tryAddTensorToBundles(
         const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& tensorAttr,
-        GraphTensorBundle& cpuBundle,
-        GraphTensorBundle& gpuBundle)
+        hipdnn_sdk::test_utilities::GraphTensorBundle& cpuBundle,
+        hipdnn_sdk::test_utilities::GraphTensorBundle& gpuBundle)
     {
         int64_t tensorId = tensorAttr->get_uid();
 
