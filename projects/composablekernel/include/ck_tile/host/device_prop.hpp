@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -50,6 +50,19 @@ inline std::string get_device_name()
     case fnv1a_hash("10.3.0 Sienna_Cichlid 18"): return "gfx1030";
     default: return name;
     }
+}
+
+inline bool is_gfx11_supported()
+{
+    return get_device_name() == "gfx1100" || get_device_name() == "gfx1101" ||
+           get_device_name() == "gfx1102" || get_device_name() == "gfx1103" ||
+           get_device_name() == "gfx1150" || get_device_name() == "gfx1151" ||
+           get_device_name() == "gfx1152" || get_device_name() == "gfx1153";
+}
+
+inline bool is_gfx12_supported()
+{
+    return get_device_name() == "gfx1200" || get_device_name() == "gfx1201";
 }
 
 inline bool is_load_tr_supported()

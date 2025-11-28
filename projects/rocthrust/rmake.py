@@ -20,7 +20,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="""
     Checks build arguments
     """)
-    
+
     default_gpus = 'gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201'
 
     parser.add_argument('-g', '--debug', required=False, default=False,  action='store_true',
@@ -39,9 +39,10 @@ def parse_args():
     parser.add_argument(      '--cmake-darg', required=False, dest='cmake_dargs', action='append', default=[],
                         help='List of additional cmake defines for builds (e.g. CMAKE_CXX_COMPILER_LAUNCHER=ccache)')
     parser.add_argument('-a', '--architecture', dest='gpu_architecture', required=False, default=default_gpus, #:sramecc+:xnack-" ) #gfx1030" ) #gfx906" ) # gfx1030" )
-                        help='Set GPU architectures, e.g. all, gfx000, gfx803, gfx906:xnack-;gfx1030 (optional, default: all)')                        
+                        help='Set GPU architectures, e.g. all, gfx000, gfx803, gfx906:xnack-;gfx1030 (optional, default: all)')
     parser.add_argument('-v', '--verbose', required=False, default=False, action='store_true',
                         help='Verbose build (default: False)')
+    parser.add_argument('--no-offload-compress', required=False, default=False, action='store_true', help='Do not apply offload compression (defult: False)')                        
     return parser.parse_args()
 
 def os_detect():
@@ -75,12 +76,12 @@ def delete_dir(dir_path) :
         linux_path = pathlib.Path(dir_path).absolute()
         #print( linux_path )
         run_cmd( "rm" , f"-rf {linux_path}")
-        
+
 def cmake_path(os_path):
     if OS_info["ID"] == "windows":
         return os_path.replace("\\", "/")
     else:
-        return os.path.realpath(os_path)          
+        return os.path.realpath(os_path)
 
 def config_cmd():
     global args
@@ -100,7 +101,7 @@ def config_cmd():
         toolchain = os.path.join( src_path, "toolchain-windows.cmake" )
         #set CPACK_PACKAGING_INSTALL_PREFIX= defined as blank as it is appended to end of path for archive creation
         cmake_platform_opts.append( f"-DWIN32=ON -DCPACK_PACKAGING_INSTALL_PREFIX=""") #" -DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}"
-        cmake_platform_opts.append( f"-DCMAKE_INSTALL_PREFIX=\"C:/hipSDK\" -DCPACK_PACKAGE_INSTALL_DIRECTORY=\"rocthrust\"")        
+        cmake_platform_opts.append( f"-DCMAKE_INSTALL_PREFIX=\"C:/hipSDK\" -DCPACK_PACKAGE_INSTALL_DIRECTORY=\"rocthrust\"")
         generator = f"-G Ninja"
         # "-G \"Visual Studio 16 2019\" -A x64"  #  -G NMake ")  #
         cmake_options.append( generator )
@@ -149,7 +150,7 @@ def config_cmd():
     # packaging options
     cmake_pack_options = f"-DCPACK_SET_DESTDIR=OFF -DCPACK_INCLUDE_TOPLEVEL_DIRECTORY=OFF"
     cmake_options.append( cmake_pack_options )
-    
+
     if args.static_lib:
         cmake_options.append( f"-DBUILD_SHARED_LIBS=OFF" )
 
@@ -159,8 +160,11 @@ def config_cmd():
     if args.build_clients:
         cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_BENCHMARK=ON -DBUILD_DIR={build_dir}" )
 
+    if args.no_offload_compress:
+        cmake_options.append( f"-DBUILD_OFFLOAD_COMPRESS=OFF" )
+        
     cmake_options.append( f"-DAMDGPU_TARGETS={args.gpu_architecture}" )
-    
+
     if args.cmake_dargs:
         for i in args.cmake_dargs:
           cmake_options.append( f"-D{i}" )

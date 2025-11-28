@@ -31,8 +31,6 @@
 
 namespace rocRoller
 {
-    RegisterComponent(BitwiseXorGenerator);
-
     template <>
     std::shared_ptr<BinaryArithmeticGenerator<Expression::BitwiseXor>>
         GetGenerator<Expression::BitwiseXor>(Register::ValuePtr dst,

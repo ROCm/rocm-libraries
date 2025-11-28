@@ -13,6 +13,8 @@ subtrees:
       title: Programming guide
     - file: conceptual/curand-compatibility
     - file: conceptual/dynamic_ordering_configuration
+    - file: conceptual/generator-types
+      title: Random number generators
 
   - caption: Examples
     entries:

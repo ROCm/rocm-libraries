@@ -38,7 +38,8 @@
 
 using namespace hipsparse_test;
 
-void testing_scatter_bad_arg(void)
+template <typename I, typename T>
+void testing_scatter_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     int64_t size = 100;
@@ -105,7 +106,7 @@ hipsparseStatus_t testing_scatter(Arguments argus)
 
     // Initial Data on CPU
     srand(12345ULL);
-    hipsparseInitIndex(hx_ind.data(), nnz, 1, size);
+    hipsparseInitIndex(hx_ind.data(), nnz, idxBase, size + idxBase);
     hipsparseInit<T>(hx_val, 1, nnz);
     hipsparseInit<T>(hy, 1, size);
 

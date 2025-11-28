@@ -62,6 +62,7 @@
         }                                                          \
     } while(0)
 
+#ifndef HAVE_ROCSPARSE
 ROCSOLVER_BEGIN_NAMESPACE
 
 template <typename Fn>
@@ -216,6 +217,7 @@ static bool try_load_rocsparse()
 }
 
 ROCSOLVER_END_NAMESPACE
+#endif /* HAVE_ROCSPARSE */
 
 extern "C" rocblas_status rocsolver_create_rfinfo(rocsolver_rfinfo* rfinfo, rocblas_handle handle)
 {

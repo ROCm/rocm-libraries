@@ -255,17 +255,8 @@ void RC2DNode::AssignParams_internal()
     rowPlan->inStride = inStride;
     rowPlan->iDist    = iDist;
 
-    // make output of row plan contiguous if the 2D node is at the root of the plan tree
-    if(parent == nullptr)
-    {
-        rowPlan->outStride = {1, length[0]};
-        rowPlan->oDist     = length[0] * length[1];
-    }
-    else
-    {
-        rowPlan->outStride = inStride;
-        rowPlan->oDist     = iDist;
-    }
+    rowPlan->outStride = outStride;
+    rowPlan->oDist     = oDist;
 
     rowPlan->AssignParams();
 

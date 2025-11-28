@@ -26,22 +26,25 @@
 
 include(FetchContent)
 
-find_package(ROCM 0.11.0 CONFIG QUIET PATHS "${ROCM_PATH}") # First version with Sphinx doc gen improvement
-if(NOT ROCM_FOUND)
-  message(STATUS "ROCm CMake not found. Fetching...")
-  set(rocm_cmake_tag
-    "c044bb52ba85058d28afe2313be98d9fed02e293" # develop@2023.09.12. (move to 6.0 tag when released)
-    CACHE STRING "rocm-cmake tag to download")
-  FetchContent_Declare(
-    rocm-cmake
-    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
-    GIT_TAG        ${rocm_cmake_tag}
-    SOURCE_SUBDIR "DISABLE ADDING TO BUILD" # We don't really want to consume the build and test targets of ROCm CMake.
-  )
-  FetchContent_MakeAvailable(rocm-cmake)
-  find_package(ROCM CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
-else()
-  find_package(ROCM 0.11.0 CONFIG REQUIRED PATHS "${ROCM_PATH}")
+find_package(ROCmCMakeBuildTools QUIET CONFIG)
+
+if(NOT ROCmCMakeBuildTools_FOUND)
+    message(STATUS "ROCmCMakeBuildTools not found. Fetching from source...")
+    include(FetchContent)
+    FetchContent_Declare(
+        rocm-cmake GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git GIT_TAG rocm-6.4.3
+        GIT_SHALLOW TRUE
+    )
+
+    FetchContent_GetProperties(rocm-cmake)
+    if(NOT rocm-cmake_POPULATED)
+        FetchContent_Populate(rocm-cmake)
+        message(
+            STATUS
+                "Added ROCm CMake modules path: ${rocm-cmake_SOURCE_DIR}/share/rocmcmakebuildtools/cmake"
+        )
+        list(APPEND CMAKE_MODULE_PATH ${rocm-cmake_SOURCE_DIR}/share/rocmcmakebuildtools/cmake)
+    endif()
 endif()
 
 include(ROCMSetupVersion)

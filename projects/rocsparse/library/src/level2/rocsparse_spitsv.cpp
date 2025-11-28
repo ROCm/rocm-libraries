@@ -350,7 +350,6 @@ try
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         // LCOV_EXCL_STOP
     }
-
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::spitsv_dynamic_dispatch(mat->row_type,
                                                                  mat->col_type,
                                                                  compute_type,

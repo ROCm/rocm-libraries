@@ -21,24 +21,14 @@
 #include <gtest/gtest.h>
 #include <stdio.h>
 
+#include "../test_common.hpp"
+
+#include <cmath>
 #include <numeric>
 #include <random>
 
 #include <rng/distribution/uniform.hpp>
 #include <rocrand/rocrand_mtgp32_11213.h>
-
-#define HIP_CHECK(cmd)                                                                         \
-    do                                                                                         \
-    {                                                                                          \
-        auto error = (cmd);                                                                    \
-        if(error != hipSuccess)                                                                \
-        {                                                                                      \
-            std::cerr << "Encountered HIP error (" << hipGetErrorString(error) << ") at line " \
-                      << __LINE__ << " in file " << __FILE__ << "\n";                          \
-            exit(-1);                                                                          \
-        }                                                                                      \
-    }                                                                                          \
-    while(0)
 
 #define ROCRAND_CHECK(cmd)                                                                \
     do                                                                                    \
@@ -455,12 +445,9 @@ TEST(uniform_distribution_tests, float4_uint4_in_test){
     std::uniform_int_distribution<unsigned int> dis(mini, maxi);
 
     NumericUD<float4, uint4, std::uniform_int_distribution<unsigned int>> test;
-    test.run_test(
-        dis,
-        [] __host__ __device__ (uint4 & input, float4 & output){
-            output = rocrand_device::detail::uniform_distribution4(input);
-        }
-    );
+    test.run_test(dis,
+                  [](uint4& input, float4& output)
+                  { output = rocrand_device::detail::uniform_distribution4(input); });
 }
 
 TEST(uniform_distribution_tests, float4_ulonglong4_test){
@@ -469,12 +456,9 @@ TEST(uniform_distribution_tests, float4_ulonglong4_test){
     std::uniform_int_distribution<unsigned long long> dis(mini, maxi);
 
     NumericUD<float4, ulonglong4, std::uniform_int_distribution<unsigned long long>> test;
-    test.run_test(
-        dis,
-        [] __host__ __device__ (ulonglong4 & input, float4 & output){
-            output = rocrand_device::detail::uniform_distribution4(input);
-        }
-    );
+    test.run_test(dis,
+                  [](ulonglong4& input, float4& output)
+                  { output = rocrand_device::detail::uniform_distribution4(input); });
 }
 
 TEST(uniform_distribution_tests, double4_uint4_test){
@@ -486,12 +470,9 @@ TEST(uniform_distribution_tests, double4_uint4_test){
     std::mt19937 gen(rd());
 
     NumericUD<double4, uint4, std::uniform_int_distribution<unsigned int>> test;
-    test.run_test(
-        dis,
-        [&] __host__ __device__ (uint4 & input, double4 & output){
-            output = rocrand_device::detail::uniform_distribution_double4(input, input);
-        }
-    );
+    test.run_test(dis,
+                  [&](uint4& input, double4& output)
+                  { output = rocrand_device::detail::uniform_distribution_double4(input, input); });
 }
 
 TEST(uniform_distribution_tests, double4_ulonglong4_test){
@@ -500,12 +481,9 @@ TEST(uniform_distribution_tests, double4_ulonglong4_test){
     std::uniform_int_distribution<unsigned long long> dis(mini, maxi);
 
     NumericUD<double4, ulonglong4, std::uniform_int_distribution<unsigned long long>> test;
-    test.run_test(
-        dis,
-        [] __host__ __device__ (ulonglong4 & input, double4 & output){
-            output = rocrand_device::detail::uniform_distribution_double4(input);
-        }
-    );
+    test.run_test(dis,
+                  [](ulonglong4& input, double4& output)
+                  { output = rocrand_device::detail::uniform_distribution_double4(input); });
 }
 
 TEST(uniform_distribution_tests, double2_uint4_in_test){
@@ -517,18 +495,19 @@ TEST(uniform_distribution_tests, double2_uint4_in_test){
     std::mt19937 gen(rd());
 
     NumericUD<double4, uint4, std::uniform_int_distribution<unsigned int>> test;
-    test.run_test(
-        dis,
-        [&] __host__ __device__ (uint4 & input, double4 & output){
+    test.run_test(dis,
+                  [&](uint4& input, double4& output)
+                  {
+                      uint4   secondInput = {dis(gen), dis(gen), dis(gen), dis(gen)};
+                      double2 o1 = rocrand_device::detail::uniform_distribution_double2(input);
+                      double2 o2
+                          = rocrand_device::detail::uniform_distribution_double2(secondInput);
 
-            uint4 secondInput = {dis(gen), dis(gen), dis(gen), dis(gen)};
-            double2 o1 = rocrand_device::detail::uniform_distribution_double2(input);
-            double2 o2 = rocrand_device::detail::uniform_distribution_double2(secondInput);
-
-            output.w = o1.x; output.x = o1.y;
-            output.y = o2.x; output.z = o2.y;
-        }
-    );
+                      output.w = o1.x;
+                      output.x = o1.y;
+                      output.y = o2.x;
+                      output.z = o2.y;
+                  });
 }
 
 TEST(uniform_distribution_tests, double2_ulonglong2_in_test){
@@ -537,20 +516,20 @@ TEST(uniform_distribution_tests, double2_ulonglong2_in_test){
     std::uniform_int_distribution<unsigned long long> dis(mini, maxi);
 
     NumericUD<double4, ulonglong4, std::uniform_int_distribution<unsigned long long>> test;
-    test.run_test(
-        dis,
-        [&] __host__ __device__ (ulonglong4 & input, double4 & output){
+    test.run_test(dis,
+                  [&](ulonglong4& input, double4& output)
+                  {
+                      ulonglong2 i1 = {input.w, input.x};
+                      ulonglong2 i2 = {input.y, input.z};
 
-            ulonglong2 i1 = {input.w, input.x};
-            ulonglong2 i2 = {input.y, input.z};
+                      double2 o1 = rocrand_device::detail::uniform_distribution_double2(i1);
+                      double2 o2 = rocrand_device::detail::uniform_distribution_double2(i2);
 
-            double2 o1 = rocrand_device::detail::uniform_distribution_double2(i1);
-            double2 o2 = rocrand_device::detail::uniform_distribution_double2(i2);
-
-            output.w = o1.x; output.x = o1.y;
-            output.y = o2.x; output.z = o2.y;
-        }
-    );
+                      output.w = o1.x;
+                      output.x = o1.y;
+                      output.y = o2.x;
+                      output.z = o2.y;
+                  });
 }
 
 TEST(uniform_distribution_tests, double2_ulonglong4_in_test){
@@ -562,17 +541,19 @@ TEST(uniform_distribution_tests, double2_ulonglong4_in_test){
     std::mt19937 gen(rd());
 
     NumericUD<double4, ulonglong4, std::uniform_int_distribution<unsigned long long>> test;
-    test.run_test(
-        dis,
-        [&] __host__ __device__ (ulonglong4 & input, double4 & output){
-            ulonglong4 secondInput = {dis(gen), dis(gen), dis(gen), dis(gen)};
-            double2 o1 = rocrand_device::detail::uniform_distribution_double2(input);
-            double2 o2 = rocrand_device::detail::uniform_distribution_double2(secondInput);
+    test.run_test(dis,
+                  [&](ulonglong4& input, double4& output)
+                  {
+                      ulonglong4 secondInput = {dis(gen), dis(gen), dis(gen), dis(gen)};
+                      double2    o1 = rocrand_device::detail::uniform_distribution_double2(input);
+                      double2    o2
+                          = rocrand_device::detail::uniform_distribution_double2(secondInput);
 
-            output.w = o1.x; output.x = o1.y;
-            output.y = o2.x; output.z = o2.y;
-        }
-    );
+                      output.w = o1.x;
+                      output.x = o1.y;
+                      output.y = o2.x;
+                      output.z = o2.y;
+                  });
 }
 
 template <typename OutType>
@@ -630,56 +611,52 @@ TEST(uniform_distribution_tests, philox4x32_10_test){
     StatesUD<float4> testFloat;
 
     testFloat.run_test(
-        [&] __host__ __device__ (float4 & output){
+        [&](float4& output)
+        {
             output = {
                 rocrand_uniform(&states), rocrand_uniform(&states),
                 rocrand_uniform(&states), rocrand_uniform(&states)
             };
-        }
-    );
+        });
 
     testFloat.run_test(
-        [&] __host__ __device__ (float4 & output){
+        [&](float4& output)
+        {
             float2 o1 = rocrand_uniform2(&states);
             float2 o2 = rocrand_uniform2(&states);
 
-            output.w = o1.x; output.x = o1.y;
-            output.y = o2.x; output.z = o2.y;
-        }
-    );
+            output.w = o1.x;
+            output.x = o1.y;
+            output.y = o2.x;
+            output.z = o2.y;
+        });
 
-    testFloat.run_test(
-        [&] __host__ __device__ (float4 & output){
-            output = rocrand_uniform4(&states);
-        }
-    );
+    testFloat.run_test([&](float4& output) { output = rocrand_uniform4(&states); });
 
     StatesUD<double4> testDouble;
 
     testDouble.run_test(
-        [&] __host__ __device__ (double4 & output){
+        [&](double4& output)
+        {
             output = {
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states),
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states)
             };
-        }
-    );
+        });
 
     testDouble.run_test(
-        [&] __host__ __device__ (double4 & output){
+        [&](double4& output)
+        {
             double2 o1 = rocrand_uniform_double2(&states);
             double2 o2 = rocrand_uniform_double2(&states);
 
-            output.w = o1.x; output.x = o1.y;
-            output.y = o2.x; output.z = o2.y;
-        }
-    );
+            output.w = o1.x;
+            output.x = o1.y;
+            output.y = o2.x;
+            output.z = o2.y;
+        });
 
-    testDouble.run_test(
-        [&] __host__ __device__ (double4 & output){
-            output = rocrand_uniform_double4(&states);
-        }
-    );
+    testDouble.run_test([&](double4& output) { output = rocrand_uniform_double4(&states); });
 }
 
 TEST(uniform_distribution_tests, mrg31k3p_test){
@@ -689,24 +666,24 @@ TEST(uniform_distribution_tests, mrg31k3p_test){
     StatesUD<float4> testFloat;
 
     testFloat.run_test(
-        [&] __host__ __device__ (float4 & output){
+        [&](float4& output)
+        {
             output = {
                 rocrand_uniform(&states), rocrand_uniform(&states),
                 rocrand_uniform(&states), rocrand_uniform(&states)
             };
-        }
-    );
+        });
 
     StatesUD<double4> testDouble;
 
     testDouble.run_test(
-        [&] __host__ __device__ (double4 & output){
+        [&](double4& output)
+        {
             output = {
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states),
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states)
             };
-        }
-    );
+        });
 }
 
 TEST(uniform_distribution_tests, mrg32k3a_test){
@@ -716,24 +693,24 @@ TEST(uniform_distribution_tests, mrg32k3a_test){
     StatesUD<float4> testFloat;
 
     testFloat.run_test(
-        [&] __host__ __device__ (float4 & output){
+        [&](float4& output)
+        {
             output = {
                 rocrand_uniform(&states), rocrand_uniform(&states),
                 rocrand_uniform(&states), rocrand_uniform(&states)
             };
-        }
-    );
+        });
 
     StatesUD<double4> testDouble;
 
     testDouble.run_test(
-        [&] __host__ __device__ (double4 & output){
+        [&](double4& output)
+        {
             output = {
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states),
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states)
             };
-        }
-    );
+        });
 }
 
 TEST(uniform_distribution_tests, xorwow_test){
@@ -743,24 +720,24 @@ TEST(uniform_distribution_tests, xorwow_test){
     StatesUD<float4> testFloat;
 
     testFloat.run_test(
-        [&] __host__ __device__ (float4 & output){
+        [&](float4& output)
+        {
             output = {
                 rocrand_uniform(&states), rocrand_uniform(&states),
                 rocrand_uniform(&states), rocrand_uniform(&states)
             };
-        }
-    );
+        });
 
     StatesUD<double4> testDouble;
 
     testDouble.run_test(
-        [&] __host__ __device__ (double4 & output){
+        [&](double4& output)
+        {
             output = {
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states),
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states)
             };
-        }
-    );
+        });
 }
 
 TEST(uniform_distribution_tests, sobol32_test){
@@ -772,24 +749,24 @@ TEST(uniform_distribution_tests, sobol32_test){
     StatesUD<float4> testFloat;
 
     testFloat.run_test(
-        [&] __host__ __device__ (float4 & output){
+        [&](float4& output)
+        {
             output = {
                 rocrand_uniform(&states), rocrand_uniform(&states),
                 rocrand_uniform(&states), rocrand_uniform(&states)
             };
-        }
-    );
+        });
 
     StatesUD<double4> testDouble;
 
     testDouble.run_test(
-        [&] __host__ __device__ (double4 & output){
+        [&](double4& output)
+        {
             output = {
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states),
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states)
             };
-        }
-    );
+        });
 }
 
 TEST(uniform_distribution_tests, scrambled_sobol32_test){
@@ -801,24 +778,24 @@ TEST(uniform_distribution_tests, scrambled_sobol32_test){
     StatesUD<float4> testFloat;
 
     testFloat.run_test(
-        [&] __host__ __device__ (float4 & output){
+        [&](float4& output)
+        {
             output = {
                 rocrand_uniform(&states), rocrand_uniform(&states),
                 rocrand_uniform(&states), rocrand_uniform(&states)
             };
-        }
-    );
+        });
 
     StatesUD<double4> testDouble;
 
     testDouble.run_test(
-        [&] __host__ __device__ (double4 & output){
+        [&](double4& output)
+        {
             output = {
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states),
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states)
             };
-        }
-    );
+        });
 }
 
 TEST(uniform_distribution_tests, sobol64_test){
@@ -830,24 +807,24 @@ TEST(uniform_distribution_tests, sobol64_test){
     StatesUD<float4> testFloat;
 
     testFloat.run_test(
-        [&] __host__ __device__ (float4 & output){
+        [&](float4& output)
+        {
             output = {
                 rocrand_uniform(&states), rocrand_uniform(&states),
                 rocrand_uniform(&states), rocrand_uniform(&states)
             };
-        }
-    );
+        });
 
     StatesUD<double4> testDouble;
 
     testDouble.run_test(
-        [&] __host__ __device__ (double4 & output){
+        [&](double4& output)
+        {
             output = {
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states),
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states)
             };
-        }
-    );
+        });
 }
 
 TEST(uniform_distribution_tests, scrambled_sobol64_test){
@@ -859,51 +836,51 @@ TEST(uniform_distribution_tests, scrambled_sobol64_test){
     StatesUD<float4> testFloat;
 
     testFloat.run_test(
-        [&] __host__ __device__ (float4 & output){
+        [&](float4& output)
+        {
             output = {
                 rocrand_uniform(&states), rocrand_uniform(&states),
                 rocrand_uniform(&states), rocrand_uniform(&states)
             };
-        }
-    );
+        });
 
     StatesUD<double4> testDouble;
 
     testDouble.run_test(
-        [&] __host__ __device__ (double4 & output){
+        [&](double4& output)
+        {
             output = {
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states),
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states)
             };
-        }
-    );
+        });
 }
 
 TEST(uniform_distribution_tests, lfsr113_test){
     rocrand_state_lfsr113 states;
-    rocrand_init(static_cast<uint4>(12), 0, &states);
+    rocrand_init(uint4{12}, 0, &states);
 
     StatesUD<float4> testFloat;
 
     testFloat.run_test(
-        [&] __host__ __device__ (float4 & output){
+        [&](float4& output)
+        {
             output = {
                 rocrand_uniform(&states), rocrand_uniform(&states),
                 rocrand_uniform(&states), rocrand_uniform(&states)
             };
-        }
-    );
+        });
 
     StatesUD<double4> testDouble;
 
     testDouble.run_test(
-        [&] __host__ __device__ (double4 & output){
+        [&](double4& output)
+        {
             output = {
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states),
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states)
             };
-        }
-    );
+        });
 }
 
 TEST(uniform_distribution_tests, threefry2x32_20_test){
@@ -913,24 +890,24 @@ TEST(uniform_distribution_tests, threefry2x32_20_test){
     StatesUD<float4> testFloat;
 
     testFloat.run_test(
-        [&] __host__ __device__ (float4 & output){
+        [&](float4& output)
+        {
             output = {
                 rocrand_uniform(&states), rocrand_uniform(&states),
                 rocrand_uniform(&states), rocrand_uniform(&states)
             };
-        }
-    );
+        });
 
     StatesUD<double4> testDouble;
 
     testDouble.run_test(
-        [&] __host__ __device__ (double4 & output){
+        [&](double4& output)
+        {
             output = {
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states),
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states)
             };
-        }
-    );
+        });
 }
 
 TEST(uniform_distribution_tests, threefry2x64_20_test){
@@ -940,24 +917,24 @@ TEST(uniform_distribution_tests, threefry2x64_20_test){
     StatesUD<float4> testFloat;
 
     testFloat.run_test(
-        [&] __host__ __device__ (float4 & output){
+        [&](float4& output)
+        {
             output = {
                 rocrand_uniform(&states), rocrand_uniform(&states),
                 rocrand_uniform(&states), rocrand_uniform(&states)
             };
-        }
-    );
+        });
 
     StatesUD<double4> testDouble;
 
     testDouble.run_test(
-        [&] __host__ __device__ (double4 & output){
+        [&](double4& output)
+        {
             output = {
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states),
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states)
             };
-        }
-    );
+        });
 }
 
 TEST(uniform_distribution_tests, threefry4x32_20_test){
@@ -967,24 +944,24 @@ TEST(uniform_distribution_tests, threefry4x32_20_test){
     StatesUD<float4> testFloat;
 
     testFloat.run_test(
-        [&] __host__ __device__ (float4 & output){
+        [&](float4& output)
+        {
             output = {
                 rocrand_uniform(&states), rocrand_uniform(&states),
                 rocrand_uniform(&states), rocrand_uniform(&states)
             };
-        }
-    );
+        });
 
     StatesUD<double4> testDouble;
 
     testDouble.run_test(
-        [&] __host__ __device__ (double4 & output){
+        [&](double4& output)
+        {
             output = {
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states),
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states)
             };
-        }
-    );
+        });
 }
 
 TEST(uniform_distribution_tests, threefry4x64_20_test){
@@ -994,24 +971,24 @@ TEST(uniform_distribution_tests, threefry4x64_20_test){
     StatesUD<float4> testFloat;
 
     testFloat.run_test(
-        [&] __host__ __device__ (float4 & output){
+        [&](float4& output)
+        {
             output = {
                 rocrand_uniform(&states), rocrand_uniform(&states),
                 rocrand_uniform(&states), rocrand_uniform(&states)
             };
-        }
-    );
+        });
 
     StatesUD<double4> testDouble;
 
     testDouble.run_test(
-        [&] __host__ __device__ (double4 & output){
+        [&](double4& output)
+        {
             output = {
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states),
                 rocrand_uniform_double(&states), rocrand_uniform_double(&states)
             };
-        }
-    );
+        });
 }
 
 template <typename T, typename UDFunction>
@@ -1035,6 +1012,24 @@ __global__ void mtgp32_kernel (rocrand_state_mtgp32 * states, T * output, const 
         states[state_id] = state;
 }
 
+struct rocrand_state_mtgp32_uniform
+{
+    __device__
+    auto operator()(rocrand_state_mtgp32* state) const
+    {
+        return rocrand_uniform(state);
+    }
+};
+
+struct rocrand_state_mtgp32_uniform_double
+{
+    __device__
+    auto operator()(rocrand_state_mtgp32* state) const
+    {
+        return rocrand_uniform_double(state);
+    }
+};
+
 TEST(uniform_distribution_tests, float_mtgp32_test){
     size_t testSize = 40192;
     size_t threads = 256;
@@ -1050,19 +1045,10 @@ TEST(uniform_distribution_tests, float_mtgp32_test){
     HIP_CHECK(hipMalloc(&dOut, sizeof(float) * testSize));
     HIP_CHECK(hipDeviceSynchronize());
 
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(mtgp32_kernel<float>),
-        dim3(blocks),
-        dim3(threads),
-        0,
-        0,
-        states,
-        dOut,
-        testSize,
-        [] __device__ (rocrand_state_mtgp32 * state){
-            return rocrand_uniform(state);
-        }
-    );
+    mtgp32_kernel<float><<<dim3(blocks), dim3(threads), 0, 0>>>(states,
+                                                                dOut,
+                                                                testSize,
+                                                                rocrand_state_mtgp32_uniform{});
 
     HIP_CHECK(hipMemcpy(hOut, dOut, sizeof(float) * testSize, hipMemcpyDeviceToHost));
 
@@ -1109,19 +1095,11 @@ TEST(uniform_distribution_tests, double_mtgp32_test){
     HIP_CHECK(hipMalloc(&dOut, sizeof(double) * testSize));
     HIP_CHECK(hipDeviceSynchronize());
 
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(mtgp32_kernel<double>),
-        dim3(blocks),
-        dim3(threads),
-        0,
-        0,
-        states,
-        dOut,
-        testSize,
-        [] __device__ (rocrand_state_mtgp32 * state){
-            return rocrand_uniform_double(state);
-        }
-    );
+    mtgp32_kernel<double>
+        <<<dim3(blocks), dim3(threads), 0, 0>>>(states,
+                                                dOut,
+                                                testSize,
+                                                rocrand_state_mtgp32_uniform_double{});
 
     HIP_CHECK(hipMemcpy(hOut, dOut, sizeof(double) * testSize, hipMemcpyDeviceToHost));
 
@@ -1210,7 +1188,7 @@ TEST(UniformHostTest, float_out_uint_in)
         [](std::uniform_int_distribution<unsigned long long>& dis, std::mt19937& gen)
         { return rocrand_device::detail::uniform_distribution((unsigned int)(dis(gen) >> 32)); },
         [](float x) { return x; },
-        [](float x, float actual_mean) { return std::powf(x - actual_mean, 2); });
+        [](float x, float actual_mean) { return POWF(x - actual_mean, 2); });
 }
 TEST(UniformHostTest, float_out_ulonglongint_in)
 {
@@ -1218,7 +1196,7 @@ TEST(UniformHostTest, float_out_ulonglongint_in)
         [](std::uniform_int_distribution<unsigned long long>& dis, std::mt19937& gen)
         { return rocrand_device::detail::uniform_distribution(dis(gen)); },
         [](float x) { return x; },
-        [](float x, float actual_mean) { return std::powf(x - actual_mean, 2); });
+        [](float x, float actual_mean) { return POWF(x - actual_mean, 2); });
 }
 
 TEST(UniformHostTest, float4_out_uint4_in)
@@ -1230,13 +1208,16 @@ TEST(UniformHostTest, float4_out_uint4_in)
             unsigned long long b = dis(gen);
 
             return rocrand_device::detail::uniform_distribution4(
-                uint4{a & 0xffffffff, a >> 32, b & 0xffffffff, b >> 32});
+                uint4{static_cast<unsigned int>(a & 0xffffffff),
+                      static_cast<unsigned int>(a >> 32),
+                      static_cast<unsigned int>(b & 0xffffffff),
+                      static_cast<unsigned int>(b >> 32)});
         },
         [](float4 x) { return x.w + x.x + x.y + x.z; },
         [](float4 x, float actual_mean)
         {
-            return std::powf(x.w - actual_mean, 2) + std::powf(x.x - actual_mean, 2)
-                   + std::powf(x.y - actual_mean, 2) + std::powf(x.z - actual_mean, 2);
+            return POWF(x.w - actual_mean, 2) + POWF(x.x - actual_mean, 2)
+                   + POWF(x.y - actual_mean, 2) + POWF(x.z - actual_mean, 2);
         });
 }
 
@@ -1251,8 +1232,8 @@ TEST(UniformHostTest, float4_out_ulonglong4_in)
         [](float4 x) { return x.w + x.x + x.y + x.z; },
         [](float4 x, float actual_mean)
         {
-            return std::powf(x.w - actual_mean, 2) + std::powf(x.x - actual_mean, 2)
-                   + std::powf(x.y - actual_mean, 2) + std::powf(x.z - actual_mean, 2);
+            return POWF(x.w - actual_mean, 2) + POWF(x.x - actual_mean, 2)
+                   + POWF(x.y - actual_mean, 2) + POWF(x.z - actual_mean, 2);
         });
 }
 
@@ -1264,7 +1245,7 @@ TEST(UniformHostTest, double_out_uint_in)
                 (unsigned int)(dis(gen) >> 32));
         },
         [](double x) { return x; },
-        [](double x, double actual_mean) { return std::powf(x - actual_mean, 2); });
+        [](double x, double actual_mean) { return POWF(x - actual_mean, 2); });
 }
 
 TEST(UniformHostTest, double_out_2uint_in)
@@ -1278,7 +1259,7 @@ TEST(UniformHostTest, double_out_2uint_in)
                 (unsigned int)(temp & 0xffffffff));
         },
         [](double x) { return x; },
-        [](double x, double actual_mean) { return std::powf(x - actual_mean, 2); });
+        [](double x, double actual_mean) { return POWF(x - actual_mean, 2); });
 }
 
 TEST(UniformHostTest, double_out_ulonglong_in)
@@ -1287,7 +1268,7 @@ TEST(UniformHostTest, double_out_ulonglong_in)
         [](std::uniform_int_distribution<unsigned long long>& dis, std::mt19937& gen)
         { return rocrand_device::detail::uniform_distribution_double(dis(gen)); },
         [](double x) { return x; },
-        [](double x, double actual_mean) { return std::powf(x - actual_mean, 2); });
+        [](double x, double actual_mean) { return POWF(x - actual_mean, 2); });
 }
 
 TEST(UniformHostTest, double2_out_uint4_in)
@@ -1298,11 +1279,14 @@ TEST(UniformHostTest, double2_out_uint4_in)
             unsigned long long a = dis(gen);
             unsigned long long b = dis(gen);
             return rocrand_device::detail::uniform_distribution_double2(
-                uint4{a & 0xffffffff, a >> 32, b & 0xffffffff, b >> 32});
+                uint4{static_cast<unsigned int>(a & 0xffffffff),
+                      static_cast<unsigned int>(a >> 32),
+                      static_cast<unsigned int>(b & 0xffffffff),
+                      static_cast<unsigned int>(b >> 32)});
         },
         [](double2 x) { return x.x + x.y; },
         [](double2 x, double actual_mean)
-        { return std::powf(x.x - actual_mean, 2) + std::powf(x.y - actual_mean, 2); });
+        { return POWF(x.x - actual_mean, 2) + POWF(x.y - actual_mean, 2); });
 }
 
 TEST(UniformHostTest, double4_out_2uint4_in)
@@ -1317,8 +1301,14 @@ TEST(UniformHostTest, double4_out_2uint4_in)
             unsigned long long d = dis(gen);
 
             return rocrand_device::detail::uniform_distribution_double4(
-                uint4{a & 0xffffffff, a >> 32, b & 0xffffffff, b >> 32},
-                uint4{c & 0xffffffff, c >> 32, d & 0xffffffff, d >> 32});
+                uint4{static_cast<unsigned int>(a & 0xffffffff),
+                      static_cast<unsigned int>(a >> 32),
+                      static_cast<unsigned int>(b & 0xffffffff),
+                      static_cast<unsigned int>(b >> 32)},
+                uint4{static_cast<unsigned int>(c & 0xffffffff),
+                      static_cast<unsigned int>(c >> 32),
+                      static_cast<unsigned int>(d & 0xffffffff),
+                      static_cast<unsigned int>(d >> 32)});
         },
         [](double4 x) { return x.x + x.y + x.z + x.w; },
 
@@ -1525,7 +1515,7 @@ TYPED_TEST(UniformRocRandStateHostTest, rocrand_state_tests)
     {
         auto mean_func = [](out_type x) { return x; };
         auto std_dev_func
-            = [](out_type x, out_type actual_mean) { return std::powf(x - actual_mean, 2); };
+            = [](out_type x, out_type actual_mean) { return POWF(x - actual_mean, 2); };
         if constexpr(std::is_same_v<out_type, float>)
         {
             run_host_prng_test<out_type, T, out_size, rocrand_state>(
@@ -1545,7 +1535,7 @@ TYPED_TEST(UniformRocRandStateHostTest, rocrand_state_tests)
     {
         auto mean_func    = [](out_type x) { return x.x + x.y; };
         auto std_dev_func = [](out_type x, T actual_mean)
-        { return std::powf(x.x - actual_mean, 2) + std::powf(x.y - actual_mean, 2); };
+        { return POWF(x.x - actual_mean, 2) + POWF(x.y - actual_mean, 2); };
 
         if constexpr(std::is_same_v<out_type, float2>)
         {
@@ -1567,8 +1557,8 @@ TYPED_TEST(UniformRocRandStateHostTest, rocrand_state_tests)
         auto mean_func    = [](out_type x) { return x.x + x.y + x.w + x.z; };
         auto std_dev_func = [](out_type x, T actual_mean)
         {
-            return std::powf(x.x - actual_mean, 2) + std::powf(x.y - actual_mean, 2)
-                   + std::powf(x.w - actual_mean, 2) + std::powf(x.z - actual_mean, 2);
+            return POWF(x.x - actual_mean, 2) + POWF(x.y - actual_mean, 2)
+                   + POWF(x.w - actual_mean, 2) + POWF(x.z - actual_mean, 2);
         };
 
         if constexpr(std::is_same_v<out_type, float4>)

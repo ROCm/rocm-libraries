@@ -23,6 +23,7 @@
 
 #include "../config.hpp"
 #include "../detail/temp_storage.hpp"
+#include "../detail/various.hpp"
 #include "config_types.hpp"
 #include "detail/ordered_block_id.hpp"
 #include "device_find_first_of_config.hpp"
@@ -39,7 +40,7 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Config, class InputIterator1, class InputIterator2, class BinaryFunction>
+template<class InputIterator1, class InputIterator2, class BinaryFunction>
 struct find_first_of_impl_kernels
 {
     template<class T>
@@ -50,17 +51,17 @@ struct find_first_of_impl_kernels
         ordered_bid.reset();
     }
 
-    static ROCPRIM_KERNEL
-    ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
-        find_first_of_kernel(InputIterator1           input,
-                             InputIterator2           keys,
-                             size_t*                  output,
-                             size_t                   size,
-                             size_t                   keys_size,
-                             ordered_block_id<size_t> ordered_bid,
-                             BinaryFunction           compare_function)
+    template<typename ArchConfig>
+    static ROCPRIM_DEVICE
+    void find_first_of_kernel_impl(InputIterator1           input,
+                                   InputIterator2           keys,
+                                   size_t*                  output,
+                                   size_t                   size,
+                                   size_t                   keys_size,
+                                   ordered_block_id<size_t> ordered_bid,
+                                   BinaryFunction           compare_function)
     {
-        constexpr find_first_of_config_params params = device_params<Config>();
+        constexpr find_first_of_config_params params = ArchConfig::params;
 
         constexpr unsigned int block_size       = params.kernel_config.block_size;
         constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -105,42 +106,45 @@ struct find_first_of_impl_kernels
 
             unsigned int thread_first_index = identity;
 
-        if(block_offset + items_per_block <= size)
-        {
-            type items[items_per_thread];
-            block_load_direct_striped<block_size>(thread_id, input + block_offset, items);
-            for(size_t key_index = 0; key_index < keys_size; ++key_index)
+            if(block_offset + items_per_block <= size)
             {
-                const key_type key = keys[key_index];
-                ROCPRIM_UNROLL
-                for(unsigned int i = 0; i < items_per_thread; ++i)
+                type items[items_per_thread];
+                block_load_direct_striped<block_size>(thread_id, input + block_offset, items);
+                for(size_t key_index = 0; key_index < keys_size; ++key_index)
                 {
-                    if(compare_function(key, items[i]))
+                    const key_type key = keys[key_index];
+                    ROCPRIM_UNROLL
+                    for(unsigned int i = 0; i < items_per_thread; ++i)
                     {
-                        thread_first_index = min(thread_first_index, i);
+                        if(compare_function(key, items[i]))
+                        {
+                            thread_first_index = min(thread_first_index, i);
+                        }
                     }
                 }
             }
-        }
-        else
-        {
-            const unsigned int valid = size - block_offset;
+            else
+            {
+                const unsigned int valid = size - block_offset;
 
-            type items[items_per_thread];
-            block_load_direct_striped<block_size>(thread_id, input + block_offset, items, valid);
-            for(size_t key_index = 0; key_index < keys_size; ++key_index)
-            {
-                const key_type key = keys[key_index];
-                ROCPRIM_UNROLL
-                for(unsigned int i = 0; i < items_per_thread; ++i)
+                type items[items_per_thread];
+                block_load_direct_striped<block_size>(thread_id,
+                                                      input + block_offset,
+                                                      items,
+                                                      valid);
+                for(size_t key_index = 0; key_index < keys_size; ++key_index)
                 {
-                    if(i * block_size + thread_id < valid && compare_function(key, items[i]))
+                    const key_type key = keys[key_index];
+                    ROCPRIM_UNROLL
+                    for(unsigned int i = 0; i < items_per_thread; ++i)
                     {
-                        thread_first_index = min(thread_first_index, i);
+                        if(i * block_size + thread_id < valid && compare_function(key, items[i]))
+                        {
+                            thread_first_index = min(thread_first_index, i);
+                        }
                     }
                 }
             }
-        }
 
             if(thread_first_index != identity)
             {
@@ -181,7 +185,7 @@ hipError_t find_first_of_impl(void*          temporary_storage,
     using type   = typename std::iterator_traits<InputIterator1>::value_type;
     using config = wrapped_find_first_of_config<Config, type>;
     using find_first_of_kernels
-        = find_first_of_impl_kernels<config, InputIterator1, InputIterator2, BinaryFunction>;
+        = find_first_of_impl_kernels<InputIterator1, InputIterator2, BinaryFunction>;
 
     target_arch target_arch;
     hipError_t  result = host_target_arch(stream, target_arch);
@@ -189,7 +193,7 @@ hipError_t find_first_of_impl(void*          temporary_storage,
     {
         return result;
     }
-    const find_first_of_config_params params = dispatch_target_arch<config>(target_arch);
+    const find_first_of_config_params params = dispatch_target_arch<config, false>(target_arch);
 
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -230,7 +234,19 @@ hipError_t find_first_of_impl(void*          temporary_storage,
 
     if(size > 0 && keys_size > 0)
     {
-        auto kernel = find_first_of_kernels::find_first_of_kernel;
+        auto kernel = [=](auto arch_config)
+        {
+            find_first_of_kernels::template find_first_of_kernel_impl<decltype(arch_config)>(
+                input,
+                keys,
+                tmp_output,
+                size,
+                keys_size,
+                ordered_bid,
+                compare_function);
+        };
+
+        auto find_first_of_configured_kernel = make_launch_plan<config>(target_arch, kernel);
 
         const size_t shared_memory_size = 0;
 
@@ -238,7 +254,7 @@ hipError_t find_first_of_impl(void*          temporary_storage,
         int min_grid_size, max_block_size;
         result = hipOccupancyMaxPotentialBlockSize(&min_grid_size,
                                                    &max_block_size,
-                                                   kernel,
+                                                   find_first_of_configured_kernel.kernel,
                                                    shared_memory_size,
                                                    int(block_size));
         if(result != hipSuccess)
@@ -253,13 +269,7 @@ hipError_t find_first_of_impl(void*          temporary_storage,
         {
             start = std::chrono::steady_clock::now();
         }
-        kernel<<<num_blocks, block_size, shared_memory_size, stream>>>(input,
-                                                                       keys,
-                                                                       tmp_output,
-                                                                       size,
-                                                                       keys_size,
-                                                                       ordered_bid,
-                                                                       compare_function);
+        find_first_of_configured_kernel.launch(num_blocks, block_size, shared_memory_size, stream);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("find_first_of_kernel", size, start);
     }
 

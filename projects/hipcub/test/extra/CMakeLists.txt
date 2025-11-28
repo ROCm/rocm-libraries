@@ -20,8 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
-cmake_policy(VERSION 3.16...3.21)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+cmake_policy(VERSION 3.18...3.25)
 
 # This project includes tests that should be run after
 # hipCUB is installed from package or using `make install`
@@ -42,20 +42,13 @@ include(VerifyCompiler)
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
-  set(CCCL_MINIMUM_VERSION 2.7.0)
+  set(CCCL_MINIMUM_VERSION 2.8.2)
   if(NOT DOWNLOAD_CUB)
-    find_package(CUB ${CCCL_MINIMUM_VERSION} CONFIG)
-    find_package(Thrust ${CCCL_MINIMUM_VERSION} CONFIG)
-    find_package(libcudacxx ${CCCL_MINIMUM_VERSION} CONFIG)
+    find_package(CCCL ${CCCL_MINIMUM_VERSION} CONFIG)
   endif()
 
-  if (NOT CUB_FOUND OR NOT Thrust_FOUND OR NOT libcudacxx_FOUND)
-    if(CUB_FOUND OR Thrust_FOUND OR libcudacxx_FOUND)
-      message(WARNING "Found one of CUB, Thrust or libcu++, but not all of them.
-                      This can lead to mixing different potentially incompatible versions.")
-    endif()
-
-    message(STATUS "CUB, Thrust or libcu++ not found, downloading and extracting CCCL ${CCCL_MINIMUM_VERSION}")
+  if (NOT CCCL_FOUND)
+    message(STATUS "CCCL not found, downloading and extracting CCCL ${CCCL_MINIMUM_VERSION}")
     file(DOWNLOAD https://github.com/NVIDIA/cccl/archive/refs/tags/v${CCCL_MINIMUM_VERSION}.zip
                   ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}.zip
         STATUS cccl_download_status LOG cccl_download_log)
@@ -79,12 +72,8 @@ if(HIP_COMPILER STREQUAL "nvcc")
       endif()
     endif()
 
-    find_package(CUB ${CCCL_MINIMUM_VERSION} CONFIG REQUIRED NO_DEFAULT_PATH
-                PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}/cub)
-    find_package(Thrust ${CCCL_MINIMUM_VERSION} CONFIG REQUIRED NO_DEFAULT_PATH
-                PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}/thrust)
-    find_package(libcudacxx ${CCCL_MINIMUM_VERSION} CONFIG REQUIRED NO_DEFAULT_PATH
-                PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}/libcudacxx)
+    find_package(CCCL ${CCCL_MINIMUM_VERSION} CONFIG REQUIRED NO_DEFAULT_PATH
+                 PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION})
   endif()
 else()
   # rocPRIM (only for ROCm platform)
@@ -129,12 +118,10 @@ function(add_hipcub_test TEST_NAME TEST_SOURCES)
   list(GET TEST_SOURCES 0 TEST_MAIN_SOURCE)
   get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
   add_executable(${TEST_TARGET} ${TEST_SOURCES})
-
   if(HIP_COMPILER STREQUAL "nvcc")
-    set_property(TARGET ${TEST_TARGET} PROPERTY CUDA_STANDARD 14)
+    target_compile_features(${TEST_TARGET} PUBLIC cuda_std_14)
     set_source_files_properties(${TEST_SOURCES} PROPERTIES LANGUAGE CUDA)
-    target_link_libraries(${TEST_TARGET} PRIVATE
-                          hip::hipcub CUB::CUB Thrust::Thrust libcudacxx::libcudacxx)
+    target_link_libraries(${TEST_TARGET} PRIVATE CCCL::CCCL)
   elseif(HIP_COMPILER STREQUAL "clang")
     target_link_libraries(${TEST_TARGET}
       PRIVATE

@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -35,17 +35,28 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
     // __attribute__((amdgpu_waves_per_eu(1, 1)))
     kernel_gemm_xdl_cshuffle_v3_b_preshuffle(typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__)
-    __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
+#if defined(__gfx9__) || defined(__gfx12__)
+    if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
+    {
+        __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
 
-    auto splitk_batch_offset = typename GridwiseGemm::SplitKBatchOffset(karg);
+        // Full K needed for matrix B
+        const index_t Kt = karg.K;
 
-    GridwiseGemm::template Run<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
-        karg.p_a_grid + splitk_batch_offset.a_k_split_offset,
-        karg.p_b_grid + splitk_batch_offset.b_k_split_offset,
-        karg.p_c_grid + splitk_batch_offset.c_reduce_offset,
-        p_shared,
-        karg);
+        auto splitk_batch_offset = typename GridwiseGemm::SplitKBatchOffset(karg);
+
+        const index_t num_k_per_block = GridwiseGemm::CalculateBK0Shuffled(karg.K);
+        const index_t k_id            = blockIdx.z * num_k_per_block;
+
+        GridwiseGemm::template Run<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
+            karg.p_a_grid + splitk_batch_offset.a_k_split_offset,
+            karg.p_b_grid,
+            karg.p_c_grid + splitk_batch_offset.c_reduce_offset,
+            p_shared,
+            karg,
+            k_id,
+            Kt);
+    }
 #else
     ignore = karg;
 #endif // end of if (defined(__gfx9__))
@@ -63,21 +74,32 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, MinimumOccupancy)
     // __attribute__((amdgpu_waves_per_eu(1, 1)))
     kernel_gemm_xdl_cshuffle_v3_b_preshuffle_2lds(typename GridwiseGemm::Argument karg)
 {
-#if defined(__gfx9__)
-    // Pass two lds pointer is the key to tell compiler that ds_read/write
-    // operate on different lds chunk at same time without order dependecy
-    __shared__ char p_shared_0[GridwiseGemm::GetSharedMemoryNumberOfByte()];
-    __shared__ char p_shared_1[GridwiseGemm::GetSharedMemoryNumberOfByte()];
+#if defined(__gfx9__) || defined(__gfx12__)
+    if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
+    {
+        // Pass two lds pointer is the key to tell compiler that ds_read/write
+        // operate on different lds chunk at same time without order dependecy
+        __shared__ char p_shared_0[GridwiseGemm::GetSharedMemoryNumberOfByte()];
+        __shared__ char p_shared_1[GridwiseGemm::GetSharedMemoryNumberOfByte()];
 
-    auto splitk_batch_offset = typename GridwiseGemm::SplitKBatchOffset(karg);
+        // Full K needed for matrix B
+        const index_t Kt = karg.K;
 
-    GridwiseGemm::template Run_2Lds<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
-        karg.p_a_grid + splitk_batch_offset.a_k_split_offset,
-        karg.p_b_grid + splitk_batch_offset.b_k_split_offset,
-        karg.p_c_grid + splitk_batch_offset.c_reduce_offset,
-        p_shared_0,
-        p_shared_1,
-        karg);
+        auto splitk_batch_offset = typename GridwiseGemm::SplitKBatchOffset(karg);
+
+        const index_t num_k_per_block = GridwiseGemm::CalculateBK0Shuffled(karg.K);
+        const index_t k_id            = blockIdx.z * num_k_per_block;
+
+        GridwiseGemm::template Run_2Lds<HasMainKBlockLoop, CGlobalMemoryDataOperation, TailNum>(
+            karg.p_a_grid + splitk_batch_offset.a_k_split_offset,
+            karg.p_b_grid,
+            karg.p_c_grid + splitk_batch_offset.c_reduce_offset,
+            p_shared_0,
+            p_shared_1,
+            karg,
+            k_id,
+            Kt);
+    }
 #else
     ignore = karg;
 #endif // end of if (defined(__gfx9__))
@@ -347,7 +369,9 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
 
     __host__ __device__ static auto MakeBGridDescriptor_Preshuffled(index_t N0, index_t K0)
     {
-        constexpr index_t NkSwizzleNumber = Number<WarpSize * KPack>{};
+        constexpr index_t MWave           = MPerBlock / (MXdlPerWave * MPerXdl);
+        constexpr index_t WaveSize        = BlockSize / (MWave * NWave);
+        constexpr index_t NkSwizzleNumber = Number<WaveSize * KPack>{};
         return make_naive_tensor_descriptor(
             make_tuple(N0 / NWave, NWave, K0, NkSwizzleNumber),
             make_tuple(NWave * K0 * NkSwizzleNumber, K0 * NkSwizzleNumber, NkSwizzleNumber, I1));
@@ -567,9 +591,7 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
               AK0{CalculateAK0Padded(K_, KBatch_)},
               BK0{CalculateBK0Padded(K_, KBatch_)},
               MBlock{CalculateMBlock(M_)},
-              NBlock{CalculateNBlock(N_)},
-              BN0Shuffled{CalculateBN0Shuffled(N_)},
-              BK0Shuffled{CalculateBK0Shuffled(K_)}
+              NBlock{CalculateNBlock(N_)}
         {
         }
 
@@ -598,9 +620,6 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
         index_t BK0;
         index_t MBlock;
         index_t NBlock;
-        // For B pre-shuffle only
-        index_t BN0Shuffled;
-        index_t BK0Shuffled;
     };
 
     // Argument
@@ -655,25 +674,6 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
                 a_k_split_offset = blockIdx.z * karg.KRead * karg.StrideA;
             }
 
-            if constexpr(is_same_v<tensor_layout::gemm::RowMajor, BLayout>)
-            {
-                b_k_split_offset = blockIdx.z * karg.KRead * karg.StrideB;
-            }
-            else if constexpr(is_same_v<tensor_layout::gemm::ColumnMajor, BLayout>)
-            {
-                if constexpr(!PermuteB)
-                {
-                    // b_k_split_offset = blockIdx.z * karg.KRead / BPackedSize;
-
-                    b_k_split_offset = blockIdx.z * karg.KRead * NLane / BPackedSize;
-                }
-                else
-                {
-                    const int k0_offset = karg.KRead * karg.N;
-                    b_k_split_offset    = blockIdx.z * k0_offset / BPackedSize;
-                }
-            }
-
             if(blockIdx.z < static_cast<uint32_t>(karg.KBatch - 1))
             {
                 karg.K = karg.KRead;
@@ -694,12 +694,13 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
         }
 
         index_t a_k_split_offset;
-        index_t b_k_split_offset;
         index_t c_reduce_offset;
     };
 
     __device__ static constexpr auto GetABlockDescriptor_AK0PerBlock_MPerBlock_AK1()
     {
+        constexpr index_t MWave    = MPerBlock / (MXdlPerWave * MPerXdl);
+        constexpr index_t WaveSize = BlockSize / (MWave * NWave);
         // A matrix in LDS memory, dst of blockwise copy
         if constexpr(ABlockLdsExtraM)
         {
@@ -735,7 +736,7 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
 
             constexpr auto KThreadWrite     = ABlockTransferThreadClusterLengths_AK0_M_AK1{}.At(I0);
             constexpr auto K0PerThreadWrite = AK0Number / KThreadWrite;
-            constexpr auto KThreadRead      = 64 / MPerXdl;
+            constexpr auto KThreadRead      = WaveSize / MPerXdl;
             constexpr auto K0PerThreadRead  = AK0Number / KThreadRead;
 
             constexpr auto kfold = (AK1Number * M0 * sizeof(ADataType) > 128)
@@ -886,12 +887,19 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
                          c_block_size * sizeof(CShuffleDataType));
     }
 
+    IS_VALID_COMPILATION_PARAMETER_IMPL(CDataType)
+
     // block_id to matrix tile idx (m0, n0) mapping are controlled by {M01, N01}
     __host__ static constexpr bool CheckValidity(const Argument& karg)
     {
         static_assert((MPerBlock % (MPerXdl * MXdlPerWave) == 0) &&
                           (NPerBlock % (NXdlPerWave * NPerXdl)) == 0,
                       "Invalid tuning param!");
+
+        if constexpr(NXdlPerWave % CShuffleNXdlPerWavePerShuffle != 0)
+        {
+            return false;
+        }
 
         if constexpr(!(GemmSpec == tensor_operation::device::GemmSpecialization::MPadding ||
                        GemmSpec == tensor_operation::device::GemmSpecialization::MNPadding ||
@@ -1127,7 +1135,8 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
                                const AGridDesc_AK0_M_K1& a_grid_desc_ak0_m_ak1,
                                const BGridDesc_BPreshuffled& b_grid_desc_bpreshuffled,
                                const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
-                                   c_grid_desc_mblock_mperblock_nblock_nperblock)
+                                   c_grid_desc_mblock_mperblock_nblock_nperblock,
+                               const index_t k_id)
     {
         const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
             p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize());
@@ -1219,7 +1228,7 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
             true>(b_grid_desc_bpreshuffled,
                   make_multi_index(n_block_data_idx_on_grid,
                                    get_warp_local_1d_id() % NWave,
-                                   0,
+                                   k_id,
                                    KPack * (get_thread_local_1d_id() % WarpSize)));
 
         // LDS allocation for A and B: be careful of alignment
@@ -1458,12 +1467,16 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
                                const BDataType* p_b_grid,
                                CDataType* p_c_grid,
                                void* p_shared,
-                               const Problem& problem)
+                               const Problem& problem,
+                               const index_t k_id,
+                               const index_t Kt)
     {
+        index_t BN0Shuffled              = CalculateBN0Shuffled(problem.N);
+        index_t BK0Shuffled              = CalculateBK0Shuffled(Kt);
         const auto a_grid_desc_ak0_m_ak1 = MakeAGridDescriptor_AK0_M_AK1(
             problem.M, problem.MPadded, problem.K, problem.KPadded, problem.StrideA, problem.AK0);
         const auto b_grid_desc_bpreshuffled =
-            MakeBGridDescriptor_Preshuffled(problem.BN0Shuffled, problem.BK0Shuffled);
+            MakeBGridDescriptor_Preshuffled(BN0Shuffled, BK0Shuffled);
         const auto c_grid_desc_m_n = MakeCGridDescriptor_M_N(
             problem.M, problem.MPadded, problem.N, problem.NPadded, problem.StrideC);
         const auto c_grid_desc_mblock_mperblock_nblock_nperblock =
@@ -1482,7 +1495,8 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
                      problem,
                      a_grid_desc_ak0_m_ak1,
                      b_grid_desc_bpreshuffled,
-                     c_grid_desc_mblock_mperblock_nblock_nperblock);
+                     c_grid_desc_mblock_mperblock_nblock_nperblock,
+                     k_id);
     }
 
     template <typename AGridDesc_AK0_M_K1,
@@ -1500,7 +1514,8 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
                                     const AGridDesc_AK0_M_K1& a_grid_desc_ak0_m_ak1,
                                     const BGridDesc_BPreshuffled& b_grid_desc_bpreshuffled,
                                     const CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock&
-                                        c_grid_desc_mblock_mperblock_nblock_nperblock)
+                                        c_grid_desc_mblock_mperblock_nblock_nperblock,
+                                    const index_t k_id)
     {
         const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
             p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize());
@@ -1597,7 +1612,7 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
             true>(b_grid_desc_bpreshuffled,
                   make_multi_index(n_block_data_idx_on_grid,
                                    get_warp_local_1d_id() % NWave,
-                                   0,
+                                   k_id,
                                    KPack * (get_thread_local_1d_id() % WarpSize)));
 
         // LDS allocation for A and B: be careful of alignment
@@ -1840,12 +1855,16 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
                                     CDataType* p_c_grid,
                                     void* p_shared_0,
                                     void* p_shared_1,
-                                    const Problem& problem)
+                                    const Problem& problem,
+                                    const index_t k_id,
+                                    const index_t Kt)
     {
+        index_t BN0Shuffled              = CalculateBN0Shuffled(problem.N);
+        index_t BK0Shuffled              = CalculateBK0Shuffled(Kt);
         const auto a_grid_desc_ak0_m_ak1 = MakeAGridDescriptor_AK0_M_AK1(
             problem.M, problem.MPadded, problem.K, problem.KPadded, problem.StrideA, problem.AK0);
         const auto b_grid_desc_bpreshuffled =
-            MakeBGridDescriptor_Preshuffled(problem.BN0Shuffled, problem.BK0Shuffled);
+            MakeBGridDescriptor_Preshuffled(BN0Shuffled, BK0Shuffled);
         const auto c_grid_desc_m_n = MakeCGridDescriptor_M_N(
             problem.M, problem.MPadded, problem.N, problem.NPadded, problem.StrideC);
 
@@ -1866,7 +1885,8 @@ struct GridwiseGemm_xdl_cshuffle_v3_b_preshuffle
                           problem,
                           a_grid_desc_ak0_m_ak1,
                           b_grid_desc_bpreshuffled,
-                          c_grid_desc_mblock_mperblock_nblock_nperblock);
+                          c_grid_desc_mblock_mperblock_nblock_nperblock,
+                          k_id);
     }
 };
 

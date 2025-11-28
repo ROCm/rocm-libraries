@@ -27,6 +27,7 @@
 #include "rocsparse_adaptive_info.hpp"
 #include "rocsparse_lrb_info.hpp"
 #include "rocsparse_mat_descr.hpp"
+#include "rocsparse_nnzsplit_info.hpp"
 
 /********************************************************************************
  * \brief rocsparse_csrmv_info is a structure holding the rocsparse csrmv info
@@ -36,6 +37,7 @@ typedef struct _rocsparse_csrmv_info
 {
     _rocsparse_adaptive_info adaptive{};
     _rocsparse_lrb_info      lrb{};
+    _rocsparse_nnzsplit_info nnzsplit{};
 
     // some data to verify correct execution
     rocsparse_operation         trans = rocsparse_operation_none;

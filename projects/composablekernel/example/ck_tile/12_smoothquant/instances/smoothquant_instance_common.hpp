@@ -1,6 +1,5 @@
-
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <ck_tile/core.hpp>
 #include "smoothquant.hpp"
@@ -50,7 +49,7 @@ float smoothquant_(const S& s, A a)
     using Kernel = ck_tile::Smoothquant<Pipeline>;
 
     const dim3 grids                       = Kernel::GridSize(a);
-    constexpr dim3 blocks                  = Kernel::BlockSize();
+    const dim3 blocks                      = Kernel::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = 1;
 
     auto kargs = Kernel::MakeKargs(a);
@@ -58,5 +57,5 @@ float smoothquant_(const S& s, A a)
         std::cout << ", " << Kernel::GetName() << std::flush;
 
     return ck_tile::launch_kernel(
-        s, ck_tile::make_kernel<blocks.x, kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
+        s, ck_tile::make_kernel<kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
 }

@@ -43,7 +43,7 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Config, class InputIterator1, class InputIterator2, class BinaryFunction>
+template<class ArchConfig, class InputIterator1, class InputIterator2, class BinaryFunction>
 ROCPRIM_DEVICE
 void search_kernel_impl(InputIterator1 input,
                         InputIterator2 keys,
@@ -52,7 +52,7 @@ void search_kernel_impl(InputIterator1 input,
                         size_t         keys_size,
                         BinaryFunction compare_function)
 {
-    constexpr search_config_params params = device_params<Config>();
+    constexpr search_config_params params = ArchConfig::params;
 
     constexpr unsigned int block_size       = params.kernel_config.block_size;
     constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -109,7 +109,7 @@ void search_kernel_impl(InputIterator1 input,
     }
 }
 
-template<class Config, class InputIterator1, class InputIterator2, class BinaryFunction>
+template<class ArchConfig, class InputIterator1, class InputIterator2, class BinaryFunction>
 ROCPRIM_DEVICE
 void search_kernel_shared_impl(InputIterator1 input,
                                InputIterator2 keys,
@@ -121,7 +121,7 @@ void search_kernel_shared_impl(InputIterator1 input,
     using value_type = typename std::iterator_traits<InputIterator1>::value_type;
     using key_type   = typename std::iterator_traits<InputIterator2>::value_type;
 
-    constexpr search_config_params params = device_params<Config>();
+    constexpr search_config_params params = ArchConfig::params;
 
     constexpr unsigned int block_size       = params.kernel_config.block_size;
     constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -250,75 +250,23 @@ void search_kernel_shared_impl(InputIterator1 input,
     }
 }
 
-template<class Config, class InputIterator1, class InputIterator2, class BinaryFunction>
-struct search_impl_kernels
+template<class T>
+static ROCPRIM_KERNEL
+void set_output_kernel(T* output, T value)
 {
-    static ROCPRIM_KERNEL
-ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
-        search_kernel_shared(InputIterator1 input,
-                             InputIterator2 keys,
-                             size_t*        output,
-                             size_t         size,
-                             size_t         keys_size,
-                             BinaryFunction compare_function)
-    {
-        search_kernel_shared_impl<Config>(input, keys, output, size, keys_size, compare_function);
-    }
+    *output = value;
+}
 
-    static ROCPRIM_KERNEL
-ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
-        search_kernel(InputIterator1 input,
-                      InputIterator2 keys,
-                      size_t*        output,
-                      size_t         size,
-                      size_t         keys_size,
-                      BinaryFunction compare_function)
+template<class T>
+static ROCPRIM_KERNEL
+void reverse_index_kernel(T* output, T size, T keys_size)
+{
+    // Return the reverse index as long as the index is lower than the size.
+    if(*output < size)
     {
-        search_kernel_impl<Config>(input, keys, output, size, keys_size, compare_function);
+        *output = size - keys_size - *output;
     }
-
-    static ROCPRIM_KERNEL
-__launch_bounds__(device_params<Config>().kernel_config.block_size)
-    void search_kernel_shared(reverse_iterator<InputIterator1> input,
-                              reverse_iterator<InputIterator2> keys,
-                              size_t*                          output,
-                              size_t                           size,
-                              size_t                           keys_size,
-                              BinaryFunction                   compare_function)
-    {
-        search_kernel_shared_impl<Config>(input, keys, output, size, keys_size, compare_function);
-    }
-
-    static ROCPRIM_KERNEL
-__launch_bounds__(device_params<Config>().kernel_config.block_size)
-    void search_kernel(reverse_iterator<InputIterator1> input,
-                       reverse_iterator<InputIterator2> keys,
-                       size_t*                          output,
-                       size_t                           size,
-                       size_t                           keys_size,
-                       BinaryFunction                   compare_function)
-    {
-        search_kernel_impl<Config>(input, keys, output, size, keys_size, compare_function);
-    }
-
-    template<class T>
-    static ROCPRIM_KERNEL
-    void set_output_kernel(T* output, T value)
-    {
-        *output = value;
-    }
-
-    template<class T>
-    static ROCPRIM_KERNEL
-    void reverse_index_kernel(T* output, T size, T keys_size)
-    {
-        // Return the reverse index as long as the index is lower than the size.
-        if(*output < size)
-        {
-            *output = size - keys_size - *output;
-        }
-    }
-};
+}
 
 template<class Config,
          bool find_first,
@@ -343,13 +291,11 @@ hipError_t search_impl(void*          temporary_storage,
     using output_type = typename std::iterator_traits<OutputIterator>::value_type;
 
     using config = wrapped_search_config<Config, input_type>;
-    using search_kernels
-        = search_impl_kernels<config, InputIterator1, InputIterator2, BinaryFunction>;
 
     target_arch target_arch;
     ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
 
-    const search_config_params params = dispatch_target_arch<config>(target_arch);
+    const search_config_params params = dispatch_target_arch<config, false>(target_arch);
 
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -383,8 +329,7 @@ hipError_t search_impl(void*          temporary_storage,
     size_t* tmp_output = reinterpret_cast<size_t*>(temporary_storage);
 
     start_timer();
-    search_kernels::set_output_kernel<<<1, 1, 0, stream>>>(tmp_output,
-                                                           find_first && keys_size <= 0 ? 0 : size);
+    set_output_kernel<<<1, 1, 0, stream>>>(tmp_output, find_first && keys_size <= 0 ? 0 : size);
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("set_output_kernel", 1, start);
 
     if(size > 0 && keys_size > 0)
@@ -395,25 +340,42 @@ hipError_t search_impl(void*          temporary_storage,
             if constexpr(find_first)
             {
                 start_timer();
-                search_kernels::search_kernel_shared<<<num_blocks, block_size, 0, stream>>>(
-                    input,
-                    keys,
-                    tmp_output,
-                    size,
-                    keys_size,
-                    compare_function);
+                auto search_shared_kernel = [=](auto arch_config)
+                {
+                    search_kernel_shared_impl<decltype(arch_config)>(input,
+                                                                     keys,
+                                                                     tmp_output,
+                                                                     size,
+                                                                     keys_size,
+                                                                     compare_function);
+                };
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                                    search_shared_kernel,
+                                                                    num_blocks,
+                                                                    block_size,
+                                                                    0,
+                                                                    stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_kernel_shared", size, start);
             }
             else
             {
                 start_timer();
-                search_kernels::search_kernel_shared<<<num_blocks, block_size, 0, stream>>>(
-                    rocprim::make_reverse_iterator(input + size),
-                    rocprim::make_reverse_iterator(keys + keys_size),
-                    tmp_output,
-                    size,
-                    keys_size,
-                    compare_function);
+                auto search_shared_kernel = [=](auto arch_config)
+                {
+                    search_kernel_shared_impl<decltype(arch_config)>(
+                        rocprim::make_reverse_iterator(input + size),
+                        rocprim::make_reverse_iterator(keys + keys_size),
+                        tmp_output,
+                        size,
+                        keys_size,
+                        compare_function);
+                };
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                                    search_shared_kernel,
+                                                                    num_blocks,
+                                                                    block_size,
+                                                                    0,
+                                                                    stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_kernel_shared", size, start);
             }
         }
@@ -422,25 +384,42 @@ hipError_t search_impl(void*          temporary_storage,
             if constexpr(find_first)
             {
                 start_timer();
-                search_kernels::search_kernel<<<num_blocks, block_size, 0, stream>>>(
-                    input,
-                    keys,
-                    tmp_output,
-                    size,
-                    keys_size,
-                    compare_function);
+                auto search_kernel = [=](auto arch_config)
+                {
+                    search_kernel_impl<decltype(arch_config)>(input,
+                                                              keys,
+                                                              tmp_output,
+                                                              size,
+                                                              keys_size,
+                                                              compare_function);
+                };
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                                    search_kernel,
+                                                                    num_blocks,
+                                                                    block_size,
+                                                                    0,
+                                                                    stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_kernel", size, start);
             }
             else
             {
                 start_timer();
-                search_kernels::search_kernel<<<num_blocks, block_size, 0, stream>>>(
-                    rocprim::make_reverse_iterator(input + size),
-                    rocprim::make_reverse_iterator(keys + keys_size),
-                    tmp_output,
-                    size,
-                    keys_size,
-                    compare_function);
+                auto search_kernel = [=](auto arch_config)
+                {
+                    search_kernel_impl<decltype(arch_config)>(
+                        rocprim::make_reverse_iterator(input + size),
+                        rocprim::make_reverse_iterator(keys + keys_size),
+                        tmp_output,
+                        size,
+                        keys_size,
+                        compare_function);
+                };
+                ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<config>(target_arch,
+                                                                    search_kernel,
+                                                                    num_blocks,
+                                                                    block_size,
+                                                                    0,
+                                                                    stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_kernel", size, start);
             }
         }
@@ -448,7 +427,7 @@ hipError_t search_impl(void*          temporary_storage,
         if constexpr(!find_first)
         {
             start_timer();
-            search_kernels::reverse_index_kernel<<<1, 1, 0, stream>>>(tmp_output, size, keys_size);
+            reverse_index_kernel<<<1, 1, 0, stream>>>(tmp_output, size, keys_size);
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reverse_index_kernel", 1, start);
         }
     }

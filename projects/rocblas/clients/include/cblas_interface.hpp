@@ -1881,6 +1881,19 @@ void ref_syrk(rocblas_fill      uplo,
               T*                C,
               int64_t           ldc);
 
+// syrk_ex
+template <typename T, typename U = T, typename Tc = U>
+void ref_syrk_ex(rocblas_fill      uplo,
+                 rocblas_operation transA,
+                 int64_t           n,
+                 int64_t           k,
+                 Tc                alpha,
+                 const T*          A,
+                 int64_t           lda,
+                 Tc                beta,
+                 U*                C,
+                 int64_t           ldc);
+
 // syr2k
 template <typename T>
 void ref_syr2k(rocblas_fill      uplo,

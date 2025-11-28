@@ -25,9 +25,21 @@
 
 std::vector<char> compile_inprocess(const std::string& kernel_src, const std::string& gpu_arch)
 {
-    hiprtcProgram prog;
+    struct RaiiState
+    {
+        hiprtcProgram prog = nullptr;
+        ~RaiiState()
+        {
+            if(prog)
+            {
+                hiprtcDestroyProgram(&prog);
+            }
+        }
+    };
+    RaiiState state;
+
     // give it a .hip extension so it'll be compiled as HIP code
-    if(hiprtcCreateProgram(&prog, kernel_src.c_str(), "rocfft_rtc.hip", 0, nullptr, nullptr)
+    if(hiprtcCreateProgram(&state.prog, kernel_src.c_str(), "rocfft_rtc.hip", 0, nullptr, nullptr)
        != HIPRTC_SUCCESS)
     {
         throw std::runtime_error("unable to create program");
@@ -44,28 +56,27 @@ std::vector<char> compile_inprocess(const std::string& kernel_src, const std::st
     options.push_back("-fsanitize=address");
 #endif
 
-    auto compileResult = hiprtcCompileProgram(prog, options.size(), options.data());
+    auto compileResult = hiprtcCompileProgram(state.prog, options.size(), options.data());
     if(compileResult != HIPRTC_SUCCESS)
     {
         size_t logSize = 0;
-        hiprtcGetProgramLogSize(prog, &logSize);
+        hiprtcGetProgramLogSize(state.prog, &logSize);
 
         if(logSize)
         {
             std::vector<char> log(logSize, '\0');
-            if(hiprtcGetProgramLog(prog, log.data()) == HIPRTC_SUCCESS)
-                throw std::runtime_error(log.data());
+            if(hiprtcGetProgramLog(state.prog, log.data()) == HIPRTC_SUCCESS)
+                throw std::runtime_error(std::string(log.begin(), log.end()));
         }
         throw std::runtime_error("compile failed without log");
     }
 
     size_t codeSize;
-    if(hiprtcGetCodeSize(prog, &codeSize) != HIPRTC_SUCCESS)
+    if(hiprtcGetCodeSize(state.prog, &codeSize) != HIPRTC_SUCCESS)
         throw std::runtime_error("failed to get code size");
 
     std::vector<char> code(codeSize);
-    if(hiprtcGetCode(prog, code.data()) != HIPRTC_SUCCESS)
+    if(hiprtcGetCode(state.prog, code.data()) != HIPRTC_SUCCESS)
         throw std::runtime_error("failed to get code");
-    hiprtcDestroyProgram(&prog);
     return code;
 }

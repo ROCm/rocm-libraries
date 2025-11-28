@@ -84,4 +84,3 @@ template<typename BidirectionalIterator,
 
 
 THRUST_NAMESPACE_END
-

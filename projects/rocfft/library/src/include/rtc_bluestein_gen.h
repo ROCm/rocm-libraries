@@ -41,8 +41,8 @@ struct BluesteinSingleSpecs
     rocfft_array_type         inArrayType;
     rocfft_array_type         outArrayType;
     CallbackType              cbtype;
-    LoadOps                   loadOps;
-    StoreOps                  storeOps;
+    std::optional<LoadOps>    loadOps;
+    std::optional<StoreOps>   storeOps;
 };
 std::string bluestein_single_rtc_kernel_name(const BluesteinSingleSpecs& specs);
 std::string bluestein_single_rtc(const std::string& kernel_name, const BluesteinSingleSpecs& specs);
@@ -52,13 +52,13 @@ static const unsigned int LAUNCH_BOUNDS_BLUESTEIN_MULTI_KERNEL = 64;
 // multi-kernel bluestein
 struct BluesteinMultiSpecs
 {
-    ComputeScheme     scheme;
-    rocfft_precision  precision;
-    rocfft_array_type inArrayType;
-    rocfft_array_type outArrayType;
-    CallbackType      cbtype;
-    LoadOps           loadOps;
-    StoreOps          storeOps;
+    ComputeScheme           scheme;
+    rocfft_precision        precision;
+    rocfft_array_type       inArrayType;
+    rocfft_array_type       outArrayType;
+    CallbackType            cbtype;
+    std::optional<LoadOps>  loadOps;
+    std::optional<StoreOps> storeOps;
 };
 
 std::string bluestein_multi_rtc_kernel_name(const BluesteinMultiSpecs& specs);

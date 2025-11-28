@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 
 #include "../../shared/array_predicate.h"
 #include "../../shared/precision_type.h"
+#include "callback_map.h"
 #include "logging.h"
 #include "plan.h"
 #include "rocfft/rocfft.h"
@@ -102,9 +103,9 @@ try
     if(shared_mem_bytes)
         return rocfft_status_invalid_arg_value;
 
-    info->callbacks.load_cb_fn        = cb_functions ? cb_functions[0] : nullptr;
-    info->callbacks.load_cb_data      = cb_data ? cb_data[0] : nullptr;
-    info->callbacks.load_cb_lds_bytes = shared_mem_bytes;
+    info->load_cb_fns       = cb_functions;
+    info->load_cb_data      = cb_data;
+    info->load_cb_lds_bytes = shared_mem_bytes;
     return rocfft_status_success;
 }
 catch(...)
@@ -123,9 +124,9 @@ try
     if(shared_mem_bytes)
         return rocfft_status_invalid_arg_value;
 
-    info->callbacks.store_cb_fn        = cb_functions ? cb_functions[0] : nullptr;
-    info->callbacks.store_cb_data      = cb_data ? cb_data[0] : nullptr;
-    info->callbacks.store_cb_lds_bytes = shared_mem_bytes;
+    info->store_cb_fns       = cb_functions;
+    info->store_cb_data      = cb_data;
+    info->store_cb_lds_bytes = shared_mem_bytes;
     return rocfft_status_success;
 }
 catch(...)
@@ -337,6 +338,8 @@ void rocfft_plan_t::Execute(void* in_buffer[], void* out_buffer[], rocfft_execut
 
     LogSortedPlan(sortedIdx);
 
+    auto callbacks = DeviceCallbackMap(info, desc);
+
     for(auto i = sortedIdx.begin(); i != sortedIdx.end(); ++i)
     {
         const auto idx = *i;
@@ -368,7 +371,7 @@ void rocfft_plan_t::Execute(void* in_buffer[], void* out_buffer[], rocfft_execut
         // Launch this item async:
         if(item.ExecutesOnRank(local_comm_rank))
         {
-            item.ExecuteAsync(this, in_buffer, out_buffer, info, idx);
+            item.ExecuteAsync(this, in_buffer, out_buffer, info, idx, callbacks);
         }
     }
 
@@ -419,11 +422,12 @@ catch(...)
     return rocfft_handle_exception();
 }
 
-void ExecPlan::ExecuteAsync(const rocfft_plan     plan,
-                            void*                 in_buffer[],
-                            void*                 out_buffer[],
-                            rocfft_execution_info info,
-                            size_t                multiPlanIdx)
+void ExecPlan::ExecuteAsync(const rocfft_plan                       plan,
+                            void*                                   in_buffer[],
+                            void*                                   out_buffer[],
+                            rocfft_execution_info                   info,
+                            size_t                                  multiPlanIdx,
+                            const std::map<int, device_callback_t>& callbacks)
 {
     rocfft_scoped_device dev(location.device);
 
@@ -498,7 +502,7 @@ void ExecPlan::ExecuteAsync(const rocfft_plan     plan,
 
     // Callbacks do not currently support planar format
     if((array_type_is_planar(rootPlan->inArrayType) || array_type_is_planar(rootPlan->outArrayType))
-       && (exec_info.callbacks.load_cb_fn || exec_info.callbacks.store_cb_fn))
+       && (exec_info.load_cb_fns || exec_info.store_cb_fns))
         throw std::runtime_error("callbacks not supported with planar format");
 
     try
@@ -508,7 +512,8 @@ void ExecPlan::ExecuteAsync(const rocfft_plan     plan,
                       (rootPlan->placement == rocfft_placement_inplace) ? in_transform_ptrs
                                                                         : out_transform_ptrs,
                       &exec_info,
-                      multiPlanIdx);
+                      multiPlanIdx,
+                      callbacks);
         // all work is enqueued to the stream, record the event on
         // the stream. Not needed for single-device plans.
         if(mgpuPlan)

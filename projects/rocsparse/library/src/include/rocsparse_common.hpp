@@ -113,6 +113,114 @@ namespace rocsparse
     template <typename T>
     __device__ __forceinline__ T fma(T p, T q, T r);
 
+    __device__ __forceinline__ int32_t shfl_up(int32_t var, int src_lane, int width = warpSize)
+    {
+        return __shfl_up(var, src_lane, width);
+    }
+    __device__ __forceinline__ int64_t shfl_up(int64_t var, int src_lane, int width = warpSize)
+    {
+        return __shfl_up(var, src_lane, width);
+    }
+    __device__ __forceinline__ float shfl_up(float var, int src_lane, int width = warpSize)
+    {
+        return __shfl_up(var, src_lane, width);
+    }
+    __device__ __forceinline__ double shfl_up(double var, int src_lane, int width = warpSize)
+    {
+        return __shfl_up(var, src_lane, width);
+    }
+    __device__ __forceinline__ rocsparse_float_complex shfl_up(rocsparse_float_complex var,
+                                                               int                     src_lane,
+                                                               int width = warpSize)
+    {
+        return rocsparse_float_complex(__shfl_up(std::real(var), src_lane, width),
+                                       __shfl_up(std::imag(var), src_lane, width));
+    }
+    __device__ __forceinline__ rocsparse_double_complex shfl_up(rocsparse_double_complex var,
+                                                                int                      src_lane,
+                                                                int width = warpSize)
+    {
+        return rocsparse_double_complex(__shfl_up(std::real(var), src_lane, width),
+                                        __shfl_up(std::imag(var), src_lane, width));
+    }
+
+    __device__ __forceinline__ int32_t shfl_down(int32_t var, int src_lane, int width = warpSize)
+    {
+        return __shfl_down(var, src_lane, width);
+    }
+    __device__ __forceinline__ int64_t shfl_down(int64_t var, int src_lane, int width = warpSize)
+    {
+        return __shfl_down(var, src_lane, width);
+    }
+    __device__ __forceinline__ float shfl_down(float var, int src_lane, int width = warpSize)
+    {
+        return __shfl_down(var, src_lane, width);
+    }
+    __device__ __forceinline__ double shfl_down(double var, int src_lane, int width = warpSize)
+    {
+        return __shfl_down(var, src_lane, width);
+    }
+    __device__ __forceinline__ rocsparse_float_complex shfl_down(rocsparse_float_complex var,
+                                                                 int                     src_lane,
+                                                                 int width = warpSize)
+    {
+        return rocsparse_float_complex(__shfl_down(std::real(var), src_lane, width),
+                                       __shfl_down(std::imag(var), src_lane, width));
+    }
+    __device__ __forceinline__ rocsparse_double_complex shfl_down(rocsparse_double_complex var,
+                                                                  int                      src_lane,
+                                                                  int width = warpSize)
+    {
+        return rocsparse_double_complex(__shfl_down(std::real(var), src_lane, width),
+                                        __shfl_down(std::imag(var), src_lane, width));
+    }
+
+    __device__ __forceinline__ _Float16 read_first_lane(_Float16 var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ float read_first_lane(float var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ double read_first_lane(double var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ int8_t read_first_lane(int8_t var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ int32_t read_first_lane(int32_t var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ int64_t read_first_lane(int64_t var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ uint8_t read_first_lane(uint8_t var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ uint32_t read_first_lane(uint32_t var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+    __device__ __forceinline__ uint64_t read_first_lane(uint64_t var)
+    {
+        return __builtin_amdgcn_readfirstlane(var);
+    }
+
+    __device__ __forceinline__ int any(int predicate)
+    {
+        return __any(predicate);
+    }
+    __device__ __forceinline__ int all(int predicate)
+    {
+        return __all(predicate);
+    }
+
     template <>
     __device__ __forceinline__ _Float16 fma(_Float16 p, _Float16 q, _Float16 r)
     {
@@ -141,6 +249,14 @@ namespace rocsparse
     __device__ __forceinline__ double fma(double p, double q, double r)
     {
         return std::fma(p, q, r);
+    }
+
+    template <typename T>
+    __device__ __forceinline__ T atomic_add_check(T* ptr, T val)
+    {
+        if(val != static_cast<T>(0))
+            return atomicAdd(ptr, val);
+        return *ptr;
     }
 
     template <>
@@ -267,6 +383,34 @@ namespace rocsparse
     __device__ __host__ __forceinline__ double log2(uint64_t val)
     {
         return std::log2(val);
+    }
+
+    template <>
+    __device__ __forceinline__ int64_t atomic_add_check<int64_t>(int64_t* ptr, int64_t val)
+    {
+        if(val != static_cast<int64_t>(0))
+            return atomicAdd((uint64_t*)ptr, val);
+        return *ptr;
+    }
+
+    template <>
+    __device__ __forceinline__ rocsparse_float_complex
+        atomic_add_check(rocsparse_float_complex* ptr, rocsparse_float_complex val)
+    {
+        if(std::real(val) != static_cast<float>(0) || std::imag(val) != static_cast<float>(0))
+            return rocsparse_float_complex(atomicAdd((float*)ptr, std::real(val)),
+                                           atomicAdd((float*)ptr + 1, std::imag(val)));
+        return *ptr;
+    }
+
+    template <>
+    __device__ __forceinline__ rocsparse_double_complex
+        atomic_add_check(rocsparse_double_complex* ptr, rocsparse_double_complex val)
+    {
+        if(std::real(val) != static_cast<double>(0) || std::imag(val) != static_cast<double>(0))
+            return rocsparse_double_complex(atomicAdd((double*)ptr, std::real(val)),
+                                            atomicAdd((double*)ptr + 1, std::imag(val)));
+        return *ptr;
     }
 
     __device__ __forceinline__ rocsparse_float_complex sqrt(rocsparse_float_complex val)
@@ -1350,6 +1494,12 @@ namespace rocsparse
         return sum;
     }
 
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ _Float16 wfreduce_sum(_Float16 sum)
+    {
+        return wfreduce_sum<WFSIZE>((float)sum);
+    }
+
     // DPP-based double wavefront partial reduction
     template <uint32_t WFSIZE, uint32_t SUB_WFSIZE>
     __device__ __forceinline__ int32_t wfreduce_partial_sum(int32_t sum)
@@ -1851,6 +2001,12 @@ namespace rocsparse
         return sum;
     }
 
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ _Float16 wfreduce_sum(_Float16 sum)
+    {
+        return wfreduce_sum<WFSIZE>((float)sum);
+    }
+
     template <uint32_t WFSIZE, uint32_t SUB_WF_SIZE>
     __device__ __forceinline__ int32_t wfreduce_partial_sum(int32_t sum)
     {
@@ -1928,6 +2084,170 @@ namespace rocsparse
         return rocsparse_double_complex(
             rocsparse::wfreduce_partial_sum<WFSIZE, SUB_WF_SIZE>(std::real(sum)),
             rocsparse::wfreduce_partial_sum<WFSIZE, SUB_WF_SIZE>(std::imag(sum)));
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ int32_t wfsegmented_reduce(const int32_t row, int32_t val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int32_t left_row = __shfl_up(row, j);
+            const int32_t left_val = __shfl_up(val, j);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val += left_val;
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ int32_t wfsegmented_reduce(const int64_t row, int32_t val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int64_t left_row = __shfl_up(row, j);
+            const int32_t left_val = __shfl_up(val, j);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val += left_val;
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ float wfsegmented_reduce(const int32_t row, float val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int32_t left_row = __shfl_up(row, j);
+            const float   left_val = __shfl_up(val, j);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val += left_val;
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ float wfsegmented_reduce(const int64_t row, float val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int64_t left_row = __shfl_up(row, j);
+            const float   left_val = __shfl_up(val, j);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val += left_val;
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ double wfsegmented_reduce(const int32_t row, double val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int32_t left_row = __shfl_up(row, j);
+            const double  left_val = __shfl_up(val, j);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val += left_val;
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ double wfsegmented_reduce(const int64_t row, double val)
+    {
+        const uint32_t lid = hipThreadIdx_x & (WFSIZE - 1);
+
+        for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+        {
+            const int64_t left_row = __shfl_up(row, j);
+            const double  left_val = __shfl_up(val, j);
+
+            if(row == left_row)
+            {
+                if(lid >= j)
+                {
+                    val += left_val;
+                }
+            }
+        }
+
+        return val;
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ rocsparse_float_complex
+        wfsegmented_reduce(const int32_t row, rocsparse_float_complex val)
+    {
+        return rocsparse_float_complex(rocsparse::wfsegmented_reduce<WFSIZE>(row, std::real(val)),
+                                       rocsparse::wfsegmented_reduce<WFSIZE>(row, std::imag(val)));
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ rocsparse_float_complex
+        wfsegmented_reduce(const int64_t row, rocsparse_float_complex val)
+    {
+        return rocsparse_float_complex(rocsparse::wfsegmented_reduce<WFSIZE>(row, std::real(val)),
+                                       rocsparse::wfsegmented_reduce<WFSIZE>(row, std::imag(val)));
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ rocsparse_double_complex
+        wfsegmented_reduce(const int32_t row, rocsparse_double_complex val)
+    {
+        return rocsparse_double_complex(rocsparse::wfsegmented_reduce<WFSIZE>(row, std::real(val)),
+                                        rocsparse::wfsegmented_reduce<WFSIZE>(row, std::imag(val)));
+    }
+
+    template <uint32_t WFSIZE>
+    __device__ __forceinline__ rocsparse_double_complex
+        wfsegmented_reduce(const int64_t row, rocsparse_double_complex val)
+    {
+        return rocsparse_double_complex(rocsparse::wfsegmented_reduce<WFSIZE>(row, std::real(val)),
+                                        rocsparse::wfsegmented_reduce<WFSIZE>(row, std::imag(val)));
     }
 
     // BSR gather functionality to permute the BSR values array

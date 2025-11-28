@@ -9,8 +9,7 @@ hipSOLVER precision support
 ********************************************************************
 
 This section provides an overview of the numerical precision types supported by the hipSOLVER library.
-hipSOLVER provides a consistent interface to linear algebra solvers that can run on both AMD and NVIDIA
-hardware.
+hipSOLVER provides a consistent interface to linear algebra solvers that can run on AMD hardware.
 
 Supported precision types
 =========================

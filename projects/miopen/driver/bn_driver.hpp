@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -64,7 +64,7 @@
 
 #define MIO_DRIVER_BN_REFERENCE_COMPUTE_3D_AS_2D 1 // Resolves issue #1974
 
-//#define BN_RUNFOR_PROFILER
+// #define BN_RUNFOR_PROFILER
 
 template <typename TInput,
           typename Tref,
@@ -177,6 +177,8 @@ private:
     miopenTensorLayout_t bn_layout;
 
     GPUMem::Check buffer_check = GPUMem::Check::None;
+
+    int tuning_policy;
 };
 
 template <typename TInput, typename Tref, typename TAcc, typename TScaleBias, typename TOut>
@@ -190,6 +192,12 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::ParseCmdLineArgs(int 
     }
 
     buffer_check = GetGpuBufferCheck(inflags);
+
+    tuning_policy = inflags.GetValueInt("tuning_policy");
+    if(tuning_policy != 0)
+    {
+        miopenSetTuningPolicy(GetHandle(), static_cast<miopenTuningPolicy_t>(tuning_policy));
+    }
 
     return miopenStatusSuccess;
 }
@@ -344,6 +352,11 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AddCmdLineArgs()
     inflags.AddInputFlag(
         "activ_beta", 'y', "1.0", "Activation function parameter beta (Default=1.0)", "float");
     AddGpuBufferCheckFlag(inflags);
+    inflags.AddInputFlag("tuning_policy",
+                         '&',
+                         "0",
+                         "MIOpen tuning policy (Default=0, or no tuning policy set)",
+                         "int");
 
     return miopenStatusSuccess;
 }
@@ -1717,16 +1730,30 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardCPU()
     }
 
     if(bn_mode == miopenBNPerActivation)
-    {
-        // 1xCxHxW
-        batchNormPerActHostBwdTrain(in.GetTensor(),
-                                    dy.GetTensor(),
-                                    out_ref,
-                                    bnScale.GetTensor(),
-                                    dScale_ref,
-                                    dBias_ref,
-                                    savedMean.GetTensor(),
-                                    savedInvVar.GetTensor());
+    { // 1xCxHxW
+        if(saveMeanVar)
+        {
+            batchNormPerActHostBwdTrain(in.GetTensor(),
+                                        dy.GetTensor(),
+                                        out_ref,
+                                        bnScale.GetTensor(),
+                                        dScale_ref,
+                                        dBias_ref,
+                                        savedMean.GetTensor(),
+                                        savedInvVar.GetTensor());
+        }
+        else
+        {
+            tensor<Tref> empty_tensor;
+            batchNormPerActHostBwdTrain(in.GetTensor(),
+                                        dy.GetTensor(),
+                                        out_ref,
+                                        bnScale.GetTensor(),
+                                        dScale_ref,
+                                        dBias_ref,
+                                        empty_tensor,
+                                        empty_tensor);
+        }
     }
     else if(bn_mode == miopenBNSpatial)
     { // 1xCx1x1
@@ -1792,8 +1819,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::VerifyBackward()
 
 #if(MIO_BN_DEBUG == 1)
     const Tref tolerance =
-        static_cast<Tref>(1000 * (sizeof(TInput) == 4) ? ERRTOL_FP32 : ERRTOL_FP16);
-    Tref diff = static_cast<Tref>(0.0);
+        static_cast<Tref>(1000 * ((sizeof(TInput) == 4) ? ERRTOL_FP32 : ERRTOL_FP16));
 #endif
     maxval          = static_cast<Tref>(0.0);
     auto errordxout = miopen::rms_range(out_ref.data, out_bwd.GetVector());
@@ -1805,8 +1831,8 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::VerifyBackward()
 #if(MIO_BN_DEBUG == 1)
         for(int i = 0; i < out_ref.data.size() && i < MIO_BN_MAX_DEBUGLOOP; i++)
         {
-            diff   = fabs(TOut(fabs(out_ref.data[i]) - fabs(out_bwd.GetVector()[i])));
-            maxval = maxval < diff ? diff : maxval;
+            auto diff = fabs(TOut(fabs(out_ref.data[i]) - fabs(out_bwd.GetVector()[i])));
+            maxval    = maxval < diff ? diff : maxval;
             if(!std::isfinite(diff) || diff > tolerance)
             {
                 std::cout << "out_ref[" << i << "]: " << out_ref.data[i];
@@ -1870,7 +1896,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::VerifyBackward()
 #if(MIO_BN_DEBUG == 1)
         for(int i = 0; i < dBias.GetVector().size() && i < MIO_BN_MAX_DEBUGLOOP; i++)
         {
-            diff = fabs(TAcc(fabs(dBias.GetVector()[i]) - fabs(dBias_ref.data[i])));
+            auto diff = fabs(TAcc(fabs(dBias.GetVector()[i]) - fabs(dBias_ref.data[i])));
             if(!std::isfinite(diff) || diff > tolerance)
             {
                 std::cout << "dbias[" << i << "]: " << dBias.GetVector()[i];

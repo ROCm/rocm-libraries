@@ -25,26 +25,32 @@
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 
 function( apply_omp_settings lib_target_ )
-  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::OpenMP_CXX)
-    set_target_properties( ${lib_target_} PROPERTIES
-      BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
-    )
-    set_target_properties( ${lib_target_} PROPERTIES
-      INSTALL_RPATH "$ORIGIN/../llvm/lib"
-    )
-  elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
-    set_target_properties( ${lib_target_} PROPERTIES
-      BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}"
-    )
-    set_target_properties( ${lib_target_} PROPERTIES
-      INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}"
-    )
+  if(NOT WIN32)
+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::OpenMP_CXX)
+      set_target_properties( ${lib_target_} PROPERTIES
+        BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
+      )
+      set_target_properties( ${lib_target_} PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../llvm/lib"
+      )
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
+      set_target_properties( ${lib_target_} PROPERTIES
+        BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}"
+      )
+      set_target_properties( ${lib_target_} PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}"
+      )
+    endif()
   endif()
 endfunction()
 
 if (rocblas_FOUND)
   message("Build rocSPARSE client with rocBLAS")
   add_compile_options(-DROCSPARSE_WITH_ROCBLAS)
+endif()
+
+if (BUILD_CLIENTS_ONLY)
+  find_package(rocsparse 4.0.0 REQUIRED)
 endif()
 
 # Consider removing this in the future
@@ -87,21 +93,28 @@ if ( BUILD_FORTRAN_CLIENTS )
 
 endif()
 
-if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  # Look for openmp config in ROCm install to populate openmp_LIB_DIR and openmp_LIB_INSTALL_DIR
-  find_package(OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake")
-endif()
-
 # OpenMP
-if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
-  set(ROCSPARSE_CLIENT_LIBS "OpenMP::omp")
-  message(STATUS "Found openmp-config.cmake at ${OpenMP_DIR}")
+if(NOT WIN32)
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # Look for openmp config in ROCm install to populate openmp_LIB_DIR and openmp_LIB_INSTALL_DIR
+    find_package(OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake")
+  endif()
+
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
+    set(ROCSPARSE_CLIENT_LIBS "OpenMP::omp")
+    message(STATUS "Found openmp-config.cmake at ${OpenMP_DIR}")
+  else()
+    # if it fails to find OpenMP compile and link flags in strange configurations it can just use non-parallel reference computation
+    # if there is no omp.h to find the client compilation will fail and this should be obvious, used to be REQUIRED
+    find_package(OpenMP)
+    if (TARGET OpenMP::OpenMP_CXX)
+      set(ROCSPARSE_CLIENT_LIBS "OpenMP::OpenMP_CXX")
+    endif()
+  endif()
 else()
-  # if it fails to find OpenMP compile and link flags in strange configurations it can just use non-parallel reference computation
-  # if there is no omp.h to find the client compilation will fail and this should be obvious, used to be REQUIRED
   find_package(OpenMP)
-  if (TARGET OpenMP::OpenMP_CXX)
-    set(ROCSPARSE_CLIENT_LIBS "OpenMP::OpenMP_CXX")
+  if(OPENMP_FOUND)
+    set(ROCSPARSE_CLIENT_LIBS "libomp")
   endif()
 endif()
 
@@ -224,7 +237,7 @@ if(BUILD_CLIENTS_TESTS)
   rocm_install(
     PROGRAMS "${ROCSPARSE_GENTEST}"
     COMPONENT clients-common
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/rocsparse/test"
+    DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/rocsparse/test"
     )
   #
   rocm_install(

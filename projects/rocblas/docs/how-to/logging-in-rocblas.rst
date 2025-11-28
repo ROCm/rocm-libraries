@@ -12,7 +12,7 @@ You can set five environment variables to control logging:
 
 .. _rocblas_logging_env:
 
-.. include:: ../data/reference/env-variables/logging-env.rst
+.. include:: ../data/reference/logging-env.rst
 
 .. caution::
 

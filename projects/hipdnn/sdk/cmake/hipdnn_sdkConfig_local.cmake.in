@@ -1,0 +1,17 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+@PACKAGE_INIT@
+
+# Subdirectory path for hipDNN engine plugins (relative to lib)
+set(HIPDNN_PLUGIN_ENGINE_SUBDIR "@HIPDNN_PLUGIN_ENGINE_SUBDIR@")
+
+# Full install path for engine plugins
+set(HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR "@HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR@")
+set(HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR "@HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR@")
+
+include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_sdkTargets.cmake")
+
+message(STATUS "hipDNN SDK: Engine plugin build directory is ${CMAKE_INSTALL_LIBDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}")
+message(STATUS "hipDNN SDK: Plugin absolute installation directory ${HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR}")
+message(STATUS "hipDNN SDK: Plugin relative installation directory ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}")

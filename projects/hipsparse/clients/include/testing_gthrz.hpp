@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2019 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_gthrz_bad_arg(void)
+void testing_gthrz_bad_arg(const Arguments& argus)
 {
     int nnz       = 100;
     int safe_size = 100;
@@ -91,7 +91,7 @@ hipsparseStatus_t testing_gthrz(Arguments argus)
 
     // Initial Data on CPU
     srand(12345ULL);
-    hipsparseInitIndex(hx_ind.data(), nnz, 1, N);
+    hipsparseInitIndex(hx_ind.data(), nnz, idx_base, N + idx_base);
     hipsparseInit<T>(hy, 1, N);
 
     hy_gold = hy;

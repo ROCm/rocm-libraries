@@ -411,7 +411,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 1
-    SolutionNameMin: Cijk_Ailk_Bljk_SB_UserArgs_MT32x32x64_MI16x16x1_SN_GRVWA4_GRVWB4_GSU1_LBSPPA512_LBSPPB256_LPA16_LPB8_LRVW4_MIWT1_1_NLCA1_SU0_SUM0_SUS0_SVW1_VWA1_WG32_8_1_WGM0
+    SolutionNameMin: Cijk_Ailk_Bljk_SB_UserArgs_MT32x32x64_MI16x16x1_SN_GRVWA4_GRVWB4_GSU1_LBSPPA512_LBSPPB256_LPA16_LPB8_LRVW4_MIWT1_1_NLCA1_SU0_SUM0_SUS0_SVW1_VWA1_WG32_8_1_WGM1
     SourceSwap: true
     StaggerU: 0
     StaggerUMapping: 0
@@ -447,7 +447,7 @@
     WaveSeparateGlobalReadMetadata: 0
     WavefrontSize: 64
     WorkGroup: [32, 8, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 1]

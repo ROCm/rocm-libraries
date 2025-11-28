@@ -29,7 +29,15 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/system/cuda/detail/util.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include <cuda/std/__exception/terminate.h>
 
 #include <cstdio>
 
@@ -40,18 +48,11 @@ namespace cuda
 {
 namespace detail
 {
-
-inline _CCCL_DEVICE void terminate()
-{
-  thrust::cuda_cub::terminate();
-}
-
 inline _CCCL_HOST_DEVICE void terminate_with_message(const char* message)
 {
   printf("%s\n", message);
-  thrust::cuda_cub::terminate();
+  ::cuda::std::terminate();
 }
-
 } // namespace detail
 } // namespace cuda
 } // namespace system

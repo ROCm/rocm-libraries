@@ -24,13 +24,13 @@
 #include <hipsparse/hipsparse.h>
 #include <stdio.h>
 
-#define HIPSPARSE_CHECK(stat)                                               \
-    {                                                                       \
-        if(stat != HIPSPARSE_STATUS_SUCCESS)                                \
-        {                                                                   \
-            fprintf(stderr, "Error: hipsparse error in line %d", __LINE__); \
-            return -1;                                                      \
-        }                                                                   \
+#define HIPSPARSE_CHECK(stat)                                                 \
+    {                                                                         \
+        if(stat != HIPSPARSE_STATUS_SUCCESS)                                  \
+        {                                                                     \
+            fprintf(stderr, "Error: hipsparse error in line %d\n", __LINE__); \
+            return -1;                                                        \
+        }                                                                     \
     }
 
 int main(int argc, char* argv[])
@@ -41,7 +41,7 @@ int main(int argc, char* argv[])
     int version;
     HIPSPARSE_CHECK(hipsparseGetVersion(handle, &version));
 
-    char rev[128];
+    char rev[256];
     HIPSPARSE_CHECK(hipsparseGetGitRevision(handle, rev));
 
     printf("hipSPARSE version %d.%d.%d-%s\n",

@@ -351,7 +351,7 @@ class Linker(Component):
         """
         Create a response file and return the arguments to pass to the linker.
 
-        Since it is possible for the character limit of the operating system to be exceeded 
+        Since it is possible for the character limit of the operating system to be exceeded
         when invoking the linker, LLVM allows the provision of arguments via a "response file"
         Reference: https://llvm.org/docs/CommandLine.html#response-files
         """

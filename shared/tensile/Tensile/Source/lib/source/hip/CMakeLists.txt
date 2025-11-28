@@ -29,4 +29,3 @@ add_library(TensileHip STATIC
 message( TensileHip SYSTEM ${HIP_INCLUDE_DIRS} )
 
 include_directories(${HIP_INCLUDE_DIRS})
-

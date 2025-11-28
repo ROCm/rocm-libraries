@@ -86,8 +86,10 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_POINTER(10, info);
         ROCSPARSE_CHECKARG_POINTER(11, buffer_size);
 
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_buffer_size_template(
-            handle, trans, mb, nnzb, descr, bsr_val, bsr_row_ptr, bsr_col_ind, info, buffer_size));
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsv_buffer_size_template<rocsparse_int,
+                                                                         rocsparse_int,
+                                                                         T>(
+            handle, trans, mb, nnzb, descr, bsr_val, bsr_row_ptr, bsr_col_ind, info, buffer_size)));
 
         if(trans == rocsparse_operation_transpose)
         {

@@ -14825,7 +14825,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 81
-    SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT128x256x32_MI16x16x1_SN_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_4_SU64_SUM3_SUS256_WGM0_WGMXCC8_WGMXCCGn1
+    SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT128x256x32_MI16x16x1_SN_GSU1_GSUC0_GSUWGMRR0_K1_MIWT8_4_SU64_SUM3_SUS256_WGM1_WGMXCC8_WGMXCCGn1
     SourceSwap: 1
     StaggerU: 64
     StaggerUMapping: 3
@@ -14866,7 +14866,7 @@
     WaveSeparateGlobalReadMetadata: 0
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 8
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
@@ -15030,7 +15030,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 82
-    SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT96x128x32_MI16x16x1_SN_GSU1_GSUC0_GSUWGMRR0_K1_MIWT6_2_SU2_SUM3_SUS2048_WGM0_WGMXCC16_WGMXCCG0
+    SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT96x128x32_MI16x16x1_SN_GSU1_GSUC0_GSUWGMRR0_K1_MIWT6_2_SU2_SUM3_SUS2048_WGM1_WGMXCC16_WGMXCCG0
     SourceSwap: 1
     StaggerU: 2
     StaggerUMapping: 3
@@ -15072,7 +15072,7 @@
     WaveSeparateGlobalReadMetadata: 0
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 16
     WorkGroupMappingXCCGroup: 0
     WorkGroupReduction: false
@@ -15236,7 +15236,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 83
-    SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT96x320x32_MI16x16x1_SN_GSU1_GSUC0_GSUWGMRR0_K1_MIWT6_5_SU32_SUM2_SUS1024_WGM0_WGMXCC1_WGMXCCGn1
+    SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT96x320x32_MI16x16x1_SN_GSU1_GSUC0_GSUWGMRR0_K1_MIWT6_5_SU32_SUM2_SUS1024_WGM1_WGMXCC1_WGMXCCGn1
     SourceSwap: 0
     StaggerU: 32
     StaggerUMapping: 2
@@ -15278,7 +15278,7 @@
     WaveSeparateGlobalReadMetadata: 0
     WavefrontSize: 64
     WorkGroup: [16, 16, 1]
-    WorkGroupMapping: 0
+    WorkGroupMapping: 1
     WorkGroupMappingXCC: 1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false

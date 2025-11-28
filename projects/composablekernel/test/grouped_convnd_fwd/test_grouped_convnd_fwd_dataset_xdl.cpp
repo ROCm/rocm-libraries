@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <cstdlib>          // Standard C library (exit codes, malloc)
 #include <iostream>         // C++ I/O streams (cout, cerr)
@@ -32,7 +32,6 @@ std::vector<ck::utils::conv::ConvParam> load_csv_test_cases(const std::string& f
     while(std::getline(file, line))
     {
         line_number++;
-        std::cout << "Line " << line_number << ": " << line << std::endl;
         // Skip comment lines (starting with #) and empty lines
         if(line.empty() || line[0] == '#')
         {

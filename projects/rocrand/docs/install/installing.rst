@@ -52,12 +52,6 @@ For Ubuntu and Debian:
 
    sudo apt-get install rocrand
 
-For CentOS-based systems:
-
-.. code-block:: shell
-
-   sudo yum install rocrand
-
 For SLES:
 
 .. code-block:: shell
@@ -157,6 +151,9 @@ In addition to the built-in CMake options, the following configuration options a
 * ``BUILD_TEST``: Controls whether to build the rocRAND tests. Defaults to ``OFF``.
 * ``BUILD_BENCHMARK``: Controls whether to build the rocRAND benchmarks. Defaults to ``OFF``.
 * ``BUILD_ADDRESS_SANITIZER`` Controls whether to build with address sanitization enabled. Defaults to ``OFF``.
+* ``USE_SYSTEM_LIB``. Defaults to ``OFF``. Set to ``ON`` to use the installed ``ROCm`` libraries when building the
+  tests. For this option to take effect, ``BUILD_TEST`` must be ``ON`` and the version of the installed ``rocrand``
+  library must be compatible with the version of the tests.
 
 To install rocRAND with a non-standard installation location of ROCm, pass ``-DCMAKE_PREFIX_PATH=</path/to/opt/rocm/>``
 or set the environment variable ``ROCM_PATH`` to ``path/to/opt/rocm``.

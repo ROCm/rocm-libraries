@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -1900,6 +1900,7 @@ struct ThreadwiseTensorSliceTransfer_StaticToStatic_InterRow
                         const DstSliceOriginIdx&,
                         DstBuffer& dst_buf) const
     {
+        ElementwiseOperation element_op_{};
         static_assert(SrcDesc::IsKnownAtCompileTime() && DstDesc::IsKnownAtCompileTime(),
                       "wrong! Desc need to known at compile-time");
 
@@ -1985,7 +1986,6 @@ struct ThreadwiseTensorSliceTransfer_StaticToStatic_InterRow
             });
         });
     }
-    ElementwiseOperation element_op_{};
 };
 
 // Specialized for gfx12

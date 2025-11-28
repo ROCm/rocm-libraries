@@ -36,6 +36,7 @@
 
 namespace rocsparse
 {
+
 // Return the leftmost significant bit position
 #if defined(rocsparse_ILP64)
     static inline rocsparse_int clz(rocsparse_int n)

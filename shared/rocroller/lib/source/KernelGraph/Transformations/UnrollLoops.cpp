@@ -39,11 +39,6 @@ namespace rocRoller
         using GD = Graph::Direction;
         using namespace ControlGraph;
         using namespace CoordinateGraph;
-        std::string getForLoopName(KernelGraph& graph, int start)
-        {
-            auto forLoop = graph.control.get<ForLoopOp>(start);
-            return forLoop->loopName;
-        }
         unsigned int
             getUnrollAmount(KernelGraph& graph, int loopTag, CommandParametersPtr const& params)
         {
@@ -386,8 +381,7 @@ namespace rocRoller
             // ------------------------------
             // Add a setCoordinate node in between the original ForLoopOp and the loop bodies
             // Delete edges between original ForLoopOp and original loop body
-            for(auto const& child :
-                graph.control.getNeighbours<GD::Downstream>(tag).to<std::vector>())
+            for(auto const& child : graph.control.getNeighbours<GD::Downstream>(tag))
             {
                 if(isEdge<Body>(graph.control.getElement(child)))
                 {

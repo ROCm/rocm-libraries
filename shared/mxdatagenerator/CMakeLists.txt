@@ -1,31 +1,8 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
 
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
-
-cmake_minimum_required(VERSION 3.16)
-project(FPDataGeneration VERSION 0.1.0)
+cmake_minimum_required(VERSION 3.25.2)
+project(mxDataGenerator VERSION 0.1.0)
 set(CMAKE_CXX_STANDARD 20)
 
 include(GNUInstallDirs)
@@ -134,16 +111,20 @@ write_basic_package_version_file(
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY ExactVersion
   )
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/mxDataGeneratorConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/cmake/mxDataGeneratorConfig.cmake"
-    COPYONLY
+
+configure_package_config_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/mxDataGeneratorConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/cmake/mxDataGeneratorConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/mxDataGenerator
+    PATH_VARS CMAKE_INSTALL_INCLUDEDIR
 )
+
 install(
     TARGETS mxDataGenerator
     EXPORT mxDataGenerator-targets
     COMPONENT mxDataGenerator_Development
 )
+
 install(
     EXPORT mxDataGenerator-targets
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/mxDataGenerator"
@@ -151,20 +132,25 @@ install(
     COMPONENT mxDataGenerator_Development
     FILE mxDataGenerator-targets.cmake
 )
+
+
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/cmake/mxDataGeneratorConfig-version.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/cmake/mxDataGeneratorConfig.cmake"
-    COMPONENT mxDataGenerator_Development 
+    COMPONENT mxDataGenerator_Development
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/mxDataGenerator
 )
+
 install(
     FILES ${mxdatagenerator_headers_public}
     COMPONENT mxDataGenerator_Development
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
+
 install(
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
     COMPONENT mxDataGenerator_Docs
     DESTINATION "${CMAKE_INSTALL_DOCDIR}"
 )
+
 export(EXPORT mxDataGenerator-targets FILE mxDataGeneratorConfig.cmake)

@@ -369,3 +369,28 @@ def ceilDivide(numerator, denominator):
 
 def roundUpToNearestMultiple(numerator, denominator):
     return ceilDivide(numerator,denominator)*int(denominator)
+
+
+# Given a divisor, this routine computes the corresponding multiplicative constant
+# and required post shifts.
+#
+# Algorithm based on: https://dl.acm.org/doi/pdf/10.1145/178243.178249
+#
+# Inputs:
+#   d: divisor
+#   N: Number of bits integers are represented in
+#   p: precision in bits (usually N = P)
+#
+# Output:
+#   mhigh: multiplicative constant
+#   shPost: amount to right shift after multiplication
+def choose_multiplier(d, N, p):
+    l = int(math.ceil(math.log(d, 2)))
+    shPost = l
+    mlow = 2**(N+l) // d
+    mhigh = (2**(N+l) + 2 ** (N + l - p )) // d
+    while ((mlow // 2) < (mhigh // 2)) and shPost > 0:
+        mlow //= 2
+        mhigh //= 2
+        shPost -=1
+    return mhigh, shPost, l

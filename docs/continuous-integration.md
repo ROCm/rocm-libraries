@@ -6,18 +6,19 @@
 This document is to detail the various continuous integration (CI) systems that are run on the rocm-libraries monorepo.
 
 ## Table of Contents
-1. [Azure Pipelines](#azure-pipelines)
-    1. [Overview](#az-overview)
-    2. [PR Workflow](#az-workflow)
-    3. [Interpreting Results](#az-results)
-    4. [Build and Test Coverage](#az-coverage)
-    5. [Downstream Job Triggers](#az-downstream)
-2. [Math CI](#math-ci)
-    1. [Overview](#math-overview)
-3. [Windows CI](#windows-ci)
-    1. [Overview](#win-overview)
-4. [TheRock CI](#therock-ci)
-    1. [Overview](#rock-overview)
+- [Continuous Integration](#continuous-integration)
+  - [Table of Contents](#table-of-contents)
+  - [Azure Pipelines](#azure-pipelines)
+    - [Overview ](#overview-)
+    - [PR Workflow ](#pr-workflow-)
+    - [Build and Test Coverage ](#build-and-test-coverage-)
+    - [Downstream Job Triggers ](#downstream-job-triggers-)
+  - [Math CI](#math-ci)
+    - [Overview ](#overview--1)
+  - [Windows CI](#windows-ci)
+    - [Overview ](#overview--2)
+  - [TheRock CI](#therock-ci)
+    - [Overview ](#overview--3)
 
 ## Azure Pipelines
 
@@ -27,37 +28,25 @@ The ROCm Azure Pipelines CI (also known as External CI) is a public-facing CI sy
 
 See the [Azure monorepo dashboard](https://dev.azure.com/ROCm-CI/ROCm-CI/_build?definitionScope=%5Cmonorepo) for a full list of pipelines running in the monorepo.
 
-For commits, the pipelines will run based on the conditions defined in the trigger files under [/.azuredevops](https://github.com/ROCm/rocm-libraries/tree/develop/.azuredevops).
+For commits to trunk, the pipelines will run based on the conditions defined in the trigger files under [/.azuredevops](https://github.com/ROCm/rocm-libraries/tree/develop/.azuredevops).
 
-For PRs, the [`Dispatch Azure CI`](https://github.com/ROCm/rocm-libraries/blob/develop/.github/workflows/azure-ci-dispatcher.yml) GitHub Action will be run, which will analyze a PR's contents and determine which pipelines to run. This action will report the final results of each Azure run it dispatches.
+For PRs targeting trunk, the [`Trigger Azure CI`](https://github.com/ROCm/rocm-libraries/blob/develop/.github/workflows/azure-ci-dispatcher.yml) GitHub Action will be run, which will analyze a PR's changed files and run CI for the appropriate components. The final CI status will be reflected in an `Azure CI Summary` check.
 
 ### PR Workflow <a id="az-workflow"></a>
 
 1. PR is submitted
-2. `Dispatch Azure CI` is run on the PR
+2. `Trigger Azure CI` action is run on the PR
     1. Analyzes the PR's contents, determines which pipelines to run
     2. Sends request(s) to Azure API to start runs
-3. Azure CI builds and tests the PR against latest public source
-4. `Dispatch Azure CI` waits until all runs are finished and reports their overall status
+    3. Creates a new `Azure CI Summary` check on the PR, which is a gating requirement
+3. Azure CI builds and tests the PR against latest public source code
+4. As runs finish, they will update `Azure CI Summary` with their status
+    - If all runs are passing, `Azure CI Summary` is marked as passing
+    - If any runs have failed, `Azure CI Summary` is marked as failing and the PR is blocked from merging
 
-URLs for individual Azure runs can be found in the logs of the `Dispatch Azure CI` action, under the `Wait for and report Azure CI` step.
+Clicking on the `Azure CI Summary` check on a PR will bring up information such as the individual runs triggered, the merge SHA used, and instructions on requesting CI reruns.
 
-### Interpreting Results <a id="az-results"></a>
-
-Any errors or warnings during a run will be highlighted on the run's main page on Azure, and clicking on those will bring you directly to the offending logs.
-
-Azure runs can have the following statuses: `Success`, `Failed`, or `Warning`. This corresponds to GitHub status checks as follows:
-
-| Azure Status | GitHub PR Status | Explanation |
-|-|-|-|
-| ✅ Success | ✅ Succeeded | The job was successful. |
-| ⚠️ Warning | ✅ Succeeded with issues | An allowed failure occurred and the job continued on without further issue. |
-| ❌ Failed | ❌ Failing | The job failed. |
-| Did not run | ⬛ Neutral | The job did not run, likely due to not fulfilling the trigger requirements. |
-
-Warnings can occur if a step fails but was marked as being allowed to fail, so a job will continue running in the event of a warning.
-
-In particular, steps are allowed to fail if they have the property `continueOnError: true` ([reference](https://learn.microsoft.com/en-us/azure/devops/pipelines/process/tasks?view=azure-devops&tabs=yaml#task-control-options)).
+From a summary page, clicking on a run ID will bring you to the run's Azure page, where build and test logs can be found. Any errors or warnings will be prominently displayed on this page.
 
 ### Build and Test Coverage <a id="az-coverage"></a>
 
@@ -89,14 +78,48 @@ Azure CI runs for a component will trigger runs for downstream components (provi
 
 For example: a rocPRIM PR will trigger a rocPRIM job. If successful, it will then continue to run hipCUB and rocThrust jobs.
 
-Currently, the following downstream trigger paths are enabled:
+The following graph illustrates the inter-component dependencies within the mathlibs stack:
 
 ```mermaid
 graph TD;
-  rocPRIM-->hipCUB;
-  rocPRIM-->rocThrust;
-  rocRAND-->hipRAND;
+  subgraph ROCm/rocm-libraries
+    rocRAND
+    hipRAND
+    rocFFT
+    hipFFT
+    rocPRIM
+    hipCUB
+    rocThrust
+    hipBLAS-common
+    hipBLASLt
+    rocBLAS
+    rocSOLVER
+    rocSPARSE
+    hipBLAS
+    hipSOLVER
+    hipSPARSE
+    MIOpen
+    hipSPARSELt
+  end
+
+  rocRAND-->hipRAND
+  rocRAND-->MIOpen
+  hipRAND-->rocFFT
+  rocFFT-->hipFFT
+  rocPRIM-->hipCUB
+  rocPRIM-->rocThrust
+  rocPRIM-->rocSOLVER
+  rocPRIM-->rocSPARSE
   hipBLAS-common-->hipBLASLt
+  hipBLASLt-->rocBLAS
+  rocBLAS-->rocSOLVER
+  rocBLAS-->rocSPARSE
+  rocSOLVER-->hipBLAS
+  rocSOLVER-->hipSOLVER
+  rocSPARSE-->hipSOLVER
+  rocSPARSE-->hipSPARSE
+  hipBLAS-->MIOpen
+  hipSPARSE-->hipSPARSELt
 ```
 
 ## Math CI
@@ -110,3 +133,15 @@ graph TD;
 ## TheRock CI
 
 ### Overview <a id="rock-overview"></a>
+
+TheRock CI runs Linux and Windows builds and tests for nightly jobs, pushes to develop, pull requests and workflow dispatches.
+
+TheRock CI builds using `rocm-libraries` at HEAD with TheRock build system. For testing, we test using TheRock's [`fetch_test_configurations.py`](https://github.com/ROCm/TheRock/blob/main/build_tools/github_actions/fetch_test_configurations.py) along with [ROCm test machines](https://github.com/ROCm/TheRock/blob/main/build_tools/github_actions/amdgpu_family_matrix.py).
+
+For pull requests and pushes to `develop`:
+- If a change is made to `.github/workflows/therock-*` or `.github/scripts/therock-*`, all projects are built and smoke tests are run.
+- If a change is made to `projects/*` or `shared/*`, TheRock CI will determine which subtree has changed and run the corresponding builds and full tests, using [`therock_matrix.py`](../.github/scripts/therock_matrix.py)
+
+For nightly jobs, TheRock CI runs all builds and full tests for all projects from [`therock_matrix.py`](../.github/scripts/therock_matrix.py).
+
+For workflow dispatch triggers, TheRock CI will run builds and full tests for whichever projects are specified.

@@ -76,9 +76,9 @@ inline hiprandStatus_t hiprandMakeMTGP32Constants(const mtgp32_params_fast_t par
  */
 inline hiprandStatus_t hiprandMakeMTGP32KernelState(hiprandStateMtgp32_t* s,
                                                     mtgp32_params_fast_t  params[],
-                                                    mtgp32_kernel_params_t* /*k*/,
-                                                    int                n,
-                                                    unsigned long long seed)
+                                                    [[maybe_unused]] mtgp32_kernel_params_t* k,
+                                                    int                                      n,
+                                                    unsigned long long                       seed)
 {
     return to_hiprand_status(rocrand_make_state_mtgp32(s, params, n, seed));
 }

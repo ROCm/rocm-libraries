@@ -22,13 +22,14 @@
 
 import argparse
 from collections import namedtuple
+import json
 import os
 import re
 import stat
 import subprocess
 import sys
 
-BenchmarkContext = namedtuple('BenchmarkContext', ['gpu_architecture', 'benchmark_output_dir', 'benchmark_dir', 'benchmark_filename_regex', 'benchmark_filter_regex', 'size', 'trials', 'seed'])
+BenchmarkContext = namedtuple('BenchmarkContext', ['gpu_architecture', 'benchmark_output_dir', 'benchmark_dir', 'benchmark_filename_regex', 'benchmark_filter_regex', 'size', 'trials', 'seed', 'skip_gathered', 'iteration_info_output_dir', 'benchmark_min_time'])
 
 def run_benchmarks(benchmark_context):
     def is_benchmark_executable(filename):
@@ -41,14 +42,29 @@ def run_benchmarks(benchmark_context):
         # and it is a regular file (S_IFREG)
         return (st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)) and (st_mode & stat.S_IFREG)
 
+    def should_skip(results_json_path):
+        if not benchmark_context.skip_gathered:
+            return False
+
+        try:
+            with open(results_json_path) as f:
+                json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return False
+
+        return True
+
     success = True
     benchmark_names = [name for name in os.listdir(benchmark_context.benchmark_dir) if is_benchmark_executable(name)]
-    print('The following benchmarks will be ran:\n{}'.format('\n'.join(benchmark_names)), file=sys.stderr, flush=True)
+    print('The following benchmarks will be run:\n{}'.format('\n'.join(benchmark_names)), file=sys.stderr, flush=True)
     for benchmark_name in benchmark_names:
         results_json_name = f'{benchmark_name}_{benchmark_context.gpu_architecture}.json'
 
         benchmark_path = os.path.join(benchmark_context.benchmark_dir, benchmark_name)
         results_json_path = os.path.join(benchmark_context.benchmark_output_dir, results_json_name)
+        if should_skip(results_json_path):
+            print(f'Skipping {benchmark_name}, because its results have already been gathered at {results_json_path}', file=sys.stderr, flush=True)
+            continue
         args = [
             benchmark_path,
             f'--benchmark_out={results_json_path}',
@@ -60,6 +76,10 @@ def run_benchmarks(benchmark_context):
             args += ['--trials', benchmark_context.trials]
         if benchmark_context.seed:
             args += ['--seed', benchmark_context.seed]
+        if benchmark_context.iteration_info_output_dir:
+            args += ['--iteration_info_out', os.path.join(benchmark_context.iteration_info_output_dir, results_json_name)]
+        if benchmark_context.benchmark_min_time:
+            args += ['--benchmark_min_time', benchmark_context.benchmark_min_time]
         try:
             subprocess.check_call(args)
         except subprocess.CalledProcessError as error:
@@ -100,6 +120,17 @@ def main():
         help='Controls the seed for random number generation for each benchmark case',
         default='',
         required=False)
+    parser.add_argument('--skip_gathered',
+        help='Skip running benchmarks whose JSON data has already been gathered',
+        default=False,
+        action='store_true',
+        required=False)
+    parser.add_argument('--iteration_info_output_dir',
+        help='The directory to write the benchmark iteration info to',
+        required=False)
+    parser.add_argument('--benchmark_min_time', # TODO: Remove this option once the benchmarks don't use Google Benchmark anymore.
+        help='The minimum amount of time for Google Benchmark to run a benchmark for, where the value \'0s\' means no minimum time',
+        required=False)
 
     args = parser.parse_args()
 
@@ -111,7 +142,10 @@ def main():
         args.benchmark_filter_regex,
         args.size,
         args.trials,
-        args.seed)
+        args.seed,
+        args.skip_gathered,
+        args.iteration_info_output_dir,
+        args.benchmark_min_time)
 
     benchmark_run_successful = run_benchmarks(benchmark_context)
 

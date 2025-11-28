@@ -23,14 +23,12 @@
 
 #include <unittest/unittest.h>
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 template <typename Iterator1, typename Iterator2>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
-#endif
-  void
-  simple_copy_on_device(Iterator1 first1, Iterator1 last1, Iterator2 first2)
+__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void
+simple_copy_on_device(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 {
   while (first1 != last1)
   {
@@ -41,14 +39,10 @@ __global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
 template <typename Iterator1, typename Iterator2>
 void simple_copy(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
   simple_copy_on_device<<<1, 1>>>(first1, last1, first2);
-#else
-  simple_copy_on_device(first1, last1, first2);
-#endif
 }
 
-void TestDeviceDereferenceDeviceVectorIterator(void)
+void TestDeviceDereferenceDeviceVectorIterator()
 {
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<int> output(input.size(), 0);
@@ -59,7 +53,7 @@ void TestDeviceDereferenceDeviceVectorIterator(void)
 }
 DECLARE_UNITTEST(TestDeviceDereferenceDeviceVectorIterator);
 
-void TestDeviceDereferenceDevicePtr(void)
+void TestDeviceDereferenceDevicePtr()
 {
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<int> output(input.size(), 0);
@@ -74,20 +68,46 @@ void TestDeviceDereferenceDevicePtr(void)
 }
 DECLARE_UNITTEST(TestDeviceDereferenceDevicePtr);
 
-void TestDeviceDereferenceTransformIterator(void)
+void TestDeviceDereferenceTransformIterator()
 {
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<int> output(input.size(), 0);
 
-  simple_copy(thrust::make_transform_iterator(input.begin(), thrust::identity<int>()),
-              thrust::make_transform_iterator(input.end(), thrust::identity<int>()),
+  simple_copy(thrust::make_transform_iterator(input.begin(), ::internal::identity{}),
+              thrust::make_transform_iterator(input.end(), ::internal::identity{}),
               output.begin());
 
   ASSERT_EQUAL(input, output);
 }
 DECLARE_UNITTEST(TestDeviceDereferenceTransformIterator);
 
-void TestDeviceDereferenceCountingIterator(void)
+void TestDeviceDereferenceTransformIteratorInputConversion()
+{
+  thrust::device_vector<int> input = unittest::random_integers<int>(100);
+  thrust::device_vector<double> output(input.size(), 0);
+
+  simple_copy(thrust::make_transform_iterator(input.begin(), ::internal::identity{}),
+              thrust::make_transform_iterator(input.end(), ::internal::identity{}),
+              output.begin());
+
+  ASSERT_EQUAL(input == output, true);
+}
+DECLARE_UNITTEST(TestDeviceDereferenceTransformIteratorInputConversion);
+
+void TestDeviceDereferenceTransformIteratorOutputConversion()
+{
+  thrust::device_vector<int> input = unittest::random_integers<int>(100);
+  thrust::device_vector<double> output(input.size(), 0);
+
+  simple_copy(thrust::make_transform_iterator(input.begin(), ::internal::identity{}),
+              thrust::make_transform_iterator(input.end(), ::internal::identity{}),
+              output.begin());
+
+  ASSERT_EQUAL(input == output, true);
+}
+DECLARE_UNITTEST(TestDeviceDereferenceTransformIteratorOutputConversion);
+
+void TestDeviceDereferenceCountingIterator()
 {
   thrust::counting_iterator<int> first(1);
   thrust::counting_iterator<int> last(6);
@@ -96,15 +116,12 @@ void TestDeviceDereferenceCountingIterator(void)
 
   simple_copy(first, last, output.begin());
 
-  ASSERT_EQUAL(output[0], 1);
-  ASSERT_EQUAL(output[1], 2);
-  ASSERT_EQUAL(output[2], 3);
-  ASSERT_EQUAL(output[3], 4);
-  ASSERT_EQUAL(output[4], 5);
+  thrust::device_vector<int> ref{1, 2, 3, 4, 5};
+  ASSERT_EQUAL(output, ref);
 }
 DECLARE_UNITTEST(TestDeviceDereferenceCountingIterator);
 
-void TestDeviceDereferenceTransformedCountingIterator(void)
+void TestDeviceDereferenceTransformedCountingIterator()
 {
   thrust::counting_iterator<int> first(1);
   thrust::counting_iterator<int> last(6);
@@ -115,12 +132,9 @@ void TestDeviceDereferenceTransformedCountingIterator(void)
               thrust::make_transform_iterator(last, thrust::negate<int>()),
               output.begin());
 
-  ASSERT_EQUAL(output[0], -1);
-  ASSERT_EQUAL(output[1], -2);
-  ASSERT_EQUAL(output[2], -3);
-  ASSERT_EQUAL(output[3], -4);
-  ASSERT_EQUAL(output[4], -5);
+  thrust::device_vector<int> ref{-1, -2, -3, -4, -5};
+  ASSERT_EQUAL(output, ref);
 }
 DECLARE_UNITTEST(TestDeviceDereferenceTransformedCountingIterator);
 
-THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_END
+THRUST_DIAG_POP

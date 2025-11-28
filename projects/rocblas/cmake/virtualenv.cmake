@@ -1,15 +1,7 @@
 # find_package(PythonInterp)
 # # TODO: Check PYTHON_VERSION_MAJOR
 
-find_program(VIRTUALENV_PYTHON_EXE ${python})
-if(NOT VIRTUALENV_PYTHON_EXE)
-    # look for non default name
-    if(${python} MATCHES "python3")
-        find_program(VIRTUALENV_PYTHON_EXE python)
-    else()
-        find_program(VIRTUALENV_PYTHON_EXE python3)
-    endif()
-endif()
+find_program(VIRTUALENV_PYTHON_EXE ${Python3_EXECUTABLE})
 
 set(VIRTUALENV_HOME_DIR ${CMAKE_BINARY_DIR}/virtualenv CACHE PATH "Path to virtual environment")
 
@@ -53,6 +45,15 @@ function(virtualenv_install)
         execute_process(
           RESULT_VARIABLE rc
           COMMAND ${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} -m pip install --upgrade pip
+        )
+        if(rc)
+            message(FATAL_ERROR ${rc})
+        endif()
+
+        message("${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} -m pip install --upgrade packaging setuptools")
+        execute_process(
+            RESULT_VARIABLE rc
+            COMMAND ${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} -m pip install --upgrade packaging setuptools
         )
         if(rc)
             message(FATAL_ERROR ${rc})

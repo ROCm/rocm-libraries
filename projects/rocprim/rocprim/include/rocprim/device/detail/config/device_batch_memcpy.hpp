@@ -253,6 +253,41 @@ struct default_batch_memcpy_config<static_cast<unsigned int>(target_arch::gfx90a
     : batch_memcpy_config<256, 2, 8, 128, 32, 128, 1024>
 {};
 
+// Based on value_type = int64_t
+template<class value_type>
+struct default_batch_memcpy_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    value_type,
+    std::enable_if_t<((sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
+    : batch_memcpy_config<256, 2, 8, 128, 32, 128, 1024>
+{};
+
+// Based on value_type = int
+template<class value_type>
+struct default_batch_memcpy_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    value_type,
+    std::enable_if_t<((sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
+    : batch_memcpy_config<256, 2, 8, 128, 32, 128, 1024>
+{};
+
+// Based on value_type = short
+template<class value_type>
+struct default_batch_memcpy_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    value_type,
+    std::enable_if_t<((sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
+    : batch_memcpy_config<256, 2, 8, 128, 32, 128, 1024>
+{};
+
+// Based on value_type = int8_t
+template<class value_type>
+struct default_batch_memcpy_config<static_cast<unsigned int>(target_arch::gfx942),
+                                   value_type,
+                                   std::enable_if_t<((sizeof(value_type) <= 1))>>
+    : batch_memcpy_config<256, 2, 8, 128, 32, 128, 1024>
+{};
+
 } // end namespace detail
 
 END_ROCPRIM_NAMESPACE

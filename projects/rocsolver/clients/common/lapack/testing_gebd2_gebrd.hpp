@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, bool GEBRD, typename T, typename S, typename U>
 void gebd2_gebrd_checkBadArgs(const rocblas_handle handle,
@@ -412,7 +413,7 @@ void gebd2_gebrd_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -429,12 +430,12 @@ void gebd2_gebrd_getPerfData(const rocblas_handle handle,
         gebd2_gebrd_initData<false, true, T>(handle, m, n, dA, lda, stA, dD, stD, dE, stE, dTauq,
                                              stQ, dTaup, stP, bc, hA, hD, hE, hTauq, hTaup);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_gebd2_gebrd(STRIDED, GEBRD, handle, m, n, dA.data(), lda, stA, dD.data(), stD,
                               dE.data(), stE, dTauq.data(), stQ, dTaup.data(), stP, bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool BATCHED, bool STRIDED, bool GEBRD, typename T>
@@ -558,7 +559,7 @@ void testing_gebd2_gebrd(Arguments& argus)
                                                     hTauq, hTaup, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             gebd2_gebrd_getPerfData<STRIDED, GEBRD, T>(
                 handle, m, n, dA, lda, stA, dD, stD, dE, stE, dTauq, stQ, dTaup, stP, bc, hA, hD,
                 hE, hTauq, hTaup, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
@@ -610,7 +611,7 @@ void testing_gebd2_gebrd(Arguments& argus)
                                                     hTauq, hTaup, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             gebd2_gebrd_getPerfData<STRIDED, GEBRD, T>(
                 handle, m, n, dA, lda, stA, dD, stD, dE, stE, dTauq, stQ, dTaup, stP, bc, hA, hD,
                 hE, hTauq, hTaup, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,

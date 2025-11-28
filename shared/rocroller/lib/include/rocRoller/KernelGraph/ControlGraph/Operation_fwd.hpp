@@ -28,6 +28,8 @@
 
 #include <variant>
 
+#include <rocRoller/Utilities/Concepts.hpp>
+
 namespace rocRoller
 {
     namespace KernelGraph::ControlGraph
@@ -99,5 +101,16 @@ namespace rocRoller
 
         template <typename T>
         concept CConcreteOperation = (COperation<T> && !std::same_as<Operation, T>);
+
+        template <typename T>
+        concept COperationWithBody = CIsAnyOf<T,
+                                              ConditionalOp,
+                                              DoWhileOp,
+                                              ForLoopOp,
+                                              Kernel,
+                                              NOP,
+                                              Block,
+                                              Scope,
+                                              SetCoordinate>;
     }
 }

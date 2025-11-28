@@ -125,6 +125,7 @@ namespace rocsparse
         }
         case rocsparse_format_bell:
         case rocsparse_format_bsr:
+        case rocsparse_format_sell:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -261,6 +262,48 @@ namespace rocsparse
                                               rocsparse_indextype_i64,
                                               rocsparse_datatype_f16_r,
                                               rocsparse_datatype_f16_r,
+                                              rocsparse_datatype_f32_r),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                                              rocsparse_indextype_i32,
+                                              rocsparse_indextype_i32,
+                                              rocsparse_datatype_bf16_r,
+                                              rocsparse_datatype_bf16_r,
+                                              rocsparse_datatype_bf16_r),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                                              rocsparse_indextype_i64,
+                                              rocsparse_indextype_i32,
+                                              rocsparse_datatype_bf16_r,
+                                              rocsparse_datatype_bf16_r,
+                                              rocsparse_datatype_bf16_r),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                                              rocsparse_indextype_i64,
+                                              rocsparse_indextype_i64,
+                                              rocsparse_datatype_bf16_r,
+                                              rocsparse_datatype_bf16_r,
+                                              rocsparse_datatype_bf16_r),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                                              rocsparse_indextype_i32,
+                                              rocsparse_indextype_i32,
+                                              rocsparse_datatype_bf16_r,
+                                              rocsparse_datatype_bf16_r,
+                                              rocsparse_datatype_f32_r),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                                              rocsparse_indextype_i64,
+                                              rocsparse_indextype_i32,
+                                              rocsparse_datatype_bf16_r,
+                                              rocsparse_datatype_bf16_r,
+                                              rocsparse_datatype_f32_r),
+
+            SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                                              rocsparse_indextype_i64,
+                                              rocsparse_indextype_i64,
+                                              rocsparse_datatype_bf16_r,
+                                              rocsparse_datatype_bf16_r,
                                               rocsparse_datatype_f32_r),
 
             SDDMM_BUFFER_SIZE_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
@@ -531,10 +574,8 @@ namespace rocsparse
         }
 
         case rocsparse_format_bell:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-        }
         case rocsparse_format_bsr:
+        case rocsparse_format_sell:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -671,6 +712,48 @@ namespace rocsparse
                                              rocsparse_indextype_i64,
                                              rocsparse_datatype_f16_r,
                                              rocsparse_datatype_f16_r,
+                                             rocsparse_datatype_f32_r),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_datatype_bf16_r,
+                                             rocsparse_datatype_bf16_r,
+                                             rocsparse_datatype_bf16_r),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                                             rocsparse_indextype_i64,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_datatype_bf16_r,
+                                             rocsparse_datatype_bf16_r,
+                                             rocsparse_datatype_bf16_r),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                                             rocsparse_indextype_i64,
+                                             rocsparse_indextype_i64,
+                                             rocsparse_datatype_bf16_r,
+                                             rocsparse_datatype_bf16_r,
+                                             rocsparse_datatype_bf16_r),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_datatype_bf16_r,
+                                             rocsparse_datatype_bf16_r,
+                                             rocsparse_datatype_f32_r),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                                             rocsparse_indextype_i64,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_datatype_bf16_r,
+                                             rocsparse_datatype_bf16_r,
+                                             rocsparse_datatype_f32_r),
+
+            SDDMM_PREPROCESS_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                                             rocsparse_indextype_i64,
+                                             rocsparse_indextype_i64,
+                                             rocsparse_datatype_bf16_r,
+                                             rocsparse_datatype_bf16_r,
                                              rocsparse_datatype_f32_r),
 
             SDDMM_PREPROCESS_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
@@ -944,10 +1027,8 @@ namespace rocsparse
         }
 
         case rocsparse_format_bell:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-        }
         case rocsparse_format_bsr:
+        case rocsparse_format_sell:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -1083,6 +1164,48 @@ namespace rocsparse
                               rocsparse_indextype_i64,
                               rocsparse_datatype_f16_r,
                               rocsparse_datatype_f16_r,
+                              rocsparse_datatype_f32_r),
+
+        SDDMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                              rocsparse_indextype_i32,
+                              rocsparse_indextype_i32,
+                              rocsparse_datatype_bf16_r,
+                              rocsparse_datatype_bf16_r,
+                              rocsparse_datatype_bf16_r),
+
+        SDDMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                              rocsparse_indextype_i64,
+                              rocsparse_indextype_i32,
+                              rocsparse_datatype_bf16_r,
+                              rocsparse_datatype_bf16_r,
+                              rocsparse_datatype_bf16_r),
+
+        SDDMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                              rocsparse_indextype_i64,
+                              rocsparse_indextype_i64,
+                              rocsparse_datatype_bf16_r,
+                              rocsparse_datatype_bf16_r,
+                              rocsparse_datatype_bf16_r),
+
+        SDDMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                              rocsparse_indextype_i32,
+                              rocsparse_indextype_i32,
+                              rocsparse_datatype_bf16_r,
+                              rocsparse_datatype_bf16_r,
+                              rocsparse_datatype_f32_r),
+
+        SDDMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                              rocsparse_indextype_i64,
+                              rocsparse_indextype_i32,
+                              rocsparse_datatype_bf16_r,
+                              rocsparse_datatype_bf16_r,
+                              rocsparse_datatype_f32_r),
+
+        SDDMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                              rocsparse_indextype_i64,
+                              rocsparse_indextype_i64,
+                              rocsparse_datatype_bf16_r,
+                              rocsparse_datatype_bf16_r,
                               rocsparse_datatype_f32_r),
 
         SDDMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,

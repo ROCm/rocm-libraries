@@ -204,7 +204,7 @@ void rocrand_discrete_kernel(unsigned int*                 output,
 TYPED_TEST(rocrand_kernel_mrg, rocrand_state_mrg32k3a_type)
 {
     typedef typename TestFixture::state_type state_type;
-    EXPECT_EQ(sizeof(state_type), 12 * sizeof(unsigned int));
+    EXPECT_EQ(sizeof(state_type), 10 * sizeof(unsigned int));
     EXPECT_EQ(sizeof(state_type[32]), 32 * sizeof(state_type));
     EXPECT_TRUE(std::is_trivially_copyable<state_type>::value);
     EXPECT_TRUE(std::is_trivially_destructible<state_type>::value);

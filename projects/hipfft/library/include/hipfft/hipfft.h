@@ -37,22 +37,25 @@
 // clang-format off
 #define DISABLE_WARNING_DEPRECATED_DECLARATIONS DISABLE_WARNING(-Wdeprecated-declarations)
 #define DISABLE_WARNING_RETURN_TYPE DISABLE_WARNING(-Wreturn-type)
+#define DISABLE_WARNING_IGNORED_ATTRIBUTES DISABLE_WARNING(-Wignored-attributes)
 // clang-format on
 #else
 #define DISABLE_WARNING_PUSH
 #define DISABLE_WARNING_POP
 #define DISABLE_WARNING_DEPRECATED_DECLARATIONS
 #define DISABLE_WARNING_RETURN_TYPE
+#define DISABLE_WARNING_IGNORED_ATTRIBUTES
 #endif
 
 #include "hipfft-export.h"
 #include "hipfft-version.h"
-#include <hip/hip_complex.h>
 #include <hip/library_types.h>
 
 DISABLE_WARNING_PUSH
 DISABLE_WARNING_DEPRECATED_DECLARATIONS
 DISABLE_WARNING_RETURN_TYPE
+DISABLE_WARNING_IGNORED_ATTRIBUTES
+#include <hip/hip_complex.h>
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
 

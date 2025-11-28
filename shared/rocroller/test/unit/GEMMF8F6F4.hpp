@@ -42,8 +42,8 @@ GEMMProblem setup_GEMMF8_NT()
     gemm.macN = wavesPerWGY * gemm.waveN;
     gemm.macK = 2 * gemm.waveK;
 
-    gemm.loadLDSA = true;
-    gemm.loadLDSB = true;
+    gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+    gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
     gemm.workgroupSizeX = 256;
     gemm.workgroupSizeY = 1;
@@ -77,8 +77,8 @@ GEMMProblem setup_GEMMF8F6F4(int waveM, int waveN, int waveK)
     gemm.macN = wavesPerWGY * gemm.waveN;
     gemm.macK = 2 * gemm.waveK;
 
-    gemm.loadLDSA  = true;
-    gemm.loadLDSB  = true;
+    gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+    gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
     gemm.storeLDSD = false;
 
     gemm.workgroupSizeX = 256;
@@ -113,8 +113,8 @@ GEMMProblem setup_GEMMF8_TN()
     gemm.macN = wavesPerWGY * gemm.waveN;
     gemm.macK = 2 * gemm.waveK;
 
-    gemm.loadLDSA  = true;
-    gemm.loadLDSB  = true;
+    gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+    gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
     gemm.storeLDSD = false;
 
     gemm.workgroupSizeX = 256;

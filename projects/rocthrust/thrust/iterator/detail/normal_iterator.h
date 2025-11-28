@@ -23,6 +23,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
@@ -37,7 +45,7 @@ class normal_iterator : public iterator_adaptor<normal_iterator<Pointer>, Pointe
   using super_t = iterator_adaptor<normal_iterator<Pointer>, Pointer>;
 
 public:
-  THRUST_HOST_DEVICE normal_iterator() {}
+  inline normal_iterator() = default;
 
   THRUST_HOST_DEVICE normal_iterator(Pointer p)
       : super_t(p)
@@ -45,7 +53,7 @@ public:
 
   template <typename OtherPointer>
   THRUST_HOST_DEVICE normal_iterator(const normal_iterator<OtherPointer>& other,
-                                     typename thrust::detail::enable_if_convertible<OtherPointer, Pointer>::type* = 0)
+                                     thrust::detail::enable_if_convertible_t<OtherPointer, Pointer>* = 0)
       : super_t(other.base())
   {}
 

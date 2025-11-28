@@ -322,9 +322,9 @@ void testing_sbmv_batched(const Arguments& arg)
     hy_gold.copy_from(hy);
 
     // copy data from CPU to device
-    dx.transfer_from(hx);
-    dy.transfer_from(hy);
-    dAb.transfer_from(hAb);
+    CHECK_HIP_ERROR(dx.transfer_from(hx));
+    CHECK_HIP_ERROR(dy.transfer_from(hy));
+    CHECK_HIP_ERROR(dAb.transfer_from(hAb));
 
     double cpu_time_used;
     double h_error = 0.0, d_error = 0.0;
@@ -363,7 +363,7 @@ void testing_sbmv_batched(const Arguments& arg)
             CHECK_HIP_ERROR(d_alpha.transfer_from(alpha));
             CHECK_HIP_ERROR(d_beta.transfer_from(beta));
 
-            dy.transfer_from(hy_gold);
+            CHECK_HIP_ERROR(dy.transfer_from(hy_gold));
 
             handle.pre_test(arg);
             DAPI_CHECK(rocblas_sbmv_batched_fn,

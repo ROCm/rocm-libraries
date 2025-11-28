@@ -39,7 +39,8 @@
 
 using namespace hipsparse_test;
 
-void testing_dense_to_sparse_csr_bad_arg(void)
+template <typename I, typename J, typename T>
+void testing_dense_to_sparse_csr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
     int64_t safe_size = 100;

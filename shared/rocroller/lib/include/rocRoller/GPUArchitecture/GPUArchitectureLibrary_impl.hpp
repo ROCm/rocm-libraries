@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #pragma once
+
 #include <array>
 #include <cstdio>
 #include <filesystem>
@@ -35,6 +36,7 @@
 #include <stdexcept>
 #include <string>
 
+#include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 namespace rocRoller

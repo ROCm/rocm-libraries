@@ -25,73 +25,67 @@
  *******************************************************************************/
 
 #include <rocRoller/KernelGraph/Transforms/OrderMultiplyNodes.hpp>
+#include <rocRoller/KernelGraph/Transforms/OrderMultiplyNodes_detail.hpp>
+
+#include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 
-#include <rocRoller/Graph/GraphUtilities.hpp>
-
-namespace rocRoller
+namespace rocRoller::KernelGraph
 {
-    namespace KernelGraph
+    namespace OrderMultiplyNodesDetail
     {
-        std::vector<std::set<int>>
-            OrderMultiplyNodes::getLocallyUnorderedGroups(KernelGraph const& graph,
-                                                          std::set<int>      nodes)
+        std::unordered_map<int, std::vector<int>> getGroupedMultiplyNodes(KernelGraph const& graph)
         {
-            std::vector<std::set<int>> groupedNodes;
+            auto multiplyNodes = graph.control.getNodes().filter([&graph](int idx) {
+                return graph.control.get<ControlGraph::Multiply>(idx).has_value();
+            });
 
-            std::unordered_map<int, std::optional<int>> containingForLoops;
-
-            for(auto const& node : nodes)
+            std::unordered_map<int, std::vector<int>> rv;
+            for(auto node : multiplyNodes)
             {
-                containingForLoops[node]
-                    = findContainingOperation<ControlGraph::ForLoopOp>(node, graph);
+                auto parent = bodyParents(node, graph).take(1).only();
+                AssertFatal(parent.has_value(), "Node has no body parent", ShowValue(node));
+
+                rv[*parent].push_back(node);
             }
-
-            while(!nodes.empty())
-            {
-                std::set<int> group = {*nodes.begin()};
-                nodes.erase(nodes.begin());
-
-                auto setLoop = containingForLoops.at(*group.begin());
-
-                for(auto node : nodes)
-                {
-                    auto nodeLoop = containingForLoops.at(node);
-
-                    if(nodeLoop != setLoop)
-                        continue;
-
-                    bool canAdd = true;
-
-                    for(auto existingNode : group)
-                    {
-                        if(graph.control.compareNodes(UpdateCache, existingNode, node)
-                           != ControlGraph::NodeOrdering::Undefined)
-                        {
-                            canAdd = false;
-                            break;
-                        }
-                    }
-
-                    if(canAdd)
-                        group.insert(node);
-                }
-
-                for(auto node : group)
-                    nodes.erase(node);
-
-                groupedNodes.push_back(std::move(group));
-            }
-
-            return groupedNodes;
+            return rv;
         }
 
-        std::vector<int>
-            OrderMultiplyNodes::sortNodesByDownstreamMemoryNodes(KernelGraph const& graph,
-                                                                 std::set<int>&     nodes)
+        BestNodeOrder::BestNodeOrder(KernelGraph const& graph)
+            : m_graph(graph)
+            , m_tracer(graph)
         {
+        }
+
+        std::optional<bool> BestNodeOrder::existingOrder(int a, int b) const
+        {
+            if(a == b)
+                return std::nullopt;
+
+            auto existingOrder = m_graph.control.compareNodes(rocRoller::UpdateCache, a, b);
+
+            if(existingOrder == ControlGraph::NodeOrdering::LeftFirst)
+                return true;
+
+            if(existingOrder == ControlGraph::NodeOrdering::RightFirst)
+                return false;
+
+            AssertFatal(existingOrder == ControlGraph::NodeOrdering::Undefined,
+                        "These nodes should not contain each other",
+                        ShowValue(a),
+                        ShowValue(b));
+
+            return std::nullopt;
+        }
+
+        std::optional<int> BestNodeOrder::downstreamMemoryNode(int node) const
+        {
+            auto iter = m_downstreamMemoryNodes.find(node);
+            if(iter != m_downstreamMemoryNodes.end())
+                return iter->second;
+
             auto isMemoryNode = [&](int idx) -> bool {
-                auto node = graph.control.get<ControlGraph::Operation>(idx);
+                auto node = m_graph.control.get<ControlGraph::Operation>(idx);
                 if(!node.has_value())
                     return false;
 
@@ -114,44 +108,42 @@ namespace rocRoller
                 return std::visit(_isMemoryNode, *node);
             };
 
-            auto downstreamMemoryNodes = [&]() {
-                auto downstreamMemoryNodes = graph.control.depthFirstVisit(nodes)
-                                                 .filter(isMemoryNode)
-                                                 .to<std::unordered_set>();
-                return std::vector(downstreamMemoryNodes.begin(), downstreamMemoryNodes.end());
-            }();
+            auto downstreamMemoryNode
+                = m_graph.control.breadthFirstVisit(node, Graph::Direction::Downstream)
+                      .filter(isMemoryNode)
+                      .take(1)
+                      .only();
 
-            auto compare = TopologicalCompare(std::make_shared<KernelGraph>(graph));
-            std::sort(downstreamMemoryNodes.begin(), downstreamMemoryNodes.end(), compare);
-
-            Log::debug("Memory: {}", ShowValue(downstreamMemoryNodes));
-
-            std::vector<int> orderedNodes;
-
-            for(auto memNode : downstreamMemoryNodes)
-            {
-                for(auto upstreamNode :
-                    graph.control.breadthFirstVisit(memNode, Graph::Direction::Upstream))
-                {
-                    if(nodes.contains(upstreamNode))
-                    {
-                        orderedNodes.push_back(upstreamNode);
-                        nodes.erase(upstreamNode);
-                        break;
-                    }
-                }
-
-                if(nodes.empty())
-                    break;
-            }
-
-            return orderedNodes;
+            m_downstreamMemoryNodes[node] = downstreamMemoryNode;
+            return downstreamMemoryNode;
         }
 
-        std::vector<int> OrderMultiplyNodes::getReversedTagDependencies(
-            KernelGraph const& graph, ControlFlowRWTracer const& tracer, int node)
+        std::optional<bool> BestNodeOrder::orderByDownstreamMemoryNodes(int a, int b) const
         {
-            auto          allRecords = tracer.coordinatesReadWrite();
+            auto downstreamMemoryNodeA = downstreamMemoryNode(a);
+            auto downstreamMemoryNodeB = downstreamMemoryNode(b);
+
+            if(downstreamMemoryNodeA.has_value() && downstreamMemoryNodeB.has_value())
+            {
+                return existingOrder(*downstreamMemoryNodeA, *downstreamMemoryNodeB);
+            }
+
+            if(downstreamMemoryNodeA.has_value())
+                return true;
+
+            if(downstreamMemoryNodeB.has_value())
+                return false;
+
+            return std::nullopt;
+        }
+
+        std::vector<int> const& BestNodeOrder::reversedTagDependencies(int node) const
+        {
+            auto iter = m_reversedTagDependencies.find(node);
+            if(iter != m_reversedTagDependencies.end())
+                return iter->second;
+
+            auto          allRecords = m_tracer.coordinatesReadWrite();
             std::set<int> coordinatesReadByNode;
             for(auto const& rec : allRecords)
             {
@@ -167,7 +159,7 @@ namespace rocRoller
             {
                 if(rec.rw != ControlFlowRWTracer::READ && rec.control != node
                    && coordinatesReadByNode.contains(rec.coordinate)
-                   && graph.control.compareNodes(UpdateCache, rec.control, node)
+                   && m_graph.control.compareNodes(UpdateCache, rec.control, node)
                           == ControlGraph::NodeOrdering::LeftFirst)
                 {
                     nodesThatWriteThoseCoordinatesBeforeTheNode.push_back(rec.control);
@@ -176,117 +168,220 @@ namespace rocRoller
 
             AssertFatal(!nodesThatWriteThoseCoordinatesBeforeTheNode.empty());
 
-            auto comp = [&](int a, int b) {
+            auto reverseTopologicalCompare = [&](int a, int b) {
                 return a != b
-                       && graph.control.compareNodes(UpdateCache, a, b)
+                       && m_graph.control.compareNodes(UpdateCache, a, b)
                               == ControlGraph::NodeOrdering::RightFirst;
             };
 
             std::sort(nodesThatWriteThoseCoordinatesBeforeTheNode.begin(),
                       nodesThatWriteThoseCoordinatesBeforeTheNode.end(),
-                      comp);
+                      reverseTopologicalCompare);
 
-            return nodesThatWriteThoseCoordinatesBeforeTheNode;
+            m_reversedTagDependencies[node]
+                = std::move(nodesThatWriteThoseCoordinatesBeforeTheNode);
+            return m_reversedTagDependencies[node];
         }
 
-        std::vector<int>
-            OrderMultiplyNodes::sortNodesByLastTagDependencies(KernelGraph const&   graph,
-                                                               std::set<int> const& nodes)
+        std::optional<bool> BestNodeOrder::orderByLastTagDependencies(int a, int b) const
         {
-            ControlFlowRWTracer tracer(graph);
+            auto const& as = reversedTagDependencies(a);
+            auto const& bs = reversedTagDependencies(b);
 
-            using NodeWithDeps = std::tuple<std::vector<int>, int>;
-            std::vector<NodeWithDeps> nodesWithUpstreamDependencies;
+            auto aIter = as.begin(), bIter = bs.begin();
+            for(; aIter != as.end() && bIter != bs.end(); ++aIter, ++bIter)
+            {
+                if(auto order = existingOrder(*aIter, *bIter))
+                    return *order;
+            }
+
+            if(aIter != as.end())
+                return false;
+            if(bIter != bs.end())
+                return true;
+
+            return std::nullopt;
+        }
+
+        bool BestNodeOrder::operator()(int a, int b) const
+        {
+            if(auto order = orderByDownstreamMemoryNodes(a, b))
+                return *order;
+
+            if(auto order = orderByLastTagDependencies(a, b))
+                return *order;
+
+            return a < b;
+        }
+
+        ControlGraph::ControlGraph createSubGraph(KernelGraph const&      graph,
+                                                  std::vector<int> const& nodes)
+        {
+            ControlGraph::ControlGraph subGraph;
+
             for(auto node : nodes)
             {
-                nodesWithUpstreamDependencies.emplace_back(
-                    getReversedTagDependencies(graph, tracer, node), node);
+                subGraph.setElement(node, graph.control.getElement(node));
             }
 
-            auto compareNodeVectors = [&](NodeWithDeps const& ap, NodeWithDeps const& bp) {
-                auto comp = [&](int a, int b) {
-                    return a != b
-                           && graph.control.compareNodes(UpdateCache, a, b)
-                                  == ControlGraph::NodeOrdering::LeftFirst;
-                };
-                auto const& as = std::get<0>(ap);
-                auto const& bs = std::get<0>(bp);
+            for(auto iterA = nodes.begin(); iterA != nodes.end(); ++iterA)
+            {
+                for(auto iterB = iterA + 1; iterB != nodes.end(); ++iterB)
+                {
+                    auto order = graph.control.compareNodes(UpdateCache, *iterA, *iterB);
 
-                return std::lexicographical_compare(
-                    as.begin(), as.end(), bs.begin(), bs.end(), comp);
+                    if(order == ControlGraph::NodeOrdering::LeftFirst)
+                    {
+                        subGraph.addElement(ControlGraph::Sequence{}, {*iterA}, {*iterB});
+                    }
+                    else if(order == ControlGraph::NodeOrdering::RightFirst)
+                    {
+                        subGraph.addElement(ControlGraph::Sequence{}, {*iterB}, {*iterA});
+                    }
+                    else
+                    {
+                        AssertFatal(order == ControlGraph::NodeOrdering::Undefined,
+                                    "These nodes should not contain each other",
+                                    ShowValue(*iterA),
+                                    ShowValue(*iterB));
+                    }
+                }
+            }
+
+            removeRedundantSequenceEdges(subGraph);
+
+            return subGraph;
+        }
+
+        void orderNodes(KernelGraph const& graph, std::vector<int>& nodes)
+        {
+            // Simply including existing order in `BestNodeOrder` and calling `sort` can
+            // lead to a situation where existing nodes appear out of program order.
+            //
+            // Instead:
+            // 1. Create a subgraph that just contains `nodes` but preserves the same
+            // order relationships between them.
+            // 2. Walk that subgraph in topological order, using `BestNodeOrder` to decide
+            // which node to pick next when there are multiple topologically valid options.
+
+            auto subGraph = OrderMultiplyNodesDetail::createSubGraph(graph, nodes);
+
+            auto candidates = subGraph.roots().to<std::list>();
+
+            std::unordered_set<int> remainingNodes(nodes.begin(), nodes.end());
+            remainingNodes.reserve(nodes.size());
+
+            std::unordered_set<int> completedNodes;
+            completedNodes.reserve(nodes.size());
+
+            auto nodeSatisfied = [&](int node) -> bool {
+                if(completedNodes.contains(node))
+                    return false;
+
+                for(auto input : subGraph.getInputNodeIndices<ControlGraph::Sequence>(node))
+                {
+                    if(!completedNodes.contains(input))
+                        return false;
+                }
+                return true;
             };
 
-            std::sort(nodesWithUpstreamDependencies.begin(),
-                      nodesWithUpstreamDependencies.end(),
-                      compareNodeVectors);
-
-            for(auto const& [ups, node] : nodesWithUpstreamDependencies)
-                Log::debug("{}: {}", node, ups);
-
-            std::vector<int> rv;
-            for(auto const& [_, node] : nodesWithUpstreamDependencies)
-                rv.push_back(node);
-            return rv;
-        }
-
-        std::vector<std::vector<int>>
-            OrderMultiplyNodes::findAndOrderGroups(KernelGraph const& graph)
-        {
-            auto isMultiply = [&](int idx) -> bool {
-                return graph.control.get<ControlGraph::Multiply>(idx).has_value();
-            };
-
-            auto allMultiplyNodes = graph.control.getNodes().filter(isMultiply).to<std::set>();
-
-            auto groupedNodes = getLocallyUnorderedGroups(graph, std::move(allMultiplyNodes));
-
-            std::vector<std::vector<int>> groupedOrderedNodes;
-
-            std::vector<std::vector<std::vector<ControlToCoordinateMapper::Connection>>>
-                multiplyConnections;
-
-            for(auto& group : groupedNodes)
+            for(auto candidate : candidates)
             {
-                Log::debug("Group of nodes: {}", ShowValue(group));
-
-                auto orderedNodes = sortNodesByDownstreamMemoryNodes(graph, group);
-
-                Log::debug("Nodes ordered by memory: {}, remaining: {}",
-                           ShowValue(orderedNodes),
-                           ShowValue(group));
-
-                if(!(orderedNodes.empty() xor group.empty()))
-                {
-                    group.insert(orderedNodes.begin(), orderedNodes.end());
-                }
-
-                if(!group.empty())
-                {
-                    orderedNodes = sortNodesByLastTagDependencies(graph, group);
-
-                    Log::debug("Nodes ordered by upstream dependencies: {}",
-                               ShowValue(orderedNodes));
-                }
-
-                groupedOrderedNodes.push_back(std::move(orderedNodes));
+                remainingNodes.erase(candidate);
             }
 
-            return groupedOrderedNodes;
-        }
+            nodes.clear();
 
-        KernelGraph OrderMultiplyNodes::apply(KernelGraph const& original)
-        {
-            auto rv = original;
+            BestNodeOrder comp(graph);
 
-            for(auto const& group : findAndOrderGroups(original))
+            while(!remainingNodes.empty() || !candidates.empty())
             {
-                for(size_t idx = 0; idx + 1 < group.size(); idx++)
+                auto iter = candidates.begin();
+                AssertFatal(iter != candidates.end());
+                auto minIter = iter;
+                ++iter;
+                for(; iter != candidates.end(); ++iter)
                 {
-                    rv.control.chain<ControlGraph::Sequence>(group[idx], group[idx + 1]);
+                    if(comp(*iter, *minIter))
+                        minIter = iter;
+                }
+
+                auto nextNode = *minIter;
+                candidates.erase(minIter);
+
+                nodes.push_back(nextNode);
+                completedNodes.insert(nextNode);
+
+                if(!remainingNodes.empty())
+                {
+                    auto outputNodes
+                        = subGraph.getOutputNodeIndices<ControlGraph::Sequence>(nextNode);
+
+                    for(auto outputNode : outputNodes)
+                    {
+                        if(nodeSatisfied(outputNode))
+                        {
+                            candidates.push_back(outputNode);
+                            remainingNodes.erase(outputNode);
+                        }
+                    }
                 }
             }
-
-            return rv;
         }
+    }
+
+    KernelGraph OrderMultiplyNodes::apply(KernelGraph const& original)
+    {
+        auto rv                   = original;
+        auto groupedMultiplyNodes = OrderMultiplyNodesDetail::getGroupedMultiplyNodes(rv);
+        for(auto& [parent, nodes] : groupedMultiplyNodes)
+        {
+            OrderMultiplyNodesDetail::orderNodes(rv, nodes);
+
+            for(size_t idx = 0; idx + 1 < nodes.size(); idx++)
+            {
+                rv.control.chain<ControlGraph::Sequence>(nodes[idx], nodes[idx + 1]);
+            }
+        }
+
+        return rv;
+    }
+
+    ConstraintStatus NoUnorderedMultiplyNodes(const KernelGraph& k)
+    {
+        ConstraintStatus retval;
+
+        auto groupedMultiplyNodes = OrderMultiplyNodesDetail::getGroupedMultiplyNodes(k);
+
+        std::set<int> ambiguousNodes;
+
+        for(auto& [parent, nodes] : groupedMultiplyNodes)
+        {
+            for(size_t idx = 0; idx + 1 < nodes.size(); idx++)
+            {
+                if(k.control.compareNodes(UpdateCache, nodes[idx], nodes[idx + 1])
+                   == ControlGraph::NodeOrdering::Undefined)
+                {
+                    ambiguousNodes.insert(nodes[idx]);
+                    ambiguousNodes.insert(nodes[idx + 1]);
+                }
+            }
+        }
+
+        if(!ambiguousNodes.empty())
+        {
+            std::ostringstream msg;
+
+            msg << "\\(";
+            streamJoin(msg, ambiguousNodes, "|");
+            msg << "\\)";
+
+            retval.combine(false,
+                           "Unordered multiply nodes found: " + ShowValue(ambiguousNodes)
+                               + " Handy regex search string: " + msg.str());
+        }
+
+        return retval;
     }
 }

@@ -18,7 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from kernels.configs import config_lds
+from kernels.configs.config_arch import lds_config
+from kernels.configs.config_arch import supported_arch
 from types import SimpleNamespace as NS
 
 # Note: Default direct_to_from_reg is True

@@ -35,6 +35,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename T, typename S, typename U, typename I>
 void gesdd_checkBadArgs(const rocblas_handle handle,
@@ -485,7 +486,7 @@ void gesdd_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -501,12 +502,12 @@ void gesdd_getPerfData(const rocblas_handle handle,
     {
         gesdd_initData<false, true, T>(handle, left_svect, right_svect, m, n, dA, lda, bc, hA, A, 0);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_gesdd(STRIDED, handle, left_svect, right_svect, m, n, dA.data(), lda, stA,
                         dS.data(), stS, dU.data(), ldu, stU, dV.data(), ldv, stV, dinfo.data(), bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
@@ -757,7 +758,7 @@ void testing_gesdd(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             gesdd_getPerfData<STRIDED, T, S>(handle, leftv, rightv, m, n, dA, lda, stA, dS, stS, dU,
                                              ldu, stU, dV, ldv, stV, dinfo, bc, hA, hS, hU, hV,
@@ -797,7 +798,7 @@ void testing_gesdd(Arguments& argus)
         }
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
         {
             gesdd_getPerfData<STRIDED, T, S>(handle, leftv, rightv, m, n, dA, lda, stA, dS, stS, dU,
                                              ldu, stU, dV, ldv, stV, dinfo, bc, hA, hS, hU, hV,

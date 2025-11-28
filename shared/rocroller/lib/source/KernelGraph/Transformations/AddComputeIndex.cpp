@@ -51,8 +51,9 @@ namespace rocRoller::KernelGraph
         std::vector<int> coords;
         int              location;
         Graph::Direction direction;
-        int              forLoop          = -1;
-        bool             replaceWithScope = true;
+        int              forLoop                    = -1;
+        bool             replaceWithScope           = true;
+        bool             isStorePartOfGlobalToLDSOp = false;
     };
 
     bool operator<(const ComputeIndexChainSpecification& a, const ComputeIndexChainSpecification& b)
@@ -88,10 +89,16 @@ namespace rocRoller::KernelGraph
      * Workgroup coordinate and attach it with a Buffer edge to the
      * `dst`.
      */
-    int getBuffer(KernelGraph& graph, int opTag, int dst, BufferMap& bufferMap, bool isDirect2LDS)
+    int getBuffer(KernelGraph& graph,
+                  int          opTag,
+                  int          dst,
+                  BufferMap&   bufferMap,
+                  bool         isStorePartOfDirect2LDSOp)
     {
         auto op = graph.control.getElement(opTag);
-        if(isOperation<LoadLDSTile>(op) || isOperation<StoreLDSTile>(op) || isDirect2LDS)
+        if(not(isOperation<LoadTiled>(op) || isOperation<StoreTiled>(op)
+               || isOperation<LoadTileDirect2LDS>(op))
+           || isStorePartOfDirect2LDSOp)
             return -1;
 
         if(!bufferMap.contains(dst))
@@ -129,13 +136,13 @@ namespace rocRoller::KernelGraph
                          DataType     valueType,
                          DataType     offsetType,
                          DataType     strideType,
-                         bool         isDirect2LDS)
+                         bool         isStorePartOfGlobalToLDSOp)
     {
         using CCI = Connections::ComputeIndex;
         using CCA = Connections::ComputeIndexArgument;
 
         auto ci = graph.control.addElement(
-            ComputeIndex{forward, isDirect2LDS, valueType, offsetType, strideType});
+            ComputeIndex{forward, isStorePartOfGlobalToLDSOp, valueType, offsetType, strideType});
 
         if(base > 0)
             graph.mapper.connect(ci, base, CCI{CCA::BASE});
@@ -204,11 +211,11 @@ namespace rocRoller::KernelGraph
     std::vector<RequiredCoordinateInfo> getRequiredCoordinatesInfo(int                op,
                                                                    int                location,
                                                                    KernelGraph const& graph,
-                                                                   bool isDirect2LDS = false)
+                                                                   bool isStorePartOfGlobalToLDSOp)
     {
-        auto [target, direction] = getOperationTarget(op, graph, isDirect2LDS);
+        auto [target, direction] = getOperationTarget(op, graph, isStorePartOfGlobalToLDSOp);
         auto [required, path]    = findRequiredCoordinates(target, direction, graph);
-        auto codegen             = getCodeGeneratorCoordinates(graph, op, isDirect2LDS);
+        auto codegen = getCodeGeneratorCoordinates(graph, op, isStorePartOfGlobalToLDSOp);
 
         std::set<int>    isForLoop, isUnroll;
         std::vector<int> ordered;
@@ -274,7 +281,7 @@ namespace rocRoller::KernelGraph
                     sdim = std::distance(codegen.cbegin(), it);
             }
 
-            if(isDirect2LDS)
+            if(isStorePartOfGlobalToLDSOp)
             {
                 sdim += ordered.size();
             }
@@ -298,63 +305,126 @@ namespace rocRoller::KernelGraph
      * @brief Return datatype that should be used for the offset when
      * generating `op`.
      */
-    DataType getOffsetDataType(int op, KernelGraph const& graph, bool direct2LDS)
+    DataType getOffsetDataType(int op, KernelGraph const& graph, bool isStorePartOfGGlobalToLDSOp)
     {
         DataType rv = DataType::UInt64;
         auto     s  = graph.control.get<StoreTiled>(op);
         auto     l  = graph.control.get<LoadTiled>(op);
         auto     ll = graph.control.get<LoadLDSTile>(op);
         auto     sl = graph.control.get<StoreLDSTile>(op);
-        if(s || l || ll || sl || direct2LDS)
+        if(s || l || ll || sl || isStorePartOfGGlobalToLDSOp)
         {
             rv = DataType::UInt32;
         }
         return rv;
     }
 
+    void addUnrollStrideConnection(KernelGraph&                     kgraph,
+                                   int                              candidate,
+                                   bool                             isStorePartOfGlobalToLDSOp,
+                                   const std::vector<int>&          strideCoords,
+                                   std::vector<DeferredConnection>& connections)
+    {
+        auto [target, direction]
+            = getOperationTarget(candidate, kgraph, isStorePartOfGlobalToLDSOp);
+        auto [required, path] = findRequiredCoordinates(target, direction, kgraph);
+        auto unrolls          = filterCoordinates<Unroll>(required, kgraph);
+
+        for(auto const& unroll : unrolls)
+        {
+            {
+                {
+                    auto const subDimension
+                        = kgraph.mapper.getConnectionSubdimension(candidate, unroll);
+                    // Find the neighbour of the Unroll that:
+                    // 1. is in the load/store coordinate transform path
+                    // 2. has a Stride edge connected to it
+                    std::vector<int> neighbourNodes;
+                    if(direction == Graph::Direction::Downstream)
+                        neighbourNodes = kgraph.coordinates.parentNodes(unroll).to<std::vector>();
+                    else
+                        neighbourNodes = kgraph.coordinates.childNodes(unroll).to<std::vector>();
+
+                    for(auto neighbourNode : neighbourNodes)
+                    {
+                        if(path.contains(neighbourNode))
+                        {
+                            auto neighbourEdges = kgraph.coordinates.getNeighbours(
+                                neighbourNode, Graph::opposite(direction));
+                            for(auto neighbourEdge : neighbourEdges)
+                            {
+                                auto maybeStride = kgraph.coordinates.get<Stride>(neighbourEdge);
+                                if(maybeStride
+                                   && std::find(
+                                          strideCoords.begin(), strideCoords.end(), neighbourEdge)
+                                          != strideCoords.end())
+                                {
+                                    auto maybeStrideTag = neighbourEdge;
+                                    auto newConnection
+                                        = makeConnection<Stride, Connections::UnrollStride>(
+                                            maybeStrideTag, subDimension);
+                                    connections.push_back(newConnection);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * @brief Add ComputeIndex nodes required for `op`.
      */
-    ComputeIndexChain addComputeIndex(KernelGraph&  graph,
-                                      int           op,
-                                      ExpressionPtr step,
-                                      int           location,
-                                      BufferMap&    bufferMap,
-                                      bool          isDirect2LDS)
+    ComputeIndexChain addComputeIndex(KernelGraph&                          graph,
+                                      int                                   op,
+                                      ExpressionPtr                         step,
+                                      ComputeIndexChainSpecification const& spec,
+                                      BufferMap&                            bufferMap)
     {
         rocRoller::Log::getLogger()->debug(
             "KernelGraph::AddComputeIndex()::genericComputeIndex(): op {} location {}",
             op,
-            location);
+            spec.location);
 
         auto dtype = getDataType(graph.control.getNode(op));
 
-        auto [target, direction] = getOperationTarget(op, graph, isDirect2LDS);
+        auto [target, direction] = getOperationTarget(op, graph, spec.isStorePartOfGlobalToLDSOp);
 
         int                             update = -1;
         std::vector<int>                chain;
         std::vector<DeferredConnection> connections;
         std::map<int, int>              offsetOfCoord;
+        bool                            hasUnroll = false;
+        std::vector<int>                strideCoords;
 
-        for(auto info : getRequiredCoordinatesInfo(op, location, graph, isDirect2LDS))
+        for(auto info :
+            getRequiredCoordinatesInfo(op, spec.location, graph, spec.isStorePartOfGlobalToLDSOp))
         {
+            if(info.isUnroll)
+                hasUnroll = true;
             // Add ComputeIndex operation
             int offset = -1, stride = -1, buffer = -1;
-            if(direction == Graph::Direction::Downstream)
+
             {
+                auto inCoord  = target;
+                auto outCoord = info.coord;
+                if(direction == Graph::Direction::Upstream)
+                {
+                    std::swap(inCoord, outCoord);
+                }
+
                 if(!info.isUnroll)
-                    offset = graph.coordinates.addElement(Offset(), {target}, {info.coord});
-                stride = graph.coordinates.addElement(Stride(), {target}, {info.coord});
+                    offset = graph.coordinates.addElement(Offset(), {inCoord}, {outCoord});
+                stride = graph.coordinates.addElement(Stride(), {inCoord}, {outCoord});
                 if(info.base == -1 && offset != -1)
-                    buffer = getBuffer(graph, op, target, bufferMap, isDirect2LDS);
-            }
-            else
-            {
-                if(!info.isUnroll)
-                    offset = graph.coordinates.addElement(Offset(), {info.coord}, {target});
-                stride = graph.coordinates.addElement(Stride(), {info.coord}, {target});
-                if(info.base == -1 && offset != -1)
-                    buffer = getBuffer(graph, op, target, bufferMap, isDirect2LDS);
+                {
+                    const bool isDirect2LDS
+                        = isOperation<LoadTileDirect2LDS>(graph.control.getElement(op));
+                    const bool isStorePartOfDirect2LDSOp
+                        = (isDirect2LDS && spec.isStorePartOfGlobalToLDSOp);
+                    buffer = getBuffer(graph, op, target, bufferMap, isStorePartOfDirect2LDSOp);
+                }
             }
 
             offsetOfCoord[info.coord] = offset;
@@ -362,7 +432,7 @@ namespace rocRoller::KernelGraph
             int base = (info.base == -1) ? -1 : offsetOfCoord.at(info.base);
 
             // For future: choose type based on buffer or non-buffer
-            auto offsetDataType = getOffsetDataType(op, graph, isDirect2LDS);
+            auto offsetDataType = getOffsetDataType(op, graph, spec.isStorePartOfGlobalToLDSOp);
             auto strideDataType = DataType::UInt64;
 
             if(info.isUnroll)
@@ -381,7 +451,7 @@ namespace rocRoller::KernelGraph
                                              dtype,
                                              offsetDataType,
                                              strideDataType,
-                                             isDirect2LDS));
+                                             spec.isStorePartOfGlobalToLDSOp));
 
             // Add connections for register allocate, and so tracer
             // can determine correct lifetimes
@@ -391,6 +461,14 @@ namespace rocRoller::KernelGraph
                 connections.push_back(DC<Stride>(stride, info.sdim));
             if(buffer != -1)
                 connections.push_back(DC<Buffer>(buffer));
+            if(base != -1)
+                connections.push_back(
+                    makeConnection<Offset, Connections::BaseOffset>(base, info.sdim));
+
+            // save all stride coordinates for the memory operation
+            // then select the unroll stride and add it to connection
+            if(stride != -1)
+                strideCoords.push_back(stride);
 
             if(info.needsUpdate)
             {
@@ -409,6 +487,9 @@ namespace rocRoller::KernelGraph
                 graph.mapper.connect(update, offset, NaryArgument::DEST);
             }
         }
+
+        addUnrollStrideConnection(
+            graph, op, spec.isStorePartOfGlobalToLDSOp, strideCoords, connections);
 
         for(int i = 1; i < chain.size(); ++i)
             graph.control.addElement(Sequence(), {chain[i - 1]}, {chain[i]});
@@ -478,32 +559,39 @@ namespace rocRoller::KernelGraph
                         int                candidate,
                         int                location,
                         Graph::Direction   direction,
-                        bool               isDirect2LDS     = false,
+                        bool               isStorePartOfGlobalToLDSOp,
                         int                forLoop          = -1,
                         bool               replaceWithScope = true)
         {
             std::vector<int> specCoords;
-            for(auto info : getRequiredCoordinatesInfo(candidate, location, graph, isDirect2LDS))
+            for(auto info :
+                getRequiredCoordinatesInfo(candidate, location, graph, isStorePartOfGlobalToLDSOp))
             {
                 specCoords.push_back(info.coord);
             }
 
-            ComputeIndexChainSpecification spec{
-                target, specCoords, location, direction, forLoop, replaceWithScope};
+            ComputeIndexChainSpecification spec{target,
+                                                specCoords,
+                                                location,
+                                                direction,
+                                                forLoop,
+                                                replaceWithScope,
+                                                isStorePartOfGlobalToLDSOp};
             m_chains[spec].push_back(candidate);
         }
 
-        void stage(KernelGraph const& kgraph, int candidate, bool isDirect2LDS)
+        void stage(KernelGraph const& kgraph, int candidate, bool isStorePartOfGlobalToLDSOp)
         {
             auto log = rocRoller::Log::getLogger();
 
             auto node = kgraph.control.getNode<Operation>(candidate);
             log->debug("KernelGraph::addComputeIndex({}): {}", candidate, toString(node));
 
-            auto [target, direction] = getOperationTarget(candidate, kgraph, isDirect2LDS);
-            auto [required, path]    = findRequiredCoordinates(target, direction, kgraph);
-            auto forLoopCoordinates  = filterCoordinates<ForLoop>(required, kgraph);
-            auto unrollCoordinates   = filterCoordinates<Unroll>(required, kgraph);
+            auto [target, direction]
+                = getOperationTarget(candidate, kgraph, isStorePartOfGlobalToLDSOp);
+            auto [required, path]   = findRequiredCoordinates(target, direction, kgraph);
+            auto forLoopCoordinates = filterCoordinates<ForLoop>(required, kgraph);
+            auto unrollCoordinates  = filterCoordinates<Unroll>(required, kgraph);
 
             log->debug("  target: {}", target);
             for(auto r : required)
@@ -517,6 +605,31 @@ namespace rocRoller::KernelGraph
             auto hasUnroll     = !unrollCoordinates.empty();
             auto isUniformLoop = maybeForLoop && uniformForLoop(maybeForLoop, kgraph);
 
+            auto isReceiveTileLoop = false;
+            if(maybeForLoop)
+            {
+                if(getForLoopName(kgraph, maybeForLoop.value()) == rocRoller::RECEIVE)
+                    isReceiveTileLoop = true;
+            }
+
+            if(isReceiveTileLoop)
+            {
+                auto maybeTopOfLoop = findTopOfContainingOperation<ForLoopOp>(candidate, kgraph);
+                log->debug("  staged as: isReceiveTileLoop, location {}, {}",
+                           *maybeForLoop,
+                           *maybeTopOfLoop);
+
+                stageChain(kgraph,
+                           target,
+                           candidate,
+                           *maybeTopOfLoop,
+                           GD::Upstream,
+                           isStorePartOfGlobalToLDSOp,
+                           -1,
+                           false);
+                return;
+            }
+
             if(hasForLoop && isUniformLoop)
             {
                 log->debug("  staged as: hasForLoop and isUniformLoop, location {} forLoopOp {}",
@@ -527,7 +640,7 @@ namespace rocRoller::KernelGraph
                            candidate,
                            *maybeForLoop,
                            GD::Upstream,
-                           isDirect2LDS,
+                           isStorePartOfGlobalToLDSOp,
                            *maybeForLoop);
                 return;
             }
@@ -554,7 +667,13 @@ namespace rocRoller::KernelGraph
                            "forLoopOp {}",
                            *maybeForLoop,
                            *maybeForLoop);
-                stageChain(kgraph, target, candidate, *maybeScope, GD::Upstream, isDirect2LDS, -1);
+                stageChain(kgraph,
+                           target,
+                           candidate,
+                           *maybeScope,
+                           GD::Upstream,
+                           isStorePartOfGlobalToLDSOp,
+                           -1);
                 return;
             }
 
@@ -569,7 +688,7 @@ namespace rocRoller::KernelGraph
                            candidate,
                            *maybeTopOfLoop,
                            GD::Upstream,
-                           isDirect2LDS,
+                           isStorePartOfGlobalToLDSOp,
                            -1,
                            false);
                 return;
@@ -580,7 +699,13 @@ namespace rocRoller::KernelGraph
                 log->debug("  staged as: hasUnroll");
 
                 auto kernel = *kgraph.control.roots().begin();
-                stageChain(kgraph, target, candidate, kernel, GD::Downstream, isDirect2LDS, -1);
+                stageChain(kgraph,
+                           target,
+                           candidate,
+                           kernel,
+                           GD::Downstream,
+                           isStorePartOfGlobalToLDSOp,
+                           -1);
                 return;
             }
 
@@ -589,12 +714,19 @@ namespace rocRoller::KernelGraph
                 auto forLoop = *maybeForLoop;
                 log->debug("  staged as: uniformForLoop, forLoopOp {}", forLoop);
 
-                stageChain(kgraph, target, candidate, forLoop, GD::Upstream, isDirect2LDS, forLoop);
+                stageChain(kgraph,
+                           target,
+                           candidate,
+                           forLoop,
+                           GD::Upstream,
+                           isStorePartOfGlobalToLDSOp,
+                           forLoop);
                 return;
             }
 
             log->debug("  staged as: immediate");
-            stageChain(kgraph, target, candidate, candidate, GD::Upstream, isDirect2LDS);
+            stageChain(
+                kgraph, target, candidate, candidate, GD::Upstream, isStorePartOfGlobalToLDSOp);
         }
 
         KernelGraph commit(KernelGraph const& original) const
@@ -612,18 +744,13 @@ namespace rocRoller::KernelGraph
                     step            = simplify(rhs);
                 }
 
-                auto isDirect2LDS
-                    = (original.control.get<LoadTileDirect2LDS>(candidates[0]).has_value()
-                       && original.coordinates.get<LDS>(spec.target).has_value());
-
                 // Use first candidate to compute indexes
                 rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::AddComputeIndex()::commit({}) isDirect2LDS({})",
+                    "KernelGraph::AddComputeIndex()::commit({}) isStorePartOfGlobalToLDSOp({})",
                     candidates[0],
-                    isDirect2LDS);
+                    spec.isStorePartOfGlobalToLDSOp);
 
-                auto chain = addComputeIndex(
-                    kgraph, candidates[0], step, spec.location, bufferMap, isDirect2LDS);
+                auto chain = addComputeIndex(kgraph, candidates[0], step, spec, bufferMap);
 
                 if(spec.direction == GD::Downstream)
                 {
@@ -712,10 +839,10 @@ namespace rocRoller::KernelGraph
         for(auto candidate :
             findComputeIndexCandidates(original, *original.control.roots().begin()))
         {
+            // Global to LDS ops have two sets of coordinates for the load and store parts
             indexer.stage(original, candidate, false);
-            auto isDirect2LDS = original.control.get<LoadTileDirect2LDS>(candidate).has_value();
-            if(isDirect2LDS)
-                indexer.stage(original, candidate, true);
+            if(isGlobalToLDSOp(original, candidate))
+                indexer.stage(original, candidate, /*isStorePartOfGlobalToLDSOp=*/true);
         }
 
         return indexer.commit(original);

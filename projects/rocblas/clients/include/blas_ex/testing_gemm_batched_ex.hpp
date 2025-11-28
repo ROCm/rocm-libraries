@@ -103,7 +103,7 @@ void testing_gemm_batched_ex_bad_arg(const Arguments& arg)
         rocblas_seedrand();
         rocblas_init_matrix<To>(
             hC, arg, rocblas_client_beta_sets_nan, rocblas_client_general_matrix);
-        dC.transfer_from(hC);
+        CHECK_HIP_ERROR(dC.transfer_from(hC));
 
         // clang-format off
 // check for invalid enum

@@ -28,6 +28,88 @@ This uses Git’s partial clone feature (`--filter=blob:none`) to reduce how muc
 With the source tree as of June 19th, 2025, the clone command lasted 4 seconds in one test run.
 The checkout command of the two projects lasted less than 90 seconds.
 
+## Working with the Superbuild
+
+> [!TIP]
+> 💡 Refer to the README.md file in each project [subfolder](projects) for details on building that specific project without making the superbuild. [TheRock](https://github.com/ROCm/TheRock) is now the preferred system for performing a superbuild of rocm-libraries. See TheRock [Development Guide](https://github.com/ROCm/TheRock/blob/main/docs/development/development_guide.md) for more details.
+
+To issue a full ROCm libraries superbuild for all projects and targets:
+
+```bash
+# configure
+cmake -B build -S .
+# build
+cmake --build build
+# install
+cmake --install build
+```
+
+Since, by default, CMake installs into `/usr/local` (on Linux) and ` C:\Program Files\CMake` (on Windows), and the canonical ROCm libraries path (`/opt/rocm`) is not in CMake's search path, it is recommended to set the prefix path and install prefix when configuring without a [toolchain file](#superbuild-toolchain-files).
+
+```bash
+# configure
+cmake -B build -S . -D CMAKE_INSTALL_PREFIX=/opt/rocm -D CMAKE_PREFIX_PATH=/opt/rocm
+```
+
+To simplify the configure and build commands for various build contexts, presets are provided in [CMakePresets.json](../CMakePresets.json). To view available presets:
+
+```bash
+# show configure presets
+cmake --list-presets=configure
+
+# show build presets
+cmake --list-presets=build
+```
+
+For example, to issue a superbuild for all projects and targets:
+
+```bash
+# configure
+cmake --preset release:all
+# build
+cmake --build --preset default
+```
+
+Alternatively, to build only [rocroller](https://github.com/ROCm/rocm-libraries/tree/develop/shared/rocroller):
+
+```bash
+# configure
+cmake --preset rocroller
+# build
+cmake --build --preset default
+```
+
+> [!TIP]
+> By default, the configure presets will generate build artifacts to the `build` directory; override this by setting `-B <build-dir>`.
+> In addition, all configure presets use the `linux-amdclang.cmake` toolchain; override this by setting `-D CMAKE_TOOLCHAIN_FILE=<toolchain-file>`.
+> Otherwise, none of the configure or build presets make assumptions about additional flags.
+> For example, to speed up the build, add `-j`/`--parallel`, or to debug the build, add `--verbose`.
+
+If you wish to have granular control over the build, use `-D ROCM_LIBS_ENABLE_COMPONENTS="list;of;components"` to selectively enable the desired projects and dependencies. For example, to build rocroller without its preset:
+
+```bash
+# configure
+cmake -B build -S . -D ROCM_LIBS_ENABLE_COMPONENTS="mxdatagenerator;rocroller"
+# build
+cmake --build build
+```
+
+### Superbuild Toolchain Files
+
+Toolchain files are located at [cmake/toolchains](https://github.com/ROCm/rocm-libraries/tree/develop/cmake/toolchains). These files establish paths to the AMD compilers and other toolchains components. To use a toolchain file when issuing a superbuild, use:
+
+```bash
+# configure
+cmake -B build -S . -D CMAKE_TOOLCHAIN_FILE=./cmake/toolchains/<toolchain-file>
+```
+
+Or, with an existing preset:
+
+```bash
+# configure
+cmake --preset release:all -D CMAKE_TOOLCHAIN_FILE=./cmake/toolchains/<toolchain-file>
+```
+
 ## Working on Multiple Projects
 
 If your work involves changing projects or introducing new projects, you can update your sparse-checkout environment:
@@ -98,6 +180,34 @@ We are transitioning to trunk-based development, with the tentative plan happeni
 Until the switch is fully implemented, we will continue to sync changes to individual repositories following their existing development model (e.g., `develop` -> `staging` -> `mainline` -> `release`).
 However, once trunk-based development is in place, feature branches will be created directly from the default branch, `develop`.
 During this period, a high priority will be placed on keeping the `develop` branch healthy.
+
+## Pre-commit Hooks
+
+Pre-commit hooks automatically run code quality checks before you commit changes, catching issues early in the development process. This includes formatting checks, linting, and other automated validations. See [`.pre-commit-config.yaml`](.pre-commit-config.yaml) for specifics.
+
+### Setting Up Pre-commit
+
+1. Install pre-commit:
+```bash
+pip install pre-commit
+```
+
+2. Install the git hooks:
+```bash
+cd rocm-libraries
+pre-commit install
+```
+
+After they are installed, the hooks will run automatically for `git commit`. If any checks fail, the commit will be blocked until you fix the issues.
+
+### Running Pre-commit Manually
+
+Run checks on staged files:
+```bash
+pre-commit
+```
+
+---
 
 ## Pull Request Guidelines
 

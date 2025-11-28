@@ -42,18 +42,9 @@ if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
   set( CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel." )
 endif()
 
-if (NOT WIN32)
-    if ( NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC} )
-      set( CMAKE_Fortran_COMPILER  "gfortran" )
-    endif()
-    set( fortran_language "Fortran" )
-endif( )
+project( hipblas LANGUAGES CXX )
 
-project( hipblas LANGUAGES CXX ${fortran_language} )
-
-if (NOT python)
-    set(python "python3") # default for linux
-endif()
+find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
 # Append our library helper cmake path and the cmake path for hip (for convenience)
 # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
@@ -66,7 +57,7 @@ list( APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake/hip /opt/rocm /opt/rocm/ll
 # rocm-cmake contains common cmake code for rocm projects to help setup and install
 include(dependencies)
 
-set ( VERSION_STRING "3.1.0" )
+set ( VERSION_STRING "3.2.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 option( BUILD_VERBOSE "Output additional build information" OFF )
@@ -135,16 +126,19 @@ if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
     rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
   endif()
   message(STATUS "OS: ${CLIENTS_OS} ${CLIENTS_OS_VERSION}")
-  set(GFORTRAN_RPM "libgfortran4")
-  set(GFORTRAN_DEB "libgfortran4")
-  if(CLIENTS_OS STREQUAL "centos" OR CLIENTS_OS STREQUAL "rhel" OR CLIENTS_OS STREQUAL "almalinux")
-    if(CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "8")
-      set(GFORTRAN_RPM "libgfortran")
+
+  if(BUILD_FORTRAN_CLIENTS)
+    set(GFORTRAN_RPM "libgfortran4")
+    set(GFORTRAN_DEB "libgfortran4")
+    if(CLIENTS_OS STREQUAL "centos" OR CLIENTS_OS STREQUAL "rhel" OR CLIENTS_OS STREQUAL "almalinux")
+      if(CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "8")
+        set(GFORTRAN_RPM "libgfortran")
+      endif()
+    elseif(CLIENTS_OS STREQUAL "ubuntu" AND CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "20.04")
+      set(GFORTRAN_DEB "libgfortran5")
+    elseif(CLIENTS_OS STREQUAL "mariner" OR CLIENTS_OS STREQUAL "azurelinux")
+      set(GFORTRAN_RPM "gfortran")
     endif()
-  elseif(CLIENTS_OS STREQUAL "ubuntu" AND CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "20.04")
-    set(GFORTRAN_DEB "libgfortran5")
-  elseif(CLIENTS_OS STREQUAL "mariner" OR CLIENTS_OS STREQUAL "azurelinux")
-    set(GFORTRAN_RPM "gfortran")
   endif()
 
   set( BUILD_CLIENTS ON )
@@ -154,26 +148,35 @@ if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
     rocm_package_setup_client_component(
       tests
       DEPENDS
-        COMPONENT clients-common
-        DEB "${GFORTRAN_DEB}"
-        RPM "${GFORTRAN_RPM}")
+        COMPONENT clients-common)
   endif()
   if(BUILD_CLIENTS_BENCHMARKS)
     rocm_package_setup_client_component(
       benchmarks
       DEPENDS
-        COMPONENT clients-common
-        DEB "${GFORTRAN_DEB}"
-        RPM "${GFORTRAN_RPM}")
+        COMPONENT clients-common)
   endif()
   if(BUILD_CLIENTS_SAMPLES)
-    rocm_package_setup_client_component(
+    rocm_package_setup_client_component( 
       samples
       DEPENDS
-        COMPONENT clients-common
-        DEB "${GFORTRAN_DEB}"
-        RPM "${GFORTRAN_RPM}")
+        COMPONENT clients-common)
   endif()
+  if(BUILD_FORTRAN_CLIENTS)
+    if(BUILD_CLIENTS_TESTS)
+      rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_RPM}")
+      rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_DEB}")
+    endif()
+    if(BUILD_CLIENTS_BENCHMARKS)
+      rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_RPM}")
+      rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_DEB}")
+    endif()
+    if(BUILD_CLIENTS_SAMPLES)
+      rocm_package_add_rpm_dependencies(COMPONENT samples DEPENDS "${GFORTRAN_RPM}")
+      rocm_package_add_deb_dependencies(COMPONENT samples DEPENDS "${GFORTRAN_DEB}")
+    endif()
+  endif()
+
   add_subdirectory( clients )
 endif( )
 
@@ -190,14 +193,14 @@ endif( )
 
 # Package specific CPACK vars
 if(HIP_PLATFORM STREQUAL amd)
-  set(rocblas_minimum 5.1.0)
-  set(rocsolver_minimum 3.31.0)
+  set(rocblas_minimum 5.2.0)
+  set(rocsolver_minimum 3.32.0)
   rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}")
   rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${rocblas_minimum}" "rocsolver-static-devel >= ${rocsolver_minimum}")
   rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${rocblas_minimum}" "rocsolver-static-dev >= ${rocsolver_minimum}")
 endif( )
 
-set(hipblas_common_minimum 1.3.0)
+set(hipblas_common_minimum 1.4.0)
 
 if(BUILD_SHARED_LIBS)
   rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-dev >= ${hipblas_common_minimum}")
@@ -296,6 +299,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hipblas-coverage_*.profraw -o ./coverage-report/hipblas.profdata
     COMMAND ${LLVM_COV} report -object ./library/src/libhipblas.so -instr-profile=./coverage-report/hipblas.profdata
     COMMAND ${LLVM_COV} show -object ./library/src/libhipblas.so -instr-profile=./coverage-report/hipblas.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/libhipblas.so -instr-profile=./coverage-report/hipblas.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 

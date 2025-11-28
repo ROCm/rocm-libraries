@@ -16,10 +16,6 @@ endif()
 
 set(CMAKE_CXX_COMPILER "${rocm_bin}/clang++.exe")
 
-if (NOT python)
-  set(python "python3") # take default for windows
-endif()
-
 # our usage flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DWIN32 -D_CRT_SECURE_NO_WARNINGS")
 
