@@ -34,9 +34,9 @@
 // CK includes
 #include <ck/library/tensor_operation_instance/gpu/contraction_bilinear.hpp>
 #include <ck/library/tensor_operation_instance/gpu/contraction_scale.hpp>
+#include <ck/library/utility/host_tensor.hpp>
 #include <ck/tensor_operation/gpu/device/device_contraction_multiple_d.hpp>
 #include <ck/tensor_operation/gpu/element/element_wise_operation.hpp>
-#include <host_tensor.hpp>
 
 #include "contraction_meta_traits.hpp"
 #include "contraction_solution.hpp"
@@ -305,19 +305,19 @@ namespace hiptensor
                         }
                     };
 
-                    make_ParallelTensorFunctor(f_ms_ns_complex,
-                                               arg.mE_ms_ns_lengths[0],
-                                               arg.mE_ms_ns_lengths[1],
-                                               arg.mE_ms_ns_lengths[2],
-                                               arg.mE_ms_ns_lengths[3],
-                                               arg.mE_ms_ns_lengths[4],
-                                               arg.mE_ms_ns_lengths[5],
-                                               arg.mE_ms_ns_lengths[6],
-                                               arg.mE_ms_ns_lengths[7],
-                                               arg.mE_ms_ns_lengths[8],
-                                               arg.mE_ms_ns_lengths[9],
-                                               arg.mE_ms_ns_lengths[10],
-                                               arg.mE_ms_ns_lengths[11])(
+                    ck::make_ParallelTensorFunctor(f_ms_ns_complex,
+                                                   arg.mE_ms_ns_lengths[0],
+                                                   arg.mE_ms_ns_lengths[1],
+                                                   arg.mE_ms_ns_lengths[2],
+                                                   arg.mE_ms_ns_lengths[3],
+                                                   arg.mE_ms_ns_lengths[4],
+                                                   arg.mE_ms_ns_lengths[5],
+                                                   arg.mE_ms_ns_lengths[6],
+                                                   arg.mE_ms_ns_lengths[7],
+                                                   arg.mE_ms_ns_lengths[8],
+                                                   arg.mE_ms_ns_lengths[9],
+                                                   arg.mE_ms_ns_lengths[10],
+                                                   arg.mE_ms_ns_lengths[11])(
                         std::thread::hardware_concurrency());
                 }
                 else
@@ -424,19 +424,19 @@ namespace hiptensor
                         }
                     };
 
-                    make_ParallelTensorFunctor(f_ms_ns,
-                                               arg.mE_ms_ns_lengths[0],
-                                               arg.mE_ms_ns_lengths[1],
-                                               arg.mE_ms_ns_lengths[2],
-                                               arg.mE_ms_ns_lengths[3],
-                                               arg.mE_ms_ns_lengths[4],
-                                               arg.mE_ms_ns_lengths[5],
-                                               arg.mE_ms_ns_lengths[6],
-                                               arg.mE_ms_ns_lengths[7],
-                                               arg.mE_ms_ns_lengths[8],
-                                               arg.mE_ms_ns_lengths[9],
-                                               arg.mE_ms_ns_lengths[10],
-                                               arg.mE_ms_ns_lengths[11])(
+                    ck::make_ParallelTensorFunctor(f_ms_ns,
+                                                   arg.mE_ms_ns_lengths[0],
+                                                   arg.mE_ms_ns_lengths[1],
+                                                   arg.mE_ms_ns_lengths[2],
+                                                   arg.mE_ms_ns_lengths[3],
+                                                   arg.mE_ms_ns_lengths[4],
+                                                   arg.mE_ms_ns_lengths[5],
+                                                   arg.mE_ms_ns_lengths[6],
+                                                   arg.mE_ms_ns_lengths[7],
+                                                   arg.mE_ms_ns_lengths[8],
+                                                   arg.mE_ms_ns_lengths[9],
+                                                   arg.mE_ms_ns_lengths[10],
+                                                   arg.mE_ms_ns_lengths[11])(
                         std::thread::hardware_concurrency());
                 }
 
@@ -632,4 +632,3 @@ namespace hiptensor
     }
 
 } // namespace hiptensor
-
