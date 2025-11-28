@@ -210,25 +210,39 @@ endif()
 set ( VERSION_STRING "2.2.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
-# configure a header file to pass the CMake version settings to the source
+# Configure a header file to pass the CMake version settings to the source
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/hiptensor-version.h.in"
                "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/hiptensor-version.h" )
 
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/hiptensorConfigVersion.cmake"
-    VERSION "${VERSION_STRING}"
-    COMPATIBILITY AnyNewerVersion
+# Define package dependencies for export
+set(PACKAGE_DEPENDS
+    PACKAGE hip
+    PACKAGE composable_kernel
 )
 
-configure_package_config_file(${CMAKE_CURRENT_SOURCE_DIR}/Config.cmake.in
-     "${CMAKE_CURRENT_BINARY_DIR}/hiptensorConfig.cmake"
-     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hiptensor
-     NO_CHECK_REQUIRED_COMPONENTS_MACRO
+set(PACKAGE_STATIC_DEPENDS
+    PACKAGE Threads
 )
 
+# Export targets using ROCm automation
+rocm_export_targets(
+    TARGETS hiptensor
+    DEPENDS
+        ${PACKAGE_DEPENDS}
+    STATIC_DEPENDS
+        ${PACKAGE_STATIC_DEPENDS}
+)
+
+# Add architecture functions to the ROCm-generated config
+install(CODE "
+    file(APPEND \"\${CMAKE_INSTALL_PREFIX}/\${CMAKE_INSTALL_LIBDIR}/cmake/hiptensor/hiptensorConfig.cmake\"
+         \"\\n# Include hiptensor supported architectures functions\\n\")
+    file(APPEND \"\${CMAKE_INSTALL_PREFIX}/\${CMAKE_INSTALL_LIBDIR}/cmake/hiptensor/hiptensorConfig.cmake\"
+         \"include(\\\"\\\${CMAKE_CURRENT_LIST_DIR}/hiptensorSupportedArchitectures.cmake\\\")\\n\")
+")
+
+# Install additional helper files
 rocm_install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/hiptensorConfig.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/hiptensorConfigVersion.cmake"
     "cmake/Functions/hiptensorSupportedArchitectures.cmake"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hiptensor
 )
