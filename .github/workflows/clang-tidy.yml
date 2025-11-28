@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  hipdnn-tidy:
+  clang-tidy:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout rocm-libraries
@@ -19,6 +19,29 @@ jobs:
         with:
           repository: ROCm/TheRock
           path: TheRock
+
+      - name: Show disk usage before cleanup
+        run: |
+          echo "=== Overall disk usage ==="
+          df -h /
+          echo ""
+          echo "=== /usr/share contents ==="
+          sudo du -sh /usr/share/* 2>/dev/null | sort -hr | head -20
+          echo ""
+          echo "=== /usr/local contents ==="
+          sudo du -sh /usr/local/* 2>/dev/null | sort -hr | head -20
+          echo ""
+          echo "=== /opt contents ==="
+          sudo du -sh /opt/* 2>/dev/null | sort -hr | head -20
+          echo ""
+          echo "=== AGENT_TOOLSDIRECTORY ($AGENT_TOOLSDIRECTORY) ==="
+          sudo du -sh "$AGENT_TOOLSDIRECTORY"/* 2>/dev/null | sort -hr | head -20 || echo "Directory not found"
+          echo ""
+          echo "=== Docker images ==="
+          sudo docker system df 2>/dev/null || echo "Docker not available"
+          echo ""
+          echo "=== Large directories in /home ==="
+          sudo du -sh /home/*/* 2>/dev/null | sort -hr | head -10
 
       - name: Free Disk Space
         run: |
