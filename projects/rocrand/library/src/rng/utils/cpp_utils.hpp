@@ -31,6 +31,7 @@
 #include <array>
 #include <tuple>
 #include <type_traits>
+#include <variant>
 
 #include <cassert>
 #include <cstddef>
@@ -274,6 +275,29 @@ constexpr T min(const T& a, const T& b)
 {
     return a < b ? a : b;
 }
+
+template<typename T, T... Vs>
+struct constexpr_value_variant
+{
+    using variant = std::variant<std::integral_constant<T, Vs>...>;
+
+    static variant create(T value)
+    {
+        variant var{};
+        // Unfold over variadic enum values. For each value
+        // create and run a small lambda that sets our variant.
+        (
+            [&]
+            {
+                if(value == Vs)
+                {
+                    var = std::integral_constant<T, Vs>{};
+                }
+            }(),
+            ...);
+        return var;
+    }
+};
 
 } // end namespace rocrand_impl::cpp_utils
 

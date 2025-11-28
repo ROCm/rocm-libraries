@@ -23,6 +23,13 @@ The rocSOLVER repository for ROCm 7.0.2 and earlier is located at `<https://gith
 
     * :doc:`Installation guide <./installation/installlinux>`
 
+.. grid:: 2
+  :gutter: 3
+
+  .. grid-item-card:: Conceptual
+
+    * :doc:`Introduction to rocSOLVER <./conceptual/intro-rocsolver>`
+
   .. grid-item-card:: How to
 
     * :doc:`Use rocSOLVER <./howto/using>`
@@ -36,7 +43,7 @@ The rocSOLVER repository for ROCm 7.0.2 and earlier is located at `<https://gith
 
   .. grid-item-card:: API reference
 
-    * :doc:`rocSOLVER API introduction <./reference/intro>`
+    * :doc:`rocSOLVER API summary <./reference/intro>`
     * :doc:`rocSOLVER types <./reference/types>`
     * :doc:`rocSOLVER precision support <./reference/precision>`
     * :doc:`rocSOLVER environment variables <./reference/env_variables>`

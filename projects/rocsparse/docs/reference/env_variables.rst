@@ -55,3 +55,53 @@ For more information, see :ref:`rocsparse_logging`.
       - stderr output
       - | Full path name for debug log files.
         | If not set or file cannot be opened, output streams to stderr.
+
+Debug variables
+================================================================================
+
+The debug environment variables for rocSPARSE are collected in the following table.
+For more information, see :doc:`Debugging rocSPARSE functions <./debugging>`.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 35,14,51
+
+    * - **Environment variable**
+      - **Default value**
+      - **Value**
+
+    * - | ``ROCSPARSE_DEBUG``
+        | Generates code traces for unsuccessful status returns.
+        | The level of information depends on the ``ROCSPARSE_DEBUG_VERBOSE`` setting.
+      - No debug
+      - | **0**: Disable (no debug)
+        | **1**: Enable
+    * - | ``ROCSPARSE_DEBUG_ARGUMENTS``
+        | Generates debug messages when errors occur during argument checking.
+        | The level of information depends on the value of ``ROCSPARSE_DEBUG_ARGUMENTS_VERBOSE``.
+      - No debug
+      - | **0**: Disable
+        | **1**: Enable
+    * - | ``ROCSPARSE_DEBUG_ARGUMENTS_VERBOSE``
+        | Generates verbose-level debug messages for argument checking.
+      - Verbose level off for argument checking debug messages
+      - | **0**: Disable
+        | **1**: Enable
+    * - | ``ROCSPARSE_DEBUG_KERNEL_LAUNCH``
+        | Generates kernel launch debug messages.
+        | Checks for HIP errors before and after every kernel launch.
+      - No kernel launch debug
+      - | **0**: Disable
+        | **1**: Enable
+    * - | ``ROCSPARSE_DEBUG_VERBOSE``
+        | Generates verbose-level debug messages.
+        | Displays a stack of code traces that shows where the code handled a unsuccessful status.
+      - Verbose level off for debug messages
+      - | **0**: Disable
+        | **1**: Enable
+    * - | ``ROCSPARSE_DEBUG_WARNINGS``
+        | Enable debug warnings.
+        | Prints specific debug warnings during execution.
+      - No debug warnings
+      - | **0**: Disable
+        | **1**: Enable

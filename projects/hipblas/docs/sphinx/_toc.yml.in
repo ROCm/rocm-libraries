@@ -18,8 +18,6 @@ subtrees:
   entries:
     - file: how-to/using-hipblas-clients
       title: Use hipBLAS clients
-    - file: how-to/contributing-to-hipblas
-      title: Contribute to hipBLAS
 - caption: Examples
   entries:
   - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas/clients/samples
@@ -35,3 +33,5 @@ subtrees:
 - caption: About
   entries:
     - file: license
+    - file: contribute
+      title: Contribute to hipBLAS

@@ -269,7 +269,7 @@ OutputIt THRUST_HIP_FUNCTION lower_bound(
     {
       return __binary_search::lower_bound(policy, first, last, values_first, values_last, result, compare_op);
     }
-
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy,
         HaystackIt first,
@@ -282,6 +282,7 @@ OutputIt THRUST_HIP_FUNCTION lower_bound(
       return thrust::lower_bound(
         cvt_to_seq(derived_cast(policy)), first, last, values_first, values_last, result, compare_op);
     }
+#  endif
   };
 
 #  if __THRUST_HAS_HIPRT__
@@ -327,7 +328,7 @@ OutputIt THRUST_HIP_FUNCTION upper_bound(
     {
       return __binary_search::upper_bound(policy, first, last, values_first, values_last, result, compare_op);
     }
-
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy,
         HaystackIt first,
@@ -340,6 +341,7 @@ OutputIt THRUST_HIP_FUNCTION upper_bound(
       return thrust::upper_bound(
         cvt_to_seq(derived_cast(policy)), first, last, values_first, values_last, result, compare_op);
     }
+# endif
   };
 
 #  if __THRUST_HAS_HIPRT__
@@ -385,7 +387,7 @@ OutputIt THRUST_HIP_FUNCTION binary_search(
     {
       return __binary_search::binary_search(policy, first, last, values_first, values_last, result, compare_op);
     }
-
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy,
         HaystackIt first,
@@ -398,6 +400,7 @@ OutputIt THRUST_HIP_FUNCTION binary_search(
       return thrust::binary_search(
         cvt_to_seq(derived_cast(policy)), first, last, values_first, values_last, result, compare_op);
     }
+#  endif
   };
 
 #  if __THRUST_HAS_HIPRT__
@@ -469,7 +472,7 @@ lower_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last
 
       return first + h_result;
     }
-
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static HaystackIt
     seq(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
     {
@@ -477,6 +480,7 @@ lower_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last
       thrust::lower_bound(cvt_to_seq(derived_cast(policy)), first, last, &value, &value + 1, &result, compare_op);
       return first + result;
     }
+# endif
   };
 
 #  if __THRUST_HAS_HIPRT__
@@ -530,7 +534,7 @@ upper_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last
 
       return first + h_result;
     }
-
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static HaystackIt
     seq(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
     {
@@ -538,6 +542,7 @@ upper_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last
       thrust::upper_bound(cvt_to_seq(derived_cast(policy)), first, last, &value, &value + 1, &result, compare_op);
       return first + result;
     }
+# endif
   };
 
 #  if __THRUST_HAS_HIPRT__
@@ -590,7 +595,7 @@ THRUST_HIP_FUNCTION bool binary_search(
 
       return h_result != 0;
     }
-
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static bool
     seq(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
     {
@@ -598,6 +603,7 @@ THRUST_HIP_FUNCTION bool binary_search(
       thrust::binary_search(cvt_to_seq(derived_cast(policy)), first, last, &value, &value + 1, &result, compare_op);
       return result;
     }
+#  endif
   };
 
 #  if __THRUST_HAS_HIPRT__
