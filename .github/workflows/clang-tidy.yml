@@ -20,6 +20,8 @@ jobs:
           repository: ROCm/TheRock
           path: TheRock
 
+      # Free up disk space for ROCm installation.
+      # The runner fully depletes it disk space otherwise.
       - name: Free Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet          # 4.0G
