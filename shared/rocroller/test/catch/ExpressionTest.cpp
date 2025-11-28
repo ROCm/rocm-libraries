@@ -2023,7 +2023,13 @@ namespace ExpressionTest
         SECTION("Size mismatch throws")
         {
             auto a = make_expression(DataType::Float);
-            REQUIRE_THROWS_AS(Expression::reinterpret(DataType::Int64, a), FatalError);
+            CHECK_THROWS_AS(Expression::reinterpret(DataType::Int64, a), FatalError);
+        }
+
+        SECTION("Invalid reinterpret - unsupported type")
+        {
+            auto a = make_expression(DataType::UInt32);
+            CHECK_THROWS(Expression::reinterpret(DataType::None, a));
         }
     }
 
@@ -2682,6 +2688,12 @@ namespace ExpressionTest
         {
             auto value = literal(int32_t(42));
             CHECK_THROWS_AS(reinterpret(DataType::Int64, value), FatalError);
+        }
+
+        SECTION("Invalid reinterpret - unsupported type")
+        {
+            auto value = literal(int32_t(42));
+            CHECK_THROWS(reinterpret(DataType::None, value));
         }
     }
 
