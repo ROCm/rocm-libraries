@@ -60,6 +60,11 @@ def count_mnksol(input_file, tuning_csv, output_csv):
         if tuning_info:
             baseline_latency = float(tuning_info["baseline_latency(us)"])
             tuned_latency = float(tuning_info["tuned_latency(us)"])
+            # Treat failed latencies as 0
+            if baseline_latency < 0:
+                baseline_latency = 0.0
+            if tuned_latency < 0:
+                tuned_latency = 0.0
         else:
             baseline_latency = 0.0
             tuned_latency = 0.0
