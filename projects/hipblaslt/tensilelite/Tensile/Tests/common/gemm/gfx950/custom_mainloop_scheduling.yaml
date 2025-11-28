@@ -1449,7 +1449,8 @@ BenchmarkProblems:
         - DepthU: [64]
         - ScheduleIterAlg: [3]
         - ExpandPointerSwap: [0]
-        - TransposeLDS: [1] #0,1
+        - TransposeLDS: [0] #0,1
+        - LDSTrInst: [1]
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
