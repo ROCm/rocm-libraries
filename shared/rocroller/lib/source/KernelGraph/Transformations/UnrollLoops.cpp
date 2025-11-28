@@ -630,7 +630,7 @@ namespace rocRoller
                           .to<std::set>();
                 for(auto ldsLoad : currentLDSLoads)
                 {
-                    if(name.starts_with(rocRoller::KLOOP))
+                    if(name == rocRoller::KLOOP)
                         graph.mapper.connect<Unroll>(ldsLoad, unrollDimension, 2);
                 }
             }
@@ -797,22 +797,14 @@ namespace rocRoller
                     dontDuplicate.insert(tag);
                 }
 
-                // Create a reindexer for the tail loop
-                if(m_unrollReindexers.count({forLoopDimension, -1}) == 0)
-                    m_unrollReindexers[{forLoopDimension, -1}] = std::make_shared<GraphReindexer>();
-                auto tailReindexer = m_unrollReindexers[{forLoopDimension, -1}];
-
                 auto dontDuplicatePredicate = [&](int x) { return dontDuplicate.contains(x); };
-                auto newBodies              = duplicateControlNodes(
-                    graph, tailReindexer, loopBodies, dontDuplicatePredicate);
+                auto newBodies
+                    = duplicateControlNodes(graph, nullptr, loopBodies, dontDuplicatePredicate);
 
                 for(auto node : newBodies)
                 {
                     graph.control.chain<Body>(tailLoop, node);
                 }
-
-                // Clear the control mapping after duplication
-                tailReindexer->control = {};
             }
 
             {
