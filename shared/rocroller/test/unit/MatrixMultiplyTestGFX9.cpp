@@ -27,56 +27,93 @@
 #include <rocRoller/CodeGen/Utils.hpp>
 
 #include "MatrixMultiplyTestBase.hpp"
+#include "rocRoller/Parameters/Solution/LoadOption.hpp"
 #include <common/SourceMatcher.hpp>
 
-using namespace rocRoller;
 
 namespace MatrixMultiplyTest
 {
-    class MatrixMultiplyTestGPU : public BaseMatrixMultiplyContextFixture<>
+    using namespace rocRoller;
+    namespace SolutionParams = rocRoller::Parameters::Solution;
+
+    // Params are: loadPathAB
+    class MatrixMultiplyTestGPU : public BaseMatrixMultiplyContextFixture<SolutionParams::LoadPath>
     {
     };
 
-    // Params are: AB type, K tile size, (transA, transB)
+    // Params are: loadPathB
+    class MatrixMultiplyNoLDSBTestGPU
+        : public BaseMatrixMultiplyContextFixture<SolutionParams::LoadPath>
+    {
+    };
+
+    // Params are: loadPathAB
+    class MatrixMultiplyABCTestGPU
+        : public BaseMatrixMultiplyContextFixture<SolutionParams::LoadPath>
+    {
+    };
+
+    // Params are: AB type, K tile size, (transA, transB), loadPathB
     class MatrixMultiplyTestGPUF16
-        : public BaseMatrixMultiplyContextFixture<
-              std::tuple<rocRoller::DataType, int, std::pair<std::string, std::string>>>
+        : public BaseMatrixMultiplyContextFixture<std::tuple<rocRoller::DataType,
+                                                             int,
+                                                             std::pair<std::string, std::string>,
+                                                             SolutionParams::LoadPath>>
     {
     };
 
-    class MatrixMultiplyTestGPUF8 : public BaseMatrixMultiplyContextFixture<rocRoller::DataType>
+    // Params are: AB type, loadPathB
+    class MatrixMultiplyTestGPUF8 : public BaseMatrixMultiplyContextFixture<
+                                        std::tuple<rocRoller::DataType, SolutionParams::LoadPath>>
     {
     };
 
-    // Params are: AB type, K tile size, (transA, transB)
+    // Params are: AB type, K tile size, (transA, transB), loadPathAB
     class MatrixMultiplyF8F6F4TestGPU
-        : public BaseMatrixMultiplyContextFixture<
-              std::tuple<rocRoller::DataType, int, std::pair<std::string, std::string>>>
+        : public BaseMatrixMultiplyContextFixture<std::tuple<rocRoller::DataType,
+                                                             int,
+                                                             std::pair<std::string, std::string>,
+                                                             SolutionParams::LoadPath>>
     {
     };
 
-    // Params are: A type, B type, K tile size, (transA, transB)
+    // Params are: A type, B type, K tile size, (transA, transB), loadPathB
     class MatrixMultiplyMixedTestGPU
         : public BaseMatrixMultiplyContextFixture<std::tuple<rocRoller::DataType,
                                                              rocRoller::DataType,
                                                              int,
-                                                             std::pair<std::string, std::string>>>
+                                                             std::pair<std::string, std::string>,
+                                                             SolutionParams::LoadPath>>
     {
     };
 
+    // Params are: loadPathB
     class MatrixMultiplyTestGPUBFloat16
-        : public BaseMatrixMultiplyContextFixture<std::tuple<int, int, int>>
+        : public BaseMatrixMultiplyContextFixture<
+              std::tuple<std::tuple<int, int, int>, SolutionParams::LoadPath>>
+    {
+    };
+
+    // Params are: A type, B type, scale pair, K tile size, (transA, transB), loadPathB
+    class ScaledMatrixMultiplyMixedTestGPU
+        : public BaseMatrixMultiplyContextFixture<std::tuple<rocRoller::DataType,
+                                                             rocRoller::DataType,
+                                                             int,
+                                                             std::pair<std::string, std::string>,
+                                                             SolutionParams::LoadPath>>
     {
     };
 
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTile)
     {
-        matrixMultiplyMacroTile<float, float, float>(32, 32, 2, 1);
+        const auto loadPathB = std::get<1>(GetParam());
+        matrixMultiplyMacroTile<float, float, float>(32, 32, 2, 1, loadPathB);
     }
 
-    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP16)
+    TEST_P(MatrixMultiplyNoLDSBTestGPU, GPU_MatrixMultiplyMacroTileFP16)
     {
-        matrixMultiplyMacroTile<Half, Half, Half>(32, 32, 8, 1, false);
+        const auto loadPathB = std::get<1>(GetParam());
+        matrixMultiplyMacroTile<Half, Half, Half>(32, 32, 8, 1, loadPathB);
 
         if(!commandKernel)
             return;
@@ -128,9 +165,10 @@ namespace MatrixMultiplyTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x8);
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x16_1k);
 
-        auto [mfma_m, mfma_n, mfma_k] = std::get<std::tuple<int, int, int>>(GetParam());
+        auto [waveTileDims, loadPathB] = std::get<1>(GetParam());
+        auto [mfma_m, mfma_n, mfma_k]  = waveTileDims;
 
-        matrixMultiplyMacroTile<BFloat16, BFloat16, float>(mfma_m, mfma_n, mfma_k, 1, false);
+        matrixMultiplyMacroTile<BFloat16, BFloat16, float>(mfma_m, mfma_n, mfma_k, 1, loadPathB);
     }
 
     TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_BF16_BF16)
@@ -140,14 +178,15 @@ namespace MatrixMultiplyTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x8);
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x16_1k);
 
-        auto [mfma_m, mfma_n, mfma_k] = std::get<std::tuple<int, int, int>>(GetParam());
+        auto [waveTileDims, loadPathB] = std::get<1>(GetParam());
+        auto [mfma_m, mfma_n, mfma_k]  = waveTileDims;
 
-        matrixMultiplyMacroTile<BFloat16, BFloat16, BFloat16>(mfma_m, mfma_n, mfma_k, 1, false);
+        matrixMultiplyMacroTile<BFloat16, BFloat16, BFloat16>(mfma_m, mfma_n, mfma_k, 1, loadPathB);
     }
 
     TEST_P(MatrixMultiplyTestGPUF16, GPU_MatrixMultiplyMacroTileF16)
     {
-        auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
+        auto [typeAB, MFMAK, transOp, loadPathB] = std::get<1>(GetParam());
 
         uint const waveM = (MFMAK == 32) ? 16 : 32;
         uint const waveN = (MFMAK == 32) ? 16 : 32;
@@ -169,7 +208,7 @@ namespace MatrixMultiplyTest
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_32x32x16_f16);
             }
             matrixMultiplyMacroTile<Half, Half, float>(
-                waveM, waveN, waveK, 1, true, transA, transB);
+                waveM, waveN, waveK, 1, loadPathB, transA, transB);
             break;
         case DataType::BFloat16:
             if(waveK == 32)
@@ -181,7 +220,7 @@ namespace MatrixMultiplyTest
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_32x32x16_bf16);
             }
             matrixMultiplyMacroTile<BFloat16, BFloat16, float>(
-                waveM, waveN, waveK, 1, true, transA, transB);
+                waveM, waveN, waveK, 1, loadPathB, transA, transB);
             typeStr = "bf16";
             break;
         default:
@@ -216,11 +255,12 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_16x16x32_NN)
     {
-        bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
+        const auto [typeAB, loadPathB] = std::get<1>(GetParam());
+        bool const isFP8 = typeAB == rocRoller::DataType::FP8;
         if(isFP8)
-            matrixMultiplyMacroTile<FP8, FP8, float>(16, 16, 32, 1, false, "N", "N");
+            matrixMultiplyMacroTile<FP8, FP8, float>(16, 16, 32, 1, loadPathB, "N", "N");
         else
-            matrixMultiplyMacroTile<BF8, BF8, float>(16, 16, 32, 1, false, "N", "N");
+            matrixMultiplyMacroTile<BF8, BF8, float>(16, 16, 32, 1, loadPathB, "N", "N");
 
         if(!commandKernel)
             return;
@@ -274,11 +314,14 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_32x32x16_NN)
     {
-        bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
+        const auto [typeAB, loadPathB] = std::get<1>(GetParam());
+        bool const isFP8 = typeAB == rocRoller::DataType::FP8;
         if(isFP8)
-            matrixMultiplyMacroTile<FP8, FP8, float>(32, 32, 16, 1, false, "N", "N");
+            matrixMultiplyMacroTile<FP8, FP8, float>(
+                32, 32, 16, 1, loadPathB, "N", "N");
         else
-            matrixMultiplyMacroTile<BF8, BF8, float>(32, 32, 16, 1, false, "N", "N");
+            matrixMultiplyMacroTile<BF8, BF8, float>(
+                32, 32, 16, 1, loadPathB, "N", "N");
 
         if(!commandKernel)
             return;
@@ -332,18 +375,20 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_16x16x32_TN)
     {
-        bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
-        if(isFP8)
-            matrixMultiplyMacroTile<FP8, FP8, float>(16, 16, 32, 1, true, "T", "N");
+        const auto [typeAB, loadPathB] = std::get<1>(GetParam());
+        if(typeAB == rocRoller::DataType::FP8)
+            matrixMultiplyMacroTile<FP8, FP8, float>(
+                16, 16, 32, 1, loadPathB, "T", "N");
         else
-            matrixMultiplyMacroTile<BF8, BF8, float>(16, 16, 32, 1, true, "T", "N");
+            matrixMultiplyMacroTile<BF8, BF8, float>(
+                16, 16, 32, 1, loadPathB, "T", "N");
     }
 
     TEST_P(MatrixMultiplyF8F6F4TestGPU, GPU_MatrixMultiplyMacroTileF8F6F4)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
-        auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
+        auto [typeAB, MFMAK, transOp, loadPathB] = std::get<1>(GetParam());
 
         uint const waveM = (MFMAK == 128) ? 16 : 32;
         uint const waveN = (MFMAK == 128) ? 16 : 32;
@@ -364,22 +409,27 @@ namespace MatrixMultiplyTest
         switch(typeAB)
         {
         case DataType::FP8:
-            matrixMultiplyMacroTile<FP8, FP8, float>(waveM, waveN, waveK, 1, true, transA, transB);
+            matrixMultiplyMacroTile<FP8, FP8, float>(
+                waveM, waveN, waveK, 1, loadPathB, transA, transB);
             break;
         case DataType::BF8:
-            matrixMultiplyMacroTile<BF8, BF8, float>(waveM, waveN, waveK, 1, true, transA, transB);
+            matrixMultiplyMacroTile<BF8, BF8, float>(
+                waveM, waveN, waveK, 1, loadPathB, transA, transB);
             modifiers = "cbsz:0b001 blgp:0b001";
             break;
         case DataType::FP6:
-            matrixMultiplyMacroTile<FP6, FP6, float>(waveM, waveN, waveK, 1, true, transA, transB);
+            matrixMultiplyMacroTile<FP6, FP6, float>(
+                waveM, waveN, waveK, 1, loadPathB, transA, transB);
             modifiers = "cbsz:0b010 blgp:0b010";
             break;
         case DataType::BF6:
-            matrixMultiplyMacroTile<BF6, BF6, float>(waveM, waveN, waveK, 1, true, transA, transB);
+            matrixMultiplyMacroTile<BF6, BF6, float>(
+                waveM, waveN, waveK, 1, loadPathB, transA, transB);
             modifiers = "cbsz:0b011 blgp:0b011";
             break;
         case DataType::FP4:
-            matrixMultiplyMacroTile<FP4, FP4, float>(waveM, waveN, waveK, 1, true, transA, transB);
+            matrixMultiplyMacroTile<FP4, FP4, float>(
+                waveM, waveN, waveK, 1, loadPathB, transA, transB);
             modifiers = "cbsz:0b100 blgp:0b100";
             break;
         default:
@@ -410,7 +460,7 @@ namespace MatrixMultiplyTest
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
 
-        auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
+        auto [typeAB, MFMAK, transOp, loadPathB] = std::get<1>(GetParam());
 
         uint const waveM = (MFMAK == 128) ? 16 : 32;
         uint const waveN = (MFMAK == 128) ? 16 : 32;
@@ -441,26 +491,26 @@ namespace MatrixMultiplyTest
         {
         case DataType::FP8:
             matrixMultiplyMacroTile<FP8, FP8, float>(
-                waveM, waveN, waveK, 1, true, transA, transB, scaleParams);
+                waveM, waveN, waveK, 1, loadPathB, transA, transB, scaleParams);
             break;
         case DataType::BF8:
             matrixMultiplyMacroTile<BF8, BF8, float>(
-                waveM, waveN, waveK, 1, true, transA, transB, scaleParams);
+                waveM, waveN, waveK, 1, loadPathB, transA, transB, scaleParams);
             modifiers = "cbsz:0b001 blgp:0b001";
             break;
         case DataType::FP6:
             matrixMultiplyMacroTile<FP6, FP6, float>(
-                waveM, waveN, waveK, 1, true, transA, transB, scaleParams);
+                waveM, waveN, waveK, 1, loadPathB, transA, transB, scaleParams);
             modifiers = "cbsz:0b010 blgp:0b010";
             break;
         case DataType::BF6:
             matrixMultiplyMacroTile<BF6, BF6, float>(
-                waveM, waveN, waveK, 1, true, transA, transB, scaleParams);
+                waveM, waveN, waveK, 1, loadPathB, transA, transB, scaleParams);
             modifiers = "cbsz:0b011 blgp:0b011";
             break;
         case DataType::FP4:
             matrixMultiplyMacroTile<FP4, FP4, float>(
-                waveM, waveN, waveK, 1, true, transA, transB, scaleParams);
+                waveM, waveN, waveK, 1, loadPathB, transA, transB, scaleParams);
             modifiers = "cbsz:0b100 blgp:0b100";
             break;
         default:
@@ -489,7 +539,7 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyMixedTestGPU, GPU_MatrixMultiplyMacroTileMixed)
     {
-        auto [typeA, typeB, MFMAK, transOp] = std::get<1>(GetParam());
+        auto [typeA, typeB, MFMAK, transOp, loadPathB] = std::get<1>(GetParam());
 
         int wave_m = (MFMAK == 128) ? 16 : 32;
         int wave_n = (MFMAK == 128) ? 16 : 32;
@@ -497,40 +547,45 @@ namespace MatrixMultiplyTest
 
         auto [transA, transB] = transOp;
 
-        matrixMultiplyMacroTileMixed(typeA, typeB, wave_m, wave_n, wave_k, 1, true, transA, transB);
+        matrixMultiplyMacroTileMixed(
+            typeA, typeB, wave_m, wave_n, wave_k, 1, loadPathB, transA, transB);
     }
 
-    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyAB)
+    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABF32)
     {
-        matrixMultiplyAB<float, float, float>(32, 32, 2, 1);
+        const auto loadPathAB = std::get<1>(GetParam());
+        matrixMultiplyAB<float, float, float>(32, 32, 2, 1, loadPathAB);
     }
 
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABFP16)
     {
-        matrixMultiplyAB<Half, Half, Half>(32, 32, 8, 1);
+        const auto loadPathAB = std::get<1>(GetParam());
+        matrixMultiplyAB<Half, Half, Half>(32, 32, 8, 1, loadPathAB);
     }
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyABF8_16x16x32)
     {
-        if(std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8)
-            matrixMultiplyAB<FP8, FP8, float>(16, 16, 32, 1);
+        const auto [typeAB, loadPathAB] = std::get<1>(GetParam());
+        if(typeAB == rocRoller::DataType::FP8)
+            matrixMultiplyAB<FP8, FP8, float>(16, 16, 32, 1, loadPathAB);
         else
-            matrixMultiplyAB<BF8, BF8, float>(16, 16, 32, 1);
+            matrixMultiplyAB<BF8, BF8, float>(16, 16, 32, 1, loadPathAB);
     }
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyABF8_32x32x16)
     {
-        if(std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8)
-            matrixMultiplyAB<FP8, FP8, float>(32, 32, 16, 1);
+        const auto [typeAB, loadPathAB] = std::get<1>(GetParam());
+        if(typeAB == rocRoller::DataType::FP8)
+            matrixMultiplyAB<FP8, FP8, float>(32, 32, 16, 1, loadPathAB);
         else
-            matrixMultiplyAB<BF8, BF8, float>(32, 32, 16, 1);
+            matrixMultiplyAB<BF8, BF8, float>(32, 32, 16, 1, loadPathAB);
     }
 
     TEST_P(MatrixMultiplyF8F6F4TestGPU, GPU_MatrixMultiplyABF8F6F4)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
-        auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
+        auto [typeAB, MFMAK, transOp, loadPathAB] = std::get<1>(GetParam());
 
         uint const waveM = (MFMAK == 128) ? 16 : 32;
         uint const waveN = (MFMAK == 128) ? 16 : 32;
@@ -552,22 +607,22 @@ namespace MatrixMultiplyTest
         switch(typeAB)
         {
         case DataType::FP8:
-            matrixMultiplyAB<FP8, FP8, float>(waveM, waveN, waveK, 1, true, transA, transB);
+            matrixMultiplyAB<FP8, FP8, float>(waveM, waveN, waveK, 1, loadPathAB, transA, transB);
             break;
         case DataType::BF8:
-            matrixMultiplyAB<BF8, BF8, float>(waveM, waveN, waveK, 1, true, transA, transB);
+            matrixMultiplyAB<BF8, BF8, float>(waveM, waveN, waveK, 1, loadPathAB, transA, transB);
             modifiers = "cbsz:0b001 blgp:0b001";
             break;
         case DataType::FP6:
-            matrixMultiplyAB<FP6, FP6, float>(waveM, waveN, waveK, 1, true, transA, transB);
+            matrixMultiplyAB<FP6, FP6, float>(waveM, waveN, waveK, 1, loadPathAB, transA, transB);
             modifiers = "cbsz:0b010 blgp:0b010";
             break;
         case DataType::BF6:
-            matrixMultiplyAB<BF6, BF6, float>(waveM, waveN, waveK, 1, true, transA, transB);
+            matrixMultiplyAB<BF6, BF6, float>(waveM, waveN, waveK, 1, loadPathAB, transA, transB);
             modifiers = "cbsz:0b011 blgp:0b011";
             break;
         case DataType::FP4:
-            matrixMultiplyAB<FP4, FP4, float>(waveM, waveN, waveK, 1, true, transA, transB);
+            matrixMultiplyAB<FP4, FP4, float>(waveM, waveN, waveK, 1, loadPathAB, transA, transB);
             modifiers = "cbsz:0b100 blgp:0b100";
             break;
         default:
@@ -594,23 +649,46 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, trLoadMnemonic), expectedTrLoads);
     }
 
-    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABC)
+    TEST_P(MatrixMultiplyABCTestGPU, GPU_MatrixMultiplyF32)
     {
-        matrixMultiplyABC<float>(32, 32, 2, 1);
+        const auto loadPathAB = std::get<1>(GetParam());
+        matrixMultiplyABC<float>(32, 32, 2, 1, loadPathAB);
     }
 
-    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABCFP16)
+    TEST_P(MatrixMultiplyABCTestGPU, GPU_MatrixMultiplyFP16)
     {
-        matrixMultiplyABC<Half>(32, 32, 8, 1);
+        const auto loadPathAB = std::get<1>(GetParam());
+        matrixMultiplyABC<Half>(32, 32, 8, 1, loadPathAB);
     }
 
-    INSTANTIATE_TEST_SUITE_P(MatrixMultiplyTest, MatrixMultiplyTestGPU, mfmaSupportedISATuples());
+    INSTANTIATE_TEST_SUITE_P(
+        MatrixMultiplyTest,
+        MatrixMultiplyTestGPU,
+        ::testing::Combine(mfmaSupportedISATuples(),
+                           ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                             SolutionParams::LoadPath::BufferToLDSViaVGPR)));
 
-    INSTANTIATE_TEST_SUITE_P(MatrixMultiplyTest,
-                             MatrixMultiplyTestGPUF8,
-                             ::testing::Combine(mfmaSupportedISAValues(),
-                                                ::testing::Values(rocRoller::DataType::FP8,
-                                                                  rocRoller::DataType::BF8)));
+    INSTANTIATE_TEST_SUITE_P(
+        MatrixMultiplyTest,
+        MatrixMultiplyNoLDSBTestGPU,
+        ::testing::Combine(mfmaSupportedISATuples(),
+                           ::testing::Values(SolutionParams::LoadPath::BufferToVGPR)));
+
+    INSTANTIATE_TEST_SUITE_P(
+        MatrixMultiplyTest,
+        MatrixMultiplyABCTestGPU,
+        ::testing::Combine(mfmaSupportedISATuples(),
+                           ::testing::Values(SolutionParams::LoadPath::BufferToVGPR)));
+
+    INSTANTIATE_TEST_SUITE_P(
+        MatrixMultiplyTest,
+        MatrixMultiplyTestGPUF8,
+        ::testing::Combine(
+            mfmaSupportedISAValues(),
+            ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
+                                                 rocRoller::DataType::BF8),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                                 SolutionParams::LoadPath::BufferToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiplyTest,
@@ -625,7 +703,8 @@ namespace MatrixMultiplyTest
                                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
                                                  std::pair<std::string, std::string>("N", "T"),
                                                  std::pair<std::string, std::string>("T", "N"),
-                                                 std::pair<std::string, std::string>("T", "T")))));
+                                                 std::pair<std::string, std::string>("T", "T")),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiplyTest,
@@ -643,7 +722,8 @@ namespace MatrixMultiplyTest
                                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
                                                  std::pair<std::string, std::string>("N", "T"),
                                                  std::pair<std::string, std::string>("T", "N"),
-                                                 std::pair<std::string, std::string>("T", "T")))));
+                                                 std::pair<std::string, std::string>("T", "T")),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiplyTest,
@@ -666,22 +746,14 @@ namespace MatrixMultiplyTest
                                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
                                                  std::pair<std::string, std::string>("N", "T"),
                                                  std::pair<std::string, std::string>("T", "N"),
-                                                 std::pair<std::string, std::string>("T", "T")))));
-
-    // Params are: A type, B type, scale pair, K tile size
-    class ScaledMatrixMultiplyMixedTestGPU
-        : public BaseMatrixMultiplyContextFixture<std::tuple<rocRoller::DataType,
-                                                             rocRoller::DataType,
-                                                             int,
-                                                             std::pair<std::string, std::string>>>
-    {
-    };
+                                                 std::pair<std::string, std::string>("T", "T")),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR))));
 
     TEST_P(ScaledMatrixMultiplyMixedTestGPU, GPU_ScaledMatrixMultiplyMacroTileMixed)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
 
-        auto [typeA, typeB, MFMAK, transOp] = std::get<1>(GetParam());
+        auto [typeA, typeB, MFMAK, transOp, loadPathB] = std::get<1>(GetParam());
 
         int waveM = (MFMAK == 128) ? 16 : 32;
         int waveN = (MFMAK == 128) ? 16 : 32;
@@ -699,7 +771,7 @@ namespace MatrixMultiplyTest
             = {.scaleTypeA = DataType::E8M0, .scaleTypeB = DataType::E8M0, .scaleBlockSize = 32};
 
         matrixMultiplyMacroTileMixed(
-            typeA, typeB, waveM, waveN, waveK, 1, true, transA, transB, scaleParams);
+            typeA, typeB, waveM, waveN, waveK, 1, loadPathB, transA, transB, scaleParams);
     }
 
     INSTANTIATE_TEST_SUITE_P(
@@ -723,7 +795,8 @@ namespace MatrixMultiplyTest
                                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
                                                  std::pair<std::string, std::string>("N", "T"),
                                                  std::pair<std::string, std::string>("T", "N"),
-                                                 std::pair<std::string, std::string>("T", "T")))));
+                                                 std::pair<std::string, std::string>("T", "T")),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR))));
 
     class ScaledMMTest
         : public BaseMatrixMultiplyContextFixture<std::tuple<rocRoller::DataType,
@@ -886,7 +959,9 @@ namespace MatrixMultiplyTest
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiplyTestGPUBFloat16,
         MatrixMultiplyTestGPUBFloat16,
-        ::testing::Combine(mfmaSupportedISAValues(),
-                           ::testing::Values(std::tuple<int, int, int>{32, 32, 4},
-                                             std::tuple<int, int, int>{16, 16, 8})));
+        ::testing::Combine(
+            mfmaSupportedISAValues(),
+            ::testing::Combine(::testing::Values(std::make_tuple(32, 32, 4),
+                                                 std::make_tuple(16, 16, 8)),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToVGPR))));
 } // namespace MatrixMultiplyTest
