@@ -8,7 +8,7 @@ set(TENSILELITE_LOGIC_FILTER "" CACHE STRING "Cutomsized logic filter, default i
 set(TENSILELITE_NO_COMPRESS "" CACHE STRING "Do not compress device code object files.")
 set(TENSILELITE_EXPERIMENTAL "" CACHE STRING "Process experimental logic files.")
 set(TENSILELITE_ENABLE_ASM_COMMENTS OFF CACHE STRING "Turn on asm comments when building gemm libraries.")
-option(HIPBLASLT_ENABLE_EXOPTS "" OFF)
+option(HIPBLASLT_ENABLE_EXOPTS "" ON)
 option(HIPBLASLT_ENABLE_TRANSFORM "" ON)
 
 set(HIPBLASLT_LIBLOGIC_PATH "" CACHE STRING "Path to library logic files (will use 'library' if unset).")
