@@ -107,7 +107,7 @@ void cpu_transformers_adam_w_updated(tensor<T1>& params,
     const float one_minus_beta2              = 1.0 - beta2;
     const float one_minus_lr_by_weight_decay = 1.0f - lr * weight_decay;
 
-    par_ford(params.GetSize())([&](size_t i) {
+    miopen::par_ford(params.GetSize())([&](size_t i) {
         T1 param      = params[i];
         T1 exp_avg    = exp_avgs[i];
         T1 exp_avg_sq = exp_avg_sqs[i];

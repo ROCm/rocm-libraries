@@ -475,7 +475,7 @@ int TransformersAdamWDriver<Tgpu, Tref, Tgrad>::RunForwardCPU_MT()
     const float one_minus_beta1 = 1.0 - beta1;
     const float one_minus_beta2 = 1.0 - beta2;
 
-    par_ford(numel)([&](size_t i) {
+    miopen::par_ford(numel)([&](size_t i) {
         Tref exp_avg_val    = exp_avgs[i];
         Tref exp_avg_sq_val = exp_avg_sqs[i];
 
