@@ -1208,8 +1208,8 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
             19, SBarrier(comment=""),
             53, SWaitCnt(dscnt=-1, vlcnt=16+1, vscnt=-1, comment="wait for previous GRB finish"),
             53, SBarrier(comment=""),
-            59, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LRA0 finish"),
-            59, SBarrier(comment=""),
+            52, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="wait for LRA0 finish"),
+            52, SBarrier(comment=""),
             71, SWaitCnt(dscnt=-1, vlcnt=16+2, vscnt=-1, comment="wait for previous GRA finish"),
             71, SBarrier(comment=""),
         ]
