@@ -43,7 +43,7 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class ArchConfig, class InputIterator1, class InputIterator2, class BinaryFunction>
+template<class TargetConfig, class InputIterator1, class InputIterator2, class BinaryFunction>
 ROCPRIM_DEVICE
 void search_kernel_impl(InputIterator1 input,
                         InputIterator2 keys,
@@ -52,7 +52,7 @@ void search_kernel_impl(InputIterator1 input,
                         size_t         keys_size,
                         BinaryFunction compare_function)
 {
-    constexpr search_config_params params = ArchConfig::params;
+    constexpr search_config_params params = TargetConfig::params;
 
     constexpr unsigned int block_size       = params.kernel_config.block_size;
     constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -109,7 +109,7 @@ void search_kernel_impl(InputIterator1 input,
     }
 }
 
-template<class ArchConfig, class InputIterator1, class InputIterator2, class BinaryFunction>
+template<class TargetConfig, class InputIterator1, class InputIterator2, class BinaryFunction>
 ROCPRIM_DEVICE
 void search_kernel_shared_impl(InputIterator1 input,
                                InputIterator2 keys,
@@ -121,7 +121,7 @@ void search_kernel_shared_impl(InputIterator1 input,
     using value_type = typename std::iterator_traits<InputIterator1>::value_type;
     using key_type   = typename std::iterator_traits<InputIterator2>::value_type;
 
-    constexpr search_config_params params = ArchConfig::params;
+    constexpr search_config_params params = TargetConfig::params;
 
     constexpr unsigned int block_size       = params.kernel_config.block_size;
     constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -342,9 +342,9 @@ hipError_t search_impl(void*          temporary_storage,
             if constexpr(find_first)
             {
                 start_timer();
-                auto search_shared_kernel = [=](auto arch_config)
+                auto search_shared_kernel = [=](auto target_config)
                 {
-                    search_kernel_shared_impl<decltype(arch_config)>(input,
+                    search_kernel_shared_impl<decltype(target_config)>(input,
                                                                      keys,
                                                                      tmp_output,
                                                                      size,
@@ -362,9 +362,9 @@ hipError_t search_impl(void*          temporary_storage,
             else
             {
                 start_timer();
-                auto search_shared_kernel = [=](auto arch_config)
+                auto search_shared_kernel = [=](auto target_config)
                 {
-                    search_kernel_shared_impl<decltype(arch_config)>(
+                    search_kernel_shared_impl<decltype(target_config)>(
                         rocprim::make_reverse_iterator(input + size),
                         rocprim::make_reverse_iterator(keys + keys_size),
                         tmp_output,
@@ -386,9 +386,9 @@ hipError_t search_impl(void*          temporary_storage,
             if constexpr(find_first)
             {
                 start_timer();
-                auto search_kernel = [=](auto arch_config)
+                auto search_kernel = [=](auto target_config)
                 {
-                    search_kernel_impl<decltype(arch_config)>(input,
+                    search_kernel_impl<decltype(target_config)>(input,
                                                               keys,
                                                               tmp_output,
                                                               size,
@@ -406,9 +406,9 @@ hipError_t search_impl(void*          temporary_storage,
             else
             {
                 start_timer();
-                auto search_kernel = [=](auto arch_config)
+                auto search_kernel = [=](auto target_config)
                 {
-                    search_kernel_impl<decltype(arch_config)>(
+                    search_kernel_impl<decltype(target_config)>(
                         rocprim::make_reverse_iterator(input + size),
                         rocprim::make_reverse_iterator(keys + keys_size),
                         tmp_output,

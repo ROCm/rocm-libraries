@@ -321,9 +321,9 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
                 {
                     start = std::chrono::steady_clock::now();
                 }
-                auto device_scan_by_key_kernel = [=](auto arch_config)
+                auto device_scan_by_key_kernel = [=](auto target_config)
                 {
-                    device_scan_by_key_kernel_impl<decltype(arch_config), Determinism, Exclusive>(
+                    device_scan_by_key_kernel_impl<decltype(target_config), Determinism, Exclusive>(
                         keys + offset,
                         input + offset,
                         output + offset,

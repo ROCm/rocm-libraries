@@ -135,12 +135,19 @@ struct block_store_impl<true, BlockSize, ItemsPerThread, Key, Value>
 };
 
 template<typename Value,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         arch::wavefront::target TargetWaveSize,
          typename Enable = void>
 struct block_permute_values_impl
 {
-    using values_exchange_type = block_exchange<Value, BlockSize, ItemsPerThread>;
+    using values_exchange_type = block_exchange<Value,
+                                                BlockSize,
+                                                ItemsPerThread,
+                                                1,
+                                                1,
+                                                block_padding_hint::avoid_conflicts,
+                                                TargetWaveSize>;
 
     using values_store_type
         = block_store<Value, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
@@ -185,8 +192,10 @@ struct block_permute_values_impl
     }
 };
 
-template<unsigned int BlockSize, unsigned int ItemsPerThread>
-struct block_permute_values_impl<rocprim::empty_type, BlockSize, ItemsPerThread>
+template<unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         arch::wavefront::target TargetWaveSize>
+struct block_permute_values_impl<rocprim::empty_type, BlockSize, ItemsPerThread, TargetWaveSize>
 {
     using storage_type = empty_storage_type;
 
@@ -224,10 +233,14 @@ struct block_permute_values_impl<rocprim::empty_type, BlockSize, ItemsPerThread>
 // when storing/loading those ValueTypes to/from registers.
 // Thus this is a temporary workaround.
 // TODO: Check if also the case for small types like this.
-template<typename Value, unsigned int BlockSize, unsigned int ItemsPerThread>
+template<typename Value,
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         arch::wavefront::target TargetWaveSize>
 struct block_permute_values_impl<Value,
                                  BlockSize,
                                  ItemsPerThread,
+                                 TargetWaveSize,
                                  std::enable_if_t<(std::is_trivially_copyable<Value>::value
                                                    && !rocprim::is_floating_point<Value>::value
                                                    && !rocprim::is_integral<Value>::value)>>
@@ -307,13 +320,17 @@ struct block_permute_values_impl<Value,
 
 template<typename Key,
          typename Value,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         arch::wavefront::target TargetWaveSize,
          typename Enable = void>
 struct block_sort_impl;
 
-template<typename Key, unsigned int BlockSize, unsigned int ItemsPerThread>
-struct block_sort_impl<Key, rocprim::empty_type, BlockSize, ItemsPerThread>
+template<typename Key,
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         arch::wavefront::target TargetWaveSize>
+struct block_sort_impl<Key, rocprim::empty_type, BlockSize, ItemsPerThread, TargetWaveSize>
 {
     using keys_load_type
         = block_load<Key, BlockSize, ItemsPerThread, block_load_method::block_load_transpose>;
@@ -371,11 +388,16 @@ struct block_sort_impl<Key, rocprim::empty_type, BlockSize, ItemsPerThread>
 };
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<typename Key, typename Value, unsigned int BlockSize, unsigned int ItemsPerThread>
+template<typename Key,
+         typename Value,
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         arch::wavefront::target TargetWaveSize>
 struct block_sort_impl<Key,
                        Value,
                        BlockSize,
                        ItemsPerThread,
+                       TargetWaveSize,
                        std::enable_if_t<(sizeof(Value) <= sizeof(int))>>
 {
     using keys_load_type
@@ -452,11 +474,16 @@ struct block_sort_impl<Key,
         }
     }
 };
-template<typename Key, typename Value, unsigned int BlockSize, unsigned int ItemsPerThread>
+template<typename Key,
+         typename Value,
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         arch::wavefront::target TargetWaveSize>
 struct block_sort_impl<Key,
                        Value,
                        BlockSize,
                        ItemsPerThread,
+                       TargetWaveSize,
                        std::enable_if_t<(sizeof(Value) > sizeof(int))>>
 {
     using keys_load_type
@@ -471,7 +498,8 @@ struct block_sort_impl<Key,
     using keys_store_type
         = block_store<Key, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
 
-    using values_permute_type = block_permute_values_impl<Value, BlockSize, ItemsPerThread>;
+    using values_permute_type
+        = block_permute_values_impl<Value, BlockSize, ItemsPerThread, TargetWaveSize>;
 
     union storage_type
     {

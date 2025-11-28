@@ -151,9 +151,9 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
         const unsigned int grid_size        = (size + items_per_block - 1) / items_per_block;
         const unsigned int shared_mem_bytes = 0; /*no dynamic shared mem*/
 
-        auto kernel = [=](auto arch_config)
+        auto kernel = [=](auto target_config)
         {
-            adjacent_find_kernels::template block_reduce_kernel<decltype(arch_config)>(
+            adjacent_find_kernels::template block_reduce_kernel<decltype(target_config)>(
                 transformed_input,
                 reduce_output,
                 size,

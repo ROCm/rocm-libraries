@@ -51,7 +51,7 @@ struct find_first_of_impl_kernels
         ordered_bid.reset();
     }
 
-    template<typename ArchConfig>
+    template<typename TargetConfig>
     static ROCPRIM_DEVICE
     void find_first_of_kernel_impl(InputIterator1           input,
                                    InputIterator2           keys,
@@ -61,7 +61,7 @@ struct find_first_of_impl_kernels
                                    ordered_block_id<size_t> ordered_bid,
                                    BinaryFunction           compare_function)
     {
-        constexpr find_first_of_config_params params = ArchConfig::params;
+        constexpr find_first_of_config_params params = TargetConfig::params;
 
         constexpr unsigned int block_size       = params.kernel_config.block_size;
         constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -236,9 +236,9 @@ hipError_t find_first_of_impl(void*          temporary_storage,
 
     if(size > 0 && keys_size > 0)
     {
-        auto kernel = [=](auto arch_config)
+        auto kernel = [=](auto target_config)
         {
-            find_first_of_kernels::template find_first_of_kernel_impl<decltype(arch_config)>(
+            find_first_of_kernels::template find_first_of_kernel_impl<decltype(target_config)>(
                 input,
                 keys,
                 tmp_output,

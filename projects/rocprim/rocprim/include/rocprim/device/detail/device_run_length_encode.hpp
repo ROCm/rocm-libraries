@@ -819,7 +819,7 @@ public:
     }
 };
 
-template<typename ArchConfig,
+template<typename TargetConfig,
          typename OffsetCountPairType,
          typename InputIterator,
          typename OffsetsOutputIterator,
@@ -841,7 +841,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     // No need to build the kernel with sleep on a device that does not require it
 }
 
-template<typename ArchConfig,
+template<typename TargetConfig,
          typename OffsetCountPairType,
          typename InputIterator,
          typename OffsetsOutputIterator,
@@ -860,7 +860,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                             BlockIdWrapper                ordered_bid)
         -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
 {
-    static constexpr non_trivial_runs_config_params params     = ArchConfig::params;
+    static constexpr non_trivial_runs_config_params params     = TargetConfig::params;
     static constexpr unsigned int                   block_size = params.kernel_config.block_size;
     static constexpr unsigned int         items_per_thread  = params.kernel_config.items_per_thread;
     static constexpr block_load_method    load_input_method = params.load_input_method;

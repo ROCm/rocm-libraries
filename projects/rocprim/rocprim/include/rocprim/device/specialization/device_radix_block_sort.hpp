@@ -86,18 +86,22 @@ inline hipError_t radix_sort_block_sort(KeysInputIterator    keys_input,
         start = std::chrono::steady_clock::now();
     }
 
-    auto radix_sort_block_sort_kernel = [=](auto arch_config)
+    auto radix_sort_block_sort_kernel = [=](auto target_config)
     {
-        static constexpr auto params = decltype(arch_config)::params;
+        using TargetConfig           = decltype(target_config);
+        static constexpr auto params = TargetConfig::params;
 
-        sort_single<params.block_size, params.items_per_thread, Descending>(keys_input,
-                                                                            keys_output,
-                                                                            values_input,
-                                                                            values_output,
-                                                                            size,
-                                                                            decomposer,
-                                                                            bit,
-                                                                            current_radix_bits);
+        sort_single<params.block_size,
+                    params.items_per_thread,
+                    Descending,
+                    TargetConfig::wavefront>(keys_input,
+                                             keys_output,
+                                             values_input,
+                                             values_output,
+                                             size,
+                                             decomposer,
+                                             bit,
+                                             current_radix_bits);
     };
 
     ROCPRIM_RETURN_ON_ERROR(

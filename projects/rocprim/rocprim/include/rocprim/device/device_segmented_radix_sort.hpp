@@ -338,9 +338,9 @@ inline hipError_t segmented_radix_sort_impl(
             {
                 start = std::chrono::steady_clock::now();
             }
-            auto segmented_sort_large_kernel = [=](auto arch_config)
+            auto segmented_sort_large_kernel = [=](auto target_config)
             {
-                segmented_sort_large<decltype(arch_config), Descending>(
+                segmented_sort_large<decltype(target_config), Descending>(
                     keys_input,
                     keys_tmp,
                     keys_output,
@@ -376,9 +376,9 @@ inline hipError_t segmented_radix_sort_impl(
             {
                 start = std::chrono::steady_clock::now();
             }
-            auto segmented_sort_medium_kernel = [=](auto arch_config)
+            auto segmented_sort_medium_kernel = [=](auto target_config)
             {
-                segmented_sort_medium<decltype(arch_config), Descending>(
+                segmented_sort_medium<decltype(target_config), Descending>(
                     keys_input,
                     keys_tmp,
                     keys_output,
@@ -417,9 +417,9 @@ inline hipError_t segmented_radix_sort_impl(
             {
                 start = std::chrono::steady_clock::now();
             }
-            auto segmented_sort_small_kernel = [=](auto arch_config)
+            auto segmented_sort_small_kernel = [=](auto target_config)
             {
-                segmented_sort_small<decltype(arch_config), Descending>(
+                segmented_sort_small<decltype(target_config), Descending>(
                     keys_input,
                     keys_tmp,
                     keys_output,
@@ -457,9 +457,9 @@ inline hipError_t segmented_radix_sort_impl(
         {
             start = std::chrono::steady_clock::now();
         }
-        auto segmented_sort_kernel = [=](auto arch_config)
+        auto segmented_sort_kernel = [=](auto target_config)
         {
-            segmented_sort<decltype(arch_config), Descending>(keys_input,
+            segmented_sort<decltype(target_config), Descending>(keys_input,
                                                               keys_tmp,
                                                               keys_output,
                                                               values_input,

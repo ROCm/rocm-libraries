@@ -253,7 +253,7 @@ struct unwrap_store
     }
 };
 
-    template<typename ArchConfig,
+    template<typename TargetConfig,
              lookback_scan_determinism Determinism,
              bool                      Exclusive,
              typename KeyInputIterator,
@@ -284,7 +284,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
         // No need to build the kernel with sleep on a device that does not require it
     }
 
-    template<typename ArchConfig,
+    template<typename TargetConfig,
              lookback_scan_determinism Determinism,
              bool                      Exclusive,
              typename KeyInputIterator,
@@ -316,7 +316,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
         static_assert(std::is_same<rocprim::tuple<ResultType, bool>,
                                    typename LookbackScanState::value_type>::value,
                       "value_type of LookbackScanState must be tuple of result type and flag");
-        static constexpr scan_by_key_config_params params = ArchConfig::params;
+        static constexpr scan_by_key_config_params params = TargetConfig::params;
 
         constexpr auto block_size         = params.kernel_config.block_size;
         constexpr auto items_per_thread   = params.kernel_config.items_per_thread;
@@ -335,8 +335,12 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
         auto wrapped_op    = headflag_scan_op_wrapper<result_type, bool, BinaryFunction>{scan_op};
         using wrapped_type = rocprim::tuple<result_type, bool>;
 
-        using block_scan_type
-            = ::rocprim::block_scan<wrapped_type, block_size, params.block_scan_method>;
+        using block_scan_type = ::rocprim::block_scan<wrapped_type,
+                                                      block_size,
+                                                      params.block_scan_method,
+                                                      1,
+                                                      1,
+                                                      TargetConfig::wavefront>;
 
         constexpr auto store_method = params.block_store_method;
         using store_unwrap = unwrap_store<block_size, items_per_thread, result_type, store_method>;

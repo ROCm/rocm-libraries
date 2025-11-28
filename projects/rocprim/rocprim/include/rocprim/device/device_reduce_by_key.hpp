@@ -256,9 +256,9 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key_init_kernel",
                                                             number_of_blocks_launch,
                                                             start);
-                auto kernel = [=](auto arch_config)
+                auto kernel = [=](auto target_config)
                 {
-                    reduce_by_key::kernel_impl<decltype(arch_config), Determinism>(
+                    reduce_by_key::kernel_impl<decltype(target_config), Determinism>(
                         keys_input + offset,
                         values_input + offset,
                         unique_output,

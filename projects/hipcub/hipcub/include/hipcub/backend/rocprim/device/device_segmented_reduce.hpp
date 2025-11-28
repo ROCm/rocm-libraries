@@ -70,10 +70,10 @@ inline hipError_t launch_segmented_arg_minmax(::rocprim::detail::target current_
                                               size_t                    shmem,
                                               hipStream_t               stream)
 {
-    auto kernel = [=](auto arch_config)
+    auto kernel = [=](auto target_config)
     {
         // each block processes one segment
-        ::rocprim::detail::segmented_reduce<decltype(arch_config)>(input,
+        ::rocprim::detail::segmented_reduce<decltype(target_config)>(input,
                                                                    output,
                                                                    begin_offsets,
                                                                    end_offsets,

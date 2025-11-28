@@ -94,9 +94,9 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
     {
         start = std::chrono::steady_clock::now();
     }
-    auto segmented_reduce_kernel = [=](auto arch_config)
+    auto segmented_reduce_kernel = [=](auto target_config)
     {
-        segmented_reduce<decltype(arch_config)>(input,
+        segmented_reduce<decltype(target_config)>(input,
                                                 output,
                                                 begin_offsets,
                                                 end_offsets,

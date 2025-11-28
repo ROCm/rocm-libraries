@@ -172,9 +172,9 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
             start = std::chrono::steady_clock::now();
         }
 
-        auto adjacent_difference_kernel = [=](auto arch_config)
+        auto adjacent_difference_kernel = [=](auto target_config)
         {
-            adjacent_difference_kernel_impl<decltype(arch_config), InPlace, Right>(
+            adjacent_difference_kernel_impl<decltype(target_config), InPlace, Right>(
                 input + offset,
                 output + offset,
                 size,

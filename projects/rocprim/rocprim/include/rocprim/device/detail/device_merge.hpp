@@ -235,10 +235,10 @@ typename std::enable_if<!WithValues>::type merge_values(unsigned int         fla
     (void)input2_size;
 }
 
-template<class ArchConfig, class Key, class Value>
+template<class TargetConfig, class Key, class Value>
 struct merge_kernel_impl_
 {
-    static constexpr merge_config_params params = ArchConfig::params;
+    static constexpr merge_config_params params = TargetConfig::params;
 
     static constexpr unsigned int block_size       = params.kernel_config.block_size;
     static constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;

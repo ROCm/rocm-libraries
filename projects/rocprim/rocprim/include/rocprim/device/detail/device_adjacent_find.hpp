@@ -51,7 +51,7 @@ struct adjacent_find_impl_kernels
         ordered_tile_id.reset();
     }
 
-    template<typename ArchConfig>
+    template<typename TargetConfig>
     static ROCPRIM_DEVICE
     void block_reduce_kernel(TransformedInputIterator transformed_input,
                              ReduceIndexIterator      reduce_output,
@@ -59,7 +59,7 @@ struct adjacent_find_impl_kernels
                              BinaryPred               op,
                              OrderedTileIdType        ordered_tile_id)
     {
-        static constexpr adjacent_find_config_params params     = ArchConfig::params;
+        static constexpr adjacent_find_config_params params     = TargetConfig::params;
         static constexpr unsigned int                block_size = params.kernel_config.block_size;
         static constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
         static constexpr unsigned int items_per_tile   = block_size * items_per_thread;
@@ -72,7 +72,7 @@ struct adjacent_find_impl_kernels
                                       block_reduce_algorithm::raking_reduce,
                                       1,
                                       1,
-                                      ArchConfig::wavefront>; // TODO?: params.block_reduce_method>;
+                                      TargetConfig::wavefront>; // TODO?: params.block_reduce_method>;
 
         ROCPRIM_SHARED_MEMORY union
         {

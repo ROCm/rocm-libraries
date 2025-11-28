@@ -110,7 +110,7 @@ auto segmented_scan_block_scan(T (&input)[ItemsPerThread],
 }
 
 template<
-    class ArchConfig,
+    class TargetConfig,
     bool Exclusive,
     class ResultType,
     class InputIterator,
@@ -127,7 +127,7 @@ void segmented_scan(InputIterator input,
                     InitValueType initial_value,
                     BinaryFunction scan_op)
 {
-    static constexpr scan_config_params params = ArchConfig::params;
+    static constexpr scan_config_params params = TargetConfig::params;
 
     constexpr auto         block_size       = params.kernel_config.block_size;
     constexpr auto         items_per_thread = params.kernel_config.items_per_thread;
@@ -138,8 +138,12 @@ void segmented_scan(InputIterator input,
         block_load<result_type, block_size, items_per_thread, params.block_load_method>;
     using block_store_type = ::rocprim::
         block_store<result_type, block_size, items_per_thread, params.block_store_method>;
-    using block_scan_type
-        = ::rocprim::block_scan<result_type, block_size, params.block_scan_method>;
+    using block_scan_type = ::rocprim::block_scan<result_type,
+                                                  block_size,
+                                                  params.block_scan_method,
+                                                  1,
+                                                  1,
+                                                  TargetConfig::wavefront>;
 
     ROCPRIM_SHARED_MEMORY union
     {

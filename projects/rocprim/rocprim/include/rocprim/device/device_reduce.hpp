@@ -71,9 +71,9 @@ namespace detail
             start = std::chrono::steady_clock::now();                                             \
         }                                                                                         \
                                                                                                   \
-        auto block_reduce_kernel = [=](auto arch_config) mutable                                  \
+        auto block_reduce_kernel = [=](auto target_config) mutable                                  \
         {                                                                                         \
-            block_reduce_kernel_impl<decltype(arch_config),                                       \
+            block_reduce_kernel_impl<decltype(target_config),                                       \
                                      WithInitialValue,                                            \
                                      fit_larger,                                                  \
                                      fit_items,                                                   \
@@ -192,9 +192,9 @@ inline hipError_t reduce_impl(void*               temporary_storage,
             {
                 start = std::chrono::steady_clock::now();
             }
-            auto block_reduce_kernel = [=](auto arch_config)
+            auto block_reduce_kernel = [=](auto target_config)
             {
-                block_reduce_kernel_impl<decltype(arch_config), false, true, 1, result_type>(
+                block_reduce_kernel_impl<decltype(target_config), false, true, 1, result_type>(
                     input + offset,
                     current_size,
                     block_prefixes + i * number_of_blocks_limit,

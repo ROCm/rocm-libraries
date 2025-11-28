@@ -287,7 +287,8 @@ template<typename KeyType,
          block_load_method         load_keys_method,
          block_load_method         load_values_method,
          block_scan_algorithm      scan_algorithm,
-         lookback_scan_determinism Determinism>
+         lookback_scan_determinism Determinism,
+         arch::wavefront::target   TargetWaveSize>
 class tile_helper
 {
 private:
@@ -301,7 +302,8 @@ private:
     using wrapped_type = reduce_by_key::wrapped_type_t<AccumulatorType>;
 
     using discontinuity_type = reduce_by_key::discontinuity_helper<KeyType, BlockSize>;
-    using block_scan_type    = rocprim::block_scan<wrapped_type, BlockSize, scan_algorithm>;
+    using block_scan_type
+        = rocprim::block_scan<wrapped_type, BlockSize, scan_algorithm, 1, 1, TargetWaveSize>;
     using prefix_op_factory  = detail::offset_lookback_scan_factory<wrapped_type>;
 
     using scatter_keys_type = reduce_by_key::scatter_helper<KeyType, BlockSize, ItemsPerThread>;
@@ -516,7 +518,7 @@ public:
     }
 };
 
-template<typename ArchConfig,
+template<typename TargetConfig,
          lookback_scan_determinism Determinism,
          typename AccumulatorType,
          typename KeyIterator,
@@ -547,7 +549,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto kernel_impl(KeyIterator,
     // No need to build the kernel with sleep on a device that does not require it
 }
 
-template<typename ArchConfig,
+template<typename TargetConfig,
          lookback_scan_determinism Determinism,
          typename AccumulatorType,
          typename KeyIterator,
@@ -576,7 +578,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                 BlockIdWrapper                 ordered_bid)
         -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
 {
-    static constexpr reduce_by_key_config_params params = ArchConfig::params;
+    static constexpr reduce_by_key_config_params params = TargetConfig::params;
 
     static constexpr unsigned int         block_size       = params.kernel_config.block_size;
     static constexpr unsigned int         items_per_thread = params.kernel_config.items_per_thread;
@@ -594,7 +596,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                        load_keys_method,
                                        load_values_method,
                                        scan_algorithm,
-                                       Determinism>;
+                                       Determinism,
+                                       TargetConfig::wavefront>;
 
     ROCPRIM_SHARED_MEMORY union
     {

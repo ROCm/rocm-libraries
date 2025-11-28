@@ -72,8 +72,8 @@ inline size_t get_partition_vsmem_size_per_block(detail::target t)
         {
             if(target{candidate} == most_common_config<targets>(t))
             {
-                using ArchConfig = target_config<Config, Selector, decltype(candidate)>;
-                using partition_kernel_impl_t = partition_kernel_impl_<ArchConfig,
+                using TargetConfig = target_config<Config, Selector, decltype(candidate)>;
+                using partition_kernel_impl_t = partition_kernel_impl_<TargetConfig,
                                                                        SelectMethod,
                                                                        OnlySelected,
                                                                        Key,
@@ -303,9 +303,9 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                     start = std::chrono::steady_clock::now();
                 }
 
-                auto partition_kernel = [=, vsm = detail::vsmem_t{vsmem}](auto arch_config) mutable
+                auto partition_kernel = [=, vsm = detail::vsmem_t{vsmem}](auto target_config) mutable
                 {
-                    using partition_kernel_impl_t = partition_kernel_impl_<decltype(arch_config),
+                    using partition_kernel_impl_t = partition_kernel_impl_<decltype(target_config),
                                                                            method,
                                                                            write_only_selected,
                                                                            key_type,

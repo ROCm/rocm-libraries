@@ -908,7 +908,7 @@ public:
     {}
 };
 
-template<class ArchConfig,
+template<class TargetConfig,
          select_method SelectMethod,
          bool          OnlySelected,
          class Key,
@@ -919,7 +919,7 @@ template<class ArchConfig,
 struct partition_kernel_impl_
 {
 
-    static constexpr partition_config_params params = ArchConfig::params;
+    static constexpr partition_config_params params = TargetConfig::params;
 
     static constexpr auto         block_size       = params.kernel_config.block_size;
     static constexpr auto         items_per_thread = params.kernel_config.items_per_thread;
@@ -932,8 +932,8 @@ struct partition_kernel_impl_
         block_load<Value, block_size, items_per_thread, params.value_block_load_method>;
     using block_load_flag_type = ::rocprim::
         block_load<FlagType, block_size, items_per_thread, params.flag_block_load_method>;
-    using block_scan_offset_type
-        = ::rocprim::block_scan<OffsetType, block_size, params.block_scan_method>;
+    using block_scan_offset_type = ::rocprim::
+        block_scan<OffsetType, block_size, params.block_scan_method, 1, 1, TargetConfig::wavefront>;
     using block_discontinuity_key_type = ::rocprim::block_discontinuity<Key, block_size>;
     using ordered_block_id             = BlockIdWrapper;
 

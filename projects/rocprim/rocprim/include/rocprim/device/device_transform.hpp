@@ -109,9 +109,9 @@ inline hipError_t transform_impl(InputIterator     input,
         {
             start = std::chrono::steady_clock::now();
         }
-        auto transform_kernel = [=](auto arch_config)
+        auto transform_kernel = [=](auto target_config)
         {
-            constexpr auto params = decltype(arch_config)::params;
+            constexpr auto params = decltype(target_config)::params;
 
             detail::transform_kernel_impl<IsPointer,
                                           params.kernel_config.block_size,

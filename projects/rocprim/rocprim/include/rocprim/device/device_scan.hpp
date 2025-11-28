@@ -200,9 +200,9 @@ inline auto scan_impl(void*               temporary_storage,
                         std::cout << "items_per_block " << items_per_block << '\n';
                     }
 
-                    auto lookback_scan_kernel = [=](auto arch_config)
+                    auto lookback_scan_kernel = [=](auto target_config)
                     {
-                        lookback_scan_kernel_impl<decltype(arch_config),
+                        lookback_scan_kernel_impl<decltype(target_config),
                                                   Determinism,
                                                   Exclusive,
                                                   UseInitialValue>(
@@ -253,9 +253,10 @@ inline auto scan_impl(void*               temporary_storage,
                     start = std::chrono::steady_clock::now();
                 }
 
-                auto single_scan_kernel = [=](auto arch_config) mutable
+                auto single_scan_kernel = [=](auto target_config) mutable
                 {
-                    static constexpr scan_config_params params = decltype(arch_config)::params;
+                    using TargetConfig                         = decltype(target_config);
+                    static constexpr scan_config_params params = TargetConfig::params;
 
                     constexpr unsigned int block_size       = params.kernel_config.block_size;
                     constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -266,8 +267,12 @@ inline auto scan_impl(void*               temporary_storage,
                                                                     block_size,
                                                                     items_per_thread,
                                                                     params.block_store_method>;
-                    using block_scan_type
-                        = ::rocprim::block_scan<AccType, block_size, params.block_scan_method>;
+                    using block_scan_type  = ::rocprim::block_scan<AccType,
+                                                                  block_size,
+                                                                  params.block_scan_method,
+                                                                  1,
+                                                                  1,
+                                                                  TargetConfig::wavefront>;
 
                     ROCPRIM_SHARED_MEMORY union
                     {

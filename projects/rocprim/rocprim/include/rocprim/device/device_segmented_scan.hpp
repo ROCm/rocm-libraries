@@ -124,9 +124,9 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
     {
         start = std::chrono::steady_clock::now();
     }
-    auto segmented_scan_kernel = [=](auto arch_config)
+    auto segmented_scan_kernel = [=](auto target_config)
     {
-        segmented_scan<decltype(arch_config), Exclusive, result_type>(
+        segmented_scan<decltype(target_config), Exclusive, result_type>(
             input,
             output,
             begin_offsets,

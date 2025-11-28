@@ -388,7 +388,7 @@ constexpr arch::wavefront::target gen_wavefront_size(const gen gen)
 {
     switch(gen)
     {
-        case gen::unknown: return arch::wavefront::get_target();
+        case gen::unknown: return arch::wavefront::target::dynamic;
         case gen::gcn3:
         case gen::gcn5:
         case gen::cdna1:
@@ -535,7 +535,7 @@ template<class Config,
 ROCPRIM_KERNEL __launch_bounds__((LaunchSelector<Config, Selector, Target>::block_size))
 void trampoline_kernel(Kernel kernel)
 {
-    using ArchConfig = target_config<Config, Selector, Target>;
+    using TargetConfig = target_config<Config, Selector, Target>;
 
 #if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
     using Targets = typename Selector::targets;
@@ -544,7 +544,7 @@ void trampoline_kernel(Kernel kernel)
     // If the build time arch from device_target_arch is a generic arch it is not the same as the runtime arch.
     if constexpr(Target::i == device_arch_target.i)
     {
-        kernel(ArchConfig{});
+        kernel(TargetConfig{});
     }
     else if constexpr(ROCPRIM_IS_GENERIC())
     {

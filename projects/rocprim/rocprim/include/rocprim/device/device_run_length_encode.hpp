@@ -213,9 +213,9 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
                                                         grid_size,
                                                         start);
 
-            auto non_trivial_kernel = [=](auto arch_config)
+            auto non_trivial_kernel = [=](auto target_config)
             {
-                run_length_encode::non_trivial_kernel_impl<decltype(arch_config),
+                run_length_encode::non_trivial_kernel_impl<decltype(target_config),
                                                            offset_count_pair_type>(
                     input,
                     offsets_output,
