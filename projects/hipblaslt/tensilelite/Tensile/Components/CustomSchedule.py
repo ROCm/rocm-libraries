@@ -1362,7 +1362,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
         
         syncCode = [
             SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for prior local read. Relax a bit to dscnt=4 to reduce latency") ,
-            SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="Wait for local reads prior to LRB0*12 + LRA0*3") ,
+            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for all LRB0 prior to  LRA0*3") ,
             SBarrier(comment="") ,
             SWaitCnt(dscnt=0, vlcnt=11, vscnt=-1, comment="Wait for prior local read. Also wait for prior GRA*6 + GRB*5 = 11 global reads") ,
             SBarrier(comment="") ,
