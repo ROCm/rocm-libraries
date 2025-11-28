@@ -34,6 +34,8 @@
 #define ROCRAND_2PI (6.2831855f)
 #define ROCRAND_SQRT2 (1.4142135f)
 #define ROCRAND_SQRT2_DOUBLE (1.4142135623730951)
+#define ROCRAND_NAN_FLOAT (0x7fc00000)
+#define ROCRAND_NAN_DOUBLE (0x7ff8000000000000)
 
 #include <hip/hip_runtime.h>
 #include <utility>
@@ -137,35 +139,36 @@ struct engine_boxmuller_helper
 {
     static __forceinline__ __device__ __host__ bool has_float(const Engine* engine)
     {
-        return engine->m_state.boxmuller_float_state != 0;
+        return engine->m_state.boxmuller_float != ROCRAND_NAN_FLOAT;
     }
 
     static __forceinline__ __device__ __host__ float get_float(Engine* engine)
     {
-        engine->m_state.boxmuller_float_state = 0;
-        return engine->m_state.boxmuller_float;
+        const float ret                 = engine->m_state.boxmuller_float;
+        engine->m_state.boxmuller_float = ROCRAND_NAN_FLOAT;
+        return ret;
     }
 
     static __forceinline__ __device__ __host__ void save_float(Engine* engine, float f)
     {
-        engine->m_state.boxmuller_float_state = 1;
         engine->m_state.boxmuller_float = f;
     }
 
     static __forceinline__ __device__ __host__ bool has_double(const Engine* engine)
     {
-        return engine->m_state.boxmuller_double_state != 0;
+        return engine->m_state.boxmuller_double != ROCRAND_NAN_DOUBLE;
     }
 
-    static __forceinline__ __device__ __host__ float get_double(Engine* engine)
+    static __forceinline__ __device__ __host__
+    double get_double(Engine* engine)
     {
-        engine->m_state.boxmuller_double_state = 0;
-        return engine->m_state.boxmuller_double;
+        const double ret                 = engine->m_state.boxmuller_double;
+        engine->m_state.boxmuller_double = ROCRAND_NAN_DOUBLE;
+        return ret;
     }
 
     static __forceinline__ __device__ __host__ void save_double(Engine* engine, double d)
     {
-        engine->m_state.boxmuller_double_state = 1;
         engine->m_state.boxmuller_double = d;
     }
 };
