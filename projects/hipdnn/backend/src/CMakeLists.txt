@@ -44,9 +44,11 @@ clang_tidy_check(hipdnn_backend_private)
 
 add_library(hipdnn_backend SHARED HipdnnBackend.cpp)
 
+target_include_directories(hipdnn_backend SYSTEM PUBLIC ${HIP_INCLUDE_DIRS})
+
 target_include_directories(
-    hipdnn_backend SYSTEM
-    PUBLIC ${HIP_INCLUDE_DIRS} $<BUILD_INTERFACE:${HIP_DNN_BACKEND_INCLUDE_DIR}>
+    hipdnn_backend
+    PUBLIC $<BUILD_INTERFACE:${HIP_DNN_BACKEND_INCLUDE_DIR}>
            $<INSTALL_INTERFACE:${HIP_DNN_BACKEND_INSTALL_INCLUDE_DIR}>
            $<BUILD_INTERFACE:${HIP_DNN_BACKEND_EXPORT_INCLUDE_DIR}>
 )

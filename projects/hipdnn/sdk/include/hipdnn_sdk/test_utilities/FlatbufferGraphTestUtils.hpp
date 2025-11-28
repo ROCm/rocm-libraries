@@ -46,6 +46,9 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferenceGraph(
         builder, 1, "x", inputDataType, &strides, &dims));
 
     tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, 2, "y", inputDataType, &strides, &dims));
+
+    tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
         builder, 3, "scale", data_objects::DataType::FLOAT, &derivedStrides, &derivedDims));
 
     tensorAttributes.push_back(data_objects::CreateTensorAttributesDirect(
