@@ -129,7 +129,9 @@ namespace rocRoller
          * will use the same ForLoop Dimension as the original
          * ForLoopOp.
         */
-        int cloneForLoop(KernelGraph& graph, int tag);
+        int cloneForLoop(KernelGraph&               graph,
+                         int                        tag,
+                         std::optional<std::string> name = std::nullopt);
 
         /**
          * @brief Remove a node and all of its children from the control graph
@@ -287,6 +289,7 @@ namespace rocRoller
          *
          * @param op Operation to replace.
          * @param newOp Replacement.
+         * @param includeBody If true, transfer Body edges.
          *
          * Does not delete the original operation.
          */
