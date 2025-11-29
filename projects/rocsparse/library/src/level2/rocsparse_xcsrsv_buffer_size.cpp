@@ -73,7 +73,10 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
         if(m == 0)
+        {
+            *buffer_size = 0;
             return rocsparse_status_success;
+        }
         RETURN_IF_ROCSPARSE_ERROR(xcsrsv_buffer_size_checkarg(
             handle, trans, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, buffer_size));
 
