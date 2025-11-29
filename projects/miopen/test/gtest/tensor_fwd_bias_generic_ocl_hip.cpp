@@ -268,10 +268,10 @@ protected:
         std::string program_name{"MIOpenTensorKernels.cl"};
         std::string network_config_ocl = network_config + "-ocl";
 
-        handle.AddKernel("OpTensorFwdBiasGeneric",
+        handle.AddKernel(kernel_name,
                          network_config_ocl,
                          program_name,
-                         "OpTensorFwdBiasGeneric",
+                         kernel_name,
                          vld,
                          vgd,
                          params)(tensA_dev.get(),            // a
@@ -299,7 +299,7 @@ protected:
 
 #if PERF_ENABLE
         ph.perfTest(handle,
-                    "OpTensorFwdBiasGeneric",
+                    kernel_name,
                     network_config_ocl,
                     tensA_dev.get(),
                     tensorsConfig.acstrides[0],
@@ -337,10 +337,10 @@ protected:
         std::string program_name{"MIOpenTensorKernelsHip.cpp"};
         std::string network_config_hip = network_config + "-hip";
 
-        handle.AddKernel("OpTensorFwdBiasGeneric",
+        handle.AddKernel(kernel_name,
                          network_config_hip,
                          program_name,
-                         "OpTensorFwdBiasGeneric",
+                         kernel_name,
                          vld,
                          vgd,
                          params)(tensA_dev.get(),            // a
@@ -368,7 +368,7 @@ protected:
 
 #if PERF_ENABLE
         ph.perfTest(handle,
-                    "OpTensorFwdBiasGeneric",
+                    kernel_name,
                     network_config_hip,
                     tensA_dev.get(),
                     tensorsConfig.acstrides[0],
@@ -427,6 +427,7 @@ protected:
 #endif
     }
 
+    const std::string kernel_name{"OpTensorFwdBiasGeneric"};
     std::string network_config{};
     std::string params{};
     std::vector<size_t> vld, vgd;
