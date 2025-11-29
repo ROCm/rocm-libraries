@@ -1507,7 +1507,6 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
 
     elif isNT(kernel) and useLDSTr and TLDS==0:
         # fmt: off            
-        syncs = SyncSchedule()
         syncs.add(-1, dscnt=3, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration") 
         grinca = [8,9,10, 11,13,14, 15,16,17]
         grincb = [19,20,21, 22,23,24, 25,26,27]
