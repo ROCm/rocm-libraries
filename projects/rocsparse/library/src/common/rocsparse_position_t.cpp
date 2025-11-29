@@ -238,6 +238,11 @@ rocsparse_status rocsparse::position_t::copy_position_async(rocsparse_pointer_mo
     RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
     bool          has_zero_pivot = false;
     const int64_t batch_count    = this->get_position_batch_count();
+
+    const int64_t mx = (this->m_position_indextype == rocsparse_indextype_i32)
+                           ? std::numeric_limits<int32_t>::max()
+                           : std::numeric_limits<int64_t>::max();
+
     switch(pointer_mode)
     {
     case rocsparse_pointer_mode_host:
@@ -248,9 +253,6 @@ rocsparse_status rocsparse::position_t::copy_position_async(rocsparse_pointer_mo
                                       ? reinterpret_cast<const int32_t*>(position)[i]
                                       : reinterpret_cast<const int64_t*>(position)[i];
 
-            const int64_t mx = (this->m_position_indextype == rocsparse_indextype_i32)
-                                   ? std::numeric_limits<int32_t>::max()
-                                   : std::numeric_limits<int64_t>::max();
             if(value == mx)
             {
                 if(position_indextype == rocsparse_indextype_i32)
@@ -273,18 +275,19 @@ rocsparse_status rocsparse::position_t::copy_position_async(rocsparse_pointer_mo
 
     case rocsparse_pointer_mode_device:
     {
+        const int64_t mx = (this->m_position_indextype == rocsparse_indextype_i32)
+                               ? std::numeric_limits<int32_t>::max()
+                               : std::numeric_limits<int64_t>::max();
+
         for(int64_t i = 0; i < batch_count; ++i)
         {
             int64_t value_bytes[1]{0};
             RETURN_IF_ROCSPARSE_ERROR(
                 this->copy_value(rocsparse_pointer_mode_host, i, value_bytes, stream));
-            const int64_t value = (this->m_position_indextype == rocsparse_indextype_i32)
-                                      ? reinterpret_cast<const int32_t*>(position)[i]
-                                      : reinterpret_cast<const int64_t*>(position)[i];
 
-            const int64_t mx = (this->m_position_indextype == rocsparse_indextype_i32)
-                                   ? std::numeric_limits<int32_t>::max()
-                                   : std::numeric_limits<int64_t>::max();
+            const int64_t value = (this->m_position_indextype == rocsparse_indextype_i32)
+                                      ? reinterpret_cast<const int32_t*>(value_bytes)[0]
+                                      : reinterpret_cast<const int64_t*>(value_bytes)[0];
 
             if(value == mx)
             {
