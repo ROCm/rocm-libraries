@@ -242,28 +242,24 @@ protected:
         std::string program_name{"MIOpenTensorKernels.cl"};
         std::string network_config_ocl = network_config + "-ocl";
 
-        handle.AddKernel(kernel_name,
-                         network_config_ocl,
-                         program_name,
-                         kernel_name,
-                         vld,
-                         vgd,
-                         params)(tensA_dev.get(),
-                                 tensB_dev.get(),
-                                 static_cast<int>(tensorsConfig.blens[1]), // b_c
-                                 tensC_dev.get(),
-                                 static_cast<int>(tensorsConfig.aclens[0]),    // c_n
-                                 static_cast<int>(tensorsConfig.acstrides[0]), // c_nstride
-                                 static_cast<int>(tensorsConfig.acstrides[1]), // c_cstride
-                                 work_per_wg,
-                                 alpha0,
-                                 alpha1,
-                                 beta,
-                                 static_cast<int64_t>(0), // Aoffset
-                                 static_cast<int64_t>(0), // Boffset
-                                 static_cast<int64_t>(0), // Coffset
-                                 num_wg,
-                                 incr_wg);
+        handle.AddKernel(
+            kernel_name, network_config_ocl, program_name, kernel_name, vld, vgd, params)(
+            tensA_dev.get(),
+            tensB_dev.get(),
+            static_cast<int>(tensorsConfig.blens[1]), // b_c
+            tensC_dev.get(),
+            static_cast<int>(tensorsConfig.aclens[0]),    // c_n
+            static_cast<int>(tensorsConfig.acstrides[0]), // c_nstride
+            static_cast<int>(tensorsConfig.acstrides[1]), // c_cstride
+            work_per_wg,
+            alpha0,
+            alpha1,
+            beta,
+            static_cast<int64_t>(0), // Aoffset
+            static_cast<int64_t>(0), // Boffset
+            static_cast<int64_t>(0), // Coffset
+            num_wg,
+            incr_wg);
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
 
@@ -304,28 +300,24 @@ protected:
         std::string program_name{"MIOpenTensorKernelsHip.cpp"};
         std::string network_config_hip = network_config + "-hip";
 
-        handle.AddKernel(kernel_name,
-                         network_config_hip,
-                         program_name,
-                         kernel_name,
-                         vld,
-                         vgd,
-                         params)(tensA_dev.get(),
-                                 tensB_dev.get(),
-                                 static_cast<int>(tensorsConfig.blens[1]), // b_c
-                                 tensC_dev.get(),
-                                 static_cast<int>(tensorsConfig.aclens[0]),    // c_n
-                                 static_cast<int>(tensorsConfig.acstrides[0]), // c_nstride
-                                 static_cast<int>(tensorsConfig.acstrides[1]), // c_cstride
-                                 work_per_wg,
-                                 alpha0,
-                                 alpha1,
-                                 beta,
-                                 static_cast<int64_t>(0), // Aoffset
-                                 static_cast<int64_t>(0), // Boffset
-                                 static_cast<int64_t>(0), // Coffset
-                                 num_wg,
-                                 incr_wg);
+        handle.AddKernel(
+            kernel_name, network_config_hip, program_name, kernel_name, vld, vgd, params)(
+            tensA_dev.get(),
+            tensB_dev.get(),
+            static_cast<int>(tensorsConfig.blens[1]), // b_c
+            tensC_dev.get(),
+            static_cast<int>(tensorsConfig.aclens[0]),    // c_n
+            static_cast<int>(tensorsConfig.acstrides[0]), // c_nstride
+            static_cast<int>(tensorsConfig.acstrides[1]), // c_cstride
+            work_per_wg,
+            alpha0,
+            alpha1,
+            beta,
+            static_cast<int64_t>(0), // Aoffset
+            static_cast<int64_t>(0), // Boffset
+            static_cast<int64_t>(0), // Coffset
+            num_wg,
+            incr_wg);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
 
