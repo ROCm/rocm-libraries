@@ -1444,69 +1444,56 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
 
 def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
-    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
-    optSchedule = dict()
-    syncCode = []
+    kernel["SwapGlobalReadOrder"] = False
+    numMfma = 104
+    syncs = SyncSchedule()
+
     if isTN(kernel) and not useLDSTr and TLDS==1:
-        numMfma = 104
-        kernel["SwapGlobalReadOrder"] = False
-        optSchedule = {
-            'SYNC': [[-1, 12, 29, 29, 40, 40, 72, 72]],
-            'LRA0': [[0, 1, 2, 3, 5, 7, 9, 11, 13, 15, 17, 19, 20]],
-            'GRIncA': [[4, 4, 4, 10, 10, 10, 14, 14, 14]],
-            'LRB0': [[22, 24, 26, 28]],
-            'GRIncB': [[16, 16, 16, 18, 18, 18, 21, 21, 21]],
-            'GRA': [[30, 30, 31, 31, 32, 32, 33, 33, 34, 34, 35, 35, 36, 36, 37, 37, 38, 38, 39, 39, 41, 41, 43, 43, 45, 45, 46, 46, 48, 48, 50, 50, 52, 52, 53, 53, 55, 55, 57, 57, 59, 59, 60, 60, 62, 62, 64, 64, 66, 66, 67, 67]],
-            'GRB': [[69, 69, 71, 71, 73, 73, 77, 77, 81, 81, 85, 85, 89, 89, 93, 93]],
-            'LRSA': [[50]],
-            'LRSB': [[50]],
-            'LWSA': [[70]],
-            'LWSB': [[70]],
-            'LRA1': [[73, 74, 75, 76, 78, 82, 84, 86, 88, 90, 92, 94, 96]],
-            'LRB1': [[80, 98, 99, 100]],
-            'LCC': [[102, 103]]
-        }
-        syncCode = [
-            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration"),
+        syncs.add(-1, dscnt=3, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration") 
+        lra0   = [0, 1, 2, 3, 5, 7, 9, 11, 13, 15, 17, 19, 20]
 
-            SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for the rest of LRB1 to complete"),
+        syncs.add(12, dscnt=8, comment="wait for the rest of LRB1 to complete") 
+        grinca = [4, 4, 4, 10, 10, 10, 14, 14, 14]
+        lrb0   = [22, 24, 26, 28]
+        grincb = [16, 16, 16, 18, 18, 18, 21, 21, 21]
 
-            SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for all LRA0 to complete before GRA start"),
-            SBarrier(comment=""),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRB0 to complete before GRB start"),
-            SBarrier(comment=""),
+        syncs.add(29, dscnt=4, barrier=True, comment="wait for all LRA0 to complete before GRA start")
+        gra    = [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 43, 45, 46, 48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 66, 67]
 
-            SWaitCnt(dscnt=-1, vlcnt=28, vscnt=-1, comment="wait for previous set of global reads"),
-            SBarrier(comment="")
-        ]
-        nglshift = nllshift = 28
+        syncs.add(40, dscnt=0, barrier=True, comment="wait for all LRB0 to complete before GRB start")
+        grb    = [69, 71, 73, 77, 81, 85, 89, 93]
+        num_gr = len(gra) + len(grb)
+        lrsa   = [50]
+        lrsb   = [50]
+        lwsa   = [70]
+        lwsb   = [70]
+
+        syncs.add(72, vlcnt=num_gr-6, barrier=True, comment="wait for previous set of global reads")
+        lra1   = [73, 74, 75, 76, 78, 82, 84, 86, 88, 90, 92, 94, 96]
+        lrb1   = [80, 98, 99, 100]
 
     elif isNN(kernel) and useLDSTr and TLDS==1:
-        numMfma = 104
-        kernel["SwapGlobalReadOrder"] = False
-
         # fmt: off            
-        syncs = SyncSchedule()
-        syncs.add(-1, dscnt=3) 
+        syncs.add(-1, dscnt=3, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration") 
         grinca = [8,9,10, 11,13,14, 15,16,17]
         grincb = [19,20,21, 22,23,24, 25,26,27]
         
-        syncs.add(      12, dscnt=12) 
+        syncs.add(      12, dscnt=12, comment="wait for the rest of LRB1 to complete") 
         lra0   = [0,  1, 2, 3, 4,  5, 6, 7, 8, 9, 
                   10,11,12,13,14, 15,16,17,18,19,
                                 20,21,22,23,24, 25] # 26 loads
 
-        syncs.add(                                       30, dscnt=2, barrier=True)
+        syncs.add(                                       30, dscnt=2, barrier=True, comment="wait for all LRA0 to complete before GRA start")
         lrb0   = [                                 26,28,30,   33] # 4 loads
 
-        syncs.add(                                                       38, dscnt=0, barrier=True)
+        syncs.add(                                                       38, dscnt=0, barrier=True, comment="wait for all LRB0 to complete before GRB start")
         gra    = [                                         31,32,34,36,37, 39,41,43,45,46,
                                                             48,50,52,53,55, 57,59,60,62,64,
                                                                             66,67,68,69,70, 71] # 26 loads
         grb    = [                                                                             73,74, 81, 83,87,91,92,93] # 8 loads
         num_gr = len(gra) + len(grb)
 
-        syncs.add(                                                                            72, vlcnt=num_gr-8, barrier=True)
+        syncs.add(                                                                            72, vlcnt=num_gr-8, barrier=True, comment="wait for previous set of global reads")
         lra1   = [                                                                             73,75,76,77,78, 79,80,81,82,83,
                                                                                                      84,85,86,87,88, 89,90,91,92,93, 
                                                                                                         94,95,96,97,98, 99] # 26 loads
@@ -1514,39 +1501,68 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
 
         lrsa   = [                                            49]
         lrsb   = [                                              51]
-        lwsa    = [                                                                                  84]
-        lwsb    = [                                                                                     85]
-        # ========== iter done ==========
+        lwsa   = [                                                                                   84]
+        lwsb   = [                                                                                      85]
         # fmt: on
 
-        def extend_list(input_list, repeat_count):
-            """Example: extend_list([1, 2, 3], 3) => [1,1,1, 2,2,2, 3,3,3]"""
-            return [item for item in input_list for _ in range(repeat_count)]
-        gra    = extend_list(gra, 2)
-        grb    = extend_list(grb, 2)   
+    elif isNT(kernel) and useLDSTr and TLDS==0:
+        # fmt: off            
+        syncs = SyncSchedule()
+        syncs.add(-1, dscnt=3, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration") 
+        grinca = [8,9,10, 11,13,14, 15,16,17]
+        grincb = [19,20,21, 22,23,24, 25,26,27]
+        
+        syncs.add(      12, dscnt=12, comment="wait for the rest of LRB1 to complete") 
+        lra0   = [0,  1, 2, 3, 4,  5, 6, 7, 8, 9, 
+                  10,11,12,13,14, 15,16,17,18,19,
+                                20,21,22,23,24, 25] # 26 loads
+        syncs.add(                                       30, dscnt=2, barrier=True, comment="wait for all LRA0 to complete before GRA start")
+        lrb0   = [                                 27,29,  31,  33,35,38,40,42] # 8 loads
 
-        optSchedule = {
-            'SYNC':   [syncs.get_indicies()],
-            'LRA0':   [lra0],
-            'GRIncA': [grinca],
-            'LRB0':   [lrb0],
-            'GRIncB': [grincb],
-            'GRA':    [gra],
-            'GRB':    [grb],
-            'LRSA':   [lrsa],
-            'LRSB':   [lrsb],
-            'LWSA':   [lwsa],
-            'LWSB':   [lwsb],
-            'LRA1':   [lra1],
-            'LRB1':   [lrb1],
-            'LCC':    [[numMfma-2, numMfma-1]],
-        }
-        syncCode = syncs.get_code()
-               
-        nglshift = nllshift = num_gr
+        syncs.add(                                                              49, dscnt=0, barrier=True, comment="wait for all LRB0 to complete before GRB start")
+        gra    = [                                         31,32,34,36,37, 39,41,43,45,46,
+                                                                              48,50,52,53,55, 57,59,60,62,64,
+                                                                                 66,67,68,69,70, 71] # 26 loads
+        grb    = [                                                                                  73,74, 81, 83,87,91,92,93] # 8 loads
+        num_gr = len(gra) + len(grb)
+
+        #                                                                                                         10 in-flight from GRA and 8 from GRB
+        syncs.add(                                                                              58, vlcnt=num_gr-(10+8), barrier=True, comment="wait for previous set of global reads")
+        lra1   = [                                                                                59,60,61,62,63, 64,65,66,67,68,
+                                                                                                     69,70,71,72,73, 74,75,76,77,78,
+                                                                                                        79,80,81,82,83, 84] # 26 loads
+        lrb1   = [                                                                                                   65,   85,86,88, 90,92,94,96] # 8 loads
+
+        lrsa   = [                                                              49]
+        lrsb   = [                                                                51]
+        lwsa   = [                                                                                                      84]
+        lwsb   = [                                                                                                        85]
+        # fmt: on
     else:
         return False, None
 
+    def extend_list(input_list, repeat_count):
+        """Example: extend_list([1, 2, 3], 3) => [1,1,1, 2,2,2, 3,3,3]"""
+        return [item for item in input_list for _ in range(repeat_count)]
+
+    optSchedule = {
+        'SYNC':   [syncs.get_indicies()],
+        'LRA0':   [lra0],
+        'GRIncA': [grinca],
+        'LRB0':   [lrb0],
+        'GRIncB': [grincb],
+        'GRA':    [extend_list(gra, 2)],
+        'GRB':    [extend_list(grb, 2)],
+        'LRSA':   [lrsa],
+        'LRSB':   [lrsb],
+        'LWSA':   [lwsa],
+        'LWSB':   [lwsb],
+        'LRA1':   [lra1],
+        'LRB1':   [lrb1],
+        'LCC':    [[numMfma-2, numMfma-1]],
+    }
+    syncCode = syncs.get_code()
+    nglshift = nllshift = num_gr
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
