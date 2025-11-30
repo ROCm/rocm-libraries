@@ -501,7 +501,7 @@ namespace origami
         // Use size_t for dimensions and counts to ensure type safety.
         const size_t workgroups_m     = safe_ceil_div(M, MT_M);
         const size_t workgroups_n     = safe_ceil_div(N, MT_N);
-        const size_t total_workgroups = workgroups_m * workgroups_n;
+        const size_t total_workgroups = workgroups_m * workgroups_n * batch;
 
         // Concurrently executing workgroups are limited by the number of CUs.a
         const size_t concurrent_workgroups = std::min(total_workgroups, hardware.N_CU);
