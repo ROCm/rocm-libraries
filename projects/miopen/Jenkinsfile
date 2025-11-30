@@ -5,6 +5,11 @@ if (repoName == "rocm-libraries") {
     repoDir = "projects/miopen"
 }
 
+def ckDir = ""
+if (repoName == "rocm-libraries") {
+    ckDir = "projects/composablekernel"
+}
+
 def rocmnode(name) {
     return '(rocmtest || miopen) && (' + name + ')'
 }
@@ -209,6 +214,7 @@ pipeline {
         Smoke_targets   = " check MIOpenDriver"
         NOCOMGR_flags   = " -DMIOPEN_USE_COMGR=Off"
         NOMLIR_flags    = " -DMIOPEN_USE_MLIR=Off"
+        CK_DIR          = "${ckDir}"
         REPO_DIR        = "${repoDir}"
         REPO_NAME       = "${repoName}"
 
