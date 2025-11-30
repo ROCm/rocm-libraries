@@ -36,12 +36,12 @@ namespace env = miopen::env;
 
 namespace pooling2d {
 
-class GPU_Pooling2d_FP32 : public testing::TestWithParam<std::vector<std::string>>
+class GPU_Pooling2d_FP32 : public testing::TestWithParam<std::string>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-class GPU_Pooling2d_FP16 : public testing::TestWithParam<std::vector<std::string>>
+class GPU_Pooling2d_FP16 : public testing::TestWithParam<std::string>
 {
     MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
@@ -57,12 +57,11 @@ void GetArgs(const std::string& param, std::vector<std::string>& tokens)
 
 void Run2dDriver(miopenDataType_t prec)
 {
-
-    std::vector<std::string> params;
+    std::string param;
     switch(prec)
     {
-    case miopenFloat: params = GPU_Pooling2d_FP32::GetParam(); break;
-    case miopenHalf: params = GPU_Pooling2d_FP16::GetParam(); break;
+    case miopenFloat: param = GPU_Pooling2d_FP32::GetParam(); break;
+    case miopenHalf: param = GPU_Pooling2d_FP16::GetParam(); break;
     case miopenBFloat16:
     case miopenInt8:
     case miopenFloat8_fnuz:
@@ -75,24 +74,21 @@ void Run2dDriver(miopenDataType_t prec)
                   "data type not supported by "
                   "pooling2d test";
 
-    default: params = GPU_Pooling2d_FP32::GetParam();
+    default: param = GPU_Pooling2d_FP32::GetParam();
     }
 
-    for(const auto& test_value : params)
-    {
-        std::vector<std::string> tokens;
-        GetArgs(test_value, tokens);
-        std::vector<const char*> ptrs;
+    std::vector<std::string> tokens;
+    GetArgs(param, tokens);
+    std::vector<const char*> ptrs;
 
-        std::transform(tokens.begin(), tokens.end(), std::back_inserter(ptrs), [](const auto& str) {
-            return str.data();
-        });
+    std::transform(tokens.begin(), tokens.end(), std::back_inserter(ptrs), [](const auto& str) {
+        return str.data();
+    });
 
-        testing::internal::CaptureStderr();
-        test_drive<pooling2d_driver>(ptrs.size(), ptrs.data());
-        auto capture = testing::internal::GetCapturedStderr();
-        std::cout << capture;
-    }
+    testing::internal::CaptureStderr();
+    test_drive<pooling2d_driver>(ptrs.size(), ptrs.data());
+    auto capture = testing::internal::GetCapturedStderr();
+    std::cout << capture;
 };
 
 bool IsTestSupportedForDevice(const miopen::Handle& handle) { return true; }
@@ -139,7 +135,7 @@ TEST_P(GPU_Pooling2d_FP16, HalfTest_pooling2d)
     }
 };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling2d_FP32, testing::Values(GetTestCases("--float")));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling2d_FP32, testing::ValuesIn(GetTestCases("--float")));
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling2d_FP16, testing::Values(GetTestCases("--half")));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling2d_FP16, testing::ValuesIn(GetTestCases("--half")));
 
