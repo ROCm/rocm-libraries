@@ -7,6 +7,15 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenConvFwdBiasActivPlan.hpp"
 
+// MIOpen's fusion API does not calculate the workspace size correctly
+#define WORKAROUND_LWPMIOPEN_1815 1
+
+#if WORKAROUND_LWPMIOPEN_1815
+#include <algorithm>
+#include <array>
+#include <numeric>
+#endif
+
 namespace miopen_legacy_plugin
 {
 
@@ -141,11 +150,37 @@ ConvFwdBiasActivPlan::ConvFwdBiasActivPlan(const HipdnnEnginePluginHandle& handl
 
     if(getWsSize)
     {
+#if WORKAROUND_LWPMIOPEN_1815
+        // MIOpen's fusion API does not calculate the workspace size correctly. To work around
+        // this issue, the workspace size is calculated as the sum of the sizes of the input,
+        // weight, and output tensors, each aligned to 256 bytes.
+        // Refer to ConvCKIgemmGrpFwdBiasActivFused::GetWorkspaceSize() in MIOpen's source code
+        // for more details.
+
+        size_t xSize;
+        THROW_ON_MIOPEN_FAILURE(miopenGetTensorNumBytes(_params.x().tensorDescriptor(), &xSize));
+        size_t wSize;
+        THROW_ON_MIOPEN_FAILURE(miopenGetTensorNumBytes(_params.w().tensorDescriptor(), &wSize));
+        size_t ySize;
+        THROW_ON_MIOPEN_FAILURE(miopenGetTensorNumBytes(_params.y().tensorDescriptor(), &ySize));
+
+        std::array<size_t, 3> sizes = {xSize, wSize, ySize};
+
+        // Align each size to 256 bytes
+        constexpr size_t ALIGNMENT_BOUNDARY = 256;
+        constexpr size_t ALIGNMENT = ALIGNMENT_BOUNDARY - 1;
+        auto alignToBoundary = [](size_t size) { return (size + ALIGNMENT) & ~ALIGNMENT; };
+        std::transform(sizes.begin(), sizes.end(), sizes.begin(), alignToBoundary);
+
+        // Calculate the total workspace size as the sum of aligned sizes
+        _workspaceSize = std::accumulate(sizes.begin(), sizes.end(), static_cast<size_t>(0));
+#else
         THROW_ON_MIOPEN_FAILURE(miopenFusionPlanGetWorkSpaceSize(
             handle.miopenHandle,
             fusePlanDesc,
             &_workspaceSize,
             static_cast<miopenConvFwdAlgorithm_t>(-1))); // Algo is not used in MIOpen
+#endif
     }
 }
 
