@@ -16,6 +16,7 @@ Documentation for rocFFT is available at
 * Fixed result scaling on multi-device transforms.
 * Fixed callbacks on single-process multi-GPU transforms.
 * Fixed potential issue with data generation for multidimensional transforms in rocfft-tests and rocfft-bench.
+* Fixed issue that sometimes blocked complex-to-complex FFT plan creation when using noncontiguous strides in multiple dimensions.
 
 ## rocFFT 1.0.35 for ROCM 7.1.0
 
