@@ -508,12 +508,15 @@ constexpr typename Selector::param_type get_config(Config config, target t)
     }
 };
 
-template<class Config, class Selector, class Target>
+template<class Config,
+         class Selector,
+         class Target,
+         arch::wavefront::target TargetWaveSize = gen_wavefront_size(Target::g)>
 struct target_config
 {
     constexpr static target config_target = target{Target{}};
     constexpr static auto   params        = get_config<Selector>(Config{}, config_target);
-    constexpr static auto   wavefront     = gen_wavefront_size(Target::g);
+    constexpr static auto   wavefront     = TargetWaveSize;
 };
 
 template<class Config, class Selector, class Target>
@@ -544,7 +547,26 @@ void trampoline_kernel(Kernel kernel)
     // If the build time arch from device_target_arch is a generic arch it is not the same as the runtime arch.
     if constexpr(Target::i == device_arch_target.i)
     {
-        kernel(TargetConfig{});
+        // Dynamic wavefront needs a launch for 32 and 64.
+        if constexpr(TargetConfig::wavefront != arch::wavefront::target::dynamic)
+        {
+            kernel(TargetConfig{});
+        }
+        else
+        {
+            if(::rocprim::arch::wavefront::size() == ROCPRIM_WARP_SIZE_64)
+            {
+                using TargetConfig64
+                    = target_config<Config, Selector, Target, arch::wavefront::target::size64>;
+                kernel(TargetConfig64{});
+            }
+            else
+            {
+                using TargetConfig32
+                    = target_config<Config, Selector, Target, arch::wavefront::target::size32>;
+                kernel(TargetConfig32{});
+            }
+        }
     }
     else if constexpr(ROCPRIM_IS_GENERIC())
     {
