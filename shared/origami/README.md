@@ -37,7 +37,7 @@ cmake --build build/ --parallel
 ```
 
 ### Installing Origami
-
+dasdsads
 After configuring and building, run the following command to install:
 
 ```bash
@@ -86,3 +86,9 @@ Once the build completes, navigate to the test directory and run the test suite:
 cd build/tests/
 ./origami-tests
 ```
+
+
+
+
+
+  
