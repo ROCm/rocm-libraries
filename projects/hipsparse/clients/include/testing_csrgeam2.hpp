@@ -881,7 +881,7 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
     void* dbuffer = (void*)dbuffer_managed.get();
 
     // hipsparse pointer mode host
-    int hnnz_C_1 = 0;
+    int hnnz_C_1;
 
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
     CHECK_HIPSPARSE_ERROR(hipsparseXcsrgeam2Nnz(handle,
