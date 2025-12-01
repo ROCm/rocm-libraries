@@ -60,7 +60,7 @@ namespace hiptensor
 
     bool                     isColMajorLayout(std::vector<std::size_t> const& strides,
                                               std::vector<std::size_t> const& lengths);
-    std::vector<std::size_t> getCKColMajorStrides(std::vector<std::size_t> const& lengths);
+    std::vector<std::size_t> applyCKColMajorStridesOptimizationForContraction(std::vector<std::size_t> const& lengths);
 
     template <typename DeviceOp, typename Enabler = void>
     class ContractionSolutionImpl;
@@ -152,13 +152,13 @@ namespace hiptensor
 
             //Apply CK ColMajor strides for col major layout
             if(isColMajorLayout(a_ms_ks_strides, a_ms_ks_lengths))
-                normal_a_ms_ks_strides = getCKColMajorStrides(normal_a_ms_ks_lengths);
+                normal_a_ms_ks_strides = applyCKColMajorStridesOptimizationForContraction(normal_a_ms_ks_lengths);
             if(isColMajorLayout(b_ns_ks_strides, b_ns_ks_lengths))
-                normal_b_ns_ks_strides = getCKColMajorStrides(normal_b_ns_ks_lengths);
+                normal_b_ns_ks_strides = applyCKColMajorStridesOptimizationForContraction(normal_b_ns_ks_lengths);
             if(isColMajorLayout(ds_ms_ns_strides, ds_ms_ns_lengths))
-                normal_ds_ms_ns_strides = getCKColMajorStrides(normal_ds_ms_ns_lengths);
+                normal_ds_ms_ns_strides = applyCKColMajorStridesOptimizationForContraction(normal_ds_ms_ns_lengths);
             if(isColMajorLayout(e_ms_ns_strides, e_ms_ns_lengths))
-                normal_e_ms_ns_strides = getCKColMajorStrides(normal_e_ms_ns_lengths);
+                normal_e_ms_ns_strides = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
 
             // Initialize the argument pointer
             Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
@@ -299,11 +299,11 @@ namespace hiptensor
 
             //Apply CK ColMajor strides for col major layout
             if(isColMajorLayout(a_ms_ks_strides, a_ms_ks_lengths))
-                normal_a_ms_ks_strides = getCKColMajorStrides(normal_a_ms_ks_lengths);
+                normal_a_ms_ks_strides = applyCKColMajorStridesOptimizationForContraction(normal_a_ms_ks_lengths);
             if(isColMajorLayout(b_ns_ks_strides, b_ns_ks_lengths))
-                normal_b_ns_ks_strides = getCKColMajorStrides(normal_b_ns_ks_lengths);
+                normal_b_ns_ks_strides = applyCKColMajorStridesOptimizationForContraction(normal_b_ns_ks_lengths);
             if(isColMajorLayout(e_ms_ns_strides, e_ms_ns_lengths))
-                normal_e_ms_ns_strides = getCKColMajorStrides(normal_e_ms_ns_lengths);
+                normal_e_ms_ns_strides = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
 
             // Initialize the argument pointer
             Base::mInvokerArgPtr

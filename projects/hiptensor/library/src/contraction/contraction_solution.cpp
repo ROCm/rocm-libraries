@@ -181,7 +181,7 @@ namespace hiptensor
         return true;
     }
 
-    std::vector<std::size_t> getCKColMajorStrides(std::vector<std::size_t> const& lengths)
+    std::vector<std::size_t> applyCKColMajorStridesOptimizationForContraction(std::vector<std::size_t> const& lengths)
     {
         std::vector<std::size_t> strides(lengths.size(), 1);
         // Assign second half of strides
