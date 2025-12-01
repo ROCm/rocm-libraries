@@ -55,4 +55,3 @@ public:
         this->add(this->wsidx, "wsidx", this->generate_data({1}));
     }
 };
-
