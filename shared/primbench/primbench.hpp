@@ -59,11 +59,37 @@
     };                                         \
     }
 
+/**
+ * \brief Exits the program with an error message if the given HIP API call returns a failure
+ * status.
+ */
+#define PRIMBENCH_HIP_CHECK(status)                                            \
+    {                                                                          \
+        if (status != hipSuccess) {                                            \
+            std::cerr << __FILE__ << ":" << __LINE__                           \
+                      << ": HIP error: " << hipGetErrorString(status) << "\n"; \
+            exit(status);                                                      \
+        }                                                                      \
+    }
+
+/**
+ * \brief Exits the program with an error message if the given AMD SMI API call returns a
+ * failure status.
+ */
+#define PRIMBENCH_AMDSMI_CHECK(status)                                                        \
+    {                                                                                         \
+        if (status != AMDSMI_STATUS_SUCCESS) {                                                \
+            const char* errstr = "(unknown)";                                                 \
+            amdsmi_status_code_to_string(status, &errstr);                                    \
+            std::cerr << __FILE__ << ":" << __LINE__ << ": AMDSMI error: " << errstr << "\n"; \
+            std::exit(status);                                                                \
+        }                                                                                     \
+    }
+
 namespace primbench {
 
 // Forward declarations for the detail namespace.
 extern const size_t MiB;
-void exit_on_hip_error(hipError_t status);
 template <typename... Args>
 void log(Args&&... args);
 
@@ -305,8 +331,8 @@ class amdsmi {
      */
     uint16_t get_temp() const {
         int64_t t = 0;
-        exit_on_amdsmi_error(amdsmi_get_temp_metric(m_target, AMDSMI_TEMPERATURE_TYPE_EDGE,
-                                                    AMDSMI_TEMP_CURRENT, &t));
+        PRIMBENCH_AMDSMI_CHECK(amdsmi_get_temp_metric(m_target, AMDSMI_TEMPERATURE_TYPE_EDGE,
+                                                      AMDSMI_TEMP_CURRENT, &t));
         if (t <= 0) {
             std::cerr << "Error: GPU temperature was " << t
                       << "°C according to amdsmi_get_temp_metric(), while it should always be "
@@ -318,7 +344,7 @@ class amdsmi {
 
    private:
     amdsmi() {
-        exit_on_amdsmi_error(amdsmi_init(AMDSMI_INIT_AMD_GPUS));
+        PRIMBENCH_AMDSMI_CHECK(amdsmi_init(AMDSMI_INIT_AMD_GPUS));
 
         // These can't be turned into a member initializer list,
         // because the above amdsmi_init() call must happen first.
@@ -327,7 +353,7 @@ class amdsmi {
     }
 
     ~amdsmi() {
-        exit_on_amdsmi_error(amdsmi_shut_down());
+        PRIMBENCH_AMDSMI_CHECK(amdsmi_shut_down());
     }
 
     /**
@@ -367,28 +393,15 @@ class amdsmi {
     };
 
     /**
-     * \brief Exits the program with an error message if the given AMD SMI API call returns a
-     * failure status.
-     */
-    static void exit_on_amdsmi_error(amdsmi_status_t status) {
-        if (status != AMDSMI_STATUS_SUCCESS) {
-            const char* errstr = "(unknown)";
-            amdsmi_status_code_to_string(status, &errstr);
-            std::cerr << "AMDSMI error: " << errstr << "\n";
-            std::exit(EXIT_FAILURE);
-        }
-    }
-
-    /**
      * \brief Finds the AMD SMI processor handle matching the current HIP device.
      * \return AMD SMI processor handle of the target GPU.
      */
     amdsmi_processor_handle get_target() const {
         int hip_dev;
-        exit_on_hip_error(hipGetDevice(&hip_dev));
+        PRIMBENCH_HIP_CHECK(hipGetDevice(&hip_dev));
 
         hipDeviceProp_t hip_props;
-        exit_on_hip_error(hipGetDeviceProperties(&hip_props, hip_dev));
+        PRIMBENCH_HIP_CHECK(hipGetDeviceProperties(&hip_props, hip_dev));
 
         // Build the AMD SMI BDF struct from HIP device properties
         amdsmi_bdf_t addr{
@@ -399,7 +412,7 @@ class amdsmi {
         };
 
         amdsmi_processor_handle target;
-        exit_on_amdsmi_error(amdsmi_get_processor_handle_from_bdf(addr, &target));
+        PRIMBENCH_AMDSMI_CHECK(amdsmi_get_processor_handle_from_bdf(addr, &target));
 
         return target;
     }
@@ -973,9 +986,9 @@ class logger {
         ss << ",\"specialization_count\":" << specialization_count;
 
         int device_id;
-        exit_on_hip_error(hipGetDevice(&device_id));
+        PRIMBENCH_HIP_CHECK(hipGetDevice(&device_id));
         hipDeviceProp_t dev_prop;
-        exit_on_hip_error(hipGetDeviceProperties(&dev_prop, device_id));
+        PRIMBENCH_HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
         ss << ",\"gpu_name\":\"" << dev_prop.name << "\"";
         ss << ",\"gpu_arch\":\"" << get_arch_name(dev_prop.gcnArchName) << "\"";
 
@@ -1198,10 +1211,10 @@ class logger {
         };
 
         int device_id;
-        exit_on_hip_error(hipGetDevice(&device_id));
+        PRIMBENCH_HIP_CHECK(hipGetDevice(&device_id));
 
         hipDeviceProp_t dev_prop;
-        exit_on_hip_error(hipGetDeviceProperties(&dev_prop, device_id));
+        PRIMBENCH_HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
 
         ss << "\"identity\":{";
         add_string("name", dev_prop.name);
@@ -1696,18 +1709,18 @@ class stream_blocker {
     stream_blocker(hipStream_t stream, double stream_blocking_timeout_secs)
         : m_stream(stream), m_stream_blocking_timeout_secs(stream_blocking_timeout_secs) {
         // Register host memory for blocking flags
-        exit_on_hip_error(
+        PRIMBENCH_HIP_CHECK(
             hipHostRegister(&m_host_flag, sizeof(m_host_flag), hipHostRegisterMapped));
-        exit_on_hip_error(hipHostRegister(&m_host_timeout_flag, sizeof(m_host_timeout_flag),
-                                          hipHostRegisterMapped));
+        PRIMBENCH_HIP_CHECK(hipHostRegister(&m_host_timeout_flag, sizeof(m_host_timeout_flag),
+                                            hipHostRegisterMapped));
 
         // Get device pointers to mapped host memory using temporary non-volatile pointers
         int32_t* temp_device_flag = nullptr;
         int32_t* temp_device_timeout_flag = nullptr;
 
-        exit_on_hip_error(
+        PRIMBENCH_HIP_CHECK(
             hipHostGetDevicePointer(reinterpret_cast<void**>(&temp_device_flag), &m_host_flag, 0));
-        exit_on_hip_error(hipHostGetDevicePointer(
+        PRIMBENCH_HIP_CHECK(hipHostGetDevicePointer(
             reinterpret_cast<void**>(&temp_device_timeout_flag), &m_host_timeout_flag, 0));
 
         // Assign to volatile members
@@ -1715,11 +1728,11 @@ class stream_blocker {
         m_device_timeout_flag = temp_device_timeout_flag;
 
         int device_id;
-        exit_on_hip_error(hipGetDevice(&device_id));
+        PRIMBENCH_HIP_CHECK(hipGetDevice(&device_id));
 
         // Query wall clock rate once (constant per device)
         int wall_clk_rate_k_hz = 0;
-        exit_on_hip_error(
+        PRIMBENCH_HIP_CHECK(
             hipDeviceGetAttribute(&wall_clk_rate_k_hz, hipDeviceAttributeWallClockRate, device_id));
 
         m_wall_clock_rate = static_cast<long long int>(wall_clk_rate_k_hz);
@@ -1729,8 +1742,8 @@ class stream_blocker {
      * \brief Destructor that unregisters host memory.
      */
     ~stream_blocker() {
-        exit_on_hip_error(hipHostUnregister(&m_host_flag));
-        exit_on_hip_error(hipHostUnregister(&m_host_timeout_flag));
+        PRIMBENCH_HIP_CHECK(hipHostUnregister(&m_host_flag));
+        PRIMBENCH_HIP_CHECK(hipHostUnregister(&m_host_timeout_flag));
     }
 
     /**
@@ -2084,7 +2097,7 @@ class state {
 
         // Reserve space for start and stop events for each iteration.
         std::vector<hipEvent_t> events(m_kernels_per_batch * 2);
-        for (auto& event : events) exit_on_hip_error(hipEventCreate(&event));
+        for (auto& event : events) PRIMBENCH_HIP_CHECK(hipEventCreate(&event));
 
         uint64_t iterations = 0;
         std::vector<float> iterations_ms(m_kernels_per_batch);
@@ -2174,7 +2187,7 @@ class state {
             }
         }
 
-        for (const auto& event : events) exit_on_hip_error(hipEventDestroy(event));
+        for (const auto& event : events) PRIMBENCH_HIP_CHECK(hipEventDestroy(event));
     }
 
     /**
@@ -2193,7 +2206,7 @@ class state {
         constexpr int num_items = 1 << 20;  // 1 million items.
 
         static float* d_data = nullptr;
-        if (!d_data) exit_on_hip_error(hipMalloc(&d_data, num_items * sizeof(float)));
+        if (!d_data) PRIMBENCH_HIP_CHECK(hipMalloc(&d_data, num_items * sizeof(float)));
 
         auto ceil_div = [](int a, int b) -> int { return (a + b - 1) / b; };
 
@@ -2212,7 +2225,7 @@ class state {
 
             warmup_kernel<<<blocks, threads, 0, stream>>>(d_data, num_items);
 
-            exit_on_hip_error(hipStreamSynchronize(stream));
+            PRIMBENCH_HIP_CHECK(hipStreamSynchronize(stream));
 
             if (std::chrono::steady_clock::now() - start >= s.max_warming_secs) {
                 std::cerr << "\nError: Failed to warm up after " << s.max_warming_secs.count()
@@ -2277,9 +2290,9 @@ class state {
 
         // Without this, the very first timed batch is very slow.
         log("Running warmup");
-        for (auto& event : events) exit_on_hip_error(hipEventCreate(&event));
+        for (auto& event : events) PRIMBENCH_HIP_CHECK(hipEventCreate(&event));
         run_batch(events, kernel);
-        for (const auto& event : events) exit_on_hip_error(hipEventDestroy(event));
+        for (const auto& event : events) PRIMBENCH_HIP_CHECK(hipEventDestroy(event));
 
         while (true) {
             log("Timing batch size ", m_kernels_per_batch);
@@ -2289,7 +2302,7 @@ class state {
 
             iterations_ms.resize(m_kernels_per_batch);
 
-            for (auto& event : events) exit_on_hip_error(hipEventCreate(&event));
+            for (auto& event : events) PRIMBENCH_HIP_CHECK(hipEventCreate(&event));
 
             run_batch(events, kernel);
 
@@ -2298,7 +2311,7 @@ class state {
             m_ms_per_batch = std::accumulate(iterations_ms.begin(), iterations_ms.end(), 0.0);
             std::chrono::duration<double> batch_ms(m_ms_per_batch);
 
-            for (const auto& event : events) exit_on_hip_error(hipEventDestroy(event));
+            for (const auto& event : events) PRIMBENCH_HIP_CHECK(hipEventDestroy(event));
 
             if (batch_ms > m_cli_settings.min_gpu_ms_per_batch) break;
 
@@ -2324,14 +2337,14 @@ class state {
             if (!m_flags.has(flags::Flags::sync)) m_stream_blocker.block();
 
             // Even events record the start time.
-            exit_on_hip_error(hipEventRecord(events[i * 2], stream));
+            PRIMBENCH_HIP_CHECK(hipEventRecord(events[i * 2], stream));
 
             // In order for the event timing to be accurate, this kernel lambda
             // shouldn't do more than just calling the __global__ kernel function.
             kernel();
 
             // Odd events record the stop time.
-            exit_on_hip_error(hipEventRecord(events[i * 2 + 1], stream));
+            PRIMBENCH_HIP_CHECK(hipEventRecord(events[i * 2 + 1], stream));
 
             // Allows the GPU to start running its queued events.
             if (!m_flags.has(flags::Flags::sync)) m_stream_blocker.unblock();
@@ -2340,17 +2353,17 @@ class state {
             // We deliberately don't do this right after the kernel() call,
             // since that'd keep the GPU blocked for slightly longer.
             // The kernel lambda is still responsible for catching
-            // host-side algorithm errors using exit_on_hip_error().
-            exit_on_hip_error(hipGetLastError());
+            // host-side algorithm errors using PRIMBENCH_HIP_CHECK().
+            PRIMBENCH_HIP_CHECK(hipGetLastError());
 
             // Periodically sync to avoid overflowing the stream's command queue.
             // Without this, too many pending events can exhaust driver resources and cause a hang.
             // 64 was chosen empirically. It'll sync on i=63, i=127, etc.
             constexpr size_t n = 64;
             if (i % n == n - 1) {
-                exit_on_hip_error(hipStreamSynchronize(stream));
+                PRIMBENCH_HIP_CHECK(hipStreamSynchronize(stream));
                 // Catch runtime/device execution errors.
-                exit_on_hip_error(hipGetLastError());
+                PRIMBENCH_HIP_CHECK(hipGetLastError());
 
                 // Check for blocking kernel timeout after sync.
                 if (!m_flags.has(flags::Flags::sync)) m_stream_blocker.check_timeout();
@@ -2358,9 +2371,9 @@ class state {
         }
 
         // Final stream synchronization.
-        exit_on_hip_error(hipStreamSynchronize(stream));
+        PRIMBENCH_HIP_CHECK(hipStreamSynchronize(stream));
         // Catch any runtime/device errors from the last kernels.
-        exit_on_hip_error(hipGetLastError());
+        PRIMBENCH_HIP_CHECK(hipGetLastError());
 
         // Final blocking kernel timeout check.
         if (!m_flags.has(flags::Flags::sync)) m_stream_blocker.check_timeout();
@@ -2375,7 +2388,8 @@ class state {
             float iteration_ms;
 
             // Gets the number of milliseconds between the start and stop event.
-            exit_on_hip_error(hipEventElapsedTime(&iteration_ms, events[i * 2], events[i * 2 + 1]));
+            PRIMBENCH_HIP_CHECK(
+                hipEventElapsedTime(&iteration_ms, events[i * 2], events[i * 2 + 1]));
 
             iterations_ms[i] = iteration_ms;
         }
@@ -2391,8 +2405,8 @@ class state {
      */
     void clear_gpu_cache(hipStream_t stream) const {
         static void* buf = nullptr;
-        if (!buf) exit_on_hip_error(hipMalloc(&buf, PRIMBENCH_GPU_CACHE_SIZE));
-        exit_on_hip_error(hipMemsetAsync(buf, 0, PRIMBENCH_GPU_CACHE_SIZE, stream));
+        if (!buf) PRIMBENCH_HIP_CHECK(hipMalloc(&buf, PRIMBENCH_GPU_CACHE_SIZE));
+        PRIMBENCH_HIP_CHECK(hipMemsetAsync(buf, 0, PRIMBENCH_GPU_CACHE_SIZE, stream));
     }
 
     /**
@@ -2591,18 +2605,6 @@ void log(Args&&... args) {
     std::cout << detail::clearline << detail::gray;
     (std::cout << ... << args);
     std::cout << detail::reset << std::flush;
-}
-
-/**
- * \brief Exits the program with an error message if the given HIP API call returns a failure
- * status.
- */
-void exit_on_hip_error(hipError_t status) {
-    if (status != hipSuccess) {
-        std::cerr << __FILE__ << ":" << __LINE__ << ": HIP error: " << hipGetErrorString(status)
-                  << "\n";
-        exit(status);
-    }
 }
 
 /**
