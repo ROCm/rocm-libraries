@@ -496,6 +496,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
                      14, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="for LRA0 complete"),
                      14, SBarrier(comment="for GRA start"),
                      46, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="for LRB0"),
+                     46, SBarrier(comment="for GRB start"),
                      50, SWaitCnt(dscnt=-1, vlcnt=14+1, vscnt=-1, comment="for LRA1"),
                      50, SBarrier(comment="for LRA1 start"),
                      65, SWaitCnt(dscnt=-1, vlcnt=6+5, vscnt=-1, comment="for LRB0"),
