@@ -184,6 +184,9 @@ RUN if [ "$USE_FIN" = "ON" ]; then \
     fi && \
     ccache -s
 
+# Remove CK source once built and installed
+RUN rm -rf /composable_kernel
+
 # Utilize multi-stage build in order to squash the container.
 FROM ubuntu:22.04
 COPY --from=miopen / /
