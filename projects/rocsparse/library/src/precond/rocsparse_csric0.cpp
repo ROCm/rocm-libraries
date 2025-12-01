@@ -28,6 +28,7 @@
 #include "internal/level2/rocsparse_csrsv.h"
 
 #include "../level2/rocsparse_csrsv.hpp"
+#include "../level2/rocsparse_csrsv_deprecated_template.hpp"
 #include "csric0_device.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
@@ -138,8 +139,8 @@ rocsparse_status rocsparse::csric0_analysis_template(rocsparse_handle          h
                                                     csr_col_ind,
                                                     temp_buffer));
 
-    csric0_info->create_singular_pivot_async(rocsparse::get_indextype<rocsparse_int>(),
-                                             handle->stream);
+    csric0_info->create_singular_pivot_async(
+        static_cast<int64_t>(1), rocsparse::get_indextype<rocsparse_int>(), handle->stream);
 
     RETURN_IF_HIP_ERROR(hipMemcpyAsync(csric0_info->get_singular_pivot(),
                                        csric0_info->get_zero_pivot(),
