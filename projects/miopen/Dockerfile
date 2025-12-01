@@ -104,8 +104,8 @@ ADD ${PROJ}/requirements.txt /requirements.txt
 ADD ${PROJ}/dev-requirements.txt /dev-requirements.txt
 ADD ${PROJ}/docs/sphinx/requirements.txt /doc-requirements.txt
 
-# Copy Composable Kernel
-COPY ./composablekernel /composable_kernel
+# Add Composable Kernel
+ADD composablekernel /composable_kernel
 
 # Install an init system
 RUN wget https://github.com/Yelp/dumb-init/releases/download/v1.2.0/dumb-init_1.2.0_amd64.deb && \
