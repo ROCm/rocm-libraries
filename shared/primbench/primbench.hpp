@@ -2514,10 +2514,9 @@ class state {
 /**
  * \brief Simple command-line argument parser.
  */
-class parser {
+class cli {
    public:
-    /// \brief Constructs parser and parses command-line arguments.
-    parser(int argc, char** argv) : _appname(argv[0]) {
+    cli(int argc, char** argv) : _appname(argv[0]) {
         // Always register --help.
         register_description("help", "Display this help and exit.");
 
@@ -2772,7 +2771,7 @@ class parser {
         _descriptions.emplace_back(key, desc);
         _description_keys_set.insert(key);
     }
-};  // class parser
+};  // class cli
 
 }  // namespace detail
 
@@ -2910,10 +2909,10 @@ class executor {
      */
     executor(int argc, char* argv[], size_t default_bytes,
              detail::flags::FlagTag flags = flags::none, hipStream_t stream = hipStreamDefault)
-        : m_stream(stream), m_flags(flags), m_parser(argc, argv) {
+        : m_stream(stream), m_flags(flags), m_cli(argc, argv) {
         get_logger().save_program_start_time();
 
-        m_cli_settings = parse(m_parser, default_bytes);
+        m_cli_settings = parse(m_cli, default_bytes);
 
         m_stream_blocker = std::make_unique<detail::stream_blocker>(
             m_stream, m_cli_settings.stream_blocking_timeout_secs.count());
@@ -2967,10 +2966,10 @@ class executor {
         }
         run_called = true;
 
-        m_parser.finalize();
+        m_cli.finalize();
 
         // Capture custom arguments after all have been registered.
-        m_cli_settings.custom_args = m_parser.get_all_custom_arguments();
+        m_cli_settings.custom_args = m_cli.get_all_custom_arguments();
 
         // Sort to get a consistent order.
         std::sort(static_specializations.begin(), static_specializations.end(),
@@ -3049,45 +3048,43 @@ class executor {
      */
     template <typename T>
     T get(std::string_view name, const T& default_val, std::string_view description) {
-        return m_parser.get<T>(name, default_val, description);
+        return m_cli.get<T>(name, default_val, description);
     }
 
    private:
     /**
      * \brief Parse optional arguments.
      */
-    detail::cli_settings parse(detail::parser& parser, size_t default_bytes) {
+    detail::cli_settings parse(detail::cli& cli, size_t default_bytes) {
         detail::cli_settings s{};
 
-        s.bytes =
-            parser.get<size_t>("bytes", default_bytes,
-                               "Sets the size (in bytes) of the randomly generated input array, "
-                               "overriding the value provided to `primbench::executor`.");
+        s.bytes = cli.get<size_t>("bytes", default_bytes,
+                                  "Sets the size (in bytes) of the randomly generated input array, "
+                                  "overriding the value provided to `primbench::executor`.");
         if (s.bytes == 0) {
             std::cerr << "Error: --bytes must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
         s.hot =
-            parser.get<bool>("hot", false, "Skip clearing the GPU cache between batch iterations.");
+            cli.get<bool>("hot", false, "Skip clearing the GPU cache between batch iterations.");
 
-        s.seed = parser.get<uint32_t>("seed", 42, "Seed used for input generation.");
+        s.seed = cli.get<uint32_t>("seed", 42, "Seed used for input generation.");
 
-        s.json_out = parser.get<std::string>("json-out", "results.json",
-                                             "JSON path to write benchmark results to.");
+        s.json_out = cli.get<std::string>("json-out", "results.json",
+                                          "JSON path to write benchmark results to.");
 
-        s.csv_out =
-            parser.get<std::string>("csv-out", "", "CSV path to write benchmark results to.");
+        s.csv_out = cli.get<std::string>("csv-out", "", "CSV path to write benchmark results to.");
 
         s.min_gpu_ms_per_batch = std::chrono::duration<double>(
-            parser.get<double>("min-gpu-ms-per-batch", 10.0,
-                               "Minimum duration of a batch in milliseconds (GPU time)."));
+            cli.get<double>("min-gpu-ms-per-batch", 10.0,
+                            "Minimum duration of a batch in milliseconds (GPU time)."));
         if (s.min_gpu_ms_per_batch.count() <= 0.0) {
             std::cerr << "Error: --min-gpu-ms-per-batch must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
-        s.min_secs = std::chrono::duration<double>(parser.get<double>(
+        s.min_secs = std::chrono::duration<double>(cli.get<double>(
             "min-secs", 1.0, "Minimum total benchmark duration in seconds (wall time)."));
         if (s.min_secs.count() <= 0.0) {
             std::cerr << "Error: --min-secs must be greater than 0\n";
@@ -3095,9 +3092,9 @@ class executor {
         }
 
         s.noise_timeout_secs = std::chrono::duration<double>(
-            parser.get<double>("noise-timeout-secs", 10.0,
-                               "Maximum total benchmark duration in seconds before timing out a "
-                               "noisy run (wall time)."));
+            cli.get<double>("noise-timeout-secs", 10.0,
+                            "Maximum total benchmark duration in seconds before timing out a "
+                            "noisy run (wall time)."));
         if (s.noise_timeout_secs.count() <= 0.0) {
             std::cerr << "Error: --noise-timeout-secs must be greater than 0\n";
             exit(EXIT_FAILURE);
@@ -3108,27 +3105,27 @@ class executor {
         }
 
         s.batch_window_size =
-            parser.get<size_t>("batch-window-size", 10,
-                               "Number of batch times used in the noise (coefficient of variation) "
-                               "window to decide early benchmark stopping.");
+            cli.get<size_t>("batch-window-size", 10,
+                            "Number of batch times used in the noise (coefficient of variation) "
+                            "window to decide early benchmark stopping.");
         if (s.batch_window_size == 0) {
             std::cerr << "Error: --batch-window-size must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
         s.noise_tolerance_percent =
-            parser.get<double>("noise-tolerance-percent", 1.0,
-                               "Noise tolerance of batch times in percent, used to determine "
-                               "whether a benchmark can be stopped early.");
+            cli.get<double>("noise-tolerance-percent", 1.0,
+                            "Noise tolerance of batch times in percent, used to determine "
+                            "whether a benchmark can be stopped early.");
         if (s.noise_tolerance_percent <= 0.0) {
             std::cerr << "Error: --noise-tolerance-percent must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
-        s.min_gpu_temp = parser.get<uint16_t>(
+        s.min_gpu_temp = cli.get<uint16_t>(
             "min-gpu-temp", 50,
             "Minimum GPU temperature in °C. Too low slows benchmarks; too high increases noise.");
-        s.max_gpu_temp = parser.get<uint16_t>(
+        s.max_gpu_temp = cli.get<uint16_t>(
             "max-gpu-temp", 60,
             "Maximum GPU temperature in °C. Too low slows benchmarks; too high increases noise.");
         if (s.min_gpu_temp > s.max_gpu_temp) {
@@ -3136,40 +3133,40 @@ class executor {
             exit(EXIT_FAILURE);
         }
 
-        s.max_warming_secs = std::chrono::duration<double>(parser.get<double>(
-            "max-warming-secs", 60.0,
-            "Maximum seconds allowed for GPU warming before an error is thrown."));
+        s.max_warming_secs = std::chrono::duration<double>(
+            cli.get<double>("max-warming-secs", 60.0,
+                            "Maximum seconds allowed for GPU warming before an error is thrown."));
         if (s.max_warming_secs.count() <= 0.0) {
             std::cerr << "Error: --max-warming-secs must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
-        s.max_cooling_secs = std::chrono::duration<double>(parser.get<double>(
-            "max-cooling-secs", 60.0,
-            "Maximum seconds allowed for GPU cooling before an error is thrown."));
+        s.max_cooling_secs = std::chrono::duration<double>(
+            cli.get<double>("max-cooling-secs", 60.0,
+                            "Maximum seconds allowed for GPU cooling before an error is thrown."));
         if (s.max_cooling_secs.count() <= 0.0) {
             std::cerr << "Error: --max-cooling-secs must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
         s.output_hip_device_properties_context =
-            parser.get<bool>("output-hip-device-properties-context", false,
-                             "Output a `hip_device_properties` object in the context object, "
-                             "containing details about the GPU.");
+            cli.get<bool>("output-hip-device-properties-context", false,
+                          "Output a `hip_device_properties` object in the context object, "
+                          "containing details about the GPU.");
 
-        s.output_amdsmi_context = parser.get<bool>(
+        s.output_amdsmi_context = cli.get<bool>(
             "output-amdsmi-context", false,
             "Output an `amdsmi` object in the context object, containing details about the GPU.");
 
-        s.output_batches = parser.get<bool>(
+        s.output_batches = cli.get<bool>(
             "output-batches", false,
             "Output a `batches` array for each specialization, containing per-batch details.");
 
-        s.spaces_per_indent = parser.get<uint32_t>(
+        s.spaces_per_indent = cli.get<uint32_t>(
             "spaces-per-indent", 4,
             "Number of spaces per indentation level in JSON output. Set to 0 for no indentation.");
 
-        s.stream_blocking_timeout_secs = std::chrono::duration<double>(parser.get<double>(
+        s.stream_blocking_timeout_secs = std::chrono::duration<double>(cli.get<double>(
             "stream-blocking-timeout-secs", 10.0,
             "Maximum stream blocking duration in seconds before timing out. Stream is blocked "
             "while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous."));
@@ -3218,7 +3215,7 @@ class executor {
 
     detail::flags::FlagTag m_flags; /**< Executor flags */
 
-    detail::parser m_parser; /**< Command-line argument parser */
+    detail::cli m_cli; /**< Command-line argument parser */
 
     detail::cli_settings m_cli_settings; /**< CLI user settings */
 
