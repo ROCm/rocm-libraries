@@ -148,9 +148,9 @@ private:
 
     miopen::FusionPlanDescriptor fusePlanDesc;
 
-    const float activ_alpha = 0.5f;
-    const float activ_beta  = 0.5f;
-    const float activ_gamma = 0.5f;
+    static constexpr double activ_alpha = 0.5;
+    static constexpr double activ_beta  = 0.5;
+    static constexpr double activ_gamma = 0.5;
     bool skip_test;
 };
 
