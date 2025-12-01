@@ -21,11 +21,13 @@
 #ifndef DATA_GEN_DEVICE_H
 #define DATA_GEN_DEVICE_H
 
+#include "../shared/rocfft_complex.h"
+
 #ifdef USE_HIPRAND
 
-static const unsigned int DATA_GEN_THREADS = 8;
+#include <vector>
 
-#include "../shared/rocfft_complex.h"
+static const unsigned int DATA_GEN_THREADS = 8;
 
 template <typename Tint, typename Treal>
 static void generate_random_interleaved_data(const Tint&            whole_length,
@@ -107,26 +109,21 @@ static void generate_real_data(const Tint&            whole_length,
 #endif // USE_HIPRAND
 
 template <typename Tcomplex>
-static void impose_hermitian_symmetry_interleaved(const std::vector<size_t>& length,
-                                                  const std::vector<size_t>& ilength,
-                                                  const std::vector<size_t>& stride,
-                                                  const size_t               dist,
-                                                  const size_t               batch,
-                                                  Tcomplex*                  input_data,
-                                                  const hipDeviceProp_t&     deviceProp)
-{
-}
+void impose_hermitian_symmetry_interleaved(const std::vector<size_t>& length,
+                                           const std::vector<size_t>& ilength,
+                                           const std::vector<size_t>& stride,
+                                           const size_t               dist,
+                                           const size_t               batch,
+                                           Tcomplex*                  input_data,
+                                           const hipDeviceProp_t&     deviceProp);
 
 template <typename Tfloat>
-static void impose_hermitian_symmetry_planar(const std::vector<size_t>& length,
-                                             const std::vector<size_t>& ilength,
-                                             const std::vector<size_t>& stride,
-                                             const size_t               dist,
-                                             const size_t               batch,
-                                             Tfloat*                    input_data_real,
-                                             Tfloat*                    input_data_imag,
-                                             const hipDeviceProp_t&     deviceProp)
-{
-}
-
+void impose_hermitian_symmetry_planar(const std::vector<size_t>& length,
+                                      const std::vector<size_t>& ilength,
+                                      const std::vector<size_t>& stride,
+                                      const size_t               dist,
+                                      const size_t               batch,
+                                      Tfloat*                    input_data_real,
+                                      Tfloat*                    input_data_imag,
+                                      const hipDeviceProp_t&     deviceProp);
 #endif // DATA_GEN_DEVICE_H
