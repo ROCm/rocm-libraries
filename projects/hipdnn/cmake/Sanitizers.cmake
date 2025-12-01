@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Enable Address Sanitizer and set linker flags for security This configuration is for standalone
+# Enable Address Sanitizer and set linker flags. This configuration is for standalone
 # builds outside of TheRock
 if(BUILD_ADDRESS_SANITIZER)
 
