@@ -240,7 +240,8 @@ def getDockerImage(Map conf=[:])
     // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
     def gpu_arch = "gfx1151" // prebuilt dockers should have all the architectures enabled so one image can be used for all stages
 
-    def dockerArgs = "--build-arg BUILDKIT_INLINE_CACHE=1 " +
+    def dockerArgs = "-f ${env.WORKSPACE}/${env.REPO_DIR}/Dockerfile " +
+                     "--build-arg BUILDKIT_INLINE_CACHE=1 " +
                      "--build-arg PREFIX=${prefixpath} " +
                      "--build-arg GPU_ARCHS=\"${gpu_arch}\" "
     if(env.CCACHE_HOST)
