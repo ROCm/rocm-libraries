@@ -25,7 +25,6 @@
 #include <cstdlib>
 #include <functional>
 #include <iostream>
-#include <limits>
 #include <numeric>
 #include <random>
 #include <string>
@@ -43,6 +42,7 @@
 #include <hipcub/libcxx.hpp>
 
 #include _HIPCUB_LIBCXX_INCLUDE(cmath)
+#include _HIPCUB_STD_INCLUDE(limits)
 
 // test_utils.hpp should only be included by this header.
 // The following definition is used as guard in test_utils.hpp

@@ -149,7 +149,7 @@ __global__
 template<typename T>
 struct max_value
 {
-    static constexpr T value = std::numeric_limits<T>::max();
+    static constexpr T value = _HIPCUB_STD::numeric_limits<T>::max();
 };
 
 template<unsigned int BlockSize,

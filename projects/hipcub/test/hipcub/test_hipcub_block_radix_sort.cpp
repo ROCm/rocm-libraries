@@ -448,11 +448,11 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeys)
         }
         else
         {
-            keys_output
-                = test_utils::get_random_data<key_type>(size,
-                                                        std::numeric_limits<limits_t>::min(),
-                                                        std::numeric_limits<limits_t>::max(),
-                                                        seed_value);
+            keys_output = test_utils::get_random_data<key_type>(
+                size,
+                _HIPCUB_STD::numeric_limits<limits_t>::min(),
+                _HIPCUB_STD::numeric_limits<limits_t>::max(),
+                seed_value);
         }
 
         // Calculate expected results on host
@@ -570,11 +570,11 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
         }
         else
         {
-            keys_output
-                = test_utils::get_random_data<key_type>(size,
-                                                        std::numeric_limits<limits_t>::min(),
-                                                        std::numeric_limits<limits_t>::max(),
-                                                        seed_value);
+            keys_output = test_utils::get_random_data<key_type>(
+                size,
+                _HIPCUB_STD::numeric_limits<limits_t>::min(),
+                _HIPCUB_STD::numeric_limits<limits_t>::max(),
+                seed_value);
         }
 
         std::vector<value_type> values_output;
@@ -588,11 +588,11 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
         }
         else
         {
-            values_output
-                = test_utils::get_random_data<value_type>(size,
-                                                          std::numeric_limits<value_type>::min(),
-                                                          std::numeric_limits<value_type>::max(),
-                                                          seed_value + seed_value_addition);
+            values_output = test_utils::get_random_data<value_type>(
+                size,
+                _HIPCUB_STD::numeric_limits<value_type>::min(),
+                _HIPCUB_STD::numeric_limits<value_type>::max(),
+                seed_value + seed_value_addition);
         }
 
         using key_value = std::pair<key_type, value_type>;

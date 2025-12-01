@@ -123,10 +123,11 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeys)
 
         // Generate data
         std::vector<key_type> keys_output;
-        keys_output = test_utils::get_random_data<key_type>(size,
-                                                            std::numeric_limits<key_type>::min(),
-                                                            std::numeric_limits<key_type>::max(),
-                                                            seed_value);
+        keys_output
+            = test_utils::get_random_data<key_type>(size,
+                                                    _HIPCUB_STD::numeric_limits<key_type>::min(),
+                                                    _HIPCUB_STD::numeric_limits<key_type>::max(),
+                                                    seed_value);
 
         // Calculate expected results on host
         std::vector<key_type> expected(keys_output);
@@ -217,8 +218,8 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeysWithValidItems)
     constexpr size_t size = grid_size * items_per_block;
 
     // minus|plus two to prevent overflow weirdness
-    const T mini = std::numeric_limits<T>::min() + static_cast<T>(2);
-    const T maxi = std::numeric_limits<T>::max() - static_cast<T>(2);
+    const T mini = _HIPCUB_STD::numeric_limits<T>::min() + static_cast<T>(2);
+    const T maxi = _HIPCUB_STD::numeric_limits<T>::max() - static_cast<T>(2);
 
     const T   default_val        = static_cast<T>(compare_op(mini, maxi) ? maxi : mini);
     const int valid_items_arr[8] = {items_per_block / 2,
@@ -354,17 +355,18 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeysValues)
 
         // Generate data
         std::vector<key_type> keys_output;
-        keys_output = test_utils::get_random_data<key_type>(size,
-                                                            std::numeric_limits<key_type>::min(),
-                                                            std::numeric_limits<key_type>::max(),
-                                                            seed_value);
+        keys_output
+            = test_utils::get_random_data<key_type>(size,
+                                                    _HIPCUB_STD::numeric_limits<key_type>::min(),
+                                                    _HIPCUB_STD::numeric_limits<key_type>::max(),
+                                                    seed_value);
 
         std::vector<value_type> values_output;
-        values_output
-            = test_utils::get_random_data<value_type>(size,
-                                                      std::numeric_limits<value_type>::min(),
-                                                      std::numeric_limits<value_type>::max(),
-                                                      seed_value + seed_value_addition);
+        values_output = test_utils::get_random_data<value_type>(
+            size,
+            _HIPCUB_STD::numeric_limits<value_type>::min(),
+            _HIPCUB_STD::numeric_limits<value_type>::max(),
+            seed_value + seed_value_addition);
 
         using key_value = std::pair<key_type, value_type>;
 
@@ -593,17 +595,18 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValues)
 
         // Generate data
         std::vector<key_type> keys_output;
-        keys_output = test_utils::get_random_data<key_type>(size,
-                                                            std::numeric_limits<key_type>::min(),
-                                                            std::numeric_limits<key_type>::max(),
-                                                            seed_value);
+        keys_output
+            = test_utils::get_random_data<key_type>(size,
+                                                    _HIPCUB_STD::numeric_limits<key_type>::min(),
+                                                    _HIPCUB_STD::numeric_limits<key_type>::max(),
+                                                    seed_value);
 
         std::vector<value_type> values_output;
-        values_output
-            = test_utils::get_random_data<value_type>(size,
-                                                      std::numeric_limits<value_type>::min(),
-                                                      std::numeric_limits<value_type>::max(),
-                                                      seed_value + seed_value_addition);
+        values_output = test_utils::get_random_data<value_type>(
+            size,
+            _HIPCUB_STD::numeric_limits<value_type>::min(),
+            _HIPCUB_STD::numeric_limits<value_type>::max(),
+            seed_value + seed_value_addition);
 
         // Set some keys to be the same, but have different values to test stability
         for(size_t i = 0; i < 10; i++)
@@ -734,8 +737,8 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysWithValidItems)
     constexpr size_t size = grid_size * items_per_block;
 
     // minus|plus two to prevent overflow weirdness
-    const T mini = std::numeric_limits<T>::min() + static_cast<T>(2);
-    const T maxi = std::numeric_limits<T>::max() - static_cast<T>(2);
+    const T mini = _HIPCUB_STD::numeric_limits<T>::min() + static_cast<T>(2);
+    const T maxi = _HIPCUB_STD::numeric_limits<T>::max() - static_cast<T>(2);
 
     const custom_type default_val = {static_cast<T>(compare_op(mini, maxi) ? maxi : mini), 0};
     const int         valid_items_arr[8] = {items_per_block / 2,
@@ -882,8 +885,8 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValuesWithValidItems)
     constexpr size_t size = grid_size * items_per_block;
 
     // minus|plus two to prevent overflow weirdness
-    const T mini = std::numeric_limits<T>::min() + static_cast<T>(2);
-    const T maxi = std::numeric_limits<T>::max() - static_cast<T>(2);
+    const T mini = _HIPCUB_STD::numeric_limits<T>::min() + static_cast<T>(2);
+    const T maxi = _HIPCUB_STD::numeric_limits<T>::max() - static_cast<T>(2);
 
     T         default_val        = static_cast<T>(compare_op(mini, maxi) ? maxi : mini);
     const int valid_items_arr[8] = {items_per_block / 2,

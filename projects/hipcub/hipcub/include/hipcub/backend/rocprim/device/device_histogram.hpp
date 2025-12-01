@@ -61,7 +61,8 @@ HIPCUB_FORCEINLINE bool may_overflow(LevelT  lower_level,
                                      ::std::true_type /* is_integral */)
 {
     return static_cast<IntArithmeticT>(upper_level - lower_level)
-           > (::std::numeric_limits<IntArithmeticT>::max() / static_cast<IntArithmeticT>(num_bins));
+           > (_HIPCUB_STD::numeric_limits<IntArithmeticT>::max()
+              / static_cast<IntArithmeticT>(num_bins));
 }
 
 template<class SampleT, class CommonT>

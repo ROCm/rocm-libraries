@@ -43,6 +43,8 @@
     #define HIPCUB_WARP_THREADS_MACRO CUB_PTX_WARP_THREADS
 #endif
 
+#include _HIPCUB_STD_INCLUDE(limits)
+
 namespace benchmark_utils
 {
 const size_t default_max_random_size = 1024 * 1024;
@@ -303,11 +305,11 @@ struct generate_limits<T, std::enable_if_t<std::is_integral<T>::value>>
 {
     static inline T min()
     {
-        return std::numeric_limits<T>::min();
+        return _HIPCUB_STD::numeric_limits<T>::min();
     }
     static inline T max()
     {
-        return std::numeric_limits<T>::max();
+        return _HIPCUB_STD::numeric_limits<T>::max();
     }
 };
 
@@ -382,7 +384,7 @@ std::vector<T>
     using key_distribution_type = std::conditional_t<std::is_integral<T>::value,
                                                      std::uniform_int_distribution<T>,
                                                      std::uniform_real_distribution<T>>;
-    key_distribution_type key_distribution(std::numeric_limits<T>::max());
+    key_distribution_type key_distribution(_HIPCUB_STD::numeric_limits<T>::max());
     std::vector<T>        keys(size);
 
     size_t keys_start_index = 0;
@@ -492,17 +494,17 @@ class numeric_limits<benchmark_utils::custom_type<int>>
 public:
     static constexpr inline T min()
     {
-        return std::numeric_limits<typename T::first_type>::min();
+        return _HIPCUB_STD::numeric_limits<typename T::first_type>::min();
     }
 
     static constexpr inline T max()
     {
-        return std::numeric_limits<typename T::first_type>::max();
+        return _HIPCUB_STD::numeric_limits<typename T::first_type>::max();
     }
 
     static constexpr inline T lowest()
     {
-        return std::numeric_limits<typename T::first_type>::lowest();
+        return _HIPCUB_STD::numeric_limits<typename T::first_type>::lowest();
     }
 };
 
@@ -514,17 +516,17 @@ class numeric_limits<benchmark_utils::custom_type<float>>
 public:
     static constexpr inline T min()
     {
-        return std::numeric_limits<typename T::first_type>::min();
+        return _HIPCUB_STD::numeric_limits<typename T::first_type>::min();
     }
 
     static constexpr inline T max()
     {
-        return std::numeric_limits<typename T::first_type>::max();
+        return _HIPCUB_STD::numeric_limits<typename T::first_type>::max();
     }
 
     static constexpr inline T lowest()
     {
-        return std::numeric_limits<typename T::first_type>::lowest();
+        return _HIPCUB_STD::numeric_limits<typename T::first_type>::lowest();
     }
 };
 } // namespace std

@@ -48,14 +48,15 @@ T set_half_bits(uint16_t value)
 
 // Numeric limits which also supports custom_test_type<U> classes
 template<class T>
-struct numeric_limits : std::numeric_limits<T>
+struct numeric_limits : _HIPCUB_STD::numeric_limits<T>
 {};
 
 template<>
-struct numeric_limits<test_utils::half> : public std::numeric_limits<test_utils::half>
+struct numeric_limits<test_utils::half> : public _HIPCUB_STD::numeric_limits<test_utils::half>
 {
 public:
     using T = test_utils::half;
+    static constexpr bool is_specialized = true;
     static inline T min()
     {
         return T(0.00006104f);
@@ -74,11 +75,11 @@ public:
     };
     static inline T quiet_NaN()
     {
-        return T(std::numeric_limits<float>::quiet_NaN());
+        return T(_HIPCUB_STD::numeric_limits<float>::quiet_NaN());
     };
     static inline T signaling_NaN()
     {
-        return T(std::numeric_limits<float>::signaling_NaN());
+        return T(_HIPCUB_STD::numeric_limits<float>::signaling_NaN());
     };
     static inline T infinity_neg()
     {
@@ -87,17 +88,19 @@ public:
 };
 
 template<>
-class numeric_limits<test_utils::bfloat16> : public std::numeric_limits<test_utils::bfloat16>
+class numeric_limits<test_utils::bfloat16>
+    : public _HIPCUB_STD::numeric_limits<test_utils::bfloat16>
 {
 public:
     using T = test_utils::bfloat16;
+    static constexpr bool is_specialized = true;
     static inline T max()
     {
         return set_half_bits<T>(0x7f7f);
     };
     static inline T min()
     {
-        return T(std::numeric_limits<float>::min());
+        return T(_HIPCUB_STD::numeric_limits<float>::min());
     };
     static inline T lowest()
     {
@@ -109,11 +112,11 @@ public:
     };
     static inline T quiet_NaN()
     {
-        return T(std::numeric_limits<float>::quiet_NaN());
+        return T(_HIPCUB_STD::numeric_limits<float>::quiet_NaN());
     };
     static inline T signaling_NaN()
     {
-        return T(std::numeric_limits<float>::signaling_NaN());
+        return T(_HIPCUB_STD::numeric_limits<float>::signaling_NaN());
     };
     static inline T infinity_neg()
     {
@@ -122,12 +125,12 @@ public:
 };
 
 template<>
-class numeric_limits<float> : public std::numeric_limits<float>
+class numeric_limits<float> : public _HIPCUB_STD::numeric_limits<float>
 {
 public:
     static inline float infinity_neg()
     {
-        return -std::numeric_limits<float>::infinity();
+        return -_HIPCUB_STD::numeric_limits<float>::infinity();
     };
 };
 // End of extended numeric_limits

@@ -374,7 +374,7 @@ TYPED_TEST(HipcubDeviceHistogramEvenOverflow, EvenOverflow)
 
     const native_level_type n_lower_level = 0;
     const native_level_type n_upper_level
-        = static_cast<native_level_type>(std::numeric_limits<sample_type>::max());
+        = static_cast<native_level_type>(_HIPCUB_STD::numeric_limits<sample_type>::max());
 
     level_type lower_level = test_utils::convert_to_device<level_type>(n_lower_level);
     level_type upper_level = test_utils::convert_to_device<level_type>(n_upper_level);
@@ -798,9 +798,9 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             std::vector<unsigned int> channel_seeds = test_utils::get_random_data<unsigned int>(
-                std::max(size, static_cast<size_t>(channels)),
-                std::numeric_limits<unsigned int>::min(),
-                std::numeric_limits<unsigned int>::max(),
+                _HIPCUB_STD::max(size, static_cast<size_t>(channels)),
+                _HIPCUB_STD::numeric_limits<unsigned int>::min(),
+                _HIPCUB_STD::numeric_limits<unsigned int>::max(),
                 seed_value
                     + seed_value_addition // Make sure that we do not use the same or shifted sequence
             );
@@ -1100,9 +1100,9 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
             std::vector<unsigned int> channel_seeds = test_utils::get_random_data<unsigned int>(
-                std::max(size, static_cast<size_t>(channels)),
-                std::numeric_limits<unsigned int>::min(),
-                std::numeric_limits<unsigned int>::max(),
+                _HIPCUB_STD::max(size, static_cast<size_t>(channels)),
+                _HIPCUB_STD::numeric_limits<unsigned int>::min(),
+                _HIPCUB_STD::numeric_limits<unsigned int>::max(),
                 seed_value);
 
             // Generate data

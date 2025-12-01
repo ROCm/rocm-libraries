@@ -1303,8 +1303,8 @@ inline void sort_keys_over_4g()
 
     std::vector<key_type> keys_input
         = test_utils::get_random_data<key_type>(size,
-                                                std::numeric_limits<key_type>::min(),
-                                                std::numeric_limits<key_type>::max(),
+                                                _HIPCUB_STD::numeric_limits<key_type>::min(),
+                                                _HIPCUB_STD::numeric_limits<key_type>::max(),
                                                 seed_value);
 
     //generate histogram of the randomly generated values
@@ -1358,7 +1358,7 @@ inline void sort_keys_over_4g()
                         hipMemcpyDeviceToHost));
 
     size_t counter = 0;
-    for(size_t i = 0; i <= std::numeric_limits<key_type>::max(); ++i)
+    for(size_t i = 0; i <= _HIPCUB_STD::numeric_limits<key_type>::max(); ++i)
     {
         for(size_t j = 0; j < histogram[i]; ++j)
         {
@@ -1464,7 +1464,7 @@ inline void sort_keys_large_sizes()
         HIP_CHECK(hipFree(d_keys));
 
         // Check if output values are as expected
-        const size_t unique_keys    = size_t(std::numeric_limits<key_type>::max()) + 1;
+        const size_t unique_keys    = size_t(_HIPCUB_STD::numeric_limits<key_type>::max()) + 1;
         const size_t segment_length = test_utils::ceiling_div(size, unique_keys);
         const size_t full_segments  = size % unique_keys == 0 ? unique_keys : size % unique_keys;
         for(size_t i = 0; i < size; i += 4321)
