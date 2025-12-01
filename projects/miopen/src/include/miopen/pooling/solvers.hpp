@@ -170,7 +170,40 @@ struct PoolingForwardNd final : PoolingSolver
                                  const miopen::pooling::ProblemDescription& problem) const override;
 };
 
-struct PoolingForwardNaive final : PoolingSolver
+struct PerformanceConfigPoolingForwardNaive : PerfConfigBase<PerformanceConfigPoolingForwardNaive>
+{
+    int local_size0;
+    int local_size1;
+    int local_size2;
+
+    PerformanceConfigPoolingForwardNaive(int local_size0_, int local_size1_, int local_size2_)
+        : local_size0(local_size0_), local_size1(local_size1_), local_size2(local_size2_)
+    {
+    }
+
+    PerformanceConfigPoolingForwardNaive() : PerformanceConfigPoolingForwardNaive(1, 1, 1) {}
+
+    PerformanceConfigPoolingForwardNaive(bool) : PerformanceConfigPoolingForwardNaive(1, 1, 1) {}
+
+    void HeuristicInit(const miopen::pooling::ProblemDescription&);
+    bool SetNextValue(const miopen::pooling::ProblemDescription&);
+    bool IsValidValue() const;
+    bool IsValid(const ExecutionContext&, const miopen::pooling::ProblemDescription&) const;
+    bool operator==(const PerformanceConfigPoolingForwardNaive& other) const;
+
+    template <class Self, class F>
+    static void Visit(Self&& self, F f)
+    {
+        f(self.local_size0, "local_size0");
+        f(self.local_size1, "local_size1");
+        f(self.local_size2, "local_size2");
+    }
+
+private:
+    void Init(const miopen::pooling::ProblemDescription&);
+};
+
+struct PoolingForwardNaive final : PoolingTunableSolver<PerformanceConfigPoolingForwardNaive>
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<PoolingForwardNaive>(); }
     bool IsDynamic() const override { return true; }
@@ -178,9 +211,23 @@ struct PoolingForwardNaive final : PoolingSolver
     bool IsApplicable(const ExecutionContext& context,
                       const miopen::pooling::ProblemDescription& problem) const override;
     ConvSolution GetSolution(const ExecutionContext& context,
-                             const miopen::pooling::ProblemDescription& problem) const override;
+                             const miopen::pooling::ProblemDescription& problem,
+                             const PerformanceConfigPoolingForwardNaive& config) const override;
     std::size_t GetWorkspaceSize(const ExecutionContext& context,
                                  const miopen::pooling::ProblemDescription& problem) const override;
+    PerformanceConfigPoolingForwardNaive
+    GetDefaultPerformanceConfig(const ExecutionContext&,
+                                const miopen::pooling::ProblemDescription&) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext&,
+                                  const miopen::pooling::ProblemDescription&,
+                                  const PerformanceConfigPoolingForwardNaive&) const override;
+    PerformanceConfigPoolingForwardNaive
+    Search(const ExecutionContext& context,
+           const miopen::pooling::ProblemDescription& problem,
+           const AnyInvokeParams& invoke_context) const override
+    {
+        return GenericSearch(*this, context, problem, invoke_context);
+    }
 };
 
 template <class Inner>
