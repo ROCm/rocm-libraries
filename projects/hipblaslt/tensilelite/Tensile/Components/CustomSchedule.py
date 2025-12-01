@@ -1427,7 +1427,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
         # Note: A/B Global read orders are swapped
         # i.e. GRA contains GR for B
         optSchedule = {
-            'SYNC'  : [[-1, 17, 17, 59, 59]],
+            'SYNC'  : [[-1, 17, 17, 49, 59, 59]],
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
             'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
             'LRB0'  : [[0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10],
@@ -1453,7 +1453,8 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
             SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for prior local read. Relax a bit to dscnt=4 to reduce latency") ,
             SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for all LRB0 prior to  LRA0*3") ,
             SBarrier(comment="") ,
-            SWaitCnt(dscnt=0, vlcnt=11, vscnt=-1, comment="Wait for prior local read. Also wait for prior GRA*6 + GRB*5 = 11 global reads") ,
+            SWaitCnt(dscnt=0,  vlcnt=-1, vscnt=-1, comment="Wait for prior local read") ,
+            SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Wait for prior GRA*6 + GRB*5 = 11 global reads") ,
             SBarrier(comment="") ,
         ]
         nglshift = nllshift = 16
