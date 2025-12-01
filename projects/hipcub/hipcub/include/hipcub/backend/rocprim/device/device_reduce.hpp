@@ -46,8 +46,9 @@
 #include <hip/hip_bfloat16.h> // hip_bfloat16
 #include <hip/hip_fp16.h> // __half
 
+#include _HIPCUB_STD_INCLUDE(limits)
+
 #include <iterator>
-#include <limits>
 
 BEGIN_HIPCUB_NAMESPACE
 namespace detail
@@ -66,7 +67,7 @@ HIPCUB_HOST_DEVICE T set_half_bits(uint16_t value)
 template<class T>
 HIPCUB_HOST_DEVICE inline T get_lowest_value()
 {
-    return std::numeric_limits<T>::lowest();
+    return _HIPCUB_STD::numeric_limits<T>::lowest();
 }
 
 template<>
@@ -86,7 +87,7 @@ HIPCUB_HOST_DEVICE inline hip_bfloat16 get_lowest_value<hip_bfloat16>()
 template<class T>
 HIPCUB_HOST_DEVICE inline T get_max_value()
 {
-    return std::numeric_limits<T>::max();
+    return _HIPCUB_STD::numeric_limits<T>::max();
 }
 
 template<>
@@ -116,7 +117,7 @@ template<class T>
 inline auto get_lowest_special_value() ->
     typename std::enable_if_t<rocprim::is_floating_point<T>::value, T>
 {
-    return -std::numeric_limits<T>::infinity();
+    return -_HIPCUB_STD::numeric_limits<T>::infinity();
 }
 
 template<>
@@ -146,7 +147,7 @@ template<typename T>
 inline auto get_max_special_value() ->
     typename std::enable_if_t<rocprim::is_floating_point<T>::value, T>
 {
-    return std::numeric_limits<T>::infinity();
+    return _HIPCUB_STD::numeric_limits<T>::infinity();
 }
 
 template<>

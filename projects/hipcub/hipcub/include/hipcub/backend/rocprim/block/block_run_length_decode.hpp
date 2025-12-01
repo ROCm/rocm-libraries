@@ -37,7 +37,8 @@
 #include "../util_type.hpp"
 #include "block_scan.hpp"
 
-#include <limits>
+#include _HIPCUB_STD_INCLUDE(limits)
+
 #include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE

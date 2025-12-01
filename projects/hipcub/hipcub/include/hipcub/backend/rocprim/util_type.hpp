@@ -42,7 +42,8 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_vector_types.h>
 
-#include <limits>
+#include _HIPCUB_STD_INCLUDE(limits)
+
 #include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
@@ -611,13 +612,13 @@ struct BaseTraits<hipcub::FLOATING_POINT, _UnsignedBits, T>
     static HIPCUB_HOST_DEVICE __forceinline__
     T Max()
     {
-        return std::numeric_limits<T>::max();
+        return _HIPCUB_STD::numeric_limits<T>::max();
     }
 
     static HIPCUB_HOST_DEVICE __forceinline__
     T Lowest()
     {
-        return std::numeric_limits<T>::lowest();
+        return _HIPCUB_STD::numeric_limits<T>::lowest();
     }
 };
 
@@ -634,7 +635,7 @@ struct NumericTraits<NullType> : BaseTraits<NOT_A_NUMBER, NullType, NullType>
 
 template<>
 struct NumericTraits<char>
-    : BaseTraits<(std::numeric_limits<char>::is_signed) ? SIGNED_INTEGER : UNSIGNED_INTEGER,
+    : BaseTraits<(_HIPCUB_STD::numeric_limits<char>::is_signed) ? SIGNED_INTEGER : UNSIGNED_INTEGER,
                  unsigned char,
                  char>
 {};

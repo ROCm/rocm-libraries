@@ -42,9 +42,10 @@
 #include <rocprim/device/device_segmented_reduce.hpp> // IWYU pragma: export
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 
+#include _HIPCUB_STD_INCLUDE(limits)
+
 #include <chrono>
 #include <iterator>
-#include <limits>
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -312,7 +313,7 @@ struct DeviceSegmentedReduce
                       d_begin_offsets,
                       d_end_offsets,
                       ::hipcub::Min(),
-                      std::numeric_limits<input_type>::max(),
+                      _HIPCUB_STD::numeric_limits<input_type>::max(),
                       stream);
     }
 
@@ -362,7 +363,7 @@ struct DeviceSegmentedReduce
         IteratorT d_indexed_in(d_in);
         // true maximum value of the full range
         // key is ::max because ArgMin finds the lowest value that has the lowest key
-        const OutputTupleT init(std::numeric_limits<OffsetT>::max(),
+        const OutputTupleT init(_HIPCUB_STD::numeric_limits<OffsetT>::max(),
                                 detail::get_max_special_value<T>());
         // special value for empty segments
         const OutputTupleT empty_value(1, detail::get_max_value<T>());
@@ -424,7 +425,7 @@ struct DeviceSegmentedReduce
                       d_begin_offsets,
                       d_end_offsets,
                       ::hipcub::Max(),
-                      std::numeric_limits<input_type>::lowest(),
+                      _HIPCUB_STD::numeric_limits<input_type>::lowest(),
                       stream);
     }
 
@@ -474,7 +475,7 @@ struct DeviceSegmentedReduce
         IteratorT d_indexed_in(d_in);
         // true minimum value of the full range
         // key is ::max because ArgMax finds the highest value that has the lowest key
-        const OutputTupleT init(std::numeric_limits<OffsetT>::max(),
+        const OutputTupleT init(_HIPCUB_STD::numeric_limits<OffsetT>::max(),
                                 detail::get_lowest_special_value<T>());
         // special value for empty segments
         const OutputTupleT empty_value(1, detail::get_lowest_value<T>());

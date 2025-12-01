@@ -438,7 +438,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
     using result_type    = output_type;
     using offset_type    = unsigned int;
 
-    constexpr input_type init = std::numeric_limits<input_type>::max();
+    constexpr input_type init = _HIPCUB_STD::numeric_limits<input_type>::max();
     reduce_op_type       reduce_op;
 
     std::random_device         rd;
@@ -595,7 +595,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Max)
     using result_type    = output_type;
     using offset_type    = unsigned int;
 
-    constexpr input_type init = std::numeric_limits<input_type>::lowest();
+    constexpr input_type init = _HIPCUB_STD::numeric_limits<input_type>::lowest();
     reduce_op_type       reduce_op;
 
     std::random_device         rd;
