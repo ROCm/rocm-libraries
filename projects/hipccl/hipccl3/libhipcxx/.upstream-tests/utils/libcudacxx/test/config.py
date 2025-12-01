@@ -280,6 +280,19 @@ class Configuration(object):
         self.target_info = make_target_info(self)
 
     def get_rocm_version(self):
+        rocm_version = os.getenv('ROCM_VERSION', None)
+        if rocm_version is not None:
+            parts = rocm_version.split(".")
+            if len(parts) == 3:
+                try:
+                    rocm_version_major, rocm_version_minor, rocm_version_patch = map(int, parts)
+                    return rocm_version_major, rocm_version_minor, rocm_version_patch
+                except ValueError:
+                    pass
+            print(f"Could not read ROCM version from ROCM_VERSION='{rocm_version}' environment variable! Expected format: MAJOR.MINOR.PATCH (e.g., 7.0.1).")
+            print("Falling back to file-based lookup.")
+            # If format is incorrect, fall through to file-based detection
+
         # 1. Find rocm_version.h
         out, err, code = libcudacxx.util.executeCommand(
             ["hipconfig", "--path"]  # find HIP base path
