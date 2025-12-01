@@ -72,6 +72,7 @@ jobs:
       - name: Fetch Linux targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "linux"
+          # TODO(geomin12): Allow dynamic values of AMDGPU_FAMILIES, with opt-in options
           AMDGPU_FAMILIES: "gfx94X, gfx950"
         id: configure_linux
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
@@ -79,6 +80,7 @@ jobs:
       - name: Fetch Windows targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "windows"
+          # TODO(geomin12): Allow dynamic values of AMDGPU_FAMILIES, with opt-in options
           AMDGPU_FAMILIES: "gfx1151"
         id: configure_windows
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
