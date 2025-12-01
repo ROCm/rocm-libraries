@@ -74,7 +74,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     auto [dx, dscale, dbias] = graph->batchnorm_backward(dxDrelu, x, scale, bnBwdAttributes);
     dx->set_name("dx");
-    dx->set_data_type(inputType);
     dx->set_output(true);
 
     dscale->set_name("dscale");
@@ -84,6 +83,21 @@ void SampleRunner::operator()(const TensorLayout& layout)
     dbias->set_name("dbias");
     dbias->set_data_type(intermediateType);
     dbias->set_output(true);
+
+    HIPDNN_FE_CHECK(graph->validate());
+    std::cout << "Graph validation successful.\n";
+
+    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
+    std::cout << "Operation graph build successful.\n";
+
+    HIPDNN_FE_CHECK(graph->create_execution_plans());
+    std::cout << "Execution plans created successfully.\n";
+
+    HIPDNN_FE_CHECK(graph->check_support());
+    std::cout << "Graph support check successful.\n";
+
+    HIPDNN_FE_CHECK(graph->build_plans());
+    std::cout << "Plans build successful.\n";
 
     // Create tensors for execution
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
@@ -108,21 +122,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
                                          static_cast<IntermediateType>(0.1f));
     savedInvVarTensor.fillWithRandomValues(static_cast<IntermediateType>(0.1f),
                                            static_cast<IntermediateType>(2.0f));
-
-    HIPDNN_FE_CHECK(graph->validate());
-    std::cout << "Graph validation successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
-    std::cout << "Operation graph build successful.\n";
-
-    HIPDNN_FE_CHECK(graph->create_execution_plans());
-    std::cout << "Execution plans created successfully.\n";
-
-    HIPDNN_FE_CHECK(graph->check_support());
-    std::cout << "Graph support check successful.\n";
-
-    HIPDNN_FE_CHECK(graph->build_plans());
-    std::cout << "Plans build successful.\n";
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[x->get_uid()] = xTensor.memory().deviceData();

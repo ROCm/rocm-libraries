@@ -24,7 +24,9 @@
  *
  *******************************************************************************/
 
+#include "rocRoller/Serialization/YAML.hpp"
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 #ifdef ROCROLLER_USE_HIP
@@ -200,11 +202,25 @@ namespace rocRoller::Client::GEMMClient
                       problemParams.types.scaleB == Operations::ScaleMode::Separate,
                       -1.f,
                       1.f,
-                      static_cast<uint>(scaleBlockSize));
+                      static_cast<uint>(scaleBlockSize),
+                      problemParams.initModeA,
+                      problemParams.initModeB,
+                      problemParams.initModeC);
         }
         else
         {
-            DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
+            DGenInput(seed,
+                      hostA,
+                      descA,
+                      hostB,
+                      descB,
+                      hostC,
+                      descC,
+                      -1.f,
+                      1.f,
+                      problemParams.initModeA,
+                      problemParams.initModeB,
+                      problemParams.initModeC);
         }
 
         size_t rotatingSize = benchmarkParams.rotatingBuffSize;
@@ -1357,6 +1373,10 @@ int main(int argc, const char* argv[])
 
         .scaleValueA = 1.0f,
         .scaleValueB = 1.0f,
+
+        .initModeA = DataInitMode(Bounded{}),
+        .initModeB = DataInitMode(Bounded{}),
+        .initModeC = DataInitMode(Bounded{}),
     };
 
     rocRoller::Client::GEMMClient::TypeParameters types;
@@ -1403,6 +1423,27 @@ int main(int argc, const char* argv[])
     app.add_option("--beta", problem.beta, "Beta scalar.");
     app.add_option("--scaleValue_A", problem.scaleValueA, "Single scale value for A.");
     app.add_option("--scaleValue_B", problem.scaleValueB, "Single scale value for B.");
+    app.add_option(
+        "--initMode_A",
+        [&problem](auto& args) -> bool { return ParseInitMode(args[0], problem.initModeA); },
+        "Data initialization mode for A [Bounded | BoundedAlternatingSign | Unbounded | "
+        "Identity | Ones | Zeros | TrigonometricFromFloat | \"NormalFromFloat(<mean>, "
+        "<std_dev>)\"]. "
+        "Default: Bounded.");
+    app.add_option(
+        "--initMode_B",
+        [&problem](auto& args) -> bool { return ParseInitMode(args[0], problem.initModeB); },
+        "Data initialization mode for B [Bounded | BoundedAlternatingSign | Unbounded | "
+        "Identity | Ones | Zeros | TrigonometricFromFloat | \"NormalFromFloat(<mean>, "
+        "<std_dev>)\"]. "
+        "Default: Bounded.");
+    app.add_option(
+        "--initMode_C",
+        [&problem](auto& args) -> bool { return ParseInitMode(args[0], problem.initModeC); },
+        "Data initialization mode for C [Bounded | BoundedAlternatingSign | Unbounded | "
+        "Identity | Ones | Zeros | TrigonometricFromFloat | \"NormalFromFloat(<mean>, "
+        "<std_dev>)\"]. "
+        "Default: Bounded.");
 
     //
     // Problem types
@@ -1578,7 +1619,7 @@ int main(int argc, const char* argv[])
 
     bool noCheckResult = false;
 
-    std::string loadPath, examplePath;
+    std::string loadPath, examplePath, exampleProblemPath;
 
     app.add_flag(
         "--hgemm",
@@ -1663,6 +1704,16 @@ int main(int argc, const char* argv[])
                        ->fallthrough();
 
     example->add_option("save", examplePath, "Example config path.")->required();
+
+    //
+    // example problem parameters sub-command
+    //
+    auto exampleProblem
+        = app.add_subcommand("exampleProblem", "Save example problem parameters to YAML file.")
+              ->fallthrough();
+
+    exampleProblem->add_option("save", exampleProblemPath, "Example problem config path")
+        ->required();
 
     //
     // Parse and update/validate problem definition
@@ -1871,9 +1922,9 @@ int main(int argc, const char* argv[])
 
     if(arch.target().isRDNA4GPU())
     {
-        // Override default settings for the `example` and `generate` subcommands.
-        if((example->parsed() || generate->parsed()) && typeA == DataType::Float
-           && typeB == DataType::Float)
+        // Override default settings for the `example`, `exampleProblem`, and `generate` subcommands.
+        if((example->parsed() || exampleProblem->parsed() || generate->parsed())
+           && typeA == DataType::Float && typeB == DataType::Float)
         {
             std::cout << "Warning: A and B types and wave sizes have been overridden for RDNA4."
                       << std::endl;
@@ -1927,7 +1978,9 @@ int main(int argc, const char* argv[])
                     ShowValue(solution.waveK),
                     ShowValue(types.scaleBlockSize));
 
-        types.scaleShuffleTileA = {64, 4, kSubtile};
+        types.scaleShuffleTileA = {static_cast<size_t>(solution.swizzleTileSize.m),
+                                   256 / static_cast<size_t>(solution.swizzleTileSize.m),
+                                   kSubtile};
     }
 
     if(types.scaleSkipPermlane)
@@ -1942,7 +1995,9 @@ int main(int argc, const char* argv[])
                     ShowValue(solution.waveK),
                     ShowValue(types.scaleBlockSize));
 
-        types.scaleShuffleTileB = {64, 4, kSubtile};
+        types.scaleShuffleTileB = {static_cast<size_t>(solution.swizzleTileSize.n),
+                                   256 / static_cast<size_t>(solution.swizzleTileSize.n),
+                                   kSubtile};
     }
 
     problem.types  = types;
@@ -1974,6 +2029,12 @@ int main(int argc, const char* argv[])
     {
         std::ofstream file(examplePath);
         Serialization::writeYAML(file, solution);
+        return 0;
+    }
+    if(exampleProblem->parsed())
+    {
+        std::ofstream file(exampleProblemPath);
+        Serialization::writeYAML(file, problem);
         return 0;
     }
 

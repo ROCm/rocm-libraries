@@ -24,31 +24,54 @@
 #include "rocsparse_pivot_info_t.hpp"
 #include "rocsparse_control.hpp"
 
+rocsparse_status rocsparse::pivot_info_t::set_pivot_batch_count(const int64_t value,
+                                                                hipStream_t   stream)
+{
+    RETURN_IF_ROCSPARSE_ERROR(this->set_position_batch_count(value, stream));
+    return rocsparse_status_success;
+}
+
+int64_t rocsparse::pivot_info_t::get_pivot_batch_count() const
+{
+    return this->get_position_batch_count();
+}
+
 rocsparse_status
-    rocsparse::pivot_info_t::copy_zero_pivot_async(rocsparse_pointer_mode pointer_mode,
+    rocsparse::pivot_info_t::copy_zero_pivot_async(int64_t                batch_count,
+                                                   rocsparse_pointer_mode pointer_mode,
                                                    rocsparse_indextype    position_indextype,
                                                    void*                  position,
                                                    hipStream_t            stream) const
 {
-    auto status = this->copy_position_async(pointer_mode, position_indextype, position, stream);
+    RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR((batch_count != this->get_pivot_batch_count())
+                                               ? rocsparse_status_invalid_value
+                                               : rocsparse_status_success,
+                                           "incompatible batch_count");
+    const rocsparse_status status
+        = this->copy_position_async(pointer_mode, position_indextype, position, stream);
+
     if(status == rocsparse_status_zero_pivot)
     {
         return status;
     }
+
     RETURN_IF_ROCSPARSE_ERROR(status);
     return rocsparse_status_success;
 }
 
-void rocsparse::pivot_info_t::create_zero_pivot_async(rocsparse_indextype indextype,
-                                                      hipStream_t         stream)
+rocsparse_status rocsparse::pivot_info_t::create_zero_pivot_async(int64_t             batch_count,
+                                                                  rocsparse_indextype indextype,
+                                                                  hipStream_t         stream)
 {
-    this->create_position_async(indextype, stream);
+    RETURN_IF_ROCSPARSE_ERROR(this->create_position_async(batch_count, indextype, stream));
+    return rocsparse_status_success;
 }
 
 const void* rocsparse::pivot_info_t::get_zero_pivot() const
 {
     return this->get_position();
 }
+
 void* rocsparse::pivot_info_t::get_zero_pivot()
 {
     return this->get_position();
@@ -59,7 +82,14 @@ rocsparse_indextype rocsparse::pivot_info_t::get_zero_pivot_indextype() const
     return this->get_position_indextype();
 }
 
-void rocsparse::pivot_info_t::copy_pivot_info_async(const pivot_info_t* that, hipStream_t stream)
+rocsparse_status rocsparse::pivot_info_t::copy_pivot_info_async(const pivot_info_t* that,
+                                                                hipStream_t         stream)
 {
-    return this->copy_position_async(that, stream);
+    RETURN_IF_ROCSPARSE_ERROR(this->copy_position_async(that, stream));
+    return rocsparse_status_success;
+}
+
+int64_t rocsparse::pivot_info_t::get_zero_pivot_stride() const
+{
+    return this->get_position_stride();
 }

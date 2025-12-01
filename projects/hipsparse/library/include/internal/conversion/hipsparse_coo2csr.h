@@ -80,9 +80,6 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p m or \p nnz is negative,
 *          \p cooRowInd or \p csrRowPtr is nullptr when \p nnz is greater than zero, or
 *          \p idxBase is neither \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
-*
-*  \par Example
-*  \snippet example_hipsparse_coo2csr.cpp doc example
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseXcoo2csr(hipsparseHandle_t    handle,
