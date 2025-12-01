@@ -444,7 +444,7 @@ __global__ static void impose_hermitian_symmetry_planar_3D_kernel(Tfloat*      x
     }
 }
 
-#ifdef USE_HIPRAND_FIXME
+#ifdef USE_HIPRAND
 
 #include <hiprand/hiprand.h>
 #include <hiprand/hiprand_kernel.h>
@@ -836,8 +836,6 @@ __global__ static void __launch_bounds__(DATA_GEN_THREADS)
     }
 }
 
-#endif
-
 // get grid dimensions for data gen kernel
 static dim3 generate_data_gridDim(const size_t isize)
 {
@@ -916,19 +914,17 @@ static dim3 generate_blockDim(const std::vector<size_t>& length, const size_t bl
     return blockDim;
 }
 
-#ifdef USE_HIPRAND_FIXME
-
 template <typename Tint, typename Treal>
-static void generate_random_interleaved_data(const Tint&            whole_length,
-                                             const size_t           idist,
-                                             const size_t           isize,
-                                             const Tint&            whole_stride,
-                                             rocfft_complex<Treal>* input_data,
-                                             const hipDeviceProp_t& deviceProp,
-                                             const Tint&            field_lower,
-                                             const size_t           field_lower_batch,
-                                             const Tint&            field_contig_stride,
-                                             const size_t           field_contig_dist)
+void generate_random_interleaved_data(const Tint&            whole_length,
+                                      const size_t           idist,
+                                      const size_t           isize,
+                                      const Tint&            whole_stride,
+                                      rocfft_complex<Treal>* input_data,
+                                      const hipDeviceProp_t& deviceProp,
+                                      const Tint&            field_lower,
+                                      const size_t           field_lower_batch,
+                                      const Tint&            field_contig_stride,
+                                      const size_t           field_contig_dist)
 {
     auto                         input_length = get_input_val(whole_length);
     const decltype(input_length) zero_length;
@@ -961,14 +957,120 @@ static void generate_random_interleaved_data(const Tint&            whole_length
                                  + std::string(hipGetErrorName(err)));
 }
 
+template void
+    generate_random_interleaved_data<size_t, _Float16>(const size_t&             whole_length,
+                                                       const size_t              idist,
+                                                       const size_t              isize,
+                                                       const size_t&             whole_stride,
+                                                       rocfft_complex<_Float16>* input_data,
+                                                       const hipDeviceProp_t&    deviceProp,
+                                                       const size_t&             field_lower,
+                                                       const size_t              field_lower_batch,
+                                                       const size_t& field_contig_stride,
+                                                       const size_t  field_contig_dist);
+
+template void generate_random_interleaved_data<size_t, float>(const size_t&          whole_length,
+                                                              const size_t           idist,
+                                                              const size_t           isize,
+                                                              const size_t&          whole_stride,
+                                                              rocfft_complex<float>* input_data,
+                                                              const hipDeviceProp_t& deviceProp,
+                                                              const size_t&          field_lower,
+                                                              const size_t  field_lower_batch,
+                                                              const size_t& field_contig_stride,
+                                                              const size_t  field_contig_dist);
+
+template void generate_random_interleaved_data<size_t, double>(const size_t&           whole_length,
+                                                               const size_t            idist,
+                                                               const size_t            isize,
+                                                               const size_t&           whole_stride,
+                                                               rocfft_complex<double>* input_data,
+                                                               const hipDeviceProp_t&  deviceProp,
+                                                               const size_t&           field_lower,
+                                                               const size_t  field_lower_batch,
+                                                               const size_t& field_contig_stride,
+                                                               const size_t  field_contig_dist);
+
+template void generate_random_interleaved_data<std::tuple<size_t, size_t>, _Float16>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    rocfft_complex<_Float16>*         input_data,
+    const hipDeviceProp_t&            deviceProp,
+    const std::tuple<size_t, size_t>& field_lower,
+    const size_t                      field_lower_batch,
+    const std::tuple<size_t, size_t>& field_contig_stride,
+    const size_t                      field_contig_dist);
+
+template void generate_random_interleaved_data<std::tuple<size_t, size_t>, float>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    rocfft_complex<float>*            input_data,
+    const hipDeviceProp_t&            deviceProp,
+    const std::tuple<size_t, size_t>& field_lower,
+    const size_t                      field_lower_batch,
+    const std::tuple<size_t, size_t>& field_contig_stride,
+    const size_t                      field_contig_dist);
+
+template void generate_random_interleaved_data<std::tuple<size_t, size_t>, double>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    rocfft_complex<double>*           input_data,
+    const hipDeviceProp_t&            deviceProp,
+    const std::tuple<size_t, size_t>& field_lower,
+    const size_t                      field_lower_batch,
+    const std::tuple<size_t, size_t>& field_contig_stride,
+    const size_t                      field_contig_dist);
+
+template void generate_random_interleaved_data<std::tuple<size_t, size_t, size_t>, _Float16>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    rocfft_complex<_Float16>*                 input_data,
+    const hipDeviceProp_t&                    deviceProp,
+    const std::tuple<size_t, size_t, size_t>& field_lower,
+    const size_t                              field_lower_batch,
+    const std::tuple<size_t, size_t, size_t>& field_contig_stride,
+    const size_t                              field_contig_dist);
+
+template void generate_random_interleaved_data<std::tuple<size_t, size_t, size_t>, float>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    rocfft_complex<float>*                    input_data,
+    const hipDeviceProp_t&                    deviceProp,
+    const std::tuple<size_t, size_t, size_t>& field_lower,
+    const size_t                              field_lower_batch,
+    const std::tuple<size_t, size_t, size_t>& field_contig_stride,
+    const size_t                              field_contig_dist);
+
+template void generate_random_interleaved_data<std::tuple<size_t, size_t, size_t>, double>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    rocfft_complex<double>*                   input_data,
+    const hipDeviceProp_t&                    deviceProp,
+    const std::tuple<size_t, size_t, size_t>& field_lower,
+    const size_t                              field_lower_batch,
+    const std::tuple<size_t, size_t, size_t>& field_contig_stride,
+    const size_t                              field_contig_dist);
+
 template <typename Tint, typename Treal>
-static void generate_interleaved_data(const Tint&            whole_length,
-                                      const size_t           idist,
-                                      const size_t           isize,
-                                      const Tint&            whole_stride,
-                                      const size_t           nbatch,
-                                      rocfft_complex<Treal>* input_data,
-                                      const hipDeviceProp_t& deviceProp)
+void generate_interleaved_data(const Tint&            whole_length,
+                               const size_t           idist,
+                               const size_t           isize,
+                               const Tint&            whole_stride,
+                               const size_t           nbatch,
+                               rocfft_complex<Treal>* input_data,
+                               const hipDeviceProp_t& deviceProp)
 {
     const auto input_length = get_input_val(whole_length);
     const auto input_stride = get_input_val(whole_stride);
@@ -1002,18 +1104,96 @@ static void generate_interleaved_data(const Tint&            whole_length,
                                  + std::string(hipGetErrorName(err)));
 }
 
+template void generate_interleaved_data<size_t, _Float16>(const size_t&             whole_length,
+                                                          const size_t              idist,
+                                                          const size_t              isize,
+                                                          const size_t&             whole_stride,
+                                                          const size_t              nbatch,
+                                                          rocfft_complex<_Float16>* input_data,
+                                                          const hipDeviceProp_t&    deviceProp);
+
+template void generate_interleaved_data<size_t, float>(const size_t&          whole_length,
+                                                       const size_t           idist,
+                                                       const size_t           isize,
+                                                       const size_t&          whole_stride,
+                                                       const size_t           nbatch,
+                                                       rocfft_complex<float>* input_data,
+                                                       const hipDeviceProp_t& deviceProp);
+
+template void generate_interleaved_data<size_t, double>(const size_t&           whole_length,
+                                                        const size_t            idist,
+                                                        const size_t            isize,
+                                                        const size_t&           whole_stride,
+                                                        const size_t            nbatch,
+                                                        rocfft_complex<double>* input_data,
+                                                        const hipDeviceProp_t&  deviceProp);
+
+template void generate_interleaved_data<std::tuple<size_t, size_t>, _Float16>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    const size_t                      nbatch,
+    rocfft_complex<_Float16>*         input_data,
+    const hipDeviceProp_t&            deviceProp);
+
+template void generate_interleaved_data<std::tuple<size_t, size_t>, float>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    const size_t                      nbatch,
+    rocfft_complex<float>*            input_data,
+    const hipDeviceProp_t&            deviceProp);
+
+template void generate_interleaved_data<std::tuple<size_t, size_t>, double>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    const size_t                      nbatch,
+    rocfft_complex<double>*           input_data,
+    const hipDeviceProp_t&            deviceProp);
+
+template void generate_interleaved_data<std::tuple<size_t, size_t, size_t>, _Float16>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    const size_t                              nbatch,
+    rocfft_complex<_Float16>*                 input_data,
+    const hipDeviceProp_t&                    deviceProp);
+
+template void generate_interleaved_data<std::tuple<size_t, size_t, size_t>, float>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    const size_t                              nbatch,
+    rocfft_complex<float>*                    input_data,
+    const hipDeviceProp_t&                    deviceProp);
+
+template void generate_interleaved_data<std::tuple<size_t, size_t, size_t>, double>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    const size_t                              nbatch,
+    rocfft_complex<double>*                   input_data,
+    const hipDeviceProp_t&                    deviceProp);
+
 template <typename Tint, typename Treal>
-static void generate_random_planar_data(const Tint&            whole_length,
-                                        const size_t           idist,
-                                        const size_t           isize,
-                                        const Tint&            whole_stride,
-                                        Treal*                 real_data,
-                                        Treal*                 imag_data,
-                                        const hipDeviceProp_t& deviceProp,
-                                        const Tint&            field_lower,
-                                        const size_t           field_lower_batch,
-                                        const Tint&            field_contig_stride,
-                                        const size_t           field_contig_dist)
+void generate_random_planar_data(const Tint&            whole_length,
+                                 const size_t           idist,
+                                 const size_t           isize,
+                                 const Tint&            whole_stride,
+                                 Treal*                 real_data,
+                                 Treal*                 imag_data,
+                                 const hipDeviceProp_t& deviceProp,
+                                 const Tint&            field_lower,
+                                 const size_t           field_lower_batch,
+                                 const Tint&            field_contig_stride,
+                                 const size_t           field_contig_dist)
 {
     const auto                   input_length = get_input_val(whole_length);
     const decltype(input_length) zero_length;
@@ -1047,15 +1227,129 @@ static void generate_random_planar_data(const Tint&            whole_length,
                                  + std::string(hipGetErrorName(err)));
 }
 
+template void generate_random_planar_data<size_t, _Float16>(const size_t&          whole_length,
+                                                            const size_t           idist,
+                                                            const size_t           isize,
+                                                            const size_t&          whole_stride,
+                                                            _Float16*              real_data,
+                                                            _Float16*              imag_data,
+                                                            const hipDeviceProp_t& deviceProp,
+                                                            const size_t&          field_lower,
+                                                            const size_t  field_lower_batch,
+                                                            const size_t& field_contig_stride,
+                                                            const size_t  field_contig_dist);
+
+template void generate_random_planar_data<size_t, float>(const size_t&          whole_length,
+                                                         const size_t           idist,
+                                                         const size_t           isize,
+                                                         const size_t&          whole_stride,
+                                                         float*                 real_data,
+                                                         float*                 imag_data,
+                                                         const hipDeviceProp_t& deviceProp,
+                                                         const size_t&          field_lower,
+                                                         const size_t           field_lower_batch,
+                                                         const size_t&          field_contig_stride,
+                                                         const size_t           field_contig_dist);
+
+template void generate_random_planar_data<size_t, double>(const size_t&          whole_length,
+                                                          const size_t           idist,
+                                                          const size_t           isize,
+                                                          const size_t&          whole_stride,
+                                                          double*                real_data,
+                                                          double*                imag_data,
+                                                          const hipDeviceProp_t& deviceProp,
+                                                          const size_t&          field_lower,
+                                                          const size_t           field_lower_batch,
+                                                          const size_t& field_contig_stride,
+                                                          const size_t  field_contig_dist);
+
+template void generate_random_planar_data<std::tuple<size_t, size_t>, _Float16>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    _Float16*                         real_data,
+    _Float16*                         imag_data,
+    const hipDeviceProp_t&            deviceProp,
+    const std::tuple<size_t, size_t>& field_lower,
+    const size_t                      field_lower_batch,
+    const std::tuple<size_t, size_t>& field_contig_stride,
+    const size_t                      field_contig_dist);
+
+template void generate_random_planar_data<std::tuple<size_t, size_t>, float>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    float*                            real_data,
+    float*                            imag_data,
+    const hipDeviceProp_t&            deviceProp,
+    const std::tuple<size_t, size_t>& field_lower,
+    const size_t                      field_lower_batch,
+    const std::tuple<size_t, size_t>& field_contig_stride,
+    const size_t                      field_contig_dist);
+
+template void generate_random_planar_data<std::tuple<size_t, size_t>, double>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    double*                           real_data,
+    double*                           imag_data,
+    const hipDeviceProp_t&            deviceProp,
+    const std::tuple<size_t, size_t>& field_lower,
+    const size_t                      field_lower_batch,
+    const std::tuple<size_t, size_t>& field_contig_stride,
+    const size_t                      field_contig_dist);
+
+template void generate_random_planar_data<std::tuple<size_t, size_t, size_t>, _Float16>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    _Float16*                                 real_data,
+    _Float16*                                 imag_data,
+    const hipDeviceProp_t&                    deviceProp,
+    const std::tuple<size_t, size_t, size_t>& field_lower,
+    const size_t                              field_lower_batch,
+    const std::tuple<size_t, size_t, size_t>& field_contig_stride,
+    const size_t                              field_contig_dist);
+
+template void generate_random_planar_data<std::tuple<size_t, size_t, size_t>, float>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    float*                                    real_data,
+    float*                                    imag_data,
+    const hipDeviceProp_t&                    deviceProp,
+    const std::tuple<size_t, size_t, size_t>& field_lower,
+    const size_t                              field_lower_batch,
+    const std::tuple<size_t, size_t, size_t>& field_contig_stride,
+    const size_t                              field_contig_dist);
+
+template void generate_random_planar_data<std::tuple<size_t, size_t, size_t>, double>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    double*                                   real_data,
+    double*                                   imag_data,
+    const hipDeviceProp_t&                    deviceProp,
+    const std::tuple<size_t, size_t, size_t>& field_lower,
+    const size_t                              field_lower_batch,
+    const std::tuple<size_t, size_t, size_t>& field_contig_stride,
+    const size_t                              field_contig_dist);
+
 template <typename Tint, typename Treal>
-static void generate_planar_data(const Tint&            whole_length,
-                                 const size_t           idist,
-                                 const size_t           isize,
-                                 const Tint&            whole_stride,
-                                 const size_t           nbatch,
-                                 Treal*                 real_data,
-                                 Treal*                 imag_data,
-                                 const hipDeviceProp_t& deviceProp)
+void generate_planar_data(const Tint&            whole_length,
+                          const size_t           idist,
+                          const size_t           isize,
+                          const Tint&            whole_stride,
+                          const size_t           nbatch,
+                          Treal*                 real_data,
+                          Treal*                 imag_data,
+                          const hipDeviceProp_t& deviceProp)
 {
     const auto input_length = get_input_val(whole_length);
     const auto input_stride = get_input_val(whole_stride);
@@ -1089,17 +1383,104 @@ static void generate_planar_data(const Tint&            whole_length,
                                  + std::string(hipGetErrorName(err)));
 }
 
+template void generate_planar_data<size_t, _Float16>(const size_t&          whole_length,
+                                                     const size_t           idist,
+                                                     const size_t           isize,
+                                                     const size_t&          whole_stride,
+                                                     const size_t           nbatch,
+                                                     _Float16*              real_data,
+                                                     _Float16*              imag_data,
+                                                     const hipDeviceProp_t& deviceProp);
+
+template void generate_planar_data<size_t, float>(const size_t&          whole_length,
+                                                  const size_t           idist,
+                                                  const size_t           isize,
+                                                  const size_t&          whole_stride,
+                                                  const size_t           nbatch,
+                                                  float*                 real_data,
+                                                  float*                 imag_data,
+                                                  const hipDeviceProp_t& deviceProp);
+
+template void generate_planar_data<size_t, double>(const size_t&          whole_length,
+                                                   const size_t           idist,
+                                                   const size_t           isize,
+                                                   const size_t&          whole_stride,
+                                                   const size_t           nbatch,
+                                                   double*                real_data,
+                                                   double*                imag_data,
+                                                   const hipDeviceProp_t& deviceProp);
+
+template void generate_planar_data<std::tuple<size_t, size_t>, _Float16>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    const size_t                      nbatch,
+    _Float16*                         real_data,
+    _Float16*                         imag_data,
+    const hipDeviceProp_t&            deviceProp);
+
+template void generate_planar_data<std::tuple<size_t, size_t>, float>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    const size_t                      nbatch,
+    float*                            real_data,
+    float*                            imag_data,
+    const hipDeviceProp_t&            deviceProp);
+
+template void generate_planar_data<std::tuple<size_t, size_t>, double>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    const size_t                      nbatch,
+    double*                           real_data,
+    double*                           imag_data,
+    const hipDeviceProp_t&            deviceProp);
+
+template void generate_planar_data<std::tuple<size_t, size_t, size_t>, _Float16>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    const size_t                              nbatch,
+    _Float16*                                 real_data,
+    _Float16*                                 imag_data,
+    const hipDeviceProp_t&                    deviceProp);
+
+template void generate_planar_data<std::tuple<size_t, size_t, size_t>, float>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    const size_t                              nbatch,
+    float*                                    real_data,
+    float*                                    imag_data,
+    const hipDeviceProp_t&                    deviceProp);
+
+template void generate_planar_data<std::tuple<size_t, size_t, size_t>, double>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    const size_t                              nbatch,
+    double*                                   real_data,
+    double*                                   imag_data,
+    const hipDeviceProp_t&                    deviceProp);
+
 template <typename Tint, typename Treal>
-static void generate_random_real_data(const Tint&            whole_length,
-                                      const size_t           idist,
-                                      const size_t           isize,
-                                      const Tint&            whole_stride,
-                                      Treal*                 input_data,
-                                      const hipDeviceProp_t& deviceProp,
-                                      const Tint             field_lower,
-                                      const size_t           field_lower_batch,
-                                      const Tint             field_contig_stride,
-                                      const size_t           field_contig_dist)
+void generate_random_real_data(const Tint&            whole_length,
+                               const size_t           idist,
+                               const size_t           isize,
+                               const Tint&            whole_stride,
+                               Treal*                 input_data,
+                               const hipDeviceProp_t& deviceProp,
+                               const Tint             field_lower,
+                               const size_t           field_lower_batch,
+                               const Tint             field_contig_stride,
+                               const size_t           field_contig_dist)
 {
     const auto                   input_length = get_input_val(whole_length);
     const decltype(input_length) zero_length;
@@ -1132,14 +1513,119 @@ static void generate_random_real_data(const Tint&            whole_length,
                                  + std::string(hipGetErrorName(err)));
 }
 
+template void generate_random_real_data<size_t, _Float16>(const size_t&          whole_length,
+                                                          const size_t           idist,
+                                                          const size_t           isize,
+                                                          const size_t&          whole_stride,
+                                                          _Float16*              input_data,
+                                                          const hipDeviceProp_t& deviceProp,
+                                                          const size_t           field_lower,
+                                                          const size_t           field_lower_batch,
+                                                          const size_t field_contig_stride,
+                                                          const size_t field_contig_dist);
+
+template void generate_random_real_data<size_t, float>(const size_t&          whole_length,
+                                                       const size_t           idist,
+                                                       const size_t           isize,
+                                                       const size_t&          whole_stride,
+                                                       float*                 input_data,
+                                                       const hipDeviceProp_t& deviceProp,
+                                                       const size_t           field_lower,
+                                                       const size_t           field_lower_batch,
+                                                       const size_t           field_contig_stride,
+                                                       const size_t           field_contig_dist);
+
+template void generate_random_real_data<size_t, double>(const size_t&          whole_length,
+                                                        const size_t           idist,
+                                                        const size_t           isize,
+                                                        const size_t&          whole_stride,
+                                                        double*                input_data,
+                                                        const hipDeviceProp_t& deviceProp,
+                                                        const size_t           field_lower,
+                                                        const size_t           field_lower_batch,
+                                                        const size_t           field_contig_stride,
+                                                        const size_t           field_contig_dist);
+
+template void generate_random_real_data<std::tuple<size_t, size_t>, _Float16>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    _Float16*                         input_data,
+    const hipDeviceProp_t&            deviceProp,
+    const std::tuple<size_t, size_t>  field_lower,
+    const size_t                      field_lower_batch,
+    const std::tuple<size_t, size_t>  field_contig_stride,
+    const size_t                      field_contig_dist);
+
+template void generate_random_real_data<std::tuple<size_t, size_t>, float>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    float*                            input_data,
+    const hipDeviceProp_t&            deviceProp,
+    const std::tuple<size_t, size_t>  field_lower,
+    const size_t                      field_lower_batch,
+    const std::tuple<size_t, size_t>  field_contig_stride,
+    const size_t                      field_contig_dist);
+
+template void generate_random_real_data<std::tuple<size_t, size_t>, double>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    double*                           input_data,
+    const hipDeviceProp_t&            deviceProp,
+    const std::tuple<size_t, size_t>  field_lower,
+    const size_t                      field_lower_batch,
+    const std::tuple<size_t, size_t>  field_contig_stride,
+    const size_t                      field_contig_dist);
+
+template void generate_random_real_data<std::tuple<size_t, size_t, size_t>, _Float16>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    _Float16*                                 input_data,
+    const hipDeviceProp_t&                    deviceProp,
+    const std::tuple<size_t, size_t, size_t>  field_lower,
+    const size_t                              field_lower_batch,
+    const std::tuple<size_t, size_t, size_t>  field_contig_stride,
+    const size_t                              field_contig_dist);
+
+template void generate_random_real_data<std::tuple<size_t, size_t, size_t>, float>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    float*                                    input_data,
+    const hipDeviceProp_t&                    deviceProp,
+    const std::tuple<size_t, size_t, size_t>  field_lower,
+    const size_t                              field_lower_batch,
+    const std::tuple<size_t, size_t, size_t>  field_contig_stride,
+    const size_t                              field_contig_dist);
+
+template void generate_random_real_data<std::tuple<size_t, size_t, size_t>, double>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    double*                                   input_data,
+    const hipDeviceProp_t&                    deviceProp,
+    const std::tuple<size_t, size_t, size_t>  field_lower,
+    const size_t                              field_lower_batch,
+    const std::tuple<size_t, size_t, size_t>  field_contig_stride,
+    const size_t                              field_contig_dist);
+
 template <typename Tint, typename Treal>
-static void generate_real_data(const Tint&            whole_length,
-                               const size_t           idist,
-                               const size_t           isize,
-                               const Tint&            whole_stride,
-                               const size_t           nbatch,
-                               Treal*                 input_data,
-                               const hipDeviceProp_t& deviceProp)
+void generate_real_data(const Tint&            whole_length,
+                        const size_t           idist,
+                        const size_t           isize,
+                        const Tint&            whole_stride,
+                        const size_t           nbatch,
+                        Treal*                 input_data,
+                        const hipDeviceProp_t& deviceProp)
 {
     const auto input_length = get_input_val(whole_length);
     const auto input_stride = get_input_val(whole_stride);
@@ -1171,6 +1657,84 @@ static void generate_real_data(const Tint&            whole_length,
         throw std::runtime_error("generate_real_data_kernel launch failure: "
                                  + std::string(hipGetErrorName(err)));
 }
+
+template void generate_real_data<size_t, _Float16>(const size_t&          whole_length,
+                                                   const size_t           idist,
+                                                   const size_t           isize,
+                                                   const size_t&          whole_stride,
+                                                   const size_t           nbatch,
+                                                   _Float16*              input_data,
+                                                   const hipDeviceProp_t& deviceProp);
+
+template void generate_real_data<size_t, float>(const size_t&          whole_length,
+                                                const size_t           idist,
+                                                const size_t           isize,
+                                                const size_t&          whole_stride,
+                                                const size_t           nbatch,
+                                                float*                 input_data,
+                                                const hipDeviceProp_t& deviceProp);
+
+template void generate_real_data<size_t, double>(const size_t&          whole_length,
+                                                 const size_t           idist,
+                                                 const size_t           isize,
+                                                 const size_t&          whole_stride,
+                                                 const size_t           nbatch,
+                                                 double*                input_data,
+                                                 const hipDeviceProp_t& deviceProp);
+
+template void generate_real_data<std::tuple<size_t, size_t>, _Float16>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    const size_t                      nbatch,
+    _Float16*                         input_data,
+    const hipDeviceProp_t&            deviceProp);
+
+template void generate_real_data<std::tuple<size_t, size_t>, float>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    const size_t                      nbatch,
+    float*                            input_data,
+    const hipDeviceProp_t&            deviceProp);
+
+template void generate_real_data<std::tuple<size_t, size_t>, double>(
+    const std::tuple<size_t, size_t>& whole_length,
+    const size_t                      idist,
+    const size_t                      isize,
+    const std::tuple<size_t, size_t>& whole_stride,
+    const size_t                      nbatch,
+    double*                           input_data,
+    const hipDeviceProp_t&            deviceProp);
+
+template void generate_real_data<std::tuple<size_t, size_t, size_t>, _Float16>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    const size_t                              nbatch,
+    _Float16*                                 input_data,
+    const hipDeviceProp_t&                    deviceProp);
+
+template void generate_real_data<std::tuple<size_t, size_t, size_t>, float>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    const size_t                              nbatch,
+    float*                                    input_data,
+    const hipDeviceProp_t&                    deviceProp);
+
+template void generate_real_data<std::tuple<size_t, size_t, size_t>, double>(
+    const std::tuple<size_t, size_t, size_t>& whole_length,
+    const size_t                              idist,
+    const size_t                              isize,
+    const std::tuple<size_t, size_t, size_t>& whole_stride,
+    const size_t                              nbatch,
+    double*                                   input_data,
+    const hipDeviceProp_t&                    deviceProp);
 
 #endif
 
