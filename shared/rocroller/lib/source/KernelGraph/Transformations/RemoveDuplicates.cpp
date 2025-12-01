@@ -148,7 +148,7 @@ namespace rocRoller
                     if(!maybeForLoop)
                         continue;
                     auto forLoop = *graph.control.get<ControlGraph::ForLoopOp>(*maybeForLoop);
-                    if(forLoop.loopName != rocRoller::KLOOP)
+                    if(not forLoop.loopName.starts_with(rocRoller::KLOOP))
                         continue;
 
                     // If LoadTiled, don't consider when loading directly
@@ -186,7 +186,7 @@ namespace rocRoller
                     if(!maybeForLoop)
                         continue;
                     auto forLoop = *graph.control.get<ControlGraph::ForLoopOp>(*maybeForLoop);
-                    if(forLoop.loopName != rocRoller::KLOOP)
+                    if(not forLoop.loopName.starts_with(rocRoller::KLOOP))
                         continue;
 
                     // If LoadTiled, only consider when loading directly
@@ -211,7 +211,7 @@ namespace rocRoller
                 {
                     auto forLoopOp = *graph.control.get<ControlGraph::ForLoopOp>(forLoopOpTag);
 
-                    if(forLoopOp.loopName != rocRoller::KLOOP)
+                    if(not forLoopOp.loopName.starts_with(rocRoller::KLOOP))
                     {
                         auto [forLoopCoord, _ignore] = getForLoopCoords(forLoopOpTag, graph);
                         auto maybeUnroll             = findUnrollNeighbour(graph, forLoopCoord);
@@ -359,31 +359,47 @@ namespace rocRoller
                     }
                 }
 
+                // Collapse reindexing chains in expressionReindexer.coordinates.
+                // If there are mappings like A -> B and B -> C, ensure A maps directly to C.
+                // This prevents intermediate mappings from leaving dangling references.
+                for(auto& [tag, mappedTag] : expressionReindexer.coordinates)
+                {
+                    while(expressionReindexer.coordinates.contains(mappedTag) and mappedTag != tag)
+                    {
+                        auto nextTag = expressionReindexer.coordinates.at(mappedTag);
+                        if(nextTag == mappedTag)
+                            break;
+                        mappedTag = nextTag;
+                    }
+                    // Update the mapping to point directly to the final target.
+                    expressionReindexer.coordinates[tag] = mappedTag;
+                }
+
                 // Update tile references
                 auto kernel = *graph.control.roots().begin();
                 reindexExpressions(graph, kernel, expressionReindexer);
 
                 // Update tile connections and remove old tiles
-                for(auto [oldTag, newTag] : expressionReindexer.coordinates)
+                for(auto [tag, mappedTag] : expressionReindexer.coordinates)
                 {
-                    auto connections = graph.mapper.getCoordinateConnections(oldTag);
-                    graph.mapper.purgeMappingsTo(oldTag);
+                    auto connections = graph.mapper.getCoordinateConnections(tag);
+                    graph.mapper.purgeMappingsTo(tag);
                     for(auto conn : connections)
                     {
-                        conn.coordinate = newTag;
+                        conn.coordinate = mappedTag;
                         graph.mapper.connect(conn);
                     }
 
-                    AssertFatal(newTag == oldTag
-                                || graph.mapper.getCoordinateConnections(oldTag).empty());
+                    AssertFatal(mappedTag == tag
+                                || graph.mapper.getCoordinateConnections(tag).empty());
 
-                    if(graph.mapper.getCoordinateConnections(oldTag).empty())
+                    if(graph.mapper.getCoordinateConnections(tag).empty())
                     {
-                        for(auto const& child : graph.coordinates.getLocation(oldTag).incoming)
+                        for(auto const& child : graph.coordinates.getLocation(tag).incoming)
                             graph.coordinates.deleteElement(child);
-                        for(auto const& child : graph.coordinates.getLocation(oldTag).outgoing)
+                        for(auto const& child : graph.coordinates.getLocation(tag).outgoing)
                             graph.coordinates.deleteElement(child);
-                        graph.coordinates.deleteElement(oldTag);
+                        graph.coordinates.deleteElement(tag);
                     }
                 }
                 return graph;

@@ -6,24 +6,22 @@
 #include <hipdnn_sdk/test_utilities/pointwise/CpuDeviceExecutor.hpp>
 #include <hipdnn_sdk/test_utilities/pointwise/ReferencePointwiseBase.hpp>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
+namespace hipdnn_sdk::test_utilities
 {
 
 template <class DeviceExecutor, class OutputType, class... InputTypes>
 class ReferencePointwiseImpl
 {
 public:
-    static bool isApplicable(const hipdnn_sdk::data_objects::Node& node)
+    static bool isApplicable(const data_objects::Node& node)
     {
         return ReferencePointwiseBase<DeviceExecutor, OutputType, InputTypes...>::isApplicable(
             node);
     }
 
     template <typename... Args>
-    static void pointwiseCompute(hipdnn_sdk::data_objects::PointwiseMode operation,
-                                 TensorBase<OutputType>& output,
+    static void pointwiseCompute(data_objects::PointwiseMode operation,
+                                 utilities::TensorBase<OutputType>& output,
                                  Args&&... args)
     {
         ReferencePointwiseBase<DeviceExecutor, OutputType, InputTypes...>::pointwiseCompute(
@@ -38,5 +36,4 @@ using CpuReferencePointwiseImpl
                              OutputType,
                              InputTypes...>;
 
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::test_utilities

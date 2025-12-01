@@ -22,9 +22,7 @@
 #include "HipdnnException.hpp"
 #include "SharedLibrary.hpp"
 
-namespace hipdnn_backend
-{
-namespace plugin
+namespace hipdnn_backend::plugin
 {
 
 // The PluginBase is the base class for all plugins.
@@ -279,5 +277,4 @@ private:
     std::set<std::filesystem::path> _defaultPluginPaths;
 };
 
-} // namespace plugin
-} // namespace hipdnn_backend
+} // namespace hipdnn_backend::plugin

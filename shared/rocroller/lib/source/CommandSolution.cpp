@@ -404,6 +404,8 @@ namespace rocRoller
         }
         transforms.push_back(std::make_shared<KernelGraph::RemoveDuplicates>());
         transforms.push_back(std::make_shared<KernelGraph::OrderEpilogueBlocks>());
+        // TODO: Investigate why Simplify cannot be called BEFORE RemoveDuplicates and OrderEpilogueBlocks
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::CleanLoops>());
         transforms.push_back(
             std::make_shared<KernelGraph::SwizzleScale>(m_commandParameters, m_context));
@@ -435,11 +437,11 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::AssignComputeIndex>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::NopExtraScopes>());
         transforms.push_back(std::make_shared<KernelGraph::InlineInits>());
-        transforms.push_back(std::make_shared<KernelGraph::AddDeallocateDataFlow>());
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
         transforms.push_back(std::make_shared<KernelGraph::OrderMultiplyNodes>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::AliasDataFlowTags>());
+        transforms.push_back(std::make_shared<KernelGraph::AddDeallocateDataFlow>());
         transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context, m_command));
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocateArguments>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::MergeAdjacentDeallocates>());
