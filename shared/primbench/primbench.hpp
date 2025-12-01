@@ -44,8 +44,8 @@
  * kernel launches. In the future, introducing HSA as a dependency may
  * allow querying the actual largest GPU cache at runtime.
  */
-#ifndef GPU_CACHE_SIZE
-#define GPU_CACHE_SIZE 256 * primbench::MiB
+#ifndef PRIMBENCH_GPU_CACHE_SIZE
+#define PRIMBENCH_GPU_CACHE_SIZE 256 * primbench::MiB
 #endif
 
 /**
@@ -2384,15 +2384,15 @@ class state {
     /**
      * \brief Clears GPU caches by zeroing a buffer.
      *
-     * Zeros a buffer of size `GPU_CACHE_SIZE` to evict cached data before
+     * Zeros a buffer of size `PRIMBENCH_GPU_CACHE_SIZE` to evict cached data before
      * each kernel launch. Currently, the actual largest GPU cache size
      * cannot be queried via HIP, so this conservative size is used instead.
      * Future support via HSA could make this runtime-queryable.
      */
     void clear_gpu_cache(hipStream_t stream) const {
         static void* buf = nullptr;
-        if (!buf) exit_on_hip_error(hipMalloc(&buf, GPU_CACHE_SIZE));
-        exit_on_hip_error(hipMemsetAsync(buf, 0, GPU_CACHE_SIZE, stream));
+        if (!buf) exit_on_hip_error(hipMalloc(&buf, PRIMBENCH_GPU_CACHE_SIZE));
+        exit_on_hip_error(hipMemsetAsync(buf, 0, PRIMBENCH_GPU_CACHE_SIZE, stream));
     }
 
     /**

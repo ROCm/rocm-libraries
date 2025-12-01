@@ -298,7 +298,7 @@ Temperatures are read via AMD SMI. Warming uses short GPU workloads; cooling wai
 primbench clears the GPU cache before each batch by default to reduce noise and ensure consistent timings. This simulates a "cold run" by preventing leftover data from previous kernel executions from affecting results.
 
 * The `--hot` flag skips cache clearing, allowing a "hot cache" scenario where data is reused between batches.
-* The default cache size is 256 MiB, but `GPU_CACHE_SIZE` can be overridden at compile time to match your GPU's cache size.
+* The default cache size is 256 MiB, but `PRIMBENCH_GPU_CACHE_SIZE` can be overridden at compile time to match your GPU's cache size.
 
 ### Timing Details
 
