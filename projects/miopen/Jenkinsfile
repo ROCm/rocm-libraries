@@ -1,14 +1,6 @@
-def repoName = scm.getUserRemoteConfigs()[0].getUrl().tokenize('/').last().replace('.git', '')
-
-def repoDir = "./"
-if (repoName == "rocm-libraries") {
-    repoDir = "projects/miopen"
-}
-
-def ckDir = ""
-if (repoName == "rocm-libraries") {
-    ckDir = "projects/composablekernel"
-}
+def projDir = "projects"
+def miopenDir = "${projDir}/miopen"
+def ckDir = "${projDir}/composablekernel"
 
 def rocmnode(name) {
     return '(rocmtest || miopen) && (' + name + ')'
@@ -215,13 +207,10 @@ pipeline {
         NOCOMGR_flags   = " -DMIOPEN_USE_COMGR=Off"
         NOMLIR_flags    = " -DMIOPEN_USE_MLIR=Off"
         CK_DIR          = "${ckDir}"
-        REPO_DIR        = "${repoDir}"
-        REPO_NAME       = "${repoName}"
+        MIOPEN_DIR      = "${miopenDir}"
+        PROJ_DIR        = "${projDir}"
 
         Build_timeout_minutes = 420
-
-
-        
     }
     stages{
         stage('Build Docker'){
