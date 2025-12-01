@@ -459,30 +459,16 @@ namespace rocRoller
                         Register::ValuePtr basePointer;
                         auto               bufferExpr = bufferReg->expression();
                         co_yield m_context->argLoader()->getValue(user->argumentName, basePointer);
-                        if(user->offset && !Expression::canEvaluateTo(0u, user->offset))
-                        {
-                            Register::ValuePtr tmpRegister;
-                            co_yield generate(tmpRegister,
-                                              simplify(basePointer->expression() + user->offset));
-                            bufferExpr = BufferDescriptor::SetBasePointer(
-                                bufferExpr, tmpRegister->expression());
+                        ExpressionPtr base =basePointer->expression();
+                        if (user->offset) {
+                            base  = base + user->offset;
                         }
-                        else
-                        {
-                            bufferExpr = BufferDescriptor::SetBasePointer(
-                                bufferExpr, basePointer->expression());
-                        }
-
+                        bufferExpr = BufferDescriptor::SetBasePointer(
+                            bufferExpr, base);
                         bufferExpr = BufferDescriptor::SetOptions(
                             bufferExpr, BufferDescriptor::GetDefaultOptions(m_context));
-                        Register::ValuePtr limitValue;
-                        co_yield generate(limitValue, toBytes(user->size));
                         // TODO: Handle sizes larger than 32 bits
-                        auto limit = (limitValue->regType() == Register::Type::Literal)
-                                         ? limitValue
-                                         : limitValue->subset({0});
-                        limit->setVariableType(DataType::UInt32);
-                        bufferExpr = BufferDescriptor::SetSize(bufferExpr, limit->expression());
+                        bufferExpr = BufferDescriptor::SetSize(bufferExpr, toBytes(user->size));
                         co_yield Expression::generate(bufferReg, bufferExpr, m_context);
                     }
                     scope->addRegister(buffer);
