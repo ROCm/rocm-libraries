@@ -25,7 +25,6 @@
 #include <cstdlib>
 #include <functional>
 #include <iostream>
-#include <limits>
 #include <numeric>
 #include <random>
 #include <tuple>
@@ -45,6 +44,7 @@
 #include <hipcub/libcxx.hpp>
 
 #include _HIPCUB_LIBCXX_INCLUDE(cmath)
+#include _HIPCUB_STD_INCLUDE(limits)
 
 // benchmark_utils.hpp should only be included by this header.
 // The following definition is used as guard in benchmark_utils.hpp

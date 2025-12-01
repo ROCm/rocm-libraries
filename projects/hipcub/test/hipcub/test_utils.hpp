@@ -639,17 +639,17 @@ namespace std
 
         static constexpr inline T max()
         {
-            return std::numeric_limits<typename T::value_type>::max();
+            return _HIPCUB_STD::numeric_limits<typename T::value_type>::max();
         }
 
         static constexpr inline T min()
         {
-            return std::numeric_limits<typename T::value_type>::min();
+            return _HIPCUB_STD::numeric_limits<typename T::value_type>::min();
         }
 
         static constexpr inline T lowest()
         {
-            return std::numeric_limits<typename T::value_type>::lowest();
+            return _HIPCUB_STD::numeric_limits<typename T::value_type>::lowest();
         }
     };
 
@@ -662,17 +662,17 @@ namespace std
 
         static constexpr inline T max()
         {
-            return std::numeric_limits<typename T::value_type>::max();
+            return _HIPCUB_STD::numeric_limits<typename T::value_type>::max();
         }
 
         static constexpr inline T min()
         {
-            return std::numeric_limits<typename T::value_type>::min();
+            return _HIPCUB_STD::numeric_limits<typename T::value_type>::min();
         }
 
         static constexpr inline T lowest()
         {
-            return std::numeric_limits<typename T::value_type>::lowest();
+            return _HIPCUB_STD::numeric_limits<typename T::value_type>::lowest();
         }
     };
 }

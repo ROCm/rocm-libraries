@@ -94,7 +94,7 @@ std::vector<T>
 
     std::default_random_engine            prng(seed_value);
     std::uniform_int_distribution<size_t> segment_length_distribution(max_segment_length);
-    std::uniform_int_distribution<T>      key_distribution(std::numeric_limits<T>::max());
+    std::uniform_int_distribution<T>      key_distribution(_HIPCUB_STD::numeric_limits<T>::max());
     std::vector<T>                        keys(size);
 
     size_t keys_start_index = 0;

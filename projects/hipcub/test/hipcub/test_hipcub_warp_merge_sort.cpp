@@ -28,7 +28,6 @@
 #include <hipcub/block/block_store.hpp>
 #include <hipcub/warp/warp_merge_sort.hpp>
 
-#include <limits>
 #include <type_traits>
 #include <utility>
 
@@ -202,12 +201,12 @@ struct sort_last;
 
 template <typename T>
 struct sort_last<test_utils::less, T> {
-    static constexpr T value = std::numeric_limits<T>::max();
+    static constexpr T value = _HIPCUB_STD::numeric_limits<T>::max();
 };
 
 template <typename T>
 struct sort_last<test_utils::greater, T> {
-    static constexpr T value = std::numeric_limits<T>::lowest();
+    static constexpr T value = _HIPCUB_STD::numeric_limits<T>::lowest();
 };
 
 template<unsigned int BlockSize,
@@ -406,8 +405,8 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysSegmented)
                             seed_value)
                         : test_utils::get_random_data<key_type>(
                             size,
-                            std::numeric_limits<wrapped_type>::lowest(),
-                            std::numeric_limits<wrapped_type>::max(),
+                            _HIPCUB_STD::numeric_limits<wrapped_type>::lowest(),
+                            _HIPCUB_STD::numeric_limits<wrapped_type>::max(),
                             seed_value);
 
         const auto segment_sizes = test_utils::get_random_data<unsigned int>(
@@ -519,8 +518,8 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysValuesSegmented)
                             seed_value)
                         : test_utils::get_random_data<key_type>(
                             size,
-                            std::numeric_limits<wrapped_type>::lowest(),
-                            std::numeric_limits<wrapped_type>::max(),
+                            _HIPCUB_STD::numeric_limits<wrapped_type>::lowest(),
+                            _HIPCUB_STD::numeric_limits<wrapped_type>::max(),
                             seed_value);
 
         using value_wrapped_type = typename test_utils::inner_type<value_type>::type;
@@ -533,8 +532,8 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysValuesSegmented)
                               seed_value)
                           : test_utils::get_random_data<value_type>(
                               size,
-                              std::numeric_limits<value_wrapped_type>::lowest(),
-                              std::numeric_limits<value_wrapped_type>::max(),
+                              _HIPCUB_STD::numeric_limits<value_wrapped_type>::lowest(),
+                              _HIPCUB_STD::numeric_limits<value_wrapped_type>::max(),
                               seed_value ^ (seed_value >> 1ul));
 
         const auto segment_sizes = test_utils::get_random_data<unsigned int>(
@@ -667,8 +666,8 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeys)
                             seed_value)
                         : test_utils::get_random_data<key_type>(
                             size,
-                            std::numeric_limits<wrapped_type>::lowest(),
-                            std::numeric_limits<wrapped_type>::max(),
+                            _HIPCUB_STD::numeric_limits<wrapped_type>::lowest(),
+                            _HIPCUB_STD::numeric_limits<wrapped_type>::max(),
                             seed_value);
 
         const auto compare = typename params::compare_function{};
@@ -766,8 +765,8 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysValues)
                             seed_value)
                         : test_utils::get_random_data<key_type>(
                             size,
-                            std::numeric_limits<wrapped_type>::lowest(),
-                            std::numeric_limits<wrapped_type>::max(),
+                            _HIPCUB_STD::numeric_limits<wrapped_type>::lowest(),
+                            _HIPCUB_STD::numeric_limits<wrapped_type>::max(),
                             seed_value);
 
         using value_wrapped_type = typename test_utils::inner_type<value_type>::type;
@@ -780,8 +779,8 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysValues)
                               seed_value)
                           : test_utils::get_random_data<value_type>(
                               size,
-                              std::numeric_limits<value_wrapped_type>::lowest(),
-                              std::numeric_limits<value_wrapped_type>::max(),
+                              _HIPCUB_STD::numeric_limits<value_wrapped_type>::lowest(),
+                              _HIPCUB_STD::numeric_limits<value_wrapped_type>::max(),
                               seed_value ^ (seed_value >> 1ul));
 
         const auto compare = typename params::compare_function{};

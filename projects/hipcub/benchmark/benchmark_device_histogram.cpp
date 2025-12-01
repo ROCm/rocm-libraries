@@ -463,7 +463,7 @@ struct num_limits
 {
     static constexpr T max()
     {
-        return std::numeric_limits<T>::max();
+        return _HIPCUB_STD::numeric_limits<T>::max();
     };
 };
 
