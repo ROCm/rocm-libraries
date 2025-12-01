@@ -1332,11 +1332,10 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
     if isNN(kernel) and useLDSTr and TLDS == 1:
         kernel["SwapGlobalReadOrder"] = True
         syncTable = [
-            -1, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for LRB1-0 "),
-            9, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for LRB1-remaining"),
+            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA1 "),
             19, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="before DirectToLds load, ensure LRB0 have finished"),
             19, SBarrier(comment=""),
-            52, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="wait for LRA0 finish"),
+            52, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA0 finish"),
             52, SBarrier(comment=""),
             53, SWaitCnt(dscnt=-1, vlcnt=16+1, vscnt=-1, comment="wait for previous GRB finish"),
             53, SBarrier(comment=""),
