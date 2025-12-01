@@ -264,6 +264,7 @@ void impose_hermitian_symmetry_cm(const std::vector<size_t>& length,
                                   const std::vector<size_t>& stride,
                                   void*                      gpu_in)
 {
+#ifdef FIXME
     size_t batch     = 1;
     size_t dist      = 1;
     size_t blockSize = DATA_GEN_THREADS;
@@ -349,6 +350,7 @@ void impose_hermitian_symmetry_cm(const std::vector<size_t>& length,
     if(err != hipSuccess)
         throw std::runtime_error("impose_hermitian_symmetry_interleaved kernel launch failure: "
                                  + std::string(hipGetErrorName(err)));
+#endif
 }
 
 // Initialize the Hermitian complex input buffer where the data has lengths given in length, the
@@ -359,6 +361,7 @@ void init_hermitiancomplex_cm(const std::vector<size_t>& length,
                               const std::vector<size_t>& stride,
                               void*                      gpu_in)
 {
+#ifdef FIXME
     size_t     blockSize = 256;
     const dim3 blockdim(blockSize);
 
@@ -415,6 +418,7 @@ void init_hermitiancomplex_cm(const std::vector<size_t>& length,
                                  + std::string(hipGetErrorName(err)));
 
     impose_hermitian_symmetry_cm(length, ilength, stride, gpu_in);
+#endif
 }
 
 #endif /* EXAMPLEKERNELS_H */
