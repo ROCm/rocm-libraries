@@ -29,6 +29,15 @@
 #include <hip/hip_runtime.h>
 #endif /* ROCROLLER_USE_HIP */
 
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+
+#include "CustomMatchers.hpp"
+#include "TestContext.hpp"
+
+#include <common/CommonGraphs.hpp>
+#include <common/Utilities.hpp>
+
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CommandSolution_fwd.hpp>
@@ -43,128 +52,116 @@
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
-#include "GPUContextFixture.hpp"
-#include "Utilities.hpp"
-
 using namespace rocRoller;
 using namespace rocRoller::KernelGraph;
 using namespace rocRoller::KernelGraph::CoordinateGraph;
 using namespace rocRoller::KernelGraph::ControlGraph;
 
-namespace AddStreamKTest
+void computeReference(std::function<void(uint, uint, uint, uint)> f,
+                      uint                                        numTileM,
+                      uint                                        numTileN,
+                      uint                                        numTileK,
+                      uint                                        numWGs,
+                      uint                                        numTilesSK,
+                      uint                                        numTilesDP)
 {
+    std::map<std::tuple<uint, uint, uint>, uint> coverage;
 
-    void computeReference(std::function<void(uint, uint, uint, uint)> f,
-                          uint                                        numTileM,
-                          uint                                        numTileN,
-                          uint                                        numTileK,
-                          uint                                        numWGs,
-                          uint                                        numTilesSK,
-                          uint                                        numTilesDP)
+    auto numSKTilesPerWG = (numTilesSK + numWGs - 1) / numWGs;
+    auto numDPTilesPerWG = numTilesDP / numWGs;
+
+    for(uint wg = 0; wg < numWGs; wg++)
     {
-        std::map<std::tuple<uint, uint, uint>, uint> coverage;
+        uint forTileIdx, forKIdx;
 
-        auto numSKTilesPerWG = (numTilesSK + numWGs - 1) / numWGs;
-        auto numDPTilesPerWG = numTilesDP / numWGs;
-
-        for(uint wg = 0; wg < numWGs; wg++)
+        forKIdx = 0;
+        for(forTileIdx = 0;
+            (forTileIdx < numSKTilesPerWG) && ((numSKTilesPerWG * wg + forTileIdx) < numTilesSK);
+            forTileIdx += forKIdx)
         {
-            uint forTileIdx, forKIdx;
+            uint tile = numSKTilesPerWG * wg + forTileIdx;
 
-            forKIdx = 0;
-            for(forTileIdx = 0; (forTileIdx < numSKTilesPerWG)
-                                && ((numSKTilesPerWG * wg + forTileIdx) < numTilesSK);
-                forTileIdx += forKIdx)
+            auto nextNonAccum = ((tile) / numTileK + 1) * numTileK;
+            auto lastTile     = std::min(nextNonAccum, numTilesSK);
+            for(forKIdx = 0; (numSKTilesPerWG * wg + forTileIdx + forKIdx < lastTile)
+                             && (forTileIdx + forKIdx < numSKTilesPerWG);
+                forKIdx += 1)
             {
-                uint tile = numSKTilesPerWG * wg + forTileIdx;
+                uint tile = numSKTilesPerWG * wg + forTileIdx + forKIdx;
 
-                auto nextNonAccum = ((tile) / numTileK + 1) * numTileK;
-                auto lastTile     = std::min(nextNonAccum, numTilesSK);
-                for(forKIdx = 0; (numSKTilesPerWG * wg + forTileIdx + forKIdx < lastTile)
-                                 && (forTileIdx + forKIdx < numSKTilesPerWG);
-                    forKIdx += 1)
-                {
-                    uint tile = numSKTilesPerWG * wg + forTileIdx + forKIdx;
-
-                    uint m = (tile / numTileK) / numTileN;
-                    uint n = (tile / numTileK) % numTileN;
-                    uint k = tile % numTileK;
-                    coverage[{m, n, k}]++;
-                    f(m, n, k, wg);
-                    //referenceResult[m * numTileN * numTileK + n * numTileK + k] = wg;
-                }
-            }
-
-            for(forTileIdx = 0; forTileIdx < numDPTilesPerWG; forTileIdx += forKIdx)
-            {
-                for(forKIdx = 0; forKIdx < numTileK; forKIdx += 1)
-                {
-                    uint tile = numTilesSK + numDPTilesPerWG * wg + forTileIdx + forKIdx;
-
-                    uint m = (tile / numTileK) / numTileN;
-                    uint n = (tile / numTileK) % numTileN;
-                    uint k = tile % numTileK;
-
-                    coverage[{m, n, k}]++;
-                    f(m, n, k, wg);
-                    //referenceResult[m * numTileN * numTileK + n * numTileK + k] = wg;
-                }
+                uint m = (tile / numTileK) / numTileN;
+                uint n = (tile / numTileK) % numTileN;
+                uint k = tile % numTileK;
+                coverage[{m, n, k}]++;
+                f(m, n, k, wg);
             }
         }
 
-        for(uint m = 0; m < numTileM; ++m)
-            for(uint n = 0; n < numTileN; ++n)
-                for(uint k = 0; k < numTileK; ++k)
-                    ASSERT_EQ((coverage[{m, n, k}]), 1);
+        for(forTileIdx = 0; forTileIdx < numDPTilesPerWG; forTileIdx += forKIdx)
+        {
+            for(forKIdx = 0; forKIdx < numTileK; forKIdx += 1)
+            {
+                uint tile = numTilesSK + numDPTilesPerWG * wg + forTileIdx + forKIdx;
+
+                uint m = (tile / numTileK) / numTileN;
+                uint n = (tile / numTileK) % numTileN;
+                uint k = tile % numTileK;
+
+                coverage[{m, n, k}]++;
+                f(m, n, k, wg);
+            }
+        }
     }
 
-    struct GPU_AddStreamKTest : public GPUContextFixtureParam<bool>
-    {
-    protected:
-        void SetUp() override
-        {
-            m_kernelOptions->assertWaitCntState = false;
+    for(uint m = 0; m < numTileM; ++m)
+        for(uint n = 0; n < numTileN; ++n)
+            for(uint k = 0; k < numTileK; ++k)
+                REQUIRE(coverage[{m, n, k}] == 1);
+}
 
-            GPUContextFixtureParam<bool>::SetUp();
-        }
-    };
+//
+// Coordinate graph looks like:
+//
+//                                                     ForLoop
+//                                                        |
+//                                                        v
+//     MacroTileNumber(M)    MacroTileNumber(N)    MacroTilenumber(K)
+//            \                     |                     /
+//             \                    v                    /
+//              \--------------> Flatten <--------------/
+//                                  |
+//                                  v
+//                                 User
+//
+// Note the M/N tile numbers are dangling.  The AddStreamK pass
+// will find them and flatten them along with the K tile number.
+//
+// Control graph looks like:
+//
+// - Kernel
+//   - WaitZero
+//   - ForLoop
+//     - Assign(VGPR, WG-number)
+//     - StoreVGPR
+//     - WaitZero
+//
+// Launch with:
+// - workgroup count equal to number of CUs on GPU
+// - a single thread per workgroup
+//
+// Result will be: an M * N * K length array representing the
+// flattened tile-space.  The {m, n, k} entry in the array will be
+// the number of the WG that processed it.
+TEST_CASE("AddStreamK BasicStreamKStore", "[streamk][kernel-graph][gpu]")
+{
+    bool twoTile = GENERATE(false, true);
 
-    //
-    // Coordinate graph looks like:
-    //
-    //                                                     ForLoop
-    //                                                        |
-    //                                                        v
-    //     MacroTileNumber(M)    MacroTileNumber(N)    MacroTilenumber(K)
-    //            \                     |                     /
-    //             \                    v                    /
-    //              \--------------> Flatten <--------------/
-    //                                  |
-    //                                  v
-    //                                 User
-    //
-    // Note the M/N tile numbers are dangling.  The AddStreamK pass
-    // will find them and flatten them along with the K tile number.
-    //
-    // Control graph looks like:
-    //
-    // - Kernel
-    //   - WaitZero
-    //   - ForLoop
-    //     - Assign(VGPR, WG-number)
-    //     - StoreVGPR
-    //     - WaitZero
-    //
-    // Launch with:
-    // - workgroup count equal to number of CUs on GPU
-    // - a single thread per workgroup
-    //
-    // Result will be: an M * N * K length array representing the
-    // flattened tile-space.  The {m, n, k} entry in the array will be
-    // the number of the WG that processed it.
-    TEST_P(GPU_AddStreamKTest, GPU_BasicStreamKStore)
+    SECTION(twoTile ? "TwoTile mode" : "Standard mode")
     {
-        bool twoTile = std::get<1>(GetParam());
+        rocRoller::KernelOptions kernelOpts;
+        kernelOpts->assertWaitCntState = false;
+
+        auto context = TestContext::ForTestDevice(kernelOpts, twoTile ? "TwoTile" : "Standard");
 
         rocRoller::KernelGraph::KernelGraph kgraph;
 
@@ -173,10 +170,10 @@ namespace AddStreamKTest
         uint numTileK = 57;
 
         hipDeviceProp_t deviceProperties;
-        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        REQUIRE_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
         uint numWGs = deviceProperties.multiProcessorCount;
 
-        auto k = m_context->kernel();
+        auto k = context->kernel();
 
         k->addArgument(
             {"result", {DataType::Int64, PointerType::PointerGlobal}, DataDirection::WriteOnly});
@@ -210,7 +207,6 @@ namespace AddStreamKTest
             Expression::DataFlowTag{wgDim, Register::Type::Vector, DataType::UInt32});
         auto assignWGNumber = kgraph.control.addElement(Assign{Register::Type::Vector, wgExpr});
         kgraph.mapper.connect(assignWGNumber, dstVGPR, NaryArgument::DEST);
-        // auto assignWGNumber = kgraph.control.addElement(NOP{});
 
         kgraph.coordinates.addElement(PassThrough(), {user}, {dstVGPR});
 
@@ -232,31 +228,30 @@ namespace AddStreamKTest
         params->streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
 
         auto addStreamK = std::make_shared<AddStreamK>(
-            m_context, params, rocRoller::KLOOP, rocRoller::KLOOP, Expression::literal(numWGs));
+            context.get(), params, rocRoller::KLOOP, rocRoller::KLOOP, Expression::literal(numWGs));
 
         kgraph = kgraph.transform(addStreamK);
-        if(m_context->kernelOptions()->removeSetCoordinate)
+        if(context->kernelOptions()->removeSetCoordinate)
             kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         auto kg2 = std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph);
         k->setKernelGraphMeta(kg2);
 
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
+        context->schedule(k->preamble());
+        context->schedule(k->prolog());
 
-        m_context->schedule(rocRoller::KernelGraph::generate(*kg2, m_context->kernel()));
+        context->schedule(rocRoller::KernelGraph::generate(*kg2, context->kernel()));
 
-        m_context->schedule(k->postamble());
-        m_context->schedule(k->amdgpu_metadata());
+        context->schedule(k->postamble());
+        context->schedule(k->amdgpu_metadata());
 
-        if(isLocalDevice())
+        if(context->hipDeviceIndex() >= 0)
         {
             auto deviceResult = make_shared_device<int>(numTileM * numTileN * numTileK);
 
             uint numTilesSK, numTilesDP;
             if(twoTile)
             {
-
                 numTilesSK = numTileK * ((numTileM * numTileN) % numWGs + numWGs);
                 numTilesDP = numTileM * numTileN * numTileK - numTilesSK;
             }
@@ -269,7 +264,7 @@ namespace AddStreamKTest
             KernelArguments kargs(false);
             kargs.append("result", deviceResult.get());
 
-            auto assemblyArgs = m_context->kernel()->arguments();
+            auto assemblyArgs = context->kernel()->arguments();
             for(int i = 1; i < assemblyArgs.size(); i++)
                 kargs.append(assemblyArgs[i].name, evaluate(assemblyArgs[i].expression));
 
@@ -277,15 +272,15 @@ namespace AddStreamKTest
             kinv.workitemCount = {numWGs, 1, 1};
             kinv.workgroupSize = {1, 1, 1};
 
-            auto executableKernel = m_context->instructions()->getExecutableKernel();
+            auto executableKernel = context->instructions()->getExecutableKernel();
             executableKernel->executeKernel(kargs, kinv);
 
             std::vector<int> hostResult(numTileM * numTileN * numTileK);
-            ASSERT_THAT(hipMemcpy(hostResult.data(),
-                                  deviceResult.get(),
-                                  hostResult.size() * sizeof(int),
-                                  hipMemcpyDefault),
-                        HasHipSuccess(0));
+            REQUIRE_THAT(hipMemcpy(hostResult.data(),
+                                   deviceResult.get(),
+                                   hostResult.size() * sizeof(int),
+                                   hipMemcpyDefault),
+                         HasHipSuccess(0));
 
             // Compute reference...
             std::vector<int> referenceResult(numTileM * numTileN * numTileK);
@@ -300,59 +295,62 @@ namespace AddStreamKTest
                 numTilesSK,
                 numTilesDP);
 
-            EXPECT_EQ(hostResult, referenceResult);
+            CHECK(hostResult == referenceResult);
         }
         else
         {
-            std::vector<char> assembledKernel = m_context->instructions()->assemble();
-            EXPECT_GT(assembledKernel.size(), 0);
+            std::vector<char> assembledKernel = context->instructions()->assemble();
+            CHECK(assembledKernel.size() > 0);
         }
     }
+}
 
-    //
-    // Coordinate graph (for the load) looks like:
-    //
-    //                                 User
-    //                                  |
-    //                                  v
-    //              /---------------- Tile -----------------\
-    //             /                    |                    \
-    //            v                     v                     v
-    //     MacroTileNumber(M)    MacroTileNumber(N)    MacroTilenumber(K)
-    //                                                        |
-    //                                                        v
-    //                                                     ForLoop
-    //
-    // Note the M/N tile numbers are dangling.  The AddStreamK pass
-    // will find them and flatten them along with the K tile number.
-    //
-    // Control graph looks like:
-    //
-    // - Kernel
-    //   - a = Assign(VGPR, 0)
-    //   - ForLoop
-    //     - x = LoadVGPR
-    //     - Assign(VGPR, a + x)
-    //   - StoreVGPR(a)
-    //
-    // Launch with:
-    // - workgroup count equal to number of CUs on GPU
-    // - a single thread per workgroup
-    //
-    // Input is an M * N * K length array of floating point values.
-    //
-    // Result will be: a numWG length array.  The n'th WG will sum
-    // the input values in it's local tile-space and store the result
-    // in the n'th entry of the output array.
-    TEST_P(GPU_AddStreamKTest, GPU_BasicStreamKLoad)
+//
+// Coordinate graph (for the load) looks like:
+//
+//                                 User
+//                                  |
+//                                  v
+//              /---------------- Tile -----------------\
+//             /                    |                    \
+//            v                     v                     v
+//     MacroTileNumber(M)    MacroTileNumber(N)    MacroTilenumber(K)
+//                                                        |
+//                                                        v
+//                                                     ForLoop
+//
+// Note the M/N tile numbers are dangling.  The AddStreamK pass
+// will find them and flatten them along with the K tile number.
+//
+// Control graph looks like:
+//
+// - Kernel
+//   - a = Assign(VGPR, 0)
+//   - ForLoop
+//     - x = LoadVGPR
+//     - Assign(VGPR, a + x)
+//   - StoreVGPR(a)
+//
+// Launch with:
+// - workgroup count equal to number of CUs on GPU
+// - a single thread per workgroup
+//
+// Input is an M * N * K length array of floating point values.
+//
+// Result will be: a numWG length array.  The n'th WG will sum
+// the input values in it's local tile-space and store the result
+// in the n'th entry of the output array.
+TEST_CASE("AddStreamK BasicStreamKLoad", "[streamk][kernel-graph][gpu]")
+{
+    // TODO: Re-work this to accumulate all K so that twoTile works.
+    bool twoTile = GENERATE(false);
+
+    SECTION(twoTile ? "TwoTile mode" : "Standard mode")
     {
-        bool twoTile = std::get<1>(GetParam());
-        if(twoTile)
-        {
-            // TODO: Re-work this to accumulate all K so that twoTile works.
-            GTEST_SKIP();
-        }
+        rocRoller::KernelOptions kernelOpts;
+        kernelOpts->assertWaitCntState = false;
 
+        auto context = TestContext::ForTestDevice(kernelOpts, twoTile ? "TwoTile" : "Standard");
         rocRoller::KernelGraph::KernelGraph kgraph;
 
         uint numTileM = 10;
@@ -360,10 +358,10 @@ namespace AddStreamKTest
         uint numTileK = 512;
 
         hipDeviceProp_t deviceProperties;
-        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        REQUIRE_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
         uint numWGs = deviceProperties.multiProcessorCount;
 
-        auto k = m_context->kernel();
+        auto k = context->kernel();
 
         k->addArgument(
             {"in", {DataType::Float, PointerType::PointerGlobal}, DataDirection::ReadOnly});
@@ -437,24 +435,24 @@ namespace AddStreamKTest
         params->streamK                       = StreamKMode::Standard;
 
         auto addStreamK = std::make_shared<AddStreamK>(
-            m_context, params, rocRoller::KLOOP, rocRoller::KLOOP, Expression::literal(numWGs));
+            context.get(), params, rocRoller::KLOOP, rocRoller::KLOOP, Expression::literal(numWGs));
 
         kgraph = kgraph.transform(addStreamK);
-        if(m_context->kernelOptions()->removeSetCoordinate)
+        if(context->kernelOptions()->removeSetCoordinate)
             kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         auto kg2 = std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph);
         k->setKernelGraphMeta(kg2);
 
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
+        context->schedule(k->preamble());
+        context->schedule(k->prolog());
 
-        m_context->schedule(rocRoller::KernelGraph::generate(*kg2, m_context->kernel()));
+        context->schedule(rocRoller::KernelGraph::generate(*kg2, context->kernel()));
 
-        m_context->schedule(k->postamble());
-        m_context->schedule(k->amdgpu_metadata());
+        context->schedule(k->postamble());
+        context->schedule(k->amdgpu_metadata());
 
-        if(isLocalDevice())
+        if(context->hipDeviceIndex() >= 0)
         {
             RandomGenerator random(17629u);
             auto            hostX = random.vector<float>(numTileM * numTileN * numTileK, -1.0, 1.0);
@@ -465,7 +463,7 @@ namespace AddStreamKTest
             kargs.append("in", deviceX.get());
             kargs.append("out", deviceA.get());
 
-            auto assemblyArgs = m_context->kernel()->arguments();
+            auto assemblyArgs = context->kernel()->arguments();
             for(int i = 2; i < assemblyArgs.size(); i++)
                 kargs.append(assemblyArgs[i].name, evaluate(assemblyArgs[i].expression));
 
@@ -473,11 +471,11 @@ namespace AddStreamKTest
             kinv.workitemCount = {numWGs, 1, 1};
             kinv.workgroupSize = {1, 1, 1};
 
-            auto executableKernel = m_context->instructions()->getExecutableKernel();
+            auto executableKernel = context->instructions()->getExecutableKernel();
             executableKernel->executeKernel(kargs, kinv);
 
             std::vector<float> hostA(numWGs);
-            ASSERT_THAT(
+            REQUIRE_THAT(
                 hipMemcpy(
                     hostA.data(), deviceA.get(), hostA.size() * sizeof(float), hipMemcpyDefault),
                 HasHipSuccess(0));
@@ -523,17 +521,103 @@ namespace AddStreamKTest
 
             auto tol = AcceptableError{epsilon<double>(), "Should be exact."};
             auto res = compare(hostA, referenceA, tol);
-            EXPECT_TRUE(res.ok) << res.message();
+            CHECK(res.ok);
+            if(!res.ok)
+            {
+                INFO(res.message());
+            }
         }
         else
         {
-            std::vector<char> assembledKernel = m_context->instructions()->assemble();
-            EXPECT_GT(assembledKernel.size(), 0);
+            std::vector<char> assembledKernel = context->instructions()->assemble();
+            CHECK(assembledKernel.size() > 0);
+        }
+    }
+}
+
+TEST_CASE("AddStreamK with unroll K", "[streamk][kernel-graph]")
+{
+    using namespace rocRoller;
+    using namespace KernelGraph;
+    using namespace ControlGraph;
+    using namespace CoordinateGraph;
+
+    auto context = TestContext::ForTestDevice();
+    auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
+
+    auto unrollK = GENERATE(1u, 2u, 4u);
+    auto mode = GENERATE(StreamKMode::Standard, StreamKMode::TwoTile, StreamKMode::TwoTileDPFirst);
+
+    example.setTileSize(128, 256, 8);
+    example.setMFMA(32, 32, 2, 1);
+    example.setUseLDS(false, false, false);
+    example.setPrefetch(false, 0, 0, false);
+    example.setUnroll(0, 0, unrollK);
+    example.setStreamK(mode);
+
+    auto numWGs     = example.getFlattenedWorkgroupSize();
+    auto numWGsExpr = std::make_shared<Expression::Expression>(numWGs);
+
+    auto applyGraphTransforms
+        = [&numWGsExpr, &context](CommandParametersPtr                 params,
+                                  rocRoller::KernelGraph::KernelGraph& kgraph) {
+              std::vector<GraphTransformPtr> transforms;
+              transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
+              transforms.push_back(std::make_shared<OrderMemory>(false));
+              transforms.push_back(std::make_shared<UpdateParameters>(params));
+              transforms.push_back(std::make_shared<AddLDS>(params, context.get()));
+              transforms.push_back(std::make_shared<LowerLinear>(context.get()));
+              transforms.push_back(std::make_shared<LowerTile>(params, context.get()));
+              transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
+              transforms.push_back(std::make_shared<Simplify>());
+              transforms.push_back(std::make_shared<FuseExpressions>());
+              transforms.push_back(std::make_shared<AddStreamK>(
+                  context.get(), params, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
+              transforms.push_back(std::make_shared<ConnectWorkgroups>(context.get()));
+              for(auto& t : transforms)
+                  kgraph = kgraph.transform(t);
+          };
+
+    auto kgraph = example.getKernelGraph();
+    auto params = example.getCommandParameters();
+
+    applyGraphTransforms(params, kgraph);
+
+    auto loopPredicate = [&](int tag) {
+        auto maybeForLoop = kgraph.control.get<ForLoopOp>(tag);
+        if(maybeForLoop)
+            return maybeForLoop->loopName == rocRoller::KLOOP;
+        return false;
+    };
+
+    // In two-tile mode, we should have two K loops: one for the SK
+    // tiles and one for the DP tiles.
+    auto expectForKLoops = mode == StreamKMode::Standard ? 1 : 2;
+
+    SECTION("Pre unroll")
+    {
+        auto forLoopTags = kgraph.control.findElements(loopPredicate).to<std::vector>();
+
+        CHECK(forLoopTags.size() == expectForKLoops);
+        for(auto& tag : forLoopTags)
+        {
+            auto [lhs, rhs] = getForLoopIncrement(kgraph, tag);
+            auto increment  = getUnsignedInt(evaluate(rhs));
+            CHECK(increment == 1);
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(GPU_AddStreamKTest,
-                             GPU_AddStreamKTest,
-                             ::testing::Combine(currentGPUISA(), ::testing::Values(true, false)));
+    kgraph = kgraph.transform(std::make_shared<UnrollLoops>(params, context.get()));
 
+    SECTION("Post unroll")
+    {
+        auto forLoopTags = kgraph.control.findElements(loopPredicate).to<std::vector>();
+
+        for(auto& tag : forLoopTags)
+        {
+            auto [lhs, rhs] = getForLoopIncrement(kgraph, tag);
+            auto increment  = getUnsignedInt(evaluate(rhs));
+            CHECK(increment == unrollK);
+        }
+    }
 }

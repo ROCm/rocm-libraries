@@ -10,9 +10,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace hipdnn_sdk
-{
-namespace utilities
+namespace hipdnn_sdk::utilities
 {
 
 // Check broadcastability: input can be broadcast to output
@@ -312,5 +310,4 @@ inline int64_t calculateGroupCount(const std::vector<int64_t>& inputDims,
     return inChannels / wChannels;
 }
 
-}
-}
+} // namespace hipdnn_sdk::utilities
