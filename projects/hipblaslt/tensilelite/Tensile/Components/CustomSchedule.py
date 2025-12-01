@@ -520,6 +520,45 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment=""),
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete"),]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+    elif isTN(kernel) and not useLDSTr and TLDS == 1:
+        #index and code pair
+        syncTable = [-1, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="for LRB1-0"),
+                      5, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="for LRB1"),
+                     14, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="for LRA0 complete"),
+                     14, SBarrier(comment="for GRA start"),
+                     46, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="for LRB0"),
+                     46, SBarrier(comment="for GRB start"),
+                     50, SWaitCnt(dscnt=-1, vlcnt=14+1, vscnt=-1, comment="for LRA1"),
+                     50, SBarrier(comment="for LRA1 start"),
+                     65, SWaitCnt(dscnt=-1, vlcnt=6+5, vscnt=-1, comment="for LRB0"),
+                     65, SBarrier(comment="for LRB1 start"),]
+        optSchedule = {
+                'SYNC'  : [syncTable[::2]],
+                'GRIncA': [[6,6,7,7,8,8,9,9,9]],
+                'GRIncB': [[9,10,11,12,13,14,15,16,17]],
+
+                'LRA0'  : [[0, 1, 2, 3, 4, 5],
+                           [-1, 0, 1, 2, 3, 4]],
+                'LRB0'  : [[7, 9, 11, 13, 15, 17, 19, 21],
+                           [8, 10, 12, 13, 16, 18, 20, 22]],
+                'GRA'   : [[14,14, 16,16, 18,18, 20,20, 25,25, 31,31],
+                           [15,15, 17,17, 19,19, 21,21, 26,26, 32,32]],
+
+                'GRB'   : [[46,46, 50,50, 54,54, 58,58, 62,62, 66,66, 70,70, 76,76],
+                           [47,47, 51,51, 55,55, 59,59, 63,63, 67,67, 71,71, 77,77]],
+                'LRA1'  : [[50, 52, 56, 58, 60, 62],
+                            [51, 53, 57, 59, 61, 63]],
+                'LRB1'  : [[65, 67, 69, 71, 73, 75, 77, 79],
+                           [66, 68, 70, 72, 74, 76, 78, 80]],
+
+                'LRSA'  : [[47]],
+                'LRSB'  : [[47]],
+                'LWSA'  : [[47]],
+                'LWSB'  : [[80]],
+                'LCC'   : [[95, 95]],
+            }
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     elif isNT(kernel) and not useLDSTr and TLDS == 0:
         kernel["UsePLRPack"] = True
 
