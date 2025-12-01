@@ -981,7 +981,7 @@ namespace origami
         double L_WG_setup = 1; // WG_setup_Latency
 
         // 3) Prologue: 2.2× memory latency
-        double L_prologue = 1.5 * L_mem * effective_tile_penalty; // 1.5 chosen emprically
+        double L_prologue = 1.5 * L_mem; // 1.5 chosen emprically
 
         // L_compute *= std::max(L_compute, L_LDS);
 
