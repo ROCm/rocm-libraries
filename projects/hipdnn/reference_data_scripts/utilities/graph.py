@@ -1,3 +1,6 @@
+## Copyright © Advanced Micro Devices, Inc., or its affiliates.
+## SPDX-License-Identifier:  MIT
+
 import torch
 from tensor import TensorAttributes, dump_data_as_binary, load_data_from_binary
 from common import DTypeConverter, NODE_REGISTRY

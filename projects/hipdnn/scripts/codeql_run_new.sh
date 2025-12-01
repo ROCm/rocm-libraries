@@ -1,3 +1,6 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 #!/bin/bash -x
 set -e  # Exit on error
 set -u  # Exit on undefined variable
