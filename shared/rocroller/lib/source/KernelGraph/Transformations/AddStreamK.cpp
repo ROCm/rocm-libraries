@@ -578,6 +578,26 @@ namespace rocRoller
             auto doWhileTag = graph.control.addElement(
                 DoWhileOp{(DF(flagRegister) == zero), "Global sync spin loop"});
 
+            // Duplicate flag and next workgroup coordinates for reset operation
+            auto resetNextWorkgroupTag = graph.coordinates.addElement(Linear(nullptr, one));
+            graph.coordinates.addElement(Join(), {workgroup, plusOneTag, forReceiveTileLoopCoord}, {resetNextWorkgroupTag});
+
+            auto resetFlagsScratchTag = graph.coordinates.addElement(
+                *graph.coordinates.get<User>(flagsScratchTag));
+            graph.coordinates.addElement(Duplicate(), {resetFlagsScratchTag}, {flagsScratchTag});
+            graph.coordinates.addElement(PassThrough(), {resetNextWorkgroupTag}, {resetFlagsScratchTag});
+
+            // Reset flag operations
+            auto assignResetFlagTag = graph.control.addElement(Assign{Register::Type::Scalar, zero});
+            graph.mapper.connect(assignResetFlagTag, flagRegister, NaryArgument::DEST);
+
+            auto resetFlagTag = graph.control.addElement(StoreSGPR(DataType::UInt32, bufOpts));
+            graph.mapper.connect<User>(resetFlagTag, resetFlagsScratchTag);
+            graph.mapper.connect<VGPR>(resetFlagTag, flagRegister);
+
+            auto waitZeroAfterResetTag = graph.control.addElement(WaitZero());
+            auto barrierBeforeResetTag = graph.control.addElement(Barrier());
+
             auto accumulatorTile = graph.coordinates.get<MacroTile>(accumulatorTileTag);
             uint numRegisters    = accumulatorTile->elements()
                                 / (product(context->kernel()->workgroupSize()) * loopInfo.xLoopSize
@@ -636,7 +656,8 @@ namespace rocRoller
             graph.control.addElement(Sequence(), {boundsCheckTag}, {doWhileTag});
             graph.control.addElement(Body(), {doWhileTag}, {loadFlagTag});
 
-            graph.control.chain<Sequence>(doWhileTag, loadAddForX, postWaitZeroTag);
+            graph.control.chain<Sequence>(doWhileTag, barrierBeforeResetTag, assignResetFlagTag, 
+                                          resetFlagTag, waitZeroAfterResetTag, loadAddForX, postWaitZeroTag);
 
             return {preWaitZeroTag, receiveTileTag, setPlusOneTag};
         }
