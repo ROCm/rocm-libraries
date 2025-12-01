@@ -473,6 +473,8 @@ class TestCustomScheduleValidation:
         expected = "Non-descending-order rule failed, schedule key 'P', sequence [3, 2, 1]: value 2 at index 1 is less than 3 at index 0."
         assert status == False
         assert message == expected
+        assert False, "This is a test that this runs in CI."
+
 
         sched = ScheduleInfo(
             None, None, {"P": [[1, 1, 2]]}, None, None, None, None
