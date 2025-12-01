@@ -450,7 +450,7 @@ protected:
     T alpha0, alpha1, beta;
 
 #if PERF_ENABLE
-    PerfHelper ph;
+    PerfHelper<float> ph;
 #endif
 };
 
