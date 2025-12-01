@@ -10,16 +10,14 @@
 #include <thread>
 #include <vector>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
+namespace hipdnn_sdk::test_utilities
 {
 
 class CpuFpReferenceConvolution
 {
 public:
     // Check if this CPU implementation supports the given node configuration
-    static bool isApplicable(const hipdnn_sdk::data_objects::Node& node)
+    static bool isApplicable(const data_objects::Node& node)
     {
         using namespace hipdnn_sdk::data_objects;
 
@@ -132,13 +130,15 @@ public:
                         {
                             // Input dims: [n, xChannel, ...]
                             // Thus, we index via global x channel index.
-                            auto xFullIndices = utilities::buildTensorIndices(nIdx, xChannel, xSpatialIndices);
+                            auto xFullIndices
+                                = utilities::buildTensorIndices(nIdx, xChannel, xSpatialIndices);
 
                             // Weight dims: [yChannels,
                             // xChannels/groupCount, ...] Thus, we index via flattened y channel index and
                             // group-offset x channel index (c).
                             int64_t wIdx = (gIdx * yChannelsPerGroup) + kIdx;
-                            auto wFullIndices = utilities::buildTensorIndices(wIdx, c, kernelSpatialIndices);
+                            auto wFullIndices
+                                = utilities::buildTensorIndices(wIdx, c, kernelSpatialIndices);
 
                             XDataType xVal = x.getHostValue(xFullIndices);
                             WDataType wVal = w.getHostValue(wFullIndices);
@@ -269,8 +269,8 @@ public:
 
                             auto wBatchIdx = yChannelIdx;
                             auto wChannelIdx = cIdx;
-                            auto wFullIndices
-                                = utilities::buildTensorIndices(wBatchIdx, wChannelIdx, kernelSpatialIndices);
+                            auto wFullIndices = utilities::buildTensorIndices(
+                                wBatchIdx, wChannelIdx, kernelSpatialIndices);
 
                             DyDataType vOut = gradY.getHostValue(gradOutputFullIndices);
                             WDataType vWei = w.getHostValue(wFullIndices);
@@ -283,7 +283,8 @@ public:
                 });
 
             int64_t xChannelIdx = (gIdx * channelsPerGroup) + cIdx;
-            auto gradInputFullIndices = utilities::buildTensorIndices(nIdx, xChannelIdx, xSpatialIndices);
+            auto gradInputFullIndices
+                = utilities::buildTensorIndices(nIdx, xChannelIdx, xSpatialIndices);
 
             gradX.setHostValue(static_cast<DxDataType>(vAcc), gradInputFullIndices);
         };
@@ -352,53 +353,55 @@ public:
             auto vAcc = static_cast<ComputeDataType>(0.0f);
 
             // Iterate over each spatial position of the kernel for contributing y gradients
-            utilities::iterateAlongDimensions(ySpatialDims, [&](const std::vector<int64_t>& ySpatialIndices) {
-                std::vector<int64_t> xSpatialIndices(static_cast<size_t>(nSpatialDims));
+            utilities::iterateAlongDimensions(
+                ySpatialDims, [&](const std::vector<int64_t>& ySpatialIndices) {
+                    std::vector<int64_t> xSpatialIndices(static_cast<size_t>(nSpatialDims));
 
-                bool validPosition = true;
+                    bool validPosition = true;
 
-                // For each spatial dimension, calculate the corresponding y gradient index
-                for(int64_t dim = 0; dim < nSpatialDims; ++dim)
-                {
-                    auto dimIdx = static_cast<size_t>(dim);
-
-                    int64_t tmp = (ySpatialIndices[dimIdx] * strides[dimIdx])
-                                  + (kernelSpatialIndices[dimIdx] * dilations[dimIdx])
-                                  - prePadding[dimIdx];
-
-                    xSpatialIndices[dimIdx] = tmp;
-
-                    if(xSpatialIndices[dimIdx] < 0
-                       || xSpatialIndices[dimIdx] >= xSpatialDims[dimIdx])
+                    // For each spatial dimension, calculate the corresponding y gradient index
+                    for(int64_t dim = 0; dim < nSpatialDims; ++dim)
                     {
-                        validPosition = false;
-                        break;
-                    }
-                }
+                        auto dimIdx = static_cast<size_t>(dim);
 
-                if(validPosition)
-                {
-                    for(int64_t n = 0; n < nBatch; ++n)
+                        int64_t tmp = (ySpatialIndices[dimIdx] * strides[dimIdx])
+                                      + (kernelSpatialIndices[dimIdx] * dilations[dimIdx])
+                                      - prePadding[dimIdx];
+
+                        xSpatialIndices[dimIdx] = tmp;
+
+                        if(xSpatialIndices[dimIdx] < 0
+                           || xSpatialIndices[dimIdx] >= xSpatialDims[dimIdx])
+                        {
+                            validPosition = false;
+                            break;
+                        }
+                    }
+
+                    if(validPosition)
                     {
-                        auto yChannelIdx = (gIdx * yChannelsPerGroup) + kIdx;
+                        for(int64_t n = 0; n < nBatch; ++n)
+                        {
+                            auto yChannelIdx = (gIdx * yChannelsPerGroup) + kIdx;
 
-                        auto gradOutputFullIndices
-                            = utilities::buildTensorIndices(n, yChannelIdx, ySpatialIndices);
+                            auto gradOutputFullIndices
+                                = utilities::buildTensorIndices(n, yChannelIdx, ySpatialIndices);
 
-                        auto xChannelIdx = (gIdx * channelsPerGroup) + cIdx;
+                            auto xChannelIdx = (gIdx * channelsPerGroup) + cIdx;
 
-                        auto xFullIndices = utilities::buildTensorIndices(n, xChannelIdx, xSpatialIndices);
+                            auto xFullIndices
+                                = utilities::buildTensorIndices(n, xChannelIdx, xSpatialIndices);
 
-                        DyDataType vOut = gradY.getHostValue(gradOutputFullIndices);
+                            DyDataType vOut = gradY.getHostValue(gradOutputFullIndices);
 
-                        XDataType vIn = x.getHostValue(xFullIndices);
+                            XDataType vIn = x.getHostValue(xFullIndices);
 
-                        vAcc = vAcc
-                               + (static_cast<ComputeDataType>(vOut)
-                                  * static_cast<ComputeDataType>(vIn));
+                            vAcc = vAcc
+                                   + (static_cast<ComputeDataType>(vOut)
+                                      * static_cast<ComputeDataType>(vIn));
+                        }
                     }
-                }
-            });
+                });
 
             auto wN = (gIdx * yChannelsPerGroup) + kIdx;
             auto wFullIndices = utilities::buildTensorIndices(wN, cIdx, kernelSpatialIndices);
@@ -531,5 +534,4 @@ private:
     }
 };
 
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::test_utilities

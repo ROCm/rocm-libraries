@@ -889,6 +889,17 @@ namespace GEMMDriverTest
     {
     };
 
+    // Params are: A & B type, UnrollK, LoadPath A, LoadPath B, LDS D, StreamK two-tile, beta is zero
+    class GEMMStreamKTestGPU : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
+                                                                        int,
+                                                                        SolutionParams::LoadPath,
+                                                                        SolutionParams::LoadPath,
+                                                                        bool,
+                                                                        rocRoller::StreamKMode,
+                                                                        bool>>
+    {
+    };
+
     // Params are: A & B type, K tile size, (transA, transB)
     class GEMMF8F6F4TestGPU
         : public BaseGEMMContextFixture<
@@ -960,6 +971,11 @@ namespace GEMMDriverTest
                                                    int, /* workgroupMapping value */
                                                    bool, /* workgroupRemapXCC */
                                                    StreamKMode>>
+    {
+    };
+
+    // Params are: K dimension size
+    class GEMMUnrollKTailLoopTestGPU : public BaseGEMMContextFixture<std::tuple<int>>
     {
     };
 
@@ -1089,53 +1105,32 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm, false, false, 1, true);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMBetaIsZeroStreamK)
-    {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
-        {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMBeta0StreamK test";
-        }
-
-        GEMMProblem gemm;
-
-        hipDeviceProp_t deviceProperties;
-        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        gemm.numWGs = deviceProperties.multiProcessorCount;
-
-        gemm.m = gemm.macM * 8;
-        gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
-
-        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
-
-        gemm.streamK = StreamKMode::Standard;
-        gemm.k       = gemm.macK * 8;
-
-        // TODO: Does not work with unrolling K
-        //gemm.unrollK          = 2;
-        //gemm.prefetch         = true;
-        //gemm.prefetchInFlight = 2;
-
-        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = true;
-
-        gemm.beta = 0;
-
-        for(auto twoTile : {true, false})
-        {
-            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
-            basicGEMM<float>(gemm, false, false, 1, true);
-        }
-    }
-
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamK)
+    TEST_P(GEMMStreamKTestGPU, GPU_BasicGEMMStreamK)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
 
+        auto [typeAB, unrollK, loadPathA, loadPathB, storeLDSD, mode, betaZero]
+            = std::get<1>(GetParam());
+
+        if((typeAB == DataType::Float)
+           && (loadPathA == SolutionParams::LoadPath::BufferToLDSViaVGPR)
+           && (loadPathB == SolutionParams::LoadPath::BufferToLDSViaVGPR) && (storeLDSD)
+           && (mode != StreamKMode::Standard))
+        {
+            // We run out of LDS in this case
+            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+        }
+
         GEMMProblem gemm;
+
+        if(typeAB == DataType::Half)
+        {
+            gemm.waveK = 8;
+            gemm.macK  = 16;
+        }
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
@@ -1146,117 +1141,31 @@ namespace GEMMDriverTest
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
 
-        gemm.streamK = StreamKMode::Standard;
+        gemm.streamK = mode;
         gemm.k       = gemm.macK * 8;
 
-        // TODO: Does not work with unrolling K
-        //gemm.unrollK          = 2;
-        //gemm.prefetch         = true;
-        //gemm.prefetchInFlight = 2;
+        gemm.loadPathA = loadPathA;
+        gemm.loadPathB = loadPathB;
+        gemm.storeLDSD = storeLDSD;
+        gemm.unrollK   = unrollK;
 
-        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = true;
+        gemm.transA = "T";
+        gemm.transB = "N";
 
-        for(auto twoTile : {true, false})
+        if(betaZero)
+            gemm.beta = 0;
+
+        switch(typeAB)
         {
-            gemm.streamK = twoTile ? StreamKMode::TwoTile : StreamKMode::Standard;
+        case DataType::Half:
+            basicGEMM<Half>(gemm);
+            break;
+        case DataType::Float:
             basicGEMM<float>(gemm);
+            break;
+        default:
+            Throw<FatalError>(fmt::format("Unexpected data type: {}. ", toString(typeAB)));
         }
-    }
-
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamKTwoTileDPFirst)
-    {
-        hipDeviceProp_t deviceProperties;
-        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-
-        GEMMProblem gemm;
-        gemm.numWGs = deviceProperties.multiProcessorCount;
-        gemm.m      = gemm.macM * 8;
-        gemm.n      = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
-        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
-        gemm.k = gemm.macK * 8;
-
-        gemm.loadPathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.loadPathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
-        gemm.storeLDSD = true;
-        gemm.streamK   = StreamKMode::TwoTileDPFirst;
-
-        basicGEMM<float>(gemm);
-    }
-
-    TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamK)
-    {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
-        {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
-        }
-
-        GEMMProblem gemm;
-
-        hipDeviceProp_t deviceProperties;
-        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        gemm.numWGs = deviceProperties.multiProcessorCount;
-
-        gemm.waveK = 8;
-        gemm.macK  = 16;
-
-        gemm.macM           = 128;
-        gemm.macN           = 256;
-        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
-        gemm.workgroupSizeY = 2;
-
-        gemm.m = gemm.macM * 8;
-        gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
-
-        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
-
-        gemm.streamK = StreamKMode::Standard;
-        gemm.k       = gemm.macK * 8;
-
-        // TODO: Does not work with unrolling K
-        //gemm.unrollK          = 2;
-        //gemm.prefetch         = true;
-        //gemm.prefetchInFlight = 2;
-
-        std::tie(gemm.streamK, gemm.loadPathA, gemm.loadPathB, gemm.storeLDSD)
-            = std::get<1>(GetParam());
-
-        basicGEMM<Half>(gemm);
-    }
-
-    TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamKSmall)
-    {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
-        {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
-        }
-
-        GEMMProblem gemm;
-
-        hipDeviceProp_t deviceProperties;
-        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        gemm.numWGs = 3;
-
-        gemm.waveK = 8;
-        gemm.macK  = 16;
-
-        gemm.macM           = 128;
-        gemm.macN           = 128;
-        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
-        gemm.workgroupSizeY = 4;
-
-        gemm.m = 4 * gemm.macM;
-        gemm.n = 4 * gemm.macN;
-
-        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
-
-        gemm.k = gemm.macK * 8;
-
-        std::tie(gemm.streamK, gemm.loadPathA, gemm.loadPathB, gemm.storeLDSD)
-            = std::get<1>(GetParam());
-
-        basicGEMM<Half>(gemm);
     }
 
     TEST_P(GEMMTestStreamKGPU, GPU_BasicGEMMFP16StreamK_MultipleFixups)
@@ -1389,12 +1298,16 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMUnrollKTailLoop)
+    TEST_P(GEMMUnrollKTailLoopTestGPU, GPU_BasicGEMMUnrollKTailLoop)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
+        auto [k] = std::get<1>(GetParam());
+
         GEMMProblem gemm;
         gemm.m         = 64;
         gemm.n         = 128;
+        gemm.k         = k;
         gemm.transA    = "T";
         gemm.transB    = "N";
         gemm.loadPathA = SolutionParams::LoadPath::BufferToVGPR;
@@ -1404,11 +1317,8 @@ namespace GEMMDriverTest
         gemm.tailLoops = true;
         gemm.unrollK   = 4;
         gemm.macK      = 8;
-        for(auto k : {8, 16, 24, 32, 40, 48, 56, 64})
-        {
-            gemm.k = k;
-            basicGEMM<float>(gemm);
-        }
+
+        basicGEMM<float>(gemm);
     }
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMUnrollKLDS)
@@ -2398,8 +2308,8 @@ namespace GEMMDriverTest
         else if(unrollK == 2)
         {
             EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
-            // 2x2 wave config: NumAScaleLoadTiles = 256/2/64 = 2 and NumBScaleLoadTiles = 256/2/64 = 2
-            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 4);
+            // 2x2 wave config: NumAScaleLoadTiles = 256/2/64 = 2 (+2 for Tail Loop) and NumBScaleLoadTiles = 256/2/64 = 2 (+2 for Tail Loop)
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 8);
         }
         else if(unrollK == 4)
         {
@@ -2462,11 +2372,11 @@ namespace GEMMDriverTest
         }
         else if(unrollK == 2)
         {
-            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 8);
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 12);
         }
         else if(unrollK == 4)
         {
-            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 16);
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 20);
         }
     }
 
@@ -2525,7 +2435,7 @@ namespace GEMMDriverTest
             EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
             // 1x4 wave config: NumAScaleLoadTiles = 256/64 = 4 and NumBScaleLoadTiles = 256/4/64 = 1
             // prefetched : 2 * 5 = 10
-            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 10);
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 15);
         }
     }
 
@@ -2631,7 +2541,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
         // 1x4 wave config: NumAScaleLoadTiles = 256/64 = 4 and NumBScaleLoadTiles = 256/4/64 = 1
         // prefetched scale: 2 * 5 = 10
-        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 10);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 15);
     }
 
     TEST_P(GEMMTestGPU, GPU_SwizzleScaledPrefetchD2LGEMMMXF4TN_192x256)
@@ -2689,7 +2599,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
         // 1x4 wave config: NumAScaleLoadTiles = 192/64 = 3 and NumBScaleLoadTiles = 256/4/64 = 1
         // prefetched scale: 2 * 4 = 8
-        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 8);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 12);
     }
 
     TEST_P(GEMMF8F6F4TestGPU, GPU_SwizzleScaled_Prefetch_GEMMF8F6F4)
@@ -3479,7 +3389,7 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 20);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 22);
         EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 8);
         EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
@@ -3539,7 +3449,7 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 24);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 26);
         EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128"), 8);
         EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
@@ -3649,7 +3559,7 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 6);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 9);
     }
 
     TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed4x2)
@@ -3709,7 +3619,7 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 12);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 15);
     }
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16AllLDS)
@@ -4141,6 +4051,25 @@ namespace GEMMDriverTest
                                ::testing::Values(true, false))));
 
     INSTANTIATE_TEST_SUITE_P(
+        GEMMStreamKTest,
+        GEMMStreamKTestGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(
+                ::testing::Values(rocRoller::DataType::Float,
+                                  rocRoller::DataType::Half), // typeAB
+                ::testing::Values(1, 2), // UnrollK
+                ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                  SolutionParams::LoadPath::BufferToLDSViaVGPR), // LoadPath A
+                ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                  SolutionParams::LoadPath::BufferToLDSViaVGPR), // LoadPath B
+                ::testing::Values(true, false), // storeLDSD
+                ::testing::Values(rocRoller::StreamKMode::Standard,
+                                  rocRoller::StreamKMode::TwoTile,
+                                  rocRoller::StreamKMode::TwoTileDPFirst), // StreamKMode
+                ::testing::Values(true, false)))); // betaZero
+
+    INSTANTIATE_TEST_SUITE_P(
         GEMMF8F6F4Test,
         GEMMF8F6F4TestGPU,
         ::testing::Combine(
@@ -4265,6 +4194,13 @@ namespace GEMMDriverTest
                                ::testing::Values(StreamKMode::Standard,
                                                  StreamKMode::TwoTile,
                                                  StreamKMode::TwoTileDPFirst))));
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMUnrollKTailLoopTest,
+        GEMMUnrollKTailLoopTestGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Values(8, 16, 24, 32, 40, 48, 56, 64, 592))); // 592 = 18 * 4 * 8 + 8 * 2
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMTestStreamK,
