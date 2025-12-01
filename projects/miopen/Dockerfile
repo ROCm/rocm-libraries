@@ -1,5 +1,6 @@
 FROM ubuntu:22.04 as miopen
 
+ARG PROJ="miopen"
 ARG DEBIAN_FRONTEND=noninteractive
 # install to /opt/rocm will cause permission issue
 ARG PREFIX=/usr/local
@@ -98,10 +99,13 @@ ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 
 # Add requirements files
-ADD rbuild.ini /rbuild.ini
-ADD requirements.txt /requirements.txt
-ADD dev-requirements.txt /dev-requirements.txt
-ADD docs/sphinx/requirements.txt /doc-requirements.txt
+ADD ${PROJ}/rbuild.ini /rbuild.ini
+ADD ${PROJ}/requirements.txt /requirements.txt
+ADD ${PROJ}/dev-requirements.txt /dev-requirements.txt
+ADD ${PROJ}/docs/sphinx/requirements.txt /doc-requirements.txt
+
+# Copy Composable Kernel
+COPY composablekernel /composable_kernel
 
 # Install an init system
 RUN wget https://github.com/Yelp/dumb-init/releases/download/v1.2.0/dumb-init_1.2.0_amd64.deb && \
@@ -132,8 +136,8 @@ RUN wget https://github.com/Yelp/dumb-init/releases/download/v1.2.0/dumb-init_1.
 # Make sure /opt/rocm is in the paths
 ENV PATH="/opt/rocm:${PATH}"
 
-ADD script/redis-cli.conf /redis-cli.conf
-ADD script/sccache_wrapper.sh /sccache_wrapper.sh
+ADD ${PROJ}/script/redis-cli.conf /redis-cli.conf
+ADD ${PROJ}/script/sccache_wrapper.sh /sccache_wrapper.sh
 
 RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
@@ -155,10 +159,7 @@ RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
     export PATH=$PATH:${SCCACHE_INSTALL_LOCATION} && \
     ./sccache_wrapper.sh --enforce_redis; \
     fi &&\
-    CK_COMMIT=$(grep 'ROCm/composable_kernel' requirements.txt | sed -n 's/.*@\([a-zA-Z0-9]*\).*/\1/p') && \
-    wget -O ck.tar.gz https://www.github.com/ROCm/composable_kernel/archive/${CK_COMMIT}.tar.gz && \
-    tar zxvf ck.tar.gz &&\
-    cd composable_kernel-${CK_COMMIT} && \
+    cd /composable_kernel && \
     mkdir build && cd build && \
     num_threads=64 && \
     echo Building CK with ${num_threads} threads && \
