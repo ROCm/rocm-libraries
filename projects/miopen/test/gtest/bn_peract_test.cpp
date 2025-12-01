@@ -48,6 +48,7 @@
 #include "random.hpp"
 #include "tensor_holder.hpp"
 #include "test.hpp"
+#include "test_parameter_name_generator.hpp"
 #include "verify.hpp"
 
 // Run CPU emulations in hierarchical reduction mode.
@@ -63,7 +64,7 @@
 
 namespace {
 
-using TestCase = std::vector<int>;
+using TestCase = NamedContainer<std::vector<int>>;
 
 //****************************************************
 // FORWARD TRAIN
@@ -973,15 +974,27 @@ struct verify_backward_bn_per_activation_recalc
 
 //====== DRIVERS ===========================================
 
-inline auto GenCases()
+inline auto GenSmokeTestCases()
 {
-    auto s = get_bn_peract_inputs(4);
-    return testing::ValuesIn((s.insert({16, 32, 8, 8}), s));
+    return testing::Values(
+        NamedContainer<std::vector<int>>("dims", std::vector<int>{16, 32, 8, 8}, "x"));
 }
 
-inline auto GetCases()
+inline auto GetSmokeTestCases()
 {
-    static const auto cases = GenCases();
+    static const auto cases = GenSmokeTestCases();
+    return cases;
+}
+
+inline auto GenFullTestCases()
+{
+    return MakeNamedParameterCollectionValues<std::vector<int>>(
+        "dims", get_bn_peract_inputs(4), "x");
+}
+
+inline auto GetFullTestCases()
+{
+    static const auto cases = GenFullTestCases();
     return cases;
 }
 
@@ -996,7 +1009,7 @@ struct BnPeractTest : public testing::TestWithParam<TestCase>
     {
         prng::reset_seed();
         const auto dims = GetParam();
-        input           = tensor<T>{dims}.generate(tensor_elem_gen_integer{MaxValue});
+        input           = tensor<T>{dims()}.generate(tensor_elem_gen_integer{MaxValue});
     }
 
     void Run()
@@ -1151,6 +1164,27 @@ private:
     }
 };
 
+struct TestNameGenerator
+{
+    std::string operator()(const auto& testCase)
+    {
+        const auto& dims = testCase.param;
+        std::stringstream ss;
+        std::string str;
+
+        ss << "dims_" << GetRangeAsString(dims(), "x") << "_test_id_" << testCase.index;
+
+        str = ss.str();
+
+        // Name format only supports letters, numbers and underscores.
+        std::transform(str.begin(), str.end(), str.begin(), [](char c) {
+            return (c == '.') ? 'p' : (std::isalnum(c) ? c : '_');
+        });
+
+        return str;
+    }
+};
+
 using GPU_BnPeract_FP16  = BnPeractTest<half_float::half>;
 using GPU_BnPeract_FP32  = BnPeractTest<float>;
 using GPU_BnPeract_BFP16 = BnPeractTest<bfloat16>;
@@ -1159,6 +1193,10 @@ TEST_P(GPU_BnPeract_FP16, TestFloat16) { this->Run(); }
 TEST_P(GPU_BnPeract_FP32, TestFloat32) { this->Run(); }
 TEST_P(GPU_BnPeract_BFP16, TestBFloat16) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeract_FP16, GetCases());
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeract_FP32, GetCases());
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeract_BFP16, GetCases());
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeract_FP16, GetSmokeTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeract_FP32, GetSmokeTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BnPeract_BFP16, GetSmokeTestCases(), TestNameGenerator{});
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_BnPeract_FP16, GetFullTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_BnPeract_FP32, GetFullTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_BnPeract_BFP16, GetFullTestCases(), TestNameGenerator{});
