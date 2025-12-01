@@ -1664,6 +1664,14 @@ BenchmarkProblems:
         - WavefrontSize: [64]
         - WorkGroup: [[16, 16, 1]]
         - WorkGroupMapping: [6]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[240], [256], [1], [64, 64, 256]]
+          - Range: [[240], [256], [1], [1, 1, 256]]
+          - Range: [[240], [256], [1], [32, 64, 256]]
+          - Range: [[7680], [8192], [1], [64, 64, 256]]
+        - BiasTypeArgs: ['b']        
   ########################################
   # HHS NT - standard
   ########################################
