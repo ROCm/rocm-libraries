@@ -516,7 +516,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete"),
                     SBarrier(comment=""),
-                    SWaitCnt(dscnt=-1, vlcnt=9, vscnt=-1, comment="Wait for GRA & GRBto complete"),
+                    SWaitCnt(dscnt=-1, vlcnt=9, vscnt=-1, comment="Wait for GRA & GRB to complete"),
                     SBarrier(comment=""),
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 & LRB1 to complete"),]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
