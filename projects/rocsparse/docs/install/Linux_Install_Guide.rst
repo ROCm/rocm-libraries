@@ -242,7 +242,7 @@ For more comprehensive testing, you can run the entire unit test suite using the
       # Execute rocSPARSE example
       ./rocsparse-test
 
-or for more focused testing, you can run a specific test by running the following command:
+For more focused testing, you can run a specific test by running the following command:
 
 .. code-block:: shell
 
