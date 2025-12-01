@@ -46,17 +46,17 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
-    auto dtype        = problem.GetDYDesc().GetType();
-    auto mode         = problem.GetMode();
-    auto input_dtype  = miopen::GetDataType(problem.GetDYDesc().GetType());
-    auto output_dtype = miopen::GetDataType(problem.GetDXDesc().GetType());
+    auto dtype     = problem.GetDYDesc().GetType();
+    auto mode      = problem.GetMode();
+    auto data_type = miopen::GetDataType(problem.GetDYDesc().GetType());
 
     auto reqd_work_item_cnt =
         get_reqd_work_item_cnt(context, PerformanceConfigLayernorm::max_parallel_local_size);
 
     {
-        size_t xlocalsize = problem.stride <= config.local_size ? config.local_size / (1 << mloLg2(problem.stride))
-                                                        : config.local_size;
+        size_t xlocalsize = problem.stride <= config.local_size
+                                ? config.local_size / (1 << mloLg2(problem.stride))
+                                : config.local_size;
         size_t xgridsize  = problem.outer_size * xlocalsize;
         size_t ylocalsize = problem.stride <= config.local_size ? problem.stride : 1;
         size_t ygridsize  = problem.stride;
@@ -72,13 +72,13 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
             {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
             {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
             {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-            {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
-            {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
+            {"DATA_TYPE", data_type == "bfloat16" ? "ushort" : data_type},
             {"OUTER_SIZE", problem.outer_size},
             {"INNER_SIZE", problem.inner_size},
             {"STRIDE", problem.stride},
             {"LOCAL_SIZE", config.local_size},
             {"MODE", mode},
+            {"EPSILON", 0},
             {"VECTORIZED", config.vectorized},
             {"PARALLEL_SIZE", 1},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
@@ -124,14 +124,14 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                 {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
                 {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
                 {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-                {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
-                {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
+                {"DATA_TYPE", data_type == "bfloat16" ? "ushort" : data_type},
                 {"OUTER_SIZE", problem.outer_size},
                 {"INNER_SIZE", problem.inner_size},
                 {"STRIDE", problem.stride},
                 {"PARALLEL_SIZE", parallelism_size},
                 {"LOCAL_SIZE", config.local_size},
                 {"MODE", mode},
+                {"EPSILON", 0},
                 {"VECTORIZED", config.vectorized},
                 {"MIOPEN_ELEMENTWISE_AFFINE", 0},
                 {"MIOPEN_WEIGHT_BIAS", 1},
@@ -171,14 +171,14 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                 {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
                 {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
                 {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-                {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
-                {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
+                {"DATA_TYPE", data_type == "bfloat16" ? "ushort" : data_type},
                 {"OUTER_SIZE", problem.outer_size},
                 {"INNER_SIZE", problem.inner_size},
                 {"STRIDE", problem.stride},
                 {"PARALLEL_SIZE", parallelism_size},
                 {"LOCAL_SIZE", config.local_size},
                 {"MODE", mode},
+                {"EPSILON", 0},
                 {"VECTORIZED", config.vectorized},
                 {"MIOPEN_ELEMENTWISE_AFFINE", 0},
                 {"MIOPEN_WEIGHT_BIAS", 1},
@@ -219,14 +219,14 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
             {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
             {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
             {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-            {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
-            {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
+            {"DATA_TYPE", data_type == "bfloat16" ? "ushort" : data_type},
             {"OUTER_SIZE", problem.outer_size},
             {"INNER_SIZE", problem.inner_size},
             {"STRIDE", problem.stride},
             {"PARALLEL_SIZE", 1},
             {"LOCAL_SIZE", config.local_size},
             {"MODE", mode},
+            {"EPSILON", 0},
             {"VECTORIZED", config.vectorized},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},

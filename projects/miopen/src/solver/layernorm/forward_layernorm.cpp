@@ -49,13 +49,13 @@ ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
     auto result = ConvSolution{miopenStatusSuccess};
 
     {
-        auto dtype        = problem.GetXDesc().GetType();
-        auto mode         = problem.GetMode();
-        auto input_dtype  = miopen::GetDataType(problem.GetXDesc().GetType());
-        auto output_dtype = miopen::GetDataType(problem.GetYDesc().GetType());
+        auto dtype     = problem.GetXDesc().GetType();
+        auto mode      = problem.GetMode();
+        auto data_type = miopen::GetDataType(problem.GetXDesc().GetType());
 
-        size_t xlocalsize = problem.stride <= config.local_size ? config.local_size / (1 << mloLg2(problem.stride))
-                                                        : config.local_size;
+        size_t xlocalsize = problem.stride <= config.local_size
+                                ? config.local_size / (1 << mloLg2(problem.stride))
+                                : config.local_size;
         size_t xgridsize  = problem.outer_size * xlocalsize;
         size_t ylocalsize = problem.stride <= config.local_size ? problem.stride : 1;
         size_t ygridsize  = problem.stride;
@@ -71,14 +71,14 @@ ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
             {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
             {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
             {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-            {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
-            {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
+            {"DATA_TYPE", data_type == "bfloat16" ? "ushort" : data_type},
             {"OUTER_SIZE", problem.outer_size},
             {"INNER_SIZE", problem.inner_size},
             {"STRIDE", problem.stride},
             {"PARALLEL_SIZE", 1},
             {"LOCAL_SIZE", config.local_size},
             {"MODE", mode},
+            {"EPSILON", static_cast<float>(problem.GetEpsilon())},
             {"VECTORIZED", config.vectorized},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
@@ -107,8 +107,7 @@ ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
                    params.bias,
                    params.y,
                    params.mean,
-                   params.rstd,
-                   params.epsilon);
+                   params.rstd);
         };
     };
 
