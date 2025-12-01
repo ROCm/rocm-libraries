@@ -137,7 +137,7 @@ namespace rocRoller::KernelGraph
 
     KernelGraph HoistLoopInvariant::apply(KernelGraph const& original)
     {
-        const size_t MAX_NODES_TO_HOIST = 1;
+        const size_t MAX_NODES_TO_HOIST = 9999;
         size_t       hoistedCount       = 0;
 
         {
@@ -209,6 +209,20 @@ namespace rocRoller::KernelGraph
 
                 auto usedTags = extractDataFlowTags(*assignNode.expression);
 
+                bool isNotSpecial = true;
+                for(const auto coordinate : usedTags)
+                {
+                    if(graph.coordinates.get<Workitem>(coordinate).has_value())
+                    {
+                        Log::info("Coordinate {} is a Workitem, skipping hoisting", coordinate);
+                        isNotSpecial = false;
+                    }
+                    Log::info("{} Coordinate {} is a {}",
+                              control,
+                              coordinate,
+                              Graph::variantToString(graph.coordinates.getElement(coordinate)));
+                }
+
                 bool allTagsLoopInvariant = true;
                 for(auto tag : usedTags)
                 {
@@ -222,7 +236,7 @@ namespace rocRoller::KernelGraph
                     }
                 }
 
-                if(allTagsLoopInvariant && !usedTags.empty())
+                if(allTagsLoopInvariant && isNotSpecial && !usedTags.empty())
                 {
                     Log::info(
                         "Hoisting Assign node {} before loop node {}, it uses dataflowtags {}",
@@ -290,6 +304,7 @@ namespace rocRoller::KernelGraph
 
                     // Increment the counter after successful hoisting
                     hoistedCount++;
+                    AssertFatal(false, "successful hoist");
                 }
             }
         }
