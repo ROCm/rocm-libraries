@@ -254,6 +254,6 @@ For more focused testing, you can run a specific test by running the following c
 
 .. warning::
 
-   The unit test suite is a comprehensive test of the rocSPARSE library and will take multiple hours to complete. Consider running 
+   The unit test suite is a comprehensive test of the rocSPARSE library and takes multiple hours to finish. Consider running 
    more focused tests for quicker feedback.
 
