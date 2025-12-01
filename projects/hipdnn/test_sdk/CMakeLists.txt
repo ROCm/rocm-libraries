@@ -5,8 +5,6 @@ include(CMakePackageConfigHelpers)
 
 set(HIP_DNN_TEST_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-add_subdirectory(tests)
-
 add_library(hipdnn_test_sdk INTERFACE)
 
 target_link_libraries(hipdnn_test_sdk INTERFACE hipdnn_sdk hipdnn_frontend)
@@ -50,3 +48,5 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hipdnn_test_sdk
     COMPONENT Development
 )
+
+add_subdirectory(tests)

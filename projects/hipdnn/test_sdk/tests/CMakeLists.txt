@@ -17,15 +17,7 @@ add_executable(hipdnn_test_sdk_tests main.cpp TestExample.cpp)
 
 target_compile_options(hipdnn_test_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_link_libraries(
-    hipdnn_test_sdk_tests
-    GTest::gtest
-    GTest::gmock
-    Threads::Threads
-    hipdnn_test_sdk
-    hipdnn_sdk
-    hipdnn_frontend
-    hip::host
-    ${CMAKE_DL_LIBS}
+    hipdnn_test_sdk_tests GTest::gtest GTest::gmock Threads::Threads hipdnn_test_sdk hip::host
 )
 
 clang_tidy_check(hipdnn_test_sdk_tests)
