@@ -137,6 +137,8 @@ namespace rocRoller::KernelGraph
 
     KernelGraph HoistLoopInvariant::apply(KernelGraph const& original)
     {
+        const size_t MAX_NODES_TO_HOIST = 1;
+        size_t       hoistedCount       = 0;
 
         {
             // std::fstream file("HoistLoopInvariant_before.dot");
@@ -173,6 +175,12 @@ namespace rocRoller::KernelGraph
 
             for(const auto& [coordinate, control] : singleWriteCoordinates)
             {
+                if(hoistedCount >= MAX_NODES_TO_HOIST)
+                {
+                    Log::info("Reached hoisting limit of {} nodes, stopping", MAX_NODES_TO_HOIST);
+                    break;
+                }
+
                 auto enclosingLoopOpt = findEnclosingLoop(graph, control);
 
                 if(!enclosingLoopOpt.has_value())
@@ -279,6 +287,9 @@ namespace rocRoller::KernelGraph
                                         loopNode,
                                         predecessorNode,
                                         -1); // TODO: last arg is not used
+
+                    // Increment the counter after successful hoisting
+                    hoistedCount++;
                 }
             }
         }
