@@ -1978,7 +1978,9 @@ int main(int argc, const char* argv[])
                     ShowValue(solution.waveK),
                     ShowValue(types.scaleBlockSize));
 
-        types.scaleShuffleTileA = {64, 4, kSubtile};
+        types.scaleShuffleTileA = {static_cast<size_t>(solution.swizzleTileSize.m),
+                                   256 / static_cast<size_t>(solution.swizzleTileSize.m),
+                                   kSubtile};
     }
 
     if(types.scaleSkipPermlane)
@@ -1993,7 +1995,9 @@ int main(int argc, const char* argv[])
                     ShowValue(solution.waveK),
                     ShowValue(types.scaleBlockSize));
 
-        types.scaleShuffleTileB = {64, 4, kSubtile};
+        types.scaleShuffleTileB = {static_cast<size_t>(solution.swizzleTileSize.n),
+                                   256 / static_cast<size_t>(solution.swizzleTileSize.n),
+                                   kSubtile};
     }
 
     problem.types  = types;
