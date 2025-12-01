@@ -112,9 +112,9 @@ struct copy_benchmark : public primbench::benchmark_interface
 
 int main(int argc, char* argv[])
 {
-    // Sets the number of input bytes (128 MiB), available as state.bytes in run().
-    // The number can be overridden from the command line with `--bytes`.
-    // The bytes/sec primbench reports isn't based on this number.
+    // Sets the number of input bytes (128 MiB), available as state.bytes in run()
+    // The number can be overridden from the command line with `--bytes`
+    // The bytes/sec primbench reports isn't based on this number
     primbench::executor executor(argc, argv, 128 * primbench::MiB);
 
     executor.queue<copy_benchmark<char>>();
@@ -265,10 +265,15 @@ You can pass `--help` to benchmarks to print the available options. They are all
 | `--spaces-per-indent`                    | Number of spaces per indentation level in JSON output. Set to 0 for no indentation. (default: 4)                                                                                   |
 | `--stream-blocking-timeout-secs`         | Maximum stream blocking duration in seconds before timing out. Stream is blocked while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous. (default: 10) |
 
+### Adding Custom Options
+
 Benchmarks can register additional custom options, which will also be listed by `--help`:
 ```c++
-size_t dimensions = executor.get<size_t>("dimensions", 42, "The number of dimensions");
+// 3 is passed as the default value
+size_t dimensions = executor.get<size_t>("dimensions", 3, "The number of dimensions");
 ```
+
+If there are any custom options, the object `context.custom_cli_settings` is output to `results.json`.
 
 ## Noise
 

@@ -780,6 +780,10 @@ struct cli_settings {
     std::chrono::duration<double>
         stream_blocking_timeout_secs; /**< Max duration before stream blocking times out */
 
+    using custom_arg_value = std::variant<std::string, bool, double, int, unsigned int, size_t>;
+    std::map<std::string, custom_arg_value>
+        custom_args; /**< Custom user-registered arguments with types */
+
 };  // struct cli_settings
 
 /**
@@ -963,6 +967,12 @@ class logger {
         ss << "\"results_version\":\"1.0.0\"";
         ss << ",\"general\":" << serialize_general(algorithm, specialization_count);
         ss << ",\"cli_settings\":" << serialize_cli_settings(cli_settings);
+
+        std::string custom_cli = serialize_custom_cli_settings(cli_settings);
+        if (!custom_cli.empty()) {
+            ss << ",\"custom_cli_settings\":" << custom_cli;
+        }
+
         ss << ",\"flags\":" << serialize_flags(flags);
         if (cli_settings.output_hip_device_properties_context)
             ss << ",\"hip_device_properties\":" << serialize_hip_device_properties();
@@ -1082,8 +1092,10 @@ class logger {
      */
     std::string serialize_cli_settings(const cli_settings& cli_settings) const {
         std::ostringstream ss;
-        const auto& s = cli_settings;
         ss << "{";
+
+        const auto& s = cli_settings;
+
         ss << "\"bytes\":" << s.bytes;
         ss << ",\"hot\":" << std::boolalpha << s.hot;
         ss << ",\"seed\":" << s.seed;
@@ -1104,6 +1116,42 @@ class logger {
         ss << ",\"output_batches\":" << s.output_batches;
         ss << ",\"spaces_per_indent\":" << s.spaces_per_indent;
         ss << ",\"stream_blocking_timeout_secs\":" << s.stream_blocking_timeout_secs.count();
+
+        ss << "}";
+        return ss.str();
+    }
+
+    /**
+     * \brief Serializes custom CLI settings into JSON.
+     */
+    std::string serialize_custom_cli_settings(const cli_settings& cli_settings) const {
+        if (cli_settings.custom_args.empty()) {
+            return "";
+        }
+
+        std::ostringstream ss;
+        ss << "{";
+        ss << std::boolalpha;
+
+        bool first = true;
+        for (const auto& [key, value] : cli_settings.custom_args) {
+            if (!first) ss << ",";
+            first = false;
+
+            ss << "\"" << key << "\":";
+
+            std::visit(
+                [&](auto const& val) {
+                    using V = std::decay_t<decltype(val)>;
+                    if constexpr (std::is_same_v<V, std::string>) {
+                        ss << "\"" << val << "\"";
+                    } else {
+                        ss << val;
+                    }
+                },
+                value);
+        }
+
         ss << "}";
         return ss.str();
     }
@@ -2468,6 +2516,7 @@ class state {
  */
 class parser {
    public:
+    /// \brief Constructs parser and parses command-line arguments.
     parser(int argc, char** argv) : _appname(argv[0]) {
         // Always register --help.
         register_description("help", "Display this help and exit.");
@@ -2478,44 +2527,189 @@ class parser {
             if (arg.rfind("--", 0) != 0) continue;
 
             std::string key = arg.substr(2);
-            std::string value =
-                (i + 1 < argc && std::string(argv[i + 1]).rfind("--", 0) != 0) ? argv[++i] : "";
+            std::string value = "";
+            // Only consume next argument if it's a value (doesn't start with --)
+            if (i + 1 < argc && std::string(argv[i + 1]).rfind("--", 0) != 0) {
+                value = argv[++i];
+            }
             _parsed[key] = value;
         }
     }
 
+    /// \brief Gets argument value, registering it with default and description if needed.
     template <typename T>
     T get(std::string_view name, const T& default_val, std::string_view description) {
         std::string key{name};
 
-        // Save description in order of registration.
-        if (!description.empty() &&
-            _description_keys_set.find(key) == _description_keys_set.end()) {
+        // Register if not already registered
+        if (_registered.find(key) == _registered.end()) {
             register_description(key, description);
-
             std::ostringstream oss;
+
+            // For bools, explicitly output "true" or "false" instead of "0" or "1"
+            if constexpr (std::is_same_v<T, bool>) {
+                oss << std::boolalpha;
+            }
             oss << default_val;
+
             _defaults[key] = oss.str();
+            _registered.insert(key);
+
+            // For bools, ensure no value was provided on command line.
+            if constexpr (std::is_same_v<T, bool>) {
+                auto it = _parsed.find(key);
+                if (it != _parsed.end() && !it->second.empty()) {
+                    std::cerr << "Error: Boolean flag --" << key << " does not take a value.\n";
+                    std::exit(EXIT_FAILURE);
+                }
+                // Disallow default value of true since --flag would have no effect.
+                if (default_val) {
+                    std::cerr << "Error: Boolean flag --" << key
+                              << " cannot have a default value of true.\n";
+                    std::exit(EXIT_FAILURE);
+                }
+            }
         }
 
         auto it = _parsed.find(key);
-        if (it == _parsed.end()) return default_val;
+        auto default_it = _defaults.find(key);
 
-        if constexpr (std::is_same_v<T, bool>) return it->second.empty() ? true : default_val;
+        // If not provided on command line, use default.
+        if (it == _parsed.end()) {
+            T out{};
+            if (default_it != _defaults.end() && !default_it->second.empty()) {
+                std::istringstream ss(default_it->second);
 
-        T out{};
-        std::istringstream ss(it->second);
-        ss >> out;
-
-        if (!ss || !ss.eof()) {
-            std::cerr << "Error: failed to parse --" << key << ": invalid value \"" << it->second
-                      << "\"\n";
-            std::exit(EXIT_FAILURE);
+                // For bools, use boolalpha to parse "true"/"false"
+                if constexpr (std::is_same_v<T, bool>) {
+                    ss >> std::boolalpha >> out;
+                    if (ss.fail()) {
+                        std::cerr << "Error: Failed to parse default for --" << key
+                                  << ": invalid value \"" << default_it->second << "\"\n";
+                        std::exit(EXIT_FAILURE);
+                    }
+                } else {
+                    ss >> out;
+                    if (!ss || !ss.eof()) {
+                        std::cerr << "Error: Failed to parse default for --" << key
+                                  << ": invalid value \"" << default_it->second << "\"\n";
+                        std::exit(EXIT_FAILURE);
+                    }
+                }
+            }
+            return out;
         }
 
-        return out;
+        // Parse provided value.
+        if constexpr (std::is_same_v<T, bool>) {
+            return it->second.empty() ? true : false;
+        } else {
+            T out{};
+            std::istringstream ss(it->second);
+            ss >> out;
+            if (!ss || !ss.eof()) {
+                std::cerr << "Error: Failed to parse --" << key << ": invalid value \""
+                          << it->second << "\"\n";
+                std::exit(EXIT_FAILURE);
+            }
+            return out;
+        }
     }
 
+    /// \brief Returns all registered arguments with their parsed values.
+    std::map<std::string, cli_settings::custom_arg_value> get_all_custom_arguments() const {
+        std::map<std::string, cli_settings::custom_arg_value> custom_args;
+
+        // Skip built-in arguments that are already in cli_settings
+        static const std::unordered_set<std::string> builtin_args = {
+            "help",
+            "bytes",
+            "hot",
+            "seed",
+            "json-out",
+            "csv-out",
+            "min-gpu-ms-per-batch",
+            "min-secs",
+            "noise-timeout-secs",
+            "batch-window-size",
+            "noise-tolerance-percent",
+            "min-gpu-temp",
+            "max-gpu-temp",
+            "max-warming-secs",
+            "max-cooling-secs",
+            "output-hip-device-properties-context",
+            "output-amdsmi-context",
+            "output-batches",
+            "spaces-per-indent",
+            "stream-blocking-timeout-secs"};
+
+        auto parse_value = [](const std::string& value) -> cli_settings::custom_arg_value {
+            if (value.empty()) {
+                return true;  // Boolean flag
+            }
+
+            // Check for boolean strings
+            if (value == "true") {
+                return true;
+            }
+            if (value == "false") {
+                return false;
+            }
+
+            // Try int
+            try {
+                size_t idx = 0;
+                int int_val = std::stoi(value, &idx);
+                if (idx == value.size()) {
+                    return int_val;
+                }
+            } catch (...) {
+            }
+
+            // Try double
+            try {
+                size_t idx = 0;
+                double double_val = std::stod(value, &idx);
+                if (idx == value.size()) {
+                    return double_val;
+                }
+            } catch (...) {
+            }
+
+            // Fall back to string
+            return value;
+        };
+
+        // Process all registered arguments, checking both defaults and parsed values
+        std::unordered_set<std::string> processed;
+
+        // First, add all parsed custom arguments
+        for (const auto& [key, value] : _parsed) {
+            if (builtin_args.find(key) == builtin_args.end()) {
+                custom_args[key] = parse_value(value);
+                processed.insert(key);
+            }
+        }
+
+        // Then, add defaults for custom arguments that weren't parsed
+        for (const auto& [key, default_val] : _defaults) {
+            if (builtin_args.find(key) == builtin_args.end() &&
+                processed.find(key) == processed.end()) {
+                custom_args[key] = parse_value(default_val);
+            }
+        }
+
+        return custom_args;
+    }
+
+    /// \brief Prints help if requested and validates all arguments are registered.
+    void finalize() const {
+        possibly_print_help();
+        validate_arguments();
+    }
+
+   private:
+    /// \brief Prints help message and exits if --help was requested.
     void possibly_print_help() const {
         if (_parsed.find("help") == _parsed.end()) return;
 
@@ -2537,7 +2731,20 @@ class parser {
         std::exit(EXIT_SUCCESS);
     }
 
-   private:
+    /// \brief Validates that all parsed arguments were registered; exits if not.
+    void validate_arguments() const {
+        for (const auto& [key, value] : _parsed) {
+            if (_registered.find(key) == _registered.end()) {
+                std::cerr << "Error: Unrecognized argument --" << key << ".\n";
+                std::cerr
+                    << "To register this argument, call .get() with a type and description:\n";
+                std::cerr << "  executor.get<std::string>(\"" << key
+                          << "\", default_value, \"Description\");\n";
+                std::exit(EXIT_FAILURE);
+            }
+        }
+    }
+
     std::string _appname;
     std::unordered_map<std::string, std::string> _parsed;
 
@@ -2550,6 +2757,10 @@ class parser {
     // Store string representation of default values.
     std::unordered_map<std::string, std::string> _defaults;
 
+    // Track which arguments were registered with set().
+    std::unordered_set<std::string> _registered;
+
+    /// \brief Registers a description for an argument; auto-adds trailing period.
     void register_description(const std::string& key, std::string_view description) {
         std::string desc{description};
 
@@ -2756,7 +2967,10 @@ class executor {
         }
         run_called = true;
 
-        m_parser.possibly_print_help();
+        m_parser.finalize();
+
+        // Capture custom arguments after all have been registered.
+        m_cli_settings.custom_args = m_parser.get_all_custom_arguments();
 
         // Sort to get a consistent order.
         std::sort(static_specializations.begin(), static_specializations.end(),
