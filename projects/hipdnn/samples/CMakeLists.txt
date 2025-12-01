@@ -24,9 +24,11 @@ endfunction()
 # Temporarily disabled bn_inference due to https://github.com/ROCm/rocm-libraries/issues/2459
 # add_hipdnn_sample(bn_inference batchnorm/BnInference.cpp)
 add_hipdnn_sample(bn_training batchnorm/BnTraining.cpp)
+add_hipdnn_sample(fused_bn_training_activ batchnorm/FusedBnTrainingActiv.cpp)
 add_hipdnn_sample(bn_backward batchnorm/BnBackward.cpp)
 add_hipdnn_sample(fused_bn_inference_drelu_bn_backward batchnorm/FusedBnInfDReluBnBwd.cpp)
 
 add_hipdnn_sample(conv_dgrad convolution/ConvDgrad.cpp)
 add_hipdnn_sample(conv_fprop convolution/ConvFprop.cpp)
+add_hipdnn_sample(fused_conv_fprop_activ convolution/FusedConvFpropActiv.cpp)
 add_hipdnn_sample(conv_wgrad convolution/ConvWgrad.cpp)
