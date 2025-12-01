@@ -87,8 +87,7 @@ Options:
 
   --cmake-arg <argument>       Forward the given argument to CMake when configuring the build.
 
-  --no-fmt                     Choose to build rocSOLVER without fmt.
-	            		       (Requires an installation of libstdc++ that supports C++23 features)
+  --[no-]libfmt                Force CMake to use (or not use) libfmt rather than std::format
 EOF
 }
 
@@ -328,7 +327,8 @@ optimal=true
 cleanup=false
 build_sanitizer=false
 build_codecoverage=false
-no_fmt=false
+force_libfmt=false
+libfmt=false
 unset build_with_sparse
 unset architecture
 unset rocblas_path
@@ -344,7 +344,7 @@ declare -a cmake_client_options
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,package,clients,clients-only,dependencies,cleanup,debug,hip-clang,codecoverage,relwithdebinfo,build_dir:,build-path:,lib_dir:,lib-path:,install_dir:,install-path:,rocblas_dir:,rocblas-path:,rocsolver_dir:,rocsolver-path:,rocsparse_dir:,rocsparse-path:,architecture:,static,relocatable,no-optimizations,sparse,no-sparse,docs,address-sanitizer,cmake-arg:,no-fmt --options hipcdgsrnka: -- "$@")
+  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,package,clients,clients-only,dependencies,cleanup,debug,hip-clang,codecoverage,relwithdebinfo,build_dir:,build-path:,lib_dir:,lib-path:,install_dir:,install-path:,rocblas_dir:,rocblas-path:,rocsolver_dir:,rocsolver-path:,rocsparse_dir:,rocsparse-path:,architecture:,static,relocatable,no-optimizations,sparse,no-sparse,docs,address-sanitizer,cmake-arg:,libfmt,no-libfmt --options hipcdgsrnka: -- "$@")
 else
   echo "Need a new version of getopt"
   exit 1
@@ -440,8 +440,13 @@ while true; do
     --cmake-arg)
         cmake_common_options+=("${2}")
         shift 2 ;;
-    --no-fmt)
-        no_fmt=true
+    --libfmt)
+        force_libfmt=true
+        libfmt=true
+        shift ;;
+    --no-libfmt)
+        force_libfmt=true
+        libfmt=false
         shift ;;
     --) shift ; break ;;
     *)
@@ -622,8 +627,14 @@ if [[ "${build_codecoverage}" == true ]]; then
     cmake_common_options+=('-DBUILD_CODE_COVERAGE=ON')
 fi
 
-if [[ "${no_fmt}" == true ]]; then
-    cmake_common_options+=('-DUSE_FMT_LIB=OFF')
+if [[ "${force_libfmt}" == true ]]; then
+    if [[ "${libfmt}" == true ]]; then
+        cmake_common_options+=('-DFORCE_USE_FMT_LIB_OPTION=ON')
+        cmake_common_option+=('-DUSE_FMT_LIB=ON')
+    else
+        cmake_common_options+=('-DFORCE_USE_FMT_LIB_OPTION=ON')
+        cmake_common_option+=('-DUSE_FMT_LIB=OFF')
+    fi
 fi
 
 # check exit codes for everything from here onwards

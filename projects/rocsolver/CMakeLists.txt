@@ -68,7 +68,26 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 # Configure which formatting dependency to use
 
 option(ROCSOLVER_EMBED_FMT "Hide libfmt symbols" ON)
-option(USE_FMT_LIB "Use libfmt for string formatting and printing" ON) # on by default
+
+option(FORCE_USE_FMT_LIB_OPTION "Use the user provided USE_FMT_LIB option, rather than the result of the automated check by CMake if std::format is available" OFF)
+option(USE_FMT_LIB "Use the fmt library instead of std::print" OFF)
+message(STATUS "Value of FORCE_USE_FMT_LIB: ${FORCE_USE_FMT_LIB_OPTION}")
+message(STATUS "Value of USE_FMT_LIB: ${USE_FMT_LIB}")
+
+if (NOT FORCE_USE_FMT_LIB_OPTION) # check using CheckIncludeFileCXX CMake module if std::format is available
+    # check std::format support
+    include(CheckIncludeFileCXX)
+    check_include_file_cxx("format" CXX_FORMAT_SUPPORT)
+    message(STATUS "Result of checking header file is: ${CXX_FORMAT_SUPPORT}")
+    if (CXX_FORMAT_SUPPORT STREQUAL "")
+        set(USE_FMT_LIB ON)
+    else()
+        set(USE_FMT_LIB OFF)
+    endif()
+endif()
+
+message(STATUS "New value of USE_FMT_LIB: ${USE_FMT_LIB}")
+
 if(USE_FMT_LIB)
   find_package(fmt REQUIRED)
 endif()
