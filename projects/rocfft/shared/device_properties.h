@@ -45,10 +45,18 @@ static hipDeviceProp_t get_curr_device_prop()
     return prop;
 }
 
-// get device GCN arch name
+// Get current device GCN arch name without any suffix after ':'
 static std::string get_curr_gcn_arch_name()
 {
-    return get_curr_device_prop().gcnArchName;
+    auto        dev_prop       = get_curr_device_prop();
+    std::string arch_name_full = dev_prop.gcnArchName;
+
+    auto suffix_char = ":";
+    auto pos         = arch_name_full.find(suffix_char);
+    if(pos != std::string::npos)
+        arch_name_full.erase(pos);
+
+    return arch_name_full;
 }
 
 // check that the given grid/block dims will fit into the limits in
