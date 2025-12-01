@@ -271,7 +271,7 @@ def getDockerImage(Map conf=[:])
     // Build docker image.
     echo "Building docker image: ${image}"
     dockerImage = docker.image("${image}")
-    dockerImage = docker.build("${image}", "${dockerArgs} ${env.WORKSPACE}/${env.REPO_DIR}/.")
+    dockerImage = docker.build("${image}", "${dockerArgs} ${env.WORKSPACE}/projects/.")
 
     echo "Done building docker image: ${image}"
 
