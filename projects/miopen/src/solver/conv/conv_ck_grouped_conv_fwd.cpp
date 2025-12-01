@@ -11,10 +11,8 @@
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 #include "ck/ck.hpp"
+#include "miopen/conv/device_grouped_conv_fwd.hpp"
 #endif
-
-#define DISABLE_OUTPUT_LDS 1
-#include "miopen/conv/device_grouped_conv_fwd_dl_v4.hpp"
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DEPTHWISE_FWD)
 
@@ -22,6 +20,9 @@ namespace miopen {
 namespace solver {
 namespace conv {
 
+using ProblemDescription = miopen::conv::ProblemDescription;
+
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 template <ck::index_t... Is>
 using S                           = ck::Sequence<Is...>;
 using InElementOp                 = ck::tensor_operation::element_wise::PassThrough;
@@ -36,7 +37,7 @@ constexpr ck::index_t BlockSize   = 64;
 constexpr bool RequirePadding     = false;
 
 // Tuple of potential device CK kernels
-using DeviceConvFwdFactory = std::tuple<ck::tensor_operation::device::DeviceGroupedConvFwdDlV4<
+using DeviceConvFwdFactory = std::tuple<ck::tensor_operation::device::DeviceGroupedConvFwd<
                                             NDimSpatial,
                                             BlockSize,
                                             InType,
@@ -55,7 +56,7 @@ using DeviceConvFwdFactory = std::tuple<ck::tensor_operation::device::DeviceGrou
                                             1,  // InScalarPerVector
                                             1,  // OutScalarPerVector
                                             RequirePadding>,
-                                        ck::tensor_operation::device::DeviceGroupedConvFwdDlV4<
+                                        ck::tensor_operation::device::DeviceGroupedConvFwd<
                                             NDimSpatial,
                                             BlockSize,
                                             InType,
@@ -74,7 +75,7 @@ using DeviceConvFwdFactory = std::tuple<ck::tensor_operation::device::DeviceGrou
                                             2,  // InScalarPerVector
                                             2,  // OutScalarPerVector
                                             RequirePadding>,
-                                        ck::tensor_operation::device::DeviceGroupedConvFwdDlV4<
+                                        ck::tensor_operation::device::DeviceGroupedConvFwd<
                                             NDimSpatial,
                                             BlockSize,
                                             InType,
@@ -93,7 +94,7 @@ using DeviceConvFwdFactory = std::tuple<ck::tensor_operation::device::DeviceGrou
                                             4,  // InScalarPerVector
                                             4,  // OutScalarPerVector
                                             RequirePadding>,
-                                        ck::tensor_operation::device::DeviceGroupedConvFwdDlV4<
+                                        ck::tensor_operation::device::DeviceGroupedConvFwd<
                                             NDimSpatial,
                                             BlockSize,
                                             InType,
@@ -112,7 +113,7 @@ using DeviceConvFwdFactory = std::tuple<ck::tensor_operation::device::DeviceGrou
                                             2,  // InScalarPerVector
                                             1,  // OutScalarPerVector
                                             RequirePadding>,
-                                        ck::tensor_operation::device::DeviceGroupedConvFwdDlV4<
+                                        ck::tensor_operation::device::DeviceGroupedConvFwd<
                                             NDimSpatial,
                                             BlockSize,
                                             InType,
@@ -131,7 +132,7 @@ using DeviceConvFwdFactory = std::tuple<ck::tensor_operation::device::DeviceGrou
                                             4,  // InScalarPerVector
                                             2,  // OutScalarPerVector
                                             RequirePadding>,
-                                        ck::tensor_operation::device::DeviceGroupedConvFwdDlV4<
+                                        ck::tensor_operation::device::DeviceGroupedConvFwd<
                                             NDimSpatial,
                                             BlockSize,
                                             InType,
@@ -152,7 +153,7 @@ using DeviceConvFwdFactory = std::tuple<ck::tensor_operation::device::DeviceGrou
                                             RequirePadding>
 
                                         ,
-                                        ck::tensor_operation::device::DeviceGroupedConvFwdDlV4<
+                                        ck::tensor_operation::device::DeviceGroupedConvFwd<
                                             NDimSpatial,
                                             BlockSize,
                                             InType,
@@ -171,7 +172,7 @@ using DeviceConvFwdFactory = std::tuple<ck::tensor_operation::device::DeviceGrou
                                             1,  // InScalarPerVector
                                             1,  // OutScalarPerVector
                                             RequirePadding>,
-                                        ck::tensor_operation::device::DeviceGroupedConvFwdDlV4<
+                                        ck::tensor_operation::device::DeviceGroupedConvFwd<
                                             NDimSpatial,
                                             BlockSize,
                                             InType,
@@ -190,7 +191,7 @@ using DeviceConvFwdFactory = std::tuple<ck::tensor_operation::device::DeviceGrou
                                             2,  // InScalarPerVector
                                             2,  // OutScalarPerVector
                                             RequirePadding>,
-                                        ck::tensor_operation::device::DeviceGroupedConvFwdDlV4<
+                                        ck::tensor_operation::device::DeviceGroupedConvFwd<
                                             NDimSpatial,
                                             BlockSize,
                                             InType,
@@ -209,7 +210,7 @@ using DeviceConvFwdFactory = std::tuple<ck::tensor_operation::device::DeviceGrou
                                             8, // InScalarPerVector
                                             8, // OutScalarPerVector
                                             RequirePadding>,
-                                        ck::tensor_operation::device::DeviceGroupedConvFwdDlV4<
+                                        ck::tensor_operation::device::DeviceGroupedConvFwd<
                                             NDimSpatial,
                                             BlockSize,
                                             InType,
@@ -230,7 +231,7 @@ using DeviceConvFwdFactory = std::tuple<ck::tensor_operation::device::DeviceGrou
                                             RequirePadding>
 
                                         ,
-                                        ck::tensor_operation::device::DeviceGroupedConvFwdDlV4<
+                                        ck::tensor_operation::device::DeviceGroupedConvFwd<
                                             NDimSpatial,
                                             BlockSize,
                                             InType,
@@ -249,7 +250,7 @@ using DeviceConvFwdFactory = std::tuple<ck::tensor_operation::device::DeviceGrou
                                             4,  // InScalarPerVector
                                             2,  // OutScalarPerVector
                                             RequirePadding>,
-                                        ck::tensor_operation::device::DeviceGroupedConvFwdDlV4<
+                                        ck::tensor_operation::device::DeviceGroupedConvFwd<
                                             NDimSpatial,
                                             BlockSize,
                                             InType,
@@ -269,12 +270,10 @@ using DeviceConvFwdFactory = std::tuple<ck::tensor_operation::device::DeviceGrou
                                             8, // OutScalarPerVector
                                             RequirePadding>>;
 
-using ProblemDescription = miopen::conv::ProblemDescription;
-
 namespace {
 struct CKArgs
 {
-    CKArgs(const ProblemDescription& problem)
+    explicit CKArgs(const ProblemDescription& problem)
     {
         G  = ProblemInterpreter::GetGroupCountG(problem);
         N  = ProblemInterpreter::GetBatchN(problem);
@@ -297,8 +296,6 @@ struct CKArgs
         wei_lens      = {G, K, C, Y, X};   // filter = wei
         bias_lens     = {G, 1, K, 1, 1};
         bias_strides  = {K, 0, 1, 0, 0};
-
-        const std::string layout = problem.GetInLayout();
 
         in_strides  = {Hi * Wi * C, G * Hi * Wi * C, 1, Wi * C, C};
         out_strides = {Ho * Wo * K, G * Ho * Wo * K, 1, Wo * K, K};
@@ -371,12 +368,6 @@ struct CKArgs
 };
 } // namespace
 
-bool PerformanceConfigConvDepthwiseFwd::operator==(
-    const PerformanceConfigConvDepthwiseFwd& other) const
-{
-    return kernel_id == other.kernel_id;
-}
-
 template <typename DataType>
 void PerformanceConfigConvDepthwiseFwd::Init(const ProblemDescription& problem)
 {
@@ -400,6 +391,7 @@ void PerformanceConfigConvDepthwiseFwd::Init(const ProblemDescription& problem)
     index     = 0;
     kernel_id = valid_kernels[index];
 }
+#endif
 
 void PerformanceConfigConvDepthwiseFwd::HeuristicInit(
     [[maybe_unused]] const ExecutionContext& ctx,
@@ -421,7 +413,6 @@ void PerformanceConfigConvDepthwiseFwd::HeuristicInit(
     case miopenDouble: break;
     }
 #endif
-    // Todo: Add AI heuristic support
 }
 
 bool PerformanceConfigConvDepthwiseFwd::SetNextValue(const ProblemDescription& problem)
@@ -454,25 +445,30 @@ bool PerformanceConfigConvDepthwiseFwd::IsValid(
     return IsValidValue();
 }
 
+bool PerformanceConfigConvDepthwiseFwd::operator==(
+    const PerformanceConfigConvDepthwiseFwd& other) const
+{
+    return kernel_id == other.kernel_id;
+}
+
 ConvDepthwiseFwd::ConvDepthwiseFwd() {}
 
 bool ConvDepthwiseFwd::IsApplicable(const ExecutionContext& ctx,
                                     const ProblemDescription& problem) const
 {
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     if(env::disabled(MIOPEN_DEBUG_CONV_DEPTHWISE_FWD))
         return false;
     if(!ctx.use_hip_kernels)
         return false;
 
     const std::string& arch = ctx.GetStream().GetDeviceName();
-    if((arch != "gfx908") && (arch != "gfx90a") && (arch != "gfx942"))
+    if((arch != "gfx906") && (arch != "gfx908") && (arch != "gfx90a") && (arch != "gfx942"))
         return false;
 
-    // TODO: support NHWC layout
     if(!problem.IsLayoutDefault())
         return false;
 
-    // TODO: support more data type
     if(!problem.IsFp16())
         return false;
 
@@ -490,6 +486,9 @@ bool ConvDepthwiseFwd::IsApplicable(const ExecutionContext& ctx,
     }
 
     return true;
+#else
+    return false;
+#endif
 }
 
 uint32_t
@@ -539,16 +538,12 @@ ConvDepthwiseFwd::Search(const ExecutionContext& ctx,
     return GenericSearch(*this, ctx, problem, invoke_ctx);
 }
 
-ConvSolution ConvDepthwiseFwd::GetSolution(const ExecutionContext& ctx,
+ConvSolution ConvDepthwiseFwd::GetSolution(const ExecutionContext&,
                                            const miopen::conv::ProblemDescription& problem,
                                            const PerformanceConfigConvDepthwiseFwd& config) const
 {
-    (void)ctx; // Unused, as we use the config directly
     ConvSolution sol;
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    const auto& ck_args = CKArgs{problem};
-
-    // auto factory_list = DeviceConvFwdFactory{};
     ck::static_for<0, std::tuple_size_v<DeviceConvFwdFactory>, 1>{}([&](auto i) -> void {
         const auto device_conv_fwd_instance = std::get<i>(DeviceConvFwdFactory{});
         using DeviceConvFwdInstance = ck::remove_cvref_t<decltype(device_conv_fwd_instance)>;
@@ -557,13 +552,12 @@ ConvSolution ConvDepthwiseFwd::GetSolution(const ExecutionContext& ctx,
         if(conv_ptr->GetTypeString() == config.kernel_id)
         {
             MIOPEN_LOG_I("Run conv : " << conv_ptr->GetTypeString());
+
             sol.invoker_factory = [conv_ptr = std::move(conv_ptr),
-                                   problem](const std::vector<Kernel>& kernels) {
-                (void)kernels; // Unused, as we use the conv_ptr directly
+                                   ck_args  = CKArgs{problem}](const std::vector<Kernel>&) {
                 return [conv_ptr = std::move(conv_ptr),
-                        problem](const Handle& handle, const AnyInvokeParams& primitive_params) {
+                        ck_args](const Handle& handle, const AnyInvokeParams& primitive_params) {
                     const auto& fwd_ctx = primitive_params.CastTo<miopen::conv::DataInvokeParams>();
-                    const auto& ck_args = CKArgs{problem};
                     auto invoker        = conv_ptr->MakeInvoker();
                     auto argument       = ck_args.MakeArgument(*conv_ptr.get(),
                                                          fwd_ctx.tensors.in,
@@ -571,12 +565,13 @@ ConvSolution ConvDepthwiseFwd::GetSolution(const ExecutionContext& ctx,
                                                          fwd_ctx.tensors.out);
 
                     {
-                        WorkAroundHipEventProfiler prf(handle);
-                        float avg_time = invoker.Run(argument, StreamConfig{nullptr, false});
-
+                        {
+                            WorkAroundHipEventProfiler prf(handle);
+                            invoker.Run(argument, StreamConfig{nullptr, false});
+                        }
                         if(handle.IsProfilingEnabled())
                         {
-                            avg_time = handle.GetKernelTime();
+                            float avg_time = handle.GetKernelTime();
                             handle.ResetKernelTime();
                             handle.AccumKernelTime(avg_time);
                         }

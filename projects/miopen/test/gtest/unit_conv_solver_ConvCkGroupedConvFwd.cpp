@@ -1,5 +1,5 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "unit_conv_solver.hpp"
 
@@ -31,7 +31,6 @@ auto GetConvDeterministicTestCases(miopenDataType_t datatype)
     };
 }
 
-// TODO: each of the types in the factory with single group and large larger group.
 auto GetConvFullTestCases(miopenDataType_t datatype)
 {
     using TestCase = miopen::unit_tests::ConvTestCase;
@@ -45,7 +44,7 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
                  datatype, {{2, 2}, {1, 1}, {1, 1}, 1}},
         TestCase{{datatype, miopenTensorNCHW, {32, 2, 7, 7}},
                  {datatype, miopenTensorNCHW, {2, 1, 5, 5}},
-                 datatype, {{2, 2}, {1, 1}, {1, 1}, 2}}, 
+                 datatype, {{2, 2}, {1, 1}, {1, 1}, 2}},
         TestCase{{datatype, miopenTensorNCHW, {32, 1, 14, 14}},
                  {datatype, miopenTensorNCHW, {1, 1, 5, 5}},
                  datatype, {{2, 2}, {1, 1}, {1, 1}, 1}},
@@ -81,19 +80,19 @@ auto GetConvFullTestCases(miopenDataType_t datatype)
                  datatype, {{1, 1}, {1, 1}, {1, 1}, 1}},
         TestCase{{datatype, miopenTensorNCHW, {32, 3, 7, 7}},
                  {datatype, miopenTensorNCHW, {3, 1, 3, 3}},
-                 datatype, {{1, 1}, {1, 1}, {1, 1}, 3}}, 
+                 datatype, {{1, 1}, {1, 1}, {1, 1}, 3}},
         TestCase{{datatype, miopenTensorNCHW, {32, 1, 14, 14}},
                  {datatype, miopenTensorNCHW, {1, 1, 3, 3}},
                  datatype, {{1, 1}, {1, 1}, {1, 1}, 1}},
         TestCase{{datatype, miopenTensorNCHW, {32, 4, 14, 14}},
                  {datatype, miopenTensorNCHW, {4, 1, 3, 3}},
-                 datatype, {{1, 1}, {1, 1}, {1, 1}, 4}}, 
+                 datatype, {{1, 1}, {1, 1}, {1, 1}, 4}},
         TestCase{{datatype, miopenTensorNCHW, {8, 1, 56, 56}},
                  {datatype, miopenTensorNCHW, {1, 1, 3, 3}},
                  datatype, {{1, 1}, {1, 1}, {1, 1}, 1}},
         TestCase{{datatype, miopenTensorNCHW, {8, 5, 56, 56}},
                  {datatype, miopenTensorNCHW, {5, 1, 3, 3}},
-                 datatype, {{1, 1}, {1, 1}, {1, 1}, 5}}, 
+                 datatype, {{1, 1}, {1, 1}, {1, 1}, 5}},
         TestCase{{datatype, miopenTensorNCHW, {2, 1, 112, 112}},
                  {datatype, miopenTensorNCHW, {1, 1, 3, 3}},
                  datatype, {{1, 1}, {1, 1}, {1, 1}, 1}},
@@ -120,7 +119,7 @@ auto GetTestParams(miopenDataType_t datatype)
 {
 // If MIOpen is built without CK these tests will fail, skip them to avoid failing
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    Gpu supportedDevices = Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X;
+    Gpu supportedDevices = Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X;
 #else
     Gpu supportedDevices = Gpu::None;
 #endif
