@@ -45,12 +45,13 @@ private:
 public:
     pooling3d_driver() : pooling_driver<T>()
     {
-        this->add(
-            this->in_shape, "input", this->template generate_data_limited<U>(get_3d_pooling_input_shapes(), 4));
+        this->add(this->in_shape,
+                  "input",
+                  this->template generate_data_limited<U>(get_3d_pooling_input_shapes(), 4));
         this->add(this->lens, "lens", this->template generate_data<U>({{2, 2, 2}, {3, 3, 3}}));
-        this->add(this->strides, "strides", this->template generate_data<U>({{2, 2, 2}, {1, 1, 1}}));
+        this->add(
+            this->strides, "strides", this->template generate_data<U>({{2, 2, 2}, {1, 1, 1}}));
         this->add(this->pads, "pads", this->template generate_data<U>({{0, 0, 0}, {1, 1, 1}}));
         this->add(this->wsidx, "wsidx", this->generate_data({1}));
     }
 };
-

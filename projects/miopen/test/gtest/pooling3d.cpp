@@ -138,4 +138,3 @@ TEST_P(GPU_Pooling3d_FP16, HalfTest_pooling3d)
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_FP32, testing::ValuesIn(GetTestCases("--float")));
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_FP16, testing::ValuesIn(GetTestCases("--half")));
-
