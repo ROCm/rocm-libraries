@@ -54,12 +54,12 @@ namespace GEMMTests
 
     // Params are: A & B type, UnrollK, LoadPath A, LoadPath B, LDS D, StreamK two-tile, beta is zero
     class StreamKTestGPU : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
-                                                                        int,
-                                                                        SolutionParams::LoadPath,
-                                                                        SolutionParams::LoadPath,
-                                                                        bool,
-                                                                        rocRoller::StreamKMode,
-                                                                        bool>>
+                                                                    int,
+                                                                    SolutionParams::LoadPath,
+                                                                    SolutionParams::LoadPath,
+                                                                    bool,
+                                                                    rocRoller::StreamKMode,
+                                                                    bool>>
     {
     };
 

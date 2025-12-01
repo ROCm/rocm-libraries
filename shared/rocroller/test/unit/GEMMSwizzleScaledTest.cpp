@@ -313,8 +313,6 @@ namespace GEMMTests
         basicGEMM<FP8, FP8, float>(gemm);
     }
 
-
-
     TEST_P(GEMMMXFP4TNSwizzleScaledUnrollTestGPU, GPU_GEMMMXFP4TNSwizzleScaled64x4Unroll)
     {
 
@@ -504,7 +502,6 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
     }
 
-
     INSTANTIATE_TEST_SUITE_P(GEMMTest, SwizzleScaledTestGPU, currentGPUISA());
 
     INSTANTIATE_TEST_SUITE_P(GEMMMXFP4TNSwizzleScaledUnrollTest,
@@ -522,6 +519,5 @@ namespace GEMMTests
                            ::testing::Values(0, 2, 4),
                            ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
                                              SolutionParams::LoadPath::BufferToVGPR)));
-
 
 } // namespace GEMMTests
