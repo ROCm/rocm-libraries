@@ -104,8 +104,8 @@ ADD ${PROJ}/requirements.txt /requirements.txt
 ADD ${PROJ}/dev-requirements.txt /dev-requirements.txt
 ADD ${PROJ}/docs/sphinx/requirements.txt /doc-requirements.txt
 
-# Add Composable Kernel
-ADD composablekernel /composable_kernel
+# Copy Composable Kernel
+COPY composablekernel /composable_kernel
 
 # Install an init system
 RUN wget https://github.com/Yelp/dumb-init/releases/download/v1.2.0/dumb-init_1.2.0_amd64.deb && \
@@ -175,9 +175,6 @@ RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
     sccache -s; \
     fi
-
-# Composable Kernel installed separated from rbuild to take in values from GPU_ARCHS
-RUN sed -i '/composable_kernel/d' /requirements.txt
 
 # rbuild is used to trigger build of requirements.txt, dev-requirements.txt.
 RUN if [ "$USE_FIN" = "ON" ]; then \
