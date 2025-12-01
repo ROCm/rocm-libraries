@@ -1766,7 +1766,7 @@ class stream_blocker {
                 << "\nError: Stream blocking timed out after " << m_stream_blocking_timeout_secs
                 << " seconds.\nThe stream is blocked while queueing kernel calls.\nIf your kernel "
                    "is synchronous, pass primbench::flags::sync to disable stream blocking.\nYou "
-                   "can increase the timeout by passing --stream_blocking_timeout_secs <secs>.\n";
+                   "can increase the timeout by passing --stream-blocking-timeout-secs <secs>.\n";
             exit(EXIT_FAILURE);
         }
     }
@@ -2867,14 +2867,14 @@ class executor {
             parser.get<double>("min-gpu-ms-per-batch", 10.0,
                                "Minimum duration of a batch in milliseconds (GPU time)."));
         if (s.min_gpu_ms_per_batch.count() <= 0.0) {
-            std::cerr << "Error: --min_gpu_ms_per_batch must be greater than 0\n";
+            std::cerr << "Error: --min-gpu-ms-per-batch must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
         s.min_secs = std::chrono::duration<double>(parser.get<double>(
             "min-secs", 1.0, "Minimum total benchmark duration in seconds (wall time)."));
         if (s.min_secs.count() <= 0.0) {
-            std::cerr << "Error: --min_secs must be greater than 0\n";
+            std::cerr << "Error: --min-secs must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
@@ -2883,11 +2883,11 @@ class executor {
                                "Maximum total benchmark duration in seconds before timing out a "
                                "noisy run (wall time)."));
         if (s.noise_timeout_secs.count() <= 0.0) {
-            std::cerr << "Error: --noise_timeout_secs must be greater than 0\n";
+            std::cerr << "Error: --noise-timeout-secs must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
         if (s.min_secs > s.noise_timeout_secs) {
-            std::cerr << "Error: --min_secs must be equal to or less than --noise_timeout_secs\n";
+            std::cerr << "Error: --min-secs must be equal to or less than --noise-timeout-secs\n";
             exit(EXIT_FAILURE);
         }
 
@@ -2896,7 +2896,7 @@ class executor {
                                "Number of batch times used in the noise (coefficient of variation) "
                                "window to decide early benchmark stopping.");
         if (s.batch_window_size == 0) {
-            std::cerr << "Error: --batch_window_size must be greater than 0\n";
+            std::cerr << "Error: --batch-window-size must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
@@ -2905,7 +2905,7 @@ class executor {
                                "Noise tolerance of batch times in percent, used to determine "
                                "whether a benchmark can be stopped early.");
         if (s.noise_tolerance_percent <= 0.0) {
-            std::cerr << "Error: --noise_tolerance_percent must be greater than 0\n";
+            std::cerr << "Error: --noise-tolerance-percent must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
@@ -2916,7 +2916,7 @@ class executor {
             "max-gpu-temp", 60,
             "Maximum GPU temperature in °C. Too low slows benchmarks; too high increases noise.");
         if (s.min_gpu_temp > s.max_gpu_temp) {
-            std::cerr << "Error: --min_gpu_temp must be equal to or less than --max_gpu_temp\n";
+            std::cerr << "Error: --min-gpu-temp must be equal to or less than --max-gpu-temp\n";
             exit(EXIT_FAILURE);
         }
 
@@ -2924,7 +2924,7 @@ class executor {
             "max-warming-secs", 60.0,
             "Maximum seconds allowed for GPU warming before an error is thrown."));
         if (s.max_warming_secs.count() <= 0.0) {
-            std::cerr << "Error: --max_warming_secs must be greater than 0\n";
+            std::cerr << "Error: --max-warming-secs must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
@@ -2932,7 +2932,7 @@ class executor {
             "max-cooling-secs", 60.0,
             "Maximum seconds allowed for GPU cooling before an error is thrown."));
         if (s.max_cooling_secs.count() <= 0.0) {
-            std::cerr << "Error: --max_cooling_secs must be greater than 0\n";
+            std::cerr << "Error: --max-cooling-secs must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
@@ -2958,7 +2958,7 @@ class executor {
             "Maximum stream blocking duration in seconds before timing out. Stream is blocked "
             "while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous."));
         if (s.stream_blocking_timeout_secs.count() <= 0.0) {
-            std::cerr << "Error: --stream_blocking_timeout_secs must be greater than 0\n";
+            std::cerr << "Error: --stream-blocking-timeout-secs must be greater than 0\n";
             exit(EXIT_FAILURE);
         }
 
