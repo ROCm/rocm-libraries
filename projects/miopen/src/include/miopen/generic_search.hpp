@@ -700,10 +700,11 @@ auto GenericSearch(const Solver s,
     // If no errors were encountered, but we either cutoff or skipped every kernel, don't throw.
     if(!is_passed && n_failed == 0)
     {
-        MIOPEN_LOG_I("Search cutoff or skipped for all kernels.  Last config returned: " << last_config);
+        MIOPEN_LOG_I(
+            "Search cutoff or skipped for all kernels.  Last config returned: " << last_config);
         return last_config;
     }
-    
+
     if(!is_passed)
         MIOPEN_THROW("Search failed");
 

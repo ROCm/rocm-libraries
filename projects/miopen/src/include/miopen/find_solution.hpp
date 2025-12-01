@@ -143,10 +143,10 @@ auto FindSolutionImpl(rank<1>,
             auto record = DbRecord(DbKinds::PerfDb, problem);
             if(env::enabled(MIOPEN_WARN_SEARCH))
                 MIOPEN_LOG_W("Search Started: " << record.GetKey() << " : " << s.SolverDbId()
-                                              << ", enforce: " << enforce);
+                                                << ", enforce: " << enforce);
             else
                 MIOPEN_LOG_I("Search Started: " << record.GetKey() << " : " << s.SolverDbId()
-                                              << ", enforce: " << enforce);
+                                                << ", enforce: " << enforce);
             try
             {
                 auto c = s.Search(context, problem, invoke_ctx);
