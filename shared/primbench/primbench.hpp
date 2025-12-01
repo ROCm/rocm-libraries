@@ -2271,9 +2271,15 @@ class state {
      * \brief Determines number of kernels per batch based on minimum duration.
      */
     void init_kernels_per_batch(std::function<void()> kernel) {
-        std::vector<hipEvent_t> events;
+        std::vector<hipEvent_t> events(2);
         std::vector<float> iterations_ms;
         m_kernels_per_batch = 1;
+
+        // Without this, the very first timed batch is very slow.
+        log("Running warmup");
+        for (auto& event : events) exit_on_hip_error(hipEventCreate(&event));
+        run_batch(events, kernel);
+        for (const auto& event : events) exit_on_hip_error(hipEventDestroy(event));
 
         while (true) {
             log("Timing batch size ", m_kernels_per_batch);

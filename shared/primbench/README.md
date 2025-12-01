@@ -306,6 +306,8 @@ Kernels often only take a few microseconds to run on the GPU, leading to a lot o
 
 The number of kernel calls in a batch is dynamically decided, by doubling the number of kernel calls, until the batch takes *at least* 10 milliseconds to run on the GPU (`--min-gpu-ms-per-batch`).
 
+Before timing the first batch, primbench issues a single unmeasured kernel launch as a warmup, giving the GPU a chance to cache the kernel's instructions before real measurements begin.
+
 In some cases, the recorded start time occurs before the kernel actually begins executing, since event recording is asynchronous. To reduce this timing noise, primbench queues the start, kernel, and stop events together in one atomic sequence.
 
 It does this by briefly blocking GPU execution with a lightweight spinlock kernel until all events are enqueued. Once queued, the block is released and execution proceeds:
