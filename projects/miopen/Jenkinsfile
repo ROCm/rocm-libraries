@@ -38,7 +38,7 @@ utils = null
 
 def withWorkingDir(Closure body) {
     checkout scm
-    dir("${env.WORKSPACE}/${env.REPO_DIR}") {
+    dir("${env.WORKSPACE}/${env.MIOPEN_DIR}") {
         if (utils == null) {
             utils = load "vars/utils.groovy"
         }
