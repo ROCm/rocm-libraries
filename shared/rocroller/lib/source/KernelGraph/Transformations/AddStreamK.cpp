@@ -580,15 +580,18 @@ namespace rocRoller
 
             // Duplicate flag and next workgroup coordinates for reset operation
             auto resetNextWorkgroupTag = graph.coordinates.addElement(Linear(nullptr, one));
-            graph.coordinates.addElement(Join(), {workgroup, plusOneTag, forReceiveTileLoopCoord}, {resetNextWorkgroupTag});
+            graph.coordinates.addElement(
+                Join(), {workgroup, plusOneTag, forReceiveTileLoopCoord}, {resetNextWorkgroupTag});
 
-            auto resetFlagsScratchTag = graph.coordinates.addElement(
-                *graph.coordinates.get<User>(flagsScratchTag));
+            auto resetFlagsScratchTag
+                = graph.coordinates.addElement(*graph.coordinates.get<User>(flagsScratchTag));
             graph.coordinates.addElement(Duplicate(), {resetFlagsScratchTag}, {flagsScratchTag});
-            graph.coordinates.addElement(PassThrough(), {resetNextWorkgroupTag}, {resetFlagsScratchTag});
+            graph.coordinates.addElement(
+                PassThrough(), {resetNextWorkgroupTag}, {resetFlagsScratchTag});
 
             // Reset flag operations
-            auto assignResetFlagTag = graph.control.addElement(Assign{Register::Type::Scalar, zero});
+            auto assignResetFlagTag
+                = graph.control.addElement(Assign{Register::Type::Scalar, zero});
             graph.mapper.connect(assignResetFlagTag, flagRegister, NaryArgument::DEST);
 
             auto resetFlagTag = graph.control.addElement(StoreSGPR(DataType::UInt32, bufOpts));
@@ -656,8 +659,13 @@ namespace rocRoller
             graph.control.addElement(Sequence(), {boundsCheckTag}, {doWhileTag});
             graph.control.addElement(Body(), {doWhileTag}, {loadFlagTag});
 
-            graph.control.chain<Sequence>(doWhileTag, barrierBeforeResetTag, assignResetFlagTag, 
-                                          resetFlagTag, waitZeroAfterResetTag, loadAddForX, postWaitZeroTag);
+            graph.control.chain<Sequence>(doWhileTag,
+                                          barrierBeforeResetTag,
+                                          assignResetFlagTag,
+                                          resetFlagTag,
+                                          waitZeroAfterResetTag,
+                                          loadAddForX,
+                                          postWaitZeroTag);
 
             return {preWaitZeroTag, receiveTileTag, setPlusOneTag};
         }
