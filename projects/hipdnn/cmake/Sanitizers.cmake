@@ -1,8 +1,8 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-# Enable Address Sanitizer and set linker flags. This configuration is for standalone
-# builds outside of TheRock
+# Enable Address Sanitizer and set linker flags. This configuration is for standalone builds outside
+# of TheRock
 if(BUILD_ADDRESS_SANITIZER)
 
     # Address Sanitizer requires specific GPU targets which support XNACK.
