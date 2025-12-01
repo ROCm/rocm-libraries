@@ -14,21 +14,17 @@
 
 #include "hipdnn_backend.h"
 
-namespace hipdnn_sdk
-{
-namespace data_objects
+namespace hipdnn_sdk::data_objects
 {
 // NOLINTNEXTLINE(readability-identifier-naming)
 struct EngineDetails;
-}
-}
+} // namespace hipdnn_sdk::data_objects
 
 namespace hipdnn_backend
 {
-
 class GraphDescriptor;
-
-namespace plugin
+}
+namespace hipdnn_backend::plugin
 {
 
 class EngineDetailsWrapper;
@@ -169,5 +165,4 @@ private:
     hipdnnEnginePluginExecutionContext_t _executionContext;
 };
 
-} // namespace plugin
-} // hipdnn_backend
+} // namespace hipdnn_backend::plugin

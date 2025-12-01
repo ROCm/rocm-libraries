@@ -12,7 +12,7 @@
 
 using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::utilities;
-using namespace helpers;
+using namespace hipdnn_sdk::helpers;
 
 template <typename T>
 void makeTensorsEqual(T& tensor1, T& tensor2)
