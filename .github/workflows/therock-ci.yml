@@ -68,7 +68,7 @@ jobs:
           PROJECTS: ${{ inputs.projects }}
         run: |
           python .github/scripts/therock_configure_ci.py
-      
+
       - name: Fetch Linux targets for build and test
         env:
           THEROCK_PACKAGE_PLATFORM: "linux"
