@@ -59,6 +59,30 @@
 namespace rocsparse
 {
 
+    template <typename T>
+    __device__ inline T* batched_pointer(uint32_t index, T* p, int64_t dist)
+    {
+        return p + dist * index;
+    }
+
+    template <typename T>
+    __device__ inline const T* batched_pointer(uint32_t index, const T* p, int64_t dist)
+    {
+        return p + dist * index;
+    }
+
+    template <typename T>
+    __device__ inline T* batched_pointer(uint32_t index, T** p, int64_t dist)
+    {
+        return *(p + dist * index);
+    }
+
+    template <typename T>
+    __device__ inline const T* batched_pointer(uint32_t index, const T** p, int64_t dist)
+    {
+        return *(p + dist * index);
+    }
+
     // find next power of 2
     __device__ __host__ __forceinline__ uint32_t fnp2(uint32_t x)
     {
