@@ -1462,7 +1462,7 @@ def _get_schedule_192x128x128_16bit(kernel, useLDSTr, TLDS):
     syncCode = []
     if isNN(kernel) and useLDSTr and TLDS == 1:
         numMfma = 96
-        kernel["SwapGlobalReadOrder"] = False
+        kernel["SwapGlobalReadOrder"] = True
 
         # Optimized schedule for 192x128x128 tile with DepthU=128 (4 sub-iterations)
         # 12 LRA per sub-iter, 4 LRB per sub-iter
@@ -1475,15 +1475,18 @@ def _get_schedule_192x128x128_16bit(kernel, useLDSTr, TLDS):
 
         # syncTable: [mfma_index, sync_instruction, ...] pairs
         syncTable = [
-            -1, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LRA3/LRB3 from prior iter"),
-            10, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for LRA0/LRB0 data ready"),
-            22, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for LRA1/LRB1 data ready"),
+          #  -1, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LRA3/LRB3 from prior iter"),
+          #  10, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for LRA0/LRB0 data ready"),
+          #  22, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for LRA1/LRB1 data ready"),
 
-            36, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="all current-tile LR done"),
-            36, SBarrier(comment="barrier before GRA/GRB DirectToLds"),
+          #  20, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="all current-tile LR done"),
+           # 20, SBarrier(comment="barrier before GRA/GRB DirectToLds"),
+            
+          #  23, SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="wait for LRA1-0 data ready"),
+          #  24, SWaitCnt(dscnt=10, vlcnt=-1, vscnt=-1, comment="wait for LRA1-0 data ready"),
 
-            76, SWaitCnt(dscnt=-1, vlcnt=20, vscnt=-1, comment="wait for all GRA/GRB to complete"),
-            76, SBarrier(comment="barrier before LRA3/LRB3 next-tile prefetch"),
+          #  76, SWaitCnt(dscnt=-1, vlcnt=20, vscnt=-1, comment="wait for all GRA/GRB to complete"),
+          #  76, SBarrier(comment="barrier before LRA3/LRB3 next-tile prefetch"),
         ]
 
         syncCode = syncTable[1::2]
@@ -1494,25 +1497,23 @@ def _get_schedule_192x128x128_16bit(kernel, useLDSTr, TLDS):
             'GRIncA': [[0, 1, 2, 3, 4, 5, 6, 7, 8]],
             'GRIncB': [[9, 10, 11, 12, 13, 14, 15, 16, 17]],
 
-            # Sub-iteration 0: LRA0/LRB0 - prefetch during mfma 0-14
-            'LRA0': [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]],
-            'LRB0': [[0, 12, 13, 14]],
+            # Sub-iteration 0: LRA0/LRB0 - prefetch for mfma 24-47
+            'LRA0': [[23, 25, 27, 29, 31, 33, 35, 37, 39, 41, 43, 45]],
+            'LRB0': [[-1, 1, 3, 5]],
 
-            # Sub-iteration 1: LRA1/LRB1 - prefetch during mfma 11-25
-            'LRA1': [[11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]],
-            'LRB1': [[11, 23, 24, 25]],
+            # Sub-iteration 1: LRA1/LRB1 - prefetch for mfma 48-71
+            'LRA1': [[47, 49, 51, 53, 55, 57, 59, 61, 63, 65, 67, 69]],
+            'LRB1': [[7, 9, 11, 13]],
 
-            # Sub-iteration 2: LRA2/LRB2 - prefetch during mfma 22-36
-            'LRA2': [[22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33]],
-            'LRB2': [[22, 34, 35, 36]],
+            # Sub-iteration 2: LRA2/LRB2 - prefetch for mfma 72-95
+            'LRA2': [[71, 73, 75, 77, 79, 81, 83, 85, 87, 89, 91, 93]],
+            'LRB2': [[15, 17, 19, 21]],
 
-            # Global reads DirectToLDS - start after barrier at mfma 36
-            # GRA: 24 instructions across mfma 37-60, 1 per slot
-            'GRA': [[37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
-                     49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60]],
-            # GRB: 16 instructions across mfma 61-76, 1 per slot
-            'GRB': [[61, 62, 63, 64, 65, 66, 67, 68,
-                     69, 70, 71, 72, 73, 74, 75, 76]],
+            'GRA': [[20, 20, 22, 22, 24, 24, 26, 26, 
+                     28, 28, 30, 30, 32, 32, 34, 34]],
+            'GRB': [[49, 49, 51, 51, 53, 53, 55, 55, 57, 57, 59, 59, 
+                     61, 61, 63, 63, 65, 65, 67, 67, 69, 69, 71, 71]],
+  
 
             # Local read/write swap pointers
             'LRSA': [[60]],
@@ -1520,9 +1521,9 @@ def _get_schedule_192x128x128_16bit(kernel, useLDSTr, TLDS):
             'LWSA': [[77]],
             'LWSB': [[77]],
 
-            # Sub-iteration 3: LRA3/LRB3 - prefetch next tile after barrier at 76
-            'LRA3': [[77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88]],
-            'LRB3': [[77, 89, 90, 91]],
+            # Sub-iteration 3: LRA3/LRB3 - prefetch next tile (for mfma 0-23)
+            'LRA3': [[83, 83, 85, 85, 87, 87, 89, 89, 91, 91, 93, 93]],
+            'LRB3': [[94, 94, 95, 95]],
 
             # Loop counter code
             'LCC': [[94, 95]],
