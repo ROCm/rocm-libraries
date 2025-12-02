@@ -25,43 +25,53 @@
  *******************************************************************************/
 
 #include <gtest/gtest.h>
-#include <miopen/env.hpp>
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
 #include "pooling2d.hpp"
-
-MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_TEST_FLAGS_ARGS)
-
-namespace env = miopen::env;
+#include "../driver.hpp"
+#include <half/half.hpp>
 
 namespace pooling2d {
 
-class GPU_Pooling2d_FP32 : public testing::TestWithParam<std::string>
+class GPU_Pooling2d_FP32 : public testing::Test
 {
-    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-class GPU_Pooling2d_FP16 : public testing::TestWithParam<std::string>
+class GPU_Pooling2d_FP16 : public testing::Test
 {
-    MIOPEN_DECLARE_GTEST_USES_TEST_DRIVE();
 };
 
-void GetArgs(const std::string& param, std::vector<std::string>& tokens)
+template <typename T>
+void RunPooling2dTests()
 {
-    std::stringstream ss(param);
-    std::istream_iterator<std::string> begin(ss);
-    std::istream_iterator<std::string> end;
-    while(begin != end)
-        tokens.push_back(*begin++);
+    pooling2d_driver<T> driver;
+    driver.type = miopen_type<T>{};
+    driver.full_set = true; // Equivalent to --all flag
+    driver.dataset_id = 0;   // Default dataset
+
+    // Get data arguments (arguments that weren't passed via command line)
+    std::vector<typename pooling2d_driver<T>::argument*> data_args;
+    for(auto&& arg : driver.arguments)
+    {
+        data_args.push_back(&arg);
+    }
+
+    // Manually iterate over all combinations using the driver's iteration logic
+    prng::reset_seed();
+    driver.iteration = 0;
+    run_data(data_args.begin(), data_args.end(), [&] { driver.template base_run<pooling2d_driver<T>>(); });
 }
 
 void Run2dDriver(miopenDataType_t prec)
 {
-    std::string param;
     switch(prec)
     {
-    case miopenFloat: param = GPU_Pooling2d_FP32::GetParam(); break;
-    case miopenHalf: param = GPU_Pooling2d_FP16::GetParam(); break;
+    case miopenFloat:
+        RunPooling2dTests<float>();
+        break;
+    case miopenHalf:
+        RunPooling2dTests<half_float::half>();
+        break;
     case miopenBFloat16:
     case miopenInt8:
     case miopenFloat8_fnuz:
@@ -74,42 +84,17 @@ void Run2dDriver(miopenDataType_t prec)
                   "data type not supported by "
                   "pooling2d test";
 
-    default: param = GPU_Pooling2d_FP32::GetParam();
+    default: RunPooling2dTests<float>();
     }
-
-    std::vector<std::string> tokens;
-    GetArgs(param, tokens);
-    std::vector<const char*> ptrs;
-
-    std::transform(tokens.begin(), tokens.end(), std::back_inserter(ptrs), [](const auto& str) {
-        return str.data();
-    });
-
-    testing::internal::CaptureStderr();
-    test_drive<pooling2d_driver>(ptrs.size(), ptrs.data());
-    auto capture = testing::internal::GetCapturedStderr();
-    std::cout << capture;
 };
 
 bool IsTestSupportedForDevice(const miopen::Handle& handle) { return true; }
 
-std::vector<std::string> GetTestCases(const std::string& precision)
-{
-    const auto& flag_arg = env::value(MIOPEN_TEST_FLAGS_ARGS);
-
-    const std::vector<std::string> test_cases = {
-        // clang-format off
-    {"test_pooling2d " + precision + " --all --limit 0 " + flag_arg}
-        // clang-format on
-    };
-
-    return test_cases;
-}
 
 } // namespace pooling2d
 using namespace pooling2d;
 
-TEST_P(GPU_Pooling2d_FP32, FloatTest_pooling2d)
+TEST_F(GPU_Pooling2d_FP32, FloatTest_pooling2d)
 {
     const auto& handle = get_handle();
     if(IsTestSupportedForDevice(handle))
@@ -120,9 +105,9 @@ TEST_P(GPU_Pooling2d_FP32, FloatTest_pooling2d)
     {
         GTEST_SKIP();
     }
-};
+}
 
-TEST_P(GPU_Pooling2d_FP16, HalfTest_pooling2d)
+TEST_F(GPU_Pooling2d_FP16, HalfTest_pooling2d)
 {
     const auto& handle = get_handle();
     if(IsTestSupportedForDevice(handle))
@@ -133,8 +118,4 @@ TEST_P(GPU_Pooling2d_FP16, HalfTest_pooling2d)
     {
         GTEST_SKIP();
     }
-};
-
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling2d_FP32, testing::ValuesIn(GetTestCases("--float")));
-
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling2d_FP16, testing::ValuesIn(GetTestCases("--half")));
+}
