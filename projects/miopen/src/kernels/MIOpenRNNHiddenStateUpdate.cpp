@@ -35,8 +35,8 @@ __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
                                                     const int cur_batch,
                                                     const int use_batch)
 {
-    const int total_items         = max(cur_batch * hy_h / READ_BLOCK, 1);
-    const T activ_param = 1;
+    const int total_items = max(cur_batch * hy_h / READ_BLOCK, 1);
+    const T activ_param   = 1;
 
     T s_dat[READ_BLOCK];
 
@@ -78,6 +78,7 @@ __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
             }
             else
             {
+#pragma unroll
                 for(T& value : cx_dat)
                 {
                     value = CVT_FP32_2FLOAT(0.0f);
@@ -96,12 +97,14 @@ __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
         }
         else
         {
+#pragma unroll
             for(T& value : cx_dat)
             {
                 value = CVT_FP32_2FLOAT(0.0f);
             }
         }
 
+#pragma unroll
         for(int i = 0; i < READ_BLOCK; ++i)
         {
             s_dat[i] = i_dat[i] * c_dat[i] + f_dat[i] * cx_dat[i];
@@ -130,6 +133,7 @@ __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
                 *reinterpret_cast<T_VEC*>(cx_dat);
         }
 
+#pragma unroll
         for(int i = 0; i < READ_BLOCK; ++i)
         {
             s_dat[i] = o_dat[i] * cx_dat[i];
@@ -167,8 +171,8 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
                                                     const int use_batch,
                                                     const int use_batch2)
 {
-    const int total_items         = max(cur_batch * hy_h / READ_BLOCK, 1);
-    const T activ_param = 1;
+    const int total_items = max(cur_batch * hy_h / READ_BLOCK, 1);
+    const T activ_param   = 1;
 
     T dh_dat[READ_BLOCK];
 
@@ -202,6 +206,7 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
         *reinterpret_cast<T_VEC*>(c_dat) =
             *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + c_offset]);
 
+#pragma unroll
         for(int i = 0; i < READ_BLOCK; ++i)
         {
             s_dat[i] = dh_dat[i] * o_dat[i];
@@ -220,6 +225,7 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
                 *reinterpret_cast<T_VEC*>(s_dat) =
                     *reinterpret_cast<const T_VEC*>(&dcy[gid * READ_BLOCK + dcy_offset]);
 
+#pragma unroll
                 for(int i = 0; i < READ_BLOCK; ++i)
                 {
                     dcx_dat[i] += s_dat[i];
@@ -233,6 +239,7 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
             *reinterpret_cast<T_VEC*>(f_dat) =
                 *reinterpret_cast<const T_VEC*>(&reservespace[rsv_idx + f_offset_pre]);
 
+#pragma unroll
             for(int i = 0; i < READ_BLOCK; ++i)
             {
                 dcx_dat[i] += s_dat[i] * f_dat[i];
@@ -243,6 +250,7 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
             *reinterpret_cast<T_VEC*>(s_dat) =
                 *reinterpret_cast<const T_VEC*>(&dcy[gid * READ_BLOCK + dcy_offset]);
 
+#pragma unroll
             for(int i = 0; i < READ_BLOCK; ++i)
             {
                 dcx_dat[i] += s_dat[i];
@@ -256,6 +264,7 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
                 *reinterpret_cast<T_VEC*>(df_dat) =
                     *reinterpret_cast<const T_VEC*>(&cx[gid * READ_BLOCK + cx_offset]);
 
+#pragma unroll
                 for(int i = 0; i < READ_BLOCK; ++i)
                 {
                     df_dat[i] *= dcx_dat[i];
@@ -263,6 +272,7 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
             }
             else
             {
+#pragma unroll
                 for(T& value : df_dat)
                 {
                     value = CVT_FP32_2FLOAT(0.0f);
@@ -274,6 +284,7 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
             *reinterpret_cast<T_VEC*>(df_dat) =
                 *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + cell_offset_pre]);
 
+#pragma unroll
             for(int i = 0; i < READ_BLOCK; ++i)
             {
                 df_dat[i] *= dcx_dat[i];
@@ -284,6 +295,7 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
             *reinterpret_cast<T_VEC*>(df_dat) =
                 *reinterpret_cast<const T_VEC*>(&cx[gid * READ_BLOCK + cx_offset]);
 
+#pragma unroll
             for(int i = 0; i < READ_BLOCK; ++i)
             {
                 df_dat[i] *= dcx_dat[i];
@@ -291,6 +303,7 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
         }
         else
         {
+#pragma unroll
             for(T& value : df_dat)
             {
                 value = CVT_FP32_2FLOAT(0.0f);
@@ -304,6 +317,7 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
         *reinterpret_cast<T_VEC*>(&workspace[rsv_idx + df_offset]) =
             *reinterpret_cast<T_VEC*>(s_dat);
 
+#pragma unroll
         for(int i = 0; i < READ_BLOCK; ++i)
         {
             di_dat[i] = c_dat[i] * dcx_dat[i];
@@ -313,6 +327,7 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
         *reinterpret_cast<T_VEC*>(&workspace[rsv_idx + di_offset]) =
             *reinterpret_cast<T_VEC*>(s_dat);
 
+#pragma unroll
         for(int i = 0; i < READ_BLOCK; ++i)
         {
             do_dat[i] = cx_dat[i] * dh_dat[i];
@@ -322,6 +337,7 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
         *reinterpret_cast<T_VEC*>(&workspace[rsv_idx + do_offset]) =
             *reinterpret_cast<T_VEC*>(s_dat);
 
+#pragma unroll
         for(int i = 0; i < READ_BLOCK; ++i)
         {
             dc_dat[i] = i_dat[i] * dcx_dat[i];
