@@ -2,17 +2,14 @@
 # SPDX-License-Identifier: MIT
 
 # C samples (for header compatibility check)
-if(NOT WIN32)
+# Note: HIP CUDA backend headers use C++ features (reinterpret_cast, auto, etc.)
+# so this C-only test is only applicable for ROCm/HIP builds
+if(NOT WIN32 AND HIPSPARSE_ENABLE_HIP)
     add_executable(example_c_headers)
     target_sources(example_c_headers PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/example_c_headers.c"
     )
     target_link_libraries(example_c_headers PRIVATE hipsparse::samples-common)
-    if(HIPSPARSE_ENABLE_CUDA)
-        target_compile_definitions(example_c_headers PRIVATE __HIP_PLATFORM_NVIDIA__)
-        target_include_directories(example_c_headers PRIVATE ${HIP_INCLUDE_DIRS})
-        target_link_libraries(example_c_headers PRIVATE ${CUDA_LIBRARIES})
-    endif()
     set_target_properties(example_c_headers PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
     )
