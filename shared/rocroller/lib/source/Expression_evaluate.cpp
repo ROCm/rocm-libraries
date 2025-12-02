@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/Expression_evaluate_detail.hpp>
 
 #include <rocRoller/AssemblyKernelArgument.hpp>
@@ -72,14 +73,20 @@ namespace rocRoller
                 throw std::runtime_error("N-ary operation present in runtime expression");
             }
 
-            CommandArgumentValue operator()(BitFieldExtract const& expr)
-            {
-                throw std::runtime_error("BitFieldExtract present in runtime expression.");
-            }
-
             CommandArgumentValue operator()(BitfieldCombine const& expr)
             {
-                throw std::runtime_error("BitfieldCombine present in runtime expression.");
+                BitfieldCombine cpy = expr;
+                cpy.lhs             = std::make_shared<Expression>(call(expr.lhs));
+                cpy.rhs             = std::make_shared<Expression>(call(expr.rhs));
+
+                auto result = evaluate(lowerBitfieldCombine(std::make_shared<Expression>(cpy)));
+
+                auto resultType = resultVariableType(result);
+                auto cpyType    = resultVariableType(cpy);
+                if(resultType != cpyType)
+                    return reinterpret(result, cpyType.dataType);
+
+                return result;
             }
 
             CommandArgumentValue operator()(MatrixMultiply const& expr)
@@ -195,6 +202,18 @@ namespace rocRoller
                 return evaluate(expr) == val;
             }
             return false;
+        }
+
+        std::optional<CommandArgumentValue> tryEvaluate(ExpressionPtr const& expr)
+        {
+            return expr ? tryEvaluate(*expr) : std::nullopt;
+        }
+
+        std::optional<CommandArgumentValue> tryEvaluate(Expression const& expr)
+        {
+            if(evaluationTimes(expr)[EvaluationTime::Translate])
+                return evaluate(expr);
+            return std::nullopt;
         }
     }
 }

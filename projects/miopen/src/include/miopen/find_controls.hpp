@@ -92,9 +92,8 @@ public:
     template <class Context>
     bool IsSearch(const Context& context) const
     {
-        return IsEnabled(context) && (action == FindEnforceAction::Search ||
-                                      action == FindEnforceAction::SearchDbUpdate ||
-                                      action == FindEnforceAction::DbUpdate);
+        return IsEnabled(context) &&
+               (action == FindEnforceAction::Search || action == FindEnforceAction::SearchDbUpdate);
     }
 
     template <class Context>
@@ -159,8 +158,7 @@ private:
     }
 
 public:
-    // Todo: remove default value of primitive
-    FindMode(solver::Primitive primitive = solver::Primitive::Convolution);
+    FindMode();
     Values Get() const { return value; }
     void Set(Values const v) { value = v; }
 

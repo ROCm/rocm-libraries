@@ -27,11 +27,11 @@ cmake_policy(VERSION 3.18...3.25)
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "4.1.0")
+set(VERSION_STRING "4.2.0")
 # Set the minimum required rocPRIM version
 set(MIN_ROCPRIM_PACKAGE_VERSION "4.1.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependency rocPRIM
-set(ROCM_DEP_RELEASE_BRANCH "release/rocm-rel-7.1" CACHE STRING "Download branch for ROCm dependencies")
+set(ROCM_DEP_RELEASE_BRANCH "release/rocm-rel-7.2" CACHE STRING "Download branch for ROCm dependencies")
 # --------------------------------------
 
 # Install prefix
@@ -63,7 +63,7 @@ include(CMakeDependentOption)
 
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
-option(CODE_COVERAGE "Enable code coverage" OFF)
+option(BUILD_CODE_COVERAGE "Enable code coverage" OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Download non-ROCm dependencies and do not search for packages" OFF)
 option(DOWNLOAD_CUB "Download CUB and thrust. Do not search for CUB package" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
@@ -109,7 +109,7 @@ check_fetch_method(ROCPRIM_FETCH_METHOD)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Set a default build type if none was specified
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES AND NOT CODE_COVERAGE)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES AND NOT BUILD_CODE_COVERAGE)
   message(STATUS "Setting build type to 'Release' as none was specified.")
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
@@ -196,8 +196,9 @@ endif()
 # hipCUB library
 add_subdirectory(hipcub)
 
-if(CODE_COVERAGE)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -fprofile-instr-generate -fcoverage-mapping")
+if(BUILD_CODE_COVERAGE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -fprofile-instr-generate -fcoverage-mapping" )
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fprofile-instr-generate")
 endif()
 
 if(BUILD_TEST OR (BUILD_BENCHMARK AND NOT ONLY_INSTALL))

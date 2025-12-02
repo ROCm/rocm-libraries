@@ -21,6 +21,10 @@
 #include <gtest/gtest.h>
 #include <stdio.h>
 
+#include "test_common.hpp"
+#include "test_rocrand_common.hpp"
+
+#include <algorithm>
 #include <numeric>
 #include <random>
 
@@ -29,32 +33,6 @@
 #include <vector>
 
 #include <hip/hip_runtime.h>
-
-#define HIP_CHECK(cmd)                                                                         \
-    do                                                                                         \
-    {                                                                                          \
-        auto error = (cmd);                                                                    \
-        if(error != hipSuccess)                                                                \
-        {                                                                                      \
-            std::cerr << "Encountered HIP error (" << hipGetErrorString(error) << ") at line " \
-                      << __LINE__ << " in file " << __FILE__ << "\n";                          \
-            exit(-1);                                                                          \
-        }                                                                                      \
-    }                                                                                          \
-    while(0)
-
-#define ROCRAND_CHECK(cmd)                                                                \
-    do                                                                                    \
-    {                                                                                     \
-        auto status = cmd;                                                                \
-        if(status != 0)                                                                   \
-        {                                                                                 \
-            std::cerr << "Encountered ROCRAND error: " << status << "at line" << __LINE__ \
-                      << " in file " << __FILE__ << "\n";                                 \
-            exit(-1);                                                                     \
-        }                                                                                 \
-    }                                                                                     \
-    while(0)
 
 struct GlobalSizes
 {
@@ -157,12 +135,7 @@ void run_internal_discrete_tests()
         for(size_t i = 0; i < actual_prob.size(); i++)
             actual_prob[i] = histogram[i] / static_cast<double>(GlobalSizes::size);
 
-        // If the original probability is bigger than 5% then expected should be within 1% difference.
-        // Otherwise it should be within 0.01
-        for(size_t i = 0; i < expected_prob.size(); i++){
-            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.01 : 0.01;
-            ASSERT_NEAR(expected_prob[i], actual_prob[i], eps);
-        }
+        ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
 
         ROCRAND_CHECK(rocrand_destroy_discrete_distribution(discrete_distribution));
     }
@@ -307,13 +280,7 @@ void run_external_discrete_tests(
         for(size_t i = 0; i < actual_prob.size(); i++)
             actual_prob[i] = histogram[i] / static_cast<double>(size);
 
-        // If the original probability is bigger than 5% then expected should be within 1% difference.
-        // Otherwise it should be within 0.01
-        for(size_t i = 0; i < expected_prob.size(); i++){
-            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.01 : 0.01;
-            ASSERT_NEAR(expected_prob[i], actual_prob[i], eps);
-        }
-
+        ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
         ROCRAND_CHECK(rocrand_destroy_discrete_distribution(discrete_distribution));
     }
 
@@ -677,12 +644,7 @@ TEST(ExternalDiscreteDistributionTests, Philox4x32_10WithUIN4OutputTest)
         for(size_t i = 0; i < actual_prob.size(); i++)
             actual_prob[i] = histogram[i] / static_cast<double>(GlobalSizes::size * 4);
 
-        // If the original probability is bigger than 5% then expected should be within 1% difference.
-        // Otherwise it should be within 0.01
-        for(size_t i = 0; i < expected_prob.size(); i++){
-            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.01 : 0.01;
-            ASSERT_NEAR(expected_prob[i], actual_prob[i], eps);
-        }
+        ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
 
         ROCRAND_CHECK(rocrand_destroy_discrete_distribution(discrete_distribution));
     }
@@ -768,13 +730,7 @@ void run_internal_host_test(const DiscreteFunc& df)
         for(size_t i = 0; i < actual_prob.size(); i++)
             actual_prob[i] = histogram[i] / static_cast<double>(test_size);
 
-        // If the original probability is bigger than 5% then expected should be within 1% difference.
-        // Otherwise it should be within 0.01
-        for(size_t i = 0; i < expected_prob.size(); i++)
-        {
-            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.05 : 0.01;
-            ASSERT_NEAR(expected_prob[i], actual_prob[i], eps);
-        }
+        ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
     }
 }
 
@@ -916,13 +872,8 @@ void run_host_test(const DiscreteFunc& df)
         for(size_t i = 0; i < actual_prob.size(); i++)
             actual_prob[i] = histogram[i] / static_cast<double>(test_size);
 
-        // If the original probability is bigger than 5% then expected should be within 1% difference.
-        // Otherwise it should be within 0.01
-        for(size_t i = 0; i < expected_prob.size(); i++)
-        {
-            double eps = expected_prob[i] > 0.05 ? expected_prob[i] * 0.05 : 0.01;
-            ASSERT_NEAR(expected_prob[i], actual_prob[i], eps);
-        }
+        ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
+
     }
 }
 

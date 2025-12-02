@@ -107,8 +107,9 @@ namespace KernelGraphTest
         transforms.push_back(std::make_shared<AddLDS>(params, m_context));
         transforms.push_back(std::make_shared<LowerTile>(params, m_context));
         transforms.push_back(std::make_shared<LowerTensorContraction>(params, m_context));
-        transforms.push_back(std::make_shared<ConnectWorkgroups>(
-            m_context, params->workgroupMappingDim, params->workgroupRemapXCC));
+        transforms.push_back(std::make_shared<ConnectWorkgroups>(m_context));
+        transforms.push_back(
+            std::make_shared<WorkgroupRemapXCC>(m_context, params->workgroupRemapXCC));
         transforms.push_back(std::make_shared<UpdateWavefrontParameters>(params));
         for(auto& t : transforms)
             kgraph = kgraph.transform(t);
@@ -142,6 +143,7 @@ namespace KernelGraphTest
                         * one;
 
         EXPECT_TRUE(Expression::identical(expected, workitemCount[0]))
-            << expected << "/" << workitemCount[0] << std::endl;
+            << expected << "\n"
+            << workitemCount[0] << std::endl;
     }
 }

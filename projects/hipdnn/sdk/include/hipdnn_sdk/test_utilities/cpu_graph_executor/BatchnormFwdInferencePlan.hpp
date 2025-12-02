@@ -28,15 +28,13 @@ struct BatchnormFwdInferenceParams
         const hipdnn_sdk::data_objects::TensorAttributes& scaleAttributes,
         const hipdnn_sdk::data_objects::TensorAttributes& biasAttributes,
         const hipdnn_sdk::data_objects::TensorAttributes& meanAttributes,
-        const hipdnn_sdk::data_objects::TensorAttributes& invVarianceAttributes,
-        double eps)
+        const hipdnn_sdk::data_objects::TensorAttributes& invVarianceAttributes)
         : xTensor(unpackTensorAttributes(xAttributes))
         , yTensor(unpackTensorAttributes(yAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
         , biasTensor(unpackTensorAttributes(biasAttributes))
         , meanTensor(unpackTensorAttributes(meanAttributes))
         , invVarianceTensor(unpackTensorAttributes(invVarianceAttributes))
-        , epsilon(eps)
     {
     }
 
@@ -46,10 +44,13 @@ struct BatchnormFwdInferenceParams
     hipdnn_sdk::data_objects::TensorAttributesT biasTensor;
     hipdnn_sdk::data_objects::TensorAttributesT meanTensor;
     hipdnn_sdk::data_objects::TensorAttributesT invVarianceTensor;
-    double epsilon; //todo, fix this.
 };
 
-template <typename InputDataType, typename ScaleBiasDataType, typename MeanVarianceDataType>
+template <typename XDataType,
+          typename ScaleBiasDataType,
+          typename MeanVarianceDataType,
+          typename OutputDataType,
+          typename ComputeDataType>
 class BatchnormFwdPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -60,10 +61,10 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowXTensor = createShallowTensor<InputDataType>(
-            _params.xTensor, variantPack.at(_params.xTensor.uid));
+        auto shallowXTensor
+            = createShallowTensor<XDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
 
-        auto shallowYTensor = createShallowTensor<InputDataType>(
+        auto shallowYTensor = createShallowTensor<OutputDataType>(
             _params.yTensor, variantPack.at(_params.yTensor.uid));
 
         auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
@@ -78,35 +79,42 @@ public:
         auto shallowInvVarianceTensor = createShallowTensor<MeanVarianceDataType>(
             _params.invVarianceTensor, variantPack.at(_params.invVarianceTensor.uid));
 
-        CpuFpReferenceBatchnormImpl<InputDataType, ScaleBiasDataType, MeanVarianceDataType>::
-            batchnormFwdInference(*shallowXTensor,
-                                  *shallowScaleTensor,
-                                  *shallowBiasTensor,
-                                  *shallowMeanTensor,
-                                  *shallowInvVarianceTensor,
-                                  *shallowYTensor,
-                                  _params.epsilon);
+        CpuFpReferenceBatchnorm::fwdInference(*shallowXTensor,
+                                              *shallowScaleTensor,
+                                              *shallowBiasTensor,
+                                              *shallowMeanTensor,
+                                              *shallowInvVarianceTensor,
+                                              *shallowYTensor);
     }
 
 private:
     BatchnormFwdInferenceParams _params;
 };
 
-template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
+template <hipdnn_sdk::data_objects::DataType XDataTypeEnum,
           hipdnn_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum>
+          hipdnn_sdk::data_objects::DataType MeanVarianceDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum>
 class BatchnormFwdInferencePlanBuilder : public IGraphNodePlanBuilder
 {
 public:
-    using InputDataType = DataTypeToNative<InputDataTypeEnum>;
+    using XDataType = DataTypeToNative<XDataTypeEnum>;
     using ScaleBiasDataType = DataTypeToNative<ScaleBiasDataTypeEnum>;
     using MeanVarianceDataType = DataTypeToNative<MeanVarianceDataTypeEnum>;
+    using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
+    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
+        if(node.compute_data_type() != ComputeDataTypeEnum)
+        {
+            return false;
+        }
+
         const auto* nodeAttributes = node.attributes_as_BatchnormInferenceAttributes();
         if(nodeAttributes == nullptr)
         {
@@ -120,8 +128,8 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid());
 
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), InputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), XDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->bias_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->mean_tensor_uid(), MeanVarianceDataTypeEnum);
@@ -143,17 +151,19 @@ public:
         }
 
         const auto& tensorMap = graph.getTensorMap();
-        BatchnormFwdInferenceParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
-                                           *tensorMap.at(nodeAttributes->y_tensor_uid()),
-                                           *tensorMap.at(nodeAttributes->scale_tensor_uid()),
-                                           *tensorMap.at(nodeAttributes->bias_tensor_uid()),
-                                           *tensorMap.at(nodeAttributes->mean_tensor_uid()),
-                                           *tensorMap.at(nodeAttributes->inv_variance_tensor_uid()),
-                                           utilities::BATCHNORM_DEFAULT_EPSILON);
+        BatchnormFwdInferenceParams params(
+            *tensorMap.at(nodeAttributes->x_tensor_uid()),
+            *tensorMap.at(nodeAttributes->y_tensor_uid()),
+            *tensorMap.at(nodeAttributes->scale_tensor_uid()),
+            *tensorMap.at(nodeAttributes->bias_tensor_uid()),
+            *tensorMap.at(nodeAttributes->mean_tensor_uid()),
+            *tensorMap.at(nodeAttributes->inv_variance_tensor_uid()));
 
-        return std::make_unique<
-            BatchnormFwdPlan<InputDataType, ScaleBiasDataType, MeanVarianceDataType>>(
-            std::move(params));
+        return std::make_unique<BatchnormFwdPlan<XDataType,
+                                                 ScaleBiasDataType,
+                                                 MeanVarianceDataType,
+                                                 OutputDataType,
+                                                 ComputeDataType>>(std::move(params));
     }
 };
 }

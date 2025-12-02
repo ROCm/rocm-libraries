@@ -136,17 +136,18 @@ namespace rocRoller
          *
          * part of the offset above.
          */
-        ExpressionPtr LoadStoreTileGenerator::getOffsetExpr(int                opTag,
-                                                            bool               isDirect2LDS,
+        ExpressionPtr LoadStoreTileGenerator::getOffsetExpr(int  opTag,
+                                                            bool isStorePartOfGlobalToLDS,
                                                             Transformer const& coords)
         {
             rocRoller::Log::getLogger()->debug("KernelGraph::LoadStoreTileGenerator::getOffsetExpr("
-                                               "operationTag: {}, isDirect2LDS: {})",
+                                               "operationTag: {}, isStorePartOfGlobalToLDS: {})",
                                                opTag,
-                                               isDirect2LDS);
+                                               isStorePartOfGlobalToLDS);
 
-            auto [target, direction] = getOperationTarget(opTag, *m_graph, isDirect2LDS);
-            auto [required, path]    = findRequiredCoordinates(target, direction, *m_graph);
+            auto [target, direction]
+                = getOperationTarget(opTag, *m_graph, isStorePartOfGlobalToLDS);
+            auto [required, path] = findRequiredCoordinates(target, direction, *m_graph);
 
             auto unrolls = filterCoordinates<Unroll>(required, *m_graph);
             if(unrolls.size() == 0)
@@ -208,9 +209,10 @@ namespace rocRoller
         Generator<Instruction> LoadStoreTileGenerator::getOffset(LoadStoreTileInfo& info,
                                                                  Transformer        coords,
                                                                  bool               preserveOffset,
-                                                                 bool               direct2LDS)
+                                                                 bool isStorePartOfGlobalToLDS)
         {
-            auto offsetTag = m_graph->mapper.get<Offset>(info.tag, direct2LDS ? 2 : 0);
+            auto offsetTag
+                = m_graph->mapper.get<Offset>(info.tag, isStorePartOfGlobalToLDS ? 2 : 0);
             rocRoller::Log::getLogger()->debug("KernelGraph::LoadStoreTileGenerator::getOffset(tag:"
                                                " {}, offsetTag: {})",
                                                info.tag,
@@ -222,7 +224,7 @@ namespace rocRoller
 
             if(m_context->registerTagManager()->hasRegister(offsetTag))
             {
-                if(direct2LDS)
+                if(isStorePartOfGlobalToLDS)
                 {
                     auto tmp  = m_context->registerTagManager()->getRegister(offsetTag);
                     auto expr = info.data->expression() + tmp->expression();
@@ -237,7 +239,7 @@ namespace rocRoller
                     info.rowOffsetReg = m_context->registerTagManager()->getRegister(offsetTag);
                 }
 
-                rowOffsetExpr = getOffsetExpr(info.tag, direct2LDS, coords);
+                rowOffsetExpr = getOffsetExpr(info.tag, isStorePartOfGlobalToLDS, coords);
             }
             else
             {
@@ -258,7 +260,7 @@ namespace rocRoller
                     Throw<FatalError>("Base offset not found");
                 }
 
-                if(direct2LDS)
+                if(isStorePartOfGlobalToLDS)
                 {
                     auto tmp = m_context->registerTagManager()->getRegister(baseTag);
                     co_yield generate(info.data, info.data->expression() + tmp->expression());
@@ -272,7 +274,7 @@ namespace rocRoller
                         Register::Type::Vector,
                         getOffsetTypeFromComputeIndex(*m_graph, offsetTag),
                         1);
-                    info.rowOffsetReg->setName(concatenate("offset", offsetTag));
+                    info.rowOffsetReg->setName(concatenate("Offset", offsetTag));
                     m_context->getScopeManager()->addRegister(offsetTag);
 
                     // Copy base to new offset register
@@ -280,10 +282,10 @@ namespace rocRoller
                     co_yield m_context->copier()->copy(info.rowOffsetReg, baseReg);
                 }
 
-                rowOffsetExpr = getOffsetExpr(info.tag, direct2LDS, coords);
+                rowOffsetExpr = getOffsetExpr(info.tag, isStorePartOfGlobalToLDS, coords);
             }
 
-            if(direct2LDS)
+            if(isStorePartOfGlobalToLDS)
             {
                 co_return;
             }
@@ -332,7 +334,7 @@ namespace rocRoller
                 {
                     stride = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, strideAttributes.dataType, 1);
-                    stride->setName("Stride");
+                    stride->setName(concatenate("Stride", strideTag));
                 }
                 else
                 {
@@ -437,10 +439,10 @@ namespace rocRoller
             if(base < 0 && offset > 0)
             {
                 auto offsetType = Register::Type::Vector;
-                if(ci.isDirect2LDS)
+                if(ci.isStorePartOfGlobalToLDS)
                     offsetType = Register::Type::Scalar;
                 auto offsetReg = tagger->getRegister(offset, offsetType, ci.offsetType, 1);
-                offsetReg->setName(concatenate("Offset", tag));
+                offsetReg->setName(concatenate("Offset", offset));
                 scope->addRegister(offset);
             }
 
@@ -519,7 +521,7 @@ namespace rocRoller
                 const auto offsetValue = getUnsignedInt(info.offset->getLiteralValue());
                 info.offset            = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, DataType::UInt32, 1);
-                info.offset->setName("Offset");
+                info.offset->setName("OffsetD2L");
                 co_yield generate(info.offset, Expression::literal(offsetValue))
                     .map(AddComment(fmt::format("{} is not a supported value!", offsetValue)));
             }
@@ -1039,7 +1041,8 @@ namespace rocRoller
 
             if(info.kind == MemoryInstructions::MemoryKind::Buffer2LDS)
             {
-                co_yield getOffset(info, coords, false /* preserveOffset */, true /* direct2LDS */);
+                co_yield getOffset(
+                    info, coords, /*preserveOffset=*/false, /*isStorePartOfGlobalToLDS=*/true);
 
                 // set global read offset
             }
@@ -1697,6 +1700,7 @@ namespace rocRoller
                 co_yield storeMacroTileVGPR(tag, store, coords);
                 break;
             case MemoryType::WAVE:
+            case MemoryType::WAVE_SWIZZLE:
                 co_yield storeMacroTileWAVE(tag, store, coords);
                 break;
             default:

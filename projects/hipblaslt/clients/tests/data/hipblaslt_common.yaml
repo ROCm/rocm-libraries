@@ -42,6 +42,8 @@ Datatypes:
         hpl: 333
         special: 444
         zero: 555
+        norm_dist: 666
+        uniform_01: 777
   - hipblaslt_activation_type:
       bases: [ c_int ]
       attr:
@@ -50,6 +52,7 @@ Datatypes:
         gelu: 2
         swish: 3
         clamp: 4
+        sigmoid: 5
   - hipblaslt_bias_source:
       bases: [ c_int ]
       attr:

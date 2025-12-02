@@ -11,22 +11,26 @@
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 
 #include "../tests/common/ConvolutionCommon.hpp"
-#include "IntegrationTestUtils.hpp"
+#include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
+using namespace miopen_legacy_plugin::test_utilities;
 using namespace test_conv_common;
 
 namespace
 {
 
 template <typename DataType>
-class ConvForward : public GraphVerifierTest<DataType, ConvTestCase>
+class ConvForward : public IntegrationGraphVerificationHarness<DataType, ConvTestCase>
 {
 protected:
     void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
     {
+        // Skipping until CK is working on Windows
+        SKIP_IF_WINDOWS();
+
         const ConvTestCase& testCase = this->GetParam();
 
         hipdnn_frontend::graph::Graph graphObj;
@@ -66,8 +70,9 @@ protected:
         yAttr->set_dim(testCase.yDims);
         yAttr->set_stride(generateStrides(testCase.yDims, layout.strideOrder));
 
-        CpuFpReferenceValidation<DataType> validator(tolerance, tolerance);
-        this->verifyGraph(graphObj, testCase.seed, validator);
+        this->registerValidator(yAttr, tolerance);
+
+        this->verifyGraph(graphObj, testCase.seed);
     }
 };
 
@@ -151,30 +156,50 @@ TEST_P(IntegrationGpuConvFwdNdhwcFp16, Correctness)
     runGraphTest(conv::getToleranceFwd<half>(), TensorLayout::NDHWC);
 }
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNchwFp32, testing::ValuesIn(getConvTestCases4D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNchwFp32,
+                         testing::ValuesIn(getConvTestCases4D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNchwBfp16, testing::ValuesIn(getConvTestCases4D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNchwBfp16,
+                         testing::ValuesIn(getConvTestCases4D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNchwFp16, testing::ValuesIn(getConvTestCases4D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNchwFp16,
+                         testing::ValuesIn(getConvTestCases4D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNhwcFp32, testing::ValuesIn(getConvTestCases4D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNhwcFp32,
+                         testing::ValuesIn(getConvTestCases4D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNhwcBfp16, testing::ValuesIn(getConvTestCases4D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNhwcBfp16,
+                         testing::ValuesIn(getConvTestCases4D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNhwcFp16, testing::ValuesIn(getConvTestCases4D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNhwcFp16,
+                         testing::ValuesIn(getConvTestCases4D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNcdhwFp32, testing::ValuesIn(getConvTestCases5D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNcdhwFp32,
+                         testing::ValuesIn(getConvTestCases5D()));
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuConvFwdNcdhwBfp16,
                          testing::ValuesIn(getConvTestCases5D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNcdhwFp16, testing::ValuesIn(getConvTestCases5D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNcdhwFp16,
+                         testing::ValuesIn(getConvTestCases5D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNdhwcFp32, testing::ValuesIn(getConvTestCases5D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNdhwcFp32,
+                         testing::ValuesIn(getConvTestCases5D()));
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuConvFwdNdhwcBfp16,
                          testing::ValuesIn(getConvTestCases5D()));
 
-INSTANTIATE_TEST_SUITE_P(, IntegrationGpuConvFwdNdhwcFp16, testing::ValuesIn(getConvTestCases5D()));
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuConvFwdNdhwcFp16,
+                         testing::ValuesIn(getConvTestCases5D()));

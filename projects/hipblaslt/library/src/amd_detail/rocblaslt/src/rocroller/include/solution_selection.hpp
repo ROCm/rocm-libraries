@@ -70,7 +70,6 @@ struct MachineInstructionSize
 struct SolutionIndexParameters
 {
     WorkGroupTileSize workgroupTile;
-    int               prefetchInFlight;
     bool              workgroupMapping;
 
     auto operator<=>(const SolutionIndexParameters& other) const = default;
@@ -97,6 +96,16 @@ constexpr MachineInstructionSize pickMI(rocRoller::DataType typeA, rocRoller::Da
             return {32, 32, 64, 1};
         }
     }
+}
+
+constexpr int preferredUnrolling(rocRoller::DataType typeA, rocRoller::DataType typeB, WorkGroupTileSize wgt) {
+    // Other datatypes run out of registers when prefetchInFlight is too
+    // large.
+    // There is an error with smaller tile sizes and larger prefetchInFlight.
+    if (typeA == rocRoller::DataType::FP4 && typeB == rocRoller::DataType::FP4 && wgt.m > 32 && wgt.n > 32)
+        return 4;
+    else
+        return 2;
 }
 
 /**

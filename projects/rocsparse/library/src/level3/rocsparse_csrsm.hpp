@@ -26,6 +26,7 @@
 
 #include "rocsparse_control.hpp"
 #include "rocsparse_csrsm_info.hpp"
+
 namespace rocsparse
 {
     rocsparse_status csrsm_zero_pivot(rocsparse_handle         handle,

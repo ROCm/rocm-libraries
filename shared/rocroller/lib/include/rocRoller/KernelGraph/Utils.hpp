@@ -38,15 +38,27 @@ namespace rocRoller
     namespace KernelGraph
     {
 
+        /**
+         * A functor that compares two nodes in a control graph in topological
+         * order. This is provided as a convenience to use with std::sort and
+         * other STL algorithms. This object does not own the graph, so the graph
+         * must be valid for the lifetime of the functor.
+         */
         class TopologicalCompare
         {
         public:
             TopologicalCompare() = delete;
-            TopologicalCompare(KernelGraphPtr graph)
+
+            explicit TopologicalCompare(KernelGraph const* graph)
                 : m_graph(graph)
             {
                 AssertFatal(graph);
             };
+
+            explicit TopologicalCompare(KernelGraph const& graph)
+                : TopologicalCompare(&graph)
+            {
+            }
 
             bool operator()(int a, int b) const
             {
@@ -55,7 +67,7 @@ namespace rocRoller
             }
 
         private:
-            KernelGraphPtr m_graph;
+            KernelGraph const* m_graph;
         };
 
         // Return value of colourByUnrollValue.  A colour-mapping is...
@@ -69,6 +81,11 @@ namespace rocRoller
         };
 
         std::string toString(UnrollColouring const&);
+
+        /**
+         * @brief Get the name of a ForLoop operation.
+         */
+        std::string getForLoopName(KernelGraph const& graph, int tag);
 
         /**
          * @brief
@@ -112,7 +129,9 @@ namespace rocRoller
          * will use the same ForLoop Dimension as the original
          * ForLoopOp.
         */
-        int cloneForLoop(KernelGraph& graph, int tag);
+        int cloneForLoop(KernelGraph&               graph,
+                         int                        tag,
+                         std::optional<std::string> name = std::nullopt);
 
         /**
          * @brief Remove a node and all of its children from the control graph
@@ -172,11 +191,13 @@ namespace rocRoller
          * For stores, the target is the destination (User or LDS) of
          * the store.
          *
-         * For load direct-to-lds, the target is the source (User) and destination (LDS) of
-         * the operation.
+         * For Global to LDS ops (e.g buffer to lds), target is User for the
+         * load from global part and LDS for the store into LDS part.
          */
-        std::pair<int, Graph::Direction>
-            getOperationTarget(int tag, KernelGraph const& kgraph, bool isDirect2LDS = false);
+        std::pair<int, Graph::Direction> getOperationTarget(int                tag,
+                                                            KernelGraph const& kgraph,
+                                                            bool isStorePartOfGlobalToLDSOp
+                                                            = false);
 
         /**
          * Returns the true coordinate that should be the target of a
@@ -238,9 +259,22 @@ namespace rocRoller
         std::optional<int> findTopOfContainingOperation(int candidate, KernelGraph const& kgraph);
 
         /**
-         * @brief Create a new coordinate representing data within the scratch space. This will return a
-         * coordinate that can be added to a coordinate graph. It also allocates the required scratch space
-         * within the context.
+         * @brief Follow Identify edges.
+         *
+         * Starting from the coordinate tag, follow outgoing Identify
+         * edges until there aren't any more.  Returns the coordinate
+         * at the end of the Identify chain.
+         *
+         * If there aren't any outgoing Identify edges, this returns
+         * the original coordinate tag.
+         */
+        int followIdentify(int coordinateTag, KernelGraph const& graph);
+
+        /**
+         * @brief Create a new coordinate representing data within the
+         * scratch space. This will return a coordinate that can be
+         * added to a coordinate graph. It also allocates the required
+         * scratch space within the context.
          *
          * @param size
          * @param varType
@@ -255,6 +289,7 @@ namespace rocRoller
          *
          * @param op Operation to replace.
          * @param newOp Replacement.
+         * @param includeBody If true, transfer Body edges.
          *
          * Does not delete the original operation.
          */
@@ -448,7 +483,7 @@ namespace rocRoller
                                 std::vector<unsigned int> const& jammedTiles,
                                 CommandParametersPtr             params,
                                 ContextPtr                       context,
-                                bool                             isDirect2LDS = false);
+                                bool                             isGlobalToLDS = false);
 
         /**
          * @brief Store version of addLoadThreadTileCT.
@@ -461,7 +496,7 @@ namespace rocRoller
                                   std::array<unsigned int, 3> const& workgroupSizes,
                                   std::vector<unsigned int> const&   jammedTiles,
                                   bool                               useSwappedAccess,
-                                  bool                               isDirect2LDS = false);
+                                  bool                               isGlobalToLDS = false);
 
         /**
          * @brief Store version of addLoadMacroTileCT.
@@ -555,7 +590,7 @@ namespace rocRoller
                                  std::array<unsigned int, 3> const& workgroupSizes,
                                  std::vector<unsigned int> const&   jammedTiles,
                                  bool                               useSwappedAccess,
-                                 bool                               isDirect2LDS = false);
+                                 bool                               isGlobalToLDS = false);
 
         /**
          * @brief Create an internal tile backed by a ThreadTile.
@@ -678,7 +713,7 @@ namespace rocRoller
         */
         std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph,
                                                      int                tag,
-                                                     bool               isDirect2LDS = false);
+                                                     bool isStorePartOfGlobalToLDSOp = false);
 
         /**
         * @brief Get the first and last nodes from a set of nodes that are totally ordered
@@ -693,13 +728,26 @@ namespace rocRoller
         void removeRedundantBodyEdgesBaselineMethod(KernelGraph& graph);
 
         /**
-         * Returns all of the nodes that contain `control` with a body
-         * relationship in order from the root of the graph
+         * Yields all of the nodes that are body parents of `control` in order from the node
+         * up to the root of the graph.
          */
-        std::deque<int> controlStack(int control, KernelGraph const& graph);
+        Generator<int> bodyParents(int control, KernelGraph const& graph);
+
+        /**
+         * Yields all of the nodes that are body parents of `control` in order from the node
+         * up to the root of the graph.
+         */
+        Generator<int> bodyParents(int control, ControlGraph::ControlGraph const& graph);
+
         /**
          * Returns all of the nodes that contain `control` with a body
-         * relationship in order from the root of the graph
+         * relationship in order from the root of the graph, including `control` itself.
+         */
+        std::deque<int> controlStack(int control, KernelGraph const& graph);
+
+        /**
+         * Returns all of the nodes that contain `control` with a body
+         * relationship in order from the root of the graph, including `control` itself.
          */
         std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph);
 
@@ -708,6 +756,36 @@ namespace rocRoller
         */
         template <typename EdgeType>
         void connectAllPairs(std::vector<int> const& A, std::vector<int> const& B, KernelGraph& kg);
+
+        /**
+         * @brief Given a tag in coordinate graph, this function returns which direction it is
+         * dangling. If the node is not dangling, it returns std::nullopt.
+         */
+        std::optional<Graph::Direction> danglingDirection(KernelGraph const& graph, int tag);
+
+        /**
+         * @brief Returns a vector of all tags of operations of type DstOpType
+         * that are connected to the same MacroTile as the given srcOpTag of
+         * an operation of type SrcOpType.
+         *
+         * Currently SrcOpType and DstOpType can only exclusively either be
+         * LoadTiled or StoreLDSTile
+         */
+        template <ControlGraph::COperation SrcOpType, ControlGraph::COperation DstOpType>
+        requires(
+            (std::is_same_v<
+                 SrcOpType,
+                 ControlGraph::LoadTiled> && std::is_same_v<DstOpType, ControlGraph::StoreLDSTile>)
+            || (std::is_same_v<
+                    SrcOpType,
+                    ControlGraph::
+                        StoreLDSTile> && std::is_same_v<DstOpType, ControlGraph::LoadTiled>))
+            std::vector<int> getAssociatedOps(KernelGraph const& kgraph, int srcOpTag);
+
+        /**
+        * @brief Return true for operations that read from global to store into LDS and false otherwise.
+        */
+        bool isGlobalToLDSOp(KernelGraph const& graph, int op);
     }
 }
 

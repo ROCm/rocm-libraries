@@ -14,9 +14,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
+namespace hipdnn_sdk::test_utilities
 {
 
 // Type trait to validate tensor types (arithmetic types + half + hip_bfloat16)
@@ -26,11 +24,11 @@ constexpr bool IS_VALID_TENSOR_TYPE_V = std::
 
 /**
  * @brief Safely convert between types while avoiding implicit precision loss warnings
- * 
+ *
  * This function handles type conversions that may trigger compiler warnings about
  * implicit precision loss, particularly when converting from double to hip_bfloat16
  * or half. It makes the conversion path explicit to eliminate warnings.
- * 
+ *
  * @tparam TargetType The type to convert to
  * @tparam SourceType The type to convert from
  * @param value The value to convert
@@ -111,7 +109,7 @@ struct ParallelTensorFunctorDynamic
             return;
         }
 
-        auto generatedStrides = hipdnn_sdk::utilities::generateStrides(dimensions);
+        auto generatedStrides = utilities::generateStrides(dimensions);
         strides.assign(generatedStrides.begin(), generatedStrides.end());
         totalElements = strides[0] * lengths[0];
     }
@@ -148,7 +146,17 @@ struct ParallelTensorFunctorDynamic
             auto threadFunc = [=, *this] {
                 for(std::size_t workIdx = workBegin; workIdx < workEnd; ++workIdx)
                 {
-                    func(getNdIndices(workIdx));
+                    if constexpr(std::is_invocable_r_v<bool, F, std::vector<int64_t>>)
+                    {
+                        if(!func(getNdIndices(workIdx)))
+                        {
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        func(getNdIndices(workIdx));
+                    }
                 }
             };
             threads[threadIdx] = JoinableThread(threadFunc);
@@ -162,5 +170,4 @@ static auto makeParallelTensorFunctor(F f, const std::vector<int64_t>& dimension
     return ParallelTensorFunctorDynamic<F>(f, dimensions);
 }
 
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::test_utilities

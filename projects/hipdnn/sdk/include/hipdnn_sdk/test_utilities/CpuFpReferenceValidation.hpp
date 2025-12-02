@@ -6,16 +6,13 @@
 #include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/ReferenceValidationInterface.hpp>
+#include <hipdnn_sdk/test_utilities/VectorLoggingUtils.hpp>
 #include <hipdnn_sdk/utilities/TensorView.hpp>
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 
-namespace hipdnn_sdk
+namespace hipdnn_sdk::test_utilities
 {
-namespace test_utilities
-{
-
-using namespace hipdnn_sdk::utilities;
 
 template <class T>
 class CpuFpReferenceValidation : public IReferenceValidation
@@ -34,84 +31,49 @@ public:
 
     ~CpuFpReferenceValidation() override = default;
 
-    bool allClose(ITensor& reference, ITensor& implementation) const override
+    bool allClose(utilities::ITensor& reference, utilities::ITensor& implementation) const override
     {
         if(reference.elementCount() != implementation.elementCount()
            || reference.dims() != implementation.dims())
         {
             return false;
         }
-        bool result = true;
 
-        TensorView<T> refView(reference);
-        TensorView<T> implView(implementation);
+        utilities::TensorView<T> refView(reference);
+        utilities::TensorView<T> implView(implementation);
 
-        auto refItr = refView.begin();
-        auto implItr = implView.begin();
+        std::atomic<bool> result(true);
 
-        while(refItr != refView.end() && implItr != implView.end())
-        {
-            T refValue = *refItr++;
-            T implValue = *implItr++;
+        auto validateFunc = [&](const std::vector<int64_t>& indices) {
+            T refValue = refView.getHostValue(indices);
+            T implValue = implView.getHostValue(indices);
 
             T absDiff = std::fabs(implValue - refValue);
             T threshold = _absoluteTolerance + _relativeTolerance * std::fabs(refValue);
 
             if(absDiff > threshold)
             {
-                HIPDNN_LOG_ERROR("Validation failed: reference value = {}, "
+                // Log error and mark as failed
+                HIPDNN_LOG_ERROR("Validation failed at indices {}: reference value = {}, "
                                  "implementation value = {}, "
                                  "absolute difference = {}, threshold = {} (atol={}, rtol={})",
+                                 indices,
                                  refValue,
                                  implValue,
                                  absDiff,
                                  threshold,
                                  _absoluteTolerance,
                                  _relativeTolerance);
-                result = false;
-                break;
+                result.store(false, std::memory_order_relaxed);
             }
-        }
-        return result;
-    }
+            return result.load(std::memory_order_relaxed);
+        };
 
-    bool allClose(MigratableMemoryBase<T>& reference, MigratableMemoryBase<T>& implementation) const
-    {
-        if(reference.count() != implementation.count())
-        {
-            return false;
-        }
+        // Create and execute parallel functor
+        auto parallelFunc = makeParallelTensorFunctor(validateFunc, reference.dims());
+        parallelFunc(std::thread::hardware_concurrency());
 
-        size_t elementCount = reference.count();
-
-        const T* refData = reference.hostData();
-        const T* implData = implementation.hostData();
-
-        for(size_t i = 0; i < elementCount; ++i)
-        {
-            T refValue = refData[i];
-            T implValue = implData[i];
-
-            T absDiff = std::fabs(implValue - refValue);
-            T threshold = _absoluteTolerance + _relativeTolerance * std::fabs(refValue);
-
-            if(absDiff > threshold)
-            {
-                HIPDNN_LOG_ERROR("Validation failed at index {}: reference value = {}, "
-                                 "implementation value = {}, "
-                                 "absolute difference = {}, threshold = {} (atol={}, rtol={})",
-                                 i,
-                                 refValue,
-                                 implValue,
-                                 absDiff,
-                                 threshold,
-                                 _absoluteTolerance,
-                                 _relativeTolerance);
-                return false;
-            }
-        }
-
-        return true;
+        return result.load();
     }
 
 private:
@@ -120,5 +82,29 @@ private:
     T _relativeTolerance;
 };
 
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+inline std::unique_ptr<hipdnn_sdk::test_utilities::IReferenceValidation>
+    createAllCloseValidator(data_objects::DataType dataType,
+                            float absoluteTolerance = std::numeric_limits<float>::epsilon(),
+                            float relativeTolerance = std::numeric_limits<float>::epsilon())
+{
+    switch(dataType)
+    {
+    case data_objects::DataType::FLOAT:
+        return std::make_unique<CpuFpReferenceValidation<float>>(absoluteTolerance,
+                                                                 relativeTolerance);
+    case data_objects::DataType::HALF:
+        return std::make_unique<CpuFpReferenceValidation<half>>(
+            static_cast<half>(absoluteTolerance), static_cast<half>(relativeTolerance));
+    case data_objects::DataType::BFLOAT16:
+        return std::make_unique<CpuFpReferenceValidation<hip_bfloat16>>(
+            static_cast<hip_bfloat16>(absoluteTolerance),
+            static_cast<hip_bfloat16>(relativeTolerance));
+    case data_objects::DataType::DOUBLE:
+        return std::make_unique<CpuFpReferenceValidation<double>>(
+            static_cast<double>(absoluteTolerance), static_cast<double>(relativeTolerance));
+    default:
+        throw std::runtime_error("Unsupported data type for allClose validator");
+    }
+}
+
+} // namespace hipdnn_sdk::test_utilities

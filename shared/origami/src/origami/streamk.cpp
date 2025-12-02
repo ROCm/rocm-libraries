@@ -325,14 +325,17 @@ namespace origami
             size_t          mi_m,
             size_t          mi_n,
             size_t          mi_k,
-            size_t          workgroup_mapping,
+            int             workgroup_mapping,
             size_t          workspace_size_per_elem_c,
             int             occupancy,
             const hardware_t& analytical_hardware,
             int dynamic_grid_version,
-            reduction_type reduction_strategy)
+            reduction_type reduction_strategy,
+            size_t max_cus)
         {
             size_t cu_count = analytical_hardware.N_CU;
+            if(max_cus > 0)
+                cu_count = std::min(cu_count, max_cus);
             size_t tiles = number_of_output_tiles(mt_m, mt_n, x, y, batch);
 
             // Dynamically pick the minimum between the cu_count or number of tiles.
@@ -409,12 +412,15 @@ namespace origami
                             0,
                             0.0,
                             workgroup_mapping,
-                            10);
+                            10,
+                            max_cus);
             }
             else if(dynamic_grid_version == 6)
             {
                 size_t iters_per_tile = std::max(size_t(1), math::safe_ceil_div(z, mt_k));
                 size_t sk_grid = tiles; // Fallback if no good fractional tile is found
+                if(max_cus > 0)
+                    sk_grid = std::min(sk_grid, max_cus);
                 size_t tile_size = mt_m * mt_n * workspace_size_per_elem_c;
                 // More tiles than CUs
                 // Distribute tiles evenly across maximum number of CUs
@@ -422,7 +428,7 @@ namespace origami
                 if(tiles > cu_count)
                 {
                     size_t virt_cu_count = cu_count;
-                    if (occupancy > 1)
+                    if (occupancy > 1 && max_cus == 0)
                         virt_cu_count *= occupancy;
 
                     const std::vector<double> tile_fractions = {0.0, 1.0/2.0, 1.0/8.0, 1.0/5.0, 1.0/4.0, 1.0/3.0};
@@ -456,7 +462,7 @@ namespace origami
                     {
                         size_t virt_cu_count = cu_count;
                         // TODO check if using occupancy info makes workspace too large
-                        // if (occupancy > 1)
+                        // if (occupancy > 1 && max_cus == 0)
                         //     virt_cu_count *= occupancy;
 
                         // Find max splitting factor to use as much of GPU as possible

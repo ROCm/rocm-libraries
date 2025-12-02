@@ -33,7 +33,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
   DSLoadB32, DSLoadB64, DSLoadB64TrB16, DSLoadInstruction, DSLoadU16, \
   DSLoadU8, DSStore2B32, DSStore2B64, DSStoreB128, DSStoreB16, DSStoreB256, \
   DSStoreB32, DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB32, \
-  FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, \
+  FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpLeU32, \
   SMFMAInstruction, SNop, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32
@@ -101,6 +101,9 @@ class ABMatrixInfo(MatrixInfo):
   numVgprLocalWriteSwapAddr: int  = -1
   startVgprLocalWriteSwapAddr: int= -1
   numSgprGlobalReadIncs: int     = -1
+
+  gNLCPermBlock: int             = -1
+  gNLCPerpStride: int            = -1
 
 # States
 @dataclass
@@ -256,7 +259,7 @@ class StateValues:
   BiasType: int                          = 0
   BiasStride: int                        = 0
   FactorDim: int                         = 0
-  freeSgprVarPool                        = set()
+  freeSgprVarPool: set                   = field(init=False)
 
   numReadsPerIterA: int                  = 0
   numReadsPerIterB: int                  = 0
@@ -284,7 +287,7 @@ class StateValues:
   numGlobalReadInsPerMfma: int           = 0
   numLocalWriteModPerMfma: int           = 0
   HHH_WMMA: bool                         = False
-  tmpvgpr: List[int]                     = field(init=False) # vgpr storage for localread
+  tmpvgpr: List[int]                     = field(init=False) # vgpr dict for localread
   numPackCvt: int                        = 0
 
   lraTileProperties: Dict[int, LraTileProperties] = field(init=False)
@@ -317,6 +320,7 @@ class StateValues:
 
     self.preloadGuard = []
     self.tmpvgpr = {}
+    self.freeSgprVarPool = set()
 
 @dataclass
 class StateVgprs:
@@ -566,10 +570,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       numPack = 999
     for n in range(numPack):
       if srcPackItems:
-        numPacked += 1
         item = srcPackItems.pop(0)
         dstPackItems.append(item)
-        itemStr = str(item)
+        numPacked += 1
+        itemStr = str(item.comment)
         for string in searchStrings:
           if string in itemStr:
             return numPacked
@@ -1124,7 +1128,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         elif isinstance(inst, SMFMAInstruction):
           srcRegs = [inst.a, inst.b, inst.metadata]
         else:
-          srcRegs = inst.srcs
+          if hasattr(inst, 'srcs'):
+            srcRegs = inst.srcs
+          else:
+            srcRegs = []
 
         return any((lrDataReg & r) for r in srcRegs if isinstance(r, RegisterContainer))
 
@@ -1230,8 +1237,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # if start to schedule localwrite, but still have localreads not scheduled yet,
         # reject to use 1LDSB, since it will write and read same lds buffer at same time.
         if mfmaIndex > self.states.sync1LdsMfmaIndex and localReadItemsThisLoop and oneBufferScheduling:
-          #TODO: can we remove this restriction?
-          self.states.overflowedResources = 5
+          # If DTLA and DTLB we can ignore this, since the global reads will be scheduled following
+          # the local reads, and there is an lgkmcnt(0) to wait for the remaining local reads
+          if not ((iteration == isBarrier - 1) and (kernel["DirectToLdsA"] and kernel["DirectToLdsB"])):
+            self.states.overflowedResources = 5
         for j in range(readLeft):
           if localReadItemsThisLoop:
             item = localReadItemsThisLoop.pop(0)
@@ -1950,7 +1959,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #     If this occurs we need to 'unshift' the C values (see shiftVectorComponents)
       #     BufferLoad does support this shifting, but if GuaranteeNoPartial=1 then
       #     it can be guaranteed that no shifting is required.
-      if not (kernel["BufferLoad"] and kernel["GuaranteeNoPartialA"]) and not forceNoTileCode:
+      if not (kernel["BufferLoad"] and kernel["GuaranteeNoPartialA"]) and not forceNoTileCode and not kernel["UseGeneralizedNLCOneA"]:
         module.addComment1("global read addresses: shift a")
         module.add(self.graShift(kernel, tensorParametersA))
         if tensorParametersA["is_sparse"] and kernel["DirectToVgprSparseMetadata"]:
@@ -1963,7 +1972,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # Using A's margin to instead Metadata's margin
         module.add(self.graShift(kernel, tPM, tPMRef["glvw"] if tPMRef["rtv"] else 1))
 
-      if not (kernel["BufferLoad"] and  kernel["GuaranteeNoPartialB"]) and not forceNoTileCode:
+      if not (kernel["BufferLoad"] and  kernel["GuaranteeNoPartialB"]) and not forceNoTileCode and not kernel["UseGeneralizedNLCOneB"]:
         module.addComment1("global read addresses: shift b")
         module.add(self.graShift(kernel, tensorParametersB))
         if tensorParametersB["is_sparse"] and kernel["DirectToVgprSparseMetadata"]:
@@ -2091,15 +2100,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["UseCustomMainLoopSchedule"]:
       module = Module()
       if isNGLL:
-        module.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1, comment="Wait for all PGR to complete"))
-        module.add(SBarrier(comment=""))
         module.addComment0("Code-path 0, useGR=0, usePLR=1, useGRInc=1, useLoop = 0")
-        module.add(TextBlock("MAINLOOP 0 0 1 1 0\n"))
+        module.add(MacroInstruction(name="MAINLOOP", args=[0,0,1,1,0]))
       else:
-        module.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=-1, comment="Wait for all PGR to complete"))
-        module.add(SBarrier(comment=""))
         module.addComment0("Code-path 0, useGR=0, usePLR=0, useGRInc=0, useLoop = 0")
-        module.add(TextBlock("MAINLOOP 0 0 0 0 0\n"))
+        module.add(MacroInstruction(name="MAINLOOP", args=[0,0,0,0,0]))
       return module
     module = Module("noLoadLoopBody")
     expand = kernel["ExpandPointerSwap"]
@@ -3726,13 +3731,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.numVgprBufferPackB = 1
 
     if kernel["UnrollMajorLDSA"]:
-      divider = 2 if (kernel["ProblemType"]["Sparse"] == 1) else 1
+      divider = 2 if (kernel["ProblemType"]["Sparse"] == 1) and (kernel["MIInputPerThread"] * kernel["ProblemType"]["DataType"].numBytes() <= 16) else 1
       self.states.lrvwUnrollA = kernel["LocalReadVectorWidth"] // divider
     else:
       self.states.lrvwUnrollA = 1
 
     if kernel["UnrollMajorLDSB"]:
-      divider = 2 if (kernel["ProblemType"]["Sparse"] == 2) else 1
+      divider = 2 if (kernel["ProblemType"]["Sparse"] == 2) and (kernel["MIInputPerThread"] * kernel["ProblemType"]["DataType"].numBytes() <= 16) else 1
       self.states.lrvwUnrollB = kernel["LocalReadVectorWidth"] // divider
     else:
       self.states.lrvwUnrollB = 1
@@ -4365,6 +4370,35 @@ class KernelWriter(metaclass=abc.ABCMeta):
       else:
         numVgprGlobalReadIncsMetadata = 0
 
+
+    def GNLCOInit(tc):
+      abmatrixinfo = self.states.a if tc == 'A' else self.states.b
+      if kernel["DirectToLds%s"%tc] and kernel["UseGeneralizedNLCOne%s"%tc]:
+        ntpl = kernel["NumTotalPackedLoads%s"%tc]
+        # TODOBS: Determine logic to calculate best permStride..
+        if kernel["ProblemType"]["TLU%s"%tc] == 1 and not kernel["enableLDSTr%s"%tc]:
+          usePerpPerm = False
+        elif kernel["ProblemType"]["TLU%s"%tc] == 1 and kernel["enableLDSTr%s"%tc]:
+          usePerpPerm = (ntpl & (ntpl-1)) == 0
+        else:
+          # Currently only VW=1,2 is supported due to how the local read offset
+          # is currently computed. Supporting VW=1,2 only required small modifications
+          # to the offset calc.
+          # TODO: Add support for VW=4,8, this will require more changes in LR offset
+          # calculations
+          usePerpPerm = False if kernel["VectorWidth%s"%tc] > 2 else True
+
+        permBlock = kernel["MatrixInstK"] if kernel["ProblemType"]["TLU%s"%tc] == 1 \
+          else kernel["VectorWidth%s"%tc] * kernel["MatrixInstM"]
+        abmatrixinfo.gNLCPermBlock  = permBlock
+        abmatrixinfo.gNLCPerpStride = min([8, 2**int(math.log(ntpl, 2)), permBlock]) if usePerpPerm else 1
+      else:
+        abmatrixinfo.gNLCPerpStride = 1
+        abmatrixinfo.gNLCPermBlock = 1
+
+    GNLCOInit('A')
+    GNLCOInit('B')
+
     numVgprAddressDbg = self.states.rpga if self.debugConfig.debugKernel else 0
 
     ####################################
@@ -4907,10 +4941,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("MagicNumberSize%s"%idxChar, 1)
       self.defineSgpr("MagicShiftSize%s"%idxChar, 1)
 
-    GSUAMBSK = 0
-    if (kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel'):
-      GSUAMBSK = 1
-
     self.defineSgpr("Alpha", numSgprAlpha, numSgprAlpha)
     self.states.numSgprAlpha = numSgprAlpha
     if kernel["ProblemType"]["UseBeta"]:
@@ -4944,8 +4974,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"]:
         self.defineSgpr("SwapMetadata", 1)
 
-
-    if GSUAMBSK:
+    if kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel':
       self.defineSgpr("AddressTD", numSgprAddressD, align=2)
       self.states.numSgprAddressGSUSync += numSgprAddressD
       self.defineSgpr("Synchronizer", 2, align=2)
@@ -5043,7 +5072,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # reads Per Iteration
     ########################################
     if kernel["EnableMatrixInstruction"]:
-      if kernel["UnrollMajorLDSA"]:
+      if kernel["UnrollMajorLDSA"] or kernel["enableLDSTrA"]:
         self.states.numReadsPerUnrollA = ceil(tensorParametersA["bpe"] * kernel["MIInputPerThreadA"] / int(tensorParametersA["localReadInstruction"].blockWidth * 4))
       else:
         self.states.numReadsPerUnrollA = kernel["MIInputPerThreadA"]
@@ -5059,7 +5088,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         tileM = kernel["MIWaveTile"][1] if kernel["ProblemType"]["Sparse"] == 2 else kernel["MIWaveTile"][0]
         numM = kernel["InnerUnroll"]*(tileM * self.states.numReadsPerUnrollMetadata) // tensorParametersM["localReadInstruction"].numOffsets
 
-      if kernel["UnrollMajorLDSB"]:
+      if kernel["UnrollMajorLDSB"] or kernel["enableLDSTrB"]:
         self.states.numReadsPerUnrollB = ceil(tensorParametersB["bpe"] * kernel["MIInputPerThreadB"] / int(tensorParametersB["localReadInstruction"].blockWidth * 4))
       else:
         self.states.numReadsPerUnrollB = kernel["MIInputPerThreadB"]
@@ -5334,6 +5363,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tP["nru"] = itP[cM].numReadsUnroll                           # number of reads along unroll dimension
     tP["nrc"] = kernel["NumLoadsCoalesced%s"%cM]                 # number of reads along coalesced dimension
     tP["nrcv"] = itP[cM].numReadsCoalVecComp                     # number of vector components along coalesced dimension
+    tP["ntpl"] = kernel["NumTotalPackedLoads%s"%cM]
     tP["nrp"] = kernel["NumLoadsPerpendicular%s"%cM]             # number of reads along perpendicular dimension
     tP["nrpv"] = itP[cM].numReadsPerpVecComp                     # number of vector components along perpendicular dimension
     tP["nwcv"] = itP[cM].numWritesCoalVecComp                    # number of vector component writes along coalesced dimension
@@ -5848,9 +5878,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     return fileString
 
 
-  def setRocIsa(self, data):
+  def setRocIsa(self, data, outOptions):
     ti = rocIsa.getInstance()
     ti.setData(data)
+    ti.setOutputOptions(outOptions)
 
   def updateBranchPlaceHolder(self, module, placeholders, targets, operations):
     phs = [ ph for ph in placeholders ]

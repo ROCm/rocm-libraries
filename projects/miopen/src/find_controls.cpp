@@ -38,13 +38,10 @@
 #include <ostream>
 #include <cstdlib>
 #include <cstring>
-#include <string_view>
-#include <optional>
 
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_FIND_ENFORCE)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DEBUG_FIND_ONLY_SOLVER)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_FIND_MODE)
-MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_FIND_MODE_FUSION)
 
 namespace miopen {
 
@@ -204,71 +201,67 @@ std::ostream& operator<<(std::ostream& os, const FindMode::Values& v)
     return os << ToCString(v) << "(" << static_cast<int>(v) << ')';
 }
 
-template <class Variable>
-std::optional<FindMode::Values> GetFindModeValueImpl2(Variable variable)
+FindMode::Values GetFindModeValueImpl()
 {
-    auto str = env::value(variable);
-    if(str.empty())
-        return std::nullopt;
-    for(auto& c : str)
-        c = toupper(static_cast<unsigned char>(c));
-    if(str == "NORMAL")
+    FindMode::Values val = FindMode::Values::Default_;
+
+    auto str = env::value(MIOPEN_FIND_MODE);
+    if(!str.empty())
     {
-        return FindMode::Values::Normal;
+        for(auto& c : str)
+            c = toupper(static_cast<unsigned char>(c));
+        if(str == "NORMAL")
+        {
+            val = FindMode::Values::Normal;
+        }
+        else if(str == "FAST")
+        {
+            val = FindMode::Values::Fast;
+        }
+        else if(str == "HYBRID")
+        {
+            val = FindMode::Values::Hybrid;
+        }
+        else if(str == "DYNAMIC_HYBRID")
+        {
+            val = FindMode::Values::DynamicHybrid;
+        }
+        else if(str == "TRUST_VERIFY")
+        {
+            val = FindMode::Values::TrustVerify;
+        }
+        else if(str == "TRUST_VERIFY_FULL")
+        {
+            val = FindMode::Values::TrustVerifyFull;
+        }
+        else
+        { // Fall down & try numerics.
+            const auto castVal = static_cast<FindMode::Values>(stoul(str));
+            if(FindMode::Values::Begin_ <= castVal && castVal < FindMode::Values::End_)
+            {
+                val = castVal;
+            }
+            else
+            {
+                MIOPEN_LOG_NQE("Wrong MIOPEN_FIND_MODE, using default.");
+                val = FindMode::Values::Default_;
+            }
+        }
     }
-    else if(str == "FAST")
-    {
-        return FindMode::Values::Fast;
-    }
-    else if(str == "HYBRID")
-    {
-        return FindMode::Values::Hybrid;
-    }
-    else if(str == "DYNAMIC_HYBRID")
-    {
-        return FindMode::Values::DynamicHybrid;
-    }
-    else if(str == "TRUST_VERIFY")
-    {
-        return FindMode::Values::TrustVerify;
-    }
-    else if(str == "TRUST_VERIFY_FULL")
-    {
-        return FindMode::Values::TrustVerifyFull;
-    }
-    else
-    { // Nop. Fall down & try numerics.
-    }
-    const auto val = static_cast<FindMode::Values>(stoul(str));
-    if(FindMode::Values::Begin_ <= val && val < FindMode::Values::End_)
-        return val;
-    MIOPEN_LOG_NQE("Wrong " << variable.GetName() << ", using default.");
-    return std::nullopt;
+
+    MIOPEN_LOG_NQI("MIOPEN_FIND_MODE = " << val);
+    return val;
 }
 
-template <class Variable>
-FindMode::Values GetFindModeValue(Variable variable, FindMode::Values defaultValue)
+FindMode::Values GetFindModeValue()
 {
-    static const FindMode::Values val = [&]() {
-        auto rv = GetFindModeValueImpl2(variable).value_or(defaultValue);
-        MIOPEN_LOG_NQI(variable.GetName() << " = " << rv);
-        return rv;
-    }();
+    static const FindMode::Values val = GetFindModeValueImpl();
     return val;
 }
 
 } // namespace
 
-FindMode::FindMode(solver::Primitive primitive)
-{
-    switch(primitive)
-    {
-    case solver::Primitive::Fusion:
-        value = GetFindModeValue(MIOPEN_FIND_MODE_FUSION, FindMode::Values::Fast);
-        break;
-    default: value = GetFindModeValue(MIOPEN_FIND_MODE, FindMode::Values::Default_); break;
-    }
-}
+FindMode::FindMode() { value = GetFindModeValue(); }
 
 std::ostream& operator<<(std::ostream& os, const FindMode& obj) { return os << obj.value; }
 

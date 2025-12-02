@@ -629,8 +629,8 @@ namespace rocRoller
             }
 
             // StoreLDS next
-            auto storeLDScounter = 0;
-            auto direct2LDSTile  = 0;
+            auto storeLDScounter   = 0;
+            auto direct2LDSCounter = 0;
             for(auto load : loadsByUnroll[0])
             {
                 logger->debug("  prefetch: pre-loop commit lds: unroll {} user {}", 0, load.user);
@@ -642,12 +642,20 @@ namespace rocRoller
                 graph.mapper.connect<LDS>(preBarrier, ldsTileTag, storeLDScounter);
                 storeLDScounter++;
 
-                auto ldsTile = graph.coordinates.getNode<LDS>(ldsTileTag);
-                if(ldsTile.isDirect2LDS)
-                    direct2LDSTile++;
+                auto op = std::get<Operation>(graph.control.getElement(load.globalOperation));
+                if(std::holds_alternative<LoadTiled>(op))
+                {
+                    auto macroTile = graph.coordinates.get<MacroTile>(
+                        graph.mapper.get<MacroTile>(load.globalOperation));
+                    if(macroTile && macroTile->memoryType == MemoryType::WAVE_Direct2LDS)
+                    {
+                        direct2LDSCounter++;
+                    }
+                }
             }
 
-            auto prefetchDirect2LDS = ((direct2LDSTile > 0) && (storeLDScounter == direct2LDSTile));
+            auto prefetchDirect2LDS
+                = ((direct2LDSCounter > 0) && (storeLDScounter == direct2LDSCounter));
 
             graph.control.addElement(Body(), {scope}, {preChain[0]});
             for(uint i = 1; i < preChain.size(); ++i)
@@ -879,20 +887,21 @@ namespace rocRoller
                                       barrier);
                     }
 
-                    logger->debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
-                                  "ordering {} to {}",
-                                  globalLoads[globalLoads.size() - 1].globalChain,
-                                  segmentBoundaries[u + 1]);
-                    graph.control.addElement(Sequence(),
-                                             {globalLoads[globalLoads.size() - 1].globalChain},
-                                             {segmentBoundaries[u + 1]});
-                    logger->debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
-                                  "ordering {} to {}",
-                                  globalStores[globalStores.size() - 1].ldsChain,
-                                  segmentBoundaries[u + 1]);
-                    graph.control.addElement(Sequence(),
-                                             {globalStores[globalStores.size() - 1].ldsChain},
-                                             {segmentBoundaries[u + 1]});
+                    auto successor = (u == numUnroll - 1) ? barrier : segmentBoundaries[u + 1];
+
+                    Log::debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
+                               "ordering {} to {}",
+                               globalLoads[globalLoads.size() - 1].globalChain,
+                               successor);
+                    graph.control.addElement(
+                        Sequence(), {globalLoads[globalLoads.size() - 1].globalChain}, {successor});
+
+                    Log::debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
+                               "ordering {} to {}",
+                               globalStores[globalStores.size() - 1].ldsChain,
+                               successor);
+                    graph.control.addElement(
+                        Sequence(), {globalStores[globalStores.size() - 1].ldsChain}, {successor});
                 }
                 else
                 {

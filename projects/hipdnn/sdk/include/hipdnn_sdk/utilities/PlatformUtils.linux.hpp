@@ -9,9 +9,8 @@
 #include <filesystem>
 #include <stdexcept>
 #include <unistd.h>
-namespace hipdnn_sdk
-{
-namespace utilities
+
+namespace hipdnn_sdk::utilities
 {
 
 constexpr const char* SHARED_LIB_EXT = ".so";
@@ -52,7 +51,7 @@ inline bool pathCompEq(const std::filesystem::path& a, const std::filesystem::pa
 
 inline std::filesystem::path getCurrentExecutableDirectory()
 {
-    std::array<char, PATH_MAX> result{};
+    std::array<char, PATH_MAX + 1> result{}; // +1 for trailing null termination
     ssize_t count = readlink("/proc/self/exe", result.data(), PATH_MAX);
     if(count == -1)
     {
@@ -62,8 +61,7 @@ inline std::filesystem::path getCurrentExecutableDirectory()
         .parent_path();
 }
 
-}
-}
+} // namespace hipdnn_sdk::utilities
 
 #else
 

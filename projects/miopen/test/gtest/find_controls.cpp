@@ -95,7 +95,7 @@ TEST_F(CPU_FindControls_NONE, FindEnforceIsSearch)
     miopen::FindEnforce enforce_clean(miopen::FindEnforceAction::DbClean);
 
     EXPECT_FALSE(enforce_none.IsSearch(context));
-    EXPECT_TRUE(enforce_db_update.IsSearch(context));
+    EXPECT_FALSE(enforce_db_update.IsSearch(context));
     EXPECT_TRUE(enforce_search.IsSearch(context));
     EXPECT_TRUE(enforce_search_db_update.IsSearch(context));
     EXPECT_FALSE(enforce_clean.IsSearch(context));
@@ -391,15 +391,11 @@ TEST_F(CPU_FindControls_NONE, FindModeGetSet)
     EXPECT_EQ(mode_trust_verify_full.Get(), miopen::FindMode::Values::TrustVerifyFull);
 }
 
-// Test constructor with different primitives
-TEST_F(CPU_FindControls_NONE, FindModeConstructorPrimitive)
+// Test constructor
+TEST_F(CPU_FindControls_NONE, FindModeConstructor)
 {
-    // Test default constructor (Convolution primitive)
+    // Test default constructor
     miopen::FindMode mode_default;
-    // Just ensure it constructs without crashing
-
-    // Test Fusion primitive
-    miopen::FindMode mode_fusion(miopen::solver::Primitive::Fusion);
     // Just ensure it constructs without crashing
 }
 
@@ -436,17 +432,11 @@ TEST_F(CPU_FindControls_NONE, ConstructorReadsEnvironment)
 {
     // Test that constructors work and read some value
     miopen::FindMode mode_conv; // Default convolution
-    miopen::FindMode mode_fusion(miopen::solver::Primitive::Fusion);
 
     // Just verify they construct and have valid enum values
     EXPECT_GE(static_cast<int>(mode_conv.Get()),
               static_cast<int>(miopen::FindMode::Values::Begin_));
     EXPECT_LT(static_cast<int>(mode_conv.Get()), static_cast<int>(miopen::FindMode::Values::End_));
-
-    EXPECT_GE(static_cast<int>(mode_fusion.Get()),
-              static_cast<int>(miopen::FindMode::Values::Begin_));
-    EXPECT_LT(static_cast<int>(mode_fusion.Get()),
-              static_cast<int>(miopen::FindMode::Values::End_));
 }
 
 // Test the default constructor behavior

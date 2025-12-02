@@ -195,9 +195,6 @@ hipsparseStatus_t hipsparseZgtsvInterleavedBatch_bufferSizeExt(hipsparseHandle_t
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p batchCount, \p dl, \p d,
 *              \p du, \p x or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
-*
-*  \par Example
-*  \snippet example_hipsparse_gtsv_interleaved_batch.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

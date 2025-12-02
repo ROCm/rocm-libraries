@@ -283,6 +283,16 @@ namespace rocRoller
         co_yield Instruction::Comment(command->argInfo());
     }
 
+    CommandArgumentPtr findArgumentByName(CommandPtr const command, std::string const& argName)
+    {
+        auto const& arguments = command->getArguments();
+        auto it = std::ranges::find_if(arguments, [&](auto x) { return x->name() == argName; });
+
+        if(it == arguments.end())
+            return nullptr;
+        return *it;
+    }
+
     void CommandKernel::generateKernelGraph(std::string name)
     {
         TIMER(t, "CommandKernel::generateKernelGraph");
@@ -345,30 +355,32 @@ namespace rocRoller
         transforms.push_back(
             std::make_shared<KernelGraph::LowerTensorContraction>(m_commandParameters, m_context));
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        transforms.push_back(std::make_shared<KernelGraph::ConstantPropagation>());
+        transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
 
-        // TODO: simplify the condition by making ConstantPropagation and
-        // Streamk work simultaneously
-        if(!m_commandParameters->streamK)
+        if(m_commandParameters->workgroupMappingDim.has_value())
         {
-            transforms.push_back(std::make_shared<KernelGraph::ConstantPropagation>());
+            auto wgmArg = findArgumentByName(m_command, rocRoller::WGM);
+            AssertFatal(wgmArg != nullptr,
+                        "Can not find WGM Command argument required for workgroup mapping.");
+
+            transforms.push_back(std::make_shared<KernelGraph::RemapOutputTiles>(
+                m_commandParameters->workgroupMappingDim,
+                std::make_shared<Expression::Expression>(wgmArg)));
         }
 
-        transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
         if(m_commandParameters->streamK)
         {
-            Expression::ExpressionPtr numWGsExpr;
-            {
-                auto arguments = m_command->getArguments();
-                auto it        = std::find_if(arguments.cbegin(), arguments.cend(), [](auto x) {
-                    return x->name() == rocRoller::NUMWGS;
-                });
-                AssertFatal(it != arguments.cend(),
-                            "Can not find numWGs Command argument required for StreamK kernels.");
-                numWGsExpr = std::make_shared<Expression::Expression>(*it);
-            }
+            auto numWGsArg = findArgumentByName(m_command, rocRoller::NUMWGS);
+            AssertFatal(numWGsArg != nullptr,
+                        "Can not find numWGs Command argument required for StreamK kernels.");
 
             transforms.push_back(std::make_shared<KernelGraph::AddStreamK>(
-                m_context, m_commandParameters, rocRoller::XLOOP, rocRoller::KLOOP, numWGsExpr));
+                m_context,
+                m_commandParameters,
+                rocRoller::XLOOP,
+                rocRoller::KLOOP,
+                std::make_shared<Expression::Expression>(numWGsArg)));
         }
         else if(!m_commandParameters->loopOverOutputTilesDimensions.empty())
         {
@@ -380,29 +392,10 @@ namespace rocRoller
                 m_context));
         }
 
-        Expression::ExpressionPtr workgroupMappingValue = nullptr;
-        if(m_commandParameters->workgroupMappingDim.has_value())
-        {
-            Expression::ExpressionPtr size;
+        transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>(m_context));
+        transforms.push_back(std::make_shared<KernelGraph::WorkgroupRemapXCC>(
+            m_context, m_commandParameters->workgroupRemapXCC));
 
-            {
-                auto arguments = m_command->getArguments();
-                auto it        = std::find_if(arguments.cbegin(), arguments.cend(), [](auto x) {
-                    return x->name() == rocRoller::WGM;
-                });
-                AssertFatal(it != arguments.cend(),
-                            "Can not find WGM Command argument required for workgroup mapping.");
-                size = std::make_shared<Expression::Expression>(*it);
-            }
-            Expression::enableDivideBy(size, m_context);
-
-            workgroupMappingValue = size;
-        }
-        transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>(
-            m_context,
-            m_commandParameters->workgroupMappingDim,
-            m_commandParameters->workgroupRemapXCC,
-            workgroupMappingValue));
         transforms.push_back(
             std::make_shared<KernelGraph::UnrollLoops>(m_commandParameters, m_context));
         if(m_commandParameters->fuseLoops)
@@ -411,6 +404,8 @@ namespace rocRoller
         }
         transforms.push_back(std::make_shared<KernelGraph::RemoveDuplicates>());
         transforms.push_back(std::make_shared<KernelGraph::OrderEpilogueBlocks>());
+        // TODO: Investigate why Simplify cannot be called BEFORE RemoveDuplicates and OrderEpilogueBlocks
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::CleanLoops>());
         transforms.push_back(
             std::make_shared<KernelGraph::SwizzleScale>(m_commandParameters, m_context));
@@ -442,11 +437,11 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::AssignComputeIndex>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::NopExtraScopes>());
         transforms.push_back(std::make_shared<KernelGraph::InlineInits>());
-        transforms.push_back(std::make_shared<KernelGraph::AddDeallocateDataFlow>());
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
         transforms.push_back(std::make_shared<KernelGraph::OrderMultiplyNodes>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::AliasDataFlowTags>());
+        transforms.push_back(std::make_shared<KernelGraph::AddDeallocateDataFlow>());
         transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context, m_command));
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocateArguments>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::MergeAdjacentDeallocates>());

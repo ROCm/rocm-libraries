@@ -52,6 +52,11 @@
     if(x != miopenStatusSuccess) \
         return x;
 
+// Fusion solution selection currently only works with the MIOPEN_FIND_MODE=FAST
+// Until the other modes are properly supported, this forces it down the FAST path, ignoring the set
+// find mode
+#define WORKAROUND_LWPMIOPEN_1882
+
 namespace miopen {
 
 miopenStatus_t ConvBiasActivFusion(const Handle& handle,
@@ -453,7 +458,11 @@ miopenStatus_t FusionPlanDescriptor::AddOp(std::shared_ptr<FusionOpDescriptor> d
         desc->SetInputDesc(input_desc);
     else
         desc->SetInputDesc(output_desc);
-    desc->GetOutputDesc(output_desc);
+    auto status = desc->GetOutputDesc(output_desc);
+    if(status != miopenStatusSuccess)
+    {
+        return status;
+    }
     op_map.emplace_back(desc);
     op_count++;
     return miopenStatusSuccess;
@@ -996,10 +1005,12 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
     }
 
     {
-        FindMode findMode(solver::Primitive::Fusion);
         auto sol = boost::optional<miopenConvSolution_t>{};
+#ifndef WORKAROUND_LWPMIOPEN_1882
+        FindMode findMode;
 
         if(findMode.IsFast(fusion_problem) || findMode.IsHybrid(fusion_problem))
+#endif
         {
             const auto ctx      = FusionContext{handle};
             auto sols           = GetSolutions(ctx, fusion_problem, 1);
@@ -1029,9 +1040,13 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
                 }
             }
 
+#ifndef WORKAROUND_LWPMIOPEN_1882
             // override the normal find with immed mode with env var
             if(!sols.empty() && (!(findMode.IsHybrid(fusion_problem) && fallback)))
             // || env::enabled(MIOPEN_DEBUG_FORCE_IMMED_MODE_FALLBACK)
+#else
+            if(!sols.empty())
+#endif
             {
                 std::sort(sols.begin(), sols.end(), SolutionTimeComparator());
                 sol = sols.front();
@@ -1089,7 +1104,7 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
             continue;
         }
 
-        handle.RegisterInvoker(*invoker, network_config, id.ToString());
+        handle.RegisterInvoker(*invoker, network_config, id.ToString(), AlgorithmName{"fusion"});
         invokers.push_back(std::move(*invoker));
         MIOPEN_LOG_I2(miopen::ConvolutionAlgoToString(algorithm));
     }
@@ -1100,8 +1115,6 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
         return miopenStatusUnsupportedOp;
     }
 
-    handle.SetAsFound1_0(
-        network_config, AlgorithmName{"fusion"}, find_results.front().GetSolver().ToString());
     return miopenStatusSuccess;
 }
 

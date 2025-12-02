@@ -9,20 +9,20 @@
 #include <stdexcept>
 #include <string>
 
-namespace hipdnn_tests
-{
-namespace plugin_constants
+namespace hipdnn_tests::plugin_constants
 {
 // Test plugin directory constants relative to backend library location
 inline const std::string& getTestPluginDefaultDir()
 {
-    static const std::string s_defaultDir = "./test_plugins/default";
+    static std::string s_defaultDir
+        = (std::filesystem::path(".") / "test_plugins" / "default").string();
     return s_defaultDir;
 }
 
 inline const std::string& getTestPluginCustomDir()
 {
-    static const std::string s_customDir = "./test_plugins/custom";
+    static std::string s_customDir
+        = (std::filesystem::path(".") / "test_plugins" / "custom").string();
     return s_customDir;
 }
 
@@ -92,6 +92,4 @@ inline const std::string& testIncompleteApiPluginPath()
         = getPluginPath(TEST_INCOMPLETE_API_PLUGIN_NAME);
     return s_testIncompleteApiPluginPath;
 }
-
-} // namespace plugin_constants
-} // namespace hipdnn_tests
+} // namespace hipdnn_tests::plugin_constants

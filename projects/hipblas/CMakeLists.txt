@@ -44,9 +44,7 @@ endif()
 
 project( hipblas LANGUAGES CXX )
 
-if (NOT python)
-    set(python "python3") # default for linux
-endif()
+find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
 # Append our library helper cmake path and the cmake path for hip (for convenience)
 # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
@@ -59,7 +57,7 @@ list( APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake/hip /opt/rocm /opt/rocm/ll
 # rocm-cmake contains common cmake code for rocm projects to help setup and install
 include(dependencies)
 
-set ( VERSION_STRING "3.1.0" )
+set ( VERSION_STRING "3.3.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 option( BUILD_VERBOSE "Output additional build information" OFF )
@@ -195,14 +193,14 @@ endif( )
 
 # Package specific CPACK vars
 if(HIP_PLATFORM STREQUAL amd)
-  set(rocblas_minimum 5.1.0)
-  set(rocsolver_minimum 3.31.0)
+  set(rocblas_minimum 5.2.0)
+  set(rocsolver_minimum 3.32.0)
   rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}")
   rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${rocblas_minimum}" "rocsolver-static-devel >= ${rocsolver_minimum}")
   rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${rocblas_minimum}" "rocsolver-static-dev >= ${rocsolver_minimum}")
 endif( )
 
-set(hipblas_common_minimum 1.3.0)
+set(hipblas_common_minimum 1.4.0)
 
 if(BUILD_SHARED_LIBS)
   rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-dev >= ${hipblas_common_minimum}")
@@ -301,6 +299,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/hipblas-coverage_*.profraw -o ./coverage-report/hipblas.profdata
     COMMAND ${LLVM_COV} report -object ./library/src/libhipblas.so -instr-profile=./coverage-report/hipblas.profdata
     COMMAND ${LLVM_COV} show -object ./library/src/libhipblas.so -instr-profile=./coverage-report/hipblas.profdata -format=html -output-dir=coverage-report
+    COMMAND ${LLVM_COV} export -object ./library/src/libhipblas.so -instr-profile=./coverage-report/hipblas.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 

@@ -42,11 +42,11 @@ extern "C" {
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle             handle to the hipSPARSE library context queue.
+*  handle             handle to the hipsparse library context queue.
 *  @param[in]
-*  m                  size of the tri-diagonal linear system (must be >= 2).
+*  m                  size of the tri-diagonal linear system. Must be at least 2.
 *  @param[in]
-*  n                  number of columns in the dense matrix B.
+*  n                  number of columns in the dense matrix B. Must be non-negative.
 *  @param[in]
 *  dl                 lower diagonal of tri-diagonal system. First entry must be zero.
 *  @param[in]
@@ -54,17 +54,19 @@ extern "C" {
 *  @param[in]
 *  du                 upper diagonal of tri-diagonal system. Last entry must be zero.
 *  @param[in]
-*  B                  Dense matrix of size ( \p ldb, \p n ).
+*  B                  dense matrix of size ( \p ldb, \p n ).
 *  @param[in]
-*  ldb                Leading dimension of B. Must satisfy \p ldb >= max(1, m).
+*  ldb                leading dimension of B. Must satisfy \p ldb >= max(1, m).
 *  @param[out]
 *  pBufferSizeInBytes number of bytes of the temporary storage buffer required by
 *                     \ref hipsparseSgtsv2 "hipsparseXgtsv2()".
 *
-*  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ldb, \p dl, \p d, \p du,
-*              \p B or \p pBufferSizeInBytes pointer is invalid.
-*  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p dl, \p d, \p du, \p B or
+*          \p pBufferSizeInBytes is nullptr, \p m is less than 2 or \p n is negative,
+*          or \p ldb is invalid.
+*  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 /**@{*/
 HIPSPARSE_EXPORT
@@ -161,9 +163,6 @@ hipsparseStatus_t hipsparseZgtsv2_bufferSizeExt(hipsparseHandle_t       handle,
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p ldb, \p dl, \p d,
 *              \p du, \p B or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
-*
-*  \par Example
-*  \snippet example_hipsparse_gtsv.cpp doc example
 */
 /**@{*/
 HIPSPARSE_EXPORT

@@ -28,6 +28,9 @@
 #include "rocsparse_csrmv.hpp"
 #include "rocsparse_utility.hpp"
 
+#include "internal/generic/rocsparse_v2_spmv.h"
+#include "rocsparse_spmv_helpers.h"
+
 #include "csrmv_device.h"
 #include "csrmv_symm_device.h"
 #include <vector>
@@ -479,7 +482,7 @@ namespace rocsparse
         }
     }
 
-    template <typename I, typename J, typename A, typename X, typename Y, typename T>
+    template <typename I, typename J, typename A, typename X, typename Y, typename Z, typename T>
     ROCSPARSE_KERNEL(WG_SIZE)
     void csrmvn_adaptive_kernel(bool conj,
                                 I    nnz,
@@ -493,12 +496,15 @@ namespace rocsparse
                                 const X* __restrict__ x,
                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
                                 Y* __restrict__ y,
+                                rocsparse_int        num_extra,
+                                const T*             gamma_device_array,
+                                const Z* const*      z_arrays,
                                 rocsparse_index_base idx_base,
                                 bool                 is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        if(alpha != 0 || beta != 1)
+        if(alpha != 0 || beta != 1 || num_extra > 0)
         {
             rocsparse::
                 csrmvn_adaptive_device<BLOCK_SIZE, BLOCK_MULTIPLIER, ROWS_FOR_VECTOR, WG_SIZE>(
@@ -514,6 +520,9 @@ namespace rocsparse
                     x,
                     beta,
                     y,
+                    num_extra,
+                    gamma_device_array,
+                    z_arrays,
                     idx_base);
         }
     }
@@ -595,7 +604,71 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
                                                              Y*       y,
                                                              bool     force_conj)
 {
+    return rocsparse::csrmv_adaptive_template_dispatch(handle,
+                                                       trans,
+                                                       m,
+                                                       n,
+                                                       nnz,
+                                                       alpha_device_host,
+                                                       descr,
+                                                       csr_val,
+                                                       csr_row_ptr,
+                                                       csr_col_ind,
+                                                       info,
+                                                       x,
+                                                       beta_device_host,
+                                                       y,
+                                                       0,
+                                                       nullptr,
+                                                       nullptr,
+                                                       force_conj);
+}
+
+template <typename T, typename I, typename J, typename A, typename X, typename Y>
+rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle    handle,
+                                                             rocsparse_operation trans,
+                                                             J                   m,
+                                                             J                   n,
+                                                             I                   nnz,
+                                                             const T*            alpha_device_host,
+                                                             const rocsparse_mat_descr descr,
+                                                             const A*                  csr_val,
+                                                             const I*                  csr_row_ptr,
+                                                             const J*                  csr_col_ind,
+                                                             rocsparse_csrmv_info      info,
+                                                             const X*                  x,
+                                                             const T*      beta_device_host,
+                                                             Y*            y,
+                                                             rocsparse_int num_extra,
+                                                             rocsparse_const_dnvec_descr  gamma_vec,
+                                                             rocsparse_const_dnvec_descr* z_vecs,
+                                                             bool force_conj)
+{
     ROCSPARSE_ROUTINE_TRACE;
+
+    // Extract gamma arrays and z vectors for batched operation
+    using Z                      = Y;
+    T*        gamma_device_array = nullptr;
+    const Z** z_array            = nullptr;
+    bool      temp_alloc         = false;
+    void*     temp_storage_ptr   = nullptr;
+
+    // Check if pre-extracted arrays are available in spmv descriptor
+    if(num_extra > 0)
+    {
+        if(handle && handle->temp_spmv_descr && spmv_has_device_arrays(handle->temp_spmv_descr))
+        {
+            gamma_device_array = rocsparse::spmv_get_gamma_device_array<T>(handle->temp_spmv_descr);
+            z_array            = rocsparse::spmv_get_z_array<Z>(handle->temp_spmv_descr);
+        }
+        else
+        {
+            // throw an error here as the extra data cannot be retrieved
+            // LCOV_EXCL_START
+            return rocsparse_status_invalid_value;
+            // LCOV_EXCL_STOP
+        }
+    }
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(6, descr);
@@ -648,6 +721,9 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
             x,
             ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),
             y,
+            num_extra,
+            gamma_device_array,
+            z_array,
             descr->base,
             handle->pointer_mode == rocsparse_pointer_mode_host);
 
@@ -740,6 +816,12 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
         // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         // LCOV_EXCL_STOP
+    }
+
+    // Clean up temp_storage_ptr
+    if(temp_alloc)
+    {
+        RETURN_IF_HIP_ERROR(hipFreeAsync(temp_storage_ptr, handle->stream));
     }
 
     return rocsparse_status_success;
