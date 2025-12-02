@@ -592,6 +592,11 @@ void apply_load_callback(const fft_params& params, std::vector<hostbuf>& input)
     }
 }
 
+// For a specified rank, get a vector of load callback function +
+// data pointers.  The pointers need to be in the order that
+// fields+bricks were specified to the FFT plan.  Pointers need to be
+// copied to the host from the device specified by the respective
+// brick.
 void get_rank_load_callbacks(const fft_params&                          params,
                              std::vector<void*>&                        load_cb_func,
                              std::vector<void*>&                        load_cb_data,
@@ -600,6 +605,7 @@ void get_rank_load_callbacks(const fft_params&                          params,
                              std::vector<gpubuf_t<callback_test_data>>& all_cb_data,
                              int                                        rank)
 {
+    // Copy callback pointer from current device and add to output vec
     auto add_load_cb = [&]() {
         void* load_cb_host = get_load_callback_host(
             params.itype, params.precision, runtime_err_handler, round_trip_inverse);
@@ -628,8 +634,7 @@ void get_rank_load_callbacks(const fft_params&                          params,
                                hipMemcpyHostToDevice);
         if(hip_status != hipSuccess)
         {
-            runtime_err_handler(
-                "Error occurred when allocating device memory for loading callback");
+            runtime_err_handler("Error occurred when copying device memory for loading callback");
         }
         load_cb_func.push_back(load_cb_host);
         load_cb_data.push_back(load_cb_data_dev.data());
@@ -654,6 +659,8 @@ void get_rank_load_callbacks(const fft_params&                          params,
     }
     else
     {
+        // user-specified decomposition - copy func+data for each brick
+        // on this rank
         for(size_t i = 0; i < params.ifields.front().bricks.size(); ++i)
         {
             if(params.ifields.front().bricks[i].rank != rank)
@@ -666,6 +673,11 @@ void get_rank_load_callbacks(const fft_params&                          params,
     }
 }
 
+// For a specified rank, get a vector of store callback function +
+// data pointers.  The pointers need to be in the order that
+// fields+bricks were specified to the FFT plan.  Pointers need to be
+// copied to the host from the device specified by the respective
+// brick.
 void get_rank_store_callbacks(const fft_params&                          params,
                               std::vector<void*>&                        store_cb_func,
                               std::vector<void*>&                        store_cb_data,
@@ -674,6 +686,7 @@ void get_rank_store_callbacks(const fft_params&                          params,
                               std::vector<gpubuf_t<callback_test_data>>& all_cb_data,
                               int                                        rank)
 {
+    // Copy callback pointer from current device and add to output vec
     auto add_store_cb = [&]() {
         void* store_cb_host = get_store_callback_host(
             params.otype, params.precision, runtime_err_handler, round_trip_inverse);
@@ -703,8 +716,7 @@ void get_rank_store_callbacks(const fft_params&                          params,
                                hipMemcpyHostToDevice);
         if(hip_status != hipSuccess)
         {
-            runtime_err_handler(
-                "Error occurred when allocating device memory for storing callback");
+            runtime_err_handler("Error occurred when copying device memory for storing callback");
         }
 
         store_cb_func.push_back(store_cb_host);
@@ -730,6 +742,8 @@ void get_rank_store_callbacks(const fft_params&                          params,
     }
     else
     {
+        // user-specified decomposition - copy func+data for each brick
+        // on this rank
         for(size_t i = 0; i < params.ofields.front().bricks.size(); ++i)
         {
             if(params.ofields.front().bricks[i].rank != rank)
