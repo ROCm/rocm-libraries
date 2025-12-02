@@ -21,35 +21,64 @@ class GPU_Pooling2d_FP16 : public testing::Test
 template <typename T>
 void RunPooling2dTests()
 {
-    pooling2d_driver<T> driver;
-    driver.type       = miopen_type<T>{};
-    driver.full_set   = false; // Set to false to reduce test cases and avoid OOM on smaller GPUs
-    driver.dataset_id = 0;     // Use default dataset
-    driver.config_iter_start = 0;
+    // Run 1: full_set = false with default dataset (reduced combinations, various tensor sizes)
+    {
+        pooling2d_driver<T> driver;
+        driver.type = miopen_type<T>{};
+        driver.full_set = false;
+        driver.dataset_id = 0;
+        driver.config_iter_start = 0;
 
-    // Get data arguments (arguments that weren't passed via command line)
-    std::vector<typename pooling2d_driver<T>::argument*> data_args;
-    for(auto&& arg : driver.arguments)
-    {
-        data_args.push_back(&arg);
+        std::vector<typename pooling2d_driver<T>::argument*> data_args;
+        for(auto&& arg : driver.arguments)
+        {
+            data_args.push_back(&arg);
+        }
+
+        prng::reset_seed();
+        driver.iteration = 0;
+        try
+        {
+            run_data(data_args.begin(), data_args.end(), [&] { driver.template base_run<pooling2d_driver<T>>(); });
+        }
+        catch(const std::exception& e)
+        {
+            FAIL() << "Exception in pooling2d test (full_set=false, dataset=0): " << e.what();
+        }
+        catch(...)
+        {
+            FAIL() << "Unknown exception in pooling2d test (full_set=false, dataset=0)";
+        }
     }
 
-    // Manually iterate over all combinations using the driver's iteration logic
-    prng::reset_seed();
-    driver.iteration = 0;
-    try
+    // Run 2: full_set = true with minimal dataset (all combinations, small tensors)
     {
-        run_data(data_args.begin(), data_args.end(), [&] {
-            driver.template base_run<pooling2d_driver<T>>();
-        });
-    }
-    catch(const std::exception& e)
-    {
-        FAIL() << "Exception in pooling2d test: " << e.what();
-    }
-    catch(...)
-    {
-        FAIL() << "Unknown exception in pooling2d test";
+        pooling2d_driver<T> driver;
+        driver.type = miopen_type<T>{};
+        driver.full_set = true;
+        driver.dataset_id = 1; // Minimal dataset to avoid OOM
+        driver.config_iter_start = 0;
+
+        std::vector<typename pooling2d_driver<T>::argument*> data_args;
+        for(auto&& arg : driver.arguments)
+        {
+            data_args.push_back(&arg);
+        }
+
+        prng::reset_seed();
+        driver.iteration = 0;
+        try
+        {
+            run_data(data_args.begin(), data_args.end(), [&] { driver.template base_run<pooling2d_driver<T>>(); });
+        }
+        catch(const std::exception& e)
+        {
+            FAIL() << "Exception in pooling2d test (full_set=true, dataset=1): " << e.what();
+        }
+        catch(...)
+        {
+            FAIL() << "Unknown exception in pooling2d test (full_set=true, dataset=1)";
+        }
     }
 }
 
