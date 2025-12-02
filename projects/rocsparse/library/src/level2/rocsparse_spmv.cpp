@@ -33,6 +33,7 @@
 #include "rocsparse_csrmv.hpp"
 #include "rocsparse_ellmv.hpp"
 #include "rocsparse_enum_utils.hpp"
+#include "rocsparse_sellmv.hpp"
 #include "rocsparse_spmv.hpp"
 
 template <>
@@ -52,6 +53,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spmv_alg value_)
         CASE(rocsparse_spmv_alg_bsr);
         CASE(rocsparse_spmv_alg_csr_lrb);
         CASE(rocsparse_spmv_alg_csr_nnzsplit);
+        CASE(rocsparse_spmv_alg_sell);
 #undef CASE
     }
     // LCOV_EXCL_START
@@ -111,6 +113,7 @@ rocsparse_status rocsparse::check_spmv_alg(rocsparse_format format, rocsparse_sp
         }
         case rocsparse_spmv_alg_coo:
         case rocsparse_spmv_alg_ell:
+        case rocsparse_spmv_alg_sell:
         case rocsparse_spmv_alg_bsr:
         case rocsparse_spmv_alg_coo_atomic:
         {
@@ -137,6 +140,7 @@ rocsparse_status rocsparse::check_spmv_alg(rocsparse_format format, rocsparse_sp
         case rocsparse_spmv_alg_csr_adaptive:
         case rocsparse_spmv_alg_bsr:
         case rocsparse_spmv_alg_ell:
+        case rocsparse_spmv_alg_sell:
         case rocsparse_spmv_alg_csr_lrb:
         case rocsparse_spmv_alg_csr_nnzsplit:
         {
@@ -164,6 +168,7 @@ rocsparse_status rocsparse::check_spmv_alg(rocsparse_format format, rocsparse_sp
         case rocsparse_spmv_alg_coo_atomic:
         case rocsparse_spmv_alg_csr_lrb:
         case rocsparse_spmv_alg_csr_nnzsplit:
+        case rocsparse_spmv_alg_sell:
         {
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -182,10 +187,38 @@ rocsparse_status rocsparse::check_spmv_alg(rocsparse_format format, rocsparse_sp
         case rocsparse_spmv_alg_csr_rowsplit:
         case rocsparse_spmv_alg_csr_adaptive:
         case rocsparse_spmv_alg_ell:
+        case rocsparse_spmv_alg_sell:
         case rocsparse_spmv_alg_bsr:
         case rocsparse_spmv_alg_coo_atomic:
         case rocsparse_spmv_alg_csr_lrb:
         case rocsparse_spmv_alg_csr_nnzsplit:
+        {
+            // LCOV_EXCL_START
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        }
+        }
+
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
+    }
+
+    case rocsparse_format_sell:
+    {
+        switch(alg)
+        {
+        case rocsparse_spmv_alg_default:
+        case rocsparse_spmv_alg_sell:
+        {
+            return rocsparse_status_success;
+        }
+        case rocsparse_spmv_alg_csr_rowsplit:
+        case rocsparse_spmv_alg_csr_adaptive:
+        case rocsparse_spmv_alg_bsr:
+        case rocsparse_spmv_alg_coo:
+        case rocsparse_spmv_alg_coo_atomic:
+        case rocsparse_spmv_alg_csr_lrb:
+        case rocsparse_spmv_alg_csr_nnzsplit:
+        case rocsparse_spmv_alg_ell:
         {
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -212,6 +245,7 @@ rocsparse_status rocsparse::check_spmv_alg(rocsparse_format format, rocsparse_sp
         case rocsparse_spmv_alg_coo_atomic:
         case rocsparse_spmv_alg_csr_lrb:
         case rocsparse_spmv_alg_csr_nnzsplit:
+        case rocsparse_spmv_alg_sell:
         {
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -260,6 +294,7 @@ rocsparse_status rocsparse::spmv_alg2csrmv_alg(rocsparse_spmv_alg    spmv_alg,
     case rocsparse_spmv_alg_coo_atomic:
     case rocsparse_spmv_alg_bsr:
     case rocsparse_spmv_alg_ell:
+    case rocsparse_spmv_alg_sell:
     {
         // LCOV_EXCL_START
         return rocsparse_status_invalid_value;
@@ -296,6 +331,7 @@ rocsparse_status rocsparse::spmv_alg2coomv_alg(rocsparse_spmv_alg   spmv_alg,
     case rocsparse_spmv_alg_csr_rowsplit:
     case rocsparse_spmv_alg_bsr:
     case rocsparse_spmv_alg_ell:
+    case rocsparse_spmv_alg_sell:
     case rocsparse_spmv_alg_csr_lrb:
     case rocsparse_spmv_alg_csr_nnzsplit:
     {
@@ -334,6 +370,7 @@ rocsparse_status rocsparse::spmv_alg2coomv_aos_alg(rocsparse_spmv_alg       spmv
     case rocsparse_spmv_alg_csr_rowsplit:
     case rocsparse_spmv_alg_bsr:
     case rocsparse_spmv_alg_ell:
+    case rocsparse_spmv_alg_sell:
     case rocsparse_spmv_alg_csr_lrb:
     case rocsparse_spmv_alg_csr_nnzsplit:
     {
@@ -610,6 +647,9 @@ namespace rocsparse
                                       beta,
                                       y->data_type,
                                       y->values,
+                                      0,
+                                      nullptr,
+                                      nullptr,
                                       fallback_algorithm)));
                 return rocsparse_status_success;
             }
@@ -724,6 +764,7 @@ namespace rocsparse
             }
         }
 
+        case rocsparse_format_sell:
         case rocsparse_format_bell:
         {
             // LCOV_EXCL_START

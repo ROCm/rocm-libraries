@@ -20,10 +20,12 @@ target_include_directories(rocthrust
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/>
 )
 
-target_link_libraries(rocthrust
-  INTERFACE
+if(${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP")
+  target_link_libraries(rocthrust
+    INTERFACE
     roc::rocprim_hip
-)
+  )
+endif()
 
 # hipstdpar header target
 add_library(hipstdpar INTERFACE)
@@ -57,9 +59,17 @@ rocm_install(
 )
 
 include(ROCMExportTargetsHeaderOnly)
-# Export targets
-rocm_export_targets_header_only(
-  TARGETS roc::rocthrust
-  DEPENDS PACKAGE rocprim
-  NAMESPACE roc::
-)
+
+if(${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP")
+  # Export targets
+  rocm_export_targets_header_only(
+    TARGETS roc::rocthrust
+    DEPENDS PACKAGE rocprim
+    NAMESPACE roc::
+  )
+else()
+  rocm_export_targets_header_only(
+    TARGETS roc::rocthrust
+    NAMESPACE roc::
+  )
+endif()

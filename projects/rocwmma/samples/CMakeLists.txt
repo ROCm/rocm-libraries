@@ -34,7 +34,7 @@ endif()
 # Custom target to build all rocWMMA samples
 add_custom_target(rocwmma_samples)
 
-# Regular gtests that don't require any special
+# Regular binaries that don't require any special
 # designation for validation or benchmarking
 function(add_rocwmma_sample TEST_TARGET TEST_SOURCE)
 
@@ -42,7 +42,8 @@ function(add_rocwmma_sample TEST_TARGET TEST_SOURCE)
   add_executable(${TEST_TARGET} ${TEST_SOURCE})
   target_link_libraries(${TEST_TARGET} OpenMP::OpenMP_CXX "-L${HIP_CLANG_ROOT}/lib")
   if(UNIX)
-    target_link_libraries(${TEST_TARGET} "-Wl,-rpath=$ORIGIN/../llvm/lib"  "-fno-rtlib-add-rpath")
+    set_target_properties(${TEST_TARGET} PROPERTIES INSTALL_RPATH "\$ORIGIN/../llvm/lib")
+    target_link_libraries(${TEST_TARGET} "-fno-rtlib-add-rpath")
   endif()
   target_link_libraries(${TEST_TARGET} rocwmma hiprtc::hiprtc)
   target_include_directories(${TEST_TARGET} PRIVATE

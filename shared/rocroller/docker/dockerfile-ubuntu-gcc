@@ -56,7 +56,8 @@ RUN apt-get update && apt-get install -y \
    python3-venv \
    vim \
    wget \
-   xz-utils
+   xz-utils \
+   libdw-dev
 
 # Needed for clang-format from ROCm 4.3.1
 RUN wget -nv --show-progress --progress=dot:mega -O /tmp/libtinfo5.deb http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb \
@@ -100,11 +101,6 @@ ENV PATH="/opt/rr-python-venv/bin:$PATH"
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
-# Install newer version of npm than is available on apt.
-# This includes diff2html-cli for code coverage report.
-ADD docker/setup-node /tmp
-RUN bash --login -ex /tmp/setup-node install && rm /tmp/setup-node
-
 # HipBLASLt
 RUN apt-get update && apt-get install -y \
     libmsgpack-dev \
@@ -140,6 +136,9 @@ RUN ( \
 
 ENV CXX=/usr/bin/g++-13
 ENV CC=/usr/bin/gcc-13
+
+ADD docker/install-rocprof-trace-decoder /tmp
+RUN /tmp/install-rocprof-trace-decoder && rm /tmp/install-rocprof-trace-decoder
 
 # Clean image
 RUN apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
