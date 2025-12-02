@@ -60,14 +60,14 @@ def count_mnksol(input_file, tuning_csv, output_csv):
         if tuning_info:
             baseline_latency = float(tuning_info["baseline_latency(us)"])
             tuned_latency = float(tuning_info["tuned_latency(us)"])
-            # Treat failed latencies as 0
-            if baseline_latency < 0:
-                baseline_latency = 0.0
-            if tuned_latency < 0:
-                tuned_latency = 0.0
+            # Skip failed benchmarks - don't count in aggregation
+            if baseline_latency < 0 or tuned_latency < 0:
+                per_kernel_times[combo] = (0.0, 0.0)
+                continue
         else:
-            baseline_latency = 0.0
-            tuned_latency = 0.0
+            # Skip missing data - don't count in aggregation
+            per_kernel_times[combo] = (0.0, 0.0)
+            continue
         total_baseline = baseline_latency * cnt
         total_tuned = tuned_latency * cnt
         per_kernel_times[combo] = (total_baseline, total_tuned)
