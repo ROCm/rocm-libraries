@@ -1,34 +1,11 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2019 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
-#include "test.hpp"
-#include "driver.hpp"
-#include "get_handle.hpp"
-#include "lib_env_var.hpp"
-#include "workspace.hpp"
+#pragma once
+
+#include "../test.hpp"
+#include "../get_handle.hpp"
+#include "../workspace.hpp"
 
 #include <miopen/convolution.hpp>
 #include <miopen/conv/problem_description.hpp>
@@ -36,14 +13,9 @@
 #include <miopen/find_db.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/temp_file.hpp>
-#include <miopen/hip_build_utils.hpp>
 
 #include <chrono>
 #include <functional>
-
-MIOPEN_LIB_ENV_VAR(MIOPEN_ENABLE_LOGGING_ELAPSED_TIME)
-MIOPEN_LIB_ENV_VAR(MIOPEN_LOG_LEVEL)
-MIOPEN_LIB_ENV_VAR(MIOPEN_COMPILE_PARALLEL_LEVEL)
 
 namespace miopen {
 
@@ -60,19 +32,20 @@ private:
     bool cached;
 };
 
-static auto Duration(const std::function<void()>& func)
+inline auto Duration(const std::function<void()>& func)
 {
     const auto start = std::chrono::steady_clock::now();
     func();
     return std::chrono::steady_clock::now() - start;
 }
 
-struct FindDbTest : test_driver
+template <class T>
+struct find_db_driver
 {
     Handle handle{};
-    tensor<float> x;
-    tensor<float> w;
-    tensor<float> y;
+    tensor<T> x;
+    tensor<T> w;
+    tensor<T> y;
     Allocator::ManageDataPtr x_dev;
     Allocator::ManageDataPtr w_dev;
     Allocator::ManageDataPtr y_dev;
@@ -80,12 +53,12 @@ struct FindDbTest : test_driver
     miopen::ConvolutionDescriptor filter = {
         2, miopenConvolution, miopenPaddingDefault, {0, 0}, {1, 1}, {1, 1}};
 
-    FindDbTest()
+    find_db_driver()
     {
         filter.findMode.Set(FindMode::Values::Hybrid);
         x = {100, 25, 32, 32};
         w = {300, 25, 3, 3};
-        y = tensor<float>{filter.GetForwardOutputTensor(x.desc, w.desc)};
+        y = tensor<T>{filter.GetForwardOutputTensor(x.desc, w.desc)};
     }
 
     void run()
@@ -225,12 +198,3 @@ private:
     }
 };
 } // namespace miopen
-
-int main(int argc, const char* argv[])
-{
-    lib_env::update(MIOPEN_ENABLE_LOGGING_ELAPSED_TIME, 1);
-    lib_env::update(MIOPEN_LOG_LEVEL, 6);
-    lib_env::update(MIOPEN_COMPILE_PARALLEL_LEVEL, 1);
-
-    test_drive<miopen::FindDbTest>(argc, argv);
-}
