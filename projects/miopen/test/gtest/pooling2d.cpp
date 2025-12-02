@@ -22,9 +22,9 @@ template <typename T>
 void RunPooling2dTests()
 {
     pooling2d_driver<T> driver;
-    driver.type = miopen_type<T>{};
-    driver.full_set = false; // Set to false to reduce test cases and avoid OOM on smaller GPUs
-    driver.dataset_id = 0;   // Use default dataset
+    driver.type       = miopen_type<T>{};
+    driver.full_set   = false; // Set to false to reduce test cases and avoid OOM on smaller GPUs
+    driver.dataset_id = 0;     // Use default dataset
     driver.config_iter_start = 0;
 
     // Get data arguments (arguments that weren't passed via command line)
@@ -39,7 +39,9 @@ void RunPooling2dTests()
     driver.iteration = 0;
     try
     {
-        run_data(data_args.begin(), data_args.end(), [&] { driver.template base_run<pooling2d_driver<T>>(); });
+        run_data(data_args.begin(), data_args.end(), [&] {
+            driver.template base_run<pooling2d_driver<T>>();
+        });
     }
     catch(const std::exception& e)
     {
@@ -55,12 +57,8 @@ void Run2dDriver(miopenDataType_t prec)
 {
     switch(prec)
     {
-    case miopenFloat:
-        RunPooling2dTests<float>();
-        break;
-    case miopenHalf:
-        RunPooling2dTests<half_float::half>();
-        break;
+    case miopenFloat: RunPooling2dTests<float>(); break;
+    case miopenHalf: RunPooling2dTests<half_float::half>(); break;
     case miopenBFloat16:
     case miopenInt8:
     case miopenFloat8_fnuz:
@@ -78,7 +76,6 @@ void Run2dDriver(miopenDataType_t prec)
 };
 
 bool IsTestSupportedForDevice(const miopen::Handle& handle) { return true; }
-
 
 } // namespace pooling2d
 using namespace pooling2d;
