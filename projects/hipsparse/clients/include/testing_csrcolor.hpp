@@ -229,8 +229,8 @@ template <typename T>
 hipsparseStatus_t testing_csrcolor(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
-    hipsparseIndexBase_t idxBase = argus.baseA;
-    std::string         filename = argus.filename;
+    hipsparseIndexBase_t idxBase  = argus.baseA;
+    std::string          filename = argus.filename;
 
     floating_data_t<T> fractionToColor = make_DataType<floating_data_t<T>>(1.0);
 
@@ -244,9 +244,9 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
     CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idxBase));
 
     // Host structures
-    std::vector<int>     hrow_ptr;
-    std::vector<int>     hcol_ind;
-    std::vector<T>       hval;
+    std::vector<int> hrow_ptr;
+    std::vector<int> hcol_ind;
+    std::vector<T>   hval;
 
     // Initial Data on CPU
     srand(12345ULL);
@@ -301,8 +301,10 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
     {
         std::vector<int> hcoloring(m);
         std::vector<int> hreordering(m);
-        CHECK_HIP_ERROR(hipMemcpy(hcoloring.data(), dcoloring, sizeof(int) * m, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(hreordering.data(), dreordering, sizeof(int) * m, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(
+            hipMemcpy(hcoloring.data(), dcoloring, sizeof(int) * m, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(
+            hipMemcpy(hreordering.data(), dreordering, sizeof(int) * m, hipMemcpyDeviceToHost));
 
         // Check that two adjacent nodes do not have the same color
         for(int row = 0; row < m; ++row)
@@ -310,7 +312,7 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
             int row_color = hcoloring[row];
 
             int start = hrow_ptr[row] - idxBase;
-            int end = hrow_ptr[row + 1] - idxBase;
+            int end   = hrow_ptr[row + 1] - idxBase;
 
             for(int j = start; j < end; ++j)
             {
@@ -318,9 +320,10 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
                 if(row != col)
                 {
                     int col_color = hcoloring[col];
-                    EXPECT_HIPSPARSE_STATUS((row_color != col_color) ? HIPSPARSE_STATUS_SUCCESS
-                                                               : HIPSPARSE_STATUS_INTERNAL_ERROR,
-                                                               HIPSPARSE_STATUS_SUCCESS);
+                    EXPECT_HIPSPARSE_STATUS((row_color != col_color)
+                                                ? HIPSPARSE_STATUS_SUCCESS
+                                                : HIPSPARSE_STATUS_INTERNAL_ERROR,
+                                            HIPSPARSE_STATUS_SUCCESS);
                 }
             }
         }
@@ -333,7 +336,7 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
             EXPECT_HIPSPARSE_STATUS((hcoloring[i] >= 0 && hcoloring[i] < m)
                                         ? HIPSPARSE_STATUS_SUCCESS
                                         : HIPSPARSE_STATUS_INTERNAL_ERROR,
-                                        HIPSPARSE_STATUS_SUCCESS);
+                                    HIPSPARSE_STATUS_SUCCESS);
 
             // Calculate maximum value.
             if(hcoloring[i] > max_value)
@@ -352,8 +355,8 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
         for(int i = 0; i < max_value; ++i)
         {
             EXPECT_HIPSPARSE_STATUS(marker[i] ? HIPSPARSE_STATUS_SUCCESS
-                                                : HIPSPARSE_STATUS_INTERNAL_ERROR,
-                                                HIPSPARSE_STATUS_SUCCESS);
+                                              : HIPSPARSE_STATUS_INTERNAL_ERROR,
+                                    HIPSPARSE_STATUS_SUCCESS);
         }
     }
 

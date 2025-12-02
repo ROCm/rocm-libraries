@@ -25,6 +25,5 @@
 #include "testing_csrcolor.hpp"
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
-TEST_ROUTINE(
-    csrcolor, reorder, arg.M, arg.N, arg.baseA);
+TEST_ROUTINE(csrcolor, reorder, arg.M, arg.N, arg.baseA);
 #endif
