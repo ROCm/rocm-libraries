@@ -200,7 +200,7 @@ static auto MakeNamedParameterCollectionValues(const std::string& name,
 // Examples:
 //
 //      GetRangeAsString(std::vector<int>{1, 2, 3, 4}, "x") returns "1x2x3x4"
-//      GetRangeAsString(std::vector<float>{1.1, 2.2, 3.3, 4.4}, ",") returns "1p1_2p2_3p3_4p4"
+//      GetRangeAsString(std::vector<float>{1.1, 2.2, 3.3, 4.4}, ", ") returns "1p1, 2p2, 3p3, 4p4"
 //
 static std::string GetRangeAsString(const std::ranges::range auto& r,
                                     std::string_view separator = " ")
