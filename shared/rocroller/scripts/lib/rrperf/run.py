@@ -37,7 +37,7 @@ from typing import Dict, Tuple
 
 import pandas as pd
 import rrperf
-import rrperf.hipblaslt
+import rrperf.dump_csv
 import yaml
 
 
@@ -192,8 +192,8 @@ def get_args(parser: argparse.ArgumentParser):
         help="Pin clocks before launching benchmark clients.",
     )
     parser.add_argument(
-        "--dump_hipblaslt_csv",
-        help="Dump hipblaslt bench compatible CSV with included headers.",
+        "--dump_csv",
+        help="Dump benchmark CSV with included headers.",
         action="store_true",
         default=False,
     )
@@ -272,7 +272,7 @@ def run_cli(  # noqa: C901
         # XXX if running single token, suite might be None
         submit_directory(suite, rundir, ptsdir)
 
-    if kwargs.get("dump_hipblaslt_csv", False):
-        rrperf.hipblaslt.dump_hipblaslt_csv(suite, rundir)
+    if kwargs.get("dump_csv", False):
+        rrperf.dump_csv.dump_csv(suite, rundir)
 
     return result, rundir
