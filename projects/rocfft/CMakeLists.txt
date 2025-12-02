@@ -167,7 +167,7 @@ else()
   # Don't force, users should be able to override GPU_TARGETS at the command line if desired
   set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "GPU architectures to build for")
 endif()
-rocm_check_target_ids(AMDGPU_TARGETS TARGETS "${GPU_TARGETS}")
+rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
   
 # HIP is required - library and clients use HIP to access the device
 find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
