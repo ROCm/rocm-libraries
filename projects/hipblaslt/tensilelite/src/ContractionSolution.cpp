@@ -930,7 +930,7 @@ namespace TensileLite
                / std::ceil(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount);
     }
 
-    std::pair<int32_t, uint32_t> ContractionSolution::calculateAutoWGM(Problem const&  problem,
+    std::pair<int32_t, int32_t> ContractionSolution::calculateAutoWGM(Problem const&  problem,
                                                                        Hardware const* hardware,
                                                                        uint32_t const  skgrid) const
     {
@@ -939,8 +939,8 @@ namespace TensileLite
         hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
 
         // Default WGM
-        int32_t  defaultWGM;
-        uint32_t defaultWGMXCC;
+        int32_t defaultWGM;
+        int32_t defaultWGMXCC;
 
         // Dynamically pick the values
         if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
@@ -948,7 +948,7 @@ namespace TensileLite
            && sizeMapping.nonTemporalA < 4 /* Exclude NTs for now till we fix libs */
            && sizeMapping.nonTemporalB < 4 /* Exclude NTs for now till we fix libs */)
         {
-            int32_t  c_wgm    = 0;
+            int32_t  c_wgm   = 0;
             int32_t c_wgmxcc = 0;
             // Try to find cached WGM and WGMXCC
             std::tie(c_wgm, c_wgmxcc) = paramsCache.find(problem);
@@ -969,7 +969,7 @@ namespace TensileLite
                         .cache_hints_a = sizeMapping.nonTemporalA,
                         .cache_hints_b = sizeMapping.nonTemporalB,
                     };
-                    auto [defaultWGMXCC, defaultWGM] = origami::select_workgroup_mapping(
+                    std::tie(defaultWGMXCC, defaultWGM) = origami::select_workgroup_mapping(
                         origami_problem, *(hipAMDGPU->analyticalHardware), origami_config, skgrid);
 
                     // Add to cache only if dynamically calculated.
