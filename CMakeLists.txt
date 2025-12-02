@@ -86,62 +86,41 @@ endforeach()
 # --- Add subdirectories ---
 if("mxdatagenerator" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
-        COMPONENT mxdatagenerator
-        PREFIX_PATH shared
-        EXPECT_TARGET roc::mxDataGenerator
+        COMPONENT mxdatagenerator PREFIX_PATH shared EXPECT_TARGET roc::mxDataGenerator
     )
 endif()
 
 if("hipblas-common" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
-        COMPONENT hipblas-common
-        PREFIX_PATH projects
-        EXPECT_TARGET roc::hipblas-common
+        COMPONENT hipblas-common PREFIX_PATH projects EXPECT_TARGET roc::hipblas-common
     )
 endif()
 
 if("rocroller" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    # pip packages:
-    #   pip install pytest-cmake
+    # pip packages: pip install pytest-cmake
     set(ROCROLLER_ENABLE_FETCH ON)
     add_subdirectory_with_message(
-        COMPONENT rocroller
-        PREFIX_PATH shared
-        EXPECT_TARGET roc::rocroller
+        COMPONENT rocroller PREFIX_PATH shared EXPECT_TARGET roc::rocroller
     )
 endif()
 
 if("origami" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    add_subdirectory_with_message(
-        COMPONENT origami
-        PREFIX_PATH shared
-        EXPECT_TARGET roc::origami
-    )
+    add_subdirectory_with_message(COMPONENT origami PREFIX_PATH shared EXPECT_TARGET roc::origami)
 endif()
 
 if("hipblaslt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     set(HIPBLASLT_ENABLE_BLIS OFF)
     add_subdirectory_with_message(
-        COMPONENT hipblaslt
-        PREFIX_PATH projects
-        EXPECT_TARGET roc::hipblaslt
+        COMPONENT hipblaslt PREFIX_PATH projects EXPECT_TARGET roc::hipblaslt
     )
 endif()
 
 if("rocprim" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    add_subdirectory_with_message(
-        COMPONENT rocprim
-        PREFIX_PATH projects
-        EXPECT_TARGET rocprim
-    )
+    add_subdirectory_with_message(COMPONENT rocprim PREFIX_PATH projects EXPECT_TARGET rocprim)
 endif()
 
 if("rocrand" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    add_subdirectory_with_message(
-        COMPONENT rocrand
-        PREFIX_PATH projects
-        EXPECT_TARGET rocrand
-    )
+    add_subdirectory_with_message(COMPONENT rocrand PREFIX_PATH projects EXPECT_TARGET rocrand)
 endif()
 
 # --- Projects not yet configured for superbuild ---

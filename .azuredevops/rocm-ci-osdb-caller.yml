@@ -14,7 +14,7 @@ variables:
   - name: REPOSITORY_NAME
     value: 'rocm/rocm-libraries'
   - name: BASE_REF
-    value: 'develop'              
+    value: 'develop'
   - name: EVENT_TYPE
     value: 'push'
   - name: GH_PAT
@@ -35,7 +35,7 @@ jobs:
       HEAD_SHA=$(git ls-remote https://github.com/rocm/rocm-libraries.git refs/heads/develop | awk '{print $1}')
       echo "HEAD_SHA=$HEAD_SHA"
       echo "##vso[task.setvariable variable=HEAD_SHA]$HEAD_SHA"
-    displayName: Get HEAD_SHA using git ls-remote   
+    displayName: Get HEAD_SHA using git ls-remote
   - script: |
       cd $(repo_name)
       LOG_FILE="/home/jenkins/azure-logs/$(date +'%Y%m%d_%H%M%S').txt"
