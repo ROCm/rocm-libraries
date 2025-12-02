@@ -42,18 +42,17 @@ namespace TensileLite
     namespace Client
     {
         /**
- * Monitors properties of a particular GPU in a separate thread.
- *
- * The thread is manually managed because the thread creation overhead is too
- * high to create a thread every time.
- *
- * The interface to this class is not thread-safe.
- */
+        * Monitors properties of a particular GPU in a separate thread.
+        *
+        * The thread is manually managed because the thread creation overhead is too
+        * high to create a thread every time.
+        *
+        * The interface to this class is not thread-safe.
+        */
         class HardwareMonitor
         {
         public:
-            /** Translates the Hip device index into the corresponding device index for
-   * ROCm-SMI. */
+            /** Translates the Hip device index into the corresponding device index for AMD-SMI. */
             static uint32_t GetAMDSMIIndex(int hipDeviceIndex);
 
             using clock = std::chrono::steady_clock;
@@ -87,7 +86,9 @@ namespace TensileLite
             double getMaxGfxFreqValues()
             {
                 if(m_hasInvalidGpuFreqStatus || !has_maxFreqValues)
+                {
                     return std::numeric_limits<double>::quiet_NaN();
+                }
                 return static_cast<double>(m_maxFreqValues);
             }
 

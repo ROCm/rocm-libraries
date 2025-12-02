@@ -119,7 +119,7 @@ namespace TensileLite
                 = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
             msg << std::put_time(gmtime(&now), "%F %T %z");
 
-            throw std::runtime_error(concatenate("RSMI Can't find a device with PCI ID ",
+            throw std::runtime_error(concatenate("AMDSMI Can't find a device with PCI ID ",
                                                  hipPCIID,
                                                  "(",
                                                  props.pciDomainID,
@@ -340,18 +340,9 @@ namespace TensileLite
         {
             m_dataPoints = 0;
 
-            for(auto& v : m_tempValues)
-            {
-                v = 0;
-            }
-            for(auto& v : m_clockValues)
-            {
-                v = 0;
-            }
-            for(auto& v : m_fanValues)
-            {
-                v = 0;
-            }
+            std::fill(m_tempValues.begin(), m_tempValues.end(), 0);
+            std::fill(m_clockValues.begin(), m_clockValues.end(), 0);
+            std::fill(m_fanValues.begin(), m_fanValues.end(), 0);
 
             m_lastCollection = clock::time_point();
             m_nextCollection = clock::time_point();
