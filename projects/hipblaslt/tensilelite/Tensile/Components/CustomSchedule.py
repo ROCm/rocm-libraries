@@ -1677,10 +1677,10 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isTN(kernel) and not useLDSTr and TLDS == 1:
         #index and code pair
-        syncTable = [-1, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment=""),
-                    3, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment=""),
+        syncTable = [-1, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRB1-0 to complete"),
+                    3, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="wait for LRB1 to complete"),
                     
-                    16, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before GRA start"),
+                    16, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before GRA start"),
                     16, SBarrier(comment=""),
                     
                     24, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0 to complete before next sub-iteration"),
@@ -1696,20 +1696,20 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
                 'GRIncA': [[4, 5, 6, 7, 8, 9, 10, 11, 12]],
                 'GRIncB': [[13, 14, 15, 16, 17, 18, 19, 20, 21]],
                  
-                'LRA0': [[-1, 0, 1, 2]],
-                'LRB0': [[3, 5, 7, 9, 11, 13, 15]],
+                'LRA0': [[-1, 1, 3, 5]],
+                'LRB0': [[7, 9, 11, 13, 15, 17, 19]],
                 'GRA': [[16, 16, 18, 18, 20, 20, 22, 22]],
 
                 'GRB': [[24, 24, 26, 26, 28, 28, 30, 30, 35,35, 40,40, 45,45]],
                 'LRA1': [[29, 31, 33, 36]],
-                'LRB1': [[50, 51, 51, 52, 52, 53, 54]],
+                'LRB1': [[50, 51, 51, 52, 53, 54, 55]],
 
                 'LRSA': [[27]],
                 'LRSB': [[31]],
-                'LWSA': [[46]],
-                'LWSB': [[47]],
+                'LWSA': [[45]],
+                'LWSB': [[46]],
 
-                'LCC' : [[55, 55]]
+                'LCC' : [[47, 48]]
             }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 11 # vmcnt shift for ngl and nll
