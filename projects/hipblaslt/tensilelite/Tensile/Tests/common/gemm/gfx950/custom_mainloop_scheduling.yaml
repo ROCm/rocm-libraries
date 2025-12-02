@@ -1097,7 +1097,58 @@ BenchmarkProblems:
           - Range: [[208], [256], [1], [32, 64, 256]]
           - Exact: [3328, 4096, 1, 8192]
         - BiasTypeArgs: ['b']
-
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - 1LDSBuffer: [0]
+        - ActivationFuncCall: [false]
+        - AssertFree0ElementMultiple: [1]
+        - AssertSummationElementMultiple: [1]
+        - ClusterLocalRead: [1]
+        - ConvertAfterDS: [false]
+        - DepthU: [128]
+        - DirectToLds: [1]
+        - DirectToVgprA: [false]
+        - DirectToVgprB: [false]
+        - ExpandPointerSwap: [false]
+        - ForceDisableShadowInit: [false]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - LDSTrInst: [false]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - LocalReadVectorWidth: [8]
+        - LocalWritePerMfma: [-1]
+        - NonTemporalA: [2]
+        - NonTemporalB: [1]
+        - NonTemporalC: [0]
+        - NonTemporalD: [5]
+        - MatrixInstruction:
+          - [16, 16,32, 1,  1, 6, 4,  2,2 ]
+        - OptNoLoadLoop: [1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - PreloadKernArgs: [true]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [true]
+        - StoreSyncOpt: [1]
+        - StreamK: [3]
+        - TransposeLDS: [1]
+        - UnrollLoopSwapGlobalReadOrder: [0]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [1]
+        - WorkGroup: [[16, 16, 1]]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[192], [128], [1], [128, 128, 512]]
+          - Range: [[192], [128], [1], [1, 1, 128]]
+          - Range: [[192], [128], [1], [64, 128, 512]]
+          - Range: [[6144], [4096], [1], [128, 128, 512]]
+          - Exact: [4096, 3072, 1, 8192]
+        - BiasTypeArgs: ['b']
   ########################################
   # HHS TN - standard
   ########################################
