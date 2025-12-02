@@ -20,16 +20,14 @@
     {                                           \
     } while(0)
 #else
-#define _HIPDNN_INTERNAL_LOG_ACTION(spdlog_level, ...)  \
-    do                                                  \
-    {                                                   \
-        if(auto logger = spdlog::get(COMPONENT_NAME))   \
-        {                                               \
-            if(logger->should_log(spdlog_level))        \
-            {                                           \
-                logger->log(spdlog_level, __VA_ARGS__); \
-            }                                           \
-        }                                               \
+#define _HIPDNN_INTERNAL_LOG_ACTION(spdlog_level, ...) \
+    do                                                 \
+    {                                                  \
+        auto logger = spdlog::get(COMPONENT_NAME);     \
+        if(logger && logger->should_log(spdlog_level)) \
+        {                                              \
+            logger->log(spdlog_level, __VA_ARGS__);    \
+        }                                              \
     } while(0)
 #endif // COMPONENT_NAME
 

@@ -8,17 +8,15 @@
 #include <spdlog/spdlog.h>
 
 #ifdef HIPDNN_BACKEND_COMPILATION
-#define _HIPDNN_BACKEND_LOG_ACTION(spdlog_level, ...)                  \
-    do                                                                 \
-    {                                                                  \
-        hipdnn_backend::logging::initialize();                         \
-        if(auto _logger = hipdnn_backend::logging::getBackendLogger()) \
-        {                                                              \
-            if(_logger->should_log(spdlog_level))                      \
-            {                                                          \
-                _logger->log(spdlog_level, __VA_ARGS__);               \
-            }                                                          \
-        }                                                              \
+#define _HIPDNN_BACKEND_LOG_ACTION(spdlog_level, ...)               \
+    do                                                              \
+    {                                                               \
+        hipdnn_backend::logging::initialize();                      \
+        auto _logger = hipdnn_backend::logging::getBackendLogger(); \
+        if(_logger && _logger->should_log(spdlog_level))            \
+        {                                                           \
+            _logger->log(spdlog_level, __VA_ARGS__);                \
+        }                                                           \
     } while(0)
 
 #define HIPDNN_LOG_INFO(...) \
