@@ -637,11 +637,8 @@ extern "C" __global__
 
     __shared__ float2 lds[1344];
 
-    const float* lwbIn;
-    float2* lwbOut;
-
-    lwbIn  = gbIn + batch * CFF_IMG_W * CFF_IMG_H * 16;
-    lwbOut = gbOut + CFF_HALFW + batch * 16;
+    const float* lwbIn = gbIn + batch * CFF_IMG_W * CFF_IMG_H * 16;
+    float2* lwbOut     = gbOut + batch * 16;
 
     unsigned int met = me % 12;
 
@@ -681,11 +678,8 @@ extern "C" __global__
 
     __shared__ float2 lds[1344];
 
-    const float* lwbIn;
-    float2* lwbOut;
-
-    lwbIn  = gbIn;
-    lwbOut = gbOut + CFF_HALFW + 84 * (CFF_CHANNELS * CFF_BATCH + 64) + batch * 16;
+    const float* lwbIn = gbIn;
+    float2* lwbOut     = gbOut + 84 * (CFF_CHANNELS * CFF_BATCH + 64) + batch * 16;
 
     unsigned int met = me % 12;
 
@@ -717,41 +711,32 @@ extern "C" __global__
 }
 
 extern "C" __global__
-    __launch_bounds__(256) void MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_out(const float2* __restrict__ gbIn,
+                                                            float2* __restrict__ gbOut)
 {
     unsigned int me    = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[256];
 
-    unsigned int iOffset;
-    unsigned int oOffset;
-    const float2* lwbIn;
-    float2* lwbOut;
-
-    float2 R0;
-
     unsigned int bm = batch % 6;
     unsigned int bd = batch / 6;
 
-    iOffset = bm * (CFF_NFILTER * CFF_BATCH + 64) * 16 + bd * 16;
-    oOffset = CFF_HALFW + bm * 16 + bd * 84 * 16;
-
-    lwbIn  = gb + iOffset;
-    lwbOut = gb + oOffset;
+    const float2* lwbIn = gbIn + bm * (CFF_NFILTER * CFF_BATCH + 64) * 16 + bd * 16;
+    float2* lwbOut      = gbOut + bm * 16 + bd * 84 * 16;
 
     if(bm == 5)
     {
         if(me < 64)
         {
-            R0 = lwbIn[(me % 16) + (me / 16) * (CFF_BATCH * CFF_NFILTER + 64)];
-            lds[(me % 16) * 4 + (me / 16)] = R0;
+            lds[(me % 16) * 4 + (me / 16)] =
+                lwbIn[(me % 16) + (me / 16) * (CFF_BATCH * CFF_NFILTER + 64)];
         }
     }
     else
     {
-        R0 = lwbIn[(me % 16) + (me / 16) * (CFF_BATCH * CFF_NFILTER + 64)];
-        lds[(me % 16) * 16 + (me / 16)] = R0;
+        lds[(me % 16) * 16 + (me / 16)] =
+            lwbIn[(me % 16) + (me / 16) * (CFF_BATCH * CFF_NFILTER + 64)];
     }
 
     __syncthreads();
@@ -760,14 +745,12 @@ extern "C" __global__
     {
         if(me < 64)
         {
-            R0                               = lds[me];
-            lwbOut[(me % 4) + (me / 4) * 84] = R0;
+            lwbOut[(me % 4) + (me / 4) * 84] = lds[me];
         }
     }
     else
     {
-        R0                                 = lds[me];
-        lwbOut[(me % 16) + (me / 16) * 84] = R0;
+        lwbOut[(me % 16) + (me / 16) * 84] = lds[me];
     }
 }
 
@@ -1041,11 +1024,8 @@ extern "C" __global__
 
     __shared__ float2 lds[1344];
 
-    const float2* lwbIn;
-    float* lwbOut;
-
-    lwbIn  = gbIn + CFF_HALFW + batch * 1344;
-    lwbOut = gbOut + batch * CFF_IMG_W * CFF_IMG_H * 16;
+    const float2* lwbIn = gbIn + batch * 1344;
+    float* lwbOut       = gbOut + batch * CFF_IMG_W * CFF_IMG_H * 16;
 
     InvPassA(me, 0, 0, lwbIn, lds);
     __syncthreads();
@@ -1505,11 +1485,8 @@ extern "C" __global__
 
     __shared__ float2 lds[720];
 
-    const float* lwbIn;
-    float2* lwbOut;
-
-    lwbIn  = gbIn + batch * CFF_IMG_W * CFF_IMG_H * 4;
-    lwbOut = gbOut + batch * 720;
+    const float* lwbIn = gbIn + batch * CFF_IMG_W * CFF_IMG_H * 4;
+    float2* lwbOut     = gbOut + batch * 720;
 
     FwdPassIN(me, (me / 32) * CFF_IMG_W * CFF_IMG_H, 0, lwbIn, lds);
 
@@ -1527,12 +1504,8 @@ extern "C" __global__
 
     __shared__ float2 lds[720];
 
-    const float* lwbIn;
-    float2* lwbOut;
-
-    lwbIn = gbIn;
-
-    lwbOut = gbOut + 180 * CFF_CHANNELS * CFF_BATCH + batch * 720;
+    const float* lwbIn = gbIn;
+    float2* lwbOut     = gbOut + 180 * CFF_CHANNELS * CFF_BATCH + batch * 720;
 
     FwdPassWE(batch, me, 0, lwbIn, lds);
 
@@ -1542,41 +1515,30 @@ extern "C" __global__
 }
 
 extern "C" __global__
-    __launch_bounds__(256) void MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_in(const float2* __restrict__ gbIn,
+                                                           float2* __restrict__ gbOut)
 {
     unsigned int me    = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[256];
 
-    unsigned int iOffset;
-    unsigned int oOffset;
-    const float2* lwbIn;
-    float2* lwbOut;
-
-    float2 R0;
-
     unsigned int bm = batch % 12;
     unsigned int bd = batch / 12;
 
-    iOffset = bm * 16 + bd * 180 * 16;
-    oOffset = CFF_HALFW + bm * (CFF_CHANNELS * CFF_BATCH + 64) * 16 + bd * 16;
-
-    lwbIn  = gb + iOffset;
-    lwbOut = gb + oOffset;
+    const float2* lwbIn = gbIn + bm * 16 + bd * 180 * 16;
+    float2* lwbOut      = gbOut + bm * (CFF_CHANNELS * CFF_BATCH + 64) * 16 + bd * 16;
 
     if(bm == 11)
     {
         if(me < 64)
         {
-            R0                            = lwbIn[(me % 4) + (me / 4) * 180];
-            lds[(me % 4) * 16 + (me / 4)] = R0;
+            lds[(me % 4) * 16 + (me / 4)] = lwbIn[(me % 4) + (me / 4) * 180];
         }
     }
     else
     {
-        R0                              = lwbIn[(me % 16) + (me / 16) * 180];
-        lds[(me % 16) * 16 + (me / 16)] = R0;
+        lds[(me % 16) * 16 + (me / 16)] = lwbIn[(me % 16) + (me / 16) * 180];
     }
 
     __syncthreads();
@@ -1585,54 +1547,41 @@ extern "C" __global__
     {
         if(me < 64)
         {
-            R0                                                              = lds[me];
-            lwbOut[(me % 16) + (me / 16) * (CFF_CHANNELS * CFF_BATCH + 64)] = R0;
+            lwbOut[(me % 16) + (me / 16) * (CFF_CHANNELS * CFF_BATCH + 64)] = lds[me];
         }
     }
     else
     {
-        R0                                                              = lds[me];
-        lwbOut[(me % 16) + (me / 16) * (CFF_CHANNELS * CFF_BATCH + 64)] = R0;
+        lwbOut[(me % 16) + (me / 16) * (CFF_CHANNELS * CFF_BATCH + 64)] = lds[me];
     }
 }
 
 extern "C" __global__
-    __launch_bounds__(256) void MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_we(const float2* __restrict__ gbIn,
+                                                           float2* __restrict__ gbOut)
 {
     unsigned int me    = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[256];
 
-    unsigned int iOffset;
-    unsigned int oOffset;
-    const float2* lwbIn;
-    float2* lwbOut;
-
-    float2 R0;
-
     unsigned int bm = batch % 12;
     unsigned int bd = batch / 12;
 
-    iOffset = 180 * CFF_CHANNELS * CFF_BATCH + bm * 16 + bd * 180 * 16;
-    oOffset = CFF_HALFW + 180 * (CFF_CHANNELS * CFF_BATCH + 64) +
-              bm * (CFF_CHANNELS * CFF_NFILTER + 64) * 16 + bd * 16;
-
-    lwbIn  = gb + iOffset;
-    lwbOut = gb + oOffset;
+    const float2* lwbIn = gbIn + 180 * CFF_CHANNELS * CFF_BATCH + bm * 16 + bd * 180 * 16;
+    float2* lwbOut      = gbOut + 180 * (CFF_CHANNELS * CFF_BATCH + 64) +
+                     bm * (CFF_CHANNELS * CFF_NFILTER + 64) * 16 + bd * 16;
 
     if(bm == 11)
     {
         if(me < 64)
         {
-            R0                            = lwbIn[(me % 4) + (me / 4) * 180];
-            lds[(me % 4) * 16 + (me / 4)] = R0;
+            lds[(me % 4) * 16 + (me / 4)] = lwbIn[(me % 4) + (me / 4) * 180];
         }
     }
     else
     {
-        R0                              = lwbIn[(me % 16) + (me / 16) * 180];
-        lds[(me % 16) * 16 + (me / 16)] = R0;
+        lds[(me % 16) * 16 + (me / 16)] = lwbIn[(me % 16) + (me / 16) * 180];
     }
 
     __syncthreads();
@@ -1641,53 +1590,42 @@ extern "C" __global__
     {
         if(me < 64)
         {
-            R0                                                                = lds[me];
-            lwbOut[(me % 16) + (me / 16) * (CFF_CHANNELS * CFF_NFILTER + 64)] = R0;
+            lwbOut[(me % 16) + (me / 16) * (CFF_CHANNELS * CFF_NFILTER + 64)] = lds[me];
         }
     }
     else
     {
-        R0                                                                = lds[me];
-        lwbOut[(me % 16) + (me / 16) * (CFF_CHANNELS * CFF_NFILTER + 64)] = R0;
+        lwbOut[(me % 16) + (me / 16) * (CFF_CHANNELS * CFF_NFILTER + 64)] = lds[me];
     }
 }
 
 extern "C" __global__
-    __launch_bounds__(256) void MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_out(const float2* __restrict__ gbIn,
+                                                            float2* __restrict__ gbOut)
 {
     unsigned int me    = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[256];
 
-    unsigned int iOffset;
-    unsigned int oOffset;
-    const float2* lwbIn;
-    float2* lwbOut;
-
-    float2 R0;
-
     unsigned int bm = batch % 12;
     unsigned int bd = batch / 12;
 
-    iOffset = bm * (CFF_NFILTER * CFF_BATCH + 64) * 16 + bd * 16;
-    oOffset = CFF_HALFW + bm * 16 + bd * 180 * 16;
-
-    lwbIn  = gb + iOffset;
-    lwbOut = gb + oOffset;
+    const float2* lwbIn = gbIn + bm * (CFF_NFILTER * CFF_BATCH + 64) * 16 + bd * 16;
+    float2* lwbOut      = gbOut + bm * 16 + bd * 180 * 16;
 
     if(bm == 11)
     {
         if(me < 64)
         {
-            R0 = lwbIn[(me % 16) + (me / 16) * (CFF_BATCH * CFF_NFILTER + 64)];
-            lds[(me % 16) * 4 + (me / 16)] = R0;
+            lds[(me % 16) * 4 + (me / 16)] =
+                lwbIn[(me % 16) + (me / 16) * (CFF_BATCH * CFF_NFILTER + 64)];
         }
     }
     else
     {
-        R0 = lwbIn[(me % 16) + (me / 16) * (CFF_BATCH * CFF_NFILTER + 64)];
-        lds[(me % 16) * 16 + (me / 16)] = R0;
+        lds[(me % 16) * 16 + (me / 16)] =
+            lwbIn[(me % 16) + (me / 16) * (CFF_BATCH * CFF_NFILTER + 64)];
     }
 
     __syncthreads();
@@ -1696,14 +1634,12 @@ extern "C" __global__
     {
         if(me < 64)
         {
-            R0                                = lds[me];
-            lwbOut[(me % 4) + (me / 4) * 180] = R0;
+            lwbOut[(me % 4) + (me / 4) * 180] = lds[me];
         }
     }
     else
     {
-        R0                                  = lds[me];
-        lwbOut[(me % 16) + (me / 16) * 180] = R0;
+        lwbOut[(me % 16) + (me / 16) * 180] = lds[me];
     }
 }
 
@@ -2007,11 +1943,8 @@ extern "C" __global__
 
     __shared__ float2 lds[720];
 
-    const float2* lwbIn;
-    float* lwbOut;
-
-    lwbIn  = gbIn + CFF_HALFW + batch * 720;
-    lwbOut = gbOut + batch * CFF_IMG_W * CFF_IMG_H * 4;
+    const float2* lwbIn = gbIn + batch * 720;
+    float* lwbOut       = gbOut + batch * CFF_IMG_W * CFF_IMG_H * 4;
 
     InvPassA(me, 0, 0, lwbIn, lds);
 
@@ -2529,8 +2462,7 @@ __forceinline__ __device__ void FwdPass4(unsigned int me,
 
     if(me < 32)
     {
-        R0                             = bufIn[inOffset + (512 + me)];
-        bufOut[outOffset + (512 + me)] = R0;
+        bufOut[outOffset + (512 + me)] = bufIn[inOffset + (512 + me)];
     }
 }
 
@@ -2543,11 +2475,8 @@ extern "C" __global__
 
     __shared__ float2 lds[544];
 
-    const float* lwbIn;
-    float2* lwbOut;
-
-    lwbIn  = gbIn + batch * CFF_IMG_W * CFF_IMG_H;
-    lwbOut = gbOut + batch * 544;
+    const float* lwbIn = gbIn + batch * CFF_IMG_W * CFF_IMG_H;
+    float2* lwbOut     = gbOut + batch * 544;
 
     FwdPassIN(me, 0, 0, lwbIn, lds);
     __syncthreads();
@@ -2585,8 +2514,6 @@ extern "C" __global__
     __shared__ float2 lds[544];
 
     const float* lwbIn;
-    float2* lwbOut;
-
     if constexpr(CFF_BACKWARD)
     {
         lwbIn = gbIn + (batch % CFF_CHANNELS) * 25 * CFF_NFILTER + (batch / CFF_CHANNELS) * 25;
@@ -2596,7 +2523,7 @@ extern "C" __global__
         lwbIn = gbIn + batch * 25;
     }
 
-    lwbOut = gbOut + 544 * CFF_CHANNELS * CFF_BATCH + batch * 544;
+    float2* lwbOut = gbOut + 544 * CFF_CHANNELS * CFF_BATCH + batch * 544;
 
     FwdPassWE(me, 0, lwbIn, lds);
     __syncthreads();
@@ -2627,77 +2554,55 @@ extern "C" __global__
 #if defined(CFF_TRANSP_IN_MOD16)
 
 extern "C" __global__
-    __launch_bounds__(256) void MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_in(const float2* __restrict__ gbIn,
+                                                           float2* __restrict__ gbOut)
 {
     unsigned int me    = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[256];
 
-    unsigned int iOffset;
-    unsigned int oOffset;
-    const float2* lwbIn;
-    float2* lwbOut;
-
-    float2 R0;
-
     unsigned int bm = batch % 34;
     unsigned int bd = batch / 34;
 
-    iOffset = bm * 16 + bd * 544 * 16;
-    oOffset = CFF_HALFW + bm * (CFF_CHANNELS * CFF_BATCH + 64) * 16 + bd * 16;
+    const float2* lwbIn = gbIn + bm * 16 + bd * 544 * 16;
+    float2* lwbOut      = gbOut + bm * (CFF_CHANNELS * CFF_BATCH + 64) * 16 + bd * 16;
 
-    lwbIn  = gb + iOffset;
-    lwbOut = gb + oOffset;
-
-    R0                              = lwbIn[(me % 16) + (me / 16) * 544];
-    lds[(me % 16) * 16 + (me / 16)] = R0;
+    lds[(me % 16) * 16 + (me / 16)] = lwbIn[(me % 16) + (me / 16) * 544];
 
     __syncthreads();
 
-    R0                                                              = lds[me];
-    lwbOut[(me % 16) + (me / 16) * (CFF_CHANNELS * CFF_BATCH + 64)] = R0;
+    lwbOut[(me % 16) + (me / 16) * (CFF_CHANNELS * CFF_BATCH + 64)] = lds[me];
 }
 
 #else
 
 extern "C" __global__
-    __launch_bounds__(256) void MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_in(const float2* __restrict__ gbIn,
+                                                           float2* __restrict__ gbOut)
 {
     unsigned int me    = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[1024];
 
-    unsigned int iOffset;
-    unsigned int oOffset;
-    const float2* lwbIn;
-    float2* lwbOut;
-
-    float2 R0;
-
     unsigned int bm = batch % 17;
     unsigned int bd = batch / 17;
 
-    iOffset = bm * 32 + bd * 544 * 32;
-    oOffset = CFF_HALFW + bm * (CFF_CHANNELS * CFF_BATCH + 64) * 32 + bd * 32;
-
-    lwbIn  = gb + iOffset;
-    lwbOut = gb + oOffset;
+    const float2* lwbIn = gbIn + bm * 32 + bd * 544 * 32;
+    float2* lwbOut      = gbOut + bm * (CFF_CHANNELS * CFF_BATCH + 64) * 32 + bd * 32;
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0                                      = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
-        lds[(me % 32) * 32 + (me / 32) + t * 8] = R0;
+        lds[(me % 32) * 32 + (me / 32) + t * 8] = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
     }
 
     __syncthreads();
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0                                              = lds[me + t * 256];
         lwbOut[(me % 32) + (me / 32) * (CFF_CHANNELS * CFF_BATCH + 64) +
-               t * 8 * (CFF_CHANNELS * CFF_BATCH + 64)] = R0;
+               t * 8 * (CFF_CHANNELS * CFF_BATCH + 64)] = lds[me + t * 256];
     }
 }
 
@@ -2706,79 +2611,57 @@ extern "C" __global__
 #if defined(CFF_TRANSP_WT_MOD16)
 
 extern "C" __global__
-    __launch_bounds__(256) void MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_we(const float2* __restrict__ gbIn,
+                                                           float2* __restrict__ gbOut)
 {
     unsigned int me    = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[256];
 
-    unsigned int iOffset;
-    unsigned int oOffset;
-    const float2* lwbIn;
-    float2* lwbOut;
-
-    float2 R0;
-
     unsigned int bm = batch % 34;
     unsigned int bd = batch / 34;
 
-    iOffset = 544 * CFF_CHANNELS * CFF_BATCH + bm * 16 + bd * 544 * 16;
-    oOffset = CFF_HALFW + 544 * (CFF_CHANNELS * CFF_BATCH + 64) +
-              bm * (CFF_CHANNELS * CFF_NFILTER + 64) * 16 + bd * 16;
+    const float2* lwbIn = gbIn + 544 * CFF_CHANNELS * CFF_BATCH + bm * 16 + bd * 544 * 16;
+    float2* lwbOut      = gbOut + 544 * (CFF_CHANNELS * CFF_BATCH + 64) +
+                     bm * (CFF_CHANNELS * CFF_NFILTER + 64) * 16 + bd * 16;
 
-    lwbIn  = gb + iOffset;
-    lwbOut = gb + oOffset;
-
-    R0                              = lwbIn[(me % 16) + (me / 16) * 544];
-    lds[(me % 16) * 16 + (me / 16)] = R0;
+    lds[(me % 16) * 16 + (me / 16)] = lwbIn[(me % 16) + (me / 16) * 544];
 
     __syncthreads();
 
-    R0                                                                = lds[me];
-    lwbOut[(me % 16) + (me / 16) * (CFF_CHANNELS * CFF_NFILTER + 64)] = R0;
+    lwbOut[(me % 16) + (me / 16) * (CFF_CHANNELS * CFF_NFILTER + 64)] = lds[me];
 }
 
 #else
 
 extern "C" __global__
-    __launch_bounds__(256) void MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_we(const float2* __restrict__ gbIn,
+                                                           float2* __restrict__ gbOut)
 {
     unsigned int me    = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[1024];
 
-    unsigned int iOffset;
-    unsigned int oOffset;
-    const float2* lwbIn;
-    float2* lwbOut;
-
-    float2 R0;
-
     unsigned int bm = batch % 17;
     unsigned int bd = batch / 17;
 
-    iOffset = 544 * CFF_CHANNELS * CFF_BATCH + bm * 32 + bd * 544 * 32;
-    oOffset = CFF_HALFW + 544 * (CFF_CHANNELS * CFF_BATCH + 64) +
-              bm * (CFF_CHANNELS * CFF_NFILTER + 64) * 32 + bd * 32;
-
-    lwbIn  = gb + iOffset;
-    lwbOut = gb + oOffset;
+    const float2* lwbIn = gbIn + 544 * CFF_CHANNELS * CFF_BATCH + bm * 32 + bd * 544 * 32;
+    float2* lwbOut      = gbOut + 544 * (CFF_CHANNELS * CFF_BATCH + 64) +
+                     bm * (CFF_CHANNELS * CFF_NFILTER + 64) * 32 + bd * 32;
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0                                      = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
-        lds[(me % 32) * 32 + (me / 32) + t * 8] = R0;
+        lds[(me % 32) * 32 + (me / 32) + t * 8] = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
     }
 
     __syncthreads();
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0                                                = lds[me + t * 256];
         lwbOut[(me % 32) + (me / 32) * (CFF_CHANNELS * CFF_NFILTER + 64) +
-               t * 8 * (CFF_CHANNELS * CFF_NFILTER + 64)] = R0;
+               t * 8 * (CFF_CHANNELS * CFF_NFILTER + 64)] = lds[me + t * 256];
     }
 }
 
@@ -2787,77 +2670,56 @@ extern "C" __global__
 #if defined(CFF_TRANSP_OT_MOD16)
 
 extern "C" __global__
-    __launch_bounds__(256) void MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_out(const float2* __restrict__ gbIn,
+                                                            float2* __restrict__ gbOut)
 {
     unsigned int me    = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[256];
 
-    unsigned int iOffset;
-    unsigned int oOffset;
-    const float2* lwbIn;
-    float2* lwbOut;
-
-    float2 R0;
-
     unsigned int bm = batch % 34;
     unsigned int bd = batch / 34;
 
-    iOffset = bm * (CFF_NFILTER * CFF_BATCH + 64) * 16 + bd * 16;
-    oOffset = CFF_HALFW + bm * 16 + bd * 544 * 16;
+    const float2* lwbIn = gbIn + bm * (CFF_NFILTER * CFF_BATCH + 64) * 16 + bd * 16;
+    float2* lwbOut      = gbOut + bm * 16 + bd * 544 * 16;
 
-    lwbIn  = gb + iOffset;
-    lwbOut = gb + oOffset;
-
-    R0                              = lwbIn[(me % 16) + (me / 16) * (CFF_NFILTER * CFF_BATCH + 64)];
-    lds[(me % 16) * 16 + (me / 16)] = R0;
+    lds[(me % 16) * 16 + (me / 16)] = lwbIn[(me % 16) + (me / 16) * (CFF_NFILTER * CFF_BATCH + 64)];
 
     __syncthreads();
 
-    R0                                  = lds[me];
-    lwbOut[(me % 16) + (me / 16) * 544] = R0;
+    lwbOut[(me % 16) + (me / 16) * 544] = lds[me];
 }
 
 #else
 
 extern "C" __global__
-    __launch_bounds__(256) void MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
+    __launch_bounds__(256) void MIOpenConvFFT_transpose_out(const float2* __restrict__ gbIn,
+                                                            float2* __restrict__ gbOut)
 {
     unsigned int me    = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[1024];
 
-    unsigned int iOffset;
-    unsigned int oOffset;
-    const float2* lwbIn;
-    float2* lwbOut;
-
-    float2 R0;
-
     unsigned int bm = batch % 17;
     unsigned int bd = batch / 17;
 
-    iOffset = bm * (CFF_NFILTER * CFF_BATCH + 64) * 32 + bd * 32;
-    oOffset = CFF_HALFW + bm * 32 + bd * 544 * 32;
-
-    lwbIn  = gb + iOffset;
-    lwbOut = gb + oOffset;
+    const float2* lwbIn = gbIn + bm * (CFF_NFILTER * CFF_BATCH + 64) * 32 + bd * 32;
+    float2* lwbOut      = gbOut + bm * 32 + bd * 544 * 32;
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0 = lwbIn[(me % 32) + (me / 32) * (CFF_NFILTER * CFF_BATCH + 64) +
-                   t * 8 * (CFF_NFILTER * CFF_BATCH + 64)];
-        lds[(me % 32) * 32 + (me / 32) + t * 8] = R0;
+        lds[(me % 32) * 32 + (me / 32) + t * 8] =
+            lwbIn[(me % 32) + (me / 32) * (CFF_NFILTER * CFF_BATCH + 64) +
+                  t * 8 * (CFF_NFILTER * CFF_BATCH + 64)];
     }
 
     __syncthreads();
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0                                                = lds[me + t * 256];
-        lwbOut[(me % 32) + (me / 32) * 544 + t * 8 * 544] = R0;
+        lwbOut[(me % 32) + (me / 32) * 544 + t * 8 * 544] = lds[me + t * 256];
     }
 }
 
@@ -3223,11 +3085,8 @@ extern "C" __global__
 
     __shared__ float2 lds[544];
 
-    const float2* lwbIn;
-    float* lwbOut;
-
-    lwbIn  = CFF_HALFW + gbIn + batch * 544;
-    lwbOut = gbOut + batch * CFF_IMG_W * CFF_IMG_H;
+    const float2* lwbIn = gbIn + batch * 544;
+    float* lwbOut       = gbOut + batch * CFF_IMG_W * CFF_IMG_H;
 
     InvPassA(me, 0, 0, lwbIn, lds);
     __syncthreads();
@@ -3338,10 +3197,9 @@ using TYPE_C = float2;
 
 /* kernel */
 extern "C" __global__
-__launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
-                                                         unsigned int const offsetC,
-                                                         unsigned int const offsetA,
-                                                         unsigned int const offsetB,
+__launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* __restrict__ C,
+                                                         const float2* __restrict__ A,
+                                                         const float2* __restrict__ B,
                                                          unsigned int const strideC1J,
                                                          unsigned int const strideCK,
                                                          unsigned int const strideA0I,
@@ -3353,11 +3211,6 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
                                                          unsigned int const sizeK,
                                                          unsigned int const sizeL)
 {
-
-    /* apply offsets */
-    float2* C       = gb + offsetC;
-    float2 const* A = gb + offsetA;
-    float2 const* B = gb + offsetB;
 
     /* allocate registers */
     TYPE_C rC[UT_0I][UT_1J] = {};
@@ -3732,10 +3585,9 @@ using VECTOR_TYPE = float2;
 /* Begin Kernel                         */
 /****************************************/
 extern "C" __global__
-    __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
-                                                            unsigned int const offsetC,
-                                                            unsigned int const offsetA,
-                                                            unsigned int const offsetB,
+    __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* __restrict__ C,
+                                                            const float2* __restrict__ A,
+                                                            const float2* __restrict__ B,
                                                             unsigned int const strideC1J,
                                                             unsigned int const strideCK,
                                                             unsigned int const strideA0I,
@@ -3747,11 +3599,6 @@ extern "C" __global__
                                                             unsigned int const sizeK,
                                                             unsigned int const sizeL)
 {
-
-    /* apply offsets */
-    float2* C       = gb + offsetC;
-    float2 const* A = gb + offsetA;
-    float2 const* B = gb + offsetB;
 
     /***************************************/
     /* Allocate Resources                  */
@@ -4269,10 +4116,9 @@ using VECTOR_TYPE = float2;
 /* Begin Kernel                           */
 /******************************************/
 extern "C" __global__
-    __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* gb,
-                                                            unsigned int const offsetC,
-                                                            unsigned int const offsetA,
-                                                            unsigned int const offsetB,
+    __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* __restrict__ C,
+                                                            const float2* __restrict__ A,
+                                                            const float2* __restrict__ B,
                                                             unsigned int const strideC1J,
                                                             unsigned int const strideCK,
                                                             unsigned int const strideA0I,
@@ -4284,11 +4130,6 @@ extern "C" __global__
                                                             unsigned int const sizeK,
                                                             unsigned int const sizeL)
 {
-
-    /* apply offsets */
-    float2* C       = gb + offsetC;
-    float2 const* A = gb + offsetA;
-    float2 const* B = gb + offsetB;
 
     /******************************************/
     /* Allocate Resources                     */

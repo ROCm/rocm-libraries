@@ -339,16 +339,12 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
 
     cgemm_grid(global_work_size[4], local_work_size[4], cgemm_choice, N, out_c, out_n);
 
-    const auto workSpaceSize = GetWorkspaceSize(ctx, problem);
-    const unsigned int halfw = static_cast<unsigned int>(workSpaceSize / (sizeof(float) * 2 * 2));
-
     auto build_params = KernelBuildParameters{
         {"CFF_IMG_H", in_h},
         {"CFF_IMG_W", in_w},
         {"CFF_BATCH", in_n},
         {"CFF_NFILTER", out_c},
         {"CFF_CHANNELS", in_c},
-        {"CFF_HALFW", halfw},
         {"CFF_BACKWARD", problem.IsDirectionForward() ? 0 : 1},
     };
 
@@ -385,6 +381,8 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
 
     const std::string algorithm    = "miopenConvolutionFwdAlgoFFT";
     const std::string program_name = "MIOpenConvFFT.cpp";
+
+    const auto workSpaceSize = GetWorkspaceSize(ctx, problem);
 
     auto sol         = ConvSolution{miopenStatusSuccess};
     sol.workspace_sz = workSpaceSize;
@@ -445,6 +443,9 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
                              std::to_string(params.workSpaceSize));
             }
 
+            void* workSpace0 = params.workSpace;
+            void* workSpace1 = reinterpret_cast<char*>(params.workSpace) + workSpaceSize / 2;
+
             float time_fft = 0;
             int kernel_id  = 0;
             for(int ik = 0; ik < NumKernels; ik++)
@@ -456,13 +457,13 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
 
                 switch(ik)
                 {
-                case 0: k(tensors.in, params.workSpace); break;
-                case 1: k(tensors.w, params.workSpace); break;
+                case 0: k(tensors.in, skip_front_transposes ? workSpace1 : workSpace0); break;
+                case 1: k(tensors.w, skip_front_transposes ? workSpace1 : workSpace0); break;
                 case 4: {
-                    k(params.workSpace,
-                      0,
-                      halfw + N * (in_n * in_c + padding),
-                      halfw + 0,
+                    k(workSpace0,
+                      reinterpret_cast<const char*>(workSpace1) +
+                          N * (in_n * in_c + padding) * (sizeof(float) * 2),
+                      workSpace1,
                       out_c,
                       out_n * out_c + padding,
                       in_c,
@@ -475,10 +476,10 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
                       in_c);
                     break;
                 }
-                case 6: k(params.workSpace, tensors.out); break;
+                case 6: k(workSpace1, tensors.out); break;
                 case 2:
                 case 3:
-                case 5: k(params.workSpace); break;
+                case 5: k(workSpace0, workSpace1); break;
                 default: assert(false);
                 }
 
