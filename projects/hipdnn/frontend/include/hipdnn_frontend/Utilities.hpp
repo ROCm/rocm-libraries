@@ -10,7 +10,6 @@
 #include <hipdnn_sdk/logging/CallbackTypes.h>
 #include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/logging/LoggingUtils.hpp>
-#include <hipdnn_sdk/test_utilities/LoggingUtils.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <numeric>

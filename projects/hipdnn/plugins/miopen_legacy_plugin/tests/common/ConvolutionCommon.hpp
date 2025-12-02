@@ -7,8 +7,8 @@
 #include <ostream>
 #include <vector>
 
-#include <hipdnn_sdk/test_utilities/Seeds.hpp>
 #include <hipdnn_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_test_sdk/utilities/Seeds.hpp>
 
 namespace test_conv_common
 {
@@ -113,7 +113,7 @@ struct ConvTestCase
 
 inline std::vector<ConvTestCase> getConvTestCases4D()
 {
-    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
     return {
         // Filter 1x1
@@ -140,7 +140,7 @@ inline std::vector<ConvTestCase> getConvTestCases4D()
 
 inline std::vector<ConvTestCase> getConvTestCases5D()
 {
-    unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
 
     return {
         // Filter 1x1

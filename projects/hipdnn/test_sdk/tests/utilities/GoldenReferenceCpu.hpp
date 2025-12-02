@@ -1,0 +1,63 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <gtest/gtest.h>
+#include <unordered_map>
+#include <vector>
+
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
+
+#include <hipdnn_sdk/utilities/LoadGraphAndTensors.hpp>
+
+namespace hipdnn_test_sdk::utilities
+{
+
+class TestGoldenReferenceCpu : public ::testing::TestWithParam<std::filesystem::path>
+{
+protected:
+    hipdnn_sdk::utilities::GraphAndTensorMap _graphAndTensors;
+    std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::utilities::ITensor>>
+        _referenceOutputTensors;
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    void SetUp() override
+    {
+        const auto& path = GetParam();
+
+        // TODO: Temporary fix until reference data can be properly installed
+        if(path.empty())
+        {
+            HIPDNN_LOG_WARN("Reference not found for Cpu golden reference test");
+            GTEST_SKIP();
+        }
+
+        _graphAndTensors = hipdnn_sdk::utilities::loadGraphAndTensors(path);
+        _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
+    }
+
+    void goldenReferenceTestSuite(float absoluteTolerance, float relativeTolerance)
+    {
+        SKIP_IF_WINDOWS();
+
+        auto tensorMap = _graphAndTensors.hostBufferMap();
+        EXPECT_EQ(tensorMap.size(), 6);
+
+        CpuReferenceGraphExecutor().execute(
+            _graphAndTensors.graphBuffer.data(), _graphAndTensors.graphBuffer.size(), tensorMap);
+
+        EXPECT_TRUE(_graphAndTensors.validateTensors(
+            _referenceOutputTensors, absoluteTolerance, relativeTolerance));
+    }
+};
+
+auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
+{
+    return testing::ValuesIn(filesInDirectoryWithExtReturnEmptyPathOnThrow(
+        hipdnn_sdk::utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data"
+            / subDirectory,
+        ".json"));
+}
+}

@@ -33,8 +33,7 @@ target_compile_definitions(
 )
 
 target_link_libraries(
-    miopen_plugin_integration_test PUBLIC GTest::gtest hip::host hipdnn_frontend hipdnn_sdk
-                                          Threads::Threads
+    miopen_plugin_integration_test PUBLIC GTest::gtest hip::host hipdnn_test_sdk Threads::Threads
 )
 
 # Ensure that the miopen_legacy_plugin is built before the miopen_plugin_integration_test, as the

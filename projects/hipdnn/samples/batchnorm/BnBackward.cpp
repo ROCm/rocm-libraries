@@ -6,10 +6,10 @@
 #include <unordered_map>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
 
@@ -111,21 +111,22 @@ void SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<IntermediateType> dscaleRefTensor(dscale->get_dim());
         utilities::Tensor<IntermediateType> dbiasRefTensor(dbias->get_dim());
 
-        test_utilities::CpuFpReferenceBatchnorm::backward(dyTensor,
-                                                          xTensor,
-                                                          savedMeanTensor,
-                                                          savedInvVarTensor,
-                                                          scaleTensor,
-                                                          dxRefTensor,
-                                                          dscaleRefTensor,
-                                                          dbiasRefTensor);
+        hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::backward(dyTensor,
+                                                                      xTensor,
+                                                                      savedMeanTensor,
+                                                                      savedInvVarTensor,
+                                                                      scaleTensor,
+                                                                      dxRefTensor,
+                                                                      dscaleRefTensor,
+                                                                      dbiasRefTensor);
 
-        auto tolerance = test_utilities::batchnorm::getToleranceBackward<InputType>();
+        auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceBackward<InputType>();
 
         auto dxValidator
-            = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
-        auto dscaleDbiasValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
-            static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+        auto dscaleDbiasValidator
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
+                static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 
         bool dxValid = dxValidator.allClose(dxRefTensor, dxTensor);
         bool dscaleValid = dscaleDbiasValidator.allClose(dscaleRefTensor, dscaleTensor);

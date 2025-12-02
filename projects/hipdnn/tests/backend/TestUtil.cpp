@@ -7,8 +7,8 @@
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <span>
 #include <stdexcept>
 
@@ -255,7 +255,7 @@ void createAndInitializeBackendDescriptor(hipdnnBackendDescriptor_t* backendDesc
 
 flatbuffers::FlatBufferBuilder createAndPopulateBatchnormNode()
 {
-    return hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+    return hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
 }
 
 void extractTensorInfoFromGraph(const flatbuffers::DetachedBuffer& serializedGraph,

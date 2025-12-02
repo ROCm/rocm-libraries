@@ -8,12 +8,12 @@
 #include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/FlatbufferDatatypeMapping.hpp>
-#include <hipdnn_sdk/test_utilities/FlatbufferTensorAttributesUtils.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/Visitor.hpp>
 #include <hipdnn_sdk/utilities/json/Graph.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferTensorAttributesUtils.hpp>
 #include <type_traits>
 #include <variant>
 
@@ -58,7 +58,7 @@ inline std::unique_ptr<ITensor>
     tensorFromFileAndAttributes(const std::filesystem::path& filepath,
                                 const data_objects::TensorAttributes& attributes)
 {
-    auto tensor = hipdnn_sdk::test_utilities::createTensorFromAttribute(attributes);
+    auto tensor = hipdnn_test_sdk::utilities::createTensorFromAttribute(attributes);
     detail::fillTensorFromFile(*tensor, filepath);
 
     return tensor;
@@ -110,7 +110,7 @@ struct GraphAndTensorMap
                     tensorPtr->fillTensorWithValue(0.f);
                     return tensorPtr;
                 },
-                test_utilities::datatypeToNativeVariant(dataType));
+                hipdnn_test_sdk::utilities::datatypeToNativeVariant(dataType));
 
             std::swap(zeroedTensorPtr, outputTensorPtr);
 
@@ -136,7 +136,7 @@ struct GraphAndTensorMap
                 [&](auto dataType) {
                     using DataType = decltype(dataType);
 
-                    auto validator = test_utilities::CpuFpReferenceValidation<DataType>{
+                    auto validator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<DataType>{
                         static_cast<DataType>(absTolerance), static_cast<DataType>(relTolerance)};
                     return validator.allClose(*referenceTensorPtr, *tensorMap.at(uid));
                 },
@@ -144,8 +144,8 @@ struct GraphAndTensorMap
                     throw std::runtime_error("validateTensors: Cannot validate integer tensors");
                     return false;
                 }};
-            bool passedValidation
-                = std::visit(validatorFunc, test_utilities::datatypeToNativeVariant(dataType));
+            bool passedValidation = std::visit(
+                validatorFunc, hipdnn_test_sdk::utilities::datatypeToNativeVariant(dataType));
             if(!passedValidation)
             {
                 return false;

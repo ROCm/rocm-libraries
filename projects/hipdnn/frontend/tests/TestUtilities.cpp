@@ -4,14 +4,14 @@
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
-#include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <memory>
 #include <vector>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
-using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_test_sdk::utilities;
 
 TEST(TestUtilities, FindCommonShapeValid)
 {

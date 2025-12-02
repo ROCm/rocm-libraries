@@ -28,6 +28,7 @@ target_link_libraries(
     GTest::gtest_main
     Threads::Threads
     hipdnn_sdk
+    hipdnn_test_sdk
     hipdnn_backend
     hip::host
 )

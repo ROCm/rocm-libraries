@@ -10,10 +10,10 @@
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
 
 using namespace hipdnn_frontend;

@@ -6,7 +6,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_sdk/plugin/PluginException.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
 #include "MiopenConvDescriptor.hpp"

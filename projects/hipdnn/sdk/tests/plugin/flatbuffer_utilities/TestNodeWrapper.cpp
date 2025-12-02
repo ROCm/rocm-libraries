@@ -7,7 +7,7 @@
 
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
-#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace hipdnn_plugin;
 using namespace hipdnn_sdk::data_objects;
@@ -20,7 +20,7 @@ TEST(TestNodeWrapper, NullBufferIsInvalid)
 TEST(TestNodeWrapper, EnsureTheNodeIsWrappedCorrectly)
 {
     flatbuffers::FlatBufferBuilder builder
-        = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+        = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     auto serializedGraph = builder.Release();
     auto shallowGraph
         = flatbuffers::GetRoot<hipdnn_sdk::data_objects::Graph>(serializedGraph.data());

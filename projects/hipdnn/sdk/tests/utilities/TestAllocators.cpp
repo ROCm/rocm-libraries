@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/Allocators.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <list>
 #include <memory>
 #include <vector>

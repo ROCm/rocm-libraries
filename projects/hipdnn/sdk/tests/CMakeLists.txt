@@ -24,38 +24,6 @@ add_executable(
     plugin/flatbuffer_utilities/TestEngineDetailsWrapper.cpp
     plugin/flatbuffer_utilities/TestGraphWrapper.cpp
     plugin/flatbuffer_utilities/TestNodeWrapper.cpp
-    test_utilities/TestCpuFpReferenceBatchnorm.cpp
-    test_utilities/TestCpuFpReferenceConvolution.cpp
-    test_utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
-    test_utilities/TestCpuFpReferenceUtilities.cpp
-    test_utilities/TestCpuFpReferenceValidation.cpp
-    test_utilities/TestCpuReferencePointwise.cpp
-    test_utilities/TestFlatbufferDatatypeMapping.cpp
-    test_utilities/TestFlatbufferTensorAttributesUtils.cpp
-    test_utilities/TestLoggingUtils.cpp
-    test_utilities/TestScopedDirectory.cpp
-    test_utilities/TestScopedEnvironmentVariableSetter.cpp
-    test_utilities/TestSeeds.cpp
-    test_utilities/TestVectorLoggingUtils.cpp
-    test_utilities/cpu_graph_executor/TestBatchnormBwdPlan.cpp
-    test_utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp
-    test_utilities/cpu_graph_executor/TestBatchnormFwdInferencePlan.cpp
-    test_utilities/cpu_graph_executor/TestBatchnormFwdInferenceSignatureKey.cpp
-    test_utilities/cpu_graph_executor/TestBatchnormTrainPlan.cpp
-    test_utilities/cpu_graph_executor/TestBatchnormTrainSignatureKey.cpp
-    test_utilities/cpu_graph_executor/TestConvolutionBwdPlan.cpp
-    test_utilities/cpu_graph_executor/TestConvolutionBwdSignatureKey.cpp
-    test_utilities/cpu_graph_executor/TestConvolutionWrwPlan.cpp
-    test_utilities/cpu_graph_executor/TestConvolutionWrwSignatureKey.cpp
-    test_utilities/cpu_graph_executor/TestConvolutionFwdPlan.cpp
-    test_utilities/cpu_graph_executor/TestConvolutionFwdSignatureKey.cpp
-    test_utilities/cpu_graph_executor/TestCpuReferenceGraphExecutor.cpp
-    test_utilities/cpu_graph_executor/TestFusedOperationsCpuGraphExecutor.cpp
-    test_utilities/cpu_graph_executor/TestPointwiseOperationsCpuGraphExecutor.cpp
-    test_utilities/cpu_graph_executor/TestGraphTensorBundle.cpp
-    test_utilities/cpu_graph_executor/TestPlanRegistrySignatureKey.cpp
-    test_utilities/cpu_graph_executor/TestPointwisePlan.cpp
-    test_utilities/cpu_graph_executor/TestPointwiseSignatureKey.cpp
     utilities/TestAllocators.cpp
     utilities/TestCallbackLogger.cpp
     utilities/TestFloats.cpp
@@ -80,8 +48,7 @@ target_link_libraries(
     GTest::gtest
     GTest::gmock
     Threads::Threads
-    hipdnn_sdk
-    hipdnn_frontend
+    hipdnn_test_sdk
     hip::host
     ${CMAKE_DL_LIBS}
 )

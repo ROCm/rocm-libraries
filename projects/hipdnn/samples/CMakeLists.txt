@@ -12,13 +12,25 @@ project(hipdnn_samples VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 
 find_package(hip REQUIRED)
+
+# Technically this is all found as part of hipdnn_test_sdk, but including these as an example for
+# consumers. hipdnn_test_sdk shouldn't be needed by normal users of hipDNN, and is only incuded here
+# for validation purposes.
 find_package(hipdnn_frontend CONFIG REQUIRED)
+find_package(hipdnn_sdk CONFIG REQUIRED)
+
+# !! NOTE !! - hipdnn_test_sdk is needed for sample validation, regular users of hipDNN do not need
+# this package.
+find_package(hipdnn_test_sdk CONFIG REQUIRED)
 
 # Helper function to add a hipDNN sample executable NAME: The name of the executable target SOURCE:
 # The source file for the sample
 function(add_hipdnn_sample NAME SOURCE)
     add_executable(${NAME} ${SOURCE})
-    target_link_libraries(${NAME} PRIVATE hip::host hipdnn_frontend)
+    # !! NOTE !! - hipdnn_test_sdk is needed for sample validation, regular users of hipDNN do not
+    # need this package. Linking against hipdnn_frontend would be sufficient for normal users
+    # (brings in hipdnn_sdk as well).
+    target_link_libraries(${NAME} PRIVATE hip::host hipdnn_frontend hipdnn_test_sdk)
 endfunction()
 
 # Temporarily disabled bn_inference due to https://github.com/ROCm/rocm-libraries/issues/2459
