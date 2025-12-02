@@ -877,7 +877,7 @@ __forceinline__ __device__ void InvPass1b(unsigned int me,
     R4 = bufIn[inOffset + 7 + (3 * me + 2)];
     R5 = bufIn[inOffset + 7 + (3 * me + 3)];
 
-    float2 dc{};
+    float2 dc;
     if(me < 1)
     {
         dc.x = bufIn[inOffset + 0].x;
@@ -1773,7 +1773,7 @@ __forceinline__ __device__ void InvPass1b(unsigned int me,
     R4 = bufIn[inOffset + 10 + (3 * me + 2)];
     R5 = bufIn[inOffset + 10 + (3 * me + 3)];
 
-    float2 dc{};
+    float2 dc;
     if(me < 1)
     {
         dc.x = bufIn[inOffset + 0].x;
@@ -2880,7 +2880,7 @@ __forceinline__ __device__ void InvPass1b(unsigned int me,
     R6 = bufIn[inOffset + 17 + (me + 9)];
     R7 = bufIn[inOffset + 17 + (me + 13)];
 
-    float2 dc{};
+    float2 dc;
     if(me < 1)
     {
         dc.x = bufIn[inOffset + 0].x;
@@ -4136,11 +4136,7 @@ extern "C" __global__
     /******************************************/
 
     /* registers for MAC's */
-    VECTOR_TYPE rC[TT0I * TT1J / VECTOR_WIDTH];
-    rC[0] = VECTOR_TYPE{};
-    rC[1] = VECTOR_TYPE{};
-    rC[2] = VECTOR_TYPE{};
-    rC[3] = VECTOR_TYPE{};
+    VECTOR_TYPE rC[TT0I * TT1J / VECTOR_WIDTH] = {};
     VECTOR_TYPE rA[TT0I / VECTOR_WIDTH];
     VECTOR_TYPE rB[TT1J / VECTOR_WIDTH];
 
