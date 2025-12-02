@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_test_sdk/TestSdk.hpp>
 
-TEST(TestSdk, ExampleTest)
+TEST(TestSdk, Example)
 {
     hipdnn::test_sdk::hello();
     EXPECT_TRUE(true);
