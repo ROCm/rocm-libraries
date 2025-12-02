@@ -1468,7 +1468,7 @@ class logger {
      */
     void output_csv_specialization(size_t index, std::string_view name, double bytes_per_sec,
                                    double items_per_sec, bool noise_timeout, double noise_percent) {
-        m_csv_out << index << "," << name << "," << bytes_per_sec << "," << items_per_sec << ","
+        m_csv_out << index << ",\"" << name << "\"," << bytes_per_sec << "," << items_per_sec << ","
                   << noise_timeout << "," << noise_percent << "\n"
                   << std::flush;
     }
