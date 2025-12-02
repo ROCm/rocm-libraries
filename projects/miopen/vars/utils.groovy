@@ -324,9 +324,6 @@ def getDockerImage(Map conf=[:])
 def getDockerImageWithStatus(Map conf=[:]) {
     def stageName = env.STAGE_NAME ?: "Docker Image"  
     def credentialsID = env.monorepo_status_wrapper_creds
-    if (env.REPO_NAME == "MIOpen") {
-        credentialsID = env.miopen_git_creds
-    }
     
     gitStatusWrapper(credentialsId: "${credentialsID}", gitHubContext: "${stageName}", account: 'ROCm', repo: 'rocm-libraries') {
         try {
