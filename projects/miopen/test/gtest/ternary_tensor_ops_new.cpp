@@ -25,10 +25,6 @@
  *******************************************************************************/
 #include "gtest_common.hpp"
 
-constexpr miopenTestConfiguration_t testConfig = miopenTestFast;
-constexpr miopenUnitUnderTest_t UUT            = miopenUnitNaiveGPU;
-constexpr miopenTestReference_t REF            = miopenTestReferenceNaiveCPU;
-
 struct TernaryTensorOpsTestCase
 {
     std::vector<size_t> tensorlens_ac;
@@ -46,17 +42,62 @@ struct TernaryTensorOpsTestCase
     // }
 };
 
-template <typename T>
-struct TensorOpsCommon : public GTESTBase, public testing::TestWithParam<TernaryTensorOpsTestCase>
+template <typename T,
+          miopenUnitUnderTest_t UUT    = miopenUnitNaiveGPU,
+          miopenTestReference_t REF    = miopenTestReferenceOptimizedCPU,
+          miopenAfterTestFailure_t ATF = miopenAfterTestFailureMoveOn>
+struct TensorOpsCommon : public GTESTBase<UUT, REF, ATF>,
+                         public testing::TestWithParam<TernaryTensorOpsTestCase>
 {
 protected:
+    static void SetUpTestSuite()
+    {
+        if constexpr(!checkTestConfiguration(UUT, REF))
+        {
+            GTEST_SKIP() << "Test configuration is incorrect";
+        }
+    }
+
     void SetUp() override { prng::reset_seed(); }
 
-    miopenStatus_t runOptimizedGPU() override { return miopenStatusNotImplemented; }
-    miopenStatus_t runNaiveGPU() override { return miopenStatusSuccess; }
-    miopenStatus_t runOptimizedCPU() override { return miopenStatusSuccess; }
-    miopenStatus_t runNaiveCPU() override { return miopenStatusSuccess; }
+    miopenStatus_t runOptimizedGPU() override
+    {
+        std::cout << "runOptimizedGPU()\n";
+        return miopenStatusNotImplemented;
+    }
+    miopenStatus_t runNaiveGPU() override
+    {
+        std::cout << "runNaiveGPU()\n";
+        return miopenStatusSuccess;
+    }
+    miopenStatus_t runOptimizedCPU() override
+    {
+        std::cout << "runOptimizedCPU()\n";
+        return miopenStatusSuccess;
+    }
+    miopenStatus_t runNaiveCPU() override
+    {
+        std::cout << "runNaiveCPU()\n";
+        return miopenStatusSuccess;
+    }
+
+    std::pair<bool, std::unordered_map<std::string, double>> verifyOptimizedGPU() override
+    {
+        return {true, std::unordered_map<std::string, double>()};
+    };
+    std::pair<bool, std::unordered_map<std::string, double>> verifyNaiveGPU() override
+    {
+        return {true, std::unordered_map<std::string, double>()};
+    };
+    std::pair<bool, std::unordered_map<std::string, double>> verifyOptimizedCPU() override
+    {
+        return {true, std::unordered_map<std::string, double>()};
+    };
 
 public:
-    void runTest() override {}
+    void run() { this->runTest(); }
 };
+
+using GPU_TernaryTensorOpsNew_FP32 = TensorOpsCommon<float>;
+
+TEST_F(GPU_TernaryTensorOpsNew_FP32, TestFloat) { this->run(); }
