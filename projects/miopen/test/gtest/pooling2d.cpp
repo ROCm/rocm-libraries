@@ -23,8 +23,8 @@ void RunPooling2dTests()
 {
     pooling2d_driver<T> driver;
     driver.type = miopen_type<T>{};
-    driver.full_set = true; // Equivalent to --all flag
-    driver.dataset_id = 0;   // Default dataset
+    driver.full_set = false; // Set to false to reduce test cases and avoid OOM on smaller GPUs
+    driver.dataset_id = 0;   // Use default dataset
     driver.config_iter_start = 0;
 
     // Get data arguments (arguments that weren't passed via command line)
