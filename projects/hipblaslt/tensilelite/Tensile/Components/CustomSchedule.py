@@ -1528,9 +1528,37 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
         ]
         numMfma = 120
         nglshift = nllshift = len(optSchedule["GRA"][0])/2 + len(optSchedule["GRB"][0])/2
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    elif isNT(kernel) and TLDS==0:
+        optSchedule = {
+            'SYNC': [[-1,24,24,59,59]],
+            'LRA0': [[0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,14,14,15]],
+            'LRB0': [[24,24,26,26,28,28,30,30]],
+            'GRA': [[24,24,25,25,27,27,29,29,31,31,33,33,35,35,37,37,39,39,41,41,43,43,45,45,47,47,49,49,50,50,52,52,54,54,56,56,58,58,60,60,61,61,62,62,63,63,64,64, 65,65,66,66,67,67,68,68,69,69,70,70]],
+            'GRB': [[75,75,76,76,77,77,78,78,  89,89,91,91,93,93,95,95]],
+            'LRA1': [[60,60,61,61,62,62,63,63,64,64, 65,65,66,66,67,67,68,68,69,69,70,70, 75,75,76,76,77,77,78,78]],
+            'LRB1': [[89,89,91,91,93,93,95,95]],
+            'GRIncA': [[0,0,0,1,1,1,2,2,2]],
+            'GRIncB': [[3,3,3,4,4,4,5,5,5]],
+            'LRSA': [[58]],
+            'LRSB': [[58]],
+            'LWSA': [[95]],
+            'LWSB': [[95]],
+            'LCC': [[119,119]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=19, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0, wait for previous set of global reads"),
+            SBarrier(comment="")
+        ]
+        numMfma = 120
+        nglshift = nllshift = len(optSchedule["GRA"][0])/2 + len(optSchedule["GRB"][0])/2
+        opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
-    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
 def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
