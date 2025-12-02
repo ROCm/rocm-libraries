@@ -661,10 +661,13 @@ extern "C" __global__
     if(met < 2)
     {
         FwdPass2(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds);
-        __syncthreads();
-        FwdPass3(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds);
-        __syncthreads();
     }
+    __syncthreads();
+    if(met < 2)
+    {
+        FwdPass3(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds);
+    }
+    __syncthreads();
 
     FwdPass4_IN(me, 0, 0, lds, lwbOut);
 }
@@ -702,10 +705,13 @@ extern "C" __global__
     if(met < 2)
     {
         FwdPass2(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds);
-        __syncthreads();
-        FwdPass3(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds);
-        __syncthreads();
     }
+    __syncthreads();
+    if(met < 2)
+    {
+        FwdPass3(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds);
+    }
+    __syncthreads();
 
     FwdPass4_WE(me, 0, 0, lds, lwbOut);
 }
@@ -1038,10 +1044,13 @@ extern "C" __global__
     if(met < 2)
     {
         InvPass0(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds);
-        __syncthreads();
-        InvPass1(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds);
-        __syncthreads();
     }
+    __syncthreads();
+    if(met < 2)
+    {
+        InvPass1(me % 2, (me / 12) * 84 + 6, (me / 12) * 84 + 6, lds, lds);
+    }
+    __syncthreads();
 
     InvPass1b(me % 2, (me / 12) * 84 + (met / 2) * 14, (me / 12) * 84 + (met / 2) * 12, lds, lds);
     __syncthreads();
@@ -2496,10 +2505,13 @@ extern "C" __global__
     if(me < 4)
     {
         FwdPass2(me % 4, 16, 16, lds, lds);
-        __syncthreads();
-        FwdPass3(me % 4, 16, 16, lds, lds);
-        __syncthreads();
     }
+    __syncthreads();
+    if(me < 4)
+    {
+        FwdPass3(me % 4, 16, 16, lds, lds);
+    }
+    __syncthreads();
 
     FwdPass4(me, 0, 0, lds, lwbOut);
 }
@@ -2543,10 +2555,13 @@ extern "C" __global__
     if(me < 4)
     {
         FwdPass2(me % 4, 16, 16, lds, lds);
-        __syncthreads();
-        FwdPass3(me % 4, 16, 16, lds, lds);
-        __syncthreads();
     }
+    __syncthreads();
+    if(me < 4)
+    {
+        FwdPass3(me % 4, 16, 16, lds, lds);
+    }
+    __syncthreads();
 
     FwdPass4(me, 0, 0, lds, lwbOut);
 }
@@ -3099,12 +3114,14 @@ extern "C" __global__
     if(me < 4)
     {
         InvPass0(me % 4, 16, 16, lds, lds);
-        __syncthreads();
-        InvPass1(me % 4, 16, 16, lds, lds);
-        __syncthreads();
     }
-
     __syncthreads();
+    if(me < 4)
+    {
+        InvPass1(me % 4, 16, 16, lds, lds);
+    }
+    __syncthreads();
+
     InvPass1b(me % 4, (me / 4) * 34, (me / 4) * 32, lds, lds);
     __syncthreads();
     InvPass2(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds);
