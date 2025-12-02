@@ -314,7 +314,7 @@ def getDockerImage(Map conf=[:])
         }
         catch(Exception ex)
         {
-            dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/.")
+            dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile ")
             withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
                 dockerImage.push()
             }
