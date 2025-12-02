@@ -316,7 +316,7 @@ std::vector<result_tuple> select_best_macro_tile_size(size_t M, size_t N, size_t
                                      }
                                  });
             }
-
+            else{ //sqaure sizes (M == N)
             // Final tie-breaker: when all else is equal (including square problems),
             // consistently prefer tiles with larger MT_M
             // This ensures deterministic selection regardless of input order
@@ -336,6 +336,7 @@ std::vector<result_tuple> select_best_macro_tile_size(size_t M, size_t N, size_t
                                  // If both MT_M and MT_N are same, prefer larger MT_K
                                  return MT_K_a > MT_K_b;
                              });
+            }
         }
     }
 
