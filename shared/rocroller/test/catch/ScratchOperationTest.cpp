@@ -39,7 +39,7 @@ using namespace rocRoller::Operations;
 
 namespace ScratchOperationTest
 {
-    TEST_CASE("ScratchPolicy enum", "[scratch][policy][enum]")
+    TEST_CASE("ScratchPolicy enum", "[scratch][serialization]")
     {
         SECTION("toString for all values")
         {
@@ -58,6 +58,29 @@ namespace ScratchOperationTest
             CHECK(oss.str() == "ZeroedBeforeAndAfter");
         }
 
+        SECTION("toString for None policy")
+        {
+            Scratch scratch(OperationTag(), ScratchPolicy::None);
+            CHECK(scratch.toString() == "Scratch(None)");
+        }
+
+        SECTION("toString for ZeroedBeforeAndAfter policy")
+        {
+            Scratch scratch(OperationTag(), ScratchPolicy::ZeroedBeforeAndAfter);
+            CHECK(scratch.toString() == "Scratch(ZeroedBeforeAndAfter)");
+        }
+
+        SECTION("Verify format is Scratch(PolicyName)")
+        {
+            Scratch     scratch(OperationTag(), ScratchPolicy::None);
+            std::string str = scratch.toString();
+            CHECK(str.substr(0, 8) == "Scratch(");
+            CHECK(str.back() == ')');
+        }
+    }
+
+    TEST_CASE("Scratch construction", "[operations][scratch]")
+    {
         SECTION("Count value for range checking")
         {
             // Verify Count is at the end for range-based operations
@@ -69,10 +92,7 @@ namespace ScratchOperationTest
             auto invalidPolicy = static_cast<ScratchPolicy>(99);
             CHECK(toString(invalidPolicy) == "Invalid");
         }
-    }
 
-    TEST_CASE("Scratch construction", "[scratch][construction]")
-    {
         SECTION("Create Scratch with None policy")
         {
             Scratch scratch(OperationTag(), ScratchPolicy::None);
@@ -109,33 +129,7 @@ namespace ScratchOperationTest
             CHECK(scratch1.policy() == ScratchPolicy::None);
             CHECK(scratch2.policy() == ScratchPolicy::ZeroedBeforeAndAfter);
         }
-    }
 
-    TEST_CASE("Scratch toString", "[scratch][toString]")
-    {
-        SECTION("toString for None policy")
-        {
-            Scratch scratch(OperationTag(), ScratchPolicy::None);
-            CHECK(scratch.toString() == "Scratch(None)");
-        }
-
-        SECTION("toString for ZeroedBeforeAndAfter policy")
-        {
-            Scratch scratch(OperationTag(), ScratchPolicy::ZeroedBeforeAndAfter);
-            CHECK(scratch.toString() == "Scratch(ZeroedBeforeAndAfter)");
-        }
-
-        SECTION("Verify format is Scratch(PolicyName)")
-        {
-            Scratch     scratch(OperationTag(), ScratchPolicy::None);
-            std::string str = scratch.toString();
-            CHECK(str.substr(0, 8) == "Scratch(");
-            CHECK(str.back() == ')');
-        }
-    }
-
-    TEST_CASE("Scratch equality", "[scratch][equality]")
-    {
         SECTION("Same policy should be equal")
         {
             auto    tag1 = OperationTag();
@@ -164,6 +158,38 @@ namespace ScratchOperationTest
         {
             Scratch scratch(OperationTag(), ScratchPolicy::None);
             CHECK(scratch == scratch);
+        }
+
+        SECTION("ToString visitor")
+        {
+            Scratch         scratch(OperationTag(), ScratchPolicy::ZeroedBeforeAndAfter);
+            ToStringVisitor toStringVisitor;
+
+            std::string str = toStringVisitor(scratch);
+            CHECK(str == "Scratch(ZeroedBeforeAndAfter)");
+        }
+
+        SECTION("VariableTypeVisitor returns DataType::None")
+        {
+            Scratch             scratch(OperationTag(), ScratchPolicy::None);
+            VariableTypeVisitor typeVisitor;
+
+            auto varType = typeVisitor(scratch);
+            CHECK(varType.dataType == DataType::None);
+        }
+
+        SECTION("SetCommand visitor")
+        {
+            auto    command = std::make_shared<Command>();
+            auto    tag     = command->allocateTag();
+            Scratch scratch(tag, ScratchPolicy::None);
+
+            SetCommand setCommandVisitor(command);
+            setCommandVisitor(scratch);
+
+            // Verify command was set (indirectly by checking tag can be assigned)
+            auto scratchTag = command->addOperation(scratch);
+            CHECK(!scratchTag.uninitialized());
         }
     }
 
@@ -198,41 +224,6 @@ namespace ScratchOperationTest
             CHECK(scratch1 != scratch2);
             CHECK(scratchOpTag1.uninitialized() == false);
             CHECK(scratchOpTag2.uninitialized() == false);
-        }
-    }
-
-    TEST_CASE("Scratch visitors", "[scratch][visitors]")
-    {
-        SECTION("ToString visitor")
-        {
-            Scratch         scratch(OperationTag(), ScratchPolicy::ZeroedBeforeAndAfter);
-            ToStringVisitor toStringVisitor;
-
-            std::string str = toStringVisitor(scratch);
-            CHECK(str == "Scratch(ZeroedBeforeAndAfter)");
-        }
-
-        SECTION("VariableTypeVisitor returns DataType::None")
-        {
-            Scratch             scratch(OperationTag(), ScratchPolicy::None);
-            VariableTypeVisitor typeVisitor;
-
-            auto varType = typeVisitor(scratch);
-            CHECK(varType.dataType == DataType::None);
-        }
-
-        SECTION("SetCommand visitor")
-        {
-            auto    command = std::make_shared<Command>();
-            auto    tag     = command->allocateTag();
-            Scratch scratch(tag, ScratchPolicy::None);
-
-            SetCommand setCommandVisitor(command);
-            setCommandVisitor(scratch);
-
-            // Verify command was set (indirectly by checking tag can be assigned)
-            auto scratchTag = command->addOperation(scratch);
-            CHECK(!scratchTag.uninitialized());
         }
     }
 }
