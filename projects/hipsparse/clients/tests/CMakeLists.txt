@@ -159,7 +159,7 @@ endif()
 target_compile_definitions(hipsparse-test PRIVATE GOOGLE_TEST)
 
 target_link_libraries(hipsparse-test PRIVATE
-    hipsparse-clients-common
+    hipsparse::clients-common
     GTest::gtest
 )
 

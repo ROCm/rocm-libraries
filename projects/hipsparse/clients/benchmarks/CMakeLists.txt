@@ -18,7 +18,7 @@ if(HIPSPARSE_BUILD_CLIENTS_ONLY)
     target_include_directories(hipsparse-bench PRIVATE ${hipsparse_INCLUDE_DIRS}/hipsparse)
 endif()
 
-target_link_libraries(hipsparse-bench PRIVATE hipsparse-clients-common)
+target_link_libraries(hipsparse-bench PRIVATE hipsparse::clients-common)
 
 if(HIPSPARSE_ENABLE_OPENMP)
     target_link_libraries(hipsparse-bench PRIVATE OpenMP::OpenMP_CXX)

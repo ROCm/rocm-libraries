@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.25.2 FATAL_ERROR)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(hipsparse_shim)
@@ -44,13 +44,18 @@ if(HIPSPARSE_ENABLE_CUDA AND HIPSPARSE_ENABLE_HIP)
 endif()
 
 option(HIPSPARSE_BUILD_SHARED_LIBS "Build hipSPARSE as a shared library." ON)
+option(HIPSPARSE_ENABLE_HOST "Build hipSPARSE library." ON)
 option(HIPSPARSE_BUILD_CLIENTS_ONLY "Build only clients." OFF)
 
 option(HIPSPARSE_ENABLE_CLIENT "Build hipSPARSE clients." ON)
 if(HIPSPARSE_ENABLE_CLIENT)
     option(HIPSPARSE_ENABLE_BENCHMARKS "Build benchmark client." ON)
     option(HIPSPARSE_ENABLE_SAMPLES "Build sample programs." ON)
-    option(HIPSPARSE_ENABLE_FORTRAN "Enable Fortran client support." ON)
+    if(WIN32)
+        option(HIPSPARSE_ENABLE_FORTRAN "Enable Fortran client support." OFF)
+    else()
+        option(HIPSPARSE_ENABLE_FORTRAN "Enable Fortran client support." ON)
+    endif()
     option(HIPSPARSE_ENABLE_OPENMP "Enable OpenMP support in clients for parallel execution." ON)
 endif()
 
@@ -92,7 +97,6 @@ find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
 if(HIPSPARSE_ENABLE_CUDA)
     find_package(HIP REQUIRED CONFIG)
-    # list(APPEND HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include")
     find_package(CUDA REQUIRED)
 elseif(HIPSPARSE_ENABLE_HIP)
     find_package(hip REQUIRED CONFIG)
@@ -107,7 +111,7 @@ endif()
 
 # --- Library target ---
 
-if(NOT HIPSPARSE_BUILD_CLIENTS_ONLY)
+if(HIPSPARSE_ENABLE_HOST)
     add_subdirectory(library)
 else()
     # When building clients-only, find the installed hipSPARSE library
@@ -117,37 +121,7 @@ endif()
 # --- Client targets ---
 
 if(HIPSPARSE_BUILD_CLIENTS_ONLY OR HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
-    if(NOT CLIENTS_OS)
-        rocm_set_os_id(CLIENTS_OS)
-        string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
-        rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
-    endif()
-    message(STATUS "OS: ${CLIENTS_OS} ${CLIENTS_OS_VERSION}")
-    
-    set(GFORTRAN_RPM "libgfortran4")
-    set(GFORTRAN_DEB "libgfortran4")
-    
-    if(CLIENTS_OS STREQUAL "centos" OR CLIENTS_OS STREQUAL "rhel" OR CLIENTS_OS STREQUAL "almalinux")
-        if(CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "8")
-            set(GFORTRAN_RPM "libgfortran")
-        endif()
-    elseif(CLIENTS_OS STREQUAL "ubuntu" AND CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "20.04")
-        set(GFORTRAN_DEB "libgfortran5")
-    elseif(CLIENTS_OS STREQUAL "mariner" OR CLIENTS_OS STREQUAL "azurelinux")
-        set(GFORTRAN_RPM "gfortran")
-    endif()
-    
-    if(HIPSPARSE_ENABLE_OPENMP)
-        set(OPENMP_RPM "libgomp")
-        set(OPENMP_DEB "libomp-dev")
-        if(CLIENTS_OS STREQUAL "sles")
-            set(OPENMP_RPM "libgomp1")
-        endif()
-    else()
-        set(OPENMP_RPM "")
-        set(OPENMP_DEB "")
-    endif()
-    
+    include(rocm_client_prerequisites)
     add_subdirectory(clients)
 endif()
 

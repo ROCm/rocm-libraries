@@ -92,11 +92,27 @@ set(_HIPSPARSE_CURRENT_OPTIONS "")
 shim_mapping(BUILD_CLIENTS_TESTS HIPSPARSE_BUILD_TESTING "Build test client; master switch.")
 shim_mapping(BUILD_CLIENTS_BENCHMARKS HIPSPARSE_ENABLE_BENCHMARKS "Build benchmark client.")
 shim_mapping(BUILD_CLIENTS_SAMPLES HIPSPARSE_ENABLE_SAMPLES "Build client samples.")
-shim_mapping(BUILD_CLIENTS_ONLY HIPSPARSE_BUILD_CLIENTS_ONLY "Build only clients.")
 shim_mapping(BUILD_CODE_COVERAGE HIPSPARSE_ENABLE_COVERAGE "Build with code coverage enabled.")
 shim_mapping(BUILD_ADDRESS_SANITIZER HIPSPARSE_ENABLE_ASAN "Build with address sanitizer enabled.")
 shim_mapping(BUILD_VERBOSE CMAKE_VERBOSE_MAKEFILE "Enable verbose output from Makefile builds.")
 shim_mapping(BUILD_DOCS HIPSPARSE_BUILD_DOCS "Build documentation.")
+
+# Special case: BUILD_CLIENTS_ONLY → HIPSPARSE_ENABLE_HOST (inverted)
+# When building clients only, we're NOT building the host library
+if(DEFINED BUILD_CLIENTS_ONLY)
+    if(NOT DEFINED HIPSPARSE_ENABLE_HOST)
+        if(BUILD_CLIENTS_ONLY)
+            set(HIPSPARSE_ENABLE_HOST OFF CACHE BOOL "Build hipSPARSE library." FORCE)
+            set(HIPSPARSE_BUILD_CLIENTS_ONLY ON CACHE BOOL "Build only clients." FORCE)
+        else()
+            set(HIPSPARSE_ENABLE_HOST ON CACHE BOOL "Build hipSPARSE library." FORCE)
+            set(HIPSPARSE_BUILD_CLIENTS_ONLY OFF CACHE BOOL "Build only clients." FORCE)
+        endif()
+        _hipsparse_deprecation_warning(BUILD_CLIENTS_ONLY HIPSPARSE_ENABLE_HOST)
+        list(APPEND _HIPSPARSE_LEGACY_OPTIONS_USED "BUILD_CLIENTS_ONLY=${BUILD_CLIENTS_ONLY}")
+        list(APPEND _HIPSPARSE_CURRENT_OPTIONS "HIPSPARSE_ENABLE_HOST=${HIPSPARSE_ENABLE_HOST}")
+    endif()
+endif()
 
 # Special case: USE_CUDA → HIPSPARSE_ENABLE_CUDA
 # Note: In the old build system, USE_CUDA controlled the backend selection

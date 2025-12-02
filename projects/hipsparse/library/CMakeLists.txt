@@ -1,6 +1,13 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+# Validate that at least one backend is enabled
+if(NOT HIPSPARSE_ENABLE_CUDA AND NOT HIPSPARSE_ENABLE_HIP)
+    message(FATAL_ERROR 
+        "At least one backend must be enabled.\n"
+        "Set HIPSPARSE_ENABLE_CUDA=ON or HIPSPARSE_ENABLE_HIP=ON")
+endif()
+
 if(HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
     add_library(hipsparse SHARED)
 else()
@@ -18,6 +25,8 @@ set_target_properties(hipsparse PROPERTIES
 )
 
 # Following boost conventions of prefixing 'lib' on static built libraries
+# This ensures static libraries are named libhipsparse.a instead of just hipsparse.a
+# for consistency with naming conventions across different platforms and build systems
 if(NOT (HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS))
     set_target_properties(hipsparse PROPERTIES PREFIX "lib")
 endif()

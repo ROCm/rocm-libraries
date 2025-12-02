@@ -3,6 +3,7 @@
 
 # Create common helper target for all clients
 add_library(hipsparse-clients-common OBJECT)
+add_library(hipsparse::clients-common ALIAS hipsparse-clients-common)
 
 target_compile_features(hipsparse-clients-common PRIVATE cxx_std_17)
 
@@ -58,6 +59,7 @@ endif()
 
 # Lightweight OBJECT library for samples only
 add_library(hipsparse-samples-common OBJECT)
+add_library(hipsparse::samples-common ALIAS hipsparse-samples-common)
 
 target_compile_features(hipsparse-samples-common PRIVATE cxx_std_17)
 

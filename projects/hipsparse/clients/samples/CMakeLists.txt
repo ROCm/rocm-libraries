@@ -7,7 +7,7 @@ if(NOT WIN32)
     target_sources(example_c_headers PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/example_c_headers.c"
     )
-    target_link_libraries(example_c_headers PRIVATE hipsparse-samples-common)
+    target_link_libraries(example_c_headers PRIVATE hipsparse::samples-common)
     if(HIPSPARSE_ENABLE_CUDA)
         target_compile_definitions(example_c_headers PRIVATE __HIP_PLATFORM_NVIDIA__)
         target_include_directories(example_c_headers PRIVATE ${HIP_INCLUDE_DIRS})
@@ -22,7 +22,7 @@ if(NOT WIN32)
         target_sources(example_axpyi PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/example_axpyi.c"
         )
-        target_link_libraries(example_axpyi PRIVATE hipsparse-samples-common)
+        target_link_libraries(example_axpyi PRIVATE hipsparse::samples-common)
         set_target_properties(example_axpyi PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
         )
@@ -34,7 +34,7 @@ add_executable(example_handle)
 target_sources(example_handle PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/example_handle.cpp"
 )
-target_link_libraries(example_handle PRIVATE hipsparse-samples-common)
+target_link_libraries(example_handle PRIVATE hipsparse::samples-common)
 set_target_properties(example_handle PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
 )
@@ -45,7 +45,7 @@ if(NOT HIPSPARSE_ENABLE_CUDA OR (HIPSPARSE_ENABLE_CUDA AND CUDA_VERSION LESS 11)
     target_sources(example_csrmv PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/example_csrmv.cpp"
     )
-    target_link_libraries(example_csrmv PRIVATE hipsparse-samples-common)
+    target_link_libraries(example_csrmv PRIVATE hipsparse::samples-common)
     set_target_properties(example_csrmv PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
     )
@@ -54,14 +54,14 @@ if(NOT HIPSPARSE_ENABLE_CUDA OR (HIPSPARSE_ENABLE_CUDA AND CUDA_VERSION LESS 11)
     target_sources(example_hybmv PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/example_hybmv.cpp"
     )
-    target_link_libraries(example_hybmv PRIVATE hipsparse-samples-common)
+    target_link_libraries(example_hybmv PRIVATE hipsparse::samples-common)
     set_target_properties(example_hybmv PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
     )
 endif()
 
 # Fortran samples (only if Fortran support enabled, using HIP, and building with library)
-if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND NOT HIPSPARSE_BUILD_CLIENTS_ONLY)
+if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
     # Fortran example: example_fortran_auxiliary
     add_executable(example_fortran_auxiliary)
     target_sources(example_fortran_auxiliary PRIVATE
@@ -70,7 +70,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND NOT HIPSPARSE_BUILD_CLI
     add_dependencies(example_fortran_auxiliary hipsparse_fortran)
     # Fortran linking C++: Need explicit C++ runtime dependencies
     target_link_libraries(example_fortran_auxiliary PRIVATE 
-        hipsparse-samples-common
+        hipsparse::samples-common
     )
     if(NOT WIN32)
         target_link_libraries(example_fortran_auxiliary PRIVATE m ${CMAKE_DL_LIBS})
@@ -85,7 +85,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND NOT HIPSPARSE_BUILD_CLI
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_csrsv2.f90"
     )
     add_dependencies(example_fortran_csrsv2 hipsparse_fortran)
-    target_link_libraries(example_fortran_csrsv2 PRIVATE hipsparse-samples-common)
+    target_link_libraries(example_fortran_csrsv2 PRIVATE hipsparse::samples-common)
     if(NOT WIN32)
         target_link_libraries(example_fortran_csrsv2 PRIVATE m ${CMAKE_DL_LIBS})
     endif()
@@ -99,7 +99,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND NOT HIPSPARSE_BUILD_CLI
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_bsric02.f90"
     )
     add_dependencies(example_fortran_bsric02 hipsparse_fortran)
-    target_link_libraries(example_fortran_bsric02 PRIVATE hipsparse-samples-common)
+    target_link_libraries(example_fortran_bsric02 PRIVATE hipsparse::samples-common)
     if(NOT WIN32)
         target_link_libraries(example_fortran_bsric02 PRIVATE m ${CMAKE_DL_LIBS})
     endif()
@@ -113,7 +113,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND NOT HIPSPARSE_BUILD_CLI
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_csric02.f90"
     )
     add_dependencies(example_fortran_csric02 hipsparse_fortran)
-    target_link_libraries(example_fortran_csric02 PRIVATE hipsparse-samples-common)
+    target_link_libraries(example_fortran_csric02 PRIVATE hipsparse::samples-common)
     if(NOT WIN32)
         target_link_libraries(example_fortran_csric02 PRIVATE m ${CMAKE_DL_LIBS})
     endif()
@@ -127,7 +127,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND NOT HIPSPARSE_BUILD_CLI
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_bsrilu02.f90"
     )
     add_dependencies(example_fortran_bsrilu02 hipsparse_fortran)
-    target_link_libraries(example_fortran_bsrilu02 PRIVATE hipsparse-samples-common)
+    target_link_libraries(example_fortran_bsrilu02 PRIVATE hipsparse::samples-common)
     if(NOT WIN32)
         target_link_libraries(example_fortran_bsrilu02 PRIVATE m ${CMAKE_DL_LIBS})
     endif()
@@ -141,7 +141,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND NOT HIPSPARSE_BUILD_CLI
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_csrilu02.f90"
     )
     add_dependencies(example_fortran_csrilu02 hipsparse_fortran)
-    target_link_libraries(example_fortran_csrilu02 PRIVATE hipsparse-samples-common)
+    target_link_libraries(example_fortran_csrilu02 PRIVATE hipsparse::samples-common)
     if(NOT WIN32)
         target_link_libraries(example_fortran_csrilu02 PRIVATE m ${CMAKE_DL_LIBS})
     endif()
@@ -155,7 +155,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND NOT HIPSPARSE_BUILD_CLI
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_csrsm2.f90"
     )
     add_dependencies(example_fortran_csrsm2 hipsparse_fortran)
-    target_link_libraries(example_fortran_csrsm2 PRIVATE hipsparse-samples-common)
+    target_link_libraries(example_fortran_csrsm2 PRIVATE hipsparse::samples-common)
     if(NOT WIN32)
         target_link_libraries(example_fortran_csrsm2 PRIVATE m ${CMAKE_DL_LIBS})
     endif()
@@ -169,7 +169,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND NOT HIPSPARSE_BUILD_CLI
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_dotci.f90"
     )
     add_dependencies(example_fortran_dotci hipsparse_fortran)
-    target_link_libraries(example_fortran_dotci PRIVATE hipsparse-samples-common)
+    target_link_libraries(example_fortran_dotci PRIVATE hipsparse::samples-common)
     if(NOT WIN32)
         target_link_libraries(example_fortran_dotci PRIVATE m ${CMAKE_DL_LIBS})
     endif()
@@ -183,7 +183,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND NOT HIPSPARSE_BUILD_CLI
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_roti.f90"
     )
     add_dependencies(example_fortran_roti hipsparse_fortran)
-    target_link_libraries(example_fortran_roti PRIVATE hipsparse-samples-common)
+    target_link_libraries(example_fortran_roti PRIVATE hipsparse::samples-common)
     if(NOT WIN32)
         target_link_libraries(example_fortran_roti PRIVATE m ${CMAKE_DL_LIBS})
     endif()
@@ -197,7 +197,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND NOT HIPSPARSE_BUILD_CLI
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_spmv.f90"
     )
     add_dependencies(example_fortran_spmv hipsparse_fortran)
-    target_link_libraries(example_fortran_spmv PRIVATE hipsparse-samples-common)
+    target_link_libraries(example_fortran_spmv PRIVATE hipsparse::samples-common)
     if(NOT WIN32)
         target_link_libraries(example_fortran_spmv PRIVATE m ${CMAKE_DL_LIBS})
     endif()
@@ -211,7 +211,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND NOT HIPSPARSE_BUILD_CLI
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_bsrmm.f90"
     )
     add_dependencies(example_fortran_bsrmm hipsparse_fortran)
-    target_link_libraries(example_fortran_bsrmm PRIVATE hipsparse-samples-common)
+    target_link_libraries(example_fortran_bsrmm PRIVATE hipsparse::samples-common)
     if(NOT WIN32)
         target_link_libraries(example_fortran_bsrmm PRIVATE m ${CMAKE_DL_LIBS})
     endif()
