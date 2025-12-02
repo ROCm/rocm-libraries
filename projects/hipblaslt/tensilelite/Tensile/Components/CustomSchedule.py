@@ -835,7 +835,7 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
         kernel["UsePLRPack"] = True
 
         optSchedule = {
-            'SYNC'   : [[8, 12,13, 36,44, 56,59, 66,68, 73]],
+            'SYNC'   : [[8, 12,13, 36,44, 56,59, 66,68, 74, 85, 127]],
             'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
             'GRIncB' : [[28,29,30,31,32,33,34,35,36]],
             'LRA0'   : [[0,0,2,2,4,4,6,6],
@@ -868,7 +868,9 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment=""),
                     SWaitCnt(dscnt=-1, vlcnt=9, vscnt=-1, comment="Wait for GRB to complete"),
                     SBarrier(comment=""),
-                    SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 to complete")]
+                    SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for 6/8 LRA1 to complete"),
+                    SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="Wait for all LRA1 to complete"),
+                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB1 to complete")]
         if isTT(kernel):
             kernel["SwapGlobalReadOrder"] = True
 
