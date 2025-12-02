@@ -1172,7 +1172,7 @@ struct TestNameGenerator
         std::stringstream ss;
         std::string str;
 
-        ss << "dims_" << GetRangeAsString(dims()) << "_test_id_" << testCase.index;
+        ss << "dims_" << GetRangeAsString(dims(), "x") << "_test_id_" << testCase.index;
 
         str = ss.str();
 
