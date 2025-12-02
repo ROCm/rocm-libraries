@@ -656,22 +656,6 @@ public:
 #endif
 };
 
-static EfficiencyMonitorImp* g_EffMonitorInstance{nullptr};
-
-EfficiencyMonitor& getEfficiencyMonitor()
-{
-    if(g_EffMonitorInstance == nullptr)
-    {
-        g_EffMonitorInstance = new EfficiencyMonitorImp();
-    }
-    return *g_EffMonitorInstance;
-}
-
-void freeEfficiencyMonitor()
-{
-    if(g_EffMonitorInstance != nullptr)
-    {
-        delete g_EffMonitorInstance;
-        g_EffMonitorInstance = nullptr;
-    }
+std::unique_ptr<EfficiencyMonitor> EfficiencyMonitor::create() {
+    return std::make_unique<EfficiencyMonitorImp>();
 }

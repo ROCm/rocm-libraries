@@ -23,9 +23,12 @@
 #pragma once
 
 #include <vector>
+#include <memory>
+
 class EfficiencyMonitor
 {
 public:
+    virtual ~EfficiencyMonitor()    = default;
     virtual bool enabled()          = 0;
     virtual bool detailedReport()   = 0;
     virtual bool efficiencyReport() = 0;
@@ -52,7 +55,6 @@ public:
     virtual size_t              getMemReadBytes()          = 0;
     virtual uint16_t            getCuCount()               = 0;
     virtual std::string         getDeviceString()          = 0;
-};
 
-EfficiencyMonitor& getEfficiencyMonitor();
-void                freeEfficiencyMonitor();
+    static std::unique_ptr<EfficiencyMonitor> create();
+};
