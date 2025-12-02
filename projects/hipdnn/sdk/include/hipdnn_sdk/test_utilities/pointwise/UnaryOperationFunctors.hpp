@@ -11,11 +11,7 @@
 #include <limits>
 #include <type_traits>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
-{
-namespace pointwise
+namespace hipdnn_sdk::test_utilities::pointwise
 {
 
 template <typename ComputeType = float>
@@ -100,6 +96,4 @@ struct Negation
     }
 };
 
-} // namespace pointwise
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::test_utilities::pointwise

@@ -19,9 +19,7 @@
 
 #endif
 
-namespace hipdnn_sdk
-{
-namespace utilities
+namespace hipdnn_sdk::utilities
 {
 
 inline std::string getLibraryName(const char* libraryBaseName)
@@ -34,5 +32,4 @@ inline std::string getExecutableName(const char* executableBaseName)
     return std::string(executableBaseName) + EXECUTABLE_EXT;
 }
 
-}
-}
+} // namespace hipdnn_sdk::utilities

@@ -221,7 +221,7 @@ pipeline {
             steps{
                 script {
                     withWorkingDir {
-                        utils.getDockerImage()
+                        utils.getDockerImageWithStatus()
                     }
                 }
             }
