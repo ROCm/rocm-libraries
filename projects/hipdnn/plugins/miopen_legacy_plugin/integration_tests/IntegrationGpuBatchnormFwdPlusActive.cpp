@@ -18,6 +18,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
+using namespace miopen_legacy_plugin::test_utilities;
 using namespace test_bn_common;
 
 namespace

@@ -9,16 +9,18 @@ on:
         type: string
       test_type:
         type: string
+      amdgpu_families:
+        type: string
+      test_runs_on:
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   therock-build-windows:
-    name: Build
+    name: Build (${{ inputs.amdgpu_families }})
     runs-on: azure-windows-scale-rocm
-    # Skip hipDNN & plugin build on Windows since it's not supported yet https://github.com/ROCm/TheRock/issues/1822
-    if: ${{ !contains(inputs.project_to_test, 'hipdnn') && !contains(inputs.project_to_test, 'miopen_plugin') }}
     outputs:
       AMDGPU_FAMILIES: ${{ env.AMDGPU_FAMILIES }}
     permissions:
@@ -31,9 +33,7 @@ jobs:
       BUILD_DIR: B:\build
       CCACHE_DIR: "${{ github.workspace }}/.container-cache/ccache"
       CCACHE_MAXSIZE: "700M"
-      # TODO(geomin12): Add matrix of families
-      # To get a fast signal of windows building for TheRock, adding gfx1151
-      AMDGPU_FAMILIES: "gfx1151"
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
     steps:
       - name: Configure GitHub longpath
         run: |
@@ -55,7 +55,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: efed3c3b10a5cce8578f58f8eb288582c26d18c4 # 2025-11-19 commit
+          ref: a1f6b57cc31890c05ab0094212ae0b269765db8e # 2025-11-25 commit
 
       - name: Set up Python
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -168,14 +168,12 @@ jobs:
             --upload
 
   therock-test-windows:
-    name: "Test"
+    name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-windows]
-    # Skip hipDNN & plugin tests on Windows since it's not supported yet https://github.com/ROCm/TheRock/issues/1822
-    if: ${{ !contains(inputs.project_to_test, 'hipdnn') && !contains(inputs.project_to_test, 'miopen_plugin') }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       project_to_test: ${{ inputs.project_to_test }}
-      amdgpu_families: ${{ needs.therock-build-windows.outputs.AMDGPU_FAMILIES }}
-      test_runs_on: "windows-strix-halo-gpu-rocm"
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      test_runs_on: ${{ inputs.test_runs_on }}
       platform: "windows"
       test_type: ${{ inputs.test_type }}

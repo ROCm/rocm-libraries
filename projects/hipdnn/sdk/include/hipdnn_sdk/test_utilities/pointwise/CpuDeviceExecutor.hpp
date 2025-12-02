@@ -9,25 +9,23 @@
 #include <stdexcept>
 #include <vector>
 
-namespace hipdnn_sdk
+namespace hipdnn_sdk::test_utilities
 {
-namespace test_utilities
-{
-
-using namespace hipdnn_sdk::utilities;
 
 template <class OutputType, class... InputTypes>
 class CpuDeviceExecutor
 {
 public:
     template <typename Op, typename InputType>
-    void executeUnary(const TensorBase<InputType>& input, TensorBase<OutputType>& output, Op op)
+    void executeUnary(const utilities::TensorBase<InputType>& input,
+                      utilities::TensorBase<OutputType>& output,
+                      Op op)
     {
         const auto& inputDims = input.dims();
         const auto& outputDims = output.dims();
 
         // Validate that input and output dimensions are compatible
-        if(!areDimensionsBroadcastCompatible(inputDims, outputDims))
+        if(!utilities::areDimensionsBroadcastCompatible(inputDims, outputDims))
         {
             throw std::runtime_error("Input dimensions are not broadcast compatible with output");
         }
@@ -52,9 +50,9 @@ public:
     }
 
     template <typename Op, typename Input1Type, typename Input2Type>
-    void executeBinaryBroadcast(const TensorBase<Input1Type>& input1,
-                                const TensorBase<Input2Type>& input2,
-                                TensorBase<OutputType>& output,
+    void executeBinaryBroadcast(const utilities::TensorBase<Input1Type>& input1,
+                                const utilities::TensorBase<Input2Type>& input2,
+                                utilities::TensorBase<OutputType>& output,
                                 Op op)
     {
         const auto& input1Dims = input1.dims();
@@ -62,12 +60,12 @@ public:
         const auto& outputDims = output.dims();
 
         // Validate broadcast compatibility using existing utility function
-        if(!areDimensionsBroadcastCompatible(input1Dims, outputDims))
+        if(!utilities::areDimensionsBroadcastCompatible(input1Dims, outputDims))
         {
             throw std::runtime_error("Input1 dimensions are not broadcast compatible with output");
         }
 
-        if(!areDimensionsBroadcastCompatible(input2Dims, outputDims))
+        if(!utilities::areDimensionsBroadcastCompatible(input2Dims, outputDims))
         {
             throw std::runtime_error("Input2 dimensions are not broadcast compatible with output");
         }
@@ -93,7 +91,7 @@ public:
         parallelFunc();
     }
 
-    void markOutputModified(TensorBase<OutputType>& output)
+    void markOutputModified(utilities::TensorBase<OutputType>& output)
     {
         output.memory().markHostModified();
     }
@@ -121,5 +119,4 @@ private:
     }
 };
 
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::test_utilities
