@@ -39,7 +39,7 @@ using namespace rocRoller::Operations;
 
 namespace ScratchOperationTest
 {
-    TEST_CASE("ScratchPolicy enum", "[scratch][policy]")
+    TEST_CASE("ScratchPolicy enum", "[scratch][policy][enum]")
     {
         SECTION("toString for all values")
         {
@@ -71,7 +71,7 @@ namespace ScratchOperationTest
         }
     }
 
-    TEST_CASE("Scratch construction", "[scratch]")
+    TEST_CASE("Scratch construction", "[scratch][construction]")
     {
         SECTION("Create Scratch with None policy")
         {

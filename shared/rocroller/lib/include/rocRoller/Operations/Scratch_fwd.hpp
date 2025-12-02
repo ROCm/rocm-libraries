@@ -24,6 +24,10 @@
  *
  *******************************************************************************/
 
+/**
+ * Scratch space command.
+ */
+
 #pragma once
 
 #include <string>
@@ -33,7 +37,7 @@ namespace rocRoller
     namespace Operations
     {
         /**
-         * A scratch space operation
+         * A scratch space operation that is used to set policy guarantees for scratch space content.
         */
         class Scratch;
 

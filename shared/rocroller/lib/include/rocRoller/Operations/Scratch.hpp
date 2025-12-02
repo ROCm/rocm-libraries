@@ -24,6 +24,10 @@
  *
  *******************************************************************************/
 
+/**
+ * Scratch space command.
+ */
+
 #pragma once
 
 #include <rocRoller/Operations/Operation.hpp>
@@ -35,12 +39,13 @@ namespace rocRoller
     namespace Operations
     {
         /**
-         * A scratch space operation
+         * A scratch space operation that is used to set policy guarantees for scratch space content.
         */
         class Scratch : public BaseOperation
         {
         public:
             Scratch() = delete;
+
             /**
              * @param tag Operation tag for this scratch space
              * @param policy Scratch space policy (guarantees about content)
