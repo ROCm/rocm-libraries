@@ -77,12 +77,12 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
         if(mode == miopenBNSpatial)
         { // SPATIAL kernels
             kernel.kernel_file = "MIOpenBatchNormActivBwdSpatial.cpp";
-            kernel.kernel_name = "ActivBwdSpatial";
+            kernel.kernel_name = "MIOpenBatchNormActivBwdSpatial";
         }
         else
         { // PER ACTIVATION
             kernel.kernel_file = "MIOpenBatchNormActivBwdPerAct.cpp";
-            kernel.kernel_name = "ActivBwdPerActivation";
+            kernel.kernel_name = "MIOpenBatchNormActivBwdPerActivation";
         }
         size_t xlocalsize, ylocalsize, zlocalsize;
         const auto& input_desc = bn_problem.GetXDesc();
@@ -157,16 +157,17 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
         const auto& activ_op =
             dynamic_cast<ActivBwdFusionOpDescriptor&>(*problem.fusion_plan_desc->op_map[1]);
         const auto build_params = KernelBuildParameters{
-            {"BATCH_SIZE", static_cast<int>(n)},
-            {"CHANNELS", static_cast<int>(c)},
-            {"H", static_cast<int>(h)},
-            {"W", static_cast<int>(w)},
+            {"MIO_BN_N", static_cast<int>(n)},
+            {"MIO_BN_NCHW", static_cast<int>(n * c * h * w)},
+            {"MIO_BN_NHW", static_cast<int>(n * h * w)},
+            {"MIO_BN_CHW", static_cast<int>(c * h * w)},
+            {"MIO_BN_HW", static_cast<int>(h * w)},
             {"LOCAL_SIZE_X", static_cast<int>(xlocalsize)},
             {"LOCAL_SIZE_Y", static_cast<int>(ylocalsize)},
             {"GRID_SIZE_Y", static_cast<int>(ygridsize)},
             {"LDSNOGCN_SIZE", static_cast<int>(ldsnogcn)},
             {"LDSGCN_SIZE", static_cast<int>(ldsgcn)},
-            {"VARIANT", static_cast<int>(variant)},
+            {"MIO_BN_VARIANT", static_cast<int>(variant)},
             {"MIO_BN_GFX103X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx103"))},
             {"MIO_BN_GFX110X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx110"))},
             {"MIO_BN_GFX120X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx120"))},

@@ -45,21 +45,21 @@ using TYPE4 = std::conditional<
     ushort4,
     typename std::conditional<std::is_same<TYPE, double>::value, double4, float4>::type>::type;
 
-constexpr static unsigned int SEGTMP  = H * W * (LOCAL_SIZE_X / (H * W));
-constexpr static unsigned int SEGMENT = SEGTMP > BATCH_SIZE* H* W ? BATCH_SIZE* H* W : SEGTMP;
-constexpr static unsigned int NLOOP  = SEGMENT > 0 ? (BATCH_SIZE* H* W + SEGMENT - 1) / SEGMENT : 1;
-constexpr static unsigned int SEGIHW = SEGMENT / (H * W);
-constexpr static unsigned int NLOOPM = NLOOP - 1;
-constexpr static unsigned int SNHW   = NLOOPM * SEGIHW;
+constexpr static unsigned int SEGTMP   = MIO_BN_HW * (LOCAL_SIZE_X / (MIO_BN_HW));
+constexpr static unsigned int SEGMENT  = SEGTMP > MIO_BN_NHW ? MIO_BN_NHW : SEGTMP;
+constexpr static unsigned int NLOOP    = SEGMENT > 0 ? (MIO_BN_NHW + SEGMENT - 1) / SEGMENT : 1;
+constexpr static unsigned int SEGIHW   = SEGMENT / (MIO_BN_HW);
+constexpr static unsigned int NLOOPM   = NLOOP - 1;
+constexpr static unsigned int SNHW     = NLOOPM * SEGIHW;
 constexpr static unsigned int LDS_SIZE = MIOPEN_USE_AMDGCN ? LDSGCN_SIZE : LDSNOGCN_SIZE;
 
 constexpr static unsigned int MAX_READ = 2;
 constexpr static unsigned int GRPRD    = LOCAL_SIZE_X * 4;
-constexpr static unsigned int REM4     = BATCH_SIZE * H * W - (BATCH_SIZE * H * W / GRPRD) * GRPRD;
-constexpr static unsigned int LESS4    = BATCH_SIZE * H * W - REM4;
+constexpr static unsigned int REM4     = MIO_BN_NHW - (MIO_BN_NHW / GRPRD) * GRPRD;
+constexpr static unsigned int LESS4    = MIO_BN_NHW - REM4;
 constexpr static unsigned int CHUNK    = MAX_READ * LOCAL_SIZE_X;
-constexpr static unsigned int REMOUT   = BATCH_SIZE * H * W - (BATCH_SIZE * H * W / CHUNK) * CHUNK;
-constexpr static unsigned int LESSOUT  = BATCH_SIZE * H * W - REMOUT;
+constexpr static unsigned int REMOUT   = MIO_BN_NHW - (MIO_BN_NHW / CHUNK) * CHUNK;
+constexpr static unsigned int LESSOUT  = MIO_BN_NHW - REMOUT;
 
 constexpr static unsigned int MAX_N = 65;
 
@@ -81,7 +81,7 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
 {
     const unsigned int lid   = threadIdx.x;
     const unsigned int gid   = blockIdx.x;
-    const unsigned int chwid = gid * H * W + (VARIANT == 0 ? lid % (H * W) : 0);
+    const unsigned int chwid = gid * MIO_BN_HW + (MIO_BN_VARIANT == 0 ? lid % (MIO_BN_HW) : 0);
 
     __shared__ FLOAT_ACCUM scale, bias, mean, inv_variance;
     if(lid == 0)
@@ -93,24 +93,24 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
     }
     __syncthreads();
 
-    FLOAT_ACCUM tmp3 = scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (BATCH_SIZE * H * W));
+    FLOAT_ACCUM tmp3 = scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (MIO_BN_NHW));
 
     FLOAT_ACCUM ds{0};
     FLOAT_ACCUM db{0};
 
-    if constexpr(VARIANT == 0)
+    if constexpr(MIO_BN_VARIANT == 0)
     {
         FLOAT_ACCUM batch_values[NLOOP];
         FLOAT_ACCUM dy_values[NLOOP];
 
-        const unsigned int lidihw = lid / (H * W);
+        const unsigned int lidihw = lid / (MIO_BN_HW);
 
         if(lid < SEGMENT)
         {
             for(unsigned int n = 0; n < NLOOPM; ++n)
             {
                 unsigned int nidx  = n * SEGIHW + lidihw;
-                unsigned int index = nidx * CHANNELS * H * W + chwid;
+                unsigned int index = nidx * MIO_BN_CHW + chwid;
                 FLOAT_ACCUM xhat   = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance;
                 FLOAT_ACCUM bn_dy[1];
                 FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
@@ -130,11 +130,11 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
                 ds += xhat * dy_values[n];
             }
             unsigned int nidx  = SNHW + lidihw;
-            unsigned int index = nidx * CHANNELS * H * W + chwid;
-            FLOAT_ACCUM xhat   = index < BATCH_SIZE * CHANNELS * H * W
+            unsigned int index = nidx * MIO_BN_CHW + chwid;
+            FLOAT_ACCUM xhat   = index < MIO_BN_NCHW
                                      ? (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance
                                      : CVT_FP32_2ACCUM(0);
-            if(index < BATCH_SIZE * CHANNELS * H * W)
+            if(index < MIO_BN_NCHW)
             {
                 FLOAT_ACCUM bn_dy[1];
                 FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
@@ -178,31 +178,31 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
             for(unsigned int n = 0; n < NLOOPM; ++n)
             {
                 unsigned int nidx  = n * SEGIHW + lidihw;
-                unsigned int index = nidx * CHANNELS * H * W + chwid;
-                FLOAT_ACCUM tmp1   = BATCH_SIZE * H * W * dy_values[n] - db;
+                unsigned int index = nidx * MIO_BN_CHW + chwid;
+                FLOAT_ACCUM tmp1   = MIO_BN_NHW * dy_values[n] - db;
                 FLOAT_ACCUM tmp2   = -batch_values[n] * ds;
                 dx[index]          = CVT_ACCUM2FLOAT(tmp3 * (tmp2 + tmp1));
             }
             unsigned int nidx  = SNHW + lidihw;
-            unsigned int index = nidx * CHANNELS * H * W + chwid;
-            if(index < BATCH_SIZE * CHANNELS * H * W)
+            unsigned int index = nidx * MIO_BN_CHW + chwid;
+            if(index < MIO_BN_NCHW)
             {
-                FLOAT_ACCUM tmp1 = BATCH_SIZE * H * W * dy_values[NLOOPM] - db;
+                FLOAT_ACCUM tmp1 = MIO_BN_NHW * dy_values[NLOOPM] - db;
                 FLOAT_ACCUM tmp2 = -batch_values[NLOOPM] * ds;
                 dx[index]        = CVT_ACCUM2FLOAT(tmp3 * (tmp2 + tmp1));
             }
         }
     }
-    else if constexpr(VARIANT == 1)
+    else if constexpr(MIO_BN_VARIANT == 1)
     {
         using T4           = TYPE4<T>;
         using FLOAT_ACCUM4 = TYPE4<FLOAT_ACCUM>;
 
         for(unsigned int k = lid << 2; k < LESS4; k += GRPRD)
         {
-            unsigned int nidx  = k / (H * W);
-            unsigned int hwidx = k - nidx * H * W;
-            unsigned int index = nidx * CHANNELS * H * W + chwid + hwidx;
+            unsigned int nidx  = k / (MIO_BN_HW);
+            unsigned int hwidx = k - nidx * MIO_BN_HW;
+            unsigned int index = nidx * MIO_BN_CHW + chwid + hwidx;
             T4 xread4          = *reinterpret_cast<const T4*>(&x[index]);
             T4 act_dy4         = *reinterpret_cast<const T4*>(&dy[index]);
             T4 act_y4          = *reinterpret_cast<const T4*>(&y[index]);
@@ -280,10 +280,10 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
         if constexpr(REM4)
         {
             unsigned int remkey = (lid << 2) + LESS4;
-            unsigned int nidx   = remkey / (H * W);
-            unsigned int hwidx  = remkey - nidx * H * W;
-            unsigned int index  = nidx * CHANNELS * H * W + chwid + hwidx;
-            if(index < BATCH_SIZE * CHANNELS * H * W)
+            unsigned int nidx   = remkey / (MIO_BN_HW);
+            unsigned int hwidx  = remkey - nidx * MIO_BN_HW;
+            unsigned int index  = nidx * MIO_BN_CHW + chwid + hwidx;
+            if(index < MIO_BN_NCHW)
             {
                 T4 xread4  = *reinterpret_cast<const T4*>(&x[index]);
                 T4 act_dy4 = *reinterpret_cast<const T4*>(&dy[index]);
@@ -375,7 +375,7 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
                 ds, db, CVT_FP32_2ACCUM(1.0f), lcl_data_x2, lcl_data_y2, lid);
         }
 
-        tmp3 = scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (BATCH_SIZE * H * W));
+        tmp3 = scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (MIO_BN_NHW));
         __syncthreads();
 
         FLOAT_ACCUM values[MAX_READ];
@@ -384,9 +384,9 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
             for(unsigned int j = 0; j < MAX_READ; ++j)
             {
                 unsigned int l     = k + j;
-                unsigned int nidx  = l / (H * W);
-                unsigned int hwidx = l - nidx * H * W;
-                unsigned int index = nidx * CHANNELS * H * W + chwid + hwidx;
+                unsigned int nidx  = l / (MIO_BN_HW);
+                unsigned int hwidx = l - nidx * MIO_BN_HW;
+                unsigned int index = nidx * MIO_BN_CHW + chwid + hwidx;
                 FLOAT_ACCUM bn_dy[1];
                 FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
                 FLOAT_ACCUM act_y[1]  = {CVT_FLOAT2ACCUM(y[index])};
@@ -400,7 +400,7 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
                                         CVT_FLOAT2ACCUM(gamma),
                                         CVT_FLOAT2ACCUM(beta),
                                         CVT_FLOAT2ACCUM(alpha));
-                FLOAT_ACCUM tmp1 = BATCH_SIZE * H * W * bn_dy[0] - db;
+                FLOAT_ACCUM tmp1 = MIO_BN_NHW * bn_dy[0] - db;
                 FLOAT_ACCUM tmp2 = -xhat * ds;
                 values[j]        = tmp3 * (tmp2 + tmp1);
             }
@@ -408,9 +408,9 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
             for(unsigned int j = 0; j < MAX_READ; ++j)
             {
                 unsigned int l     = k + j;
-                unsigned int nidx  = l / (H * W);
-                unsigned int hwidx = l - nidx * H * W;
-                unsigned int index = nidx * CHANNELS * H * W + chwid + hwidx;
+                unsigned int nidx  = l / (MIO_BN_HW);
+                unsigned int hwidx = l - nidx * MIO_BN_HW;
+                unsigned int index = nidx * MIO_BN_CHW + chwid + hwidx;
                 dx[index]          = CVT_ACCUM2FLOAT(values[j]);
             }
         }
@@ -421,10 +421,10 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
             for(unsigned int j = 0; j < MAX_READ; ++j)
             {
                 unsigned int l     = remkeyout + j;
-                unsigned int nidx  = l / (H * W);
-                unsigned int hwidx = l - nidx * H * W;
-                unsigned int index = nidx * CHANNELS * H * W + chwid + hwidx;
-                if(index < BATCH_SIZE * CHANNELS * H * W)
+                unsigned int nidx  = l / (MIO_BN_HW);
+                unsigned int hwidx = l - nidx * MIO_BN_HW;
+                unsigned int index = nidx * MIO_BN_CHW + chwid + hwidx;
+                if(index < MIO_BN_NCHW)
                 {
                     FLOAT_ACCUM bn_dy[1];
                     FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
@@ -440,7 +440,7 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
                                             CVT_FLOAT2ACCUM(beta),
                                             CVT_FLOAT2ACCUM(alpha));
 
-                    FLOAT_ACCUM tmp1 = BATCH_SIZE * H * W * bn_dy[0] - db;
+                    FLOAT_ACCUM tmp1 = MIO_BN_NHW * bn_dy[0] - db;
                     FLOAT_ACCUM tmp2 = -xhat * ds;
                     values[j]        = tmp3 * (tmp2 + tmp1);
                 }
@@ -449,30 +449,30 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
             for(unsigned int j = 0; j < MAX_READ; ++j)
             {
                 unsigned int l     = remkeyout + j;
-                unsigned int nidx  = l / (H * W);
-                unsigned int hwidx = l - nidx * H * W;
-                unsigned int index = nidx * CHANNELS * H * W + chwid + hwidx;
-                if(index < BATCH_SIZE * CHANNELS * H * W)
+                unsigned int nidx  = l / (MIO_BN_HW);
+                unsigned int hwidx = l - nidx * MIO_BN_HW;
+                unsigned int index = nidx * MIO_BN_CHW + chwid + hwidx;
+                if(index < MIO_BN_NCHW)
                 {
                     dx[index] = CVT_ACCUM2FLOAT(values[j]);
                 }
             }
         }
     }
-    else if constexpr(VARIANT == 2)
+    else if constexpr(MIO_BN_VARIANT == 2)
     {
         // Unused
     }
-    else if constexpr(VARIANT == 3)
+    else if constexpr(MIO_BN_VARIANT == 3)
     {
-        FLOAT_ACCUM batch_values[BATCH_SIZE];
-        FLOAT_ACCUM dy_values[BATCH_SIZE];
-        if(lid < H * W)
+        FLOAT_ACCUM batch_values[MIO_BN_N];
+        FLOAT_ACCUM dy_values[MIO_BN_N];
+        if(lid < MIO_BN_HW)
         {
 #pragma unroll
-            for(unsigned int n = 0; n < BATCH_SIZE; ++n)
+            for(unsigned int n = 0; n < MIO_BN_N; ++n)
             {
-                unsigned int index = n * CHANNELS * H * W + chwid + lid;
+                unsigned int index = n * MIO_BN_CHW + chwid + lid;
                 FLOAT_ACCUM bn_dy[1];
                 FLOAT_ACCUM act_dy[1] = {CVT_FLOAT2ACCUM(dy[index])};
                 FLOAT_ACCUM xhat      = (CVT_FLOAT2ACCUM(x[index]) - mean) * inv_variance;
@@ -487,7 +487,7 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
                                         CVT_FLOAT2ACCUM(beta),
                                         CVT_FLOAT2ACCUM(alpha));
 
-                if constexpr(BATCH_SIZE < MAX_N)
+                if constexpr(MIO_BN_N < MAX_N)
                 {
                     batch_values[n] = xhat;
                     dy_values[n]    = bn_dy[0];
@@ -517,16 +517,16 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
         // Group level reduction
         // Need to reduce over all elements in NxHxW
         // move across the sections of an image in the mini_batch stack
-        if(lid < H * W)
+        if(lid < MIO_BN_HW)
         {
 #pragma unroll
-            for(unsigned int n = 0; n < BATCH_SIZE; ++n)
+            for(unsigned int n = 0; n < MIO_BN_N; ++n)
             {
-                unsigned int index = n * CHANNELS * H * W + chwid + lid;
+                unsigned int index = n * MIO_BN_CHW + chwid + lid;
                 FLOAT_ACCUM tmp1, tmp2;
-                if constexpr(BATCH_SIZE < MAX_N)
+                if constexpr(MIO_BN_N < MAX_N)
                 {
-                    tmp1 = BATCH_SIZE * H * W * dy_values[n] - db;
+                    tmp1 = MIO_BN_NHW * dy_values[n] - db;
                     tmp2 = -batch_values[n] * ds;
                 }
                 else
@@ -545,10 +545,10 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
                                             CVT_FLOAT2ACCUM(beta),
                                             CVT_FLOAT2ACCUM(alpha));
 
-                    tmp1 = BATCH_SIZE * H * W * bn_dy[0] - db;
+                    tmp1 = MIO_BN_NHW * bn_dy[0] - db;
                     tmp2 = -xhat * ds;
                 }
-                tmp3      = scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (BATCH_SIZE * H * W));
+                tmp3      = scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (MIO_BN_NHW));
                 dx[index] = CVT_ACCUM2FLOAT(tmp3 * (tmp2 + tmp1));
             }
         }
@@ -562,20 +562,20 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
 }
 
 extern "C" __global__ __launch_bounds__(LOCAL_SIZE_X* LOCAL_SIZE_Y) //
-    void ActivBwdSpatial(const DATA_TYPE* __restrict__ x,
-                         const DATA_TYPE* __restrict__ y,
-                         const DATA_TYPE* __restrict__ dy,
-                         DATA_TYPE* __restrict__ dx,
-                         const DATA_TYPE diff_scale,
-                         const DATA_TYPE gamma,
-                         const DATA_TYPE beta,
-                         const DATA_TYPE alpha,
-                         const float* __restrict__ bn_scale,
-                         const float* __restrict__ bn_bias,
-                         float* __restrict__ dscale,
-                         float* __restrict__ dbias,
-                         const float* __restrict__ saved_mean,
-                         const float* __restrict__ saved_inv_variance)
+    void MIOpenBatchNormActivBwdSpatial(const DATA_TYPE* __restrict__ x,
+                                        const DATA_TYPE* __restrict__ y,
+                                        const DATA_TYPE* __restrict__ dy,
+                                        DATA_TYPE* __restrict__ dx,
+                                        const DATA_TYPE diff_scale,
+                                        const DATA_TYPE gamma,
+                                        const DATA_TYPE beta,
+                                        const DATA_TYPE alpha,
+                                        const float* __restrict__ bn_scale,
+                                        const float* __restrict__ bn_bias,
+                                        float* __restrict__ dscale,
+                                        float* __restrict__ dbias,
+                                        const float* __restrict__ saved_mean,
+                                        const float* __restrict__ saved_inv_variance)
 {
     activbwdspatial<DATA_TYPE>(x,
                                y,
