@@ -33,6 +33,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <regex>
 #include <thread>
 #include <unordered_set>
 #include <variant>
@@ -763,6 +764,7 @@ struct cli_settings {
     uint32_t seed;        /**< The seed to use for input array generation */
     std::string json_out; /**< Output JSON file path */
     std::string csv_out;  /**< Output CSV file path */
+    std::string filter;   /**< Regex filter of specialization names to benchmark */
     std::chrono::duration<double> min_gpu_ms_per_batch; /**< Minimum GPU batch duration */
     std::chrono::duration<double> min_secs;             /**< Minimum benchmark duration */
     std::chrono::duration<double>
@@ -1101,6 +1103,7 @@ class logger {
         ss << ",\"seed\":" << s.seed;
         ss << ",\"json_out\":\"" << s.json_out << "\"";
         ss << ",\"csv_out\":\"" << s.csv_out << "\"";
+        ss << ",\"filter\":\"" << s.filter << "\"";
         ss << ",\"min_gpu_ms_per_batch\":" << s.min_gpu_ms_per_batch.count();
         ss << ",\"min_secs\":" << s.min_secs.count();
         ss << ",\"noise_timeout_secs\":" << s.noise_timeout_secs.count();
@@ -2605,8 +2608,14 @@ class cli {
         } else {
             T out{};
             std::istringstream ss(it->second);
-            ss >> out;
-            if (!ss || !ss.eof()) {
+
+            if constexpr (std::is_same_v<T, std::string>) {
+                std::getline(ss, out);
+            } else {
+                ss >> out;
+            }
+
+            if (!ss) {
                 std::cerr << "Error: Failed to parse --" << key << ": invalid value \""
                           << it->second << "\"\n";
                 std::exit(EXIT_FAILURE);
@@ -2627,6 +2636,7 @@ class cli {
             "seed",
             "json-out",
             "csv-out",
+            "filter",
             "min-gpu-ms-per-batch",
             "min-secs",
             "noise-timeout-secs",
@@ -2971,6 +2981,16 @@ class executor {
         // Capture custom arguments after all have been registered.
         m_cli_settings.custom_args = m_cli.get_all_custom_arguments();
 
+        // Only keep filtered specializations, based on their name.
+        std::regex pattern(m_cli_settings.filter);
+        static_specializations.erase(
+            std::remove_if(static_specializations.begin(), static_specializations.end(),
+                           [&pattern](const auto& spec) {
+                               return !std::regex_search(spec.get()->meta().serialize_human(),
+                                                         pattern);
+                           }),
+            static_specializations.end());
+
         // Sort to get a consistent order.
         std::sort(static_specializations.begin(), static_specializations.end(),
                   [](const auto& l, const auto& r) {
@@ -2980,7 +3000,11 @@ class executor {
         size_t specialization_count = static_specializations.size();
 
         if (specialization_count == 0) {
-            std::cerr << "Error: At least 1 benchmark must be queued\n";
+            std::cerr << "Error: At least one benchmark must be queued\n";
+            if (!m_cli_settings.filter.empty()) {
+                std::cerr << "Hint: The currently used --filter '" << m_cli_settings.filter
+                          << "' is likely incorrect\n";
+            }
             exit(EXIT_FAILURE);
         }
 
@@ -3075,6 +3099,9 @@ class executor {
                                           "JSON path to write benchmark results to.");
 
         s.csv_out = cli.get<std::string>("csv-out", "", "CSV path to write benchmark results to.");
+
+        s.filter = cli.get<std::string>("filter", "",
+                                        "Regex filter of specialization names to benchmark.");
 
         s.min_gpu_ms_per_batch = std::chrono::duration<double>(
             cli.get<double>("min-gpu-ms-per-batch", 10.0,

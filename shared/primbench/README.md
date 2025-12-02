@@ -246,10 +246,11 @@ You can pass `--help` to benchmarks to print the available options. They are all
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--help`                                 | Display this help and exit.                                                                                                                                                        |
 | `--bytes`                                | Overrides the number of input bytes passed to `primbench::executor`.                                                                                                               |
-| `--hot`                                  | Skip clearing the GPU cache between batch iterations. (default: 0)                                                                                                                 |
+| `--hot`                                  | Skip clearing the GPU cache between batch iterations. (default: false)                                                                                                             |
 | `--seed`                                 | Seed used for input generation. (default: 42)                                                                                                                                      |
 | `--json-out`                             | JSON path to write benchmark results to. (default: results.json)                                                                                                                   |
 | `--csv-out`                              | CSV path to write benchmark results to.                                                                                                                                            |
+| `--filter`                               | Regex filter of specialization names to benchmark.                                                                                                                                 |
 | `--min-gpu-ms-per-batch`                 | Minimum duration of a batch in milliseconds (GPU time). (default: 10)                                                                                                              |
 | `--min-secs`                             | Minimum total benchmark duration in seconds (wall time). (default: 1)                                                                                                              |
 | `--noise-timeout-secs`                   | Maximum total benchmark duration in seconds before timing out a noisy run (wall time). (default: 10)                                                                               |
@@ -259,9 +260,9 @@ You can pass `--help` to benchmarks to print the available options. They are all
 | `--max-gpu-temp`                         | Maximum GPU temperature in °C. Too low slows benchmarks; too high increases noise. (default: 60)                                                                                   |
 | `--max-warming-secs`                     | Maximum seconds allowed for GPU warming before an error is thrown. (default: 60)                                                                                                   |
 | `--max-cooling-secs`                     | Maximum seconds allowed for GPU cooling before an error is thrown. (default: 60)                                                                                                   |
-| `--output-hip-device-properties-context` | Output a `hip_device_properties` object in the context, containing GPU details. (default: 0)                                                                                       |
-| `--output-amdsmi-context`                | Output an `amdsmi` object in the context, containing GPU details. (default: 0)                                                                                                     |
-| `--output-batches`                       | Output a `batches` array for each specialization, containing per-batch details. (default: 0)                                                                                       |
+| `--output-hip-device-properties-context` | Output a `hip_device_properties` object in the context, containing GPU details. (default: false)                                                                                   |
+| `--output-amdsmi-context`                | Output an `amdsmi` object in the context, containing GPU details. (default: false)                                                                                                 |
+| `--output-batches`                       | Output a `batches` array for each specialization, containing per-batch details. (default: false)                                                                                   |
 | `--spaces-per-indent`                    | Number of spaces per indentation level in JSON output. Set to 0 for no indentation. (default: 4)                                                                                   |
 | `--stream-blocking-timeout-secs`         | Maximum stream blocking duration in seconds before timing out. Stream is blocked while queueing kernel calls. Use `primbench::flags::sync` if kernel is synchronous. (default: 10) |
 
@@ -274,6 +275,21 @@ size_t dimensions = executor.get<size_t>("dimensions", 3, "The number of dimensi
 ```
 
 If there are any custom options, the object `context.custom_cli_settings` is output to `results.json`.
+
+## Filtering Specializations
+
+You can use the `--filter` option with a regex pattern to benchmark only specific specializations. For example, to benchmark only the `type: long long` specialization from the example program:
+
+```bash
+./copy_benchmark --filter 'type: long long'
+```
+
+The filter matches against the specialization name. Other valid patterns include:
+
+```bash
+./copy_benchmark --filter long     # Matches any name containing 'long'
+./copy_benchmark --filter 'l.*g'   # Regex: starts with 'l', ends with 'g'
+```
 
 ## Noise
 
