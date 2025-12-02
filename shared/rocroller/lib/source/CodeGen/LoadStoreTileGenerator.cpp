@@ -459,12 +459,12 @@ namespace rocRoller
                         Register::ValuePtr basePointer;
                         auto               bufferExpr = bufferReg->expression();
                         co_yield m_context->argLoader()->getValue(user->argumentName, basePointer);
-                        ExpressionPtr base =basePointer->expression();
-                        if (user->offset) {
-                            base  = base + user->offset;
+                        ExpressionPtr base = basePointer->expression();
+                        if(user->offset)
+                        {
+                            base = base + user->offset;
                         }
-                        bufferExpr = BufferDescriptor::SetBasePointer(
-                            bufferExpr, base);
+                        bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, base);
                         bufferExpr = BufferDescriptor::SetOptions(
                             bufferExpr, BufferDescriptor::GetDefaultOptions(m_context));
                         // TODO: Handle sizes larger than 32 bits
