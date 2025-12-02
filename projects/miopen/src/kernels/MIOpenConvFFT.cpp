@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#define C3QA 0.50000000000000000000000000000000f
-#define C3QB 0.86602540378443864676372317075294f
+constexpr float C3QA = 0.50000000000000000000000000000000f;
+constexpr float C3QB = 0.86602540378443864676372317075294f;
 
 __forceinline__ __device__ void FwdRad3B1(float2& R0, float2& R1, float2& R2)
 {
@@ -138,7 +138,7 @@ __forceinline__ __device__ void InvRad2B1(float2& R0, float2& R1)
     R0 = 2.0f * R0 - R1;
 }
 
-#define C8Q 0.70710678118654752440084436210485f
+constexpr float C8Q = 0.70710678118654752440084436210485f;
 
 __forceinline__ __device__ void FwdRad4B1(float2& R0, float2& R2, float2& R1, float2& R3)
 {
@@ -3265,25 +3265,30 @@ extern "C" __global__
  */
 
 /* tile parameters */
-#define WG_0I 16
-#define WG_1J 16
-#define UT_0I 4
-#define UT_1J 4
-#define MT_0I 64
-#define MT_1J 64
-#define UNROLL 16
-#define PAD 1
+constexpr unsigned int WG_0I  = 16;
+constexpr unsigned int WG_1J  = 16;
+constexpr unsigned int UT_0I  = 4;
+constexpr unsigned int UT_1J  = 4;
+constexpr unsigned int MT_0I  = 64;
+constexpr unsigned int MT_1J  = 64;
+constexpr unsigned int UNROLL = 16;
+constexpr unsigned int PAD    = 1;
 
 /* num loads parallel and perpendicular to coalesced dimension */
-#define NL_COAL_A 1
-#define NL_COAL_B 1
-#define NL_PERP_A 4
-#define NL_PERP_B 4
+constexpr unsigned int NL_COAL_A = 1;
+constexpr unsigned int NL_COAL_B = 1;
+constexpr unsigned int NL_PERP_A = 4;
+constexpr unsigned int NL_PERP_B = 4;
 
-#define LS_COAL_A (UNROLL / NL_COAL_A)
-#define LS_PERP_A (MT_0I / NL_PERP_A)
-#define LS_COAL_B (UNROLL / NL_COAL_B)
-#define LS_PERP_B (MT_1J / NL_PERP_B)
+constexpr unsigned int LS_COAL_A = UNROLL / NL_COAL_A;
+constexpr unsigned int LS_PERP_A = MT_0I / NL_PERP_A;
+constexpr unsigned int LS_COAL_B = UNROLL / NL_COAL_B;
+constexpr unsigned int LS_PERP_B = MT_1J / NL_PERP_B;
+
+/* hard-coded initial strides */
+constexpr unsigned int strideC0I = 1;
+constexpr unsigned int strideAL  = 1;
+constexpr unsigned int strideBL  = 1;
 
 /* global memory indices */
 #define GLOBAL_C(IDX0I, IDX1J, IDXK) ((IDX0I)*strideC0I + (IDX1J)*strideC1J + (IDXK)*strideCK)
@@ -3291,9 +3296,9 @@ extern "C" __global__
 #define GLOBAL_B(IDXL, IDX1J, IDXK) ((IDXL)*strideBL + (IDX1J)*strideB1J + (IDXK)*strideBK)
 
 /* data types */
-#define TYPE_A float2
-#define TYPE_B float2
-#define TYPE_C float2
+using TYPE_A = float2;
+using TYPE_B = float2;
+using TYPE_C = float2;
 
 /* MADs */
 #define TYPE_MAD(MULA, MULB, DST)        \
@@ -3330,11 +3335,6 @@ extern "C" __global__
     TYPE_MAD(rA[3], rB[1], rC[3][1]); \
     TYPE_MAD(rA[3], rB[2], rC[3][2]); \
     TYPE_MAD(rA[3], rB[3], rC[3][3]);
-
-/* preprocessor definitions of kernel arguments*/
-#define strideC0I 1
-#define strideAL 1
-#define strideBL 1
 
 /* kernel */
 extern "C" __global__
@@ -3591,31 +3591,6 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
         }
     }
 }
-#undef UNROLL
-#undef WG_0I
-#undef WG_1J
-#undef UT_0I
-#undef UT_1J
-#undef MT_0I
-#undef MT_1J
-#undef NL_COAL_A
-#undef NL_COAL_B
-#undef NL_PERP_A
-#undef NL_PERP_B
-#undef LS_COAL_A
-#undef LS_PERP_A
-#undef LS_COAL_B
-#undef LS_PERP_B
-#undef GLOBAL_C
-#undef GLOBAL_A
-#undef GLOBAL_B
-#undef TYPE_C
-#undef TYPE_A
-#undef TYPE_B
-#undef MICRO_TILE
-#undef strideC0I
-#undef strideAL
-#undef strideBL
 
 /* Kernel Parameters
   ProblemType: Cijk_Alik_Bljk_CB
@@ -3664,47 +3639,49 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
 
 /* Cijk_Alik_Bljk_CB_MT016x016x16_K1_NT64_SU04_TTNE16_src */
 
-/****************************************/
-/* Preprocessor Definitions             */
-/****************************************/
-
 /* tile parameters */
-#define NUM_THREADS 64
-#define SG0I 4
-#define SG1J 4
-#define TT0I 4
-#define TT1J 4
-#define MT0I (SG0I * TT0I)
-#define MT1J (SG1J * TT1J)
+constexpr unsigned int NUM_THREADS  = 64;
+constexpr unsigned int SG0I         = 4;
+constexpr unsigned int SG1J         = 4;
+constexpr unsigned int TT0I         = 4;
+constexpr unsigned int TT1J         = 4;
+constexpr unsigned int MT0I         = SG0I * TT0I;
+constexpr unsigned int MT1J         = SG1J * TT1J;
+constexpr unsigned int VECTOR_WIDTH = 1;
 
 /* DepthU parameters*/
-#define CPS (NUM_THREADS / MT0I * VECTOR_WIDTH)
-#define SPLITU 4
-#define UNROLL 4
-#define DEPTHU (SPLITU * UNROLL)
+constexpr unsigned int CPS    = NUM_THREADS / MT0I * VECTOR_WIDTH;
+constexpr unsigned int SPLITU = 4;
+constexpr unsigned int UNROLL = 4;
+constexpr unsigned int DEPTHU = SPLITU * UNROLL;
 
 /* other */
-#define PAD 0
-#define WORK_GROUP_MAPPING 1
-#define VECTOR_WIDTH 1
+constexpr unsigned int PAD                = 0;
+constexpr unsigned int WORK_GROUP_MAPPING = 1;
 
 /* num loads parallel and perpendicular to coalesced */
-#define NLCA 1
-#define NLCB 1
-#define NLPA 4
-#define NLPB 4
+constexpr unsigned int NLCA = 1;
+constexpr unsigned int NLCB = 1;
+constexpr unsigned int NLPA = 4;
+constexpr unsigned int NLPB = 4;
 
 /* load sizes parallel and perpendicular to coalesced */
-#define LSCA (DEPTHU / NLCA)
-#define LSPA (MT0I / NLPA)
-#define LSCB (DEPTHU / NLCB)
-#define LSPB (MT1J / NLPB)
-#define LVCA (LSCA / VECTOR_WIDTH)
-#define LVCB (LSCB / VECTOR_WIDTH)
-#define LVPA (LSPA / VECTOR_WIDTH)
-#define LVPB (LSPB / VECTOR_WIDTH)
-#define LDS_OFFSET_B 256
-#define LDS_NUM_ELEMENTS 1024
+constexpr unsigned int LSCA = DEPTHU / NLCA;
+constexpr unsigned int LSPA = MT0I / NLPA;
+constexpr unsigned int LSCB = DEPTHU / NLCB;
+constexpr unsigned int LSPB = MT1J / NLPB;
+constexpr unsigned int LVCA = LSCA / VECTOR_WIDTH;
+constexpr unsigned int LVCB = LSCB / VECTOR_WIDTH;
+constexpr unsigned int LVPA = LSPA / VECTOR_WIDTH;
+constexpr unsigned int LVPB = LSPB / VECTOR_WIDTH;
+
+constexpr unsigned int LDS_OFFSET_B     = 256;
+constexpr unsigned int LDS_NUM_ELEMENTS = 1024;
+
+/* hard-coded initial strides */
+constexpr unsigned int strideC0I = 1;
+constexpr unsigned int strideAL  = 1;
+constexpr unsigned int strideBL  = 1;
 
 /* global memory indices */
 #define GLOBAL_C(IDX0I, IDX1J, IDXK) (((IDX0I)*strideC0I + (IDX1J)*strideC1J + (IDXK)*strideCK))
@@ -3712,8 +3689,8 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
 #define GLOBAL_OFFSET_B(IDXL, IDX1J, IDXK) (((IDXL)*strideBL + (IDX1J)*strideB1J + (IDXK)*strideBK))
 
 /* data types */
-#define DATA_TYPE float2
-#define VECTOR_TYPE float2
+using DATA_TYPE   = float2;
+using VECTOR_TYPE = float2;
 
 /* MAC's */
 #define TYPE_MAC(MULA, MULB, DST)        \
@@ -3750,11 +3727,6 @@ __launch_bounds__(WG_0I* WG_1J) void MIOpenConvFFT_cgemm(float2* gb,
     TYPE_MAC(rA[1], rB[3], rC[(1 + 3 * TT0I / VECTOR_WIDTH)]); \
     TYPE_MAC(rA[2], rB[3], rC[(2 + 3 * TT0I / VECTOR_WIDTH)]); \
     TYPE_MAC(rA[3], rB[3], rC[(3 + 3 * TT0I / VECTOR_WIDTH)]);
-
-/* hard-coded initial strides */
-#define strideC0I 1
-#define strideAL 1
-#define strideBL 1
 
 /****************************************/
 /* Begin Kernel                         */
@@ -4227,47 +4199,48 @@ extern "C" __global__
 
 /* Cijk_Alik_Bljk_CB_MT008x008x16_K1_NT64_SU04_TTNE04 */
 
-/******************************************/
-/* Function Prefix                        */
-/******************************************/
-
 /* tile parameters */
-#define NUM_THREADS 64
-#define SG0I 4
-#define SG1J 4
-#define TT0I 2
-#define TT1J 2
-#define MT0I (SG0I * TT0I)
-#define MT1J (SG1J * TT1J)
+constexpr unsigned int NUM_THREADS  = 64;
+constexpr unsigned int SG0I         = 4;
+constexpr unsigned int SG1J         = 4;
+constexpr unsigned int TT0I         = 2;
+constexpr unsigned int TT1J         = 2;
+constexpr unsigned int MT0I         = SG0I * TT0I;
+constexpr unsigned int MT1J         = SG1J * TT1J;
+constexpr unsigned int VECTOR_WIDTH = 1;
 
 /* DepthU parameters*/
-#define CPS (NUM_THREADS / MT0I * VECTOR_WIDTH)
-#define SPLITU 4
-#define UNROLL 4
-#define DEPTHU (SPLITU * UNROLL)
+constexpr unsigned int CPS    = NUM_THREADS / MT0I * VECTOR_WIDTH;
+constexpr unsigned int SPLITU = 4;
+constexpr unsigned int UNROLL = 4;
+constexpr unsigned int DEPTHU = SPLITU * UNROLL;
 
 /* other */
-#define PAD 0
-#define WORK_GROUP_MAPPING 1
-#define VECTOR_WIDTH 1
+constexpr unsigned int PAD                = 0;
+constexpr unsigned int WORK_GROUP_MAPPING = 1;
 
 /* num loads parallel and perpendicular to coalesced */
-#define NLCA 1
-#define NLCB 1
-#define NLPA 2
-#define NLPB 2
+constexpr unsigned int NLCA = 1;
+constexpr unsigned int NLCB = 1;
+constexpr unsigned int NLPA = 2;
+constexpr unsigned int NLPB = 2;
 
 /* load sizes parallel and perpendicular to coalesced */
-#define LSCA (DEPTHU / NLCA)
-#define LSPA (MT0I / NLPA)
-#define LSCB (DEPTHU / NLCB)
-#define LSPB (MT1J / NLPB)
-#define LVCA (LSCA / VECTOR_WIDTH)
-#define LVCB (LSCB / VECTOR_WIDTH)
-#define LVPA (LSPA / VECTOR_WIDTH)
-#define LVPB (LSPB / VECTOR_WIDTH)
-#define LDS_OFFSET_B 128
-#define LDS_NUM_ELEMENTS 256
+constexpr unsigned int LSCA             = DEPTHU / NLCA;
+constexpr unsigned int LSPA             = MT0I / NLPA;
+constexpr unsigned int LSCB             = DEPTHU / NLCB;
+constexpr unsigned int LSPB             = MT1J / NLPB;
+constexpr unsigned int LVCA             = LSCA / VECTOR_WIDTH;
+constexpr unsigned int LVCB             = LSCB / VECTOR_WIDTH;
+constexpr unsigned int LVPA             = LSPA / VECTOR_WIDTH;
+constexpr unsigned int LVPB             = LSPB / VECTOR_WIDTH;
+constexpr unsigned int LDS_OFFSET_B     = 128;
+constexpr unsigned int LDS_NUM_ELEMENTS = 256;
+
+/* hard-coded initial strides */
+constexpr unsigned int strideC0I = 1;
+constexpr unsigned int strideAL  = 1;
+constexpr unsigned int strideBL  = 1;
 
 /* global memory indices */
 #define GLOBAL_C(IDX0I, IDX1J, IDXK) (((IDX0I)*strideC0I + (IDX1J)*strideC1J + (IDXK)*strideCK))
@@ -4275,8 +4248,8 @@ extern "C" __global__
 #define GLOBAL_OFFSET_B(IDXL, IDX1J, IDXK) (((IDXL)*strideBL + (IDX1J)*strideB1J + (IDXK)*strideBK))
 
 /* data types */
-#define DATA_TYPE float2
-#define VECTOR_TYPE float2
+using DATA_TYPE   = float2;
+using VECTOR_TYPE = float2;
 
 /* MAC's */
 #define TYPE_MAC(MULA, MULB, DST)        \
@@ -4291,11 +4264,6 @@ extern "C" __global__
     TYPE_MAC(rA[1], rB[0], rC[1 + 0 * TT0I / VECTOR_WIDTH]); \
     TYPE_MAC(rA[0], rB[1], rC[0 + 1 * TT0I / VECTOR_WIDTH]); \
     TYPE_MAC(rA[1], rB[1], rC[1 + 1 * TT0I / VECTOR_WIDTH]);
-
-/* hard-coded initial strides */
-#define strideC0I 1
-#define strideAL 1
-#define strideBL 1
 
 /******************************************/
 /* Begin Kernel                           */
