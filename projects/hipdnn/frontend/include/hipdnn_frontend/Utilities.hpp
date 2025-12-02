@@ -162,6 +162,7 @@ inline Error
 
     return {ErrorCode::OK, ""};
 }
+}
 
 inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCallback_ext)
 {
