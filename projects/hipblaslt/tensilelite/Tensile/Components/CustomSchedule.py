@@ -428,11 +428,13 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
 
         nglshift = nllshift = 11
         syncTable = [
-                    -1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment=""),
-                    7, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment=""),
+                    -1, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Finish all LRA1 and 1/3 LRB1"),
+                    7, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="Finish 2/3 LRB1"),
 
-                    15, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="All LRA0 done"),
+                    15, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="All LRB1 and LRA0 done"),
                     15, SBarrier(comment=""),
+
+                    23, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="1/3 LRB0 done"),
 
                     29, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LRB0 done"),
                     29, SBarrier(comment=""),
