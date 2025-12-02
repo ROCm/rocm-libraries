@@ -1520,22 +1520,23 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
 
         syncs.add(                                                              49, dscnt=0, barrier=True, comment="wait for all LRB0 to complete before GRB start")
         gra    = [                                         31,32,34,36,37, 39,41,43,45,46,
-                                                                              48,50,52,53,55, 57,59,60,62,64,
-                                                                                 66,67,68,69,70, 71] # 26 loads
-        grb    = [                                                                                  73,74, 81, 83,87,91,92,93] # 8 loads
-        num_gr = len(gra) + len(grb)
-
-        #                                                                                                         10 in-flight from GRA and 8 from GRB
-        syncs.add(                                                                              58, vlcnt=num_gr-(10+8), barrier=True, comment="wait for previous set of global reads")
-        lra1   = [                                                                                59,60,61,62,63, 64,65,66,67,68,
-                                                                                                     69,70,71,72,73, 74,75,76,77,78,
-                                                                                                        79,80,81,82,83, 84] # 26 loads
-        lrb1   = [                                                                                                   65,   85,86,88, 90,92,94,96] # 8 loads
+                                                                              48,50,52,53,55, 57,59,60,   62,    64,   66,67,68,69,70,71] # 26 loads
+        grb    = [                                                                                                                          73,74,    81,   83,  87,91,92,93] # 8 loads
+        num_gra, num_grb = len(gra), len(grb)
+        num_gr = num_gra + num_grb
+        #                                                                                       10 from GRA and 8 from GRB will be issued after this index
+        syncs.add(                                                                              58, vlcnt=num_grb+(num_gr-(10+8)), barrier=True, comment="wait for previous set of GRA")
+        lra1   = [                                                                               59,60,61,62,63, 64,65,66,67,68,69,70,71,72,73, 74,75,76,77,78,
+                                                                                                                                                79,80,81,82,83,84] # 26 loads
+        
+        #                                                                                                           6 from GRA and 8 from GRB will be issued after this index        
+        syncs.add(                                                                                                  65, vlcnt=num_gr-(6+8), barrier=True, comment="wait for previous set of GRB")
+        lrb1   = [                                                                                                     66,                             85,86,88, 90,92,94,96] # 8 loads
 
         lrsa   = [                                                              49]
         lrsb   = [                                                                51]
-        lwsa   = [                                                                                                      84]
-        lwsb   = [                                                                                                        85]
+        lwsa   = [                                                                                                                                   84]
+        lwsb   = [                                                                                                                                     85]
         # fmt: on
     else:
         return False, None
