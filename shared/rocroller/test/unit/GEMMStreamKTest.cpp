@@ -65,10 +65,7 @@ namespace GEMMTests
 
     TEST_P(StreamKMultipleFixupsTestGPU, GPU_BasicGEMMFP16)
     {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
-        {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
-        }
+        REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
 
         GEMMProblem gemm;
 
@@ -107,10 +104,7 @@ namespace GEMMTests
 
     TEST_P(StreamKWGMTestGPU, GPU_BasicGEMMStreamKWorkgroupMapping)
     {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
-        {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamKWorkgroupMapping test";
-        }
+        REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs, GPUCapability::HasXCC);
 
         GEMMProblem gemm;
 
@@ -136,10 +130,7 @@ namespace GEMMTests
 
     TEST_P(StreamKTestGPU, GPU_BasicGEMM)
     {
-        if(m_context->targetArchitecture().target().isCDNA1GPU())
-        {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
-        }
+        REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs, GPUCapability::HasXCC);
 
         auto [typeAB, unrollK, loadPathA, loadPathB, storeLDSD, mode, betaZero]
             = std::get<1>(GetParam());
