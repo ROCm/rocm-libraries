@@ -55,7 +55,7 @@
 // test_utils.hpp should only be included by this header.
 // The following definition is used as guard in test_utils.hpp
 // Including test_utils.hpp by itself will cause a compile error.
-#define TEST_UTILS_INCLUDE_GAURD
+#define TEST_UTILS_INCLUDE_GUARD
 #include "test_utils.hpp"
 
 #if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
