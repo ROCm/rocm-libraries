@@ -850,7 +850,7 @@ class logger {
 
         if (m_outputting_csv) {
             // Output the CSV header.
-            m_csv_out << "index,human_name,bytes_per_second,items_per_second,noise_timeout,noise_"
+            m_csv_out << "index,name,bytes_per_second,items_per_second,noise_timeout,noise_"
                          "percent\n";
             m_csv_out.flush();
         }
@@ -878,20 +878,20 @@ class logger {
     /**
      * \brief Outputs JSON and CSV specialization information.
      */
-    void output_specialization(size_t index, std::string_view human_name,
+    void output_specialization(size_t index, std::string_view name,
                                std::string_view serialized_meta, size_t kernels_per_batch,
                                double ms_per_batch, double bytes_per_sec, double items_per_sec,
                                size_t bytes_per_item, size_t items, double noise_percent,
                                uint16_t start_temp, uint16_t end_temp, double elapsed_host_secs,
                                double elapsed_gpu_secs, bool noise_timeout, const amdsmi& amdsmi) {
-        output_json_specialization(index, human_name, serialized_meta, kernels_per_batch,
-                                   ms_per_batch, bytes_per_sec, items_per_sec, bytes_per_item,
-                                   items, noise_percent, start_temp, end_temp, elapsed_host_secs,
+        output_json_specialization(index, name, serialized_meta, kernels_per_batch, ms_per_batch,
+                                   bytes_per_sec, items_per_sec, bytes_per_item, items,
+                                   noise_percent, start_temp, end_temp, elapsed_host_secs,
                                    elapsed_gpu_secs, noise_timeout, amdsmi);
 
         if (m_outputting_csv) {
-            output_csv_specialization(index, human_name, bytes_per_sec, items_per_sec,
-                                      noise_timeout, noise_percent);
+            output_csv_specialization(index, name, bytes_per_sec, items_per_sec, noise_timeout,
+                                      noise_percent);
         }
 
         m_total_elapsed_gpu_secs += elapsed_gpu_secs;
@@ -1439,7 +1439,7 @@ class logger {
     /**
      * \brief Outputs specialization information to JSON.
      */
-    void output_json_specialization(size_t index, std::string_view human_name,
+    void output_json_specialization(size_t index, std::string_view name,
                                     std::string_view serialized_meta, size_t kernels_per_batch,
                                     double ms_per_batch, double bytes_per_sec, double items_per_sec,
                                     size_t bytes_per_item, size_t items, double noise_percent,
@@ -1454,9 +1454,9 @@ class logger {
             m_first_specialization = false;
 
         m_json_out << indent(
-            serialize_specialization(index, human_name, serialized_meta, kernels_per_batch,
-                                     ms_per_batch, bytes_per_sec, items_per_sec, bytes_per_item,
-                                     items, noise_percent, start_temp, end_temp, elapsed_host_secs,
+            serialize_specialization(index, name, serialized_meta, kernels_per_batch, ms_per_batch,
+                                     bytes_per_sec, items_per_sec, bytes_per_item, items,
+                                     noise_percent, start_temp, end_temp, elapsed_host_secs,
                                      elapsed_gpu_secs, noise_timeout, amdsmi),
             2);
 
@@ -1466,17 +1466,17 @@ class logger {
     /**
      * \brief Outputs specialization information to CSV.
      */
-    void output_csv_specialization(size_t index, std::string_view human_name, double bytes_per_sec,
+    void output_csv_specialization(size_t index, std::string_view name, double bytes_per_sec,
                                    double items_per_sec, bool noise_timeout, double noise_percent) {
-        m_csv_out << index << "," << human_name << "," << bytes_per_sec << "," << items_per_sec
-                  << "," << noise_timeout << "," << noise_percent << "\n"
+        m_csv_out << index << "," << name << "," << bytes_per_sec << "," << items_per_sec << ","
+                  << noise_timeout << "," << noise_percent << "\n"
                   << std::flush;
     }
 
     /**
      * \brief Serializes a specialization into JSON format.
      */
-    std::string serialize_specialization(size_t index, std::string_view human_name,
+    std::string serialize_specialization(size_t index, std::string_view name,
                                          std::string_view serialized_meta, size_t kernels_per_batch,
                                          double ms_per_batch, double bytes_per_sec,
                                          double items_per_sec, size_t bytes_per_item, size_t items,
@@ -1488,7 +1488,7 @@ class logger {
         ss << "{";
 
         ss << "\"index\":" << index;
-        ss << ",\"human_name\":\"" << human_name << "\"";
+        ss << ",\"name\":\"" << name << "\"";
 
         ss << ",\"bytes_per_second\":" << bytes_per_sec;
         ss << ",\"items_per_second\":" << items_per_sec;
@@ -1874,7 +1874,7 @@ class stream_blocker {
  * \brief Simple JSON-like container.
  *
  * Stores key-value pairs where values can be nested JSON objects,
- * strings, integers, or doubles. Provides basic serialization to JSON and human-readable form.
+ * strings, integers, or doubles. Provides basic serialization to JSON and to a human-readable name.
  */
 struct json {
     using key_type = std::string;
@@ -1934,9 +1934,9 @@ struct json {
     }
 
     /**
-     * \brief Serializes the JSON object in a human-readable concise form.
+     * \brief Serializes the JSON object into a human-readable name.
      */
-    std::string serialize_human() const {
+    std::string serialize_name() const {
         static const std::vector<std::string_view> blacklist = {"lvl", "algo"};
         static const std::vector<std::string_view> stripped_prefixes = {"rocprim::", "common::"};
 
@@ -2215,13 +2215,12 @@ class state {
 
             uint16_t gpu_temp = m_amdsmi.get_temp();
 
-            std::string human_name = m_meta.serialize_human();
+            std::string name = m_meta.serialize_name();
 
-            progress::print_progress(iterations, noise_percent, bytes_per_sec, status, human_name,
-                                     m_algo, s.batch_window_size, m_family_index, m_spec_col_width,
-                                     m_family_col_width, elapsed_host_secs,
-                                     s.noise_timeout_secs.count(), s.noise_tolerance_percent,
-                                     gpu_temp);
+            progress::print_progress(
+                iterations, noise_percent, bytes_per_sec, status, name, m_algo, s.batch_window_size,
+                m_family_index, m_spec_col_width, m_family_col_width, elapsed_host_secs,
+                s.noise_timeout_secs.count(), s.noise_tolerance_percent, gpu_temp);
 
             if (stop_early || noise_timeout) {
                 std::cout << "\n";
@@ -2229,10 +2228,10 @@ class state {
                 size_t bytes_per_item = m_read_write_bytes / m_items;
 
                 m_logger.output_specialization(
-                    m_family_index, human_name, m_meta.serialize(), m_kernels_per_batch,
-                    m_ms_per_batch, bytes_per_sec, items_per_sec, bytes_per_item, m_items,
-                    noise_percent, start_temp, gpu_temp, elapsed_host_secs, elapsed_gpu_secs,
-                    noise_timeout, m_amdsmi);
+                    m_family_index, name, m_meta.serialize(), m_kernels_per_batch, m_ms_per_batch,
+                    bytes_per_sec, items_per_sec, bytes_per_item, m_items, noise_percent,
+                    start_temp, gpu_temp, elapsed_host_secs, elapsed_gpu_secs, noise_timeout,
+                    m_amdsmi);
 
                 break;
             }
@@ -2961,7 +2960,7 @@ class executor {
      * - Sorts benchmarks to achieve a consistent order.
      * - Validates that all benchmarks have the same algorithm name (`algo`).
      * - Verifies that at least one benchmark is queued.
-     * - Ensures that all human-readable specialization names (`human_name`) are unique.
+     * - Ensures that all human-readable specialization names (`name`) are unique.
      * - Computes output column widths and prints the benchmark header.
      * - Executes each benchmark and prints progress/results.
      * - Outputs a summary after all benchmarks are complete.
@@ -2986,7 +2985,7 @@ class executor {
         static_specializations.erase(
             std::remove_if(static_specializations.begin(), static_specializations.end(),
                            [&pattern](const auto& spec) {
-                               return !std::regex_search(spec.get()->meta().serialize_human(),
+                               return !std::regex_search(spec.get()->meta().serialize_name(),
                                                          pattern);
                            }),
             static_specializations.end());
@@ -2994,7 +2993,7 @@ class executor {
         // Sort to get a consistent order.
         std::sort(static_specializations.begin(), static_specializations.end(),
                   [](const auto& l, const auto& r) {
-                      return l->meta().serialize_human() < r->meta().serialize_human();
+                      return l->meta().serialize_name() < r->meta().serialize_name();
                   });
 
         size_t specialization_count = static_specializations.size();
@@ -3031,19 +3030,18 @@ class executor {
 
         get_logger().init(algorithm, specialization_count, m_cli_settings, m_flags, get_amdsmi());
 
-        // Determine max specialization width, and validate that every human_name is unique.
+        // Determine max specialization width, and validate that every name is unique.
         m_spec_col_width = 0;
-        std::unordered_set<std::string> seen_human_names;
+        std::unordered_set<std::string> seen_names;
 
         for (const auto& bp : static_specializations) {
-            std::string human_name = bp->meta().serialize_human();
-            size_t len = human_name.size();
+            std::string name = bp->meta().serialize_name();
+            size_t len = name.size();
             if (len > m_spec_col_width) m_spec_col_width = len;
 
-            if (!seen_human_names.insert(human_name).second) {
+            if (!seen_names.insert(name).second) {
                 std::cerr << "Error: Algorithm '" << algorithm
-                          << "' has multiple specializations with the human_name '" << human_name
-                          << "'\n";
+                          << "' has multiple specializations with the name '" << name << "'\n";
                 exit(EXIT_FAILURE);
             }
         }

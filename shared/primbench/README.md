@@ -173,7 +173,7 @@ It output this `results.json`:
     "specializations": [
         {
             "index": 0,
-            "human_name": "type: char",
+            "name": "type: char",
             "bytes_per_second": 7.53499e+11,
             "items_per_second": 3.7675e+11,
             "bytes_per_item": 2,
@@ -201,7 +201,7 @@ It output this `results.json`:
         },
         {
             "index": 1,
-            "human_name": "type: long long",
+            "name": "type: long long",
             "bytes_per_second": 1.29973e+12,
             "items_per_second": 8.12334e+10,
             "bytes_per_item": 16,
@@ -347,10 +347,10 @@ When benchmarking synchronous algorithms, the `primbench::flags::sync` flag must
 
 Benchmarks can produce a CSV file alongside the JSON output by passing `--csv-out results.csv`.
 
-This CSV is a condensed version of the full `results.json` shown earlier in the readme. It includes only the most essential metrics: index, human-readable name, throughput, and noise, making it easier to read at a glance:
+This CSV is a condensed version of the full `results.json` shown earlier in the readme. It includes only the most essential metrics: index, name, throughput, and noise, making it easier to read at a glance:
 
 ```
-index,human_name,bytes_per_second,items_per_second,noise_timeout,noise_percent
+index,name,bytes_per_second,items_per_second,noise_timeout,noise_percent
 0,type: char,7.53499e+11,3.7675e+11,0,0.0378893
 1,type: long long,1.29973e+12,8.12334e+10,0,0.0586062
 ```
