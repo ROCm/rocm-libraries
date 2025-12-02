@@ -155,7 +155,7 @@ namespace rocRollerTest
                 bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression());
                 bufferExpr = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N));
                 bufferExpr
-                    = BufferDescriptor::SetOptions(bufferExpr, Expression::literal(0x00020000));
+                    = BufferDescriptor::SetOptions(bufferExpr, Expression::literal(131072)); //0x00020000
 
                 auto bufferRegs = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);

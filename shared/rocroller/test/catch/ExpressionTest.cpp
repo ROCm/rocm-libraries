@@ -2616,9 +2616,9 @@ namespace ExpressionTest
                     valueAsLE, DataType::UInt32, std::endian::little);
                 uint32_t truncatedLE = std::get<uint32_t>(resultLE);
 
-                uint32_t finalValue = swapEndian(truncatedLE);
+                uint32_t truncatedBE = swapEndian(truncatedLE);
 
-                CHECK(finalValue == 15u);
+                CHECK(truncatedBE == 15u);
             }
         }
 
