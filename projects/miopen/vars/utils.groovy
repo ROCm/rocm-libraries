@@ -242,8 +242,7 @@ def getDockerImage(Map conf=[:])
     // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
     def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1151" // prebuilt dockers should have all the architectures enabled so one image can be used for all stages
 
-    def dockerArgs = "-f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile " +
-                     "--build-arg BUILDKIT_INLINE_CACHE=1 " +
+    def dockerArgs = "--build-arg BUILDKIT_INLINE_CACHE=1 " +
                      "--build-arg PREFIX=${prefixpath} " +
                      "--build-arg GPU_ARCHS=\"${gpu_arch}\" "
     if(env.CCACHE_HOST)
@@ -265,9 +264,12 @@ def getDockerImage(Map conf=[:])
     {
         dockerArgs = dockerArgs + " --build-arg MIOPEN_SCCACHE=${env.MIOPEN_SCCACHE} --build-arg COMPILER_LAUNCHER=sccache"
     }
-    echo "Docker Args: ${dockerArgs}"
 
     def image = getDockerImageName(dockerArgs)
+
+    // Append Dockerfile path after image name is generated to avoid affecting the hash.
+    dockerArgs = dockerArgs + " -f ${env.WORKSPACE}/${env.MIOPEN_DIR}/Dockerfile "
+    echo "Docker Args: ${dockerArgs}"
 
     def dockerImage
     try{
