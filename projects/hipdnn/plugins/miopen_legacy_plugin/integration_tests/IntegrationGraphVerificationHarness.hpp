@@ -82,7 +82,8 @@ protected:
         executeCpuGraph(graph, cpuBundle);
 
         ASSERT_GE(outputTensorIds.size(), 1)
-            << "At least one output tensor id must be specified for validation.";
+            << "At least one output tensor id must be specified for "
+               "validation.";
 
         HIPDNN_LOG_INFO("Validating {} output tensors", outputTensorIds);
 

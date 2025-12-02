@@ -27,7 +27,8 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                              hipdnn_sdk::data_objects::DataType outputDataType,
                              hipdnn_frontend::PointwiseMode operation,
                              unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
-                             const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW,
+                             const hipdnn_sdk::utilities::TensorLayout& layout
+                             = hipdnn_sdk::utilities::TensorLayout::NCHW,
                              std::optional<float> reluLowerClip = std::nullopt,
                              std::optional<float> reluUpperClip = std::nullopt,
                              std::optional<float> reluLowerClipSlope = std::nullopt,
@@ -86,7 +87,8 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     }
     outputTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(outputDataType));
     outputTensorAttr->set_dim(outputDims);
-    outputTensorAttr->set_stride(hipdnn_sdk::utilities::generateStrides(outputDims, layout.strideOrder));
+    outputTensorAttr->set_stride(
+        hipdnn_sdk::utilities::generateStrides(outputDims, layout.strideOrder));
     outputTensorAttr->set_output(true);
 
     // Ensure properties are inferred
@@ -119,7 +121,8 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                               hipdnn_sdk::data_objects::DataType outputDataType,
                               hipdnn_frontend::PointwiseMode operation,
                               unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
-                              const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW,
+                              const hipdnn_sdk::utilities::TensorLayout& layout
+                              = hipdnn_sdk::utilities::TensorLayout::NCHW,
                               std::optional<float> reluLowerClip = std::nullopt,
                               std::optional<float> reluUpperClip = std::nullopt,
                               std::optional<float> reluLowerClipSlope = std::nullopt,
@@ -186,7 +189,8 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     }
     outputTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(outputDataType));
     outputTensorAttr->set_dim(outputDims);
-    outputTensorAttr->set_stride(hipdnn_sdk::utilities::generateStrides(outputDims, layout.strideOrder));
+    outputTensorAttr->set_stride(
+        hipdnn_sdk::utilities::generateStrides(outputDims, layout.strideOrder));
     outputTensorAttr->set_output(true);
 
     // Ensure properties are inferred
