@@ -19,30 +19,6 @@ using T_VEC =
                      typename std::conditional<READ_BLOCK == 2, T_VEC2, DATA_TYPE>::type>::type;
 
 template <typename T>
-__forceinline__ __device__ void tvec_to_accumvec(FLOAT_ACCUM data[READ_BLOCK])
-{
-    if constexpr(!std::is_same<T, FLOAT_ACCUM>::value)
-    {
-        for(int i = READ_BLOCK - 1; i >= 0; --i)
-        {
-            data[i] = CVT_FLOAT2ACCUM(reinterpret_cast<T*>(data)[i]);
-        }
-    }
-}
-
-template <typename T>
-__forceinline__ __device__ void accumvec_to_tvec(FLOAT_ACCUM data[READ_BLOCK])
-{
-    if constexpr(!std::is_same<T, FLOAT_ACCUM>::value)
-    {
-        for(int i = 0; i < READ_BLOCK; ++i)
-        {
-            reinterpret_cast<T*>(data)[i] = CVT_ACCUM2FLOAT(data[i]);
-        }
-    }
-}
-
-template <typename T>
 __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
                                                     T* __restrict__ reservespace,
                                                     const int hy_h,
@@ -60,16 +36,16 @@ __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
                                                     const int use_batch)
 {
     const int total_items         = max(cur_batch * hy_h / READ_BLOCK, 1);
-    const FLOAT_ACCUM activ_param = 1;
+    const T activ_param = 1;
 
-    FLOAT_ACCUM s_dat[READ_BLOCK];
+    T s_dat[READ_BLOCK];
 
-    FLOAT_ACCUM i_dat[READ_BLOCK];
-    FLOAT_ACCUM f_dat[READ_BLOCK];
-    FLOAT_ACCUM o_dat[READ_BLOCK];
-    FLOAT_ACCUM c_dat[READ_BLOCK];
+    T i_dat[READ_BLOCK];
+    T f_dat[READ_BLOCK];
+    T o_dat[READ_BLOCK];
+    T c_dat[READ_BLOCK];
 
-    FLOAT_ACCUM cx_dat[READ_BLOCK];
+    T cx_dat[READ_BLOCK];
 
     for(int gid = blockIdx.x * LOCAL_SIZE + threadIdx.x; gid < total_items; gid += GLOBAL_SIZE)
     {
@@ -79,22 +55,18 @@ __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
 
         *reinterpret_cast<T_VEC*>(s_dat) =
             *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + i_offset]);
-        tvec_to_accumvec<T>(s_dat);
         ActivationFunction_Sigmoid(i_dat, s_dat, activ_param, activ_param, activ_param);
 
         *reinterpret_cast<T_VEC*>(s_dat) =
             *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + f_offset]);
-        tvec_to_accumvec<T>(s_dat);
         ActivationFunction_Sigmoid(f_dat, s_dat, activ_param, activ_param, activ_param);
 
         *reinterpret_cast<T_VEC*>(s_dat) =
             *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + o_offset]);
-        tvec_to_accumvec<T>(s_dat);
         ActivationFunction_Sigmoid(o_dat, s_dat, activ_param, activ_param, activ_param);
 
         *reinterpret_cast<T_VEC*>(s_dat) =
             *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + c_offset]);
-        tvec_to_accumvec<T>(s_dat);
         ActivationFunction_TanH(c_dat, s_dat, activ_param, activ_param, activ_param);
 
         if constexpr(IS_SEQ_BEGIN)
@@ -103,13 +75,12 @@ __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
             {
                 *reinterpret_cast<T_VEC*>(cx_dat) =
                     *reinterpret_cast<const T_VEC*>(&cx[gid * READ_BLOCK + cx_offset]);
-                tvec_to_accumvec<T>(cx_dat);
             }
             else
             {
-                for(FLOAT_ACCUM& value : cx_dat)
+                for(T& value : cx_dat)
                 {
-                    value = FLOAT_ACCUM{0};
+                    value = CVT_FP32_2FLOAT(0.0f);
                 }
             }
         }
@@ -117,19 +88,17 @@ __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
         {
             *reinterpret_cast<T_VEC*>(cx_dat) =
                 *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + cell_offset_pre]);
-            tvec_to_accumvec<T>(cx_dat);
         }
         else if constexpr(DIRECTION == 1 && USE_CX)
         {
             *reinterpret_cast<T_VEC*>(cx_dat) =
                 *reinterpret_cast<const T_VEC*>(&cx[gid * READ_BLOCK + cx_offset]);
-            tvec_to_accumvec<T>(cx_dat);
         }
         else
         {
-            for(FLOAT_ACCUM& value : cx_dat)
+            for(T& value : cx_dat)
             {
-                value = FLOAT_ACCUM{0};
+                value = CVT_FP32_2FLOAT(0.0f);
             }
         }
 
@@ -141,27 +110,21 @@ __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
 
         if constexpr(!INFERENCE_MODE)
         {
-            accumvec_to_tvec<T>(i_dat);
             *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + i_offset]) =
                 *reinterpret_cast<T_VEC*>(i_dat);
-            accumvec_to_tvec<T>(f_dat);
             *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + f_offset]) =
                 *reinterpret_cast<T_VEC*>(f_dat);
-            accumvec_to_tvec<T>(o_dat);
             *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + o_offset]) =
                 *reinterpret_cast<T_VEC*>(o_dat);
-            accumvec_to_tvec<T>(c_dat);
             *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + c_offset]) =
                 *reinterpret_cast<T_VEC*>(c_dat);
         }
 
-        accumvec_to_tvec<T>(s_dat);
         *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + cell_offset]) =
             *reinterpret_cast<T_VEC*>(s_dat); // Ct
 
         if constexpr(!INFERENCE_MODE)
         {
-            accumvec_to_tvec<T>(cx_dat);
             *reinterpret_cast<T_VEC*>(
                 &reservespace[b_idx * hy_stride / 6 + h_idx + activ_cell_offset]) =
                 *reinterpret_cast<T_VEC*>(cx_dat);
@@ -172,7 +135,6 @@ __forceinline__ __device__ void lstmfwdhiddenupdate(const T* __restrict__ cx,
             s_dat[i] = o_dat[i] * cx_dat[i];
         }
 
-        accumvec_to_tvec<T>(s_dat);
         *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + hidden_offset]) =
             *reinterpret_cast<T_VEC*>(s_dat); // Ht
     }
@@ -206,24 +168,24 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
                                                     const int use_batch2)
 {
     const int total_items         = max(cur_batch * hy_h / READ_BLOCK, 1);
-    const FLOAT_ACCUM activ_param = 1;
+    const T activ_param = 1;
 
-    FLOAT_ACCUM dh_dat[READ_BLOCK];
+    T dh_dat[READ_BLOCK];
 
-    FLOAT_ACCUM s_dat[READ_BLOCK];
+    T s_dat[READ_BLOCK];
 
-    FLOAT_ACCUM i_dat[READ_BLOCK];
-    FLOAT_ACCUM f_dat[READ_BLOCK];
-    FLOAT_ACCUM o_dat[READ_BLOCK];
-    FLOAT_ACCUM c_dat[READ_BLOCK];
+    T i_dat[READ_BLOCK];
+    T f_dat[READ_BLOCK];
+    T o_dat[READ_BLOCK];
+    T c_dat[READ_BLOCK];
 
-    FLOAT_ACCUM di_dat[READ_BLOCK];
-    FLOAT_ACCUM df_dat[READ_BLOCK];
-    FLOAT_ACCUM do_dat[READ_BLOCK];
-    FLOAT_ACCUM dc_dat[READ_BLOCK];
+    T di_dat[READ_BLOCK];
+    T df_dat[READ_BLOCK];
+    T do_dat[READ_BLOCK];
+    T dc_dat[READ_BLOCK];
 
-    FLOAT_ACCUM cx_dat[READ_BLOCK];
-    FLOAT_ACCUM dcx_dat[READ_BLOCK];
+    T cx_dat[READ_BLOCK];
+    T dcx_dat[READ_BLOCK];
 
     for(int gid = blockIdx.x * LOCAL_SIZE + threadIdx.x; gid < total_items; gid += GLOBAL_SIZE)
     {
@@ -233,16 +195,12 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
 
         *reinterpret_cast<T_VEC*>(dh_dat) =
             *reinterpret_cast<T_VEC*>(&workspace[rsv_idx + dhidden_offset]);
-        tvec_to_accumvec<T>(dh_dat);
         *reinterpret_cast<T_VEC*>(o_dat) =
             *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + o_offset]);
-        tvec_to_accumvec<T>(o_dat);
         *reinterpret_cast<T_VEC*>(i_dat) =
             *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + i_offset]);
-        tvec_to_accumvec<T>(i_dat);
         *reinterpret_cast<T_VEC*>(c_dat) =
             *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + c_offset]);
-        tvec_to_accumvec<T>(c_dat);
 
         for(int i = 0; i < READ_BLOCK; ++i)
         {
@@ -251,7 +209,6 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
 
         *reinterpret_cast<T_VEC*>(cx_dat) = *reinterpret_cast<T_VEC*>(
             &reservespace[b_idx * hy_stride / 6 + h_idx + activ_cell_offset]);
-        tvec_to_accumvec<T>(cx_dat);
 
         ActivationFunction_TanH_Diff(
             dcx_dat, s_dat, cx_dat, cx_dat, activ_param, activ_param, activ_param, activ_param);
@@ -262,7 +219,6 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
             {
                 *reinterpret_cast<T_VEC*>(s_dat) =
                     *reinterpret_cast<const T_VEC*>(&dcy[gid * READ_BLOCK + dcy_offset]);
-                tvec_to_accumvec<T>(s_dat);
 
                 for(int i = 0; i < READ_BLOCK; ++i)
                 {
@@ -274,10 +230,8 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
         {
             *reinterpret_cast<T_VEC*>(s_dat) =
                 *reinterpret_cast<const T_VEC*>(&workspace[rsv_idx + dcell_offset_pre]);
-            tvec_to_accumvec<T>(s_dat);
             *reinterpret_cast<T_VEC*>(f_dat) =
                 *reinterpret_cast<const T_VEC*>(&reservespace[rsv_idx + f_offset_pre]);
-            tvec_to_accumvec<T>(f_dat);
 
             for(int i = 0; i < READ_BLOCK; ++i)
             {
@@ -288,7 +242,6 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
         {
             *reinterpret_cast<T_VEC*>(s_dat) =
                 *reinterpret_cast<const T_VEC*>(&dcy[gid * READ_BLOCK + dcy_offset]);
-            tvec_to_accumvec<T>(s_dat);
 
             for(int i = 0; i < READ_BLOCK; ++i)
             {
@@ -302,7 +255,6 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
             {
                 *reinterpret_cast<T_VEC*>(df_dat) =
                     *reinterpret_cast<const T_VEC*>(&cx[gid * READ_BLOCK + cx_offset]);
-                tvec_to_accumvec<T>(df_dat);
 
                 for(int i = 0; i < READ_BLOCK; ++i)
                 {
@@ -311,9 +263,9 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
             }
             else
             {
-                for(FLOAT_ACCUM& value : df_dat)
+                for(T& value : df_dat)
                 {
-                    value = FLOAT_ACCUM{0};
+                    value = CVT_FP32_2FLOAT(0.0f);
                 }
             }
         }
@@ -321,7 +273,6 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
         {
             *reinterpret_cast<T_VEC*>(df_dat) =
                 *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + cell_offset_pre]);
-            tvec_to_accumvec<T>(df_dat);
 
             for(int i = 0; i < READ_BLOCK; ++i)
             {
@@ -332,7 +283,6 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
         {
             *reinterpret_cast<T_VEC*>(df_dat) =
                 *reinterpret_cast<const T_VEC*>(&cx[gid * READ_BLOCK + cx_offset]);
-            tvec_to_accumvec<T>(df_dat);
 
             for(int i = 0; i < READ_BLOCK; ++i)
             {
@@ -341,18 +291,16 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
         }
         else
         {
-            for(FLOAT_ACCUM& value : df_dat)
+            for(T& value : df_dat)
             {
-                value = FLOAT_ACCUM{0};
+                value = CVT_FP32_2FLOAT(0.0f);
             }
         }
 
         *reinterpret_cast<T_VEC*>(f_dat) =
             *reinterpret_cast<T_VEC*>(&reservespace[rsv_idx + f_offset]);
-        tvec_to_accumvec<T>(f_dat);
         ActivationFunction_Sigmoid_Diff(
             s_dat, df_dat, f_dat, f_dat, activ_param, activ_param, activ_param, activ_param);
-        accumvec_to_tvec<T>(s_dat);
         *reinterpret_cast<T_VEC*>(&workspace[rsv_idx + df_offset]) =
             *reinterpret_cast<T_VEC*>(s_dat);
 
@@ -362,7 +310,6 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
         }
         ActivationFunction_Sigmoid_Diff(
             s_dat, di_dat, i_dat, i_dat, activ_param, activ_param, activ_param, activ_param);
-        accumvec_to_tvec<T>(s_dat);
         *reinterpret_cast<T_VEC*>(&workspace[rsv_idx + di_offset]) =
             *reinterpret_cast<T_VEC*>(s_dat);
 
@@ -372,7 +319,6 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
         }
         ActivationFunction_Sigmoid_Diff(
             s_dat, do_dat, o_dat, o_dat, activ_param, activ_param, activ_param, activ_param);
-        accumvec_to_tvec<T>(s_dat);
         *reinterpret_cast<T_VEC*>(&workspace[rsv_idx + do_offset]) =
             *reinterpret_cast<T_VEC*>(s_dat);
 
@@ -382,11 +328,9 @@ __forceinline__ __device__ void lstmbwdhiddenupdate(const T* __restrict__ cx,
         }
         ActivationFunction_TanH_Diff(
             s_dat, dc_dat, c_dat, c_dat, activ_param, activ_param, activ_param, activ_param);
-        accumvec_to_tvec<T>(s_dat);
         *reinterpret_cast<T_VEC*>(&workspace[rsv_idx + dc_offset]) =
             *reinterpret_cast<T_VEC*>(s_dat);
 
-        accumvec_to_tvec<T>(dcx_dat);
         *reinterpret_cast<T_VEC*>(&workspace[rsv_idx + dcell_offset]) =
             *reinterpret_cast<T_VEC*>(dcx_dat);
     }
