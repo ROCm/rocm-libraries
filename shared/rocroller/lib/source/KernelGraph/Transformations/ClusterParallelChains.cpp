@@ -164,6 +164,7 @@ namespace rocRoller
                     using T = std::decay_t<decltype(op)>;
 
                     return CIsAnyOf<T,
+                                    ControlGraph::Barrier,
                                     ControlGraph::LoadTileDirect2LDS,
                                     ControlGraph::LoadTiled,
                                     ControlGraph::StoreLDSTile,
@@ -466,6 +467,61 @@ namespace rocRoller
             return groups;
         }
 
+        void distributeParallelChainsUpward(KernelGraph& graph, vec3 groups, int factor)
+        {
+            for(auto const& group : groups)
+            {
+                AssertFatal(group.size() > 1, ShowValue(group.size()));
+
+                auto theSizes
+                    = group | std::views::transform([](auto const& c) { return c.size(); });
+                std::vector<int> sizes(theSizes.begin(), theSizes.end());
+                auto             maxSize = std::ranges::max(sizes);
+
+                std::vector<float> expectedNodes(group.size(), 0.f);
+                std::vector<int>   seenNodes(group.size(), 0);
+
+                auto done = [&]() {
+                    for(int idx = 0; idx < group.size(); idx++)
+                    {
+                        if(seenNodes[idx] < sizes[idx])
+                            return false;
+                    }
+                    return true;
+                };
+
+                for(int incr = 0; !done(); ++incr)
+                {
+                    for(int idx = group.size() - 1; idx >= 0; --idx)
+                    {
+                        expectedNodes[idx] = static_cast<float>(incr * sizes[idx]) / maxSize;
+                        auto floor         = static_cast<int>(expectedNodes[idx]);
+                        if(floor > seenNodes[idx])
+                        {
+                            if(idx + 1 < group.size() && seenNodes.back() < sizes.back()
+                               && seenNodes[idx] < sizes[idx])
+                            {
+                                Log::debug("back[{}] -> group[{}][{}]",
+                                           seenNodes.back(),
+                                           idx,
+                                           seenNodes.at(idx));
+                                graph.control.chain<ControlGraph::Sequence>(
+                                    group.back().at(seenNodes.back()),
+                                    group[idx].at(seenNodes[idx]));
+                            }
+
+                            seenNodes[idx] = floor;
+                        }
+                    }
+
+                    Log::debug("exp: ({}), seen: ({}) / ({})",
+                               fmt::join(expectedNodes, ", "),
+                               fmt::join(seenNodes, ", "),
+                               fmt::join(sizes, ", "));
+                }
+            }
+        }
+
         void clusterParallelChainsUpward(KernelGraph& graph, vec3 groups, int factor)
         {
             groups = fixupGroups(groups);
@@ -602,7 +658,7 @@ namespace rocRoller
                 Log::debug(showGroups(groups));
 
                 // clusterParallelChainsNop(rv, groups, 1, {0, 8});
-                clusterParallelChainsUpward(rv, groups, 1);
+                distributeParallelChainsUpward(rv, groups, 1);
             }
             else
             {
