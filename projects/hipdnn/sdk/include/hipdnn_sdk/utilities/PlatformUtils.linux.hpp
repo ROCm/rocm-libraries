@@ -9,9 +9,8 @@
 #include <filesystem>
 #include <stdexcept>
 #include <unistd.h>
-namespace hipdnn_sdk
-{
-namespace utilities
+
+namespace hipdnn_sdk::utilities
 {
 
 constexpr const char* SHARED_LIB_EXT = ".so";
@@ -62,8 +61,7 @@ inline std::filesystem::path getCurrentExecutableDirectory()
         .parent_path();
 }
 
-}
-}
+} // namespace hipdnn_sdk::utilities
 
 #else
 

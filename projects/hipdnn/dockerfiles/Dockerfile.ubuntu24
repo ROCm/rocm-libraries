@@ -104,6 +104,7 @@ ARG THEROCK_GIT_HASH=default
 ARG THEROCK_BUILD_MODE=Release
 ARG THEROCK_BUILD_PRESET=linux-release-package
 ARG BUILD_JOBS=0
+ARG ROCM_LIBRARIES_REF=default
 
 RUN git config --global user.email "docker@build.local" && \
     git config --global user.name "Docker Build"
@@ -120,7 +121,23 @@ RUN if [ "$THEROCK_GIT_HASH" != "default" ]; then \
         echo "Using default branch"; \
     fi
 
+# Update rocm-libraries submodule to specific ref if provided
+# we need to commit the change so that fetch_sources.py does not overwrite the change
+RUN if [ "$ROCM_LIBRARIES_REF" != "default" ]; then \
+        echo "Updating rocm-libraries submodule to: $ROCM_LIBRARIES_REF"; \
+        git submodule update --init rocm-libraries && \
+        cd rocm-libraries && \
+        git fetch origin && \
+        git checkout $ROCM_LIBRARIES_REF && \
+        cd .. && \
+        git add rocm-libraries && \
+        git commit -m "Update rocm-libraries submodule to $ROCM_LIBRARIES_REF"; \
+    fi
+
 RUN python3 -m venv /opt/venv
+
+# Adding the venv into the path activates the python virtual env in a way.  We cant source it the
+# normal way due to how dockerfiles run
 ENV PATH="/opt/venv/bin:$PATH"
 
 RUN pip install -r requirements.txt
@@ -128,6 +145,9 @@ RUN pip install -r requirements.txt
 RUN git config --global url."https://github.com/".insteadOf git@github.com: && \
     git config --global credential.helper "!f() { echo username=anonymous; echo password=; }; f" && \
     python ./build_tools/fetch_sources.py
+
+# Do this after fetch_sources.py or you wont have the repos pulled this file references.
+RUN pip install -r requirements-external.txt
 
 RUN mkdir build
 WORKDIR /TheRock/build

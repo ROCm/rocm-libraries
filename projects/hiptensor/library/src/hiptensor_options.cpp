@@ -224,5 +224,5 @@ namespace hiptensor
     {
         return mColMajorStrides;
     }
-
+    
 } // namespace hiptensor

@@ -57,7 +57,7 @@ The following table lists all operations currently supported in the CPU Referenc
 
 ### Datatypes
 - **FP16**: Half-precision floating point (16-bit)
-- **BFP16**: Brain floating point (16-bit)  
+- **BFP16**: Brain floating point (16-bit)
 - **FP32**: Single-precision floating point (32-bit)
 
 ### Layouts
@@ -75,6 +75,6 @@ For detailed information on adding new operations or datatypes to the CPU Refere
 
 ## Related Documentation
 
-- [hipDNN Operation Support (GPU)](./OperationSupport.md) - GPU-accelerated operation support
+- [hipDNN Operation Support](./OperationSupport.md) - Central hub for hipDNN operation support
 - [CPU Graph Executor Design](./CpuGraphExecutorDesign.md) - Detailed architecture documentation
 - [Testing Plan](./testing/TestPlan.md) - Testing strategy and procedures
