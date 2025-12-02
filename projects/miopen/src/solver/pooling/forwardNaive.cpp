@@ -194,7 +194,9 @@ PoolingForwardNaive::GetSolution(const ExecutionContext& context,
 
 #if !WORKAROUND_ISSUE_MIFIN_80
     const auto wavesize = static_cast<uint32_t>(context.GetStream().GetWavefrontWidth());
+#if !MIOPEN_NDEBUG
     assert(IsPower2(wavesize));
+#endif
 #endif
 
     const auto is2d_kernel = (top_d == 1); // For 2D + optimize for 3D where the 1st dim is 1.

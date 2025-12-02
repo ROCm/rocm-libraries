@@ -31,6 +31,7 @@
 #include <miopen/pooling.hpp>
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/mlo_internal.hpp>
+#include <miopen/solver/implicitgemm_util.hpp>
 
 #define WORKAROUND_ISSUE_MIFIN_80 1 // https://github.com/ROCm/MIFin/issues/80
 
@@ -66,9 +67,10 @@ bool PoolingBackwardNd::IsApplicable(const ExecutionContext&,
                 && problem.GetPooling().GetWorkspaceIndexMode() == miopenPoolingWorkspaceIndexMask);
 }
 
-ConvSolution
-PoolingBackwardNd::GetSolution(const ExecutionContext&,
-                               const miopen::pooling::ProblemDescription& problem) const
+ConvSolution PoolingBackwardNd::GetSolutionImpl(
+    const ExecutionContext&,
+    const miopen::pooling::ProblemDescription& problem,
+    const std::optional<PerformanceConfigPoolingNdBackward>& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
@@ -98,9 +100,9 @@ PoolingBackwardNd::GetSolution(const ExecutionContext&,
                                           ? MLO_POOLING_OP_AVE
                                           : MLO_POOLING_OP_AVE_INCLUSIVE);
 
-    int pix_w_per_work = 1;
-    int pix_h_per_work = 4;
-    int pix_d_per_work = 2;
+    int pix_w_per_work = config ? config->pix_w_per_work : 1;
+    int pix_h_per_work = config ? config->pix_h_per_work : 4;
+    int pix_d_per_work = config ? config->pix_d_per_work : 2;
 
     int batch = top.GetLengths()[0];
     int chal  = top.GetLengths()[1];
@@ -121,10 +123,12 @@ PoolingBackwardNd::GetSolution(const ExecutionContext&,
 
 #if WORKAROUND_ISSUE_MIFIN_80
     const std::size_t wavesize = 64;
+    const std::size_t lcl_work = config ? config->local_size : wavesize;
 #else
     const std::size_t wavesize = context.GetStream().GetWavefrontWidth();
+    const std::size_t lcl_work = wavesize;
 #endif
-    size_t grp_num = (activ_work + wavesize - 1) / wavesize;
+    size_t grp_num = (activ_work + lcl_work - 1) / lcl_work;
 
     auto strides = problem.GetPooling().strides;
     auto lens    = problem.GetPooling().lens;
@@ -150,7 +154,7 @@ PoolingBackwardNd::GetSolution(const ExecutionContext&,
         KernelBuildParameters{
             {"MLO_POOLING_OP_ID", pooling_method},
             {"MAX_ACTIV_WORKITEM", max_activ_workitem},
-            {"MLO_POOLING_GROUP_SZ0", wavesize},
+            {"MLO_POOLING_GROUP_SZ0", lcl_work},
             {"MLO_POOLING_GROUP_SZ1", 1},
             {"MLO_POOLING_GROUP_SZ2", 1},
             {"PIX_W_PER_WORK", pix_w_per_work},
@@ -170,8 +174,8 @@ PoolingBackwardNd::GetSolution(const ExecutionContext&,
 
     kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
-    kernel.l_wk = {wavesize, 1, 1};
-    kernel.g_wk = {wavesize * grp_num, 1, 1};
+    kernel.l_wk = {lcl_work, 1, 1};
+    kernel.g_wk = {lcl_work * grp_num, 1, 1};
 
     result.construction_params.push_back(kernel);
 
@@ -265,6 +269,67 @@ PoolingBackwardNd::GetWorkspaceSize(const ExecutionContext&,
     if(problem.GetPooling().GetMode() != miopenPoolingMax)
         return 0;
     return problem.GetYDesc().GetElementSize() * get_data_size(problem.GetPooling().GetIndexType());
+}
+
+bool PerformanceConfigPoolingNdBackward::SetNextValue(
+    const miopen::pooling::ProblemDescription&)
+{
+#if !MIOPEN_BACKEND_HIP
+    return false;
+#else
+#if WORKAROUND_ISSUE_MIFIN_80
+    static constexpr std::size_t wavesize = 64;
+    do
+    {
+        if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_w_per_work))
+            break;
+        if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_h_per_work))
+            break;
+        if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_d_per_work))
+            break;
+        if(!NextTwoPower<1, wavesize>(local_size))
+            break;
+        return false;
+    } while(false);
+    return true;
+#else
+    return false;
+#endif
+#endif
+}
+
+bool PerformanceConfigPoolingNdBackward::IsValidValue() const
+{
+#if WORKAROUND_ISSUE_MIFIN_80
+    static constexpr std::size_t wavesize = 64;
+    if(!IsTwoPower<min_pix_per_work, max_pix_per_work>(pix_w_per_work))
+        return false;
+    if(!IsTwoPower<min_pix_per_work, max_pix_per_work>(pix_h_per_work))
+        return false;
+    if(!IsTwoPower<min_pix_per_work, max_pix_per_work>(pix_d_per_work))
+        return false;
+    if(!IsTwoPower<1, wavesize>(local_size))
+        return false;
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool PoolingBackwardNd::IsValidPerformanceConfig(
+    const ExecutionContext& context,
+    const miopen::pooling::ProblemDescription& problem,
+    const PerformanceConfigPoolingNdBackward& config) const
+{
+    return config.IsValid(context, problem);
+}
+
+PerformanceConfigPoolingNdBackward PoolingBackwardNd::GetDefaultPerformanceConfig(
+    const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
+{
+    PerformanceConfigPoolingNdBackward config;
+    config.HeuristicInit(problem);
+    return config;
 }
 
 } // namespace pooling
