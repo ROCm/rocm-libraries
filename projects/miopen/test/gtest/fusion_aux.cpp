@@ -32,57 +32,41 @@
 
 TEST(FusionAuxTest, Test)
 {
-    miopen::TensorDescriptor        inputTensor;
-    miopen::TensorDescriptor        convFilter;
-    miopenConvolutionDescriptor_t   convDesc    {};
-    miopenFusionOpDescriptor_t      convoOp     {};
-    const std::vector<int>          inputs      {100, 32, 8, 8};
-    const std::vector<int>          conv_filter {64, 32, 5, 5};
-    const std::vector<int>          conv_desc   {0, 0, 1, 1, 1, 1};
+    miopen::TensorDescriptor inputTensor;
+    miopen::TensorDescriptor convFilter;
+    miopenConvolutionDescriptor_t convDesc{};
+    miopenFusionOpDescriptor_t convoOp{};
+    const std::vector<int> inputs{100, 32, 8, 8};
+    const std::vector<int> conv_filter{64, 32, 5, 5};
+    const std::vector<int> conv_desc{0, 0, 1, 1, 1, 1};
 
     // input descriptor
-    auto status =
-        miopenSet4dTensorDescriptor
-        (
-            &inputTensor,
-            miopenFloat,
-            inputs[0],
-            inputs[1],
-            inputs[2],
-            inputs[3]
-        );
+    auto status = miopenSet4dTensorDescriptor(
+        &inputTensor, miopenFloat, inputs[0], inputs[1], inputs[2], inputs[3]);
 
     EXPECT_EQ(status, miopenStatusSuccess);
 
     // convolution descriptor
-    status =
-        miopenSet4dTensorDescriptor
-        (
-            &convFilter,
-            miopenFloat,
-            conv_filter[0], // outputs k
-            conv_filter[1], // inputs c
-            conv_filter[2], // kernel size
-            conv_filter[3]
-        );
+    status = miopenSet4dTensorDescriptor(&convFilter,
+                                         miopenFloat,
+                                         conv_filter[0], // outputs k
+                                         conv_filter[1], // inputs c
+                                         conv_filter[2], // kernel size
+                                         conv_filter[3]);
 
     EXPECT_EQ(status, miopenStatusSuccess);
 
     status = miopenCreateConvolutionDescriptor(&convDesc);
     EXPECT_EQ(status, miopenStatusSuccess);
 
-    status =
-        miopenInitConvolutionDescriptor
-        (
-            convDesc,
-            miopenConvolution,
-            conv_desc[0],
-            conv_desc[1],
-            conv_desc[2],
-            conv_desc[3],
-            conv_desc[4],
-            conv_desc[5]
-        );
+    status = miopenInitConvolutionDescriptor(convDesc,
+                                             miopenConvolution,
+                                             conv_desc[0],
+                                             conv_desc[1],
+                                             conv_desc[2],
+                                             conv_desc[3],
+                                             conv_desc[4],
+                                             conv_desc[5]);
 
     EXPECT_EQ(status, miopenStatusSuccess);
 
