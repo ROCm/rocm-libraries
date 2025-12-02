@@ -328,7 +328,7 @@ def getDockerImageWithStatus(Map conf=[:]) {
         credentialsID = env.miopen_git_creds
     }
     
-    gitStatusWrapper(credentialsId: "${credentialsID}", gitHubContext: "${stageName}", account: 'ROCm', repo: "${env.REPO_NAME}") {
+    gitStatusWrapper(credentialsId: "${credentialsID}", gitHubContext: "${stageName}", account: 'ROCm', repo: 'rocm-libraries') {
         try {
             return getDockerImage(conf) 
         }
