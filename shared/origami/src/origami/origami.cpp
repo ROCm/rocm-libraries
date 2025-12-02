@@ -369,20 +369,21 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                            }
                          });
       }
-
-      // Final tie-breaker: when all else is equal (including square problems),
-      // consistently prefer tiles with larger MT_M
-      // This ensures deterministic selection regardless of input order
-      std::stable_sort(results.begin(),
-                       results.begin() + num_same_ai,
-                       [](const prediction_result_t& a, const prediction_result_t& b) {
-                         // Prefer larger MT_M first
-                         if (a.config.mt.m != b.config.mt.m) return a.config.mt.m > b.config.mt.m;
-                         // If MT_M is same, prefer larger MT_N
-                         if (a.config.mt.n != b.config.mt.n) return a.config.mt.n > b.config.mt.n;
-                         // If both MT_M and MT_N are same, prefer larger MT_K
-                         return a.config.mt.k > b.config.mt.k;
-                       });
+      else {
+        // Final tie-breaker: when all else is equal (including square problems),
+        // consistently prefer tiles with larger MT_M
+        // This ensures deterministic selection regardless of input order
+        std::stable_sort(results.begin(),
+                        results.begin() + num_same_ai,
+                        [](const prediction_result_t& a, const prediction_result_t& b) {
+                          // Prefer larger MT_M first
+                          if (a.config.mt.m != b.config.mt.m) return a.config.mt.m > b.config.mt.m;
+                          // If MT_M is same, prefer larger MT_N
+                          if (a.config.mt.n != b.config.mt.n) return a.config.mt.n > b.config.mt.n;
+                          // If both MT_M and MT_N are same, prefer larger MT_K
+                          return a.config.mt.k > b.config.mt.k;
+                        });
+      }
     }
   }
   return results;
