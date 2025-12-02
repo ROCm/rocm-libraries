@@ -29,7 +29,7 @@ double calculate_work_utilization(const problem_t& problem, const config_t& conf
   const size_t MT_N = config.mt.n;
   const size_t MT_K = config.mt.k;
 
-  if (M == 0 || N == 0 || K == 0 || MT_M == 0 || MT_N == 0 || MT_K == 0) return 1.0;
+  if (MT_M <= 0 || MT_N <= 0) return 1.0;
 
   // Calculate the full dimensions covered by the launched grid of tiles (spatial).
   const double launched_M =
@@ -61,7 +61,7 @@ double calculate_output_utilization(const problem_t& problem,
   const size_t MT_M = config.mt.m;
   const size_t MT_N = config.mt.n;
 
-  if (M == 0 || N == 0 || MT_M == 0 || MT_N == 0) return 1.0;
+  if (MT_M <= 0 || MT_N <= 0) return 1.0;
 
   // Tiled coverage in M/N
   const double launched_M =
@@ -318,16 +318,11 @@ static inline double compute_cvt_overhead(const problem_t& problem,
 size_t compute_mt_compute_latency(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const config_t& config) {
-  dim3_t compute_mi = config.mi;
-  // Override dot2 instruction with vector lane widths
-  if (compute_mi.m == 0 && compute_mi.n == 0 && compute_mi.k == 0)
-    compute_mi = {.m = 1, .n = 1, .k = 64};
-
   // Compute the number of matrix instructions
-  size_t N_MI = compute_number_matrix_instructions(config.mt, compute_mi);
+  size_t N_MI = compute_number_matrix_instructions(config.mt, config.mi);
   // Latency of a single MT_MxMT_NxMT_k tile is the latency of one MI multiplied by
   // number of MI per MT_MxMT_NxMT_k.
-  size_t L_MI = hardware.get_mi_latency(compute_mi.m, compute_mi.n, compute_mi.k, problem.mi_dtype);
+  size_t L_MI = hardware.get_mi_latency(config.mi.m, config.mi.n, config.mi.k, problem.mi_dtype);
 
   // size_t mt_arith = arithmetic_intensity(MT_M, MT_N, MT_K, 2);
   // printf("MT_M:%d MT_N:%d MT_K:%d arith:%d\n", MT_M, MT_N, MT_K, mt_arith);
@@ -867,8 +862,6 @@ double compute_tile_latency(const problem_t& problem,
       (L_tile_single * static_cast<double>(num_iter)) + L_prologue + L_epilogue * 2 + L_WG_setup +
       (500 * static_cast<double>(
                  num_iter));  // 7 instructions (each with 4 cycles) at the end of the loop
-
-  if (MT_K == 1024) { L_prologue = L_prologue * 100; }
 
   if (get_runtime_options(config).debug_enabled) {
     double problem_k_quant = ((K % MT_K) / (double)K);

@@ -42,9 +42,9 @@ std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
  */
 
 std::tuple<int, int> select_workgroup_mapping(const problem_t& problem,
-                                                    const hardware_t& hardware,
-                                                    const config_t& config,
-                                                    size_t skGrid) {
+                                              const hardware_t& hardware,
+                                              const config_t& config,
+                                              size_t skGrid) {
   // Extract parameters from structured types
   size_t M     = problem.size.m;
   size_t N     = problem.size.n;
@@ -325,11 +325,9 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                        return compute_arithmetic_intensity(a.config) >
                               compute_arithmetic_intensity(b.config);
                      });
-  }
 
-  // After arithmetic intensity tie-breaking, check if we still have ties
-  // among the top results (those with same latency and arithmetic intensity)
-  if (num_the_same > 1) {
+    // After arithmetic intensity tie-breaking, check if we still have ties
+    // among the top results (those with same latency and arithmetic intensity)
     // Check if the top tiles still have the same arithmetic intensity
     double first_ai    = compute_arithmetic_intensity(results.front().config);
     size_t num_same_ai = 1;
@@ -368,24 +366,24 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                              return a.config.mt.m > b.config.mt.m;
                            }
                          });
-      }
-      else {
+      } else {
         // Final tie-breaker: when all else is equal (including square problems),
         // consistently prefer tiles with larger MT_M
         // This ensures deterministic selection regardless of input order
         std::stable_sort(results.begin(),
-                        results.begin() + num_same_ai,
-                        [](const prediction_result_t& a, const prediction_result_t& b) {
-                          // Prefer larger MT_M first
-                          if (a.config.mt.m != b.config.mt.m) return a.config.mt.m > b.config.mt.m;
-                          // If MT_M is same, prefer larger MT_N
-                          if (a.config.mt.n != b.config.mt.n) return a.config.mt.n > b.config.mt.n;
-                          // If both MT_M and MT_N are same, prefer larger MT_K
-                          return a.config.mt.k > b.config.mt.k;
-                        });
+                         results.begin() + num_same_ai,
+                         [](const prediction_result_t& a, const prediction_result_t& b) {
+                           // Prefer larger MT_M first
+                           if (a.config.mt.m != b.config.mt.m) return a.config.mt.m > b.config.mt.m;
+                           // If MT_M is same, prefer larger MT_N
+                           if (a.config.mt.n != b.config.mt.n) return a.config.mt.n > b.config.mt.n;
+                           // If both MT_M and MT_N are same, prefer larger MT_K
+                           return a.config.mt.k > b.config.mt.k;
+                         });
       }
     }
   }
+
   return results;
 }
 
