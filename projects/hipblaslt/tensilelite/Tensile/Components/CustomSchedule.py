@@ -613,28 +613,27 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
     if isTN(kernel) and not useLDSTr and TLDS == 1:
         #index and code pair
         syncTable = [-1, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for LRB1-0"),
-                     7, SWaitCnt(dscnt=10, vlcnt=-1, vscnt=-1, comment="wait for LRB1-1"),
+                     7, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="wait for LRB1"),
+                     10, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="wait for LRA0"),
                      10, SBarrier(comment="for GRA"),
-                     14, SWaitCnt(dscnt=14, vlcnt=-1, vscnt=-1, comment="wait for LRB1-2"),
-                     23, SWaitCnt(dscnt=14, vlcnt=-1, vscnt=-1, comment="wait for LRB1 remaining"),
-                     47, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for LRB0-0"),
-                     50, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="for LRA1"),
-                     50, SBarrier(comment="for LRA1"),
-                     55, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRB0-1"),
-                     63, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRB0-2"),
-                     70, SWaitCnt(dscnt=-1, vlcnt=12, vscnt=-1, comment="for LRB1"),
-                     70, SBarrier(comment="for LRB1"),
-                     71, SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="wait for LRB0-3"),
-                     79, SWaitCnt(dscnt=13, vlcnt=-1, vscnt=-1, comment="wait for LRB0 remaining"),]
+                     
+                     47, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0-0"),
+                     50, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="for previous GRA"),
+                     50, SBarrier(comment="for GRA"),
+                     
+                     70, SWaitCnt(dscnt=-1, vlcnt=12, vscnt=-1, comment="for previous GRB"),
+                     70, SBarrier(comment="for GRB"),
+                     ]
         optSchedule = {
                 'SYNC'  : [syncTable[::2]],
                 'GRIncA': [[0,1,2,3,4,5,6,7,8]],
                 'GRIncB': [[9,10,11,12,13,14,15,16,17]],
 
-                'LRA0': [[0, 2, 3, 4, 5, 6, 7, 8]],
+                'LRA0': [[-1, 0, 1, 2, 3, 4, 5, 6],
+                         [0, 1, 2, 3, 4, 5, 6, 7]],
                  #interleave LRB0 , GRA
-                'LRB0': [[9, 11, 13, 15, 17, 19],
-                         [10, 12, 14, 16, 18, 20]],
+                'LRB0': [[7, 9, 11, 13, 15, 17],
+                        [8, 10, 12, 14, 16, 18]],
                 'GRA': [[10,10, 12,12, 14,14, 16,16, 20,20, 31,31, 33,33, 35,35],
                         [11,11, 13,13, 15,15, 17,17, 21,21, 32,32, 34,34, 36,36]],
                  #interleave GRB, LRB1
@@ -643,7 +642,8 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                 'LRA1': [[50, 52, 57, 60, 62, 64, 66, 68],
                          [51, 53, 58, 61, 63, 65, 67, 69]],
 
-                'LRB1': [[70, 72, 74, 76, 78, 79]],
+                'LRB1': [[70, 72, 74, 76, 78, 79],
+                         [71, 73, 75, 77, 79, 80]],
                 'LRSA': [[20]],
                 'LRSB': [[64]],
                 'LWSA': [[40]],
@@ -1565,9 +1565,37 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
         ]
         numMfma = 120
         nglshift = nllshift = len(optSchedule["GRA"][0])/2 + len(optSchedule["GRB"][0])/2
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    elif isNT(kernel) and TLDS==0:
+        optSchedule = {
+            'SYNC': [[-1,24,24,59,59]],
+            'LRA0': [[0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,14,14,15]],
+            'LRB0': [[24,24,26,26,28,28,30,30]],
+            'GRA': [[24,24,25,25,27,27,29,29,31,31,33,33,35,35,37,37,39,39,41,41,43,43,45,45,47,47,49,49,50,50,52,52,54,54,56,56,58,58,60,60,61,61,62,62,63,63,64,64, 65,65,66,66,67,67,68,68,69,69,70,70]],
+            'GRB': [[75,75,76,76,77,77,78,78,  89,89,91,91,93,93,95,95]],
+            'LRA1': [[60,60,61,61,62,62,63,63,64,64, 65,65,66,66,67,67,68,68,69,69,70,70, 75,75,76,76,77,77,78,78]],
+            'LRB1': [[89,89,91,91,93,93,95,95]],
+            'GRIncA': [[0,0,0,1,1,1,2,2,2]],
+            'GRIncB': [[3,3,3,4,4,4,5,5,5]],
+            'LRSA': [[58]],
+            'LRSB': [[58]],
+            'LWSA': [[95]],
+            'LWSB': [[95]],
+            'LCC': [[119,119]],
+        }
+
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0"),
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+            SBarrier(comment=""),
+            SWaitCnt(dscnt=0, vlcnt=19, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0, wait for previous set of global reads"),
+            SBarrier(comment="")
+        ]
+        numMfma = 120
+        nglshift = nllshift = len(optSchedule["GRA"][0])/2 + len(optSchedule["GRB"][0])/2
+        opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
-    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
 def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
