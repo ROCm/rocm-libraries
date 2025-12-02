@@ -25,6 +25,7 @@ void RunPooling2dTests()
     driver.type = miopen_type<T>{};
     driver.full_set = true; // Equivalent to --all flag
     driver.dataset_id = 0;   // Default dataset
+    driver.config_iter_start = 0;
 
     // Get data arguments (arguments that weren't passed via command line)
     std::vector<typename pooling2d_driver<T>::argument*> data_args;
@@ -36,7 +37,18 @@ void RunPooling2dTests()
     // Manually iterate over all combinations using the driver's iteration logic
     prng::reset_seed();
     driver.iteration = 0;
-    run_data(data_args.begin(), data_args.end(), [&] { driver.template base_run<pooling2d_driver<T>>(); });
+    try
+    {
+        run_data(data_args.begin(), data_args.end(), [&] { driver.template base_run<pooling2d_driver<T>>(); });
+    }
+    catch(const std::exception& e)
+    {
+        FAIL() << "Exception in pooling2d test: " << e.what();
+    }
+    catch(...)
+    {
+        FAIL() << "Unknown exception in pooling2d test";
+    }
 }
 
 void Run2dDriver(miopenDataType_t prec)
