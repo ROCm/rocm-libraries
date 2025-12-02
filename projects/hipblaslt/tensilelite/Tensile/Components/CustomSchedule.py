@@ -515,7 +515,18 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         return InstStreams
 
     status, message = opt1.isValid({'kernel' : kernel})
-    assert status is True, f"Custom mainloop schedule validation failed: {message}"
+    # create the case str (TN, NT, TT, or NN)
+    if isTN(kernel):
+        case_str = "TN"
+    elif isNT(kernel):
+        case_str = "NT"
+    elif isTT(kernel):
+        case_str = "TT"
+    elif isNN(kernel):
+        case_str = "NN"
+    else:
+        case_str = "Unknown"
+    assert status is True, f"Custom mainloop schedule validation failed for kernel {kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']} {case_str}: {message}"
 
     InstStreams = convOptToStream(opt1)
 
