@@ -35,7 +35,7 @@
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 
-TEST_CASE("StreamK multiple fix-ups", "[streamK][kernel-graph]")
+TEST_CASE("StreamK multiple fix-ups", "[streamk][kernel-graph]")
 {
     using namespace rocRoller;
     using namespace KernelGraph;

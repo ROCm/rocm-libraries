@@ -53,6 +53,7 @@
 #    define _THRUST_HAS_DEVICE_SYSTEM_STD 1
 #    define _THRUST_STD_NAMESPACE_BEGIN   _LIBCUDACXX_BEGIN_NAMESPACE_STD
 #    define _THRUST_STD_NAMESPACE_END     _LIBCUDACXX_END_NAMESPACE_STD
+#    define _THRUST_USE_ROCPRIM           0
 #  endif
 
 // Otherwise, if the '::hip::std' namespace from 'libhipcxx' is available.
@@ -71,6 +72,7 @@
 #    define _THRUST_HAS_DEVICE_SYSTEM_STD 1
 #    define _THRUST_STD_NAMESPACE_BEGIN   _LIBCUDACXX_BEGIN_NAMESPACE_STD
 #    define _THRUST_STD_NAMESPACE_END     _LIBCUDACXX_END_NAMESPACE_STD
+#    define _THRUST_USE_ROCPRIM           0
 #  endif
 #endif
 
@@ -85,4 +87,5 @@
     namespace std                     \
     {
 #  define _THRUST_STD_NAMESPACE_END }
+#  define _THRUST_USE_ROCPRIM (THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CPP)
 #endif
