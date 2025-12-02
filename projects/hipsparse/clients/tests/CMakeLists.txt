@@ -74,7 +74,7 @@ else()
     include(cuda/12.8/CMakeLists.txt)
     message("Building hipsparse-test executable using CUDA_VERSION ${CUDA_VERSION}")
   else()
-    message("ERROR")
+    message("ERROR: Testing on CUDA_VERSION ${CUDA_VERSION} not supported.")
   endif()
 endif()
 
