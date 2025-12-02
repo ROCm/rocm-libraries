@@ -1,33 +1,9 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2019 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
 
-#include "test.hpp"
-#include "driver.hpp"
+#include <gtest/gtest.h>
 #include "get_handle.hpp"
-#include "lib_env_var.hpp"
+#include "gtest_common.hpp"
 #include "workspace.hpp"
 
 #include <miopen/convolution.hpp>
@@ -36,6 +12,7 @@
 #include <miopen/find_db.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/temp_file.hpp>
+#include <miopen/tensor.hpp>
 #include <miopen/hip_build_utils.hpp>
 
 #include <chrono>
@@ -67,8 +44,24 @@ static auto Duration(const std::function<void()>& func)
     return std::chrono::steady_clock::now() - start;
 }
 
-struct FindDbTest : test_driver
+class GPU_FindDb_FP32 : public testing::Test
 {
+protected:
+    void SetUp() override
+    {
+        filter.findMode.Set(FindMode::Values::Hybrid);
+        x = {100, 25, 32, 32};
+        w = {300, 25, 3, 3};
+        y = tensor<float>{filter.GetForwardOutputTensor(x.desc, w.desc)};
+
+        x_dev = handle.Write(x.data);
+        w_dev = handle.Write(w.data);
+        y_dev = handle.Write(y.data);
+
+        const TempFile temp_file{"miopen.test.find_db"};
+        debug::testing_find_db_path_override() = temp_file;
+    }
+
     Handle handle{};
     tensor<float> x;
     tensor<float> w;
@@ -80,30 +73,6 @@ struct FindDbTest : test_driver
     miopen::ConvolutionDescriptor filter = {
         2, miopenConvolution, miopenPaddingDefault, {0, 0}, {1, 1}, {1, 1}};
 
-    FindDbTest()
-    {
-        filter.findMode.Set(FindMode::Values::Hybrid);
-        x = {100, 25, 32, 32};
-        w = {300, 25, 3, 3};
-        y = tensor<float>{filter.GetForwardOutputTensor(x.desc, w.desc)};
-    }
-
-    void run()
-    {
-        x_dev = handle.Write(x.data);
-        w_dev = handle.Write(w.data);
-        y_dev = handle.Write(y.data);
-
-        const TempFile temp_file{"miopen.test.find_db"};
-        debug::testing_find_db_path_override() = temp_file;
-        TestRordbEmbedFsOverrideLock rordb_embed_fs_override;
-
-        TestForward();
-        TestBwdData();
-        TestWeights();
-    }
-
-private:
     void TestBwdData()
     {
         MIOPEN_LOG_I("Starting backward find-db test.");
@@ -201,6 +170,8 @@ private:
     {
         using mSeconds = std::chrono::duration<double, std::ratio<1, 1000>>;
 
+        TestRordbEmbedFsOverrideLock rordb_embed_fs_override;
+
         const auto time0   = Duration(func);
         const auto time0ms = std::chrono::duration_cast<mSeconds>(time0);
         MIOPEN_LOG_I(
@@ -220,17 +191,21 @@ private:
         MIOPEN_LOG_I("Speedup: " << find_db_speedup);
 #if !MIOPEN_DISABLE_USERDB
         double limit = 3.0;
-        EXPECT_OP(find_db_speedup, >=, limit);
+        EXPECT_GE(find_db_speedup, limit);
 #endif
     }
 };
+
+TEST_F(GPU_FindDb_FP32, FloatTest_find_db)
+{
+    ScopedEnvironment<int> logging_time(MIOPEN_ENABLE_LOGGING_ELAPSED_TIME, 1);
+    ScopedEnvironment<int> log_level(MIOPEN_LOG_LEVEL, 2);
+    ScopedEnvironment<int> compile_parallel(MIOPEN_COMPILE_PARALLEL_LEVEL, 1);
+
+    TestForward();
+    TestBwdData();
+    TestWeights();
+}
+
 } // namespace miopen
 
-int main(int argc, const char* argv[])
-{
-    lib_env::update(MIOPEN_ENABLE_LOGGING_ELAPSED_TIME, 1);
-    lib_env::update(MIOPEN_LOG_LEVEL, 6);
-    lib_env::update(MIOPEN_COMPILE_PARALLEL_LEVEL, 1);
-
-    test_drive<miopen::FindDbTest>(argc, argv);
-}
