@@ -129,7 +129,9 @@ namespace rocRoller
          * will use the same ForLoop Dimension as the original
          * ForLoopOp.
         */
-        int cloneForLoop(KernelGraph& graph, int tag);
+        int cloneForLoop(KernelGraph&               graph,
+                         int                        tag,
+                         std::optional<std::string> name = std::nullopt);
 
         /**
          * @brief Remove a node and all of its children from the control graph
@@ -257,9 +259,22 @@ namespace rocRoller
         std::optional<int> findTopOfContainingOperation(int candidate, KernelGraph const& kgraph);
 
         /**
-         * @brief Create a new coordinate representing data within the scratch space. This will return a
-         * coordinate that can be added to a coordinate graph. It also allocates the required scratch space
-         * within the context.
+         * @brief Follow Identify edges.
+         *
+         * Starting from the coordinate tag, follow outgoing Identify
+         * edges until there aren't any more.  Returns the coordinate
+         * at the end of the Identify chain.
+         *
+         * If there aren't any outgoing Identify edges, this returns
+         * the original coordinate tag.
+         */
+        int followIdentify(int coordinateTag, KernelGraph const& graph);
+
+        /**
+         * @brief Create a new coordinate representing data within the
+         * scratch space. This will return a coordinate that can be
+         * added to a coordinate graph. It also allocates the required
+         * scratch space within the context.
          *
          * @param size
          * @param varType
@@ -274,6 +289,7 @@ namespace rocRoller
          *
          * @param op Operation to replace.
          * @param newOp Replacement.
+         * @param includeBody If true, transfer Body edges.
          *
          * Does not delete the original operation.
          */
@@ -712,13 +728,26 @@ namespace rocRoller
         void removeRedundantBodyEdgesBaselineMethod(KernelGraph& graph);
 
         /**
-         * Returns all of the nodes that contain `control` with a body
-         * relationship in order from the root of the graph
+         * Yields all of the nodes that are body parents of `control` in order from the node
+         * up to the root of the graph.
          */
-        std::deque<int> controlStack(int control, KernelGraph const& graph);
+        Generator<int> bodyParents(int control, KernelGraph const& graph);
+
+        /**
+         * Yields all of the nodes that are body parents of `control` in order from the node
+         * up to the root of the graph.
+         */
+        Generator<int> bodyParents(int control, ControlGraph::ControlGraph const& graph);
+
         /**
          * Returns all of the nodes that contain `control` with a body
-         * relationship in order from the root of the graph
+         * relationship in order from the root of the graph, including `control` itself.
+         */
+        std::deque<int> controlStack(int control, KernelGraph const& graph);
+
+        /**
+         * Returns all of the nodes that contain `control` with a body
+         * relationship in order from the root of the graph, including `control` itself.
          */
         std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph);
 
