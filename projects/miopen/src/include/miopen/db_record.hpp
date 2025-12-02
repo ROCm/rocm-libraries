@@ -71,7 +71,7 @@ enum class DbKinds : std::uint8_t
 /// Upon construction, allows getting and modifying contents of a record (IDs and VALUES).
 ///
 /// All operations are MP- and MT-safe.
-class MIOPEN_INTERNALS_EXPORT DbRecord
+class DbRecord
 {
 public:
     template <class TValue>
@@ -196,11 +196,11 @@ private:
         return ss.str();
     }
 
-    bool ParseContents(std::istream& contents);
+    MIOPEN_INTERNALS_EXPORT bool ParseContents(std::istream& contents);
     void WriteContents(std::ostream& stream) const;
     void WriteIdsAndValues(std::ostream& stream) const;
-    bool SetValues(const std::string& id, const std::string& values);
-    bool GetValues(const std::string& id, std::string& values) const;
+    MIOPEN_INTERNALS_EXPORT bool SetValues(const std::string& id, const std::string& values);
+    MIOPEN_INTERNALS_EXPORT bool GetValues(const std::string& id, std::string& values) const;
 
     DbRecord(const std::string& key_) : key(key_) {}
 

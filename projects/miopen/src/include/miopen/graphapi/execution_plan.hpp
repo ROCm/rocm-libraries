@@ -38,7 +38,7 @@ namespace miopen {
 
 namespace graphapi {
 
-class MIOPEN_INTERNALS_EXPORT ExecutionPlan
+class ExecutionPlan
 {
 private:
     /* we don't use a pointer for mEngineCfg
@@ -52,17 +52,17 @@ private:
     friend class ExecutionPlanBuilder;
 
 public:
-    ExecutionPlan()                     = default;
-    ExecutionPlan(const ExecutionPlan&) = default;
-    ExecutionPlan(ExecutionPlan&&)      = default;
+    ExecutionPlan()                                = default;
+    ExecutionPlan(const ExecutionPlan&)            = default;
+    ExecutionPlan(ExecutionPlan&&)                 = default;
     ExecutionPlan& operator=(const ExecutionPlan&) = default;
-    ExecutionPlan& operator=(ExecutionPlan&&) = default;
+    ExecutionPlan& operator=(ExecutionPlan&&)      = default;
 
     miopenHandle_t getHandle() const noexcept { return mHandle; }
     const EngineCfg& getEngineCfg() const noexcept { return mEngineCfg; }
     EngineCfg& getEngineCfg() noexcept { return mEngineCfg; }
     const std::vector<int64_t>& getIntermediateIds() const noexcept { return mIntermediateIds; }
-    std::string getJsonRepresentation() const;
+    MIOPEN_INTERNALS_EXPORT std::string getJsonRepresentation() const;
 
     void execute(miopenHandle_t handle, const VariantPack& variantPack)
     {
@@ -160,8 +160,9 @@ private:
 public:
     ExecutionPlanBuilder& setHandle(miopenHandle_t handle) &;
     ExecutionPlanBuilder& setEngineCfg(const EngineCfg& engineCfg) &;
-    ExecutionPlanBuilder& setEngineCfg(EngineCfg&& engineCfg) &;
-    ExecutionPlanBuilder& setIntermediateIds(const std::vector<int64_t>& ids) &;
+    MIOPEN_INTERNALS_NO_EXPORT ExecutionPlanBuilder& setEngineCfg(EngineCfg&& engineCfg) &;
+    MIOPEN_INTERNALS_NO_EXPORT ExecutionPlanBuilder&
+    setIntermediateIds(const std::vector<int64_t>& ids) &;
     ExecutionPlanBuilder& setIntermediateIds(std::vector<int64_t>&& ids) &;
     ExecutionPlanBuilder& setJsonRepresentation(const std::string_view& s) &;
 
@@ -190,11 +191,11 @@ public:
         return std::move(setJsonRepresentation(s));
     }
 
-    ExecutionPlan build() &;
+    MIOPEN_INTERNALS_NO_EXPORT ExecutionPlan build() &;
     ExecutionPlan build() &&;
 };
 
-class MIOPEN_INTERNALS_EXPORT BackendExecutionPlanDescriptor : public BackendDescriptor
+class BackendExecutionPlanDescriptor : public BackendDescriptor
 {
 private:
     ExecutionPlanBuilder mBuilder;

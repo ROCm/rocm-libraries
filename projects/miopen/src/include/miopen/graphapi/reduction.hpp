@@ -52,7 +52,7 @@ public:
     miopenDataType_t getCompType() const { return mCompType; }
 };
 
-class MIOPEN_INTERNALS_EXPORT ReductionBuilder
+class ReductionBuilder
 {
 private:
     Reduction mReduction;
@@ -74,7 +74,7 @@ public:
         return *this;
     }
 
-    Reduction build();
+    MIOPEN_INTERNALS_EXPORT Reduction build();
 };
 
 class MIOPEN_INTERNALS_EXPORT BackendReductionDescriptor : public BackendDescriptor
@@ -136,7 +136,7 @@ public:
     OperationReduction build();
 };
 
-class MIOPEN_INTERNALS_EXPORT BackendOperationReductionDescriptor : public BackendDescriptor
+class BackendOperationReductionDescriptor : public BackendDescriptor
 {
 private:
     OperationReductionBuilder mBuilder;

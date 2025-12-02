@@ -61,14 +61,14 @@ struct BatchedTransposeParam
     int ediv_y{0};
 };
 
-struct MIOPEN_INTERNALS_EXPORT BatchedTransposeSolution
+struct BatchedTransposeSolution
 {
-    BatchedTransposeSolution(const ExecutionContext& ctx_,
-                             miopenDataType_t data_type_,
-                             uint32_t batch_,
-                             uint32_t height_,
-                             uint32_t width_);
-    solver::KernelInfo GetKernelInfo() const;
+    MIOPEN_INTERNALS_EXPORT BatchedTransposeSolution(const ExecutionContext& ctx_,
+                                                     miopenDataType_t data_type_,
+                                                     uint32_t batch_,
+                                                     uint32_t height_,
+                                                     uint32_t width_);
+    MIOPEN_INTERNALS_EXPORT solver::KernelInfo GetKernelInfo() const;
     std::vector<OpKernelArg> GetKernelArg() const;
     std::string GetKernelName() const;
     bool IsSkippable() const;
@@ -82,7 +82,7 @@ struct MIOPEN_INTERNALS_EXPORT BatchedTransposeSolution
 
     BatchedTransposeParam kernel_param_heuristic;
 
-    InvokerFactory MakeBatchedTransposeInvokerFactory() const;
+    MIOPEN_INTERNALS_EXPORT InvokerFactory MakeBatchedTransposeInvokerFactory() const;
 };
 
 struct TransposeSolutionDefault2Nhwc : public BatchedTransposeSolution

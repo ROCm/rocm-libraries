@@ -44,7 +44,7 @@ enum class Direction
     Backward,
 };
 
-struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase
+struct ProblemDescription : ProblemDescriptionBase
 {
     // Forward constructor
     ProblemDescription(const ActivationDescriptor& activ,

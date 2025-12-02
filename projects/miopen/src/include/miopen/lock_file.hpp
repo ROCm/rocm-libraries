@@ -203,7 +203,7 @@ MIOPEN_INTERNALS_EXPORT fs::path LockFilePath(const fs::path& filename_);
 // One process should never have more than one instance of this class with same path at the same
 // time. It may lead to undefined behaviour on Windows.
 // Also on windows mutex can be removed because file locks are MT-safe there.
-class MIOPEN_INTERNALS_EXPORT LockFile
+class LockFile
 {
 private:
     class PassKey
@@ -212,7 +212,7 @@ private:
 
 public:
     LockFile(const fs::path&, PassKey);
-    LockFile(const LockFile&) = delete;
+    LockFile(const LockFile&)           = delete;
     LockFile operator=(const LockFile&) = delete;
 
     bool timed_lock(const boost::posix_time::ptime& abs_time)

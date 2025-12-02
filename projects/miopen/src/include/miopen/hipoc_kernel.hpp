@@ -119,7 +119,7 @@ struct KernelArgs
     uint64_t hidden[6] = {};
 };
 
-struct MIOPEN_INTERNALS_EXPORT HIPOCKernelInvoke
+struct HIPOCKernelInvoke
 {
     HIPOCKernelInvoke() {}
     HIPOCKernelInvoke(hipStream_t pstream,
@@ -185,8 +185,8 @@ struct MIOPEN_INTERNALS_EXPORT HIPOCKernelInvoke
     const std::string& GetName() const { return name; }
 
 private:
-    void run(void* args, std::size_t size) const;
-    void run_cooperative(void** kern_args) const;
+    MIOPEN_INTERNALS_EXPORT void run(void* args, std::size_t size) const;
+    MIOPEN_INTERNALS_EXPORT void run_cooperative(void** kern_args) const;
 
     hipStream_t stream          = nullptr;
     hipFunction_t fun           = nullptr;
@@ -197,7 +197,7 @@ private:
     bool coop_launch;
 };
 
-struct MIOPEN_INTERNALS_EXPORT HIPOCKernel
+struct HIPOCKernel
 {
     HIPOCProgram program;
     std::string name;

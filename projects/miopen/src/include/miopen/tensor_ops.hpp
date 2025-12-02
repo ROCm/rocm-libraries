@@ -48,7 +48,7 @@ struct f_length_is_not_1_t
     }
 };
 
-MIOPEN_INTERNALS_EXPORT TensorDescriptor GetFlattenedTensorDescriptor(const TensorDescriptor& desc);
+TensorDescriptor GetFlattenedTensorDescriptor(const TensorDescriptor& desc);
 
 template <typename... TDescriptors>
 std::tuple<TDescriptors...>

@@ -47,7 +47,7 @@ class LockFile;
 constexpr bool DisableUserDbFileIO = MIOPEN_DISABLE_USERDB;
 
 /// No instance of this class should be used from several threads at the same time.
-class MIOPEN_INTERNALS_EXPORT PlainTextDb
+class PlainTextDb
 {
 public:
     PlainTextDb(DbKinds db_kind_, const fs::path& filename_, bool is_system = false);

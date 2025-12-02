@@ -40,7 +40,7 @@
 
 namespace miopen {
 
-struct MIOPEN_INTERNALS_EXPORT CTCLossDescriptor : miopenCTCLossDescriptor
+struct CTCLossDescriptor : miopenCTCLossDescriptor
 {
 
     CTCLossDescriptor();

@@ -39,42 +39,43 @@ namespace miopen {
 struct Handle;
 struct TensorDescriptor;
 
-struct MIOPEN_INTERNALS_EXPORT ActivationDescriptor : miopenActivationDescriptor
+struct ActivationDescriptor : miopenActivationDescriptor
 {
-    ActivationDescriptor();
+    MIOPEN_INTERNALS_EXPORT ActivationDescriptor();
     ActivationDescriptor(miopenActivationMode_t m, const double* pparms);
+    MIOPEN_INTERNALS_EXPORT
     ActivationDescriptor(miopenActivationMode_t m, double alpha, double beta, double gamma);
 
-    miopenActivationMode_t GetMode() const;
-    double GetAlpha() const;
-    double GetBeta() const;
-    double GetGamma() const;
+    MIOPEN_INTERNALS_EXPORT miopenActivationMode_t GetMode() const;
+    MIOPEN_INTERNALS_EXPORT double GetAlpha() const;
+    MIOPEN_INTERNALS_EXPORT double GetBeta() const;
+    MIOPEN_INTERNALS_EXPORT double GetGamma() const;
 
-    miopenStatus_t Forward(const Handle& handle,
-                           const void* alpha,
-                           const TensorDescriptor& xDesc,
-                           ConstData_t x,
-                           const void* beta,
-                           const TensorDescriptor& yDesc,
-                           Data_t y,
-                           size_t xOffset = 0,
-                           size_t yOffset = 0) const;
+    MIOPEN_INTERNALS_EXPORT miopenStatus_t Forward(const Handle& handle,
+                                                   const void* alpha,
+                                                   const TensorDescriptor& xDesc,
+                                                   ConstData_t x,
+                                                   const void* beta,
+                                                   const TensorDescriptor& yDesc,
+                                                   Data_t y,
+                                                   size_t xOffset = 0,
+                                                   size_t yOffset = 0) const;
 
-    miopenStatus_t Backward(const Handle& handle,
-                            const void* alpha,
-                            const TensorDescriptor& yDesc,
-                            ConstData_t y,
-                            const TensorDescriptor& dyDesc,
-                            ConstData_t dy,
-                            const TensorDescriptor& xDesc,
-                            ConstData_t x,
-                            const void* beta,
-                            const TensorDescriptor& dxDesc,
-                            Data_t dx,
-                            size_t yOffset  = 0,
-                            size_t dyOffset = 0,
-                            size_t xOffset  = 0,
-                            size_t dxOffset = 0) const;
+    MIOPEN_INTERNALS_EXPORT miopenStatus_t Backward(const Handle& handle,
+                                                    const void* alpha,
+                                                    const TensorDescriptor& yDesc,
+                                                    ConstData_t y,
+                                                    const TensorDescriptor& dyDesc,
+                                                    ConstData_t dy,
+                                                    const TensorDescriptor& xDesc,
+                                                    ConstData_t x,
+                                                    const void* beta,
+                                                    const TensorDescriptor& dxDesc,
+                                                    Data_t dx,
+                                                    size_t yOffset  = 0,
+                                                    size_t dyOffset = 0,
+                                                    size_t xOffset  = 0,
+                                                    size_t dxOffset = 0) const;
 
     friend std::ostream& operator<<(std::ostream& stream, const ActivationDescriptor& x);
 

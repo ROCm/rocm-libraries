@@ -53,31 +53,20 @@ using ValidationFunc = std::function<bool(int, int)>;
 class CandidateSelectionMetadata
 {
 public:
-    MIOPEN_INTERNALS_EXPORT CandidateSelectionMetadata(const std::string& arch,
-                                                       const std::string& solver);
-    MIOPEN_INTERNALS_EXPORT size_t GetInputParamIndex(const std::string& name) const;
-    MIOPEN_INTERNALS_EXPORT size_t GetOutputParamIndex(const std::string& name) const;
-    MIOPEN_INTERNALS_EXPORT std::optional<std::string>
-    GetInputConstant(const std::string& name) const;
-    MIOPEN_INTERNALS_EXPORT std::optional<std::string>
-    GetOutputConstant(const std::string& name) const;
-    MIOPEN_INTERNALS_EXPORT std::vector<size_t> GetConstantInputIndices() const;
-    MIOPEN_INTERNALS_EXPORT std::vector<size_t> GetConstantOutputIndices() const;
-    MIOPEN_INTERNALS_EXPORT std::map<std::string, std::string>
-    GetKernelStrMapping(const std::string& kernel_name) const;
+    CandidateSelectionMetadata(const std::string& arch, const std::string& solver);
+    size_t GetInputParamIndex(const std::string& name) const;
+    size_t GetOutputParamIndex(const std::string& name) const;
+    std::optional<std::string> GetInputConstant(const std::string& name) const;
+    std::optional<std::string> GetOutputConstant(const std::string& name) const;
+    std::vector<size_t> GetConstantInputIndices() const;
+    std::vector<size_t> GetConstantOutputIndices() const;
+    std::map<std::string, std::string> GetKernelStrMapping(const std::string& kernel_name) const;
     // Getter functions for private members
-    MIOPEN_INTERNALS_EXPORT const std::vector<std::string>& input_params() const
-    {
-        return input_params_;
-    }
-    MIOPEN_INTERNALS_EXPORT const std::vector<std::string>& output_params() const
-    {
-        return output_params_;
-    }
-    MIOPEN_INTERNALS_EXPORT const std::map<std::string, std::map<std::string, int>>&
-    sequence_encodings() const;
-    MIOPEN_INTERNALS_EXPORT float GetMissingValueToken() const;
-    MIOPEN_INTERNALS_EXPORT const std::vector<int>& GetSplitKValues() const;
+    const std::vector<std::string>& input_params() const { return input_params_; }
+    const std::vector<std::string>& output_params() const { return output_params_; }
+    const std::map<std::string, std::map<std::string, int>>& sequence_encodings() const;
+    float GetMissingValueToken() const;
+    const std::vector<int>& GetSplitKValues() const;
 
 private:
     // Internal mappings and encodings
@@ -98,15 +87,13 @@ private:
 class CandidateSelectionModel
 {
 public:
-    MIOPEN_INTERNALS_EXPORT CandidateSelectionModel(const std::string& arch,
-                                                    const std::string& solver);
-    MIOPEN_INTERNALS_EXPORT ~CandidateSelectionModel();
+    CandidateSelectionModel(const std::string& arch, const std::string& solver);
+    ~CandidateSelectionModel();
 
-    MIOPEN_INTERNALS_EXPORT std::vector<float>
-    EncodeInputFeatures(const std::map<std::string, float>& features) const;
-    MIOPEN_INTERNALS_EXPORT std::vector<std::vector<float>>
+    std::vector<float> EncodeInputFeatures(const std::map<std::string, float>& features) const;
+    std::vector<std::vector<float>>
     EncodeKernelConfigs(const std::vector<std::vector<float>>& encoded_candidates) const;
-    MIOPEN_INTERNALS_EXPORT std::vector<std::pair<int, float>>
+    std::vector<std::pair<int, float>>
     SelectBestCandidateIndices(const std::vector<float>& encoded_features,
                                const std::vector<std::vector<float>>& encoded_configs) const;
     const CandidateSelectionMetadata& metadata() const { return metadata_; }
@@ -117,14 +104,14 @@ private:
     std::string solver_;
 };
 
-MIOPEN_INTERNALS_EXPORT const CandidateSelectionModel&
-GetCandidateSelectionModel(const std::string& arch, const std::string& solver);
+const CandidateSelectionModel& GetCandidateSelectionModel(const std::string& arch,
+                                                          const std::string& solver);
 
-MIOPEN_INTERNALS_EXPORT std::vector<std::vector<float>>
+std::vector<std::vector<float>>
 EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_params,
                    const CandidateSelectionMetadata& metadata);
 
-MIOPEN_INTERNALS_EXPORT struct CandidateSelectionResult
+struct CandidateSelectionResult
 {
     std::vector<int> kernel_indices; // Sorted list of kernel indices (best to worst)
     std::vector<int> split_k_values; // Corresponding split_k values

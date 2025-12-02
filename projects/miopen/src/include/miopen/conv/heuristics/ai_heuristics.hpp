@@ -192,7 +192,7 @@ public:
      * @param arch Architecture name (e.g., "gfx942_3d")
      * @note Does not throw - use IsValid() to check for errors
      */
-    MIOPEN_INTERNALS_EXPORT explicit Metadata3D(const std::string& arch);
+    explicit Metadata3D(const std::string& arch);
 
     /**
      * @brief Check if metadata was loaded successfully
@@ -254,42 +254,42 @@ public:
      * @param dir Convolution direction (Forward/BackwardData/BackwardWeights)
      * @return Encoded direction value, or 0 if direction not supported
      */
-    MIOPEN_INTERNALS_EXPORT size_t EncodeDirection(miopen::conv::Direction dir) const;
+    size_t EncodeDirection(miopen::conv::Direction dir) const;
 
     /**
      * @brief Encode data type to integer
      * @param data_type Data type (FP32/FP16/BF16)
      * @return Encoded precision value, or 0 if type not supported
      */
-    MIOPEN_INTERNALS_EXPORT size_t EncodePrecision(miopenDataType_t data_type) const;
+    size_t EncodePrecision(miopenDataType_t data_type) const;
 
     /**
      * @brief Encode layout string to integer (generic)
      * @param layout Layout string
      * @return Encoded layout value, or 0 if layout not supported
      */
-    MIOPEN_INTERNALS_EXPORT size_t EncodeLayout(const std::string& layout) const;
+    size_t EncodeLayout(const std::string& layout) const;
 
     /**
      * @brief Encode input layout string to integer
      * @param layout Input layout string
      * @return Encoded input layout value, or 0 if layout not supported
      */
-    MIOPEN_INTERNALS_EXPORT size_t EncodeInLayout(const std::string& layout) const;
+    size_t EncodeInLayout(const std::string& layout) const;
 
     /**
      * @brief Encode filter layout string to integer
      * @param layout Filter layout string
      * @return Encoded filter layout value, or 0 if layout not supported
      */
-    MIOPEN_INTERNALS_EXPORT size_t EncodeFilLayout(const std::string& layout) const;
+    size_t EncodeFilLayout(const std::string& layout) const;
 
     /**
      * @brief Encode output layout string to integer
      * @param layout Output layout string
      * @return Encoded output layout value, or 0 if layout not supported
      */
-    MIOPEN_INTERNALS_EXPORT size_t EncodeOutLayout(const std::string& layout) const;
+    size_t EncodeOutLayout(const std::string& layout) const;
 };
 
 /**

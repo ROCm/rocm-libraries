@@ -65,7 +65,7 @@ struct c_array_view
 
 void profileRNNkernels(const Handle& handle, unsigned char select, float& ctime);
 
-struct MIOPEN_INTERNALS_EXPORT RNNDescriptor : miopenRNNDescriptor
+struct RNNDescriptor : miopenRNNDescriptor
 {
 
     RNNDescriptor();
@@ -620,7 +620,7 @@ private:
                                          size_t reserveSpaceSize) const;
 };
 
-MIOPEN_INTERNALS_EXPORT std::ostream& operator<<(std::ostream& stream, const RNNDescriptor& r);
+std::ostream& operator<<(std::ostream& stream, const RNNDescriptor& r);
 
 } // namespace miopen
 MIOPEN_DEFINE_OBJECT(miopenRNNDescriptor, miopen::RNNDescriptor);
