@@ -140,95 +140,65 @@ namespace rocRoller::KernelGraph
         const size_t MAX_NODES_TO_HOIST = 9999;
         size_t       hoistedCount       = 0;
 
-        {
-            // std::fstream file("HoistLoopInvariant_before.dot");
-            // file << original.toDOT(true);
-        }
-
         auto graph = original;
 
+        ControlFlowRWTracer tracer(graph);
+        const auto          rwResults = tracer.coordinatesReadWrite();
+
+        auto forLoopNodes = graph.control.getNodes<ForLoopOp>();
+        for(auto loopNode : forLoopNodes)
         {
-            ControlFlowRWTracer tracer(graph);
-            const auto          result = tracer.coordinatesReadWrite();
-
-            std::unordered_map<int, std::vector<int>> coordinateAccessMap;
-
-            for(const auto& [control, coordinate, rw] : result)
+            auto bodyNodes = graph.control.getOutputNodeIndices<Body>(loopNode);
+            for(auto bodyNode : bodyNodes)
             {
-                if(rw == ControlFlowRWTracer::ReadWrite::WRITE)
-                    coordinateAccessMap[coordinate].emplace_back(control);
-            }
-
-            std::vector<std::pair<int, int>> singleWriteCoordinates; // (coordinate, control)
-
-            for(const auto& [coordinate, accessList] : coordinateAccessMap)
-            {
-                if(accessList.size() == 1)
-                {
-                    const auto control = accessList[0];
-                    singleWriteCoordinates.emplace_back(coordinate, control);
-                    Log::trace("Coordinate {} has single write-only access from control node {}",
-                               coordinate,
-                               control);
-                }
-            }
-
-            for(const auto& [coordinate, control] : singleWriteCoordinates)
-            {
-                if(hoistedCount >= MAX_NODES_TO_HOIST)
-                {
-                    Log::info("Reached hoisting limit of {} nodes, stopping", MAX_NODES_TO_HOIST);
-                    break;
-                }
-
-                auto enclosingLoopOpt = findEnclosingLoop(graph, control);
-
-                if(!enclosingLoopOpt.has_value())
-                {
-                    Log::trace("No enclosing loop found for control node {}, skipping", control);
+                auto maybeAssign = graph.control.get<Assign>(bodyNode);
+                if(!maybeAssign.has_value())
                     continue;
-                }
+                auto control = maybeAssign.value();
 
-                int loopNode = enclosingLoopOpt.value();
+                auto dst = graph.mapper.get(bodyNode, NaryArgument::DEST);
 
-                auto assignNodeOpt = graph.control.get<Assign>(control);
-                if(!assignNodeOpt.has_value())
+                Log::info("Analyzing Assign node {} in loop node {}, dst coordinate {}",
+                          bodyNode,
+                          loopNode,
+                          dst);
+
+                auto   records          = tracer.coordinatesReadWrite(dst);
+                size_t writeCountInLoop = 0;
+                for(const auto& record : records)
                 {
-                    Log::trace("Control node {} is not an Assign node, skipping", control);
-                    auto element = graph.control.getElement(control);
-                    continue;
-                }
-
-                auto assignNode = assignNodeOpt.value();
-
-                if(assignNode.expression == nullptr)
-                {
-                    Log::trace("Assign node {} has no expression, skipping", control);
-                    continue;
-                }
-
-                auto usedTags = extractDataFlowTags(*assignNode.expression);
-
-                bool isNotSpecial = true;
-                for(const auto coordinate : usedTags)
-                {
-                    if(graph.coordinates.get<Workitem>(coordinate).has_value())
+                    if(record.rw == ControlFlowRWTracer::WRITE
+                       || record.rw == ControlFlowRWTracer::READWRITE)
                     {
-                        Log::info("Coordinate {} is a Workitem, skipping hoisting", coordinate);
-                        isNotSpecial = false;
+                        if(isCoordinateWrittenInLoop(graph, loopNode, dst, tracer))
+                        {
+                            writeCountInLoop++;
+                        }
                     }
-                    Log::info("{} Coordinate {} is a {}",
-                              control,
-                              coordinate,
-                              Graph::variantToString(graph.coordinates.getElement(coordinate)));
                 }
 
+                Log::info(
+                    "Coordinate {} has {} writes in loop node {}", dst, writeCountInLoop, loopNode);
+
+                if(writeCountInLoop > 1)
+                {
+                    continue;
+                }
+
+                AssertFatal(
+                    writeCountInLoop == 1,
+                    fmt::format(
+                        "Expected exactly one write to coordinate {} in loop node {}, found {}",
+                        dst,
+                        loopNode,
+                        writeCountInLoop));
+
+                auto usedTags             = extractDataFlowTags(*control.expression);
                 bool allTagsLoopInvariant = true;
                 for(auto tag : usedTags)
                 {
                     const auto isWrittenInLoop
                         = isCoordinateWrittenInLoop(graph, loopNode, tag, tracer);
-
                     if(isWrittenInLoop)
                     {
                         allTagsLoopInvariant = false;
@@ -236,84 +206,14 @@ namespace rocRoller::KernelGraph
                     }
                 }
 
-                if(allTagsLoopInvariant && isNotSpecial && !usedTags.empty())
-                {
-                    Log::info(
-                        "Hoisting Assign node {} before loop node {}, it uses dataflowtags {}",
-                        control,
-                        loopNode,
-                        usedTags);
+                Log::info("Used tags in Assign node {}: {}, all loop invariant: {}",
+                          bodyNode,
+                          usedTags,
+                          allTagsLoopInvariant);
 
-                    {
-                        auto inputs = graph.control.getInputNodeIndices<ControlEdge>(control);
-                        for(auto input : inputs)
-                        {
-                            Log::info("Input nodes {}: {} {}",
-                                      control,
-                                      input,
-                                      Graph::variantToString(graph.control.getElement(input)));
-                        }
-                        auto outputs = graph.control.getOutputNodeIndices<ControlEdge>(control);
-                        for(auto output : outputs)
-                        {
-                            Log::info("Output nodes {}: {} {}",
-                                      control,
-                                      output,
-                                      Graph::variantToString(graph.control.getElement(output)));
-                        }
-                        auto inEdges
-                            = graph.control.getNeighbours<Graph::Direction::Upstream>(control);
-                        for(auto edge : inEdges)
-                        {
-                            Log::info("InEdges {}",
-                                      Graph::variantToString(graph.control.getElement(edge)));
-                        }
-                        auto outEdges
-                            = graph.control.getNeighbours<Graph::Direction::Downstream>(control);
-                        for(auto edge : outEdges)
-                        {
-                            Log::info("OutEdges {}",
-                                      Graph::variantToString(graph.control.getElement(edge)));
-                        }
-                    }
-
-                    auto loopPredecessors = graph.control.getInputNodeIndices<ControlEdge>(loopNode)
-                                                .to<std::vector>();
-
-                    for(auto pred : loopPredecessors)
-                    {
-                        Log::info("predicate of loop {} {}",
-                                  pred,
-                                  Graph::variantToString(graph.control.getElement(pred)));
-                    }
-
-                    AssertFatal(
-                        loopPredecessors.size() == 1,
-                        fmt::format("Got {} predecessors for loop node {} {}",
-                                    loopPredecessors.size(),
-                                    loopNode,
-                                    Graph::variantToString(graph.control.getElement(loopNode))));
-
-                    int predecessorNode = loopPredecessors[0]; // Take the first predecessor
-
-                    hoistNodeBeforeLoop(graph,
-                                        control,
-                                        loopNode,
-                                        predecessorNode,
-                                        -1); // TODO: last arg is not used
-
-                    // Increment the counter after successful hoisting
-                    hoistedCount++;
-                    AssertFatal(false, "successful hoist");
-                }
+                AssertFatal(!allTagsLoopInvariant);
             }
         }
-
-        {
-            // std::fstream file("HoistLoopInvariant_after.dot");
-            // file << graph.toDOT(true);
-        }
-
         return graph;
     }
 
