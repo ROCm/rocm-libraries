@@ -259,17 +259,17 @@ TEST(TestBatchnormBackwardNode, PackNode)
 TEST(TestBatchnormBackwardNode, PreValidateNodeRejectsInvalidSpatialDimensions)
 {
     BatchnormBackwardAttributes batchnormAttributes;
-    
+
     batchnormAttributes.set_dy(std::make_shared<TensorAttributes>());
-    
+
     auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({1, 256, 1, 1}); // Invalid: N*H*W = 1*1*1 = 1
     batchnormAttributes.set_x(xTensor);
-    
+
     auto scaleTensor = std::make_shared<TensorAttributes>();
     scaleTensor->set_dim({1, 256, 1, 1}); // Spatial mode
     batchnormAttributes.set_scale(scaleTensor);
-    
+
     batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());
@@ -280,23 +280,24 @@ TEST(TestBatchnormBackwardNode, PreValidateNodeRejectsInvalidSpatialDimensions)
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(error.get_message().find("Batch normalization backward") != std::string::npos);
-    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1") != std::string::npos);
+    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1")
+                != std::string::npos);
 }
 
 TEST(TestBatchnormBackwardNode, PreValidateNodeAcceptsValidSpatialDimensions)
 {
     BatchnormBackwardAttributes batchnormAttributes;
-    
+
     batchnormAttributes.set_dy(std::make_shared<TensorAttributes>());
-    
+
     auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({2, 3, 2, 2}); // Valid: N*H*W = 2*2*2 = 8
     batchnormAttributes.set_x(xTensor);
-    
+
     auto scaleTensor = std::make_shared<TensorAttributes>();
     scaleTensor->set_dim({1, 3, 1, 1}); // Spatial mode
     batchnormAttributes.set_scale(scaleTensor);
-    
+
     batchnormAttributes.set_dx(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_dscale(std::make_shared<TensorAttributes>());
     batchnormAttributes.set_dbias(std::make_shared<TensorAttributes>());

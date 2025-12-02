@@ -232,7 +232,8 @@ TEST(TestUtilities, ValidateBNTrainingSpatialDimsInvalidSingleElement)
 
     auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1") != std::string::npos);
+    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1")
+                != std::string::npos);
     EXPECT_TRUE(error.get_message().find("N=1") != std::string::npos);
 }
 
@@ -245,7 +246,8 @@ TEST(TestUtilities, ValidateBNTrainingSpatialDimsInvalidSingleElement3D)
 
     auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1") != std::string::npos);
+    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1")
+                != std::string::npos);
 }
 
 TEST(TestUtilities, ValidateBNTrainingSpatialDimsPerActivationNotSupported)
@@ -268,8 +270,8 @@ TEST(TestUtilities, ValidateBNTrainingSpatialDimsCustomOperationName)
     auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1, 32, 1, 1});
 
-    auto error = validateBatchNormTrainingSpatialDimensions(
-        x, scale, "Batch normalization backward");
+    auto error
+        = validateBatchNormTrainingSpatialDimensions(x, scale, "Batch normalization backward");
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(error.get_message().find("Batch normalization backward") != std::string::npos);
 }
