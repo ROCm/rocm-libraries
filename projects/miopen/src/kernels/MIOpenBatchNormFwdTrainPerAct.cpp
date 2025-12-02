@@ -74,56 +74,67 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
     using fp_accum_c_type = typename mio_bn_config::fp_accum_c_type;
     using fp_prec_c_type  = typename mio_bn_config::fp_prec_c_type;
 
-    // PER ACTIVATION
-    // fp_prec_type mean        = fp_prec_type(0);
-    // fp_prec_type variance    = fp_prec_type(0);
-    // fp_prec_type invVariance = fp_prec_type(0);
-    // fp_prec_type inhat       = fp_prec_type(0);
-    // fp_prec_type pvt_scale   = fp_prec_type(0);
-    // fp_prec_type pvt_bias    = fp_prec_type(0);
-
-    unsigned int xgid    = blockIdx.x * MIO_BN_GRP0 + threadIdx.x;
-    unsigned int ygid    = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
-    unsigned int yglb_sz = gridDim.y * MIO_BN_GRP1;
-    int cidx             = MIO_BN_HW * static_cast<int>(xgid);
-    int adjIndex, index;
+    unsigned int xgid = blockIdx.x;
+    int cidx          = MIO_BN_HW * static_cast<int>(xgid);
 
     const fp_prec_type invN = fp_prec_type(1) / fp_prec_type(MIO_BN_N);
 
     auto nstr = in_nstride;
 
+    in += cidx;
+    out += cidx;
+    scale += cidx;
+    bias += cidx;
+
+    in += blockIdx.y * MIO_BN_GRP1;
+    out += blockIdx.y * MIO_BN_GRP1;
+
     // move across the sections of the image mini_batch stack
-    for(int idx = static_cast<int>(ygid); idx < static_cast<int>(in_cstride);
-        idx += static_cast<int>(yglb_sz))
+    for(unsigned bid = blockIdx.y; bid * MIO_BN_GRP1 < in_cstride; bid += gridDim.y)
     {
+        const auto blockOffset = bid * MIO_BN_GRP1;
+        const auto idx         = blockOffset + threadIdx.y;
+
+        if(idx >= in_cstride)
+        {
+            return;
+        }
+
         fp_prec_type mean     = fp_prec_type(0);
         fp_prec_type variance = fp_prec_type(0);
 
         unsigned adjIndex = cidx + idx; // gamma and beta tensor index
-        auto ptr = in + adjIndex;
-        auto out_ptr = out + adjIndex;
+
+        const auto* in_ptr = in;
+        auto* out_ptr      = out;
+
+        in += MIO_BN_GRP1;
+        out += MIO_BN_GRP1;
+
+        const auto getInput = [&](unsigned int i) {
+            return static_cast<fp_prec_type>(in_ptr[nstr * i + threadIdx.y]);
+        };
 
         for(unsigned int n = 0; n < MIO_BN_N; n++)
         {
-            mean += static_cast<fp_prec_type>(ptr[nstr * n]);
+            mean += getInput(n);
         }
         mean *= invN;
 
         for(unsigned int n = 0; n < MIO_BN_N; n++)
         {
-            const fp_prec_type x =
-                static_cast<fp_prec_type>(ptr[nstr * n]);
-           const fp_prec_type d = x - mean;
-           variance += d * d;
+            const fp_prec_type x = getInput(n);
+            const fp_prec_type d = x - mean;
+            variance += d * d;
         }
         variance *= invN;
 
-        // asm volatile (""::"v"(variance));
-        // // epsilon is double in API; cast to precision type for math
-        fp_prec_type invVariance = static_cast<fp_prec_type>(rsqrt(variance + static_cast<fp_prec_type>(epsilon)));
+        // epsilon is double in API; cast to precision type for math
+        fp_prec_type invVariance =
+            static_cast<fp_prec_type>(rsqrt(variance + static_cast<fp_prec_type>(epsilon)));
 
-        fp_prec_type pvt_scale = scale[adjIndex];
-        fp_prec_type pvt_bias  = bias[adjIndex];
+        fp_prec_type pvt_scale = scale[idx];
+        fp_prec_type pvt_bias  = bias[idx];
 
 #if(MIO_RUNNING_RESULT == 1)
         // Match the newer HIP templated/namespaced pattern:
@@ -144,14 +155,12 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
 
         for(unsigned int n = 0; n < MIO_BN_N; n++)
         {
-            const fp_prec_type x =
-                static_cast<fp_prec_type>(ptr[nstr * n]);
-            fp_prec_type inhat = (x - mean) * invVariance;
+            const fp_prec_type x = getInput(n);
+            fp_prec_type inhat   = (x - mean) * invVariance;
 
             // fma(a,b,c) = a*b + c (HIP provides float/double overloads)
-            const fp_prec_type y_prec                        = fma(pvt_scale, inhat, pvt_bias);
-            out_ptr[nstr * n] = static_cast<fp_type>(y_prec);
-            // asm volatile (""::"v"(y_prec));
+            const fp_prec_type y_prec       = fma(pvt_scale, inhat, pvt_bias);
+            out_ptr[nstr * n + threadIdx.y] = static_cast<fp_type>(y_prec);
         }
     }
 }
