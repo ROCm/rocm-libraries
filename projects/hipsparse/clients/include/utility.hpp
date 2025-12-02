@@ -147,16 +147,29 @@ inline std::string get_filename(const std::string& matrix_filename)
 #define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
 #define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
 
-#define CHECK_HIP_ERROR(error)                \
-    if(error != hipSuccess)                   \
-    {                                         \
-        fprintf(stderr,                       \
-                "error: '%s'(%d) at %s:%d\n", \
-                hipGetErrorString(error),     \
-                error,                        \
-                __FILE__,                     \
-                __LINE__);                    \
-        exit(EXIT_FAILURE);                   \
+#define CHECK_HIP_ERROR(ERROR)                    \
+    do                                            \
+    {                                             \
+        auto error = ERROR;                       \
+        if(error != hipSuccess)                   \
+        {                                         \
+            fprintf(stderr,                       \
+                    "error: '%s'(%d) at %s:%d\n", \
+                    hipGetErrorString(error),     \
+                    error,                        \
+                    __FILE__,                     \
+                    __LINE__);                    \
+            exit(EXIT_FAILURE);                   \
+        }                                         \
+    } while(0)
+
+#define EXPECT_HIPSPARSE_STATUS(status, expect) \
+    if(status != expect)                        \
+    {                                           \
+        if(expect == HIPSPARSE_STATUS_SUCCESS)  \
+        {                                       \
+            exit(EXIT_FAILURE);                 \
+        }                                       \
     }
 
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
