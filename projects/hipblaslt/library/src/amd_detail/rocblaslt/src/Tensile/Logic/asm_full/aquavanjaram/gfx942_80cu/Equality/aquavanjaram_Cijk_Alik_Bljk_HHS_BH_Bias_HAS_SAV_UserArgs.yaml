@@ -1,6 +1,6 @@
 - {MinimumRequiredVersion: 5.0.0}
 - aquavanjaram
-- '{Architecture: gfx942, CUCount: 80}'
+- {Architecture: gfx942, CUCount: 80}
 - [Device 0049, Device 0050]
 - Activation: true
   ActivationComputeDataType: 0
