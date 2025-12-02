@@ -349,6 +349,7 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
         {"CFF_NFILTER", out_c},
         {"CFF_CHANNELS", in_c},
         {"CFF_HALFW", halfw},
+        {"CFF_BACKWARD", problem.IsDirectionForward() ? 0 : 1},
     };
 
     if(in_tranpose_choice == 0)
@@ -380,11 +381,6 @@ ConvSolution fft::GetSolution(const ExecutionContext& ctx, const ProblemDescript
     else if((in_h == 7) && (in_w == 7))
     {
         build_params.Define("CFF_IMG_SZ_7_7", 1);
-    }
-
-    if(!problem.IsDirectionForward())
-    {
-        build_params.Define("CFF_BACKWARD", 1);
     }
 
     const std::string algorithm    = "miopenConvolutionFwdAlgoFFT";

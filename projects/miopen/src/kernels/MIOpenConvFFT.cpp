@@ -312,30 +312,30 @@ __forceinline__ __device__ void FwdPassIN(unsigned int me,
     }
 }
 
-__forceinline__ __device__ void FwdPassWE(unsigned int batch,
-                                          unsigned int me,
-                                          unsigned int inOffset,
-                                          unsigned int outOffset,
-                                          const float* bufIn,
-                                          float2* bufOut)
+__forceinline__ __device__ void FwdPassWE(
+    unsigned int batch, unsigned int me, unsigned int outOffset, const float* bufIn, float2* bufOut)
 {
     unsigned int met = me % 24;
     float* ldsf      = reinterpret_cast<float*>(bufOut + outOffset);
 
-#ifdef CFF_BACKWARD
-    inOffset =
-        ((batch * 16) % CFF_CHANNELS) * 25 * CFF_NFILTER + ((batch * 16) / CFF_CHANNELS) * 25;
-#else
-    inOffset                                = batch * 25 * 16;
-#endif
-
-#ifdef CFF_BACKWARD
-    ldsf[met + ((me / 24) + 0) * 25] = bufIn[inOffset + (((me / 24) + 0) * 25 * CFF_NFILTER + met)];
-    ldsf[met + ((me / 24) + 8) * 25] = bufIn[inOffset + (((me / 24) + 8) * 25 * CFF_NFILTER + met)];
-#else
-    ldsf[(23 - met) + ((me / 24) + 0) * 25] = bufIn[inOffset + (((me / 24) + 0) * 25 + met + 1)];
-    ldsf[(23 - met) + ((me / 24) + 8) * 25] = bufIn[inOffset + (((me / 24) + 8) * 25 + met + 1)];
-#endif
+    unsigned int inOffset;
+    if constexpr(CFF_BACKWARD)
+    {
+        inOffset =
+            ((batch * 16) % CFF_CHANNELS) * 25 * CFF_NFILTER + ((batch * 16) / CFF_CHANNELS) * 25;
+        ldsf[met + ((me / 24) + 0) * 25] =
+            bufIn[inOffset + (((me / 24) + 0) * 25 * CFF_NFILTER + met)];
+        ldsf[met + ((me / 24) + 8) * 25] =
+            bufIn[inOffset + (((me / 24) + 8) * 25 * CFF_NFILTER + met)];
+    }
+    else
+    {
+        inOffset = batch * 25 * 16;
+        ldsf[(23 - met) + ((me / 24) + 0) * 25] =
+            bufIn[inOffset + (((me / 24) + 0) * 25 + met + 1)];
+        ldsf[(23 - met) + ((me / 24) + 8) * 25] =
+            bufIn[inOffset + (((me / 24) + 8) * 25 + met + 1)];
+    }
 
     __syncthreads();
 
@@ -359,11 +359,14 @@ __forceinline__ __device__ void FwdPassWE(unsigned int batch,
 
     if(me < 16)
     {
-#ifdef CFF_BACKWARD
-        ldsf[me * 168 + 56] = bufIn[inOffset + (me * 25 * CFF_NFILTER + 24)];
-#else
-        ldsf[me * 168 + 56] = bufIn[inOffset + (me * 25)];
-#endif
+        if constexpr(CFF_BACKWARD)
+        {
+            ldsf[me * 168 + 56] = bufIn[inOffset + (me * 25 * CFF_NFILTER + 24)];
+        }
+        else
+        {
+            ldsf[me * 168 + 56] = bufIn[inOffset + (me * 25)];
+        }
     }
 }
 
@@ -686,7 +689,7 @@ extern "C" __global__
 
     unsigned int met = me % 12;
 
-    FwdPassWE(batch, me, 0, 0, lwbIn, lds);
+    FwdPassWE(batch, me, 0, lwbIn, lds);
     __syncthreads();
 
     FwdPass0(me % 2, (me / 12) * 84 + (met / 2) * 12, (me / 12) * 84 + (met / 2) * 12, lds, lds);
@@ -1388,49 +1391,44 @@ __forceinline__ __device__ void FwdPassIN(unsigned int me,
     }
 }
 
-__forceinline__ __device__ void FwdPassWE(unsigned int batch,
-                                          unsigned int me,
-                                          unsigned int inOffset,
-                                          unsigned int outOffset,
-                                          const float* bufIn,
-                                          float2* bufOut)
+__forceinline__ __device__ void FwdPassWE(
+    unsigned int batch, unsigned int me, unsigned int outOffset, const float* bufIn, float2* bufOut)
 {
     unsigned int met = me % 32;
 
-#ifdef CFF_BACKWARD
-    inOffset         = ((batch * 4 + (me / 32)) % CFF_CHANNELS) * 25 * CFF_NFILTER +
-               ((batch * 4 + (me / 32)) / CFF_CHANNELS) * 25;
-#else
-    inOffset = batch * 25 * 4 + (me / 32) * 25;
-#endif
-
-    float R0 = 0;
-
     float* ldsf = reinterpret_cast<float*>(bufOut + outOffset);
 
-    ldsf[(me / 32) * 180 * 2 + met] = R0;
+    ldsf[(me / 32) * 180 * 2 + met] = 0;
 
     if(met < 25)
     {
-        R0                              = bufIn[inOffset + met];
-
-#ifdef CFF_BACKWARD
-        ldsf[(me / 32) * 180 * 2 + met] = R0;
-#else
-        ldsf[(me / 32) * 180 * 2 + met + 5] = R0;
-#endif
+        if constexpr(CFF_BACKWARD)
+        {
+            unsigned int inOffset = ((batch * 4 + (me / 32)) % CFF_CHANNELS) * 25 * CFF_NFILTER +
+                                    ((batch * 4 + (me / 32)) / CFF_CHANNELS) * 25;
+            ldsf[(me / 32) * 180 * 2 + met] = bufIn[inOffset + met];
+        }
+        else
+        {
+            unsigned int inOffset               = batch * 25 * 4 + (me / 32) * 25;
+            ldsf[(me / 32) * 180 * 2 + met + 5] = bufIn[inOffset + met];
+        }
     }
 
     __syncthreads();
 
+    float R0;
     if(met < 30)
     {
-#ifdef CFF_BACKWARD
-        R0 = ldsf[(me / 32) * 180 * 2 + ((met / 10) * 10 + (met % 2) * 5 + ((met % 10) / 2))];
-#else
-        R0                                  = ldsf[(me / 32) * 180 * 2 + 5 +
-                  (24 - (met / 10) * 10 - (met % 2) * 5 - ((met % 10) / 2))];
-#endif
+        if constexpr(CFF_BACKWARD)
+        {
+            R0 = ldsf[(me / 32) * 180 * 2 + ((met / 10) * 10 + (met % 2) * 5 + ((met % 10) / 2))];
+        }
+        else
+        {
+            R0 = ldsf[(me / 32) * 180 * 2 + 5 +
+                      (24 - (met / 10) * 10 - (met % 2) * 5 - ((met % 10) / 2))];
+        }
     }
 
     __syncthreads();
@@ -1536,7 +1534,7 @@ extern "C" __global__
 
     lwbOut = gbOut + 180 * CFF_CHANNELS * CFF_BATCH + batch * 720;
 
-    FwdPassWE(batch, me, 0, 0, lwbIn, lds);
+    FwdPassWE(batch, me, 0, lwbIn, lds);
 
     __syncthreads();
 
@@ -2145,11 +2143,14 @@ __forceinline__ __device__ void FwdPassIN(unsigned int me,
 
         R7.x = bufIn[inOffset + (me + 26 * CFF_IMG_W)];
 
-#ifdef CFF_IMG_SZ_28_28
-        R7.y = bufIn[inOffset + (me + 27 * CFF_IMG_W)];
-#else
-        R7.y = 0;
-#endif
+        if constexpr(CFF_IMG_H == 28 && CFF_IMG_W == 28)
+        {
+            R7.y = bufIn[inOffset + (me + 27 * CFF_IMG_W)];
+        }
+        else
+        {
+            R7.y = 0;
+        }
     }
 
     __syncthreads();
@@ -2169,20 +2170,16 @@ __forceinline__ __device__ void FwdPassIN(unsigned int me,
     bufOut[outOffset + ((1 + 12 + (me / 32) * 2 + 1) % 17) * 32 + ((2 + me) % 32)] = R7;
 }
 
-__forceinline__ __device__ void FwdPassWE(unsigned int me,
-                                          unsigned int inOffset,
-                                          unsigned int outOffset,
-                                          const float* bufIn,
-                                          float2* bufOut)
+__forceinline__ __device__ void
+FwdPassWE(unsigned int me, unsigned int outOffset, const float* bufIn, float2* bufOut)
 {
-    float2 R0, R1, R2, R3, R4, R5, R6, R7;
+    float2 R0, R1, R2;
 
     float* ldsf = reinterpret_cast<float*>(bufOut);
 
     if(me < 25)
     {
-        R0.x     = bufIn[inOffset + me];
-        ldsf[me] = R0.x;
+        ldsf[me] = bufIn[me];
     }
 
     __syncthreads();
@@ -2190,42 +2187,37 @@ __forceinline__ __device__ void FwdPassWE(unsigned int me,
     R0 = float2(0, 0);
     R1 = float2(0, 0);
     R2 = float2(0, 0);
-    R3 = float2(0, 0);
-    R4 = float2(0, 0);
-    R5 = float2(0, 0);
-    R6 = float2(0, 0);
-    R7 = float2(0, 0);
 
-#ifdef CFF_BACKWARD
     if(me < 5)
     {
-        R0.x = ldsf[0 * 5 + me];
-        R0.y = ldsf[1 * 5 + me];
-        R1.x = ldsf[2 * 5 + me];
-        R1.y = ldsf[3 * 5 + me];
-        R2.x = ldsf[4 * 5 + me];
+        if constexpr(CFF_BACKWARD)
+        {
+            R0.x = ldsf[0 * 5 + me];
+            R0.y = ldsf[1 * 5 + me];
+            R1.x = ldsf[2 * 5 + me];
+            R1.y = ldsf[3 * 5 + me];
+            R2.x = ldsf[4 * 5 + me];
+        }
+        else
+        {
+            R0.x = ldsf[4 * 5 + 4 - me];
+            R0.y = ldsf[3 * 5 + 4 - me];
+            R1.x = ldsf[2 * 5 + 4 - me];
+            R1.y = ldsf[1 * 5 + 4 - me];
+            R2.x = ldsf[0 * 5 + 4 - me];
+        }
     }
-#else
-    if(me < 5)
-    {
-        R0.x = ldsf[4 * 5 + 4 - me];
-        R0.y = ldsf[3 * 5 + 4 - me];
-        R1.x = ldsf[2 * 5 + 4 - me];
-        R1.y = ldsf[1 * 5 + 4 - me];
-        R2.x = ldsf[0 * 5 + 4 - me];
-    }
-#endif
 
     __syncthreads();
 
     bufOut[outOffset + ((me / 32) * 8 + 0) * 32 + (me % 32)] = R0;
     bufOut[outOffset + ((me / 32) * 8 + 1) * 32 + (me % 32)] = R1;
     bufOut[outOffset + ((me / 32) * 8 + 2) * 32 + (me % 32)] = R2;
-    bufOut[outOffset + ((me / 32) * 8 + 3) * 32 + (me % 32)] = R3;
-    bufOut[outOffset + ((me / 32) * 8 + 4) * 32 + (me % 32)] = R4;
-    bufOut[outOffset + ((me / 32) * 8 + 5) * 32 + (me % 32)] = R5;
-    bufOut[outOffset + ((me / 32) * 8 + 6) * 32 + (me % 32)] = R6;
-    bufOut[outOffset + ((me / 32) * 8 + 7) * 32 + (me % 32)] = R7;
+    bufOut[outOffset + ((me / 32) * 8 + 3) * 32 + (me % 32)] = float2(0, 0);
+    bufOut[outOffset + ((me / 32) * 8 + 4) * 32 + (me % 32)] = float2(0, 0);
+    bufOut[outOffset + ((me / 32) * 8 + 5) * 32 + (me % 32)] = float2(0, 0);
+    bufOut[outOffset + ((me / 32) * 8 + 6) * 32 + (me % 32)] = float2(0, 0);
+    bufOut[outOffset + ((me / 32) * 8 + 7) * 32 + (me % 32)] = float2(0, 0);
 
     if(me < 32)
     {
@@ -2595,15 +2587,18 @@ extern "C" __global__
     const float* lwbIn;
     float2* lwbOut;
 
-#ifdef CFF_BACKWARD
-    lwbIn = gbIn + (batch % CFF_CHANNELS) * 25 * CFF_NFILTER + (batch / CFF_CHANNELS) * 25;
-#else
-    lwbIn = gbIn + batch * 25;
-#endif
+    if constexpr(CFF_BACKWARD)
+    {
+        lwbIn = gbIn + (batch % CFF_CHANNELS) * 25 * CFF_NFILTER + (batch / CFF_CHANNELS) * 25;
+    }
+    else
+    {
+        lwbIn = gbIn + batch * 25;
+    }
 
     lwbOut = gbOut + 544 * CFF_CHANNELS * CFF_BATCH + batch * 544;
 
-    FwdPassWE(me, 0, 0, lwbIn, lds);
+    FwdPassWE(me, 0, lwbIn, lds);
     __syncthreads();
     FwdPass0(me % 4, (me / 4) * 32, (me / 4) * 32, lds, lds);
     __syncthreads();
@@ -2669,7 +2664,7 @@ extern "C" __global__
 extern "C" __global__
     __launch_bounds__(256) void MIOpenConvFFT_transpose_in(float2* __restrict__ gb)
 {
-    unsigned int me = threadIdx.x;
+    unsigned int me    = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[1024];
@@ -2687,12 +2682,12 @@ extern "C" __global__
     iOffset = bm * 32 + bd * 544 * 32;
     oOffset = CFF_HALFW + bm * (CFF_CHANNELS * CFF_BATCH + 64) * 32 + bd * 32;
 
-    lwbIn = gb + iOffset;
+    lwbIn  = gb + iOffset;
     lwbOut = gb + oOffset;
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0 = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
+        R0                                      = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
         lds[(me % 32) * 32 + (me / 32) + t * 8] = R0;
     }
 
@@ -2700,7 +2695,7 @@ extern "C" __global__
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0 = lds[me + t * 256];
+        R0                                              = lds[me + t * 256];
         lwbOut[(me % 32) + (me / 32) * (CFF_CHANNELS * CFF_BATCH + 64) +
                t * 8 * (CFF_CHANNELS * CFF_BATCH + 64)] = R0;
     }
@@ -2749,7 +2744,7 @@ extern "C" __global__
 extern "C" __global__
     __launch_bounds__(256) void MIOpenConvFFT_transpose_we(float2* __restrict__ gb)
 {
-    unsigned int me = threadIdx.x;
+    unsigned int me    = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[1024];
@@ -2768,12 +2763,12 @@ extern "C" __global__
     oOffset = CFF_HALFW + 544 * (CFF_CHANNELS * CFF_BATCH + 64) +
               bm * (CFF_CHANNELS * CFF_NFILTER + 64) * 32 + bd * 32;
 
-    lwbIn = gb + iOffset;
+    lwbIn  = gb + iOffset;
     lwbOut = gb + oOffset;
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0 = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
+        R0                                      = lwbIn[(me % 32) + (me / 32) * 544 + t * 8 * 544];
         lds[(me % 32) * 32 + (me / 32) + t * 8] = R0;
     }
 
@@ -2781,7 +2776,7 @@ extern "C" __global__
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0 = lds[me + t * 256];
+        R0                                                = lds[me + t * 256];
         lwbOut[(me % 32) + (me / 32) * (CFF_CHANNELS * CFF_NFILTER + 64) +
                t * 8 * (CFF_CHANNELS * CFF_NFILTER + 64)] = R0;
     }
@@ -2829,7 +2824,7 @@ extern "C" __global__
 extern "C" __global__
     __launch_bounds__(256) void MIOpenConvFFT_transpose_out(float2* __restrict__ gb)
 {
-    unsigned int me = threadIdx.x;
+    unsigned int me    = threadIdx.x;
     unsigned int batch = blockIdx.x;
 
     __shared__ float2 lds[1024];
@@ -2847,7 +2842,7 @@ extern "C" __global__
     iOffset = bm * (CFF_NFILTER * CFF_BATCH + 64) * 32 + bd * 32;
     oOffset = CFF_HALFW + bm * 32 + bd * 544 * 32;
 
-    lwbIn = gb + iOffset;
+    lwbIn  = gb + iOffset;
     lwbOut = gb + oOffset;
 
     for(unsigned int t = 0; t < 4; t++)
@@ -2861,7 +2856,7 @@ extern "C" __global__
 
     for(unsigned int t = 0; t < 4; t++)
     {
-        R0 = lds[me + t * 256];
+        R0                                                = lds[me + t * 256];
         lwbOut[(me % 32) + (me / 32) * 544 + t * 8 * 544] = R0;
     }
 }
@@ -3212,9 +3207,10 @@ __forceinline__ __device__ void InvPassOUT(unsigned int me,
         bufOut[outOffset + (me + 25 * CFF_IMG_W)] = R6.y;
 
         bufOut[outOffset + (me + 26 * CFF_IMG_W)] = R7.x;
-#ifdef CFF_IMG_SZ_28_28
-        bufOut[outOffset + (me + 27 * CFF_IMG_W)] = R7.y;
-#endif
+        if constexpr(CFF_IMG_H == 28 && CFF_IMG_W == 28)
+        {
+            bufOut[outOffset + (me + 27 * CFF_IMG_W)] = R7.y;
+        }
     }
 }
 
