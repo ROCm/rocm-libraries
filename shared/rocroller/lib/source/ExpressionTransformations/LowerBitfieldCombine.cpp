@@ -133,6 +133,12 @@ namespace rocRoller
 
                 ExpressionPtr ret = lhs | rhs;
                 setComment(ret, expr.comment);
+
+                // TODO: Enable this conversion with a reinterpret_cast expression
+                // auto exprType = resultVariableType(expr);
+                // if(resultVariableType(ret) != exprType)
+                //     ret = convert(exprType.dataType, ret);
+
                 return ret;
             }
 

@@ -16,7 +16,7 @@ if(EXISTS "${GIT_ROOT_DIR}/.git")
         file(READ "${GIT_DIR}" GIT_DIR_CONTENT)
 
         # Capture the gitdir value
-        string(REGEX MATCH "gitdir: ([^\n\r]+)" _ "${GIT_DIR_CONTENT}")
+        string(REGEX MATCH "gitdir: ([^\n\r]+/\.git)" _ "${GIT_DIR_CONTENT}")
         if(CMAKE_MATCH_1)
             set(GIT_DIR "${CMAKE_MATCH_1}")
             if(NOT IS_ABSOLUTE "${GIT_DIR}")
@@ -29,9 +29,12 @@ if(EXISTS "${GIT_ROOT_DIR}/.git")
 
     if(PRE_COMMIT_EXECUTABLE)
         if(NOT EXISTS "${GIT_DIR}/hooks/pre-commit")
-            message(WARNING "\n" "Pre-commit hooks are NOT installed\n" "Please run:\n"
-                            "  cd ${GIT_ROOT_DIR}\n" "  pre-commit install\n"
+            message(WARNING "\n"
+                            "Pre-commit hooks are NOT installed at ${GIT_DIR}/hooks/pre-commit\n"
+                            "Please run:\n" "  cd ${GIT_ROOT_DIR}\n" "  pre-commit install\n"
             )
+        else()
+            message(STATUS "Found git pre-commit hook installed at ${GIT_DIR}/hooks/pre-commit")
         endif()
     else()
         message(WARNING "\n" "pre-commit package is NOT installed\n" "Please run:"

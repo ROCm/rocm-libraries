@@ -14,9 +14,7 @@
 #include <hipdnn_sdk/test_utilities/ReferenceValidationInterface.hpp>
 #include <hipdnn_sdk/utilities/TensorView.hpp>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
+namespace hipdnn_sdk::test_utilities
 {
 
 // CPU validator that uses MIOpen RMS calculation for comparing tensor likes.
@@ -126,19 +124,19 @@ private:
 };
 
 inline std::unique_ptr<hipdnn_sdk::test_utilities::IReferenceValidation>
-    createRmsValidator(hipdnn_sdk::data_objects::DataType dataType, float relativeTolerance)
+    createRmsValidator(data_objects::DataType dataType, float relativeTolerance)
 {
     switch(dataType)
     {
-    case hipdnn_sdk::data_objects::DataType::FLOAT:
+    case data_objects::DataType::FLOAT:
         return std::make_unique<CpuFpReferenceMiopenRmsValidation<float>>(relativeTolerance);
-    case hipdnn_sdk::data_objects::DataType::HALF:
+    case data_objects::DataType::HALF:
         return std::make_unique<CpuFpReferenceMiopenRmsValidation<half>>(
             static_cast<half>(relativeTolerance));
-    case hipdnn_sdk::data_objects::DataType::BFLOAT16:
+    case data_objects::DataType::BFLOAT16:
         return std::make_unique<CpuFpReferenceMiopenRmsValidation<hip_bfloat16>>(
             static_cast<hip_bfloat16>(relativeTolerance));
-    case hipdnn_sdk::data_objects::DataType::DOUBLE:
+    case data_objects::DataType::DOUBLE:
         return std::make_unique<CpuFpReferenceMiopenRmsValidation<double>>(
             static_cast<double>(relativeTolerance));
     default:
@@ -146,5 +144,4 @@ inline std::unique_ptr<hipdnn_sdk::test_utilities::IReferenceValidation>
     }
 }
 
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::test_utilities
