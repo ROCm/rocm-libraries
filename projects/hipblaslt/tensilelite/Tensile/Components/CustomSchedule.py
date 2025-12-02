@@ -1460,7 +1460,7 @@ def _get_schedule_192x128x128_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     optSchedule = dict()
     syncCode = []
-    if isNN(kernel) and useLDSTr and TLDS == 1:
+    if isTN(kernel) and not useLDSTr and TLDS == 1:
         numMfma = 96
         kernel["SwapGlobalReadOrder"] = True
 
@@ -1475,18 +1475,35 @@ def _get_schedule_192x128x128_16bit(kernel, useLDSTr, TLDS):
 
         # syncTable: [mfma_index, sync_instruction, ...] pairs
         syncTable = [
-          #  -1, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LRA3/LRB3 from prior iter"),
-          #  10, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for LRA0/LRB0 data ready"),
-          #  22, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for LRA1/LRB1 data ready"),
+            -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA3/LRB3 from prior iter"),
 
-          #  20, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="all current-tile LR done"),
-           # 20, SBarrier(comment="barrier before GRA/GRB DirectToLds"),
-            
-          #  23, SWaitCnt(dscnt=11, vlcnt=-1, vscnt=-1, comment="wait for LRA1-0 data ready"),
-          #  24, SWaitCnt(dscnt=10, vlcnt=-1, vscnt=-1, comment="wait for LRA1-0 data ready"),
+            23, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LRA0-0 data ready"),
+            24, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LRA0-1 data ready"),
+            25, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="wait for LRA0-2 data ready"),
+            26, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="wait for LRA0-3 data ready"),
+            27, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="wait for LRA0-4 data ready"),
+            28, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="wait for LRA0-5 data ready"),
 
-          #  76, SWaitCnt(dscnt=-1, vlcnt=20, vscnt=-1, comment="wait for all GRA/GRB to complete"),
-          #  76, SBarrier(comment="barrier before LRA3/LRB3 next-tile prefetch"),
+            43, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="all current-tile LRB0/1/2 done"),
+            43, SBarrier(comment="barrier before GRA DirectToLds"),
+
+            47, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for LRA1-0 data ready"),
+            48, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for LRA1-1 data ready"),
+            49, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for LRA1-2 data ready"),
+            50, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for LRA1-3 data ready"),
+            51, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LRA1-4 data ready"),
+            52, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LRA1-5 data ready"),
+
+            59, SWaitCnt(dscnt=-1, vlcnt=20, vscnt=-1, comment="wait for all GRB to complete"),
+            59, SBarrier(comment="barrier before LRB3 next-tile prefetch"),
+
+            65, SWaitCnt(dscnt=3-3, vlcnt=-1, vscnt=-1, comment="wait for LRA2 data ready"),
+            65, SBarrier(comment="barrier before LRA3 next-tile prefetch"),
+
+            67, SWaitCnt(dscnt=-1, vlcnt=20-11, vscnt=-1, comment="wait for all GRA to complete"),
+            67, SBarrier(comment="barrier before LRA3 next-tile prefetch"),
+
+            #71, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRA2 data ready"),
         ]
 
         syncCode = syncTable[1::2]
@@ -1497,34 +1514,30 @@ def _get_schedule_192x128x128_16bit(kernel, useLDSTr, TLDS):
             'GRIncA': [[0, 1, 2, 3, 4, 5, 6, 7, 8]],
             'GRIncB': [[9, 10, 11, 12, 13, 14, 15, 16, 17]],
 
-            # Sub-iteration 0: LRA0/LRB0 - prefetch for mfma 24-47
-            'LRA0': [[23, 25, 27, 29, 31, 33, 35, 37, 39, 41, 43, 45]],
+            # Sub-iteration 0 (mfma 0-23): LRA0/LRB0 - prefetch for mfma 24-47
             'LRB0': [[-1, 1, 3, 5]],
-
-            # Sub-iteration 1: LRA1/LRB1 - prefetch for mfma 48-71
-            'LRA1': [[47, 49, 51, 53, 55, 57, 59, 61, 63, 65, 67, 69]],
+            'LRA0': [[15, 17, 19,  21, 23, 25]],
+            # Sub-iteration 1 (mfma 24-47): LRA1/LRB1 - prefetch for mfma 48-71
             'LRB1': [[7, 9, 11, 13]],
+            'LRA1': [[35, 37, 39, 41, 43, 45]],
 
-            # Sub-iteration 2: LRA2/LRB2 - prefetch for mfma 72-95
-            'LRA2': [[71, 73, 75, 77, 79, 81, 83, 85, 87, 89, 91, 93]],
-            'LRB2': [[15, 17, 19, 21]],
+            # Sub-iteration 2 (mfma 48-71): LRA2/LRB2 - prefetch for mfma 72-95
+            'LRB2': [[27, 29, 31, 33]],
+            'LRA2': [[47, 49, 51, 53, 55, 57]], 
 
-            'GRA': [[20, 20, 22, 22, 24, 24, 26, 26, 
-                     28, 28, 30, 30, 32, 32, 34, 34]],
-            'GRB': [[49, 49, 51, 51, 53, 53, 55, 55, 57, 57, 59, 59, 
-                     61, 61, 63, 63, 65, 65, 67, 67, 69, 69, 71, 71]],
-  
+            'GRA': [[43, 43, 45, 45, 47, 47, 49, 49, 52, 52, 54, 54, 56, 56, 58, 58]],
+            'GRB': [[65, 65, 67, 67, 69, 69, 71, 71, 74, 74, 76, 76, 78, 78, 80, 80, 83, 83, 85, 85, 87, 87, 90, 90]],
 
             # Local read/write swap pointers
+            'LRSB': [[50]],
             'LRSA': [[60]],
-            'LRSB': [[60]],
-            'LWSA': [[77]],
+
             'LWSB': [[77]],
+            'LWSA': [[93]],
 
-            # Sub-iteration 3: LRA3/LRB3 - prefetch next tile (for mfma 0-23)
-            'LRA3': [[83, 83, 85, 85, 87, 87, 89, 89, 91, 91, 93, 93]],
-            'LRB3': [[94, 94, 95, 95]],
-
+            # Sub-iteration 3 (mfma 72-95): LRA3/LRB3 - prefetch next tile (for mfma 0-23)
+            'LRB3': [[59, 61, 63, 65]],
+            'LRA3': [[67, 69, 71, 73, 75, 77]],
             # Loop counter code
             'LCC': [[94, 95]],
         }
