@@ -132,6 +132,26 @@ Tests:
   alpha: 2
   beta: 3
 
+- name: matmul_grid_limit_single
+  category: pre_checkin
+  function:
+    matmul: *single_precision
+  matrix_size: *grid_limit_matrix_size_single
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: 0
+  gpu_arch: '120[0-1]'
+
+- name: matmul_grid_limit_double
+  category: pre_checkin
+  function:
+    matmul: *double_precision
+  matrix_size: *grid_limit_matrix_size_double
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: 0
+  gpu_arch: '120[0-1]'
+
 - name: matmul_deepbench
   category: nightly
   function:
