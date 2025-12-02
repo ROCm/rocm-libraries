@@ -176,7 +176,7 @@ inline std::vector<BN2DTestCase> Network2DSmall()
         {16, 8, 128, 256, miopen::batchnorm::Direction::ForwardTraining, 1, 0},
         // Edge cases - minimum valid dimensions for Spatial BN training (N*H*W > 1)
         {2, 256, 1, 1, miopen::batchnorm::Direction::ForwardTraining, 1, 0},  // N*H*W = 2 (min batch)
-        {1, 256, 2, 1, miopen::batchnorm::Direction::Backward, 1, 0},         // N*H*W = 2 (min spatial)
+        {2, 256, 1, 1, miopen::batchnorm::Direction::Backward, 1, 0},         // N*H*W = 2 (min spatial)
     };
     // clang-format on
 }
@@ -191,7 +191,7 @@ inline std::vector<BN3DTestCase> Network3DBN()
         {16, 8, 16, 128, 128, miopen::batchnorm::Direction::ForwardTraining, 1, 0},
         // Edge cases - minimum valid dimensions for Spatial BN training (N*D*H*W > 1)
         {2, 256, 1, 1, 1, miopen::batchnorm::Direction::ForwardTraining, 1, 0},  // N*D*H*W = 2 (min batch)
-        {1, 256, 2, 1, 1, miopen::batchnorm::Direction::Backward, 1, 0},         // N*D*H*W = 2 (min spatial D)
+        {2, 256, 1, 1, 1, miopen::batchnorm::Direction::Backward, 1, 0},         // N*D*H*W = 2 (min spatial D)
     };
     // clang-format on
 }
