@@ -598,7 +598,6 @@ namespace rocRoller
             graph.mapper.connect<User>(resetFlagTag, resetFlagsScratchTag);
             graph.mapper.connect<VGPR>(resetFlagTag, flagRegister);
 
-            auto waitZeroAfterResetTag = graph.control.addElement(WaitZero());
             auto barrierBeforeResetTag = graph.control.addElement(Barrier());
 
             auto accumulatorTile = graph.coordinates.get<MacroTile>(accumulatorTileTag);
@@ -663,7 +662,6 @@ namespace rocRoller
                                           barrierBeforeResetTag,
                                           assignResetFlagTag,
                                           resetFlagTag,
-                                          waitZeroAfterResetTag,
                                           loadAddForX,
                                           postWaitZeroTag);
 
