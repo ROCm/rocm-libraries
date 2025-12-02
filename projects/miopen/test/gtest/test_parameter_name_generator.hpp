@@ -69,8 +69,8 @@ concept Container = requires(T t)
 };
 
 // Template wrapper around a test parameter.
-// It defines the << operator as required by GTest, and the cast operator that returns the wrapped parameter.
-// If you need to wrap a container, use the 'NamedContainer' template wrapper.
+// It defines the << operator as required by GTest, and the cast operator that returns the wrapped
+// parameter. If you need to wrap a container, use the 'NamedContainer' template wrapper.
 template <typename T>
 requires Printable<T> && std::is_move_constructible_v<T>
 struct NamedParameter
@@ -94,8 +94,9 @@ struct NamedParameter
 };
 
 // Template wrapper around an iterable container test parameter (like all STL containers).
-// It defines the << operator as required by GTest, and the cast operator that returns the wrapped container.
-// If you need to wrap a parameter which is not a container, use the 'NamedParameter' template wrapper.
+// It defines the << operator as required by GTest, and the cast operator that returns the wrapped
+// container. If you need to wrap a parameter which is not a container, use the 'NamedParameter'
+// template wrapper.
 template <typename T>
 requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T>
 struct NamedContainer
@@ -137,39 +138,39 @@ struct NamedContainer
     std::string separator{};
 };
 
-// Variadic template function that creates a GTest ValueArray of 'NamedParameter' each one with the name and value supplied.
-// The result can be directly fed to the GTest instantiated test suite.
-// 
+// Variadic template function that creates a GTest ValueArray of 'NamedParameter' each one with the
+// name and value supplied. The result can be directly fed to the GTest instantiated test suite.
+//
 // Example:
-// 
+//
 //      testing::Combine(
 //          MakeNamedParameterValues<int>("TestInt1", 1, 2, 3),
 //          MakeNamedParameterValues<int>("TestInt2", 10, 20, 30),
 //          MakeNamedParameterValues<int>("TestInt3", 100, 200, 300)
 //      );
-// 
+//
 template <typename... T>
 static auto MakeNamedParameterValues(const std::string& name, T... values)
 {
     return testing::Values(NamedParameter<T>{name, values}...);
 }
 
-// Variadic template function that creates a GTest ValueArray of 'NamedContainer' each one with the name and value supplied.
-// An optional separator for each value in each containers can be supplied.
+// Variadic template function that creates a GTest ValueArray of 'NamedContainer' each one with the
+// name and value supplied. An optional separator for each value in each containers can be supplied.
 // The result can be directly fed to the GTest instantiated test suite.
-// 
+//
 // Example:
-// 
+//
 //      std::set<std::vector<int>> tensorSizes = ...
-// 
+//
 //      testing::Combine(
-//          MakeNamedParameterCollectionValues<std::vector<int>>("TestTensorSizes", tensorSizes, "x"),
-//          MakeNamedParameterValues<int>("TestInteger", 1, 2, 3)
+//          MakeNamedParameterCollectionValues<std::vector<int>>("TestTensorSizes", tensorSizes,
+//          "x"), MakeNamedParameterValues<int>("TestInteger", 1, 2, 3)
 //      );
-// 
-// The 'tensorSizes' collection of std::vector<int>'s is turned into a collection of NamedContainer<std::vector<int>>,
-// and then fed into 'testing::Combine()'.
-// 
+//
+// The 'tensorSizes' collection of std::vector<int>'s is turned into a collection of
+// NamedContainer<std::vector<int>>, and then fed into 'testing::Combine()'.
+//
 template <typename T>
 static auto MakeNamedParameterCollectionValues(const std::string& name,
                                                const std::ranges::range auto& collection,
@@ -187,9 +188,10 @@ static auto MakeNamedParameterCollectionValues(const std::string& name,
     return testing::ValuesIn(v);
 }
 
-// The 'GetRangeAsString()' function Returns the string representation of the input collection, using the user-supplied separator.
-// The returned string meets the GTest requirements for test names: only alphanumeric characters and underscores are allowed.
-// Any dot character (i.e. '.') is turned into a 'p' character, which stands for 'point'.
+// The 'GetRangeAsString()' function Returns the string representation of the input collection,
+// using the user-supplied separator. The returned string meets the GTest requirements for test
+// names: only alphanumeric characters and underscores are allowed. Any dot character (i.e. '.') is
+// turned into a 'p' character, which stands for 'point'.
 //
 // Examples:
 //
