@@ -35,7 +35,7 @@ function display_help()
 #  echo "    [--prefix] Specify an alternate CMAKE_INSTALL_PREFIX for cmake"
   echo "    [-i|--install] install after build"
   echo "    [-d|--dependencies] install build dependencies"
-  echo "    [-a|--architecture] Set AMD GPU architecture target(s), e.g., all, gfx000, gfx900, gfx906:xnack-;gfx908:xnack-"
+  echo "    [-a|--architecture] Set AMD GPU architecture target(s), e.g., all, gfx900, gfx906:xnack-;gfx908:xnack-"
   echo "    [-c|--clients] build library clients too (combines with -i & -d)"
   echo "    [--cpu_ref_lib <lib>] specify library to use for CPU reference code in testing (blis or lapack)"
   echo "    [-r]--relocatable] create a package to support relocatable ROCm"

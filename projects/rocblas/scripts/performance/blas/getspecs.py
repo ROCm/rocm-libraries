@@ -77,8 +77,7 @@ def getgfx(devicenum, cuda):
         success, cout = _subprocess_helper(cmd)
         if not success:
             return "N/A"
-        # Add 1 to devicenum since rocm-agent-enum always prints gfx000 first
-        return cout.splitlines()[devicenum+1]
+        return cout.splitlines()[devicenum]
 
 # Get the hostname
 def gethostname():
