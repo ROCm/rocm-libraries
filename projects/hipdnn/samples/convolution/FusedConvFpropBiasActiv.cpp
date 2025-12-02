@@ -37,10 +37,10 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     // Filter
     constexpr int64_t k = 16; // Number of output (y) channels
-    constexpr int64_t r = 3;  // Height
-    constexpr int64_t s = 3;  // Width
-    constexpr int64_t u = 1;  // Height stride
-    constexpr int64_t v = 1;  // Width stride
+    constexpr int64_t r = 3; // Height
+    constexpr int64_t s = 3; // Width
+    constexpr int64_t u = 1; // Height stride
+    constexpr int64_t v = 1; // Width stride
     constexpr int64_t padH = 1; // Height padding
     constexpr int64_t padW = 1; // Width padding
     constexpr int64_t dilH = 1; // Height dilation
@@ -148,10 +148,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         // Step 2: Add bias using pointwise ADD with broadcasting
         utilities::Tensor<InputType> biasRefTensor(convOutAttr->get_dim(), layout);
         test_utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
-            hipdnn_sdk::data_objects::PointwiseMode::ADD,
-            biasRefTensor,
-            convRefTensor,
-            biasTensor);
+            hipdnn_sdk::data_objects::PointwiseMode::ADD, biasRefTensor, convRefTensor, biasTensor);
 
         // Step 3: Apply ReLU activation
         utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
@@ -169,8 +166,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
         std::cout << "  output: " << (outValid ? "successful" : "failed") << "\n";
     }
 
-    std::cout << "Fused Convolution fprop + Bias + Activ graph execution complete for "
-              << inputType << ".\n\n";
+    std::cout << "Fused Convolution fprop + Bias + Activ graph execution complete for " << inputType
+              << ".\n\n";
 }
 
 int main(int argc, char* argv[])
