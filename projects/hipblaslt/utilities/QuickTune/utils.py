@@ -10,7 +10,7 @@ def parse_hipblaslt_output(output, line, tuning_info, mode):
     print(output)
 
     # Check if NO solution was found
-    if "NO solution found!" in output or "error:" in output.lower():
+    if "NO solution found!" in output:
         print(f"WARNING: No solution found for {mode} mode")
         latency = -1
         solution_idx = "NO_SOLUTION"
