@@ -1677,29 +1677,38 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isTN(kernel) and not useLDSTr and TLDS == 1:
         #index and code pair
-        syncTable = [-1, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=6 newLW=0 newLR=6 for iteration == 0"),
-                    3, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
-                    17, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
-                    17, SBarrier(comment=""),
-                    27, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
-                    39, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
-                    39, SBarrier(comment=""),
+        syncTable = [-1, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment=""),
+                    3, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment=""),
+                    
+                    16, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before GRA start"),
+                    16, SBarrier(comment=""),
+                    
+                    27, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0 to complete before next sub-iteration"),
+                    27, SBarrier(comment=""),
+    
+                    28, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
+                    28, SBarrier(comment=""),
+                    40, SWaitCnt(dscnt=-1, vlcnt=11-3, vscnt=-1, comment="wait for previous set of global reads"),
+                    40, SBarrier(comment=""),
                      ]
         optSchedule = {
                 'SYNC'  : [syncTable[::2]],
-                'GRIncA': [[6,6,7,7,8,8,9,9,9]],
-                'GRIncB': [[9,10,11,12,13,14,15,16,17]],
+                'GRIncA': [[4, 5, 6, 7, 8, 9, 10, 11, 12]],
+                'GRIncB': [[13, 14, 15, 16, 17, 18, 19, 20, 21]],
+                 
+                'LRA0': [[-1, 0, 1, 2]],
+                'LRB0': [[3, 5, 7, 9, 11, 13, 15]],
+                'GRA': [[16, 16, 18, 18, 20, 20, 22, 22]],
 
-                'LRA0': [[0, 2, 3, 4]],
-                'LRB0': [[1, 5, 6, 7, 8, 9, 10]],
-                'GRA': [[17, 17, 19, 19, 21, 21, 23, 23]],
-                'GRB': [[25, 25, 27, 27, 29, 29, 31, 31, 33, 33, 35, 35, 37, 37]],
-                'LRSA': [[26]],
-                'LRSB': [[26]],
-                'LWSA': [[37]],
-                'LWSB': [[37]],
-                'LRA1': [[40, 42, 43, 44]],
-                'LRB1': [[41, 45, 46, 47, 48, 49, 50]],
+                'GRB': [[30, 30, 33, 33, 36, 36, 39, 39, 42, 42, 45, 45, 50, 50]],
+                'LRA1': [[28, 30, 32, 34]],
+                'LRB1': [[40, 41, 42, 43, 44, 45, 46]],
+
+                'LRSA': [[27]],
+                'LRSB': [[35]],
+                'LWSA': [[53]],
+                'LWSB': [[54]],
+
                 'LCC' : [[55, 55]]
             }
         syncCode = syncTable[1::2]
