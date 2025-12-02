@@ -1,4 +1,3 @@
-
 /* ************************************************************************
  * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
  *
@@ -31,7 +30,7 @@ public:
     virtual bool detailedReport()   = 0;
     virtual bool efficiencyReport() = 0;
 
-    virtual void set_device_id(int deviceId) = 0;
+    virtual void setDeviceId(int deviceId) = 0;
 
     virtual void start() = 0;
     virtual void stop()  = 0;

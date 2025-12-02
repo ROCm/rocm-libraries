@@ -795,7 +795,7 @@ try
     set_device(device_id);
 
     EfficiencyMonitor& perf_monitor = getEfficiencyMonitor();
-    perf_monitor.set_device_id(device_id);
+    perf_monitor.setDeviceId(device_id);
 
     if(datafile)
         return hipblaslt_bench_datafile(filter, any_stride, props);
