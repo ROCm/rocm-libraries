@@ -940,6 +940,19 @@ namespace rocRoller
         CommandArgumentValue evaluate(Expression const& expr, RuntimeArguments const& args);
 
         /**
+         * Reinterpret cast a value to a target DataType.
+         *
+         * @tparam FromType The input value type
+         * @param value The value to reinterpret
+         * @param targetDataType The target DataType to cast to
+         * @return CommandArgumentValue containing the reinterpreted value
+         */
+        template <CCommandArgumentValue FromType, int Idx = 0>
+        CommandArgumentValue reinterpret(FromType const& value, DataType targetDataType);
+        CommandArgumentValue reinterpret(CommandArgumentValue const& value,
+                                         DataType                    targetDataType);
+
+        /**
          * Splits an expression and returns its operands in a tuple.
          *
          * Return type:
