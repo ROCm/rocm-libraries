@@ -29,7 +29,7 @@ struct DatatypeFromTensor
 };
 
 template <class T>
-struct DatatypeFromTensor<Tensor<T>>
+struct DatatypeFromTensor<utilities::Tensor<T>>
 {
     using Type = T;
 };
@@ -106,7 +106,7 @@ struct GraphAndTensorMap
                 [&](auto dataType) {
                     using DataType = decltype(dataType);
                     auto tensorPtr = std::unique_ptr<ITensor>(
-                        new Tensor<DataType>(outputTensorPtr->dims(), outputTensorPtr->strides()));
+                        new utilities::Tensor<DataType>(outputTensorPtr->dims(), outputTensorPtr->strides()));
                     tensorPtr->fillTensorWithValue(0.f);
                     return tensorPtr;
                 },

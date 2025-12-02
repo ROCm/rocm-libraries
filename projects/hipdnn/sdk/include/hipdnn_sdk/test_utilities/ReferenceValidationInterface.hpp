@@ -14,14 +14,12 @@ namespace hipdnn_sdk
 namespace test_utilities
 {
 
-using namespace hipdnn_sdk::utilities;
-
 class IReferenceValidation
 {
 public:
     virtual ~IReferenceValidation() = default;
 
-    virtual bool allClose(ITensor& reference, ITensor& implementation) const = 0;
+    virtual bool allClose(utilities::ITensor& reference, utilities::ITensor& implementation) const = 0;
 };
 
 } // namespace test_utilities
