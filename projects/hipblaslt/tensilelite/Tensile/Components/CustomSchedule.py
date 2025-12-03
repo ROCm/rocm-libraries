@@ -1682,14 +1682,14 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
                     7, SWaitCnt(dscnt=4+4, vlcnt=-1, vscnt=-1, comment="wait for LRB1-2 to complete"),
                     11, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRB1 to complete"),
                     
-                    14, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before GRA start"),
+                    14, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before GRA start"),
                     14, SBarrier(comment=""),
                     
                     22, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0 to complete before next sub-iteration"),
                     22, SBarrier(comment=""),
     
-                    29, SWaitCnt(dscnt=-1, vlcnt=11+4, vscnt=-1, comment="wait for previous set of global reads"),
-                    29, SBarrier(comment=""),
+                    30, SWaitCnt(dscnt=-1, vlcnt=11+4, vscnt=-1, comment="wait for previous set of global reads"),
+                    30, SBarrier(comment=""),
                     48, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
                     48, SBarrier(comment=""),
                      ]
@@ -1699,13 +1699,19 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
                 'GRIncA': [[4, 5, 6, 7, 8, 9, 10, 11, 12]],
                 'GRIncB': [[13, 14, 15, 16, 17, 18, 19, 20, 21]],
                  
-                'LRA0': [[-1, 1, 3, 5]],
-                'LRB0': [[7, 9, 11, 13, 15, 17, 19]],
-                'GRA': [[14, 14, 16, 16, 18, 18, 20, 20]],
+                'LRA0': [[-1, 1, 3, 5],
+                         [0, 2, 4, 6]],
+                'LRB0': [[7, 9, 11, 13, 15, 17, 19],
+                         [8, 10, 12, 14, 16, 18, 20]],
+                'GRA': [[14, 14, 16, 16, 18, 18, 20, 20],
+                        [15, 15, 17, 17, 19, 19, 21, 21]],
 
-                'GRB': [[22, 22, 24, 24, 26, 26, 28, 28, 33,33, 35,35, 37,37]],
-                'LRA1': [[29, 31, 33, 36]],
-                'LRB1': [[48, 49, 50, 51, 52, 53, 54]],
+                'GRB': [[22, 22, 24, 24, 26, 26, 28, 28, 33,33, 35,35, 37,37],
+                        [23, 23, 25, 25, 27, 27, 29, 29, 34,34, 36,36, 38,38]],
+                'LRA1': [[30, 32, 34, 37],
+                         [31, 33, 35, 38]],
+                'LRB1': [[48, 49, 50, 51, 52, 53, 54],
+                         [49, 50, 51, 52, 53, 54, 55]],
 
                 'LRSA': [[27]],
                 'LRSB': [[31]],
