@@ -798,8 +798,8 @@ class Solution(collections.abc.Mapping):
     MT = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
 
     if (MT & (MT-1)) != 0 and not state["UseGeneralizedNLCOne%s"%tc]: # Check of MT not power of 2
-      # so far, numBytesAB<4 case, TLU=False only (continue with False)
-      if (numBytesAB < 4 or state["UseF32XEmulation"]) and state["ProblemType"]["TLU%c"%tc]:
+      # so far, numBytesAB<=4 case, TLU=False only (continue with False)
+      if (numBytesAB <= 4) and state["ProblemType"]["TLU%c"%tc]:
         return False
 
     # x2 DTL is not supported
@@ -1735,7 +1735,7 @@ class Solution(collections.abc.Mapping):
               if state["_DepthUA"] * tmpBpe * state["VectorWidthA"] > 128:
                 LdsBlockSizePerPadA = roundUpToNearestMultiple(state["_DepthUA"] * tmpBpe * state["VectorWidthA"], 128)
             else:
-              if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
+              if state["MatrixInstB"] == 1 and (state["MatrixInstM"] == 16 or state["DirectToLdsA"]):
                 LdsBlockSizePerPadA = state["MacroTile0"] * tmpBpe * lrvw
               else:
                 LdsBlockSizePerPadA = 0
@@ -1749,7 +1749,7 @@ class Solution(collections.abc.Mapping):
               if state["_DepthUB"] * tmpBpe * state["VectorWidthB"] > 128:
                 LdsBlockSizePerPadB = roundUpToNearestMultiple(state["_DepthUB"] * tmpBpe * state["VectorWidthB"], 128)
             else:
-              if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
+              if state["MatrixInstB"] == 1 and (state["MatrixInstM"] == 16 or state["DirectToLdsB"]):
                 LdsBlockSizePerPadB = state["MacroTile1"] * tmpBpe * lrvw
               else:
                 LdsBlockSizePerPadB = 0
