@@ -196,7 +196,7 @@ TEST_P(GPU_BNInputValidation3D_FP32, RejectsInvalidInput)
 
 // Instantiate tests for 2D with all combinations of layouts and modes
 INSTANTIATE_TEST_SUITE_P(
-    AllModesAndLayouts,
+    Smoke,
     GPU_BNInputValidation2D_FP32,
     testing::Combine(testing::ValuesIn(Network2DInvalidTraining<BN2DTestCase>()),
                      testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
@@ -204,7 +204,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 // Instantiate tests for 3D with all combinations of layouts and modes
 INSTANTIATE_TEST_SUITE_P(
-    AllModesAndLayouts,
+    Smoke,
     GPU_BNInputValidation3D_FP32,
     testing::Combine(testing::ValuesIn(Network3DInvalidTraining<BN3DTestCase>()),
                      testing::ValuesIn({miopenTensorNCDHW, miopenTensorNDHWC}),
