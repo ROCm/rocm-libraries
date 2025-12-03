@@ -219,7 +219,24 @@ def getDockerImageName(dockerArgs)
 {
     sh "echo ${dockerArgs} > ${env.WORKSPACE}/factors.txt"
     def image = "${env.MIOPEN_DOCKER_IMAGE_URL}"
-    sh(script: "cd ${env.WORKSPACE} && find ${env.CK_DIR} -type f -print0 | sort -z | xargs -0 md5sum | md5sum | awk '{print \$1}' >> factors.txt")
+    // Note: The following files and directories from the CK repo are used to generate a hash for 
+    // the docker image build. To ensure that we rebuild the docker image only when necessary.
+    // Add any other files or directories that should trigger a rebuild of the docker image when changed.
+    sh """
+    cd ${env.WORKSPACE}/${env.CK_DIR} && \
+    ( \
+        find cmake codegen experimental include library python tile_engine -type f -print0; \
+        find . -maxdepth 1 -type f \\( \
+        -name 'CMakeLists.txt' -o \
+        -name 'Config.cmake.in' -o \
+        -name 'dev-requirements.txt' -o \
+        -name 'pyproject.toml' -o \
+        -name 'rbuild.ini' -o \
+        -name 'requirements.txt' \
+        \\) -print0 \
+    ) | sort -z | xargs -0 md5sum | md5sum | awk '{print \$1}' >> ${env.WORKSPACE}/factors.txt
+    """
+    
     sh "cd ${env.WORKSPACE}/${env.MIOPEN_DIR}/ && md5sum Dockerfile requirements.txt dev-requirements.txt >> ${env.WORKSPACE}/factors.txt"
     def docker_hash = sh(script: "cd ${env.WORKSPACE} && md5sum factors.txt | awk '{print \$1}' | head -c 6", returnStdout: true)
     sh "rm ${env.WORKSPACE}/factors.txt"
