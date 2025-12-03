@@ -58,7 +58,11 @@ public:
     const std::string targetId;
     LcOptionTargetStrings(const TargetProperties& target)
         : device(target.Name()),
-          xnack(std::string{":xnack"} + (target.isXnackEnabled() ? "+" : "-")),
+          xnack([&]() -> std::string {
+              if(target.xnack.isReported())
+                  return std::string{":xnack"} + (target.isXnackEnabled() ? "+" : "-");
+              return {};
+          }()),
           sramecc([&]() -> std::string {
               if(target.sramecc.isReported())
                   return std::string{":sramecc"} + (target.sramecc.isEnabled() ? "+" : "-");
