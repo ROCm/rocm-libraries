@@ -117,8 +117,7 @@ private:
 
         auto test_set_tensor_descriptor = [problem](miopenTensorArgumentId_t name,
                                                     miopen::TensorDescriptor& desc) {
-            EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, name, &desc),
-                     miopenStatusSuccess);
+            EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, name, &desc), miopenStatusSuccess);
         };
 
         test_set_tensor_descriptor(miopenTensorConvolutionX, x.desc);
@@ -127,7 +126,7 @@ private:
 
         // adding x descriptor again to validate that error is produced
         EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionX, &x.desc),
-                 miopenStatusBadParm);
+                  miopenStatusBadParm);
 
         std::cerr << "Created conv tensor descriptos." << std::endl;
     }
@@ -142,8 +141,8 @@ private:
         solutions.resize(100);
 
         EXPECT_EQ(miopenFindSolutions(
-                     handle, problem, nullptr, solutions.data(), &found, solutions.size()),
-                 miopenStatusSuccess);
+                      handle, problem, nullptr, solutions.data(), &found, solutions.size()),
+                  miopenStatusSuccess);
         EXPECT_GE(found, 0);
 
         solutions.resize(found);
@@ -169,11 +168,11 @@ private:
 
             EXPECT_EQ(miopenSetFindOptionTuning(options, tune), miopenStatusSuccess);
             EXPECT_EQ(miopenSetFindOptionResultsOrder(options, miopenFindResultsOrderByTime),
-                     miopenStatusSuccess);
+                      miopenStatusSuccess);
             EXPECT_EQ(miopenSetFindOptionWorkspaceLimit(options, workspace_limit),
-                     miopenStatusSuccess);
+                      miopenStatusSuccess);
             EXPECT_EQ(miopenSetFindOptionAttachBinaries(options, attach_binaries),
-                     miopenStatusSuccess);
+                      miopenStatusSuccess);
 
             miopen::Allocator::ManageDataPtr workspace_dev;
 
@@ -184,18 +183,18 @@ private:
                 {
                 case miopenProblemDirectionForward:
                     EXPECT_EQ(miopenConvolutionForwardGetWorkSpaceSize(
-                                 handle, &x.desc, &w.desc, &filter, &y.desc, &workspace_max),
-                             miopenStatusSuccess);
+                                  handle, &x.desc, &w.desc, &filter, &y.desc, &workspace_max),
+                              miopenStatusSuccess);
                     break;
                 case miopenProblemDirectionBackward:
                     EXPECT_EQ(miopenConvolutionBackwardDataGetWorkSpaceSize(
-                                 handle, &y.desc, &w.desc, &filter, &x.desc, &workspace_max),
-                             miopenStatusSuccess);
+                                  handle, &y.desc, &w.desc, &filter, &x.desc, &workspace_max),
+                              miopenStatusSuccess);
                     break;
                 case miopenProblemDirectionBackwardWeights:
                     EXPECT_EQ(miopenConvolutionBackwardWeightsGetWorkSpaceSize(
-                                 handle, &y.desc, &x.desc, &filter, &w.desc, &workspace_max),
-                             miopenStatusSuccess);
+                                  handle, &y.desc, &x.desc, &filter, &w.desc, &workspace_max),
+                              miopenStatusSuccess);
                     break;
                 default: MIOPEN_THROW(miopenStatusNotImplemented);
                 }
@@ -208,16 +207,16 @@ private:
                     miopenStatusSuccess);
 
                 EXPECT_EQ(miopenSetFindOptionPreallocatedTensor(
-                             options, miopenTensorConvolutionX, x_dev.get()),
-                         miopenStatusSuccess);
+                              options, miopenTensorConvolutionX, x_dev.get()),
+                          miopenStatusSuccess);
 
                 EXPECT_EQ(miopenSetFindOptionPreallocatedTensor(
-                             options, miopenTensorConvolutionW, w_dev.get()),
-                         miopenStatusSuccess);
+                              options, miopenTensorConvolutionW, w_dev.get()),
+                          miopenStatusSuccess);
 
                 EXPECT_EQ(miopenSetFindOptionPreallocatedTensor(
-                             options, miopenTensorConvolutionY, y_dev.get()),
-                         miopenStatusSuccess);
+                              options, miopenTensorConvolutionY, y_dev.get()),
+                          miopenStatusSuccess);
             }
 
             std::cerr << "Testing with: ";
@@ -226,8 +225,8 @@ private:
             std::cerr << workspace_limit << " ws limit";
 
             EXPECT_EQ(miopenFindSolutions(
-                         handle, problem, options, solutions.data(), &found, solutions.size()),
-                     miopenStatusSuccess);
+                          handle, problem, options, solutions.data(), &found, solutions.size()),
+                      miopenStatusSuccess);
 
             EXPECT_EQ(miopenDestroyFindOptions(options), miopenStatusSuccess);
         }
@@ -252,7 +251,7 @@ private:
 
             EXPECT_EQ(miopenGetSolutionTime(solution, &time), miopenStatusSuccess);
             EXPECT_EQ(miopenGetSolutionWorkspaceSize(solution, &workspace_size),
-                     miopenStatusSuccess);
+                      miopenStatusSuccess);
             EXPECT_EQ(miopenGetSolutionSolverId(solution, &solver_id), miopenStatusSuccess);
             EXPECT_EQ(miopenGetSolverIdConvAlgorithm(solver_id, &algo), miopenStatusSuccess);
         }
@@ -270,8 +269,8 @@ private:
         {
             uint64_t solver_id;
             EXPECT_EQ(miopenGetSolutionSolverId(solution, &solver_id), miopenStatusSuccess);
-            std::cerr << "Testing solver " << solver_id << " (" << miopen::solver::Id(solver_id).ToString()
-                      << ")" << std::endl;
+            std::cerr << "Testing solver " << solver_id << " ("
+                      << miopen::solver::Id(solver_id).ToString() << ")" << std::endl;
 
             miopenTensorArgumentId_t names[3] = {
                 miopenTensorConvolutionX, miopenTensorConvolutionW, miopenTensorConvolutionY};
@@ -317,8 +316,7 @@ private:
         std::cerr << "Running a solution..." << std::endl;
 
         std::size_t workspace_size;
-        EXPECT_EQ(miopenGetSolutionWorkspaceSize(solution, &workspace_size),
-                 miopenStatusSuccess);
+        EXPECT_EQ(miopenGetSolutionWorkspaceSize(solution, &workspace_size), miopenStatusSuccess);
 
         Workspace wspace{workspace_size};
 
@@ -333,8 +331,8 @@ private:
             }
 
             EXPECT_EQ(miopenRunSolution(
-                         handle, solution, 3, arguments.get(), wspace.ptr(), wspace.size()),
-                     miopenStatusSuccess);
+                          handle, solution, 3, arguments.get(), wspace.ptr(), wspace.size()),
+                      miopenStatusSuccess);
         };
 
         // Without descriptors
@@ -353,8 +351,8 @@ class GPU_Find2Conv_FP32 : public testing::Test
 void RunFind2ConvTests()
 {
     Find2ConvTest test;
-    test.full_set = false;
-    test.dataset_id = 0;
+    test.full_set          = false;
+    test.dataset_id        = 0;
     test.config_iter_start = 0;
 
     std::vector<typename Find2ConvTest::argument*> data_args;
@@ -398,4 +396,3 @@ TEST_F(GPU_Find2Conv_FP32, FloatTest_find_2_conv)
         GTEST_SKIP();
     }
 }
-
