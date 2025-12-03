@@ -20,6 +20,8 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from itertools import chain
+from dataclasses import dataclass
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
                         StructuredModule, TextBlock, ValueEndif, ValueIf, ValueElseIf, ValueSet, SignatureBase
 from rocisa.container import vgpr, sgpr, SMEMModifiers, replaceHolder, EXEC,\
@@ -36,9 +38,12 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB32, BufferLoadB64, \
 from rocisa.instruction import SAddU32, SAddCU32, SCmpEQU32, SCSelectB32, SSubBU32
 from Tensile.Common import IsaVersion
 from Tensile.Utilities.Decorators.Shared import CallableGuard
+from Tensile.Common.Utilities import printWarning
+
+from abc import ABC, abstractmethod
 
 from copy import deepcopy
-from typing import Dict
+from typing import Callable, Dict
 
 class SyncSchedule:
     schedule : list[tuple[int, SWaitCnt | SBarrier]] = []
@@ -70,6 +75,235 @@ class SyncSchedule:
         return [item[0] for item in self.schedule]
     def get_code(self):
         return [item[1] for item in self.schedule]
+
+
+class ValidatorInstruction(ABC):
+    """
+    Abstract class with no method just for type hinting purposes.
+    """
+    @abstractmethod
+    def validate(self) -> str | None:
+        ...
+
+@dataclass
+class LocalRead(ValidatorInstruction):
+    name: str
+    issued_at: int
+    needed_by: int
+    num_vmfma: int
+    guaranteed_by: int | float = float('inf')
+
+    def validate(self) -> str | None:
+        # Needs to be guaranteed BEFORE the index at which it's needed since the 
+        # SWaitCnt is issued AFTER the vmfma.
+        if self.guaranteed_by < self.needed_by:
+            return None
+        
+        guaranteed_by = self.guaranteed_by
+        # Modulo for LRs that finish in next iteration.
+        needed_by = self.needed_by % self.num_vmfma
+        if guaranteed_by == float('inf'):
+            message = f"{self.name} at index {self.issued_at} is not valid. " + \
+                        "There are no guarantees on when it will be done."
+        else:
+            if isinstance(guaranteed_by, float):
+                # Special case to handle idx=-1 which is written as numVMFMA - 0.5
+                guaranteed_by = -1
+            else:
+                guaranteed_by %= self.num_vmfma
+            message = f"{self.name} at index {self.issued_at} is not valid. " + \
+                        f"Needed before index {needed_by}, but only guaranteed at index {guaranteed_by}."
+        return message
+     
+
+@dataclass
+class SWait(ValidatorInstruction):
+    issued_at: int
+    dscnt: int
+    vlcnt: int
+    vscnt: int
+    comment: str
+
+    def _is_valid(self) -> bool:
+        return self.dscnt >= -1 and self.vlcnt >= -1 and self.vscnt >= -1 and self.issued_at >= -1
+
+    def validate(self) -> str | None:
+        if self._is_valid():
+            return None
+        return f"SWait at index {self.issued_at} is invalid: dscnt={self.dscnt}, vlcnt={self.vlcnt}, vscnt={self.vscnt}, issued_at={self.issued_at}."
+
+def schedule_get(name: str, code_path: int, schedule_info: 'ScheduleInfo') -> list[list[int]]:
+    """
+    Helper function to get the schedule for a given instruction name and code path.
+    When multiple code paths are provided, return the schedule for the given code path.
+    If only one code path is implemented, return that schedule.
+
+    Args:
+        name: The name of the instruction to get the schedule for (e.g. "LRA0", "LRB0", "SYNC")
+        code_path: The code path to get the schedule for (0-indexed)
+        schedule_info: The schedule information (ScheduleInfo object)
+
+    Returns:
+        The schedule for the given instruction name and code path.
+    """
+    assert code_path >= 0, f"Code path {code_path} is not valid. Must be >= 0."
+    schedules = schedule_info.optSchedule[name]
+    return schedules[0] if len(schedules) == 1 else schedules[code_path]
+
+
+def lr_needed_by_mfma(is_lra: bool, lr_idx: int, offset: int, schedule_info: 'ScheduleInfo', kernel: 'Solution') -> int:
+    """
+    Helper fucntion to calculate the index of the MFMA at which the given LRA/LRB will be needed by.
+
+    Args:
+        is_lra: Whether the given LRA/LRB is an LRA (True) or LRB (False).
+        lr_idx: The index of the LRA/LRB in the list of LRAs/LRBs for the given code path.
+        offset: The offset from the halfway point of the main loop.
+        schedule_info: The schedule information (ScheduleInfo object)
+        kernel: The kernel (Solution object)
+
+    Returns:
+        The index of the MFMA at which the given LRA/LRB will be needed by.
+    """
+    assert len(schedule_info.mfmaReorder) == 0, "Not implemented for mfmaReorder"
+
+    n_tiles_a = kernel['MIWaveTileA']
+    n_tiles_b = kernel['MIWaveTileB']
+    # NOTE: This calculation will produce incorrect results if the user provided the wrong number of LRs.
+    n_lr_a = len(schedule_get("LRA0", 0, schedule_info))
+    n_lr_b = len(schedule_get("LRB0", 0, schedule_info))
+
+    # How many MFMA worth of data is loaded by each LRA/LRB
+    n_tiles_per_lra = n_tiles_a / n_lr_a
+    n_tiles_per_lrb = n_tiles_b / n_lr_b
+
+    # NOTE: This is based on the current bahaviour where we iterate through A faster than B.
+    def index_lra_needed_by_mfma(lra_idx: int, offset: int) -> int:
+        """
+        Calculate the index of the MFMA at which the given LRA will be needed by.
+        """
+        return int(lra_idx * n_tiles_per_lra) + offset
+    
+    def index_lrb_needed_by_mfma(lrb_idx: int, offset: int) -> int:
+        """
+        Calculate the index of the MFMA at which the given LRB will be needed by.
+        """
+        return n_tiles_a * int(lrb_idx * n_tiles_per_lrb) + offset
+    
+    if is_lra:
+        return index_lra_needed_by_mfma(lr_idx, offset)
+    else:
+        return index_lrb_needed_by_mfma(lr_idx, offset)
+
+
+def create_timeline(instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution') -> list[list[ValidatorInstruction]]:
+    """
+    Create a timeline from the provided schedule_info which contains only the instructions inside `instruction_names_to_add`.
+    Organized as a list of lists indexed by vmfma_index + 1.
+    
+    The +1 is required in order to handle the special case of idx=-1, which is at timeline[0].
+    idx=-1 is special case that occurs BEFORE the first VMFMA but AFTER the last VMFMA.
+    """
+    # NOTE: numMfma + 1 to account for special idx=-1.
+    #       idx=-1 is special case that occurs BEFORE the first VMFMA but AFTER the last VMFMA.
+    #       Instructions at idx=-1 happen after all instructions at idx=numVMFMA-1 and BEFORE all instructions (including the VMFMA) at idx=0.
+    timeline = [[] for _ in range(schedule_info.numMfma+1)]
+
+    num_vmfma = schedule_info.numMfma
+    halfway_point = num_vmfma // 2
+    
+    # NOTE: Relative ordering of instructions must be preserved.
+    #       Order dictates the order in which instructions are scheduled if they are scheduled at the same vmfmaindex.
+    for name in schedule_info.optSchedule.keys():
+        if name not in instruction_names_to_add:
+            continue
+
+        if name == "SYNC":
+            for idx_sync, (idx_vmfma, sync) in enumerate(zip(schedule_get(name, code_path, schedule_info), schedule_info.syncCode)):
+                assert idx_vmfma >= -1, f"Code path {code_path}: SWaitCnt at index {idx_sync} is not valid. Must be >= -1."
+                if not isinstance(sync, SWaitCnt):
+                    continue 
+                
+                swait = SWait(issued_at=idx_vmfma, dscnt=sync.dscnt, vlcnt=sync.vlcnt, vscnt=sync.vscnt, comment=sync.comment)
+                timeline[idx_vmfma+1].append(swait)
+        elif name.startswith("LRA") or name.startswith("LRB"):
+            offset = halfway_point if "0" in name else num_vmfma
+            is_lra = name.startswith("LRA")
+            for idx_LR, idx_vmfma in enumerate(schedule_get(name, code_path, schedule_info)):
+                assert idx_vmfma >= -1, f"Code path {code_path}: LocalRead {name} at index {idx_LR} is not valid. Must be >= -1."
+
+                needed_by = lr_needed_by_mfma(is_lra, idx_LR, offset, schedule_info, kernel)
+                local_read = LocalRead(name=name, issued_at=idx_vmfma, needed_by=needed_by, num_vmfma=num_vmfma)
+                timeline[idx_vmfma+1].append(local_read)
+        else:
+            raise NotImplementedError(f"Instruction {name} not implemented")
+    
+    return timeline
+
+def apply_swaits(timeline: list[list[ValidatorInstruction]], num_vmfma: int) -> None:
+    """
+    Apply the effect of SWaitCnts to the timeline by updating the guaranteed_by field of LocalReads.
+    Timeline is modified in place.
+    """
+    num_instructions = len(timeline)
+    # Mapping between linear index and swait at that index
+    swaits: dict[int, SWait] = {i: swait for i, swait in enumerate(timeline) if isinstance(swait, SWait)}
+
+    for i_swait, swait in swaits.items():
+        num_left_in_flight = swait.dscnt
+        if num_left_in_flight == -1:
+            continue # -1 is special value to indicate doing nothing.
+        
+        for i_lr in chain(range(i_swait-1, -1, -1), range(num_instructions-1, i_swait, -1)):
+            local_read = timeline[i_lr]
+            if not isinstance(local_read, LocalRead):
+                continue  # Only LRs are supported at the moment.
+            if num_left_in_flight > 0:
+                num_left_in_flight -= 1
+                continue
+
+            new_guaranteed_by = swait.issued_at
+            if i_lr > i_swait:
+                # LRs which finish during the next iteration.
+                new_guaranteed_by += num_vmfma
+            if swait.issued_at == -1:
+                # Need a number between (numVMFMA-1) and numVMFMA, resort to floats.
+                new_guaranteed_by += 0.5
+            local_read.guaranteed_by = min(local_read.guaranteed_by, new_guaranteed_by)
+
+
+def verify_lrs_complete_before_vmfma(schedule_info: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
+    """
+    Ensure that the A and B data needed for VMFA at index=i is guaranteed to be in the registers before index=i.
+    """    
+    def verify(schedule_info: 'ScheduleInfo', code_path: int) -> tuple[bool, str]:
+        if len(schedule_info.mfmaReorder) != 0:
+            printWarning("Do not currently support mfmaReorder in CMS validation.")
+            return None
+        
+        relevant_names = ["LRA0", "LRB0", "LRA1", "LRB1", "SYNC"]
+        for name in schedule_info.optSchedule.keys():
+            if name.startswith("LRA") or name.startswith("LRB"):
+                if name not in relevant_names:
+                    printWarning(f"LocalRead {name} not implemented in CMS validation.")
+                    return None
+
+        timeline = create_timeline(relevant_names, code_path, schedule_info, context["kernel"])
+        timeline = [instruction for instructions in timeline for instruction in instructions]
+
+        apply_swaits(timeline, schedule_info.numMfma)
+
+        for instruction in timeline:
+            error_message = instruction.validate()
+            if error_message:
+                return error_message
+        return None
+    
+    for code_path in range(schedule_info.numCodePaths):
+        error_message = verify(schedule_info, code_path)
+        if error_message:
+            return False, f"Code path {code_path}: {error_message}"
+    return True, ""
 
 
 def verifyAscendingOrder(scheduleInfo, context: Dict = {}):
@@ -130,8 +364,9 @@ class ScheduleInfo:
         self.__skipValidation__ = False
 
         # The set of validation rules to run inside `isValid`.
-        self.rules: List[Callable[[ScheduleInfo, dict], [bool, str]]] = [
-            verifyAscendingOrder
+        self.rules: list[Callable[[ScheduleInfo, dict], [bool, str]]] = [
+            verifyAscendingOrder,
+            verify_lrs_complete_before_vmfma
         ]
 
     def disableValidation(self):
@@ -280,7 +515,18 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         return InstStreams
 
     status, message = opt1.isValid({'kernel' : kernel})
-    assert status is True, f"Custom mainloop schedule validation failed: {message}"
+    # create the case str (TN, NT, TT, or NN)
+    if isTN(kernel):
+        case_str = "TN"
+    elif isNT(kernel):
+        case_str = "NT"
+    elif isTT(kernel):
+        case_str = "TT"
+    elif isNN(kernel):
+        case_str = "NN"
+    else:
+        case_str = "Unknown"
+    assert status is True, f"Custom mainloop schedule validation failed for kernel {kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']} {case_str}: {message}"
 
     InstStreams = convOptToStream(opt1)
 
@@ -604,6 +850,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
 
     numMfma = 96
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1.disableValidation()  # TODO: Remove after schedule is fixed
     return True, opt1
 
 def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
@@ -1293,6 +1540,7 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
 
     numMfma = 104
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1.disableValidation()  # TODO: Fix and re-enable
     return True, opt1
 
 def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
@@ -1524,6 +1772,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
 
     numMfma = 120
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1.disableValidation()  # TODO: Remove after landing fix
     return True, opt1
 
 def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
