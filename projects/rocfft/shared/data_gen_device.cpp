@@ -1859,6 +1859,8 @@ template void impose_hermitian_symmetry_interleaved<rocfft_complex<double>>(
     rocfft_complex<double>*    input_data,
     const hipDeviceProp_t&     deviceProp);
 
+// explicit specialization for use by samples, which use
+// hipDoubleComplex instead of rocfft_complex<double>
 template <>
 void impose_hermitian_symmetry_interleaved(const std::vector<size_t>& length,
                                            const std::vector<size_t>& ilength,
