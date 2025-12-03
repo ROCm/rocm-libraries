@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - 'projects/hipdnn/**/*.{hpp,h,cpp,c}'
-      - '.github/workflows/clang-tidy.yml'
+      - '.github/workflows/hipdnn-clang-tidy.yml'
   workflow_dispatch:
 
 jobs:
