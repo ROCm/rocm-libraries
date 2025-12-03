@@ -24320,7 +24320,6 @@ ROCBLAS_EXPORT rocblas_status rocblas_dotc_strided_batched_ex_64(rocblas_handle 
                                                                  rocblas_datatype execution_type);
 //! @}
 
-
 /*! @{
     \brief BLAS_EX API
 
