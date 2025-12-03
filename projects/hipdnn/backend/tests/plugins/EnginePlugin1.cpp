@@ -35,7 +35,9 @@ const unsigned GPU_DATA_SIZE = 512;
 // TODO Use HIP RTC to compile the kernel at runtime
 __global__ void engineKernel(const uint32_t* input, uint32_t* output, uint32_t size)
 {
-    const auto tid = blockIdx.x * blockDim.x + threadIdx.x;
+    // NOLINTBEGIN(readability-static-accessed-through-instance)
+    const auto tid = (blockIdx.x * blockDim.x) + threadIdx.x;
+    // NOLINTEND(readability-static-accessed-through-instance)
     if(tid < size)
     {
         output[tid] = input[tid];

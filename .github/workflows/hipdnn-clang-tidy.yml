@@ -1,0 +1,62 @@
+name: hipDNN Clang Tidy
+
+on:
+  pull_request:
+    paths:
+      - 'projects/hipdnn/**/*.{hpp,h,cpp,c}'
+      - '.github/workflows/hipdnn-clang-tidy.yml'
+  workflow_dispatch:
+
+jobs:
+  clang-tidy:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout rocm-libraries
+        uses: actions/checkout@v4
+
+      - name: Checkout TheRock
+        uses: actions/checkout@v4
+        with:
+          repository: ROCm/TheRock
+          path: TheRock
+
+      # Free up disk space for ROCm installation.
+      # The runner fully depletes it disk space otherwise.
+      - name: Free Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet          # 4.0G
+          sudo rm -rf /usr/share/swift           # 3.2G
+          sudo rm -rf /usr/local/lib/android     # ~13G
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            python3-venv \
+            clang-tidy-20 \
+            clang-tools-20
+          python3 -m venv .venv
+          . .venv/bin/activate
+          pip install boto3
+          pip install -r TheRock/requirements.txt
+
+      - name: Install ROCm
+        run: |
+          sudo .venv/bin/python3 TheRock/build_tools/install_rocm_from_artifacts.py \
+            --release 7.9.0rc20251008 \
+            --amdgpu-family gfx94X-dcgpu \
+            --output-dir /opt/rocm \
+            --base-only
+
+      - name: Run clang-tidy
+        run: |
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          cmake -S projects/hipdnn -B build -G Ninja \
+            -DENABLE_CLANG_TIDY=ON \
+            -DROCM_PATH=/opt/rocm \
+            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DHIP_DNN_SKIP_TESTS=ON \
+            -DHIP_PLATFORM=amd
+          ninja -C build tidy
