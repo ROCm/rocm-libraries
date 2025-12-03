@@ -275,3 +275,50 @@ TEST(TestUtilities, ValidateBNTrainingSpatialDimsCustomOperationName)
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
     EXPECT_TRUE(error.get_message().find("Batch normalization backward") != std::string::npos);
 }
+
+// Layout-specific tests to ensure validation is layout-agnostic
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsNHWC)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({2, 14, 14, 3}); // NHWC: N*H*W = 2*14*14 = 392
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 3, 1, 1}); // Always channel-first
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsNHWCInvalid)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 1, 1, 256}); // NHWC: N*H*W = 1*1*1 = 1 (invalid!)
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 256, 1, 1});
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("samples per channel = 1") != std::string::npos);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsNDHWC)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({2, 2, 2, 2, 3}); // NDHWC: N*D*H*W = 2*2*2*2 = 16
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 3, 1, 1, 1});
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsNDHWCInvalid)
+{
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 1, 1, 1, 256}); // NDHWC: N*D*H*W = 1*1*1*1 = 1 (invalid!)
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_dim({1, 256, 1, 1, 1});
+
+    auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("samples per channel = 1") != std::string::npos);
+}
