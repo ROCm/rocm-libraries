@@ -33,7 +33,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Removed  `ConstantInputIterator`, `CountingInputIterator`, `DiscardOutputIterator` and `TransformInputIterator` which were deprecated in hipCUB-4.1.0.
 * Removed `DeviceSpmv`, which was removed from CUB after CCCL's 2.8.0 release. Use `hipSPARSE` or `rocSPARSE` libraries instead.
 * Removed `GridBarrier`.
-* Removed `HIPCUB_MIN` and `HIPCUB_MAX`.
+* Removed `HIPCUB_MIN`, `HIPCUB_MAX`, `HIPCUB_QUOTIENT_FLOOR`, `HIPCUB_QUOTIENT_CEILING`, `HIPCUB_ROUND_UP_NEAREST` and `HIPCUB_ROUND_DOWN_NEAREST` which were deprecated in hipCUB-4.1.0.
 * Removed `LEGACY_PTX_ARCH`.
 * Removed `hipcub:max` and `hipcub:min`, which were deprecated. Use `hip::std::max` and `hip::std::min` instead.
 * Deprecated `hipcub::Swap`, use `rocprim::swap` instead.
