@@ -397,16 +397,16 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
     kernelType.typeAcc    = rocblaslt_compute_type_to_rocRoller_type(prob.compute_type);
     kernelType.transA     = prob.trans_a == HIPBLAS_OP_T;
     kernelType.transB     = prob.trans_b == HIPBLAS_OP_T;
-    kernelType.scaleAMode = prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block
+    kernelType.scaleTypeA.mode = prob.scaleAType == RocblasltContractionProblem::ScalingFormat::Block
                                 ? rocRoller::Operations::ScaleMode::Separate
                                 : rocRoller::Operations::ScaleMode::None;
-    kernelType.scaleBMode = prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block
+    kernelType.scaleTypeB.mode = prob.scaleBType == RocblasltContractionProblem::ScalingFormat::Block
                                 ? rocRoller::Operations::ScaleMode::Separate
                                 : rocRoller::Operations::ScaleMode::None;
-    kernelType.scaleABlockRowSize = prob.scaleABlockRowSize;
-    kernelType.scaleABlockColSize = prob.scaleABlockColSize;
-    kernelType.scaleBBlockRowSize = prob.scaleBBlockRowSize;
-    kernelType.scaleBBlockColSize = prob.scaleBBlockColSize;
+    kernelType.scaleTypeA.blockRowSize = prob.scaleABlockRowSize;
+    kernelType.scaleTypeA.blockColSize = prob.scaleABlockColSize;
+    kernelType.scaleTypeB.blockRowSize = prob.scaleBBlockRowSize;
+    kernelType.scaleTypeB.blockColSize = prob.scaleBBlockColSize;
 
     return kernelType;
 }

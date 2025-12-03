@@ -199,7 +199,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
         elementSizeB_bits,
         elementSizeC_bits,
         dataType,
-        kernelType.scaleABlockRowSize * kernelType.scaleABlockColSize, //Handle A vs B block size.
+        kernelType.scaleTypeA.blockRowSize * kernelType.scaleTypeA.blockColSize, //Handle A vs B block size.
         0.8,
         false,
         WGM);
