@@ -41,6 +41,48 @@
 #include <numeric>
 #include <vector>
 
+template <typename Tcheck, typename Tgpu>
+void addlayernorm_inner(size_t inner_size,
+                        size_t o,
+                        Tgpu* input,
+                        Tgpu* input2,
+                        Tgpu* weight,
+                        Tgpu* bias,
+                        Tcheck* outputhost,
+                        Tcheck* meanhost,
+                        Tcheck* rstdhost,
+                        miopenNormMode_t mode,
+                        float eps)
+{
+    Tcheck pmean = 0.0f;
+    Tcheck pvar  = 0.0f;
+
+    miopen::ford(inner_size)([&](int32_t i) {
+        Tcheck tmp = static_cast<Tcheck>(input[o * inner_size + i]) +
+                     static_cast<Tcheck>(input2[o * inner_size + i]);
+        pmean += tmp;
+        pvar += tmp * tmp;
+    });
+
+    pmean        = pmean / inner_size;
+    pvar         = pvar / inner_size - pmean * pmean;
+    Tcheck prstd = 1.0f / sqrt(pvar + eps);
+
+    meanhost[o] = pmean;
+    rstdhost[o] = prstd;
+
+    miopen::ford(inner_size)([&](int32_t i) {
+        Tcheck pweight =
+            (mode == MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD) ? 1 : static_cast<Tcheck>(weight[i]);
+        Tcheck pbias =
+            (mode == MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD) ? 0 : static_cast<Tcheck>(bias[i]);
+        outputhost[o * inner_size + i] = (static_cast<Tcheck>(input[o * inner_size + i]) +
+                                          static_cast<Tcheck>(input2[o * inner_size + i]) - pmean) *
+                                             prstd * pweight +
+                                         pbias;
+    });
+}
+
 template <typename Tgpu, typename Tcheck>
 int32_t mloAddLayerNormForwardRunHost(miopenTensorDescriptor_t inputDesc,
                                       Tgpu* input,
@@ -105,6 +147,42 @@ int32_t mloAddLayerNormForwardRunHost(miopenTensorDescriptor_t inputDesc,
 }
 
 template <typename Tgpu, typename Tcheck>
+int32_t mloAddLayerNormForwardRunHost2(miopenTensorDescriptor_t inputDesc,
+                                       Tgpu* input,
+                                       Tgpu* input2,
+                                       Tgpu* weight,
+                                       Tgpu* bias,
+                                       Tcheck* outputhost,
+                                       Tcheck* meanhost,
+                                       Tcheck* rstdhost,
+                                       float eps,
+                                       int32_t normalized_dim,
+                                       miopenNormMode_t mode)
+{
+    auto dims         = miopen::deref(inputDesc).GetLengths();
+    size_t outer_size = 1;
+    size_t inner_size = 1;
+    size_t norm_dim   = static_cast<size_t>(normalized_dim);
+
+    for(size_t i = 0ULL; i < dims.size(); ++i)
+    {
+        if(i < norm_dim)
+            outer_size *= dims[i];
+        else
+            inner_size *= dims[i];
+    }
+
+    int32_t ret = 0;
+
+    for(int32_t o = 0; o < outer_size; o++)
+    {
+        addlayernorm_inner(
+            inner_size, o, input, input2, weight, bias, outputhost, meanhost, rstdhost, mode, eps);
+    }
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
 int32_t mloAddLayerNormForwardRunHost_mt(miopenTensorDescriptor_t inputDesc,
                                          Tgpu* input,
                                          Tgpu* input2,
@@ -161,6 +239,42 @@ int32_t mloAddLayerNormForwardRunHost_mt(miopenTensorDescriptor_t inputDesc,
                     prstd * pweight +
                 pbias;
         });
+    });
+
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
+int32_t mloAddLayerNormForwardRunHost_mt2(miopenTensorDescriptor_t inputDesc,
+                                          Tgpu* input,
+                                          Tgpu* input2,
+                                          Tgpu* weight,
+                                          Tgpu* bias,
+                                          Tcheck* outputhost,
+                                          Tcheck* meanhost,
+                                          Tcheck* rstdhost,
+                                          float eps,
+                                          int32_t normalized_dim,
+                                          miopenNormMode_t mode)
+{
+    auto dims         = miopen::deref(inputDesc).GetLengths();
+    size_t outer_size = 1;
+    size_t inner_size = 1;
+    size_t norm_dim   = static_cast<size_t>(normalized_dim);
+
+    for(size_t i = 0ULL; i < dims.size(); ++i)
+    {
+        if(i < norm_dim)
+            outer_size *= dims[i];
+        else
+            inner_size *= dims[i];
+    }
+
+    int32_t ret = 0;
+
+    miopen::par_ford(outer_size)([&](int32_t o) {
+        addlayernorm_inner(
+            inner_size, o, input, input2, weight, bias, outputhost, meanhost, rstdhost, mode, eps);
     });
 
     return ret;
@@ -491,6 +605,7 @@ int AddLayerNormDriver<Tgpu, Tref>::RunForwardCPU()
 
     if(use_multithread)
     {
+        auto start = std::chrono::steady_clock::now();
         mloAddLayerNormForwardRunHost_mt<Tgpu, Tref>(inputDesc,
                                                      in.data(),
                                                      in2.data(),
@@ -502,9 +617,47 @@ int AddLayerNormDriver<Tgpu, Tref>::RunForwardCPU()
                                                      eps,
                                                      dim,
                                                      mode);
+        auto end = std::chrono::steady_clock::now();
+
+        std::chrono::duration<float, std::milli> diff = end - start;
+
+        start = std::chrono::steady_clock::now();
+        mloAddLayerNormForwardRunHost_mt2<Tgpu, Tref>(inputDesc,
+                                                      in.data(),
+                                                      in2.data(),
+                                                      weight.data(),
+                                                      bias.data(),
+                                                      outhost.data(),
+                                                      meanhost.data(),
+                                                      rstdhost.data(),
+                                                      eps,
+                                                      dim,
+                                                      mode);
+        end = std::chrono::steady_clock::now();
+
+        std::chrono::duration<float, std::milli> diff1 = end - start;
+
+        auto lens = inflags.GetValueTensor("input").lengths;
+
+        size_t sz     = 1;
+        std::string s = "";
+        for(int i = 0; i < lens.size(); i++)
+        {
+            sz *= lens[i];
+            s += std::to_string(lens[i]);
+            if(i < lens.size() - 1)
+            {
+                s += "x";
+            }
+        }
+
+        std::ofstream f("addlayernorm_fwd_mt.tsv", std::ios::app);
+        f << s << "\t" << sz << "\t" << diff.count() << "\t" << diff1.count() << std::endl;
+        f.close();
     }
     else
     {
+        auto start = std::chrono::steady_clock::now();
         mloAddLayerNormForwardRunHost<Tgpu, Tref>(inputDesc,
                                                   in.data(),
                                                   in2.data(),
@@ -516,6 +669,43 @@ int AddLayerNormDriver<Tgpu, Tref>::RunForwardCPU()
                                                   eps,
                                                   dim,
                                                   mode);
+        auto end = std::chrono::steady_clock::now();
+
+        std::chrono::duration<float, std::milli> diff = end - start;
+
+        start = std::chrono::steady_clock::now();
+        mloAddLayerNormForwardRunHost2<Tgpu, Tref>(inputDesc,
+                                                   in.data(),
+                                                   in2.data(),
+                                                   weight.data(),
+                                                   bias.data(),
+                                                   outhost.data(),
+                                                   meanhost.data(),
+                                                   rstdhost.data(),
+                                                   eps,
+                                                   dim,
+                                                   mode);
+        end = std::chrono::steady_clock::now();
+
+        std::chrono::duration<float, std::milli> diff1 = end - start;
+
+        auto lens = inflags.GetValueTensor("input").lengths;
+
+        size_t sz     = 1;
+        std::string s = "";
+        for(int i = 0; i < lens.size(); i++)
+        {
+            sz *= lens[i];
+            s += std::to_string(lens[i]);
+            if(i < lens.size() - 1)
+            {
+                s += "x";
+            }
+        }
+
+        std::ofstream f("addlayernorm_fwd_st.tsv", std::ios::app);
+        f << s << "\t" << sz << "\t" << diff.count() << "\t" << diff1.count() << std::endl;
+        f.close();
     }
 
     return miopenStatusSuccess;

@@ -42,6 +42,35 @@
 #include <vector>
 
 template <typename Tgpu, typename Tcheck>
+void t5layernorm_fwd_inner(size_t inner_size,
+                           size_t o,
+                           Tgpu* x,
+                           Tgpu* weight,
+                           Tcheck* yhost,
+                           Tcheck* rstdhost,
+                           float eps,
+                           miopenNormMode_t mode)
+{
+    Tcheck pvar = static_cast<Tcheck>(0);
+
+    miopen::ford(inner_size)([&](int32_t i) {
+        Tcheck tmp = static_cast<Tcheck>(x[o * inner_size + i]);
+        pvar += tmp * tmp;
+    });
+
+    pvar         = pvar / inner_size;
+    Tcheck prstd = static_cast<Tcheck>(1.0) / sqrt(pvar + eps);
+
+    rstdhost[o] = prstd;
+
+    miopen::ford(inner_size)([&](int32_t i) {
+        Tcheck pweight            = (mode == MIOPEN_ELEMENTWISE_AFFINE_T5) ? static_cast<Tcheck>(1)
+                                                                           : static_cast<Tcheck>(weight[i]);
+        yhost[o * inner_size + i] = (static_cast<Tcheck>(x[o * inner_size + i])) * prstd * pweight;
+    });
+}
+
+template <typename Tgpu, typename Tcheck>
 int32_t mloT5LayerNormForwardRunHost(miopenTensorDescriptor_t xDesc,
                                      Tgpu* x,
                                      Tgpu* weight,
@@ -88,6 +117,33 @@ int32_t mloT5LayerNormForwardRunHost(miopenTensorDescriptor_t xDesc,
 }
 
 template <typename Tgpu, typename Tcheck>
+int32_t mloT5LayerNormForwardRunHost2(miopenTensorDescriptor_t xDesc,
+                                      Tgpu* x,
+                                      Tgpu* weight,
+                                      Tcheck* yhost,
+                                      Tcheck* rstdhost,
+                                      float eps,
+                                      miopenNormMode_t mode)
+{
+    auto dims         = miopen::deref(xDesc).GetLengths();
+    size_t outer_size = 1;
+    size_t inner_size = dims[dims.size() - 1];
+
+    for(size_t i = 0ULL; i < dims.size() - 1; ++i)
+    {
+        outer_size *= dims[i];
+    }
+
+    int32_t ret = 0;
+
+    for(int32_t o = 0; o < outer_size; o++)
+    {
+        t5layernorm_fwd_inner(inner_size, o, x, weight, yhost, rstdhost, eps, mode);
+    }
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
 int32_t mloT5LayerNormForwardRunHost_mt(miopenTensorDescriptor_t xDesc,
                                         Tgpu* x,
                                         Tgpu* weight,
@@ -129,6 +185,66 @@ int32_t mloT5LayerNormForwardRunHost_mt(miopenTensorDescriptor_t xDesc,
         });
     });
     return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
+int32_t mloT5LayerNormForwardRunHost_mt2(miopenTensorDescriptor_t xDesc,
+                                         Tgpu* x,
+                                         Tgpu* weight,
+                                         Tcheck* yhost,
+                                         Tcheck* rstdhost,
+                                         float eps,
+                                         miopenNormMode_t mode)
+{
+    auto dims         = miopen::deref(xDesc).GetLengths();
+    size_t outer_size = 1;
+    size_t inner_size = dims[dims.size() - 1];
+
+    for(size_t i = 0ULL; i < dims.size() - 1; ++i)
+    {
+        outer_size *= dims[i];
+    }
+
+    int32_t ret = 0;
+
+    miopen::par_ford(outer_size)([&](int32_t o) {
+        t5layernorm_fwd_inner(inner_size, o, x, weight, yhost, rstdhost, eps, mode);
+    });
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
+void t5layernorm_bwd_inner(size_t inner_size,
+                           size_t o,
+                           Tgpu* dy,
+                           Tgpu* x,
+                           Tgpu* weight,
+                           Tcheck* rstdhost,
+                           Tcheck* dxhost,
+                           miopenNormMode_t mode)
+{
+    Tcheck sum = static_cast<Tcheck>(0);
+
+    miopen::ford(inner_size)([&](int32_t i) {
+        Tcheck pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE_T5) ? static_cast<Tcheck>(1)
+                                                                : static_cast<Tcheck>(weight[i]);
+        Tcheck pdy     = dy ? static_cast<Tcheck>(dy[o * inner_size + i]) : static_cast<Tcheck>(0);
+        Tcheck px      = static_cast<Tcheck>(x[o * inner_size + i]);
+        sum += pdy * px * pweight;
+    });
+
+    Tcheck s     = static_cast<Tcheck>(1) / inner_size;
+    Tcheck prstd = rstdhost[o];
+    Tcheck a     = sum * prstd * prstd * prstd * s;
+
+    miopen::ford(inner_size)([&](int32_t i) {
+        Tcheck pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE_T5) ? static_cast<Tcheck>(1)
+                                                                : static_cast<Tcheck>(weight[i]);
+        Tcheck pdy     = dy ? static_cast<Tcheck>(dy[o * inner_size + i]) : static_cast<Tcheck>(0);
+
+        Tcheck val = prstd * pdy * pweight - a * static_cast<Tcheck>(x[o * inner_size + i]);
+        dxhost[o * inner_size + i] = static_cast<Tcheck>(val);
+    });
 }
 
 template <typename Tgpu, typename Tcheck>
@@ -184,6 +300,33 @@ int32_t mloT5LayerNormBackwardRunHost(miopenTensorDescriptor_t dyDesc,
 }
 
 template <typename Tgpu, typename Tcheck>
+int32_t mloT5LayerNormBackwardRunHost2(miopenTensorDescriptor_t dyDesc,
+                                       Tgpu* dy,
+                                       Tgpu* x,
+                                       Tgpu* weight,
+                                       Tcheck* rstdhost,
+                                       Tcheck* dxhost,
+                                       miopenNormMode_t mode)
+{
+    auto dims         = miopen::deref(dyDesc).GetLengths();
+    size_t outer_size = 1;
+    size_t inner_size = dims[dims.size() - 1];
+
+    for(size_t i = 0ULL; i < dims.size() - 1; ++i)
+    {
+        outer_size *= dims[i];
+    }
+
+    int32_t ret = 0;
+
+    for(int32_t o = 0; o < outer_size; o++)
+    {
+        t5layernorm_bwd_inner(inner_size, o, dy, x, weight, rstdhost, dxhost, mode);
+    }
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
 int32_t mloT5LayerNormBackwardRunHost_mt(miopenTensorDescriptor_t dyDesc,
                                          Tgpu* dy,
                                          Tgpu* x,
@@ -233,6 +376,54 @@ int32_t mloT5LayerNormBackwardRunHost_mt(miopenTensorDescriptor_t dyDesc,
 }
 
 template <typename Tgpu, typename Tcheck>
+int32_t mloT5LayerNormBackwardRunHost_mt2(miopenTensorDescriptor_t dyDesc,
+                                          Tgpu* dy,
+                                          Tgpu* x,
+                                          Tgpu* weight,
+                                          Tcheck* rstdhost,
+                                          Tcheck* dxhost,
+                                          miopenNormMode_t mode)
+{
+    auto dims         = miopen::deref(dyDesc).GetLengths();
+    size_t outer_size = 1;
+    size_t inner_size = dims[dims.size() - 1];
+
+    for(size_t i = 0ULL; i < dims.size() - 1; ++i)
+    {
+        outer_size *= dims[i];
+    }
+
+    int32_t ret = 0;
+
+    miopen::par_ford(outer_size)([&](int32_t o) {
+        t5layernorm_bwd_inner(inner_size, o, dy, x, weight, rstdhost, dxhost, mode);
+    });
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
+void t5layernorm_bwd_weight_inner(size_t inner_size,
+                                  size_t o,
+                                  size_t outer_size,
+                                  Tgpu* dy,
+                                  Tgpu* x,
+                                  Tcheck* rstdhost,
+                                  Tcheck* dwhost)
+{
+    Tcheck sum = static_cast<Tcheck>(0);
+
+    miopen::ford(outer_size)([&](uint64_t i) {
+        Tcheck prstd = static_cast<Tcheck>(rstdhost[i]);
+        Tcheck pdy   = dy ? static_cast<Tcheck>(dy[i * inner_size + o]) : 0;
+        Tcheck px    = static_cast<Tcheck>(x[i * inner_size + o]);
+
+        sum += pdy * px * prstd;
+    });
+
+    dwhost[o] = sum;
+}
+
+template <typename Tgpu, typename Tcheck>
 int32_t mloT5LayerNormBackckwardweightRunHost(
     miopenTensorDescriptor_t dyDesc, Tgpu* dy, Tgpu* x, Tcheck* rstdhost, Tcheck* dwhost)
 {
@@ -265,6 +456,28 @@ int32_t mloT5LayerNormBackckwardweightRunHost(
 }
 
 template <typename Tgpu, typename Tcheck>
+int32_t mloT5LayerNormBackckwardweightRunHost2(
+    miopenTensorDescriptor_t dyDesc, Tgpu* dy, Tgpu* x, Tcheck* rstdhost, Tcheck* dwhost)
+{
+    auto dims         = miopen::deref(dyDesc).GetLengths();
+    size_t outer_size = 1;
+    size_t inner_size = dims[dims.size() - 1];
+
+    for(size_t i = 0ULL; i < dims.size() - 1; ++i)
+    {
+        outer_size *= dims[i];
+    }
+
+    int32_t ret = 0;
+
+    for(int32_t o = 0; o < inner_size; o++)
+    {
+        t5layernorm_bwd_weight_inner(inner_size, o, outer_size, dy, x, rstdhost, dwhost);
+    }
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
 int32_t mloT5LayerNormBackckwardweightRunHost_mt(
     miopenTensorDescriptor_t dyDesc, Tgpu* dy, Tgpu* x, Tcheck* rstdhost, Tcheck* dwhost)
 {
@@ -291,6 +504,27 @@ int32_t mloT5LayerNormBackckwardweightRunHost_mt(
         });
 
         dwhost[o] = sum;
+    });
+    return ret;
+}
+
+template <typename Tgpu, typename Tcheck>
+int32_t mloT5LayerNormBackckwardweightRunHost_mt2(
+    miopenTensorDescriptor_t dyDesc, Tgpu* dy, Tgpu* x, Tcheck* rstdhost, Tcheck* dwhost)
+{
+    auto dims         = miopen::deref(dyDesc).GetLengths();
+    size_t outer_size = 1;
+    size_t inner_size = dims[dims.size() - 1];
+
+    for(size_t i = 0ULL; i < dims.size() - 1; ++i)
+    {
+        outer_size *= dims[i];
+    }
+
+    int32_t ret = 0;
+
+    miopen::par_ford(inner_size)([&](int32_t o) {
+        t5layernorm_bwd_weight_inner(inner_size, o, outer_size, dy, x, rstdhost, dwhost);
     });
     return ret;
 }
@@ -606,13 +840,71 @@ int T5LayerNormDriver<Tgpu, Tref>::RunForwardCPU()
 {
     if(use_multithread)
     {
+        auto start = std::chrono::steady_clock::now();
         mloT5LayerNormForwardRunHost_mt<Tgpu, Tref>(
             xDesc, x.data(), weight.data(), yhost.data(), rstdhost.data(), eps, mode);
+        auto end = std::chrono::steady_clock::now();
+
+        std::chrono::duration<float, std::milli> diff = end - start;
+
+        start = std::chrono::steady_clock::now();
+        mloT5LayerNormForwardRunHost_mt2<Tgpu, Tref>(
+            xDesc, x.data(), weight.data(), yhost.data(), rstdhost.data(), eps, mode);
+        end = std::chrono::steady_clock::now();
+
+        std::chrono::duration<float, std::milli> diff1 = end - start;
+
+        auto lens = inflags.GetValueTensor("input").lengths;
+
+        size_t sz     = 1;
+        std::string s = "";
+        for(int i = 0; i < lens.size(); i++)
+        {
+            sz *= lens[i];
+            s += std::to_string(lens[i]);
+            if(i < lens.size() - 1)
+            {
+                s += "x";
+            }
+        }
+
+        std::ofstream f("t5layernorm_fwd_mt.tsv", std::ios::app);
+        f << s << "\t" << sz << "\t" << diff.count() << "\t" << diff1.count() << std::endl;
+        f.close();
     }
     else
     {
+        auto start = std::chrono::steady_clock::now();
         mloT5LayerNormForwardRunHost<Tgpu, Tref>(
             xDesc, x.data(), weight.data(), yhost.data(), rstdhost.data(), eps, mode);
+        auto end = std::chrono::steady_clock::now();
+
+        std::chrono::duration<float, std::milli> diff = end - start;
+
+        start = std::chrono::steady_clock::now();
+        mloT5LayerNormForwardRunHost2<Tgpu, Tref>(
+            xDesc, x.data(), weight.data(), yhost.data(), rstdhost.data(), eps, mode);
+        end = std::chrono::steady_clock::now();
+
+        std::chrono::duration<float, std::milli> diff1 = end - start;
+
+        auto lens = inflags.GetValueTensor("input").lengths;
+
+        size_t sz     = 1;
+        std::string s = "";
+        for(int i = 0; i < lens.size(); i++)
+        {
+            sz *= lens[i];
+            s += std::to_string(lens[i]);
+            if(i < lens.size() - 1)
+            {
+                s += "x";
+            }
+        }
+
+        std::ofstream f("t5layernorm_fwd_st.tsv", std::ios::app);
+        f << s << "\t" << sz << "\t" << diff.count() << "\t" << diff1.count() << std::endl;
+        f.close();
     }
 
     return miopenStatusSuccess;
@@ -681,19 +973,105 @@ int T5LayerNormDriver<Tgpu, Tref>::RunBackwardCPU()
 {
     if(use_multithread)
     {
+        auto start = std::chrono::steady_clock::now();
         mloT5LayerNormBackwardRunHost_mt<Tgpu, Tref>(
             dyDesc, dy.data(), x.data(), weight.data(), rstdhost.data(), dxhost.data(), mode);
+        auto end = std::chrono::steady_clock::now();
 
+        std::chrono::duration<float, std::milli> diff = end - start;
+
+        start = std::chrono::steady_clock::now();
+        mloT5LayerNormBackwardRunHost_mt2<Tgpu, Tref>(
+            dyDesc, dy.data(), x.data(), weight.data(), rstdhost.data(), dxhost.data(), mode);
+        end = std::chrono::steady_clock::now();
+
+        std::chrono::duration<float, std::milli> diff1 = end - start;
+
+        auto lens = inflags.GetValueTensor("input").lengths;
+
+        size_t sz     = 1;
+        std::string s = "";
+        for(int i = 0; i < lens.size(); i++)
+        {
+            sz *= lens[i];
+            s += std::to_string(lens[i]);
+            if(i < lens.size() - 1)
+            {
+                s += "x";
+            }
+        }
+
+        std::ofstream f("t5layernorm_bwd_mt.tsv", std::ios::app);
+        f << s << "\t" << sz << "\t" << diff.count() << "\t" << diff1.count() << std::endl;
+        f.close();
+        start = std::chrono::steady_clock::now();
         mloT5LayerNormBackckwardweightRunHost_mt<Tgpu, Tref>(
             dyDesc, dy.data(), x.data(), rstdhost.data(), dwhost.data());
+        end = std::chrono::steady_clock::now();
+
+        diff = end - start;
+
+        start = std::chrono::steady_clock::now();
+        mloT5LayerNormBackckwardweightRunHost_mt2<Tgpu, Tref>(
+            dyDesc, dy.data(), x.data(), rstdhost.data(), dwhost.data());
+        end = std::chrono::steady_clock::now();
+
+        diff1 = end - start;
+
+        std::ofstream f1("t5layernorm_bwd_weight_mt.tsv", std::ios::app);
+        f1 << s << "\t" << sz << "\t" << diff.count() << "\t" << diff1.count() << std::endl;
+        f1.close();
     }
     else
     {
+        auto start = std::chrono::steady_clock::now();
         mloT5LayerNormBackwardRunHost<Tgpu, Tref>(
             dyDesc, dy.data(), x.data(), weight.data(), rstdhost.data(), dxhost.data(), mode);
+        auto end = std::chrono::steady_clock::now();
 
+        std::chrono::duration<float, std::milli> diff = end - start;
+
+        start = std::chrono::steady_clock::now();
+        mloT5LayerNormBackwardRunHost2<Tgpu, Tref>(
+            dyDesc, dy.data(), x.data(), weight.data(), rstdhost.data(), dxhost.data(), mode);
+        end = std::chrono::steady_clock::now();
+
+        std::chrono::duration<float, std::milli> diff1 = end - start;
+
+        auto lens = inflags.GetValueTensor("input").lengths;
+
+        size_t sz     = 1;
+        std::string s = "";
+        for(int i = 0; i < lens.size(); i++)
+        {
+            sz *= lens[i];
+            s += std::to_string(lens[i]);
+            if(i < lens.size() - 1)
+            {
+                s += "x";
+            }
+        }
+
+        std::ofstream f("t5layernorm_bwd_st.tsv", std::ios::app);
+        f << s << "\t" << sz << "\t" << diff.count() << "\t" << diff1.count() << std::endl;
+        f.close();
+        start = std::chrono::steady_clock::now();
         mloT5LayerNormBackckwardweightRunHost<Tgpu, Tref>(
             dyDesc, dy.data(), x.data(), rstdhost.data(), dwhost.data());
+        end = std::chrono::steady_clock::now();
+
+        diff = end - start;
+
+        start = std::chrono::steady_clock::now();
+        mloT5LayerNormBackckwardweightRunHost2<Tgpu, Tref>(
+            dyDesc, dy.data(), x.data(), rstdhost.data(), dwhost.data());
+        end = std::chrono::steady_clock::now();
+
+        diff1 = end - start;
+
+        std::ofstream f1("t5layernorm_bwd_weight_st.tsv", std::ios::app);
+        f1 << s << "\t" << sz << "\t" << diff.count() << "\t" << diff1.count() << std::endl;
+        f1.close();
     }
 
     return miopenStatusSuccess;
@@ -771,13 +1149,13 @@ int T5LayerNormDriver<Tgpu, Tref>::VerifyBackward()
     auto dwerror = miopen::rms_range(dwhost, dw);
     if(!std::isfinite(dwerror) || dwerror > tolerance)
     {
-        std::cout << "Backward T5LayerNorm FAILED against " << solver_type
+        std::cout << "Backward T5LayerNorm dw FAILED against " << solver_type
                   << " CPU reference: " << error << " > " << tolerance << std::endl;
         return EC_VerifyBwd;
     }
     else
     {
-        std::cout << "Backward T5LayerNorm Verifies OK against " << solver_type
+        std::cout << "Backward T5LayerNorm dw Verifies OK against " << solver_type
                   << " CPU reference (" << error << " < " << tolerance << ')' << std::endl;
     }
 
