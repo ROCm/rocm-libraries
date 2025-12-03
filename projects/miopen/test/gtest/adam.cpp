@@ -27,6 +27,7 @@
 #include <string_view>
 
 #include "adam.hpp"
+#include "test_parameter_name_generator.hpp"
 
 namespace adam {
 
@@ -139,10 +140,9 @@ TEST_P(GPU_AmpAdam_Updated_Singlethread_FP32, AmpAdamUpdatedSinglethreadTestFw)
 
 /////////////////////////////////////////////////////////
 
-template <typename TestSuiteT>
 struct TestNameGenerator
 {
-    std::string operator()(const testing::TestParamInfo<typename TestSuiteT::ParamType>& info)
+    std::string operator()(const auto& info)
     {
         const auto& tc = info.param;
         std::stringstream ss;
@@ -162,32 +162,6 @@ struct TestNameGenerator
 
         return str;
     }
-
-private:
-    std::string GetRangeAsString(const std::ranges::range auto& r, std::string_view separator)
-    {
-        std::string str;
-
-        if(r.size() > 0)
-        {
-            std::stringstream ss;
-
-            ss << *r.begin();
-
-            for(auto it = r.begin() + 1; it != r.end(); ++it)
-            {
-                ss << separator << *it;
-            }
-
-            str = ss.str();
-
-            // Name format only supports letters, numbers and underscores.
-            std::transform(
-                str.begin(), str.end(), str.begin(), [](char c) { return (c == '.') ? 'p' : c; });
-        }
-
-        return str;
-    }
 };
 
 /////////////////////////////////////////////////////////
@@ -195,38 +169,38 @@ private:
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Adam_FP32,
                          testing::ValuesIn(AdamTestConfigs()),
-                         TestNameGenerator<GPU_Adam_FP32>{});
+                         TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Adam_FP16,
                          testing::ValuesIn(AdamTestConfigs()),
-                         TestNameGenerator<GPU_Adam_FP16>{});
+                         TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_AmpAdam_FP32,
                          testing::ValuesIn(AdamTestConfigs()),
-                         TestNameGenerator<GPU_AmpAdam_FP32>{});
+                         TestNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Adam_Updated_FP32,
                          testing::ValuesIn(AdamTestConfigs()),
-                         TestNameGenerator<GPU_Adam_Updated_FP32>{});
+                         TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Adam_Updated_FP16,
                          testing::ValuesIn(AdamTestConfigs()),
-                         TestNameGenerator<GPU_Adam_Updated_FP16>{});
+                         TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_AmpAdam_Updated_FP32,
                          testing::ValuesIn(AdamTestConfigs()),
-                         TestNameGenerator<GPU_AmpAdam_Updated_FP32>{});
+                         TestNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Adam_Updated_Singlethread_FP32,
                          testing::ValuesIn(AdamTestConfigs()),
-                         TestNameGenerator<GPU_Adam_Updated_Singlethread_FP32>{});
+                         TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Adam_Updated_Singlethread_FP16,
                          testing::ValuesIn(AdamTestConfigs()),
-                         TestNameGenerator<GPU_Adam_Updated_Singlethread_FP16>{});
+                         TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_AmpAdam_Updated_Singlethread_FP32,
                          testing::ValuesIn(AdamTestConfigs()),
-                         TestNameGenerator<GPU_AmpAdam_Updated_Singlethread_FP32>{});
+                         TestNameGenerator{});

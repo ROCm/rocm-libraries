@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -303,21 +303,19 @@ private:
     std::vector<Tref> exp_avg_sq_host;
     std::vector<Tref> max_exp_avg_sq_host;
 
-    std::vector<Tref> param_host_mt;
-    std::vector<Tref> max_exp_avg_sq_host_mt;
-
     float lr;
     float beta1;
     float beta2;
     float weight_decay;
     float eps;
-    bool amsgrad   = false;
-    bool maximize  = false;
-    bool found_inf = false;
-    bool adamw     = false;
-    bool is_amp    = false;
-    int grad_scale = 1;
-    int iter       = 0;
+    bool amsgrad         = false;
+    bool maximize        = false;
+    bool found_inf       = false;
+    bool adamw           = false;
+    bool is_amp          = false;
+    int grad_scale       = 1;
+    int iter             = 0;
+    bool use_multithread = false;
 
     miopenDataType_t grad_type;
 };
@@ -337,15 +335,16 @@ int AdamDriver<Tgpu, Tref, Tgrad>::ParseCmdLineArgs(int argc, char* argv[])
 template <typename Tgpu, typename Tref, typename Tgrad>
 int AdamDriver<Tgpu, Tref, Tgrad>::GetandSetData()
 {
-    auto param_len = GetInputTensorLengthsFromCmdLine();
-    lr             = inflags.GetValueDouble("lr");
-    beta1          = inflags.GetValueDouble("beta1");
-    beta2          = inflags.GetValueDouble("beta2");
-    eps            = inflags.GetValueDouble("eps");
-    weight_decay   = inflags.GetValueDouble("weight_decay");
-    amsgrad        = inflags.GetValueInt("amsgrad");
-    maximize       = inflags.GetValueInt("maximize");
-    iter           = inflags.GetValueInt("iter");
+    auto param_len  = GetInputTensorLengthsFromCmdLine();
+    lr              = inflags.GetValueDouble("lr");
+    beta1           = inflags.GetValueDouble("beta1");
+    beta2           = inflags.GetValueDouble("beta2");
+    eps             = inflags.GetValueDouble("eps");
+    weight_decay    = inflags.GetValueDouble("weight_decay");
+    amsgrad         = inflags.GetValueInt("amsgrad");
+    maximize        = inflags.GetValueInt("maximize");
+    iter            = inflags.GetValueInt("iter");
+    use_multithread = (inflags.GetValueInt("mt") != 0);
 
     if(is_amp)
     {
@@ -402,6 +401,7 @@ int AdamDriver<Tgpu, Tref, Tgrad>::AddCmdLineArgs()
     inflags.AddInputFlag("time", 't', "0", "Time Each Layer (Default=0)", "int");
     inflags.AddInputFlag(
         "wall", 'w', "0", "Wall-clock Time Each Layer, Requires time == 1 (Default=0)", "int");
+    inflags.AddInputFlag("mt", 'M', "0", "Use multithreaded version (Default=0)", "int");
 
     return miopenStatusSuccess;
 }
@@ -449,32 +449,27 @@ int AdamDriver<Tgpu, Tref, Tgrad>::AllocateBuffersAndCopy()
     exp_avg_host    = std::vector<Tref>(param_sz, static_cast<Tref>(0));
     exp_avg_sq_host = std::vector<Tref>(param_sz, static_cast<Tref>(0));
 
-    param_host_mt = std::vector<Tref>(param_sz, static_cast<Tref>(0));
-
     if(amsgrad)
     {
-        max_exp_avg_sq         = std::vector<Tgpu>(param_sz, static_cast<Tgpu>(0));
-        max_exp_avg_sq_host    = std::vector<Tref>(param_sz, static_cast<Tref>(0));
-        max_exp_avg_sq_host_mt = std::vector<Tref>(param_sz, static_cast<Tref>(0));
+        max_exp_avg_sq      = std::vector<Tgpu>(param_sz, static_cast<Tgpu>(0));
+        max_exp_avg_sq_host = std::vector<Tref>(param_sz, static_cast<Tref>(0));
     }
 
     for(size_t i = 0; i < param_sz; ++i)
     {
-        param[i]      = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
-        grad[i]       = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0.0), static_cast<Tgrad>(0.1));
-        exp_avg[i]    = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0), static_cast<Tgrad>(0.1));
-        exp_avg_sq[i] = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0), static_cast<Tgrad>(0.1));
-        param_host[i] = param[i];
-        param_host_mt[i]   = param[i];
-        exp_avg_host[i]    = exp_avg[i];
+        param[i]        = prng::gen_A_to_B<Tgpu>(static_cast<Tgpu>(0.0), static_cast<Tgpu>(1.0));
+        grad[i]         = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0.0), static_cast<Tgrad>(0.1));
+        exp_avg[i]      = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0), static_cast<Tgrad>(0.1));
+        exp_avg_sq[i]   = prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0), static_cast<Tgrad>(0.1));
+        param_host[i]   = param[i];
+        exp_avg_host[i] = exp_avg[i];
         exp_avg_sq_host[i] = exp_avg_sq[i];
 
         if(amsgrad)
         {
             max_exp_avg_sq[i] =
                 prng::gen_A_to_B<Tgrad>(static_cast<Tgrad>(0.5), static_cast<Tgrad>(1.0));
-            max_exp_avg_sq_host[i]    = max_exp_avg_sq[i];
-            max_exp_avg_sq_host_mt[i] = max_exp_avg_sq[i];
+            max_exp_avg_sq_host[i] = max_exp_avg_sq[i];
         }
 
         if(is_amp)
@@ -610,43 +605,48 @@ int AdamDriver<Tgpu, Tref, Tgrad>::RunForwardGPU()
 template <typename Tgpu, typename Tref, typename Tgrad>
 int AdamDriver<Tgpu, Tref, Tgrad>::RunForwardCPU()
 {
-    mloAdamRunHost<Tref>(paramDesc,
-                         param_host.data(),
-                         grad_host.data(),
-                         exp_avg_host.data(),
-                         exp_avg_sq_host.data(),
-                         max_exp_avg_sq_host.data(),
-                         iter,
-                         lr,
-                         beta1,
-                         beta2,
-                         weight_decay,
-                         eps,
-                         amsgrad,
-                         maximize,
-                         adamw,
-                         is_amp,
-                         grad_scale,
-                         found_inf);
-
-    mloAdamRunHost_mt<Tref>(paramDesc,
-                            param_host_mt.data(),
-                            grad_host.data(),
-                            exp_avg_host.data(),
-                            exp_avg_sq_host.data(),
-                            max_exp_avg_sq_host_mt.data(),
-                            iter,
-                            lr,
-                            beta1,
-                            beta2,
-                            weight_decay,
-                            eps,
-                            amsgrad,
-                            maximize,
-                            adamw,
-                            is_amp,
-                            grad_scale,
-                            found_inf);
+    if(use_multithread)
+    {
+        mloAdamRunHost_mt<Tref>(paramDesc,
+                                param_host.data(),
+                                grad_host.data(),
+                                exp_avg_host.data(),
+                                exp_avg_sq_host.data(),
+                                max_exp_avg_sq_host.data(),
+                                iter,
+                                lr,
+                                beta1,
+                                beta2,
+                                weight_decay,
+                                eps,
+                                amsgrad,
+                                maximize,
+                                adamw,
+                                is_amp,
+                                grad_scale,
+                                found_inf);
+    }
+    else
+    {
+        mloAdamRunHost<Tref>(paramDesc,
+                             param_host.data(),
+                             grad_host.data(),
+                             exp_avg_host.data(),
+                             exp_avg_sq_host.data(),
+                             max_exp_avg_sq_host.data(),
+                             iter,
+                             lr,
+                             beta1,
+                             beta2,
+                             weight_decay,
+                             eps,
+                             amsgrad,
+                             maximize,
+                             adamw,
+                             is_amp,
+                             grad_scale,
+                             found_inf);
+    }
 
     return miopenStatusSuccess;
 }
@@ -684,26 +684,35 @@ int AdamDriver<Tgpu, Tref, Tgrad>::VerifyForward()
 {
     RunForwardCPU();
     const Tref tolerance = GetTolerance();
-    const auto error     = miopen::rms_range(param_host, param);
-    const auto error_mt  = miopen::rms_range(param_host_mt, param);
 
-    if(!std::isfinite(error) || error > tolerance)
+    if(use_multithread)
     {
-        std::cout << "Forward Adam FAILED on updated single-threaded CPU reference: " << error
+        const auto error = miopen::rms_range(param_host, param);
+
+        if(!std::isfinite(error) || error > tolerance)
+        {
+            std::cout << "Forward Adam FAILED on updated multi-threaded CPU reference: " << error
+                      << std::endl;
+            return EC_VerifyFwd;
+        }
+
+        std::cout << "Forward Adam Verifies OK on updated multi-threaded CPU reference"
                   << std::endl;
-        return EC_VerifyFwd;
     }
-
-    std::cout << "Forward Adam Verifies OK on updated single-threaded CPU reference" << std::endl;
-
-    if(!std::isfinite(error_mt) || error_mt > tolerance)
+    else
     {
-        std::cout << "Forward Adam FAILED on updated multi-threaded CPU reference: " << error_mt
-                  << std::endl;
-        return EC_VerifyFwd;
-    }
+        const auto error = miopen::rms_range(param_host, param);
 
-    std::cout << "Forward Adam Verifies OK on updated multi-threaded CPU reference" << std::endl;
+        if(!std::isfinite(error) || error > tolerance)
+        {
+            std::cout << "Forward Adam FAILED on updated single-threaded CPU reference: " << error
+                      << std::endl;
+            return EC_VerifyFwd;
+        }
+
+        std::cout << "Forward Adam Verifies OK on updated single-threaded CPU reference"
+                  << std::endl;
+    }
 
     return miopenStatusSuccess;
 }

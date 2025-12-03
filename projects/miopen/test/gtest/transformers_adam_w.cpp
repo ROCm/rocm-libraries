@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include "test_parameter_name_generator.hpp"
 #include "transformers_adam_w.hpp"
 
 namespace transformers_adam_w {
@@ -144,32 +145,65 @@ TEST_P(GPU_TransformersAmpAdamWTest_Updated_Singlethread_FP32,
 
 /////////////////////////////////////////////////////////
 
+struct TestNameGenerator
+{
+    std::string operator()(const auto& info)
+    {
+        const auto& tc = info.param;
+        std::stringstream ss;
+
+        ss << "input_" << GetRangeAsString(tc.input, "x") << "_weight_decay_" << tc.weight_decay
+           << "_correct_bias_" << tc.correct_bias << "_use_step_tensor_" << tc.use_step_tensor
+           << "_use_step_size_" << tc.use_step_size << "_test_id_" << info.index;
+
+        std::string str(ss.str());
+
+        // Name format only supports letters, numbers and underscores.
+        std::transform(str.begin(), str.end(), str.begin(), [](char c) {
+            return (c == '.') ? 'p' : (std::isalnum(c) ? c : '_');
+        });
+
+        return str;
+    }
+};
+
+/////////////////////////////////////////////////////////
+
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_TransformersAdamWTest_FP32,
-                         testing::ValuesIn(TransformersAdamWTestConfigs()));
+                         testing::ValuesIn(TransformersAdamWTestConfigs()),
+                         TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_TransformersAdamWTest_FP16,
-                         testing::ValuesIn(TransformersAdamWTestConfigs()));
+                         testing::ValuesIn(TransformersAdamWTestConfigs()),
+                         TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_TransformersAmpAdamWTest_FP32,
-                         testing::ValuesIn(TransformersAdamWTestConfigs()));
+                         testing::ValuesIn(TransformersAdamWTestConfigs()),
+                         TestNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_TransformersAdamWTest_Updated_FP32,
-                         testing::ValuesIn(TransformersAdamWTestConfigs()));
+                         testing::ValuesIn(TransformersAdamWTestConfigs()),
+                         TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_TransformersAdamWTest_Updated_FP16,
-                         testing::ValuesIn(TransformersAdamWTestConfigs()));
+                         testing::ValuesIn(TransformersAdamWTestConfigs()),
+                         TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_TransformersAmpAdamWTest_Updated_FP32,
-                         testing::ValuesIn(TransformersAdamWTestConfigs()));
+                         testing::ValuesIn(TransformersAdamWTestConfigs()),
+                         TestNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_TransformersAdamWTest_Updated_Singlethread_FP32,
-                         testing::ValuesIn(TransformersAdamWTestConfigs()));
+                         testing::ValuesIn(TransformersAdamWTestConfigs()),
+                         TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_TransformersAdamWTest_Updated_Singlethread_FP16,
-                         testing::ValuesIn(TransformersAdamWTestConfigs()));
+                         testing::ValuesIn(TransformersAdamWTestConfigs()),
+                         TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_TransformersAmpAdamWTest_Updated_Singlethread_FP32,
-                         testing::ValuesIn(TransformersAdamWTestConfigs()));
+                         testing::ValuesIn(TransformersAdamWTestConfigs()),
+                         TestNameGenerator{});
