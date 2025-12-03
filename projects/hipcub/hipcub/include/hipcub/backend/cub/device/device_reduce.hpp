@@ -103,7 +103,7 @@ public:
                              InputIteratorT       d_in,
                              ExtremumOutIteratorT d_min_out,
                              IndexOutIteratorT    d_index_out,
-                             ::std::int64_t       num_items,
+                             std::int64_t         num_items,
                              hipStream_t          stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceReduce::ArgMin(d_temp_storage,
@@ -163,7 +163,7 @@ public:
                              InputIteratorT       d_in,
                              ExtremumOutIteratorT d_max_out,
                              IndexOutIteratorT    d_index_out,
-                             ::std::int64_t       num_items,
+                             std::int64_t         num_items,
                              hipError_t           stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceReduce::ArgMax(d_temp_storage,

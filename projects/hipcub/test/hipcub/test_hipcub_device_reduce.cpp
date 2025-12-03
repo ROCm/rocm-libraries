@@ -1218,7 +1218,7 @@ TYPED_TEST(HipcubDeviceReduceLargeIndicesTests, LargeIndices)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            const std::size_t result = output[0];
+            const size_t result = output[0];
             ASSERT_EQ(result, size);
 
             HIP_CHECK(hipFree(d_output));

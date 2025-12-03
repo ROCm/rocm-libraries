@@ -88,17 +88,17 @@ struct bfloat16_t
         *this = bfloat16_t(float(a));
     }
 
-    /// Constructor from std::size_t
-    __host__ __device__ __forceinline__ bfloat16_t(std::size_t a)
+    /// Constructor from size_t
+    __host__ __device__ __forceinline__ bfloat16_t(size_t a)
     {
         *this = bfloat16_t(float(a));
     }
 
     /// Constructor from unsigned long long int
     template<typename T,
-             typename = typename std::enable_if<
-                 std::is_same_v<T, unsigned long long int>
-                 && (!std::is_same_v<std::size_t, unsigned long long int>)>::type>
+             typename
+             = typename std::enable_if<std::is_same_v<T, unsigned long long int>
+                                       && (!std::is_same_v<size_t, unsigned long long int>)>::type>
     __host__ __device__ __forceinline__ bfloat16_t(T a)
     {
         *this = bfloat16_t(float(a));
