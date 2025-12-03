@@ -1743,22 +1743,24 @@ int RNNSeqDriver<Tgpu, Tref>::VerifyForward()
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << std::string("Forward RNN FAILED: ") << error << std::endl;
+        std::cout << std::string("Forward RNN FAILED: ") << error << std::string(" > ") << tolerance
+                  << std::endl;
     }
     else
     {
-        printf("Forward RNN Verifies on CPU and GPU\n");
+        printf("Forward RNN Verifies on CPU and GPU (%e < %e)\n", error, tolerance);
     }
 
     auto error2 = miopen::rms_range(hy_host, hy);
 
     if(!std::isfinite(error2) || error2 > tolerance)
     {
-        std::cout << std::string("final hidden state FAILED: ") << error2 << std::endl;
+        std::cout << std::string("final hidden state FAILED: ") << error2 << std::string(" > ")
+                  << tolerance << std::endl;
     }
     else
     {
-        printf("final hidden Verifies on CPU and GPU\n");
+        printf("final hidden Verifies on CPU and GPU (%e < %e)\n", error2, tolerance);
     }
 
     if((inflags.GetValueStr("mode")) == "lstm")
@@ -1767,11 +1769,12 @@ int RNNSeqDriver<Tgpu, Tref>::VerifyForward()
 
         if(!std::isfinite(error3) || error3 > tolerance)
         {
-            std::cout << std::string("final cell state FAILED: ") << error3 << std::endl;
+            std::cout << std::string("final cell state FAILED: ") << error3 << std::string(" > ")
+                      << tolerance << std::endl;
         }
         else
         {
-            printf("final cell Verifies on CPU and GPU\n");
+            printf("final cell Verifies on CPU and GPU (%e < %e)\n", error3, tolerance);
         }
     }
 
@@ -1800,11 +1803,12 @@ int RNNSeqDriver<Tgpu, Tref>::VerifyBackward()
 
         if(!std::isfinite(error_data) || error_data > tolerance)
         {
-            std::cout << std::string("Backward RNN Data FAILED: ") << error_data << std::endl;
+            std::cout << std::string("Backward RNN Data FAILED: ") << error_data
+                      << std::string(" > ") << tolerance << std::endl;
         }
         else
         {
-            printf("Backward RNN Data Verifies on CPU and GPU\n");
+            printf("Backward RNN Data Verifies on CPU and GPU (%e < %e)\n", error_data, tolerance);
         }
 
         auto error_data2 = miopen::rms_range(dhx_host, dhx);
@@ -1812,11 +1816,12 @@ int RNNSeqDriver<Tgpu, Tref>::VerifyBackward()
         if(!std::isfinite(error_data2) || error_data2 > tolerance)
         {
             std::cout << std::string("difference at inital hidden state FAILED: ") << error_data2
-                      << std::endl;
+                      << std::string(" > ") << tolerance << std::endl;
         }
         else
         {
-            printf("initial hidden state Verifies on CPU and GPU\n");
+            printf(
+                "initial hidden state Verifies on CPU and GPU (%e < %e)\n", error_data2, tolerance);
         }
 
         if((inflags.GetValueStr("mode")) == "lstm")
@@ -1826,11 +1831,13 @@ int RNNSeqDriver<Tgpu, Tref>::VerifyBackward()
             if(!std::isfinite(error_data3) || error_data3 > tolerance)
             {
                 std::cout << std::string("difference at inital cell state FAILED: ") << error_data3
-                          << std::endl;
+                          << std::string(" > ") << tolerance << std::endl;
             }
             else
             {
-                printf("inital cell state Verifies on CPU and GPU\n");
+                printf("inital cell state Verifies on CPU and GPU (%e < %e)\n",
+                       error_data3,
+                       tolerance);
             }
         }
     }
@@ -1845,11 +1852,14 @@ int RNNSeqDriver<Tgpu, Tref>::VerifyBackward()
         auto error_weights = miopen::rms_range(dwei_host, dwei);
         if(!std::isfinite(error_weights) || error_weights > tolerance)
         {
-            std::cout << std::string("Backward RNN Weights FAILED: ") << error_weights << std::endl;
+            std::cout << std::string("Backward RNN Weights FAILED: ") << error_weights
+                      << std::string(" > ") << tolerance << std::endl;
         }
         else
         {
-            printf("Backward RNN Weights Verifies on CPU and GPU\n");
+            printf("Backward RNN Weights Verifies on CPU and GPU (%e < %e)\n",
+                   error_weights,
+                   tolerance);
         }
     }
 
