@@ -10,11 +10,7 @@
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 #include <type_traits>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
-{
-namespace pointwise
+namespace hipdnn_sdk::test_utilities::pointwise
 {
 
 struct Add
@@ -51,18 +47,28 @@ template <typename ComputeType = float>
 struct ReluBackward
 {
     template <typename X, typename Dy>
-    auto operator()(const X& x, const Dy& dy) const -> X
+    auto operator()(const X& x, const Dy& dy) const -> ComputeType
     {
         auto xCompute = static_cast<ComputeType>(x);
         auto dyCompute = static_cast<ComputeType>(dy);
         auto localGradient = (xCompute > ComputeType{0}) ? ComputeType{1} : ComputeType{0};
-        ComputeType result = dyCompute * localGradient;
-        return safeConvert<X>(result);
+        return dyCompute * localGradient;
     }
 };
 
-// The Two bwd relus are split because this one is inclusive of your lower clip, whereas default
-// bwd relu is exclusive of 0.
+// CLAMP is f(x) = min(max(x, lowerClip), upperClip)
+// Thus, we have:
+// f'(x) = 1, if x > lowerClip && x < upperClip
+// f'(x) = 0, if x < lowerClip || x > upperClip
+// The derivatives at the bounds are technically undefined, but we follow convention
+// of treating the upper bound as inclusive and the lower bound as exclusive.
+// e.g. https://github.com/ROCm/rocm-libraries/blob/develop/projects/miopen/src/kernels/bnorm_spatial_activation_functions.h#L75
+
+// Leaky ReLU is f(x) = x, if x > 0; f(x) = lowerSlope * x, otherwise
+// Thus, we have:
+// f'(x) = 1, if x > 0
+// f'(x) = lowerSlope, if x < 0
+// Again, the derivative at 0 is technically undefined, but we follow convention of treating f'(0) = lowerSlope.
 template <typename ComputeType = float>
 struct ParameterizedReluBackward
 {
@@ -78,13 +84,13 @@ struct ParameterizedReluBackward
     }
 
     template <typename X, typename Dy>
-    auto operator()(const X& x, const Dy& dy) const -> X
+    auto operator()(const X& x, const Dy& dy) const -> ComputeType
     {
         auto xCompute = static_cast<ComputeType>(x);
         auto dyCompute = static_cast<ComputeType>(dy);
 
         ComputeType localGradient;
-        if(xCompute < lowerClip)
+        if(xCompute <= lowerClip)
         {
             localGradient = lowerSlope;
         }
@@ -97,8 +103,7 @@ struct ParameterizedReluBackward
             localGradient = ComputeType{1};
         }
 
-        ComputeType result = dyCompute * localGradient;
-        return safeConvert<X>(result);
+        return dyCompute * localGradient;
     }
 };
 
@@ -106,15 +111,14 @@ template <typename ComputeType = float>
 struct SigmoidBackward
 {
     template <typename X, typename Dy>
-    auto operator()(const X& x, const Dy& dy) const -> X
+    auto operator()(const X& x, const Dy& dy) const -> ComputeType
     {
         auto xCompute = static_cast<ComputeType>(x);
         auto dyCompute = static_cast<ComputeType>(dy);
 
         ComputeType sigmoidVal = ComputeType{1} / (ComputeType{1} + std::exp(-xCompute));
         auto localGradient = sigmoidVal * (ComputeType{1} - sigmoidVal);
-        ComputeType result = dyCompute * localGradient;
-        return safeConvert<X>(result);
+        return dyCompute * localGradient;
     }
 };
 
@@ -122,18 +126,15 @@ template <typename ComputeType = float>
 struct TanhBackward
 {
     template <typename X, typename Dy>
-    auto operator()(const X& x, const Dy& dy) const -> X
+    auto operator()(const X& x, const Dy& dy) const -> ComputeType
     {
         auto xCompute = static_cast<ComputeType>(x);
         auto dyCompute = static_cast<ComputeType>(dy);
 
         ComputeType tanhVal = std::tanh(xCompute);
         auto localGradient = ComputeType{1} - (tanhVal * tanhVal);
-        ComputeType result = dyCompute * localGradient;
-        return safeConvert<X>(result);
+        return dyCompute * localGradient;
     }
 };
 
-} // namespace pointwise
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::test_utilities::pointwise

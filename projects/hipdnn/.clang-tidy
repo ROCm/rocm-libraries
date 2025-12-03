@@ -9,6 +9,7 @@ Checks: >
   performance-*,
   portability-*,
   readability-*,
+  google-global-names-in-headers,
   -fuchsia-trailing-return,
   -modernize-use-trailing-return-type,
   -modernize-concat-nested-namespaces,
@@ -27,7 +28,7 @@ WarningsAsErrors: "*"
 HeaderFileExtensions: ['h','hpp']
 
 # This regex is a inclusion filter for the files to be checked. Its a Posix regex and
-# does not seem to support negative lookahead.  
+# does not seem to support negative lookahead.
 HeaderFilterRegex: '.'
 ExcludeHeaderFilterRegex: '^(.*data_objects.*)$'
 

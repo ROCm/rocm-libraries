@@ -4,6 +4,7 @@
 
 #include "GraphAttributes.hpp"
 #include <flatbuffers/flatbuffers.h>
+#include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
@@ -15,9 +16,7 @@
 #include <variant>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 
 class TensorAttributes
@@ -186,6 +185,17 @@ public:
         return *this;
     }
 
+    Error validate() const
+    {
+        if(_dataType == DataType::NOT_SET)
+        {
+            return {ErrorCode::ATTRIBUTE_NOT_SET,
+                    "Tensor " + _name + " does not have a data type set"};
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
     bool validate_dims_set_and_positive() const // NOLINT(readability-identifier-naming
     {
         auto isPositive = [](int64_t value) constexpr { return value > 0; };
@@ -272,5 +282,4 @@ private:
     ValueVariant _value;
 };
 typedef TensorAttributes Tensor_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

@@ -23,133 +23,104 @@
  * ************************************************************************ */
 
 #include "rocsparse_coosv.hpp"
-#include "rocsparse_enum_utils.hpp"
+#include "rocsparse_csrsv.hpp"
 #include "rocsparse_utility.hpp"
-#include <map>
-#include <sstream>
 
-namespace rocsparse
+rocsparse_status rocsparse::coosv_solve(rocsparse_handle            handle, // 0
+                                        rocsparse_operation         trans, // 1
+                                        rocsparse_datatype          alpha_datatype, //2
+                                        const void*                 alpha, // 3
+                                        int64_t                     alpha_stride, // 4
+                                        rocsparse_const_spmat_descr A, // 5
+                                        rocsparse_const_dnvec_descr x, // 6
+                                        rocsparse_dnvec_descr       y, // 7
+                                        rocsparse_solve_policy      policy, // 8
+                                        rocsparse_csrsv_info        csrsv_info, // 9
+                                        void*                       temp_buffer) // 10
 {
-    typedef rocsparse_status (*coosv_solve_t)(rocsparse_handle          handle,
-                                              rocsparse_operation       trans,
-                                              int64_t                   m,
-                                              int64_t                   nnz,
-                                              const void*               alpha,
-                                              const rocsparse_mat_descr descr,
-                                              const void*               coo_val,
-                                              const void*               coo_row_ind,
-                                              const void*               coo_col_ind,
-                                              rocsparse_mat_info        info,
-                                              const void*               x,
-                                              void*                     y,
-                                              rocsparse_solve_policy    policy,
-                                              rocsparse_csrsv_info      csrsv_info,
-                                              void*                     temp_buffer);
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_ENUM(1, trans);
+    ROCSPARSE_CHECKARG_ENUM(2, alpha_datatype);
+    ROCSPARSE_CHECKARG_POINTER(5, A);
+    ROCSPARSE_CHECKARG_ARRAY(3, A->batch_count, alpha);
+    ROCSPARSE_CHECKARG_POINTER(6, x);
+    ROCSPARSE_CHECKARG_POINTER(7, y);
+    ROCSPARSE_CHECKARG_ENUM(8, policy);
 
-    using coosv_solve_tuple = std::tuple<rocsparse_indextype, rocsparse_datatype>;
-
-#define COOSV_SOLVE_CONFIG(I_, T_)                                                 \
-    {                                                                              \
-        coosv_solve_tuple(I_, T_),                                                 \
-            coosv_solve_template<typename rocsparse::indextype_traits<I_>::type_t, \
-                                 typename rocsparse::datatype_traits<T_>::type_t>  \
-    }
-
-    static const std::map<coosv_solve_tuple, coosv_solve_t> s_coosv_solve_dispatch{
-        {COOSV_SOLVE_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f32_r),
-         COOSV_SOLVE_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f64_r),
-         COOSV_SOLVE_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f32_c),
-         COOSV_SOLVE_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f64_c),
-         COOSV_SOLVE_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f32_r),
-         COOSV_SOLVE_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f64_r),
-         COOSV_SOLVE_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f32_c),
-         COOSV_SOLVE_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f64_c)}};
-
-    static rocsparse_status coosv_solve_find(coosv_solve_t*      function_,
-                                             rocsparse_indextype i_type_,
-                                             rocsparse_datatype  t_type_)
+    if(A->rows == 0 || A->batch_count == 0)
     {
-        const auto& it = rocsparse::s_coosv_solve_dispatch.find(
-            rocsparse::coosv_solve_tuple(i_type_, t_type_));
-
-        if(it != rocsparse::s_coosv_solve_dispatch.end())
-        {
-            function_[0] = it->second;
-        }
-        // LCOV_EXCL_START
-        else
-        {
-#ifndef NDEBUG
-            std::cout << "invalid precision configuration: "
-                      << "i_type: " << rocsparse::enum_utils::to_string(i_type_) << std::endl
-                      << ", t_type: " << rocsparse::enum_utils::to_string(t_type_) << std::endl;
-
-            std::cout << "available configuration are: " << std::endl;
-            for(const auto& p : rocsparse::s_coosv_solve_dispatch)
-            {
-                const auto& t      = p.first;
-                const auto  i_type = std::get<0>(t);
-                const auto  t_type = std::get<1>(t);
-                std::cout << std::endl
-                          << std::endl
-                          << "i_type: " << rocsparse::enum_utils::to_string(i_type) << std::endl
-                          << ", t_type: " << rocsparse::enum_utils::to_string(t_type) << std::endl;
-            }
-#endif
-
-            std::stringstream sstr;
-            sstr << "invalid precision configuration: "
-                 << "i_type: " << rocsparse::enum_utils::to_string(i_type_)
-                 << ", t_type: " << rocsparse::enum_utils::to_string(t_type_);
-
-            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
-                                                   sstr.str().c_str());
-        }
-        // LCOV_EXCL_STOP
-
         return rocsparse_status_success;
     }
-}
 
-rocsparse_status rocsparse::coosv_solve(rocsparse_handle          handle,
-                                        rocsparse_operation       trans,
-                                        int64_t                   m,
-                                        int64_t                   nnz,
-                                        rocsparse_datatype        alpha_datatype,
-                                        const void*               alpha,
-                                        const rocsparse_mat_descr descr,
-                                        rocsparse_datatype        coo_val_datatype,
-                                        const void*               coo_val,
-                                        rocsparse_indextype       coo_row_ind_indextype,
-                                        const void*               coo_row_ind,
-                                        rocsparse_indextype       coo_col_ind_indextype,
-                                        const void*               coo_col_ind,
-                                        rocsparse_mat_info        info,
-                                        rocsparse_datatype        x_datatype,
-                                        const void*               x,
-                                        rocsparse_datatype        y_datatype,
-                                        void*                     y,
-                                        rocsparse_solve_policy    policy,
-                                        rocsparse_csrsv_info      csrsv_info,
-                                        void*                     temp_buffer)
-{
-    rocsparse::coosv_solve_t f;
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::coosv_solve_find(&f, coo_row_ind_indextype, coo_val_datatype));
-    RETURN_IF_ROCSPARSE_ERROR(f(handle,
-                                trans,
-                                m,
-                                nnz,
-                                alpha,
-                                descr,
-                                coo_val,
-                                coo_row_ind,
-                                coo_col_ind,
-                                info,
-                                x,
-                                y,
-                                policy,
-                                csrsv_info,
-                                temp_buffer));
+    ROCSPARSE_CHECKARG_POINTER(9, csrsv_info);
+    rocsparse_mat_descr descr = A->descr;
+    rocsparse_mat_info  info  = A->info;
+    // Check matrix type
+    ROCSPARSE_CHECKARG(5,
+                       A,
+                       (descr->type != rocsparse_matrix_type_general
+                        && descr->type != rocsparse_matrix_type_triangular),
+                       rocsparse_status_not_implemented);
+
+    // Check matrix sorting mode
+    ROCSPARSE_CHECKARG(5,
+                       A,
+                       (descr->storage_mode != rocsparse_storage_mode_sorted),
+                       rocsparse_status_requires_sorted_storage);
+
+    rocsparse::sorted_coo2csr_info_t* sorted_coo2csr_info = info->get_sorted_coo2csr_info();
+    if(sorted_coo2csr_info == nullptr)
+    {
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+            rocsparse_status_internal_error,
+            "sorted_coo2csr_info is not available, it looks like the analysis phase of this "
+            "algorithm was not previously executed.");
+    }
+
+    const bool                use_32 = A->nnz < std::numeric_limits<int32_t>::max();
+    const rocsparse_indextype csr_row_ptr_indextype
+        = (use_32) ? rocsparse_indextype_i32 : rocsparse_indextype_i64;
+    const void*   csr_row_ptr        = sorted_coo2csr_info->get_row_ptr();
+    const int64_t csr_row_ptr_stride = (A->offsets_batch_stride == 0) ? 0 : (A->rows + 1);
+
+    _rocsparse_spmat_descr csr(rocsparse_format_csr,
+                               A->analysed,
+                               A->batch_count,
+                               A->rows,
+                               A->cols,
+                               A->nnz,
+
+                               A->data_type,
+                               A->const_val_data,
+                               A->val_data,
+                               A->batch_stride,
+
+                               //
+                               csr_row_ptr_indextype,
+                               csr_row_ptr,
+                               nullptr,
+                               csr_row_ptr_stride,
+
+                               A->col_type,
+                               A->const_col_data,
+                               A->col_data,
+                               A->columns_values_batch_stride,
+
+                               A->idx_base,
+                               A->descr,
+                               A->info);
+
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsv_solve(handle,
+                                                      trans,
+                                                      alpha_datatype,
+                                                      alpha,
+                                                      alpha_stride,
+                                                      &csr,
+                                                      x,
+                                                      y,
+                                                      policy,
+                                                      csrsv_info,
+                                                      temp_buffer)));
+
     return rocsparse_status_success;
 }

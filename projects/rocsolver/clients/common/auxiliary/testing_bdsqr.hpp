@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <typename T, typename S>
 void bdsqr_checkBadArgs(const rocblas_handle handle,
@@ -434,7 +435,7 @@ void bdsqr_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -451,12 +452,12 @@ void bdsqr_getPerfData(const rocblas_handle handle,
         bdsqr_initData<false, true, T>(handle, uplo, n, nv, nu, nc, dD, dE, dV, ldv, dU, ldu, dC,
                                        ldc, dInfo, hD, hE, hV, hU, hC, hInfo, D, E, false);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_bdsqr(handle, uplo, n, nv, nu, nc, dD.data(), dE.data(), dV.data(), ldv,
                         dU.data(), ldu, dC.data(), ldc, dInfo.data());
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <typename T>
@@ -627,7 +628,7 @@ void testing_bdsqr(Arguments& argus)
     }
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
     {
         host_strided_batch_vector<T> hV(size_V, 1, size_V, 1);
         host_strided_batch_vector<T> hU(size_U, 1, size_U, 1);

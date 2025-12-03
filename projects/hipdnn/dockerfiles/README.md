@@ -1,12 +1,15 @@
 # hipDNN Docker Environments
 
-This directory contains the Dockerfile for building hipDNN development environment Docker image.
+This directory contains the Dockerfile for building the hipDNN development environment Docker image.
 
 ## 📋 Prerequisites
 
-- Docker installed on your system
-- ROCm-compatible GPU (for running with GPU support)
-- Sufficient disk space for Docker images
+- **Docker with Buildx installed** (Version 27.5.1+ recommended)
+    - **Why?** This Dockerfile relies on BuildKit (Buildx) to selectively build only the necessary stages. Legacy builders or older versions may attempt to build *all* stages—including those with missing arguments—causing build failures.
+- **ROCm-compatible GPU**
+    - Required for running applications with GPU support.
+- **Sufficient disk space**
+    - Required for storing development Docker images.
 
 ## 🐳 Ubuntu 24.04
 
@@ -25,7 +28,7 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 
 ### Build Arguments
 
-#### 🔧Select Build TYpe
+#### 🔧Select Build Type
 
 | Argument | Default | Description | Valid Values |
 |----------|---------|-------------|--------------|
@@ -33,7 +36,13 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 
 #### 📦 Prebuilt-Only Arguments
 
-> **Note**: Prebuilt mode downloads pre-compiled binaries from TheRock nightly builds (much faster)
+> [!NOTE]
+> Prebuilt mode downloads pre-compiled binaries from TheRock nightly builds (much faster)
+
+> [!NOTE]
+> There is currently an issue with using the prebuilt binaries with the gfx90X ASIC family. Refer to this GitHub issue for more details:
+https://github.com/ROCm/TheRock/issues/2179
+
 
 | Argument | Default | Description |
 |----------|---------|-------------|
@@ -44,11 +53,13 @@ The Dockerfile supports two build types: **prebuilt** (using nightly tarballs) a
 
 #### 🏗️ Fullbuild-Only Arguments
 
-> **Note**: Fullbuild mode clones and compiles TheRock from source (will take several hours to complete but more flexible)
+> [!NOTE]
+> Fullbuild mode clones and compiles TheRock from source (will take several hours to complete but more flexible)
 
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `THEROCK_GIT_HASH` | `default` | Specific git commit hash to checkout (uses default branch if not specified). |
+| `ROCM_LIBRARIES_REF` | `default` | Specific git commit hash for rocm-libraries submodule to checkout (uses default branch if not specified). |
 | `THEROCK_ASIC` | `gfx90a` for fullbuild | GPU architecture target. The values for THEROCK_ASIC for fullbuild mode can be found in the LLVM Target column of the Supported GPU table [here](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html). |
 | `THEROCK_BUILD_MODE` | `Release` | Build mode: `Preset` (uses TheRock presets), `Debug`, or `Release` (uses CMake build types). |
 | `THEROCK_BUILD_PRESET` | `linux-release-package` | Specify which build preset to use when THEROCK_BUILD_MODE=Preset. |
@@ -157,7 +168,7 @@ docker run -it \
 ```
 ### Building hipDNN
 
-Follow the [quick start steps in the build guide](./docs/Building.md#quick-start-guide) to build hipDNN.
+Follow the [quick start steps in the build guide](../docs/Building.md#quick-start-guide) to build hipDNN.
 
 ## 💡 Tips and Best Practices
 
@@ -192,5 +203,15 @@ Follow the [quick start steps in the build guide](./docs/Building.md#quick-start
 - Ensure all submodules are initialized: `git submodule update --init --recursive`
 - Check that the ROCm version in the container matches your GPU requirements
 
-### fullbuild not updating to latest version of TheRock
+### Fullbuild not updating to latest version of TheRock
 - Since the docker build doesn't change when the cloned source is updated, you will need to either provide a new hash for the docker build to rebuild `--build-arg THEROCK_GIT_HASH=abcd1234`, or provide `--no-cache` option when building to force rebuild
+
+### Build issues
+
+**Build fails attempting to build all stages / Argument mismatches:**
+- **Symptom:** The build attempts to execute stages you didn't select (e.g., compiling from source in `fullbuild` when you requested `prebuilt`), often failing due to default arguments or configuration conflicts in those unselected stages.
+- **Cause:** You are likely using the legacy Docker builder instead of BuildKit (Buildx). The legacy builder attempts to process all stages, whereas BuildKit only builds what is necessary for the target.
+- **Solution:**
+  - Ensure Docker Buildx is installed and enabled (`docker buildx version`).
+  - Upgrade Docker to the recommended version (27.5.1+).
+  - If using an older version, try explicitly enabling BuildKit: `DOCKER_BUILDKIT=1 docker build ...`

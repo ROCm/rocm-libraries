@@ -242,6 +242,7 @@ try
         auto csrsv_info = sptrsv_descr->get_csrsv_info();
         auto status
             = rocsparse::csrsv_zero_pivot(handle, csrsv_info, rocsparse_indextype_i64, data);
+
         if(status == rocsparse_status_zero_pivot)
         {
             return status;
@@ -271,59 +272,74 @@ namespace rocsparse
         ROCSPARSE_ROUTINE_TRACE;
         const rocsparse_format    format    = A->format;
         const rocsparse_operation operation = sptrsv_descr->get_operation();
-        switch(format)
+        switch(sptrsv_stage)
         {
-        case rocsparse_format_csr:
+        case rocsparse_sptrsv_stage_analysis:
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_buffer_size(handle,
-                                                                   operation,
-                                                                   A->rows,
-                                                                   A->nnz,
-                                                                   A->descr,
-                                                                   A->data_type,
-                                                                   A->const_val_data,
-                                                                   A->row_type,
-                                                                   A->const_row_data,
-                                                                   A->col_type,
-                                                                   A->const_col_data,
-                                                                   A->info,
-                                                                   buffer_size_in_bytes));
+            switch(format)
+            {
+            case rocsparse_format_csr:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_analysis_buffer_size(
+                    handle, operation, A, buffer_size_in_bytes));
+                return rocsparse_status_success;
+            }
 
-            return rocsparse_status_success;
+            case rocsparse_format_coo:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_analysis_buffer_size(
+                    handle, operation, A, buffer_size_in_bytes));
+                return rocsparse_status_success;
+            }
+
+            case rocsparse_format_csc:
+            case rocsparse_format_bsr:
+            case rocsparse_format_ell:
+            case rocsparse_format_bell:
+            case rocsparse_format_coo_aos:
+            {
+                // LCOV_EXCL_START
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            }
+            }
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
         }
+            // LCOV_EXCL_STOP
 
-        case rocsparse_format_coo:
+        case rocsparse_sptrsv_stage_compute:
         {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_buffer_size(handle,
-                                                                   operation,
-                                                                   A->rows,
-                                                                   A->nnz,
-                                                                   A->descr,
-                                                                   A->data_type,
-                                                                   A->const_val_data,
-                                                                   A->row_type,
-                                                                   A->const_row_data,
-                                                                   A->col_type,
-                                                                   A->const_col_data,
-                                                                   A->info,
-                                                                   buffer_size_in_bytes));
-            return rocsparse_status_success;
-        }
+            switch(format)
+            {
+            case rocsparse_format_csr:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::csrsv_solve_buffer_size(handle, operation, A, buffer_size_in_bytes));
+                return rocsparse_status_success;
+            }
 
-        case rocsparse_format_csc:
-        case rocsparse_format_bsr:
-        case rocsparse_format_ell:
-        case rocsparse_format_bell:
-        case rocsparse_format_coo_aos:
-        {
-            // LCOV_EXCL_START
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-        }
-        }
+            case rocsparse_format_coo:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::coosv_solve_buffer_size(handle, operation, A, buffer_size_in_bytes));
+                return rocsparse_status_success;
+            }
 
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-        // LCOV_EXCL_STOP
+            case rocsparse_format_csc:
+            case rocsparse_format_bsr:
+            case rocsparse_format_ell:
+            case rocsparse_format_bell:
+            case rocsparse_format_coo_aos:
+            {
+                // LCOV_EXCL_START
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            }
+            }
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        }
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        }
     }
+    // LCOV_EXCL_STOP
 
     static rocsparse_status convert_scalars(rocsparse_handle             handle,
                                             const rocsparse_sptrsv_descr descr,
@@ -450,16 +466,7 @@ namespace rocsparse
 
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsv_analysis(handle,
                                                                      operation,
-                                                                     A->rows,
-                                                                     A->nnz,
-                                                                     A->descr,
-                                                                     A->data_type,
-                                                                     A->const_val_data,
-                                                                     A->row_type,
-                                                                     A->const_row_data,
-                                                                     A->col_type,
-                                                                     A->const_col_data,
-                                                                     A->info,
+                                                                     A,
                                                                      analysis_policy,
                                                                      rocsparse_solve_policy_auto,
                                                                      &csrsv_info,
@@ -501,21 +508,12 @@ namespace rocsparse
 
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::coosv_analysis(handle,
                                                                      operation,
-                                                                     A->rows,
-                                                                     A->nnz,
-                                                                     A->descr,
-                                                                     A->data_type,
-                                                                     A->const_val_data,
-                                                                     A->row_type,
-                                                                     A->const_row_data,
-                                                                     A->col_type,
-                                                                     A->const_col_data,
-                                                                     A->info,
+                                                                     A,
                                                                      analysis_policy,
                                                                      rocsparse_solve_policy_auto,
                                                                      &csrsv_info,
                                                                      buffer)));
-
+                std::cout << "p csrsv_info " << csrsv_info << std::endl;
                 switch(analysis_policy)
                 {
                 case rocsparse_analysis_policy_reuse:
@@ -524,7 +522,9 @@ namespace rocsparse
                 }
                 case rocsparse_analysis_policy_force:
                 {
+                    std::cout << "p csrsv_info " << csrsv_info << std::endl;
                     sptrsv_descr->set_csrsv_info(csrsv_info);
+                    std::cout << "p csrsv_info " << csrsv_info << std::endl;
                     break;
                 }
                 }
@@ -565,56 +565,36 @@ namespace rocsparse
                 handle, sptrsv_descr, sptrsv_descr->get_scalar_alpha(), &alpha));
 
             const rocsparse_datatype alpha_datatype = sptrsv_descr->get_compute_datatype();
-
             switch(format)
             {
             case rocsparse_format_csr:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
                                                                  operation,
-                                                                 A->rows,
-                                                                 A->nnz,
                                                                  alpha_datatype,
                                                                  alpha,
-                                                                 A->descr,
-                                                                 A->data_type,
-                                                                 A->const_val_data,
-                                                                 A->row_type,
-                                                                 A->const_row_data,
-                                                                 A->col_type,
-                                                                 A->const_col_data,
-                                                                 A->info,
-                                                                 dnvec_descr_x->data_type,
-                                                                 dnvec_descr_x->const_values,
-                                                                 static_cast<int64_t>(1),
-                                                                 dnvec_descr_y->data_type,
-                                                                 dnvec_descr_y->values,
+                                                                 static_cast<int64_t>(0),
+                                                                 A,
+                                                                 dnvec_descr_x,
+                                                                 dnvec_descr_y,
                                                                  rocsparse_solve_policy_auto,
                                                                  sptrsv_descr->get_csrsv_info(),
                                                                  buffer));
                 sptrsv_descr->set_stage(rocsparse_sptrsv_stage_compute);
                 return rocsparse_status_success;
             }
+
             case rocsparse_format_coo:
             {
+                std::cout << "p csrsv_info solve " << sptrsv_descr->get_csrsv_info() << std::endl;
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosv_solve(handle,
                                                                  operation,
-                                                                 A->rows,
-                                                                 A->nnz,
                                                                  alpha_datatype,
                                                                  alpha,
-                                                                 A->descr,
-                                                                 A->data_type,
-                                                                 A->const_val_data,
-                                                                 A->row_type,
-                                                                 A->const_row_data,
-                                                                 A->col_type,
-                                                                 A->const_col_data,
-                                                                 A->info,
-                                                                 dnvec_descr_x->data_type,
-                                                                 dnvec_descr_x->const_values,
-                                                                 dnvec_descr_y->data_type,
-                                                                 dnvec_descr_y->values,
+                                                                 static_cast<int64_t>(0),
+                                                                 A,
+                                                                 dnvec_descr_x,
+                                                                 dnvec_descr_y,
                                                                  rocsparse_solve_policy_auto,
                                                                  sptrsv_descr->get_csrsv_info(),
                                                                  buffer));

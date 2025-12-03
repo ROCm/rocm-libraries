@@ -15,7 +15,7 @@ namespace testing
 {
 
 using namespace hipdnn_sdk::data_objects;
-using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_backend::test_utilities;
 
 class TestFlatbufferUtilities : public ::testing::Test
 {

@@ -1,58 +1,55 @@
 # hipDNN Operation Support
 
-This document provides a comprehensive overview of the operations currently supported in hipDNN and the details of their implementation support.
+This document provides an overview of operation support in hipDNN and guides you to detailed information about specific plugin implementations.
+
+## About hipDNN Operation Support
+
+hipDNN is a plugin-based deep learning library that provides graph-based operation support through various backend plugins. Each plugin implements specific operations with support for different datatypes, layouts, and features.
 
 > [!IMPORTANT]
-> ⚠️ **hipDNN is in the early phase of development.** The operation support table below reflects the current state of the library. We are actively working on expanding support for additional operations and features.
+> ⚠️ **hipDNN is in the early phase of development.** Operation support continues to expand as the library matures. Check individual plugin documentation for current support details.
 
-## Current Operation Support
+## Plugin-Specific Operation Support
 
-The following table lists all operations currently supported in hipDNN:
+hipDNN operations are implemented through plugins. Each plugin provides its own set of supported operations. For detailed information about what operations are available, please refer to the plugin-specific documentation:
 
-| Operation | Datatypes | Layouts | Plugin | Notes |
-|-----------|-----------|---------|--------|-------|
-| Batchnorm Backward  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Spatial mode only¹ |
-| Batchnorm Inference | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Spatial mode only¹ |
-| Batchnorm Training  | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Spatial mode only¹ |
-| Convolution Dgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Cross-correlation only² |
-| Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | MIOpen | Cross-correlation only² |
+### Available Plugins
 
-¹ See Batchnorm Operations note below
-² See Convolution Operations note below  
+- **[MIOpen Legacy Plugin](../plugins/miopen_legacy_plugin/docs/OperationSupport.md)** - Integration with AMD's MIOpen library for GPU-accelerated deep learning operations
+  - Convolution operations (Forward, Dgrad, Wgrad)
+  - Batchnorm operations (Training, Backward, Inference)
+  - Fused operation graphs
 
-## Operation Notes
+- **[Fusilli IREE Plugin](https://github.com/iree-org/fusilli)** - IREE backed plugin for JIT compiling ML operations (with fusions) for AMD GPUs, supporting efficient codegenerated kernels
+  - Convolution (Forward, Dgrad, Wgrad)
+  - GEMM
+  - Batchnorm (Training, Inference)
 
-> [!NOTE]
-> **Batchnorm Operations:** Currently, only spatial batchnorm mode is supported. Spatial mode computes statistics over the batch (N) and spatial dimensions (H, W, or D, H, W) for each channel.
+### Reference Implementation
 
-> [!NOTE]
-> **Convolution Operations:** Currently, only cross-correlation convolutions are supported. True mathematical convolution (with kernel flipping) is not yet implemented. In practice, cross-correlation is the standard operation used in modern deep learning frameworks.
+- **[CPU Reference Implementation](./OperationSupport-ReferenceImpl.md)** - CPU-based reference implementation for validation and testing
+  - Provides ground-truth results for validating GPU implementations
+  - Supports core operations (Convolution, Batchnorm, Pointwise)
+  - Not intended for performance or production use
 
-> [!NOTE]
-> **Sparse Support:** All operations currently work with dense tensors only. Sparse tensor support is planned for future releases.
+## Roadmap
 
-## Legend
+For information about planned features, upcoming operations, and the development roadmap, please see:
 
-### Datatypes
-- **FP16**: Half-precision floating point (16-bit)
-- **BFP16**: Brain floating point (16-bit)
-- **FP32**: Single-precision floating point (32-bit)
-
-### Layouts
-- **NCHW**: Batch, Channels, Height, Width (2D, channel-first)
-- **NHWC**: Batch, Height, Width, Channels (2D, channel-last)
-- **NCDHW**: Batch, Channels, Depth, Height, Width (3D, channel-first)
-- **NDHWC**: Batch, Depth, Height, Width, Channels (3D, channel-last)
-
-### Plugins
-- **MIOpen**: MIOpen Legacy Plugin - Integration with AMD's MIOpen library for GPU-accelerated operations
-
-## Future Operations
-
-For information about upcoming operations and features, please refer to the [Roadmap](./Roadmap.md) document.
+- **[hipDNN Roadmap](./Roadmap.md)** - Comprehensive roadmap covering all hipDNN components, including planned plugin enhancements and new operation support
 
 ## Contributing
 
-As hipDNN evolves, this document will be updated to reflect new operation support.
+We welcome contributions to expand operation support in hipDNN!
 
-If you're interested in contributing to expand operation support, please see our [Contributing Guide](../CONTRIBUTING.md).
+For detailed contribution guidelines, please see:
+
+- **[Contributing Guide](../CONTRIBUTING.md)** - Complete guide to contributing to hipDNN
+- **[Plugin Development](./PluginDevelopment.md)** - Guide for creating and extending plugins
+
+### Getting Started
+
+1. Review the [hipDNN Design](./Design.md) to understand the architecture
+2. Check the [Roadmap](./Roadmap.md) for planned features and contribution opportunities
+3. Open a GitHub issue to discuss your planned contribution
+4. Follow the [Contributing Guide](../CONTRIBUTING.md) for code quality and testing requirements
