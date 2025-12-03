@@ -52,10 +52,6 @@ if(HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
     set_target_properties(hipsparse-clients-common PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 
-if(HIPSPARSE_ENABLE_COVERAGE)
-    target_link_options(hipsparse-clients-common PUBLIC --coverage)
-endif()
-
 
 # Lightweight OBJECT library for samples only
 add_library(hipsparse-samples-common OBJECT)
@@ -90,8 +86,4 @@ endif()
 
 if(HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
     set_target_properties(hipsparse-samples-common PROPERTIES POSITION_INDEPENDENT_CODE ON)
-endif()
-
-if(HIPSPARSE_ENABLE_COVERAGE)
-    target_link_options(hipsparse-samples-common PUBLIC --coverage)
 endif()

@@ -15,7 +15,7 @@ target_sources(hipsparse-bench PRIVATE
 target_compile_options(hipsparse-bench PRIVATE -Wall)
 
 if(NOT HIPSPARSE_ENABLE_HOST)
-    target_include_directories(hipsparse-bench PRIVATE ${hipsparse_INCLUDE_DIRS}/hipsparse)
+    target_include_directories(hipsparse-bench PRIVATE "${hipsparse_INCLUDE_DIRS}/hipsparse")
 endif()
 
 target_link_libraries(hipsparse-bench PRIVATE hipsparse::clients-common)

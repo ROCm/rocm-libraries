@@ -12,8 +12,6 @@ target_link_libraries(hipsparse
         roc::rocsparse
 )
 
-target_compile_definitions(hipsparse PRIVATE __HIP_PLATFORM_AMD__)
-
 add_subdirectory(level1)
 add_subdirectory(level2)
 add_subdirectory(level3)

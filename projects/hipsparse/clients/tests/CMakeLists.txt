@@ -148,7 +148,7 @@ if(HIPSPARSE_ENABLE_HIP)
 endif()
 
 if(NOT HIPSPARSE_ENABLE_HOST)
-    target_include_directories(hipsparse-test PRIVATE ${hipsparse_INCLUDE_DIRS}/hipsparse)
+    target_include_directories(hipsparse-test PRIVATE "${hipsparse_INCLUDE_DIRS}/hipsparse")
 endif()
 
 target_compile_definitions(hipsparse-test PRIVATE GOOGLE_TEST)

@@ -216,8 +216,18 @@ endif()
 if(HIPSPARSE_ENABLE_COVERAGE)
     set(hipsparse_coverage_dir "${CMAKE_BINARY_DIR}/lcoverage")
     
+    # Apply coverage to main library
     target_compile_options(hipsparse PRIVATE -fprofile-arcs -ftest-coverage)
     target_link_options(hipsparse PRIVATE --coverage)
+    
+    # Apply coverage to client common libraries
+    if(HIPSPARSE_ENABLE_CLIENT)
+        target_compile_options(hipsparse-clients-common PUBLIC -fprofile-arcs -ftest-coverage)
+        target_link_options(hipsparse-clients-common PUBLIC --coverage)
+        
+        target_compile_options(hipsparse-samples-common PUBLIC -fprofile-arcs -ftest-coverage)
+        target_link_options(hipsparse-samples-common PUBLIC --coverage)
+    endif()
     
     add_custom_target(coverage_cleanup
         COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete

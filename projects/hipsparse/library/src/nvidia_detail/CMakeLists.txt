@@ -15,13 +15,6 @@ add_subdirectory(reorder)
 add_subdirectory(conversion)
 add_subdirectory(generic)
 
-target_compile_definitions(hipsparse PRIVATE __HIP_PLATFORM_NVIDIA__)
-
-target_include_directories(hipsparse PRIVATE
-    $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}>
-)
-
 set(SEARCH_SYMBOL "cusparseCreateSpVec")
 set(SEARCH_RESULTS "")
 if(WIN32)

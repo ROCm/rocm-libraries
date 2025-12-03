@@ -33,6 +33,16 @@ if(HIPSPARSE_ENABLE_ASAN)
     target_link_options(hipsparse PRIVATE -fuse-ld=lld)
 endif()
 
+if(HIPSPARSE_ENABLE_CUDA)
+    target_compile_definitions(hipsparse PRIVATE __HIP_PLATFORM_NVIDIA__)
+    target_include_directories(hipsparse PRIVATE
+        $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
+        $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}>
+    )
+elseif(HIPSPARSE_ENABLE_HIP)
+    target_compile_definitions(hipsparse PRIVATE __HIP_PLATFORM_AMD__)
+endif()
+
 add_subdirectory(include)
 add_subdirectory(src)
 
