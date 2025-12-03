@@ -10,7 +10,7 @@ if(ENABLE_CLANG_TIDY)
     set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
     set(CLANG_TIDY_HIP_ARGS -extra-arg=-D__HIP_PLATFORM_AMD__ -extra-arg=-D__HIPCC__
-                            -extra-arg=-isystem -extra-arg=/opt/rocm/include
+                            -extra-arg=-isystem -extra-arg=${ROCM_PATH}/include
     )
 
     set(CLANG_TIDY_COMMAND ${CLANG_TIDY_EXE} -config-file=${CMAKE_SOURCE_DIR}/.clang-tidy -p
