@@ -71,8 +71,8 @@ class SyncSchedule:
     def get_code(self):
         return [item[1] for item in self.schedule]
 
-def extend_list(input_list: list, repeat_count: int) -> list:
-    """Example: extend_list([1, 2, 3], 3) => [1,1,1, 2,2,2, 3,3,3]"""
+def duplicate_list_items(input_list: list, repeat_count: int) -> list:
+    """Example: duplicate_list_items([1, 2, 3], 3) => [1,1,1, 2,2,2, 3,3,3]"""
     return [item for item in input_list for _ in range(repeat_count)]
 
 def verifyAscendingOrder(scheduleInfo, context: Dict = {}):
@@ -1354,7 +1354,6 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     syncs = SyncSchedule()
 
     if isNN(kernel) and useLDSTr and TLDS==1:
-        # fmt: off
         syncs.add(-1, dscnt=9, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration")
         
         lra0   = [0,1,2,3,4,6,8,10,12,14,16,18]
@@ -1362,12 +1361,13 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         
         grinca = [7,7,7,9,9,9,11,11,11]
         lrb0   = [                            20,22,24,25,27,29,31,33,35,37]
-        grincb = [13,13,13,15,15,15,17,17,17]
+        grincb = [                    13,13,13,15,15,15,17,17,17]
         syncs.add(                                       26, dscnt=4, barrier=True, comment="wait for all LRA0 to complete before GRA start")
 
+        # one index for two instructions
         gra    = [                                          28,30,32,   36,39,42]
         syncs.add(                                                             44, dscnt=0, barrier=True, comment="wait for all LRB0 to complete before GRB start")
-
+        # one index for two instructions
         grb    = [                                                                53,58,63,67,72,77,82,86,91,  96]
         num_gr = len(gra) + len(grb)
         lrsa   = [                                                                   58]
@@ -1379,38 +1379,33 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         lrb1   = [                                                                                                  99,106,107,108,109,110,111,112,113,114]
         lwsa   = [                                                                                            95]
         lwsb   = [                                                                                            95]
-        # fmt: on
 
     elif isTN(kernel) and not useLDSTr and TLDS==1:
-        print("AAAAAAAAAAAAAAAAAAA")
-        # fmt: off            
-        syncs.add(-1, dscnt=4, comment="ait for all LRA1 and one item from LRB1 before starting the sub-iteration") 
-        grinca = [0,0,0,1,1,1,2,2,2]
-        grincb = [3,3,3,4,4,4,5,5,5]
+        syncs.add(-1, dscnt=9, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration")
         
-        syncs.add(                    11, dscnt=12, comment="wait for the rest of LRB1 to complete") 
-        lra0   = [0,2,3,4,5,6,7,8,9,10,11,12]
-        lrb0   = [ 1,                      13,14,15,16] # 4 loads
-        lrsa   = [                                            58]
-        lrsb   = [                                              58]
-        syncs.add(                                     25, dscnt=0, barrier=True, comment="wait for all LRA0,LRB0 to complete before GRA,GRB start")
-        gra    = [                                      25,29,34,39,44,48]
+        lra0   = [0,1,2,3,4,6]
+        syncs.add(5, dscnt=5, comment="wait for the rest of LRB1 to complete") 
+        
+        grinca = [0,1,2,3,4,5,6,7,8]
+        lrb0   = [               8,  10,12,   14,   16,   18,20,22,24,27]
+        grincb = [                 9,10,12,13,14,15,16,17,18]
+        syncs.add(                                                   26, dscnt=9, barrier=True, comment="wait for all LRA0 to complete before GRA start")
 
-        # redundant
-        syncs.add(                                                             59, dscnt=0, barrier=False)
-
-        grb    = [                                                        53,58,63,67,72,77,
-                                                                                   82,86,91,96] # 8 loads
+        # one index for two instructions
+        gra    = [                                                      28,30,32,36,39,42]
+        syncs.add(                                                                       44, dscnt=0, barrier=True, comment="wait for all LRB0 to complete before GRB start")
+        # one index for two instructions
+        grb    = [                                                                         53,58,63,67,72,77,82,86, 91,96]
         num_gr = len(gra) + len(grb)
+        lrsa   = [                                                                            58]
+        lrsb   = [                                                                            58]
+        syncs.add(                                                                                    71, vlcnt=10, barrier=True, comment="wait for previous set of global reads")
 
-        syncs.add(                                                                            98, vlcnt=num_gr, barrier=True, comment="wait for previous set of global reads")
-        lra1   = [                                                                             99,101,102,103,104,105,106,107,108,109,110,111]
-        lrb1   = [                                                                               100,112,113,114,115] # 4 loads
-
-        lwsa    = [                                                                         96]
-        lwsb    = [                                                                         96]
-        # ========== iter done ==========
-        # fmt: on
+        lra1   = [                                                                                     72,   76,  80,  84,
+                                                                                                                   90,     98]
+        lrb1   = [                                                                                                    99,106,107,108,109,110,111,112,113,114]
+        lwsa   = [                                                                                                  95]
+        lwsb   = [                                                                                                  95]
 
     else:
         return False, None
@@ -1421,8 +1416,9 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         'GRIncA': [grinca],
         'LRB0':   [lrb0],
         'GRIncB': [grincb],
-        'GRA':    [extend_list(gra, 2)],
-        'GRB':    [extend_list(grb, 2)],
+        # Note: each GRA/GRB item corresponds to two instructions (addr increment and read). So duplicate each item twice.
+        'GRA':    [duplicate_list_items(gra, 2)],
+        'GRB':    [duplicate_list_items(grb, 2)],
         'LRSA':   [lrsa],
         'LRSB':   [lrsb],
         'LWSA':   [lwsa],
