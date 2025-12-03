@@ -61,43 +61,41 @@ rocblas_status rocsolver_stedc_impl(rocblas_handle handle,
     rocblas_int batch_count = 1;
 
     // memory workspace sizes:
-    // size for lasrt stack/stedc workspace
-    size_t size_work_stack;
     // size for temporary computations
-    size_t size_tempvect, size_tempgemm;
+    size_t size_tempvect, size_workSvec, size_workStmp;
     // size for pointers to workspace (batched case)
     size_t size_workArr;
-    // size for vector with positions of split blocks
-    size_t size_splits_map;
+    // size for vector with positions of split blocks and different indices
+    size_t size_workInt;
     // size for temporary diagonal and z vectors.
-    size_t size_tmpz;
-    rocsolver_stedc_getMemorySize<false, T, S>(evect, n, batch_count, &size_work_stack,
-                                               &size_tempvect, &size_tempgemm, &size_tmpz,
-                                               &size_splits_map, &size_workArr);
+    size_t size_workSz;
+    rocsolver_stedc_getMemorySize<false, T, S>(evect, n, batch_count, &size_tempvect,
+                                               &size_workSvec, &size_workStmp, &size_workSz,
+                                               &size_workInt, &size_workArr);
 
     if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_work_stack, size_tempvect,
-                                                      size_tempgemm, size_tmpz, size_splits_map,
+        return rocblas_set_optimal_device_memory_size(handle, size_tempvect, size_workSvec,
+                                                      size_workStmp, size_workSz, size_workInt,
                                                       size_workArr);
 
     // memory workspace allocation
-    void *work_stack, *tempvect, *tempgemm, *tmpz, *splits_map, *workArr;
-    rocblas_device_malloc mem(handle, size_work_stack, size_tempvect, size_tempgemm, size_tmpz,
-                              size_splits_map, size_workArr);
+    void *tempvect, *workSvec, *workStmp, *workSz, *workInt, *workArr;
+    rocblas_device_malloc mem(handle, size_tempvect, size_workSvec, size_workStmp, size_workSz,
+                              size_workInt, size_workArr);
     if(!mem)
         return rocblas_status_memory_error;
 
-    work_stack = mem[0];
-    tempvect = mem[1];
-    tempgemm = mem[2];
-    tmpz = mem[3];
-    splits_map = mem[4];
+    tempvect = mem[0];
+    workSvec = mem[1];
+    workStmp = mem[2];
+    workSz = mem[3];
+    workInt = mem[4];
     workArr = mem[5];
 
     // execution
     return rocsolver_stedc_template<false, false, T>(
         handle, evect, n, D, shiftD, strideD, E, shiftE, strideE, C, shiftC, ldc, strideC, info,
-        batch_count, work_stack, (S*)tempvect, (S*)tempgemm, (S*)tmpz, (rocblas_int*)splits_map,
+        batch_count, (S*)tempvect, workSvec, (S*)workStmp, (S*)workSz, (rocblas_int*)workInt,
         (S**)workArr);
 }
 
