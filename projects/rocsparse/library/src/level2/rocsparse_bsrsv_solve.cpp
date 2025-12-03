@@ -389,6 +389,7 @@ namespace rocsparse
         if(descr->diag_type == rocsparse_diag_type_unit)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_async(
+                1,
                 reinterpret_cast<rocsparse_int*>(bsrsv_info->get_zero_pivot()),
                 std::numeric_limits<rocsparse_int>::max(),
                 stream));

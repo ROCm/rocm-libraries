@@ -12,9 +12,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class INode
 {
@@ -203,5 +201,4 @@ protected:
 
 template <typename DerivedT>
 using NodeCRTP = BaseNode<DerivedT>; // NOLINT
-}
-}
+} // namespace hipdnn_frontend::graph

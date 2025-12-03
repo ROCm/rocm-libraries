@@ -116,8 +116,15 @@ If later you add invariants or non-trivial behavior, consider converting to a cl
 ## 10. Namespaces
 
 - lower_snake_case with single underscores
+- Nested namespaces should be defined on the same line, e.g.
+  ```
+  namespace hipdnn_sdk::test_utilities::pointwise
+  {
+    ...
+  } // namespace hipdnn_sdk::test_utilities::pointwise
+- Do not use redundant namespace qualifiers (e.g. do not use `hipdnn_sdk::` qualifier when inside the `hipdnn_sdk` namespace).
 - Most code should fit generally within a few namespaces
-  - `hipdnn_<component>`: (eg. hipdnn_frontend) Contains all basic code required for the component
+  - `hipdnn_<component>`: (e.g. hipdnn_frontend) Contains all basic code required for the component
     - `utilities`: Contains code that can aid and assist in using component code
     - `test_utilities`: Contains code that can aid and assist in testing component code
 
