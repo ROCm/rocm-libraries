@@ -40,7 +40,7 @@
 #ifndef HIPCUB_CUB_API
     #define HIPCUB_WARP_THREADS_MACRO warpSize
 #else
-    #define HIPCUB_WARP_THREADS_MACRO CUB_PTX_WARP_THREADS
+    #define HIPCUB_WARP_THREADS_MACRO warp_threads
 #endif
 
 #include _HIPCUB_STD_INCLUDE(limits)
