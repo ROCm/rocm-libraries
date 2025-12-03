@@ -136,24 +136,22 @@ inline Error
     if(isBatchNormSpatialMode(scale))
     {
         // Spatial mode: normalizes over N*spatial_dims per channel
-        // Compute samples per channel in a layout-agnostic way
-        int64_t totalElements = 1;
-        for(const auto& dim : dims)
+        // Requires N*H*W > 1 (or N*D*H*W > 1 for 3D)
+
+        // dims are always declared in NCHW & NCDHW order
+        int64_t spatialElements = dims[0]; // Start with N
+        for(size_t i = 2; i < dims.size(); ++i)
         {
-            totalElements *= dim;
+            spatialElements *= dims[i]; // Multiply by spatial dimensions
         }
 
-        const auto& scaleDims = scale->get_dim();
-        int64_t channelCount = scaleDims[1]; // Scale is always [1, C, 1, 1, ...]
-        int64_t samplesPerChannel = totalElements / channelCount;
-
-        if(samplesPerChannel <= 1)
+        if(spatialElements <= 1)
         {
             return {ErrorCode::INVALID_VALUE,
                     operation
                         + " (spatial mode) requires more than 1 value per channel. "
-                          "Got samples per channel = "
-                        + std::to_string(samplesPerChannel)};
+                          "N * spatial_dimensions must be > 1. Got N="
+                        + std::to_string(dims[0])};
         }
     }
     else

@@ -31,30 +31,36 @@
 #include "bn_test_data.hpp"
 #include "get_handle.hpp"
 
-// Test that batch norm training APIs reject invalid inputs
-// Matches PyTorch behavior: "Expected more than 1 value per channel when training"
+// Test that batch norm training APIs reject invalid inputs matching PyTorch behavior
+// PyTorch errors:
+// - Spatial: "Expected more than 1 value per channel when training"
+// - PerActivation: "Expected more than 1 value per channel when training" (N > 1)
 
-struct GPU_BNInputValidation2D_FP32 : public testing::TestWithParam<BN2DTestCase>
+struct GPU_BNInputValidation2D_FP32
+    : public testing::TestWithParam<
+          std::tuple<BN2DTestCase, miopenTensorLayout_t, miopenBatchNormMode_t>>
 {
 };
 
-struct GPU_BNInputValidation3D_FP32 : public testing::TestWithParam<BN3DTestCase>
+struct GPU_BNInputValidation3D_FP32
+    : public testing::TestWithParam<
+          std::tuple<BN3DTestCase, miopenTensorLayout_t, miopenBatchNormMode_t>>
 {
 };
 
 TEST_P(GPU_BNInputValidation2D_FP32, RejectsInvalidInput)
 {
-    auto config   = GetParam();
-    auto&& handle = get_handle();
+    auto [config, layout, bn_mode] = GetParam();
+    auto&& handle                  = get_handle();
     float alpha = 1.0f, beta = 0.0f;
 
     if(config.Direction == miopen::batchnorm::Direction::ForwardTraining)
     {
         BNFwdTrainTestData<float, float, float, float, float, double, BN2DTestCase> data;
-        data.SetUpImpl(config, miopenBNSpatial, miopenTensorNCHW);
+        data.SetUpImpl(config, bn_mode, layout);
 
         auto status = miopenBatchNormalizationForwardTraining(&handle,
-                                                              miopenBNSpatial,
+                                                              bn_mode,
                                                               &alpha,
                                                               &beta,
                                                               &data.input.desc,
@@ -71,17 +77,21 @@ TEST_P(GPU_BNInputValidation2D_FP32, RejectsInvalidInput)
                                                               data.saveMean_dev.get(),
                                                               data.saveVariance_dev.get());
 
+        const char* mode_str   = (bn_mode == miopenBNSpatial) ? "Spatial" : "PerActivation";
+        const char* layout_str = (layout == miopenTensorNCHW) ? "NCHW" : "NHWC";
+
         EXPECT_EQ(status, miopenStatusBadParm)
-            << "ForwardTraining should reject N=" << config.N << " H=" << config.H
-            << " W=" << config.W << " (N*H*W=" << (config.N * config.H * config.W) << ")";
+            << "ForwardTraining should reject " << mode_str << " mode with " << layout_str
+            << " layout: N=" << config.N << " H=" << config.H << " W=" << config.W
+            << " (N*H*W=" << (config.N * config.H * config.W) << ")";
     }
     else if(config.Direction == miopen::batchnorm::Direction::Backward)
     {
         BNBwdTestData<float, float, float, float, float, float, double, BN2DTestCase> data;
-        data.SetUpImpl(config, miopenBNSpatial, miopenTensorNCHW);
+        data.SetUpImpl(config, bn_mode, layout);
 
         auto status = miopenBatchNormalizationBackward(&handle,
-                                                       miopenBNSpatial,
+                                                       bn_mode,
                                                        &alpha,
                                                        &beta,
                                                        &alpha,
@@ -100,25 +110,29 @@ TEST_P(GPU_BNInputValidation2D_FP32, RejectsInvalidInput)
                                                        data.savedMean_dev.get(),
                                                        data.savedInvVar_dev.get());
 
+        const char* mode_str   = (bn_mode == miopenBNSpatial) ? "Spatial" : "PerActivation";
+        const char* layout_str = (layout == miopenTensorNCHW) ? "NCHW" : "NHWC";
+
         EXPECT_EQ(status, miopenStatusBadParm)
-            << "Backward should reject N=" << config.N << " H=" << config.H << " W=" << config.W
+            << "Backward should reject " << mode_str << " mode with " << layout_str
+            << " layout: N=" << config.N << " H=" << config.H << " W=" << config.W
             << " (N*H*W=" << (config.N * config.H * config.W) << ")";
     }
 }
 
 TEST_P(GPU_BNInputValidation3D_FP32, RejectsInvalidInput)
 {
-    auto config   = GetParam();
-    auto&& handle = get_handle();
+    auto [config, layout, bn_mode] = GetParam();
+    auto&& handle                  = get_handle();
     float alpha = 1.0f, beta = 0.0f;
 
     if(config.Direction == miopen::batchnorm::Direction::ForwardTraining)
     {
         BNFwdTrainTestData<float, float, float, float, float, double, BN3DTestCase> data;
-        data.SetUpImpl(config, miopenBNSpatial, miopenTensorNCDHW);
+        data.SetUpImpl(config, bn_mode, layout);
 
         auto status = miopenBatchNormalizationForwardTraining(&handle,
-                                                              miopenBNSpatial,
+                                                              bn_mode,
                                                               &alpha,
                                                               &beta,
                                                               &data.input.desc,
@@ -135,18 +149,22 @@ TEST_P(GPU_BNInputValidation3D_FP32, RejectsInvalidInput)
                                                               data.saveMean_dev.get(),
                                                               data.saveVariance_dev.get());
 
+        const char* mode_str   = (bn_mode == miopenBNSpatial) ? "Spatial" : "PerActivation";
+        const char* layout_str = (layout == miopenTensorNCDHW) ? "NCDHW" : "NDHWC";
+
         EXPECT_EQ(status, miopenStatusBadParm)
-            << "ForwardTraining 3D should reject N=" << config.N << " D=" << config.D
-            << " H=" << config.H << " W=" << config.W
-            << " (N*D*H*W=" << (config.N * config.D * config.H * config.W) << ")";
+            << "ForwardTraining 3D should reject " << mode_str << " mode with " << layout_str
+            << " layout: N=" << config.N << " D=" << config.D << " H=" << config.H
+            << " W=" << config.W << " (N*D*H*W=" << (config.N * config.D * config.H * config.W)
+            << ")";
     }
     else if(config.Direction == miopen::batchnorm::Direction::Backward)
     {
         BNBwdTestData<float, float, float, float, float, float, double, BN3DTestCase> data;
-        data.SetUpImpl(config, miopenBNSpatial, miopenTensorNCDHW);
+        data.SetUpImpl(config, bn_mode, layout);
 
         auto status = miopenBatchNormalizationBackward(&handle,
-                                                       miopenBNSpatial,
+                                                       bn_mode,
                                                        &alpha,
                                                        &beta,
                                                        &alpha,
@@ -165,17 +183,29 @@ TEST_P(GPU_BNInputValidation3D_FP32, RejectsInvalidInput)
                                                        data.savedMean_dev.get(),
                                                        data.savedInvVar_dev.get());
 
+        const char* mode_str   = (bn_mode == miopenBNSpatial) ? "Spatial" : "PerActivation";
+        const char* layout_str = (layout == miopenTensorNCDHW) ? "NCDHW" : "NDHWC";
+
         EXPECT_EQ(status, miopenStatusBadParm)
-            << "Backward 3D should reject N=" << config.N << " D=" << config.D << " H=" << config.H
+            << "Backward 3D should reject " << mode_str << " mode with " << layout_str
+            << " layout: N=" << config.N << " D=" << config.D << " H=" << config.H
             << " W=" << config.W << " (N*D*H*W=" << (config.N * config.D * config.H * config.W)
             << ")";
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_BNInputValidation2D_FP32,
-                         testing::ValuesIn(Network2DInvalidTraining<BN2DTestCase>()));
+// Instantiate tests for 2D with all combinations of layouts and modes
+INSTANTIATE_TEST_SUITE_P(
+    AllModesAndLayouts,
+    GPU_BNInputValidation2D_FP32,
+    testing::Combine(testing::ValuesIn(Network2DInvalidTraining<BN2DTestCase>()),
+                     testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
+                     testing::ValuesIn({miopenBNSpatial, miopenBNPerActivation})));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_BNInputValidation3D_FP32,
-                         testing::ValuesIn(Network3DInvalidTraining<BN3DTestCase>()));
+// Instantiate tests for 3D with all combinations of layouts and modes
+INSTANTIATE_TEST_SUITE_P(
+    AllModesAndLayouts,
+    GPU_BNInputValidation3D_FP32,
+    testing::Combine(testing::ValuesIn(Network3DInvalidTraining<BN3DTestCase>()),
+                     testing::ValuesIn({miopenTensorNCDHW, miopenTensorNDHWC}),
+                     testing::ValuesIn({miopenBNSpatial, miopenBNPerActivation})));

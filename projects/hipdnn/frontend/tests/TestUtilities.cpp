@@ -277,10 +277,10 @@ TEST(TestUtilities, ValidateBNTrainingSpatialDimsCustomOperationName)
 }
 
 // Layout-specific tests to ensure validation is layout-agnostic
-TEST(TestUtilities, ValidateBNTrainingSpatialDimsNHWC)
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsNhwc)
 {
     auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({2, 14, 14, 3}); // NHWC: N*H*W = 2*14*14 = 392
+    x->set_dim({2, 3, 14, 14}); // NCHW: N*H*W = 2*14*14 = 392
     auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1, 3, 1, 1}); // Always channel-first
 
@@ -288,22 +288,23 @@ TEST(TestUtilities, ValidateBNTrainingSpatialDimsNHWC)
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
-TEST(TestUtilities, ValidateBNTrainingSpatialDimsNHWCInvalid)
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsNhwcInvalid)
 {
     auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 1, 1, 256}); // NHWC: N*H*W = 1*1*1 = 1 (invalid!)
+    x->set_dim({1, 256, 1, 1}); // NCHW: N*H*W = 1*1*1 = 1 (invalid!)
     auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1, 256, 1, 1});
 
     auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    EXPECT_TRUE(error.get_message().find("samples per channel = 1") != std::string::npos);
+    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1")
+                != std::string::npos);
 }
 
-TEST(TestUtilities, ValidateBNTrainingSpatialDimsNDHWC)
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsNDhwc)
 {
     auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({2, 2, 2, 2, 3}); // NDHWC: N*D*H*W = 2*2*2*2 = 16
+    x->set_dim({2, 3, 2, 2, 2}); // NCDHW: N*D*H*W = 2*2*2*2 = 16
     auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1, 3, 1, 1, 1});
 
@@ -311,14 +312,15 @@ TEST(TestUtilities, ValidateBNTrainingSpatialDimsNDHWC)
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
-TEST(TestUtilities, ValidateBNTrainingSpatialDimsNDHWCInvalid)
+TEST(TestUtilities, ValidateBNTrainingSpatialDimsNDhwcInvalid)
 {
     auto x = std::make_shared<TensorAttributes>();
-    x->set_dim({1, 1, 1, 1, 256}); // NDHWC: N*D*H*W = 1*1*1*1 = 1 (invalid!)
+    x->set_dim({1, 256, 1, 1, 1}); // NCDHW: N*D*H*W = 1*1*1*1 = 1 (invalid!)
     auto scale = std::make_shared<TensorAttributes>();
     scale->set_dim({1, 256, 1, 1, 1});
 
     auto error = validateBatchNormTrainingSpatialDimensions(x, scale);
     EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
-    EXPECT_TRUE(error.get_message().find("samples per channel = 1") != std::string::npos);
+    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1")
+                != std::string::npos);
 }

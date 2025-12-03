@@ -59,38 +59,36 @@ namespace {
 // Validate batch norm training input dimensions (PyTorch-compatible)
 // PyTorch rejects training when there's insufficient data for statistics computation
 inline void ValidateBatchNormTrainingInput(const TensorDescriptor& xDesc,
-                                           const TensorDescriptor& bnScaleDesc,
                                            miopenBatchNormMode_t bn_mode)
 {
     const auto& lengths = xDesc.GetLengths();
+    const auto N        = lengths[0];
 
     if(bn_mode == miopenBNSpatial)
     {
-        // For Spatial BN: need samples_per_channel > 1 to compute variance
-        // Layout-agnostic approach: total_elements / channel_count
-        size_t totalElements = 1;
-        for(const auto& len : lengths)
+
+        // For Spatial BN: need N*spatial_size > 1 to compute variance
+        // spatial_size = H*W (2D) or D*H*W (3D)
+
+        // dims are always declared in NCHW & NCDHW order
+        size_t spatial_size = 1;
+        for(size_t i = 2; i < lengths.size(); ++i)
         {
-            totalElements *= len;
+            spatial_size *= lengths[i];
         }
 
-        const auto& scaleLengths = bnScaleDesc.GetLengths();
-        size_t channelCount      = scaleLengths[1]; // Scale is always [1, C, 1, 1, ...]
-        size_t samplesPerChannel = totalElements / channelCount;
-
-        if(samplesPerChannel <= 1)
+        if(N * spatial_size <= 1)
         {
             MIOPEN_THROW(miopenStatusBadParm,
-                         "BatchNorm Spatial training requires samples_per_channel > 1. "
-                         "Got " +
-                             std::to_string(samplesPerChannel) +
+                         "BatchNorm Spatial training requires N*spatial_size > 1. "
+                         "Got N=" +
+                             std::to_string(N) + ", spatial=" + std::to_string(spatial_size) +
                              ". This restriction matches PyTorch behavior.");
         }
     }
     else if(bn_mode == miopenBNPerActivation)
     {
         // For PerActivation BN: need N > 1 to compute variance across batch dimension
-        const auto N = lengths[0];
         if(N <= 1)
         {
             MIOPEN_THROW(miopenStatusBadParm,
@@ -152,7 +150,7 @@ void BatchNormForwardTraining(const Handle& handle,
     }
 
     // Validate training input dimensions (PyTorch-compatible) - fail fast
-    ValidateBatchNormTrainingInput(xDesc, scaleDesc, bn_mode);
+    ValidateBatchNormTrainingInput(xDesc, bn_mode);
 
     if(!float_equal(*(static_cast<const float*>(alpha)), 1.0) ||
        !float_equal(*(static_cast<const float*>(beta)), 0.0))
@@ -412,7 +410,7 @@ void BatchNormBackward(const Handle& handle,
     }
 
     // Validate training input dimensions (PyTorch-compatible) - fail fast
-    ValidateBatchNormTrainingInput(xDesc, scaleDesc, bn_mode);
+    ValidateBatchNormTrainingInput(xDesc, bn_mode);
 
     if(!float_equal(*(static_cast<const float*>(alphaDataDiff)), 1.0) ||
        !float_equal(*(static_cast<const float*>(betaDataDiff)), 0))
