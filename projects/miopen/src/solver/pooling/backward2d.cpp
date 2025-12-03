@@ -207,10 +207,10 @@ bool PoolingBackward2d::IsApplicable(const ExecutionContext&,
            sizeof_local_memory(problem) <= TargetProperties::GetMaxLocalMemorySize();
 }
 
-ConvSolution PoolingBackward2d::GetSolutionImpl(
+ConvSolution PoolingBackward2d::GetSolution(
     const ExecutionContext&,
     const miopen::pooling::ProblemDescription& problem,
-    const std::optional<PerformanceConfigPooling2d<OperationType::Backward>>& config) const
+    const PerformanceConfigPooling2d<OperationType::Backward>& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 

@@ -67,10 +67,9 @@ bool PoolingBackwardNd::IsApplicable(const ExecutionContext&,
                 && problem.GetPooling().GetWorkspaceIndexMode() == miopenPoolingWorkspaceIndexMask);
 }
 
-ConvSolution PoolingBackwardNd::GetSolutionImpl(
-    const ExecutionContext&,
-    const miopen::pooling::ProblemDescription& problem,
-    const std::optional<PerformanceConfigPoolingNdBackward>& config) const
+ConvSolution PoolingBackwardNd::GetSolution(const ExecutionContext&,
+                                            const miopen::pooling::ProblemDescription& problem,
+                                            const PerformanceConfigPoolingNdBackward& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
@@ -100,9 +99,9 @@ ConvSolution PoolingBackwardNd::GetSolutionImpl(
                                           ? MLO_POOLING_OP_AVE
                                           : MLO_POOLING_OP_AVE_INCLUSIVE);
 
-    int pix_w_per_work = config ? config->pix_w_per_work : 1;
-    int pix_h_per_work = config ? config->pix_h_per_work : 4;
-    int pix_d_per_work = config ? config->pix_d_per_work : 2;
+    int pix_w_per_work = config.pix_w_per_work;
+    int pix_h_per_work = config.pix_h_per_work;
+    int pix_d_per_work = config.pix_d_per_work;
 
     int batch = top.GetLengths()[0];
     int chal  = top.GetLengths()[1];
@@ -122,8 +121,7 @@ ConvSolution PoolingBackwardNd::GetSolutionImpl(
     int activ_work         = std::min(total_work, max_activ_workitem);
 
 #if WORKAROUND_ISSUE_MIFIN_80
-    const std::size_t wavesize = 64;
-    const std::size_t lcl_work = config ? config->local_size : wavesize;
+    const std::size_t lcl_work = config.local_size;
 #else
     const std::size_t wavesize = context.GetStream().GetWavefrontWidth();
     const std::size_t lcl_work = wavesize;

@@ -41,10 +41,6 @@ namespace pooling {
 
 namespace {
 
-int top_w_per_work = 1;
-int top_h_per_work = 4;
-int top_d_per_work = 2;
-
 struct kernel_params
 {
     uint32_t stride_d;
@@ -136,10 +132,9 @@ bool PoolingForwardNd::IsApplicable(const ExecutionContext& context,
              && problem.SaveIndex() == true);
 }
 
-ConvSolution PoolingForwardNd::GetSolutionImpl(
-    const ExecutionContext&,
-    const miopen::pooling::ProblemDescription& problem,
-    const std::optional<PerformanceConfigPoolingNdForward>& config) const
+ConvSolution PoolingForwardNd::GetSolution(const ExecutionContext&,
+                                           const miopen::pooling::ProblemDescription& problem,
+                                           const PerformanceConfigPoolingNdForward& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
@@ -152,10 +147,9 @@ ConvSolution PoolingForwardNd::GetSolutionImpl(
     const int top_h = *(problem.GetYDesc().GetLengths().rbegin() + 1);
     const int top_w = *(problem.GetYDesc().GetLengths().rbegin());
 
-    // override defaults if config is provided
-    top_w_per_work = config ? config->pix_w_per_work : top_w_per_work;
-    top_h_per_work = config ? config->pix_h_per_work : top_h_per_work;
-    top_d_per_work = config ? config->pix_d_per_work : top_d_per_work;
+    int top_w_per_work = config.pix_w_per_work;
+    int top_h_per_work = config.pix_h_per_work;
+    int top_d_per_work = config.pix_d_per_work;
 
     const int top_blk_w = std::max((top_w + top_w_per_work - 1) / top_w_per_work, 1);
     const int top_blk_h = std::max((top_h + top_h_per_work - 1) / top_h_per_work, 1);
@@ -177,7 +171,7 @@ ConvSolution PoolingForwardNd::GetSolutionImpl(
                                         ? MLO_POOLING_OP_AVE
                                         : MLO_POOLING_OP_AVE_INCLUSIVE);
 
-        const size_t lcl_work = config ? config->local_size : 64;
+        const size_t lcl_work = config.local_size;
         const size_t grp_num  = (activ_work + lcl_work - 1) / lcl_work;
 
         auto build_params = KernelBuildParameters{
