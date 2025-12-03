@@ -1678,19 +1678,22 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
     if isTN(kernel) and not useLDSTr and TLDS == 1:
         #index and code pair
         syncTable = [-1, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRB1-0 to complete"),
-                    3, SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="wait for LRB1 to complete"),
+                    3, SWaitCnt(dscnt=5+2, vlcnt=-1, vscnt=-1, comment="wait for LRB1-1 to complete"),
+                    7, SWaitCnt(dscnt=4+4, vlcnt=-1, vscnt=-1, comment="wait for LRB1-2 to complete"),
+                    11, SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for LRB1 to complete"),
                     
-                    16, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before GRA start"),
-                    16, SBarrier(comment=""),
+                    14, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before GRA start"),
+                    14, SBarrier(comment=""),
                     
-                    24, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0 to complete before next sub-iteration"),
-                    24, SBarrier(comment=""),
+                    22, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0 to complete before next sub-iteration"),
+                    22, SBarrier(comment=""),
     
-                    29, SWaitCnt(dscnt=-1, vlcnt=11+3, vscnt=-1, comment="wait for previous set of global reads"),
+                    29, SWaitCnt(dscnt=-1, vlcnt=11+4, vscnt=-1, comment="wait for previous set of global reads"),
                     29, SBarrier(comment=""),
-                    50, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
-                    50, SBarrier(comment=""),
+                    48, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
+                    48, SBarrier(comment=""),
                      ]
+       # syncTable = []
         optSchedule = {
                 'SYNC'  : [syncTable[::2]],
                 'GRIncA': [[4, 5, 6, 7, 8, 9, 10, 11, 12]],
@@ -1698,11 +1701,11 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
                  
                 'LRA0': [[-1, 1, 3, 5]],
                 'LRB0': [[7, 9, 11, 13, 15, 17, 19]],
-                'GRA': [[16, 16, 18, 18, 20, 20, 22, 22]],
+                'GRA': [[14, 14, 16, 16, 18, 18, 20, 20]],
 
-                'GRB': [[24, 24, 26, 26, 28, 28, 30, 30, 35,35, 40,40, 45,45]],
+                'GRB': [[22, 22, 24, 24, 26, 26, 28, 28, 33,33, 35,35, 37,37]],
                 'LRA1': [[29, 31, 33, 36]],
-                'LRB1': [[50, 51, 51, 52, 53, 54, 55]],
+                'LRB1': [[48, 49, 50, 51, 52, 53, 54]],
 
                 'LRSA': [[27]],
                 'LRSB': [[31]],
