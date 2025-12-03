@@ -8,7 +8,7 @@ include(hipsparse_shim)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile_commands.json for clang tooling support" ON)
 
-project(hipsparse VERSION 4.2.0 LANGUAGES CXX C)
+project(hipsparse VERSION 4.3.0 LANGUAGES CXX C)
 
 if(POLICY CMP0066)
     cmake_policy(SET CMP0066 NEW) # Honor per-config flags in try_compile()
@@ -91,6 +91,7 @@ if(HIPSPARSE_ENABLE_FORTRAN)
 endif()
 
 # --- Dependency Setup ---
+# set(hipsparse_SOVERSION 4.3.0)
 
 find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 

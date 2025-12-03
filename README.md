@@ -119,3 +119,17 @@ This monorepo contains multiple subprojects, each of which retains the license u
 - 🐞 [Open an issue](https://github.com/ROCm/rocm-libraries/issues)
 
 We're happy to help!
+
+### Filing an issue
+
+When you open an issue in the rocm-libraries repo, please help us help you by being as clear and
+reproducible as possible. Before creating a new issue, please search existing ones to avoid duplicates.
+For bug reports, include a minimal reproducible example (or small test case) that triggers the error,
+along with full environment details (ROCm version, GPU, compiler, OS, etc.). If relevant, try to reduce
+the problem (e.g., smaller code snippet) to make diagnosis easier. Finally, if you have ideas for how
+to fix or improve something, feel free to suggest them — maintainers appreciate actionable feedback.
+
+Be sure to check out the [hipblaslt runtime error triage checklist](./docs/hipblaslt-runtime-triage-checklist.md)
+for a detailed step-by-step process for identifying and reporting runtime errors so we have all of the
+information necessary to help resolve the issue quickly. While this checklist is specific to hipblaslt
+the same process is generally applicable to other rocm-libraries components.
