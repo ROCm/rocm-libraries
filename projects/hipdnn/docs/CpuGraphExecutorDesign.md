@@ -138,7 +138,7 @@ The complete execution flow from graph input to results:
 
 The CPU Reference Implementation supports a comprehensive set of deep learning operations for testing and validation purposes, including:
 - **BatchNormalization**: Forward (training/inference modes) and backward operations
-- **Convolution**: Forward pass, data gradients, and weight gradients  
+- **Convolution**: Forward pass, data gradients, and weight gradients
 - **Pointwise**: Unary and binary element-wise operations (activations, arithmetic)
 
 For a complete list of supported operations, datatypes, and layouts, please refer to the [CPU Reference Implementation Operation Support](./OperationSupport-ReferenceImpl.md) document.
