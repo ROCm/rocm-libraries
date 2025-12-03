@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
- * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2011-2025, NVIDIA CORPORATION.  All rights reserved.
  * Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -33,5 +33,16 @@
 #include "../../config.hpp"
 
 #include <utility>
+
+BEGIN_HIPCUB_NAMESPACE
+
+// RAPIDS cuDF needs to avoid unrolling some loops in sort to prevent compile time issues
+#if defined(CCCL_AVOID_SORT_UNROLL)
+    #define _CCCL_SORT_MAYBE_UNROLL() _CCCL_PRAGMA_NOUNROLL()
+#else // ^^^ CCCL_AVOID_SORT_UNROLL ^^^ / vvv !CCCL_AVOID_SORT_UNROLL vvv
+    #define _CCCL_SORT_MAYBE_UNROLL() _CCCL_PRAGMA_UNROLL_FULL()
+#endif // !CCCL_AVOID_SORT_UNROLL
+
+END_HIPCUB_NAMESPACE
 
 #endif // HIPCUB_ROCPRIM_MACRO_HPP_
