@@ -160,28 +160,24 @@ protected:
         std::string program_name{"MIOpenTensorKernels.cl"};
         std::string network_config_ocl = network_config + "-ocl";
 
-        handle.AddKernel(kernel_name,
-                         network_config_ocl,
-                         program_name,
-                         kernel_name,
-                         vld,
-                         vgd,
-                         paramsOCL)(tensA_dev.get(),
-                                    tensorsConfig.acstrides[0],
-                                    tensB_dev.get(),
-                                    tensorsConfig.bstrides[0],
-                                    tensC_dev.get(),
-                                    tensorsConfig.acstrides[0],
-                                    alpha0,
-                                    alpha1,
-                                    beta,
-                                    uint64_t(0),
-                                    uint64_t(0),
-                                    uint64_t(0),
-                                    total_work,
-                                    total_work2,
-                                    use_beta,
-                                    use_bias);
+        handle.AddKernel(
+            kernel_name, network_config_ocl, program_name, kernel_name, vld, vgd, paramsOCL)(
+            tensA_dev.get(),
+            tensorsConfig.acstrides[0],
+            tensB_dev.get(),
+            tensorsConfig.bstrides[0],
+            tensC_dev.get(),
+            tensorsConfig.acstrides[0],
+            alpha0,
+            alpha1,
+            beta,
+            uint64_t(0),
+            uint64_t(0),
+            uint64_t(0),
+            total_work,
+            total_work2,
+            use_beta,
+            use_bias);
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
 
@@ -219,28 +215,24 @@ protected:
         std::string program_name{"MIOpenTensorKernelsHip.cpp"};
         std::string network_config_hip = network_config + "-hip";
 
-        handle.AddKernel(kernel_name,
-                         network_config_hip,
-                         program_name,
-                         kernel_name,
-                         vld,
-                         vgd,
-                         paramsHIP)(tensA_dev.get(),
-                                    tensorsConfig.acstrides[0],
-                                    tensB_dev.get(),
-                                    tensorsConfig.bstrides[0],
-                                    tensC_dev.get(),
-                                    tensorsConfig.acstrides[0],
-                                    alpha0,
-                                    alpha1,
-                                    beta,
-                                    uint64_t(0),
-                                    uint64_t(0),
-                                    uint64_t(0),
-                                    total_work,
-                                    total_work2,
-                                    use_beta,
-                                    use_bias);
+        handle.AddKernel(
+            kernel_name, network_config_hip, program_name, kernel_name, vld, vgd, paramsHIP)(
+            tensA_dev.get(),
+            tensorsConfig.acstrides[0],
+            tensB_dev.get(),
+            tensorsConfig.bstrides[0],
+            tensC_dev.get(),
+            tensorsConfig.acstrides[0],
+            alpha0,
+            alpha1,
+            beta,
+            uint64_t(0),
+            uint64_t(0),
+            uint64_t(0),
+            total_work,
+            total_work2,
+            use_beta,
+            use_bias);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
 
