@@ -501,7 +501,7 @@ namespace origami
         // Use size_t for dimensions and counts to ensure type safety.
         const size_t workgroups_m     = safe_ceil_div(M, MT_M);
         const size_t workgroups_n     = safe_ceil_div(N, MT_N);
-        const size_t total_workgroups = workgroups_m * workgroups_n * batch;
+        const size_t total_workgroups = workgroups_m * workgroups_n * batch * splittingFactor;
 
         // Concurrently executing workgroups are limited by the number of CUs.a
         const size_t concurrent_workgroups = std::min(total_workgroups, hardware.N_CU);
@@ -529,12 +529,14 @@ namespace origami
         l2_tile_m = std::max(std::min(workgroups_m, l2_tile_m), static_cast<size_t>(1));
         l2_tile_n = std::max(std::min(workgroups_n, l2_tile_n), static_cast<size_t>(1));
 
+        double batches_per_xcd = std::min(batch, std::max(cu_per_xcd / (workgroups_m * workgroups_n), static_cast<size_t>(1)));
+
         // Calculate memory footprint in bytes.
         const size_t element_bytes       = safe_ceil_div(element_size, 8);
         auto         calculate_footprint = [&](size_t tile_m, size_t tile_n) {
             size_t a_footprint = tile_m * MT_M * MT_K * element_bytes;
             size_t b_footprint = tile_n * MT_N * MT_K * element_bytes;
-            return a_footprint + b_footprint;
+            return (a_footprint + b_footprint) * batches_per_xcd;
         };
 
         // Symmetrically shrink the L2 tile until it fits in the L2 cache capacity.
@@ -606,7 +608,7 @@ namespace origami
 
         // --- Initial Tile Sizing based on Concurrency ---
         // Use ceiling division for a more accurate initial guess.
-        size_t mall_tile_m = safe_ceil_div(numActiveCUs, static_cast<size_t>(WGM));
+        size_t mall_tile_m = safe_ceil_div(std::min(numActiveCUs, workgroups_m * workgroups_n), static_cast<size_t>(WGM));
         size_t mall_tile_n = std::min(static_cast<size_t>(WGM), workgroups_n);
 
         // Handle wrap-around case if the tile is taller than the grid.
@@ -658,20 +660,16 @@ namespace origami
     @brief Computes the L2 hit rate from a global,
     problem - wide perspective.
     **/
-    double compute_l2_hit_rate_global(size_t M,
+    double compute_l2_hit_rate_global(const hardware_t& hardware,
+                                      size_t M,
                                       size_t N,
+                                      size_t batch,
                                       size_t MT_M,
                                       size_t MT_N,
                                       size_t MT_K,
                                       size_t element_size,
-                                      size_t l2_capacity_bytes)
+                                      size_t splittingFactor)
     {
-        // --- Hardware Parameters (as requested, defined locally) ---
-        // You would normally get l2_capacity_bytes from your hardware_t struct.
-        if(l2_capacity_bytes == 0)
-            throw std::runtime_error("L2 Capacity is zero");
-        ;
-
         // 1. Calculate the grid dimensions in terms of macro-tiles
         const size_t grid_m = safe_ceil_div(M, MT_M);
         const size_t grid_n = safe_ceil_div(N, MT_N);
@@ -685,12 +683,13 @@ namespace origami
         const double bytes_per_element = static_cast<double>(element_size) / 8.0;
         const double a_working_set = static_cast<double>(grid_m * MT_M * MT_K) * bytes_per_element;
         const double b_working_set = static_cast<double>(grid_n * MT_N * MT_K) * bytes_per_element;
-        const double total_working_set_bytes = a_working_set + b_working_set;
+        const double concurrent_batches = std::min(batch, std::max(hardware.N_CU / (splittingFactor * grid_m * grid_n), static_cast<size_t>(1)));
+        const double total_working_set_bytes = (a_working_set + b_working_set) * concurrent_batches;
 
         // 3. CRUCIAL: Check if the working set fits in the L2 cache.
         // If it doesn't, the global reuse pattern is broken by capacity misses,
         // and the hit rate will be very low.
-        if(total_working_set_bytes > l2_capacity_bytes)
+        if(total_working_set_bytes > hardware.L2_capacity * hardware.NUM_XCD)
         {
             // Return a floor value for the hit rate. The exact value can be tuned,
             // but it should be low to indicate that the ideal reuse is not possible.
@@ -754,7 +753,7 @@ namespace origami
             hardware, M, N, K, batch, MT_M, MT_N, MT_K, element_size_A, WGM, splittingFactor);
 
         double H_mem1_global = compute_l2_hit_rate_global(
-            M, N, MT_M, MT_N, MT_K, element_size_A, hardware.L2_capacity * 1024);
+            hardware, M, N, batch, MT_M, MT_N, MT_K, element_size_A, splittingFactor);
 
         H_mem1 = std::min(H_mem1, H_mem1_global);
 
@@ -839,7 +838,7 @@ namespace origami
         // Calculate the tile of workgroups that can run concurrently (logic from estimate_mall_hit).
         size_t grid_m = safe_ceil_div(M, MT_M);
         size_t grid_n = safe_ceil_div(N, MT_N);
-        size_t mall_m = safe_ceil_div(numActiveCUs, static_cast<size_t>(WGM));
+        size_t mall_m = safe_ceil_div(std::min(grid_m * grid_n, numActiveCUs), static_cast<size_t>(WGM));
         size_t mall_n = std::min(static_cast<size_t>(WGM), grid_n);
         // Handle wrap-around case
         if(mall_m > grid_m)
@@ -852,9 +851,11 @@ namespace origami
         mall_m = std::max(std::min(grid_m, mall_m), static_cast<size_t>(1));
         mall_n = std::max(std::min(grid_n, mall_n), static_cast<size_t>(1));
         // This is the minimum unique bytes needed from HBM to feed the concurrent workgroups.
+        double concurrent_batches = std::min(batch, std::max(numActiveCUs / (splittingFactor * grid_m * grid_n), static_cast<size_t>(1)));
         double min_load
-            = static_cast<double>((mall_m * MT_M * MT_K * safe_ceil_div(element_size_A, 8))
-                                  + (mall_n * MT_N * MT_K * safe_ceil_div(element_size_B, 8)));
+            = static_cast<double>((mall_m * Ld_A_value * safe_ceil_div(element_size_A, 8))
+                                  + (mall_n * Ld_B_value * safe_ceil_div(element_size_B, 8)))
+                                  * concurrent_batches;
         // The actual loads cannot be less than this physical minimum.
         Ld_MEM  = std::max(Ld_MEM, min_load);
         Ld_mem2 = std::max(Ld_mem2, min_load);
