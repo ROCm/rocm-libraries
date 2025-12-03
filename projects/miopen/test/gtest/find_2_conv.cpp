@@ -386,7 +386,7 @@ TEST_F(GPU_Find2Conv_FP32, FloatTest_find_2_conv)
     if(IsTestSupportedForDevice(handle))
     {
         // Set up environment variables
-        lib_env::update(MIOPEN_LOG_LEVEL, 6);
+        lib_env::update(MIOPEN_LOG_LEVEL, 2);
         RunFind2ConvTests();
     }
     else
