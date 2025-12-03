@@ -207,6 +207,31 @@ Run checks on staged files:
 pre-commit
 ```
 
+### Opting a Project into Pre-commit Checks
+
+By default, most projects are excluded from pre-commit checks in [`.pre-commit-config.yaml`](.pre-commit-config.yaml). To opt-in a project:
+
+1.  **Enable Checks**: Remove the project's exclusion pattern from the `exclude` block in [`.pre-commit-config.yaml`](.pre-commit-config.yaml).
+
+2.  **Apply Initial Formatting**: It is recommended to submit a dedicated "bulk" pull request that applies pre-commit fixes to the entire project. You can run pre-commit on all files in your project directory:
+    ```bash
+    pre-commit run --files $(git ls-files projects/<your-project>)
+    ```
+
+3.  **Handle Optional Dependencies in CI**: If your project requires specific system dependencies to run pre-commit hooks in CI:
+    > [!IMPORTANT]
+    > This is only needed if you are adding custom pre-commit hooks that rely on external tools.
+
+    *   Edit [`.github/workflows/pre-commit.yml`](.github/workflows/pre-commit.yml).
+    *   Add your project name to the `PROJECTS_WITH_OPTIONAL_DEPS` environment variable in the "Get changed files" step.
+    *   Add a new step to install dependencies, conditional on your project changing:
+        ```yaml
+        - name: Install <your-project> dependencies
+          if: steps.changed-files.outputs.<your-project>_changed == 'true'
+          run: |
+            # Install dependencies here
+        ```
+
 ---
 
 ## Pull Request Guidelines
