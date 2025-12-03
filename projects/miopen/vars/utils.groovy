@@ -219,7 +219,7 @@ def getDockerImageName(dockerArgs)
 {
     sh "echo ${dockerArgs} > ${env.WORKSPACE}/factors.txt"
     def image = "${env.MIOPEN_DOCKER_IMAGE_URL}"
-    sh(script: "git log -1 --format=%H -- ${env.WORKSPACE}/${env.CK_DIR}/ >> ${env.WORKSPACE}/factors.txt")
+    sh(script: "cd ${env.WORKSPACE} && find ${env.CK_DIR} -type f -print0 | sort -z | xargs -0 md5sum | md5sum | awk '{print \$1}' >> factors.txt")
     sh "cd ${env.WORKSPACE}/${env.MIOPEN_DIR}/ && md5sum Dockerfile requirements.txt dev-requirements.txt >> ${env.WORKSPACE}/factors.txt"
     def docker_hash = sh(script: "cd ${env.WORKSPACE} && md5sum factors.txt | awk '{print \$1}' | head -c 6", returnStdout: true)
     // Debug print the contents of factors.txt
