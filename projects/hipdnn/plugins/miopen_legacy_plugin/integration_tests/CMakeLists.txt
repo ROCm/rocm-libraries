@@ -4,7 +4,7 @@
 find_package(Threads REQUIRED)
 
 if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
-    find_package(hipdnn_frontend CONFIG REQUIRED)
+    find_package(hipdnn_test_sdk CONFIG REQUIRED)
 endif()
 
 add_executable(
