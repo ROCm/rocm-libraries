@@ -70,7 +70,6 @@ set( rocfft-test_source
   gtest_main.cpp
   rocfft_accuracy_test.cpp
   bitwise_repro/bitwise_repro_test.cpp
-  accuracy_test.cpp
   accuracy_test_1D.cpp	
   accuracy_test_2D.cpp
   accuracy_test_3D.cpp
@@ -89,6 +88,7 @@ set( rocfft-test_source
   validate_length_stride.cpp
   random.cpp
   ../../shared/array_validator.cpp
+  ../../shared/test_callbacks.cpp
   )
 
 add_executable( rocfft-test ${rocfft-test_source} ${rocfft-test_includes} )
@@ -128,12 +128,13 @@ if( NOT BUILD_FFTW )
     find_package(FFTW3f CONFIG QUIET )
     if( FFTW3_FOUND AND FFTW3f_FOUND )
       message(STATUS "FFTW3 found by using the FFTW3Config.cmake")
+      string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
       if ( NOT WIN32 )
-        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_RELEASE)
-        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_RELEASE)
+        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
+        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
       else()
-        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_RELEASE)
-        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_RELEASE)
+        get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
+        get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
       endif()
 
       # Look for omp (preferred) or thread libraries. These are not a
@@ -408,7 +409,7 @@ endif()
 if( ROCFFT_MPI_ENABLE )
   # normal and dynamic-loading MPI worker processes
   foreach(worker rocfft_mpi_worker dyna_rocfft_mpi_worker)
-    add_executable( ${worker} rocfft_mpi_worker.cpp )
+    add_executable( ${worker} rocfft_mpi_worker.cpp ../../shared/test_callbacks.cpp )
 
     if( BUILD_CLIENTS_TESTS_OPENMP )
       set_target_properties( ${worker} PROPERTIES

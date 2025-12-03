@@ -625,7 +625,7 @@ namespace rocRoller
                     // predicates
                     // unrollK size match predicates
 
-                    if(params->unrollX <= 1 && params->unrollY <= 1 && !params->streamK)
+                    if(params->tailLoops and not params->streamK)
                     {
                         auto unrollKPredicate = (aSizeExps[1] % macKExp == zero);
                         setComment(unrollKPredicate, "K must be a multiple of macK.");
