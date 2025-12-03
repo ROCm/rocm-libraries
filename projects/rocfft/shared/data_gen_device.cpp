@@ -958,6 +958,217 @@ void generate_random_interleaved_data(const Tint&            whole_length,
                                  + std::string(hipGetErrorName(err)));
 }
 
+template <typename Tint, typename Treal>
+void generate_interleaved_data(const Tint&            whole_length,
+                               const size_t           idist,
+                               const size_t           isize,
+                               const Tint&            whole_stride,
+                               const size_t           nbatch,
+                               rocfft_complex<Treal>* input_data,
+                               const hipDeviceProp_t& deviceProp)
+{
+    const auto input_length = get_input_val(whole_length);
+    const auto input_stride = get_input_val(whole_stride);
+    const auto unit_stride  = make_unit_stride(input_length);
+
+    const auto inv_scale
+        = static_cast<Treal>(1.0)
+          / static_cast<Treal>(static_cast<unsigned long long>(isize) / nbatch - 1);
+
+    dim3 gridDim = generate_data_gridDim(isize);
+    dim3 blockDim{DATA_GEN_THREADS};
+
+    launch_limits_check("generate_interleaved_data_kernel", gridDim, blockDim, deviceProp);
+
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(generate_interleaved_data_kernel<decltype(input_length), Treal>),
+        gridDim,
+        blockDim,
+        0, // sharedMemBytes
+        0, // stream
+        input_length,
+        idist,
+        isize,
+        input_stride,
+        unit_stride,
+        inv_scale,
+        input_data);
+    auto err = hipGetLastError();
+    if(err != hipSuccess)
+        throw std::runtime_error("generate_interleaved_data_kernel launch failure: "
+                                 + std::string(hipGetErrorName(err)));
+}
+
+template <typename Tint, typename Treal>
+void generate_random_planar_data(const Tint&            whole_length,
+                                 const size_t           idist,
+                                 const size_t           isize,
+                                 const Tint&            whole_stride,
+                                 Treal*                 real_data,
+                                 Treal*                 imag_data,
+                                 const hipDeviceProp_t& deviceProp,
+                                 const Tint&            field_lower,
+                                 const size_t           field_lower_batch,
+                                 const Tint&            field_contig_stride,
+                                 const size_t           field_contig_dist)
+{
+    const auto                   input_length = get_input_val(whole_length);
+    const decltype(input_length) zero_length;
+    const auto                   input_stride = get_input_val(whole_stride);
+
+    dim3 gridDim = generate_data_gridDim(isize);
+    dim3 blockDim{DATA_GEN_THREADS};
+
+    launch_limits_check("generate_random_planar_data_kernel", gridDim, blockDim, deviceProp);
+
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(generate_random_planar_data_kernel<decltype(input_length), Treal>),
+        gridDim,
+        blockDim,
+        0, // sharedMemBytes
+        0, // stream
+        input_length,
+        zero_length,
+        idist,
+        isize,
+        input_stride,
+        real_data,
+        imag_data,
+        get_input_val(field_lower),
+        field_lower_batch,
+        get_input_val(field_contig_stride),
+        field_contig_dist);
+    auto err = hipGetLastError();
+    if(err != hipSuccess)
+        throw std::runtime_error("generate_random_planar_data_kernel launch failure: "
+                                 + std::string(hipGetErrorName(err)));
+}
+
+template <typename Tint, typename Treal>
+void generate_planar_data(const Tint&            whole_length,
+                          const size_t           idist,
+                          const size_t           isize,
+                          const Tint&            whole_stride,
+                          const size_t           nbatch,
+                          Treal*                 real_data,
+                          Treal*                 imag_data,
+                          const hipDeviceProp_t& deviceProp)
+{
+    const auto input_length = get_input_val(whole_length);
+    const auto input_stride = get_input_val(whole_stride);
+    const auto unit_stride  = make_unit_stride(input_length);
+
+    const auto inv_scale
+        = static_cast<Treal>(1.0)
+          / static_cast<Treal>(static_cast<unsigned long long>(isize) / nbatch - 1);
+
+    dim3 gridDim = generate_data_gridDim(isize);
+    dim3 blockDim{DATA_GEN_THREADS};
+
+    launch_limits_check("generate_planar_data_kernel", gridDim, blockDim, deviceProp);
+
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(generate_planar_data_kernel<decltype(input_length), Treal>),
+                       gridDim,
+                       blockDim,
+                       0, // sharedMemBytes
+                       0, // stream
+                       input_length,
+                       idist,
+                       isize,
+                       input_stride,
+                       unit_stride,
+                       inv_scale,
+                       real_data,
+                       imag_data);
+    auto err = hipGetLastError();
+    if(err != hipSuccess)
+        throw std::runtime_error("generate_planar_data_kernel launch failure: "
+                                 + std::string(hipGetErrorName(err)));
+}
+
+template <typename Tint, typename Treal>
+void generate_random_real_data(const Tint&            whole_length,
+                               const size_t           idist,
+                               const size_t           isize,
+                               const Tint&            whole_stride,
+                               Treal*                 input_data,
+                               const hipDeviceProp_t& deviceProp,
+                               const Tint             field_lower,
+                               const size_t           field_lower_batch,
+                               const Tint             field_contig_stride,
+                               const size_t           field_contig_dist)
+{
+    const auto                   input_length = get_input_val(whole_length);
+    const decltype(input_length) zero_length;
+    const auto                   input_stride = get_input_val(whole_stride);
+
+    dim3 gridDim = generate_data_gridDim(isize);
+    dim3 blockDim{DATA_GEN_THREADS};
+
+    launch_limits_check("generate_random_real_data_kernel", gridDim, blockDim, deviceProp);
+
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(generate_random_real_data_kernel<decltype(input_length), Treal>),
+        gridDim,
+        blockDim,
+        0, // sharedMemBytes
+        0, // stream
+        input_length,
+        zero_length,
+        idist,
+        isize,
+        input_stride,
+        input_data,
+        get_input_val(field_lower),
+        field_lower_batch,
+        get_input_val(field_contig_stride),
+        field_contig_dist);
+    auto err = hipGetLastError();
+    if(err != hipSuccess)
+        throw std::runtime_error("generate_random_real_data_kernel launch failure: "
+                                 + std::string(hipGetErrorName(err)));
+}
+
+template <typename Tint, typename Treal>
+void generate_real_data(const Tint&            whole_length,
+                        const size_t           idist,
+                        const size_t           isize,
+                        const Tint&            whole_stride,
+                        const size_t           nbatch,
+                        Treal*                 input_data,
+                        const hipDeviceProp_t& deviceProp)
+{
+    const auto input_length = get_input_val(whole_length);
+    const auto input_stride = get_input_val(whole_stride);
+    const auto unit_stride  = make_unit_stride(input_length);
+
+    const auto inv_scale
+        = static_cast<Treal>(1.0)
+          / static_cast<Treal>(static_cast<unsigned long long>(isize) / nbatch - 1);
+
+    dim3 gridDim = generate_data_gridDim(isize);
+    dim3 blockDim{DATA_GEN_THREADS};
+
+    launch_limits_check("generate_real_data_kernel", gridDim, blockDim, deviceProp);
+
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(generate_real_data_kernel<decltype(input_length), Treal>),
+                       gridDim,
+                       blockDim,
+                       0, // sharedMemBytes
+                       0, // stream
+                       input_length,
+                       idist,
+                       isize,
+                       input_stride,
+                       unit_stride,
+                       inv_scale,
+                       input_data);
+    auto err = hipGetLastError();
+    if(err != hipSuccess)
+        throw std::runtime_error("generate_real_data_kernel launch failure: "
+                                 + std::string(hipGetErrorName(err)));
+}
+
 template void
     generate_random_interleaved_data<size_t, _Float16>(const size_t&             whole_length,
                                                        const size_t              idist,
@@ -1064,47 +1275,6 @@ template void generate_random_interleaved_data<std::tuple<size_t, size_t, size_t
     const std::tuple<size_t, size_t, size_t>& field_contig_stride,
     const size_t                              field_contig_dist);
 
-template <typename Tint, typename Treal>
-void generate_interleaved_data(const Tint&            whole_length,
-                               const size_t           idist,
-                               const size_t           isize,
-                               const Tint&            whole_stride,
-                               const size_t           nbatch,
-                               rocfft_complex<Treal>* input_data,
-                               const hipDeviceProp_t& deviceProp)
-{
-    const auto input_length = get_input_val(whole_length);
-    const auto input_stride = get_input_val(whole_stride);
-    const auto unit_stride  = make_unit_stride(input_length);
-
-    const auto inv_scale
-        = static_cast<Treal>(1.0)
-          / static_cast<Treal>(static_cast<unsigned long long>(isize) / nbatch - 1);
-
-    dim3 gridDim = generate_data_gridDim(isize);
-    dim3 blockDim{DATA_GEN_THREADS};
-
-    launch_limits_check("generate_interleaved_data_kernel", gridDim, blockDim, deviceProp);
-
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(generate_interleaved_data_kernel<decltype(input_length), Treal>),
-        gridDim,
-        blockDim,
-        0, // sharedMemBytes
-        0, // stream
-        input_length,
-        idist,
-        isize,
-        input_stride,
-        unit_stride,
-        inv_scale,
-        input_data);
-    auto err = hipGetLastError();
-    if(err != hipSuccess)
-        throw std::runtime_error("generate_interleaved_data_kernel launch failure: "
-                                 + std::string(hipGetErrorName(err)));
-}
-
 template void generate_interleaved_data<size_t, _Float16>(const size_t&             whole_length,
                                                           const size_t              idist,
                                                           const size_t              isize,
@@ -1182,51 +1352,6 @@ template void generate_interleaved_data<std::tuple<size_t, size_t, size_t>, doub
     const size_t                              nbatch,
     rocfft_complex<double>*                   input_data,
     const hipDeviceProp_t&                    deviceProp);
-
-template <typename Tint, typename Treal>
-void generate_random_planar_data(const Tint&            whole_length,
-                                 const size_t           idist,
-                                 const size_t           isize,
-                                 const Tint&            whole_stride,
-                                 Treal*                 real_data,
-                                 Treal*                 imag_data,
-                                 const hipDeviceProp_t& deviceProp,
-                                 const Tint&            field_lower,
-                                 const size_t           field_lower_batch,
-                                 const Tint&            field_contig_stride,
-                                 const size_t           field_contig_dist)
-{
-    const auto                   input_length = get_input_val(whole_length);
-    const decltype(input_length) zero_length;
-    const auto                   input_stride = get_input_val(whole_stride);
-
-    dim3 gridDim = generate_data_gridDim(isize);
-    dim3 blockDim{DATA_GEN_THREADS};
-
-    launch_limits_check("generate_random_planar_data_kernel", gridDim, blockDim, deviceProp);
-
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(generate_random_planar_data_kernel<decltype(input_length), Treal>),
-        gridDim,
-        blockDim,
-        0, // sharedMemBytes
-        0, // stream
-        input_length,
-        zero_length,
-        idist,
-        isize,
-        input_stride,
-        real_data,
-        imag_data,
-        get_input_val(field_lower),
-        field_lower_batch,
-        get_input_val(field_contig_stride),
-        field_contig_dist);
-    auto err = hipGetLastError();
-    if(err != hipSuccess)
-        throw std::runtime_error("generate_random_planar_data_kernel launch failure: "
-                                 + std::string(hipGetErrorName(err)));
-}
 
 template void generate_random_planar_data<size_t, _Float16>(const size_t&          whole_length,
                                                             const size_t           idist,
@@ -1342,48 +1467,6 @@ template void generate_random_planar_data<std::tuple<size_t, size_t, size_t>, do
     const std::tuple<size_t, size_t, size_t>& field_contig_stride,
     const size_t                              field_contig_dist);
 
-template <typename Tint, typename Treal>
-void generate_planar_data(const Tint&            whole_length,
-                          const size_t           idist,
-                          const size_t           isize,
-                          const Tint&            whole_stride,
-                          const size_t           nbatch,
-                          Treal*                 real_data,
-                          Treal*                 imag_data,
-                          const hipDeviceProp_t& deviceProp)
-{
-    const auto input_length = get_input_val(whole_length);
-    const auto input_stride = get_input_val(whole_stride);
-    const auto unit_stride  = make_unit_stride(input_length);
-
-    const auto inv_scale
-        = static_cast<Treal>(1.0)
-          / static_cast<Treal>(static_cast<unsigned long long>(isize) / nbatch - 1);
-
-    dim3 gridDim = generate_data_gridDim(isize);
-    dim3 blockDim{DATA_GEN_THREADS};
-
-    launch_limits_check("generate_planar_data_kernel", gridDim, blockDim, deviceProp);
-
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(generate_planar_data_kernel<decltype(input_length), Treal>),
-                       gridDim,
-                       blockDim,
-                       0, // sharedMemBytes
-                       0, // stream
-                       input_length,
-                       idist,
-                       isize,
-                       input_stride,
-                       unit_stride,
-                       inv_scale,
-                       real_data,
-                       imag_data);
-    auto err = hipGetLastError();
-    if(err != hipSuccess)
-        throw std::runtime_error("generate_planar_data_kernel launch failure: "
-                                 + std::string(hipGetErrorName(err)));
-}
-
 template void generate_planar_data<size_t, _Float16>(const size_t&          whole_length,
                                                      const size_t           idist,
                                                      const size_t           isize,
@@ -1470,49 +1553,6 @@ template void generate_planar_data<std::tuple<size_t, size_t, size_t>, double>(
     double*                                   real_data,
     double*                                   imag_data,
     const hipDeviceProp_t&                    deviceProp);
-
-template <typename Tint, typename Treal>
-void generate_random_real_data(const Tint&            whole_length,
-                               const size_t           idist,
-                               const size_t           isize,
-                               const Tint&            whole_stride,
-                               Treal*                 input_data,
-                               const hipDeviceProp_t& deviceProp,
-                               const Tint             field_lower,
-                               const size_t           field_lower_batch,
-                               const Tint             field_contig_stride,
-                               const size_t           field_contig_dist)
-{
-    const auto                   input_length = get_input_val(whole_length);
-    const decltype(input_length) zero_length;
-    const auto                   input_stride = get_input_val(whole_stride);
-
-    dim3 gridDim = generate_data_gridDim(isize);
-    dim3 blockDim{DATA_GEN_THREADS};
-
-    launch_limits_check("generate_random_real_data_kernel", gridDim, blockDim, deviceProp);
-
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(generate_random_real_data_kernel<decltype(input_length), Treal>),
-        gridDim,
-        blockDim,
-        0, // sharedMemBytes
-        0, // stream
-        input_length,
-        zero_length,
-        idist,
-        isize,
-        input_stride,
-        input_data,
-        get_input_val(field_lower),
-        field_lower_batch,
-        get_input_val(field_contig_stride),
-        field_contig_dist);
-    auto err = hipGetLastError();
-    if(err != hipSuccess)
-        throw std::runtime_error("generate_random_real_data_kernel launch failure: "
-                                 + std::string(hipGetErrorName(err)));
-}
 
 template void generate_random_real_data<size_t, _Float16>(const size_t&          whole_length,
                                                           const size_t           idist,
@@ -1618,46 +1658,6 @@ template void generate_random_real_data<std::tuple<size_t, size_t, size_t>, doub
     const size_t                              field_lower_batch,
     const std::tuple<size_t, size_t, size_t>  field_contig_stride,
     const size_t                              field_contig_dist);
-
-template <typename Tint, typename Treal>
-void generate_real_data(const Tint&            whole_length,
-                        const size_t           idist,
-                        const size_t           isize,
-                        const Tint&            whole_stride,
-                        const size_t           nbatch,
-                        Treal*                 input_data,
-                        const hipDeviceProp_t& deviceProp)
-{
-    const auto input_length = get_input_val(whole_length);
-    const auto input_stride = get_input_val(whole_stride);
-    const auto unit_stride  = make_unit_stride(input_length);
-
-    const auto inv_scale
-        = static_cast<Treal>(1.0)
-          / static_cast<Treal>(static_cast<unsigned long long>(isize) / nbatch - 1);
-
-    dim3 gridDim = generate_data_gridDim(isize);
-    dim3 blockDim{DATA_GEN_THREADS};
-
-    launch_limits_check("generate_real_data_kernel", gridDim, blockDim, deviceProp);
-
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(generate_real_data_kernel<decltype(input_length), Treal>),
-                       gridDim,
-                       blockDim,
-                       0, // sharedMemBytes
-                       0, // stream
-                       input_length,
-                       idist,
-                       isize,
-                       input_stride,
-                       unit_stride,
-                       inv_scale,
-                       input_data);
-    auto err = hipGetLastError();
-    if(err != hipSuccess)
-        throw std::runtime_error("generate_real_data_kernel launch failure: "
-                                 + std::string(hipGetErrorName(err)));
-}
 
 template void generate_real_data<size_t, _Float16>(const size_t&          whole_length,
                                                    const size_t           idist,
