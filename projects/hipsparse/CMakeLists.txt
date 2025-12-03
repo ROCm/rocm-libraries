@@ -39,10 +39,6 @@ endif()
 option(HIPSPARSE_ENABLE_CUDA "Build hipSPARSE with CUDA backend." OFF)
 option(HIPSPARSE_ENABLE_HIP "Build hipSPARSE with HIP backend." ON)
 
-if(HIPSPARSE_ENABLE_CUDA AND HIPSPARSE_ENABLE_HIP)
-    message(FATAL_ERROR "Cannot enable both CUDA and HIP backends simultaneously.")
-endif()
-
 option(HIPSPARSE_BUILD_SHARED_LIBS "Build hipSPARSE as a shared library." ON)
 option(HIPSPARSE_ENABLE_HOST "Build hipSPARSE library." ON)
 
@@ -64,17 +60,7 @@ option(HIPSPARSE_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
 option(HIPSPARSE_BUILD_DOCS "Build documentation." OFF)
 
 # Validate incompatible option combinations
-if(HIPSPARSE_ENABLE_COVERAGE)
-    # if(HIPSPARSE_ENABLE_FORTRAN)
-        # message(FATAL_ERROR "Cannot enable fortran clients and code coverage.")
-    if((NOT CMAKE_BUILD_TYPE STREQUAL "Debug") AND (NOT CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo"))
-        message(FATAL_ERROR "Code coverage is only supported for CMAKE_BUILD_TYPE=Debug and CMAKE_BUILD_TYPE=RelWithDebInfo.") # rel with deb info also
-    endif()
-endif()
-
-if(HIPSPARSE_ENABLE_ASAN AND HIPSPARSE_ENABLE_FORTRAN)
-    message(FATAL_ERROR "Cannot enable both address sanitizer and Fortran clients")
-endif()
+include(hipsparse_compatibility)
 
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
