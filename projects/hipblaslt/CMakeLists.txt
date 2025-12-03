@@ -573,10 +573,7 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         DEPENDS hipblaslt-test
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${coverage_dir}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${coverage_dir}/profraw"
-        COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="${coverage_dir}/profraw/hipblaslt-coverage_%p.profraw"
-                                        GTEST_LISTENER=NO_PASS_LINE_IN_LOG
-                                        $<TARGET_FILE:hipblaslt-test>
-                                        --precompile=hipblaslt-test-precompile.db
+        COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="${coverage_dir}/profraw/hipblaslt-coverage_%p.profraw" $<TARGET_FILE:hipblaslt-test>
       )
       find_program(
         LLVM_PROFDATA
