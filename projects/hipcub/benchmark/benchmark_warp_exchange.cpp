@@ -41,7 +41,7 @@ __device__ auto warp_exchange_benchmark(T* d_output)
     -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     T thread_data[ItemsPerThread];
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned i = 0; i < ItemsPerThread; ++i)
     {
         thread_data[i] = static_cast<T>(i);
@@ -59,7 +59,7 @@ __device__ auto warp_exchange_benchmark(T* d_output)
     WarpExchangeT warp_exchange(temp_storage[warp_id]);
     Op{}(warp_exchange, thread_data);
 
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned i = 0; i < ItemsPerThread; ++i)
     {
         const unsigned global_idx = (BlockSize * blockIdx.x + threadIdx.x) * ItemsPerThread + i;
@@ -99,7 +99,7 @@ __device__ auto warp_exchange_scatter_to_striped_benchmark(T* d_output)
     const unsigned warp_id = threadIdx.x / LogicalWarpSize;
     T              thread_data[ItemsPerThread];
     OffsetT        thread_ranks[ItemsPerThread];
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned i = 0; i < ItemsPerThread; ++i)
     {
         thread_data[i]  = static_cast<T>(i);
@@ -112,7 +112,7 @@ __device__ auto warp_exchange_scatter_to_striped_benchmark(T* d_output)
 
     WarpExchangeT(temp_storage[warp_id]).ScatterToStriped(thread_data, thread_ranks);
 
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned i = 0; i < ItemsPerThread; ++i)
     {
         const unsigned striped_global_idx

@@ -44,6 +44,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Updated the documentation on how to run hipCUB tests on multiple GPUs in parallel.
 * Changed `CCCL_MINIMUM_VERSION` to `3.0.0` to align with CUB.
 * Add support for large num_items `DeviceMerge` and `DeviceSegmentedSort`.
+* Replace `#pragma unroll` by `_CCCL_PRAGMA_UNROLL_FULL()` and `_CCCL_PRAGMA_NOUNROLL()` by `_CCCL_PRAGMA_NOUNROLL()`.
 
 ### Removed
 

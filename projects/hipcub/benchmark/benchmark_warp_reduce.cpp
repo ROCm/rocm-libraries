@@ -40,7 +40,7 @@ __device__ auto warp_reduce_benchmark(const T* d_input, T* d_output)
     using wreduce_t = hipcub::WarpReduce<T, WarpSize>;
     __shared__ typename wreduce_t::TempStorage storage;
     auto                                       reduce_op = hipcub::Sum();
-#pragma nounroll
+    _CCCL_PRAGMA_NOUNROLL()
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         value = wreduce_t(storage).Reduce(value, reduce_op);
@@ -72,7 +72,7 @@ __device__ auto segmented_warp_reduce_benchmark(const T* d_input, Flag* d_flags,
 
     using wreduce_t = hipcub::WarpReduce<T, WarpSize>;
     __shared__ typename wreduce_t::TempStorage storage;
-#pragma nounroll
+    _CCCL_PRAGMA_NOUNROLL()
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         value = wreduce_t(storage).HeadSegmentedSum(value, flag);

@@ -84,28 +84,28 @@ StableOddEvenSort(KeyT (&keys)[ITEMS_PER_THREAD],
 {
   constexpr bool KEYS_ONLY = ::rocprim::Equals<ValueT, NullType>::VALUE;
 
-  #pragma unroll
-  for (int i = 0; i < ITEMS_PER_THREAD; ++i)
+  _CCCL_PRAGMA_UNROLL_FULL()
+  for(int i = 0; i < ITEMS_PER_THREAD; ++i)
   {
-  #pragma unroll
-    for (int j = 1 & i; j < ITEMS_PER_THREAD - 1; j += 2)
-    {
-      if (compare_op(keys[j + 1], keys[j]))
+      _CCCL_PRAGMA_UNROLL_FULL()
+      for(int j = 1 & i; j < ITEMS_PER_THREAD - 1; j += 2)
       {
+          if(compare_op(keys[j + 1], keys[j]))
+          {
 
 #if defined(__HIP_PLATFORM_NVIDIA__)
-          using ::cuda::std::swap;
+              using ::cuda::std::swap;
 #else
-          using ::rocprim::swap;
+              using ::rocprim::swap;
 #endif
-          swap(keys[j], keys[j + 1]);
-          if(!KEYS_ONLY)
-          {
-              swap(items[j], items[j + 1]);
+              swap(keys[j], keys[j + 1]);
+              if(!KEYS_ONLY)
+              {
+                  swap(items[j], items[j + 1]);
+              }
           }
-      }
-    } // inner loop
-  }   // outer loop
+      } // inner loop
+  } // outer loop
 }
 
 
