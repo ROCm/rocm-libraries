@@ -3,8 +3,8 @@ name: hipDNN Clang Tidy
 on:
   pull_request:
     paths:
-      - 'projects/hipdnn/**'
-      - '.github/workflows/hipdnn-tidy.yml'
+      - 'projects/hipdnn/**/*.{hpp,h,cpp,c}'
+      - '.github/workflows/clang-tidy.yml'
   workflow_dispatch:
 
 jobs:
