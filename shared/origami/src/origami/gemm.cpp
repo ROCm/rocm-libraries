@@ -272,10 +272,8 @@ static inline double compute_cvt_overhead(const problem_t& problem,
   int a_bytes = data_type_to_bytes(problem.a_dtype);
   int b_bytes = data_type_to_bytes(problem.b_dtype);
 
-  const double bytesA =
-      static_cast<double>(wave_tile_m) * config.mt.k * a_bytes;
-  const double bytesB =
-      static_cast<double>(wave_tile_n) * config.mt.k * b_bytes;
+  const double bytesA = static_cast<double>(wave_tile_m) * config.mt.k * a_bytes;
+  const double bytesB = static_cast<double>(wave_tile_n) * config.mt.k * b_bytes;
 
   // const double mt_bytesA
   //     = static_cast<double>(MT_M) * MT_K * safe_ceil_div(element_size_A, 8);
@@ -983,8 +981,9 @@ double compute_total_latency(const problem_t& problem,
     }
   }
 
-  // 1-1) config.workgroup_mapping can't be greater than one
-  config.workgroup_mapping = std::max(config.workgroup_mapping, 1);
+  // 1-1) To compute the latency, use default WGM. And WGM can't be greater than one
+  int defaultWGM           = static_cast<int>(ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD)));
+  config.workgroup_mapping = std::max(defaultWGM, 1);
 
   // 1-2) Find CU occupancy
   auto [num_wgs, num_active_cus, numWaves, splitting_factor] =

@@ -68,9 +68,6 @@ namespace TensileLite
                                       "ProblemPredictionLibrary requires non empty "
                                       "mapping index set.");
 
-                    const origami::hardware_t analytical_hardware = origami::hardware_t::get_hardware_for_device(0);
-                    int defaultWGM = std::ceil(std::sqrt(analytical_hardware.N_CU / analytical_hardware.NUM_XCD));
-                    
                     for(int index : mappingIndices)
                     {
                         auto slnIter = ctx->solutions->find(index);
@@ -87,29 +84,33 @@ namespace TensileLite
                             lib.solutionmap.insert(std::make_pair(index, solution));
 
                             origami::dim3_t origami_mi;
-                            if (solution->sizeMapping.matrixInstruction[0] == 0 && solution->sizeMapping.matrixInstruction[1] == 0 && solution->sizeMapping.matrixInstruction[2] == 0) {
+                            if(solution->sizeMapping.matrixInstruction[0] == 0
+                               && solution->sizeMapping.matrixInstruction[1] == 0
+                               && solution->sizeMapping.matrixInstruction[2] == 0)
+                            {
                                 // Override dot2 instruction with vector lane widths
                                 origami_mi = {1, 1, 64};
-                            } else {
+                            }
+                            else
+                            {
                                 origami_mi = {
-                                    static_cast<size_t>(solution->sizeMapping.matrixInstruction[0]), 
-                                    static_cast<size_t>(solution->sizeMapping.matrixInstruction[1]), 
-                                    static_cast<size_t>(solution->sizeMapping.matrixInstruction[2])
-                                };
+                                    static_cast<size_t>(solution->sizeMapping.matrixInstruction[0]),
+                                    static_cast<size_t>(solution->sizeMapping.matrixInstruction[1]),
+                                    static_cast<size_t>(
+                                        solution->sizeMapping.matrixInstruction[2])};
                             }
 
                             origami::config_t origami_config = {
-                                .mt = {
-                                    solution->sizeMapping.macroTile.x,
-                                    solution->sizeMapping.macroTile.y,
-                                    solution->sizeMapping.depthU
-                                },
+                                .mt = {solution->sizeMapping.macroTile.x,
+                                       solution->sizeMapping.macroTile.y,
+                                       solution->sizeMapping.depthU},
                                 .mi = origami_mi,
-                                .occupancy = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
-                                .workgroup_mapping = (solution->sizeMapping.nonTemporalA>0 || solution->sizeMapping.nonTemporalB > 0) ? solution->sizeMapping.workGroupMapping : defaultWGM,
-                                .cache_hints_a = solution->sizeMapping.nonTemporalA,
-                                .cache_hints_b = solution->sizeMapping.nonTemporalB,
-                                .workspace_size = std::numeric_limits<size_t>::max(),
+                                .occupancy
+                                = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
+                                .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
+                                .cache_hints_a             = solution->sizeMapping.nonTemporalA,
+                                .cache_hints_b             = solution->sizeMapping.nonTemporalB,
+                                .workspace_size            = std::numeric_limits<size_t>::max(),
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
                             };
 
