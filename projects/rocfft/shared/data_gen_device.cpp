@@ -29,6 +29,7 @@
 #include "../shared/device_properties.h"
 #include "../shared/gpubuf.h"
 #include "../shared/increment.h"
+#include <hip/hip_complex.h>
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <limits>
@@ -1857,6 +1858,24 @@ template void impose_hermitian_symmetry_interleaved<rocfft_complex<double>>(
     const size_t               batch,
     rocfft_complex<double>*    input_data,
     const hipDeviceProp_t&     deviceProp);
+
+template <>
+void impose_hermitian_symmetry_interleaved(const std::vector<size_t>& length,
+                                           const std::vector<size_t>& ilength,
+                                           const std::vector<size_t>& stride,
+                                           const size_t               dist,
+                                           const size_t               batch,
+                                           hipDoubleComplex*          input_data,
+                                           const hipDeviceProp_t&     deviceProp)
+{
+    impose_hermitian_symmetry_interleaved(length,
+                                          ilength,
+                                          stride,
+                                          dist,
+                                          batch,
+                                          reinterpret_cast<rocfft_complex<double>*>(input_data),
+                                          deviceProp);
+}
 
 template <typename Tfloat>
 void impose_hermitian_symmetry_planar(const std::vector<size_t>& length,
