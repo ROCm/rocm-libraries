@@ -24,13 +24,6 @@ set_target_properties(hipsparse PROPERTIES
     DEBUG_POSTFIX "-d"
 )
 
-# Following boost conventions of prefixing 'lib' on static built libraries
-# This ensures static libraries are named libhipsparse.a instead of just hipsparse.a
-# for consistency with naming conventions across different platforms and build systems
-if(NOT (HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS))
-    set_target_properties(hipsparse PROPERTIES PREFIX "lib")
-endif()
-
 target_compile_features(hipsparse PRIVATE cxx_std_17)
 
 target_compile_options(hipsparse PRIVATE -Wno-unused-command-line-argument -Wall)

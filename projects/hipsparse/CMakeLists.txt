@@ -45,7 +45,6 @@ endif()
 
 option(HIPSPARSE_BUILD_SHARED_LIBS "Build hipSPARSE as a shared library." ON)
 option(HIPSPARSE_ENABLE_HOST "Build hipSPARSE library." ON)
-option(HIPSPARSE_BUILD_CLIENTS_ONLY "Build only clients." OFF)
 
 option(HIPSPARSE_ENABLE_CLIENT "Build hipSPARSE clients." ON)
 if(HIPSPARSE_ENABLE_CLIENT)
@@ -100,7 +99,7 @@ if(HIPSPARSE_ENABLE_CUDA)
     find_package(CUDA REQUIRED)
 elseif(HIPSPARSE_ENABLE_HIP)
     find_package(hip REQUIRED CONFIG)
-    find_package(rocsparse 4.0.1 REQUIRED CONFIG)
+    find_package(rocsparse REQUIRED)
 endif()
 
 if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
@@ -113,63 +112,67 @@ endif()
 
 if(HIPSPARSE_ENABLE_HOST)
     add_subdirectory(library)
-else()
-    # When building clients-only, find the installed hipSPARSE library
-    find_package(hipsparse 4.0.0 REQUIRED CONFIG)
 endif()
 
 # --- Client targets ---
 
-if(HIPSPARSE_BUILD_CLIENTS_ONLY OR HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
+if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
     include(rocm_client_prerequisites)
     add_subdirectory(clients)
 endif()
 
 # --- Packaging and installation ---
 
-if(HIPSPARSE_BUILD_CLIENTS_ONLY OR HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
+if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
     rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
-    
-    if(HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
-        rocm_package_setup_client_component(
-            tests
-            DEPENDS
-            COMPONENT clients-common
-            DEB "${GFORTRAN_DEB}"
-            RPM "${GFORTRAN_RPM}"
-        )
-        rocm_package_setup_client_component(
-            tests
-            DEPENDS
-            COMPONENT clients-common
-            DEB "${OPENMP_DEB}"
-            RPM "${OPENMP_RPM}"
-        )
-    endif()
-    
-    if(HIPSPARSE_ENABLE_BENCHMARKS)
-        rocm_package_setup_client_component(
-            benchmarks
-            DEPENDS
-            COMPONENT clients-common
-            DEB "${OPENMP_DEB}"
-            RPM "${OPENMP_RPM}"
-        )
-    endif()
-    
+endif()
+
+if(HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
+    rocm_package_setup_client_component(
+        tests
+        DEPENDS
+        COMPONENT clients-common
+        DEB "${GFORTRAN_DEB}"
+        RPM "${GFORTRAN_RPM}"
+    )
+    rocm_package_setup_client_component(
+        tests
+        DEPENDS
+        COMPONENT clients-common
+        DEB "${OPENMP_DEB}"
+        RPM "${OPENMP_RPM}"
+    )
+endif()
+
+if(HIPSPARSE_ENABLE_BENCHMARKS)
+    rocm_package_setup_client_component(
+        benchmarks
+        DEPENDS
+        COMPONENT clients-common
+        DEB "${OPENMP_DEB}"
+        RPM "${OPENMP_RPM}"
+    )
+endif()
+
+if(HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
     if(NOT WIN32)
-        if(HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
-            rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_RPM}")
-            rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_DEB}")
-        endif()
-        if(HIPSPARSE_ENABLE_BENCHMARKS)
-            rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_RPM}")
-            rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_DEB}")
-        endif()
-        if(HIPSPARSE_ENABLE_OPENMP AND (HIPSPARSE_BUILD_TESTING OR BUILD_TESTING))
+        rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_RPM}")
+        rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${GFORTRAN_DEB}")
+        if(HIPSPARSE_ENABLE_OPENMP)
             rocm_package_add_rpm_dependencies(COMPONENT tests DEPENDS "${OPENMP_RPM}")
             rocm_package_add_deb_dependencies(COMPONENT tests DEPENDS "${OPENMP_DEB}")
+        endif()
+    endif()
+endif()
+
+if(HIPSPARSE_ENABLE_BENCHMARKS)
+    if(NOT WIN32)
+        rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_RPM}")
+        rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "${GFORTRAN_DEB}")
+        if(HIPSPARSE_ENABLE_OPENMP)
+            rocm_package_add_rpm_dependencies(COMPONENT benchmarks DEPENDS "${OPENMP_RPM}")
+            rocm_package_add_deb_dependencies(COMPONENT benchmarks DEPENDS "${OPENMP_DEB}")
         endif()
     endif()
 endif()

@@ -153,6 +153,20 @@ if(DEFINED BUILD_CUDA)
 endif()
 
 # ==============================================================================
+# Platform-Specific Option Validation
+# ==============================================================================
+
+# Windows does not support Fortran clients - force disable if enabled
+if(WIN32 AND HIPSPARSE_ENABLE_FORTRAN)
+    message(DEPRECATION
+        "HIPSPARSE_ENABLE_FORTRAN is not supported on Windows.\n"
+        "Fortran support is automatically disabled on Windows.\n"
+        "Remove -DHIPSPARSE_ENABLE_FORTRAN=ON from your build configuration.\n"
+        "To suppress these warnings: cmake -DCMAKE_WARN_DEPRECATED=OFF ...")
+    set(HIPSPARSE_ENABLE_FORTRAN OFF CACHE BOOL "Enable Fortran client support." FORCE)
+endif()
+
+# ==============================================================================
 # Display Migration Guidance
 # ==============================================================================
 
