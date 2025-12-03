@@ -4181,7 +4181,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_drotmg_strided_batched_64(rocblas_handle h
                     0 0 0 5 4 1 2             0 0 0 0 0 0 0
                     0 0 0 0 5 4 1             0 0 0 0 0 0 0
 
-              Note that empty elements which do not correspond to data will not
+              Note that empty elements that do not correspond to data will not
               be referenced.
     @param[in]
     lda       [rocblas_int]
@@ -4373,7 +4373,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgbmv_64(rocblas_handle                han
                     0 0 0 5 4 1 2             0 0 0 0 0 0 0
                     0 0 0 0 5 4 1             0 0 0 0 0 0 0
 
-              Note that empty elements which do not correspond to data will not
+              Note that empty elements that do not correspond to data will not
               be referenced.
     @param[in]
     lda       [rocblas_int]
@@ -4576,14 +4576,14 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgbmv_batched_64(rocblas_handle           
                     0 0 0 5 4 1 2             0 0 0 0 0 0 0
                     0 0 0 0 5 4 1             0 0 0 0 0 0 0
 
-              Note that empty elements which do not correspond to data will not
+              Note that empty elements that do not correspond to data will not
               be referenced.
     @param[in]
     lda       [rocblas_int]
               specifies the leading dimension of A. Must be >= (kl + ku + 1).
     @param[in]
     stride_A  [rocblas_stride]
-              stride from the start of one matrix (A_i) and the next one (A_i+1).
+              stride from the start of one matrix (A_i) to the next one (A_i+1).
     @param[in]
     x         device pointer to first vector (x_1).
     @param[in]
@@ -5525,15 +5525,16 @@ ROCBLAS_EXPORT rocblas_status rocblas_tssgemv_strided_batched_64(rocblas_handle 
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    hbmv performs the matrix-vector operations:
+    The hbmv functions perform the matrix-vector operations:
 
         y := alpha*A*x + beta*y
-        where alpha and beta are scalars, x and y are n element vectors and A is an
-        n by n Hermitian band matrix, with k super-diagonals.
+   
+    where ``alpha`` and ``beta`` are scalars, ``x`` and ``y`` are ``n``-element vectors, and ``A`` is an
+    ``n`` by ``n`` Hermitian band matrix, with ``k`` super-diagonals.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
             - rocblas_fill_upper: The upper triangular part of A is being supplied.
@@ -5553,7 +5554,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_tssgemv_strided_batched_64(rocblas_handle 
                 The leading (k + 1) by n part of A must contain the upper
                 triangular band part of the Hermitian matrix, with the leading
                 diagonal in row (k + 1), the first super-diagonal on the RHS
-                of row k, etc.
+                of row k, and so forth.
                 The top left k by x triangle of A will not be referenced.
                     Ex (upper, lda = n = 4, k = 1):
                     A                             Represented matrix
@@ -5566,7 +5567,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_tssgemv_strided_batched_64(rocblas_handle 
                 The leading (k + 1) by n part of A must contain the lower
                 triangular band part of the Hermitian matrix, with the leading
                 diagonal in row (1), the first sub-diagonal on the LHS of
-                row 2, etc.
+                row 2, and so forth.
                 The bottom right k by k triangle of A will not be referenced.
                     Ex (lower, lda = 2, n = 4, k = 1):
                     A                               Represented matrix
@@ -5579,7 +5580,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_tssgemv_strided_batched_64(rocblas_handle 
               of A will not be referenced and is assumed to be == 0.
     @param[in]
     lda       [rocblas_int]
-              specifies the leading dimension of A. must be >= k + 1.
+              specifies the leading dimension of A. Must be >= k + 1.
     @param[in]
     x         device pointer storing vector x.
     @param[in]
@@ -5652,15 +5653,16 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhbmv_64(rocblas_handle                han
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    hbmv_batched performs one of the matrix-vector operations:
+    The hbmv_batched functions perform one of the matrix-vector operations:
 
         y_i := alpha*A_i*x_i + beta*y_i
-        where alpha and beta are scalars, x_i and y_i are n element vectors and A_i is an
-        n by n Hermitian band matrix with k super-diagonals, for each batch in i = [1, batch_count].
+   
+    where ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are ``n``-element vectors, and ``A_i`` is an
+    ``n`` by ``n`` Hermitian band matrix with ``k`` super-diagonals, for each batch in ``i`` = [1, ``batch_count``].
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
             - rocblas_fill_upper: The upper triangular part of each A_i is being supplied.
@@ -5674,13 +5676,13 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhbmv_64(rocblas_handle                han
     @param[in]
     alpha     device pointer or host pointer to scalar alpha.
     @param[in]
-    A         device array of device pointers storing each matrix_i A of dimension (lda, n).
+    A         device array of device pointers storing each matrix A_i of dimension (lda, n).
 
             if uplo == rocblas_fill_upper:
                 The leading (k + 1) by n part of each A_i must contain the upper
                 triangular band part of the Hermitian matrix, with the leading
                 diagonal in row (k + 1), the first super-diagonal on the RHS
-                of row k, etc.
+                of row k, and so forth.
                 The top left k by x triangle of each A_i will not be referenced.
                     Ex (upper, lda = n = 4, k = 1):
                     A                             Represented matrix
@@ -5693,7 +5695,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhbmv_64(rocblas_handle                han
                 The leading (k + 1) by n part of each A_i must contain the lower
                 triangular band part of the Hermitian matrix, with the leading
                 diagonal in row (1), the first sub-diagonal on the LHS of
-                row 2, etc.
+                row 2, and so forth.
                 The bottom right k by k triangle of each A_i will not be referenced.
                     Ex (lower, lda = 2, n = 4, k = 1):
                     A                               Represented matrix
@@ -5706,7 +5708,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhbmv_64(rocblas_handle                han
               of each A_i will not be referenced and is assumed to be == 0.
     @param[in]
     lda       [rocblas_int]
-              specifies the leading dimension of each A_i. must be >= max(1, n).
+              specifies the leading dimension of each A_i. Must be >= max(1, n).
     @param[in]
     x         device array of device pointers storing each vector x_i.
     @param[in]
@@ -5786,15 +5788,16 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhbmv_batched_64(rocblas_handle           
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    hbmv_strided_batched performs one of the matrix-vector operations:
+    The hbmv_strided_batched functions perform one of the matrix-vector operations:
 
         y_i := alpha*A_i*x_i + beta*y_i
-        where alpha and beta are scalars, x_i and y_i are n element vectors and A_i is an
-        n by n Hermitian band matrix with k super-diagonals, for each batch in i = [1, batch_count].
+   
+    where ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are ``n``-element vectors, and ``A_i`` is an
+    ``n`` by ``n`` Hermitian band matrix with ``k`` super-diagonals, for each batch in ``i`` = [1, ``batch_count``].
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
             - rocblas_fill_upper: The upper triangular part of each A_i is being supplied.
@@ -5814,7 +5817,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhbmv_batched_64(rocblas_handle           
                 The leading (k + 1) by n part of each A_i must contain the upper
                 triangular band part of the Hermitian matrix, with the leading
                 diagonal in row (k + 1), the first super-diagonal on the RHS
-                of row k, etc.
+                of row k, and so forth.
                 The top left k by x triangle of each A_i will not be referenced.
                     Ex (upper, lda = n = 4, k = 1):
                     A                             Represented matrix
@@ -5827,7 +5830,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhbmv_batched_64(rocblas_handle           
                 The leading (k + 1) by n part of each A_i must contain the lower
                 triangular band part of the Hermitian matrix, with the leading
                 diagonal in row (1), the first sub-diagonal on the LHS of
-                row 2, etc.
+                row 2, and so forth.
                 The bottom right k by k triangle of each A_i will not be referenced.
                     Ex (lower, lda = 2, n = 4, k = 1):
                     A                               Represented matrix
@@ -5840,10 +5843,10 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhbmv_batched_64(rocblas_handle           
               of each A_i will not be referenced and is assumed to be == 0.
     @param[in]
     lda       [rocblas_int]
-              specifies the leading dimension of each A_i. must be >= max(1, n).
+              specifies the leading dimension of each A_i. Must be >= max(1, n).
     @param[in]
     stride_A  [rocblas_stride]
-              stride from the start of one matrix (A_i) and the next one (A_i+1).
+              stride from the start of one matrix (A_i) to the next one (A_i+1).
     @param[in]
     x         device array pointing to the first vector y_1.
     @param[in]
@@ -5851,7 +5854,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhbmv_batched_64(rocblas_handle           
               specifies the increment for the elements of each x_i.
     @param[in]
     stride_x  [rocblas_stride]
-              stride from the start of one vector (x_i) and the next one (x_i+1).
+              stride from the start of one vector (x_i) to the next one (x_i+1).
     @param[in]
     beta      device pointer or host pointer to scalar beta.
     @param[in, out]
@@ -5861,7 +5864,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhbmv_batched_64(rocblas_handle           
               specifies the increment for the elements of y.
     @param[in]
     stride_y  [rocblas_stride]
-              stride from the start of one vector (y_i) and the next one (y_i+1).
+              stride from the start of one vector (y_i) to the next one (y_i+1).
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
@@ -5941,15 +5944,16 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhbmv_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    hemv performs one of the matrix-vector operations:
+    The hemv functions perform one of the matrix-vector operations:
 
         y := alpha*A*x + beta*y
-        where alpha and beta are scalars, x and y are n element vectors and A is an
-        n by n Hermitian matrix.
+   
+    where ``alpha`` and ``beta`` are scalars, ``x`` and ``y`` are ``n``-element vectors, and ``A`` is an
+    ``n`` by ``n`` Hermitian matrix.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
             - rocblas_fill_upper: the upper triangular part of the Hermitian matrix A is supplied.
@@ -5975,7 +5979,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhbmv_strided_batched_64(rocblas_handle   
             of A will not be referenced and is assumed to be == 0.
     @param[in]
     lda       [rocblas_int]
-              specifies the leading dimension of A. must be >= max(1, n).
+              specifies the leading dimension of A. Must be >= max(1, n).
     @param[in]
     x         device pointer storing vector x.
     @param[in]
@@ -6044,15 +6048,16 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemv_64(rocblas_handle                han
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    hemv_batched performs one of the matrix-vector operations:
+    The hemv_batched functions perform one of the matrix-vector operations:
 
         y_i := alpha*A_i*x_i + beta*y_i
-        where alpha and beta are scalars, x_i and y_i are n element vectors and A_i is an
-        n by n Hermitian matrix, for each batch in i = [1, batch_count].
+   
+    where ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are ``n``-element vectors, and ``A_i`` is an
+    ``n`` by ``n`` Hermitian matrix, for each batch in ``i`` = [1, ``batch_count``].
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
             - rocblas_fill_upper: the upper triangular part of the Hermitian matrix A is supplied.
@@ -6078,7 +6083,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemv_64(rocblas_handle                han
             of each A_i will not be referenced and is assumed to be == 0.
     @param[in]
     lda       [rocblas_int]
-              specifies the leading dimension of each A_i. must be >= max(1, n).
+              specifies the leading dimension of each A_i. Must be >= max(1, n).
     @param[in]
     x         device array of device pointers storing each vector x_i.
     @param[in]
@@ -6154,15 +6159,16 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemv_batched_64(rocblas_handle           
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    hemv_strided_batched performs one of the matrix-vector operations:
+    The hemv_strided_batched functions perform one of the matrix-vector operations:
 
         y_i := alpha*A_i*x_i + beta*y_i
-        where alpha and beta are scalars, x_i and y_i are n element vectors and A_i is an
-        n by n Hermitian matrix, for each batch in i = [1, batch_count].
+   
+    where ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are ``n``-element vectors, and ``A_i`` is an
+    ``n`` by ``n`` Hermitian matrix, for each batch in ``i`` = [1, ``batch_count``].
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
             - rocblas_fill_upper: the upper triangular part of the Hermitian matrix A is supplied.
@@ -6188,7 +6194,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemv_batched_64(rocblas_handle           
             of each A_i will not be referenced and is assumed to be == 0.
     @param[in]
     lda       [rocblas_int]
-              specifies the leading dimension of each A_i. must be >= max(1, n).
+              specifies the leading dimension of each A_i. Must be >= max(1, n).
     @param[in]
     stride_A    [rocblas_stride]
                 stride from the start of one (A_i) to the next (A_i+1).
@@ -6199,7 +6205,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemv_batched_64(rocblas_handle           
               specifies the increment for the elements of each x_i.
     @param[in]
     stride_x  [rocblas_stride]
-              stride from the start of one vector (x_i) and the next one (x_i+1).
+              stride from the start of one vector (x_i) to the next one (x_i+1).
     @param[in]
     beta      device pointer or host pointer to scalar beta.
     @param[in, out]
@@ -6209,7 +6215,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemv_batched_64(rocblas_handle           
               specifies the increment for the elements of y.
     @param[in]
     stride_y  [rocblas_stride]
-              stride from the start of one vector (y_i) and the next one (y_i+1).
+              stride from the start of one vector (y_i) to the next one (y_i+1).
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
@@ -6285,18 +6291,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemv_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    her performs the matrix-vector operations:
+    The her functions perform the matrix-vector operations:
 
         A := A + alpha*x*x**H
-        where alpha is a real scalar, x is a vector, and A is an
-        n by n Hermitian matrix.
+   
+    where ``alpha`` is a real scalar, ``x`` is a vector, and ``A`` is an
+    ``n`` by ``n`` Hermitian matrix.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of A is supplied in A.
             - rocblas_fill_lower: The lower triangular part of A is supplied in A.
     @param[in]
@@ -6311,17 +6318,18 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemv_strided_batched_64(rocblas_handle   
     incx      [rocblas_int]
               specifies the increment for the elements of x.
     @param[in, out]
-    A         device pointer storing the specified triangular portion of the Hermitian matrix A. Of size (lda * n).
+    A         device pointer storing the specified triangular portion of the Hermitian matrix A.
+              Of size (lda * n).
 
-                if uplo == rocblas_fill_upper:
-                    The upper triangular portion of the Hermitian matrix A is supplied.
-                    The lower triangluar portion will not be touched.
+                    if uplo == rocblas_fill_upper:
+                        The upper triangular portion of the Hermitian matrix A is supplied.
+                        The lower triangluar portion will not be touched.
 
-                if uplo == rocblas_fill_lower:
-                    The lower triangular portion of the Hermitian matrix A is supplied.
-                    The upper triangular portion will not be touched.
-                Note that the imaginary part of the diagonal elements are not accessed
-                and are assumed to be 0.
+                    if uplo == rocblas_fill_lower:
+                        The lower triangular portion of the Hermitian matrix A is supplied.
+                        The upper triangular portion will not be touched.
+               Note that the imaginary parts of the diagonal elements are not accessed
+               and are assumed to be 0.
 
     @param[in]
     lda       [rocblas_int]
@@ -6368,18 +6376,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher_64(rocblas_handle                hand
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    her_batched performs the matrix-vector operations:
+    The her_batched functions performs the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*x_i**H
-        where alpha is a real scalar, x_i is a vector, and A_i is an
-        n by n symmetric matrix, for i = 1, ..., batch_count.
+   
+    where ``alpha`` is a real scalar, ``x_i`` is a vector, and ``A_i`` is an
+    ``n`` by ``n`` symmetric matrix, for ``i`` = 1, ..., ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of each A_i is supplied in A.
             - rocblas_fill_lower: The lower triangular part of each A_i is supplied in A.
     @param[in]
@@ -6395,16 +6404,17 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher_64(rocblas_handle                hand
               specifies the increment for the elements of each x_i.
     @param[in, out]
     A         device array of device pointers storing the specified triangular portion of
-    each Hermitian matrix A_i of at least size ((n * (n + 1)) / 2). Array is of at least size batch_count.
+              each Hermitian matrix A_i of at least size ((n * (n + 1)) / 2). Array is of at least size batch_count.
 
-                if uplo == rocblas_fill_upper:
-                    The upper triangular portion of each Hermitian matrix A_i is supplied.
-                    The lower triangular portion of each A_i will not be touched.
-                if uplo == rocblas_fill_lower:
-                    The lower triangular portion of each Hermitian matrix A_i is supplied.
-                    The upper triangular portion of each A_i will not be touched.
-                Note that the imaginary part of the diagonal elements are not accessed
-                and are assumed to be 0.
+                    if uplo == rocblas_fill_upper:
+                        The upper triangular portion of each Hermitian matrix A_i is supplied.
+                        The lower triangular portion of each A_i will not be touched.
+
+                    if uplo == rocblas_fill_lower:
+                        The lower triangular portion of each Hermitian matrix A_i is supplied.
+                        The upper triangular portion of each A_i will not be touched.
+               Note that the imaginary parts of the diagonal elements are not accessed
+               and are assumed to be 0.
 
     @param[in]
     lda       [rocblas_int]
@@ -6458,18 +6468,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher_batched_64(rocblas_handle            
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    her_strided_batched performs the matrix-vector operations:
+    The her_strided_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*x_i**H
-        where alpha is a real scalar, x_i is a vector, and A_i is an
-        n by n Hermitian matrix, for i = 1, ..., batch_count.
+   
+    where ``alpha`` is a real scalar, ``x_i`` is a vector, and ``A_i`` is an
+    ``n`` by ``n`` Hermitian matrix, for ``i`` = 1, ..., ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-              specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+              specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of each A_i is supplied in A.
             - rocblas_fill_lower: The lower triangular part of each A_i is supplied in A.
     @param[in]
@@ -6485,7 +6496,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher_batched_64(rocblas_handle            
               specifies the increment for the elements of each x_i.
     @param[in]
     stride_x  [rocblas_stride]
-              stride from the start of one vector (x_i) and the next one (x_i+1).
+              stride from the start of one vector (x_i) to the next one (x_i+1).
     @param[in, out]
     A         device array of device pointers storing the specified triangular portion of
               each Hermitian matrix A_i. Points to the first matrix (A_1).
@@ -6497,14 +6508,14 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher_batched_64(rocblas_handle            
                     if uplo == rocblas_fill_lower:
                         The lower triangular portion of each Hermitian matrix A_i is supplied.
                         The upper triangular portion of each A_i will not be touched.
-                Note that the imaginary part of the diagonal elements are not accessed
-                and are assumed to be 0.
+               Note that the imaginary parts of the diagonal elements are not accessed
+               and are assumed to be 0.
     @param[in]
     lda       [rocblas_int]
               specifies the leading dimension of each A_i.
     @param[in]
     stride_A    [rocblas_stride]
-                stride from the start of one (A_i) and the next (A_i+1).
+                stride from the start of one (A_i) to the next (A_i+1).
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
@@ -6562,18 +6573,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher_strided_batched_64(rocblas_handle    
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    her2 performs the matrix-vector operations:
+    The her2 functions perform the matrix-vector operations:
 
         A := A + alpha*x*y**H + conj(alpha)*y*x**H
-        where alpha is a complex scalar, x and y are vectors, and A is an
-        n by n Hermitian matrix.
+   
+    where ``alpha`` is a complex scalar, ``x`` and ``y`` are vectors, and ``A`` is an
+    ``n`` by ``n`` Hermitian matrix.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of A is supplied.
             - rocblas_fill_lower: The lower triangular part of A is supplied.
     @param[in]
@@ -6603,8 +6615,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher_strided_batched_64(rocblas_handle    
                     if uplo == rocblas_fill_lower:
                         The lower triangular portion of the Hermitian matrix A is supplied.
                         The upper triangular portion of A will not be touched.
-                Note that the imaginary part of the diagonal elements are not accessed
-                and are assumed to be 0.
+               Note that the imaginary parts of the diagonal elements are not accessed
+               and are assumed to be 0.
     @param[in]
     lda       [rocblas_int]
               specifies the leading dimension of A. Must be at least max(lda, 1).
@@ -6658,18 +6670,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2_64(rocblas_handle                han
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    her2_batched performs the matrix-vector operations:
+    The her2_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*y_i**H + conj(alpha)*y_i*x_i**H
-        where alpha is a complex scalar, x_i and y_i are vectors, and A_i is an
-        n by n Hermitian matrix for each batch in i = [1, batch_count].
+   
+    where ``alpha`` is a complex scalar, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
+    ``n`` by ``n`` Hermitian matrix for each batch in ``i`` = [1, ``batch_count``].
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of each A_i is supplied.
             - rocblas_fill_lower: The lower triangular part of each A_i is supplied.
     @param[in]
@@ -6699,8 +6712,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2_64(rocblas_handle                han
                     if uplo == rocblas_fill_lower:
                         The lower triangular portion of each Hermitian matrix A_i is supplied.
                         The upper triangular portion of each A_i will not be touched.
-                Note that the imaginary part of the diagonal elements are not accessed
-                and are assumed to be 0.
+               Note that the imaginary parts of the diagonal elements are not accessed
+               and are assumed to be 0.
     @param[in]
     lda       [rocblas_int]
               specifies the leading dimension of each A_i. Must be at least max(lda, 1).
@@ -6761,18 +6774,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2_batched_64(rocblas_handle           
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    her2_strided_batched performs the matrix-vector operations:
+    The her2_strided_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*y_i**H + conj(alpha)*y_i*x_i**H
-        where alpha is a complex scalar, x_i and y_i are vectors, and A_i is an
-        n by n Hermitian matrix for each batch in i = [1, batch_count].
+   
+    where ``alpha`` is a complex scalar, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
+    ``n`` by ``n`` Hermitian matrix for each batch in ``i`` = [1, ``batch_count``].
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of each A_i is supplied.
             - rocblas_fill_lower: The lower triangular part of each A_i is supplied.
     @param[in]
@@ -6808,7 +6822,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2_batched_64(rocblas_handle           
                     if uplo == rocblas_fill_lower:
                         The lower triangular portion of each Hermitian matrix A_i is supplied.
                         The upper triangular portion of each A_i will not be touched.
-                Note that the imaginary part of the diagonal elements are not accessed
+                Note that the imaginary parts of the diagonal elements are not accessed
                 and are assumed to be 0.
     @param[in]
     lda       [rocblas_int]
@@ -6885,15 +6899,16 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    hpmv performs the matrix-vector operation:
+    The hpmv functions perform the matrix-vector operation:
 
         y := alpha*A*x + beta*y
-        where alpha and beta are scalars, x and y are n element vectors and A is an
-        n by n Hermitian matrix, supplied in packed form (see description below).
+   
+    where ``alpha`` and ``beta`` are scalars, ``x`` and ``y`` are ``n``-element vectors and A is an
+    ``n`` by ``n`` Hermitian matrix, supplied in packed form (see description below).
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
             - rocblas_fill_upper: the upper triangular part of the Hermitian matrix A is supplied in AP.
@@ -6932,7 +6947,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2_strided_batched_64(rocblas_handle   
                             (1, 0) (2, 1) (3, 2)
                             (2,-1) (4, 0) (5,-1) ---> [(1,0),(2,-1),(3,-2),(4,0),(5,1),(6,0)]
                             (3,-2) (5, 1) (6, 0)
-                Note that the imaginary part of the diagonal elements are not accessed
+                Note that the imaginary parts of the diagonal elements are not accessed
                 and are assumed to be 0.
     @param[in]
     x         device pointer storing vector x.
@@ -6997,16 +7012,17 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpmv_64(rocblas_handle                han
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    hpmv_batched performs the matrix-vector operation:
+    The hpmv_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-        where alpha and beta are scalars, x_i and y_i are n element vectors and A_i is an
-        n by n Hermitian matrix, supplied in packed form (see description below),
-        for each batch in i = [1, batch_count].
+   
+    where ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are ``n``-element vectors and ``A_i`` is an
+    ``n`` by ``n`` Hermitian matrix, supplied in packed form (see description below),
+    for each batch in ``i`` = [1, ``batch_count``].
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
             - rocblas_fill_upper: the upper triangular part of each Hermitian matrix A_i is supplied in AP.
@@ -7045,8 +7061,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpmv_64(rocblas_handle                han
                             (1, 0) (2, 1) (3, 2)
                             (2,-1) (4, 0) (5,-1) ---> [(1,0),(2,-1),(3,-2),(4,0),(5,1),(6,0)]
                             (3,-2) (5, 1) (6, 0)
-                    Note that the imaginary part of the diagonal elements are not accessed
-                    and are assumed to be 0.
+               Note that the imaginary parts of the diagonal elements are not accessed
+               and are assumed to be 0.
     @param[in]
     x         device array of device pointers storing each vector x_i.
     @param[in]
@@ -7117,16 +7133,17 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpmv_batched_64(rocblas_handle           
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    hpmv_strided_batched performs the matrix-vector operation:
+    The hpmv_strided_batched functions perform the matrix-vector operation:
 
         y_i := alpha*A_i*x_i + beta*y_i
-        where alpha and beta are scalars, x_i and y_i are n element vectors and A_i is an
-        n by n Hermitian matrix, supplied in packed form (see description below),
-        for each batch in i = [1, batch_count].
+   
+    where ``alpha`` and ``beta`` are scalars, ``x_i`` and ``y_i`` are ``n``-element vectors and ``A_i`` is an
+    ``n`` by ``n`` Hermitian matrix, supplied in packed form (see description below),
+    for each batch in ``i`` = [1, ``batch_count``].
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
             - rocblas_fill_upper: the upper triangular part of each Hermitian matrix A_i is supplied in AP.
@@ -7165,11 +7182,11 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpmv_batched_64(rocblas_handle           
                             (1, 0) (2, 1) (3, 2)
                             (2,-1) (4, 0) (5,-1) ---> [(1,0),(2,-1),(3,-2),(4,0),(5,1),(6,0)]
                             (3,-2) (5, 1) (6, 0)
-                    Note that the imaginary part of the diagonal elements are not accessed
-                    and are assumed to be 0.
+               Note that the imaginary parts of the diagonal elements are not accessed
+               and are assumed to be 0.
     @param[in]
     stride_A  [rocblas_stride]
-              stride from the start of one matrix (AP_i) and the next one (AP_i+1).
+              stride from the start of one matrix (AP_i) to the next one (AP_i+1).
     @param[in]
     x         device array pointing to the beginning of the first vector (x_1).
     @param[in]
@@ -7177,7 +7194,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpmv_batched_64(rocblas_handle           
               specifies the increment for the elements of each x_i.
     @param[in]
     stride_x  [rocblas_stride]
-              stride from the start of one vector (x_i) and the next one (x_i+1).
+              stride from the start of one vector (x_i) to the next one (x_i+1).
     @param[in]
     beta      device pointer or host pointer to scalar beta.
     @param[in, out]
@@ -7187,7 +7204,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpmv_batched_64(rocblas_handle           
               specifies the increment for the elements of y.
     @param[in]
     stride_y  [rocblas_stride]
-              stride from the start of one vector (y_i) and the next one (y_i+1).
+              stride from the start of one vector (y_i) to the next one (y_i+1).
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
@@ -7258,18 +7275,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpmv_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    hpr performs the matrix-vector operations:
+    The hpr functions perform the matrix-vector operations:
 
         A := A + alpha*x*x**H
-        where alpha is a real scalar, x is a vector, and A is an
-        n by n Hermitian matrix, supplied in packed form.
+   
+    where ``alpha`` is a real scalar, ``x`` is a vector, and ``A`` is an
+    ``n`` by ``n`` Hermitian matrix, supplied in packed form.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of A is supplied in AP.
             - rocblas_fill_lower: The lower triangular part of A is supplied in AP.
     @param[in]
@@ -7312,8 +7330,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpmv_strided_batched_64(rocblas_handle   
                             (1, 0) (2, 1) (4,9)
                             (2,-1) (3, 0) (5,3) ---> [(1,0),(2,-1),(4,-9),(3,0),(5,-3),(6,0)]
                             (4,-9) (5,-3) (6,0)
-                    Note that the imaginary part of the diagonal elements are not accessed
-                    and are assumed to be 0.
+               Note that the imaginary parts of the diagonal elements are not accessed
+               and are assumed to be 0.
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_chpr(rocblas_handle               handle,
                                            rocblas_fill                 uplo,
@@ -7352,18 +7370,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr_64(rocblas_handle                hand
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    hpr_batched performs the matrix-vector operations:
+    The hpr_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*x_i**H
-        where alpha is a real scalar, x_i is a vector, and A_i is an
-        n by n symmetric matrix, supplied in packed form, for i = 1, ..., batch_count.
+   
+    where ``alpha`` is a real scalar, ``x_i`` is a vector, and ``A_i`` is an
+    ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of each A_i is supplied in AP.
             - rocblas_fill_lower: The lower triangular part of each A_i is supplied in AP.
     @param[in]
@@ -7406,8 +7425,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr_64(rocblas_handle                hand
                             (1, 0) (2, 1) (4,9)
                             (2,-1) (3, 0) (5,3) ---> [(1,0),(2,-1),(4,-9),(3,0),(5,-3),(6,0)]
                             (4,-9) (5,-3) (6,0)
-                    Note that the imaginary part of the diagonal elements are not accessed
-                    and are assumed to be 0.
+               Note that the imaginary parts of the diagonal elements are not accessed
+               and are assumed to be 0.
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
@@ -7453,18 +7472,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr_batched_64(rocblas_handle            
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    hpr_strided_batched performs the matrix-vector operations:
+    The hpr_strided_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*x_i**H
-        where alpha is a real scalar, x_i is a vector, and A_i is an
-        n by n symmetric matrix, supplied in packed form, for i = 1, ..., batch_count.
+   
+    where ``alpha`` is a real scalar, ``x_i`` is a vector, and ``A_i`` is an
+    ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of each A_i is supplied in AP.
             - rocblas_fill_lower: The lower triangular part of each A_i is supplied in AP.
     @param[in]
@@ -7480,7 +7500,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr_batched_64(rocblas_handle            
               specifies the increment for the elements of each x_i.
     @param[in]
     stride_x  [rocblas_stride]
-              stride from the start of one vector (x_i) and the next one (x_i+1).
+              stride from the start of one vector (x_i) to the next one (x_i+1).
     @param[in, out]
     AP        device array of device pointers storing the packed version of the specified triangular portion of
               each Hermitian matrix A_i. Points to the first matrix (A_1).
@@ -7510,11 +7530,11 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr_batched_64(rocblas_handle            
                             (1, 0) (2, 1) (4,9)
                             (2,-1) (3, 0) (5,3) ---> [(1,0),(2,-1),(4,-9),(3,0),(5,-3),(6,0)]
                             (4,-9) (5,-3) (6,0)
-                    Note that the imaginary part of the diagonal elements are not accessed
-                    and are assumed to be 0.
+               Note that the imaginary parts of the diagonal elements are not accessed
+               and are assumed to be 0.
     @param[in]
     stride_A    [rocblas_stride]
-                stride from the start of one (A_i) and the next (A_i+1).
+                stride from the start of one (A_i) to the next (A_i+1).
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
@@ -7568,18 +7588,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr_strided_batched_64(rocblas_handle    
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    hpr2 performs the matrix-vector operations:
+    The hpr2 functions perform the matrix-vector operations:
 
         A := A + alpha*x*y**H + conj(alpha)*y*x**H
-        where alpha is a complex scalar, x and y are vectors, and A is an
-        n by n Hermitian matrix, supplied in packed form.
+   
+    where ``alpha`` is a complex scalar, ``x`` and ``y`` are vectors, and ``A`` is an
+    ``n`` by ``n`` Hermitian matrix, supplied in packed form.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of A is supplied in AP.
             - rocblas_fill_lower: The lower triangular part of A is supplied in AP.
     @param[in]
@@ -7627,8 +7648,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr_strided_batched_64(rocblas_handle    
                             (1, 0) (2, 1) (4,9)
                             (2,-1) (3, 0) (5,3) ---> [(1,0),(2,-1),(4,-9),(3,0),(5,-3),(6,0)]
                             (4,-9) (5,-3) (6,0)
-                    Note that the imaginary part of the diagonal elements are not accessed
-                    and are assumed to be 0.
+               Note that the imaginary parts of the diagonal elements are not accessed
+               and are assumed to be 0.
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_chpr2(rocblas_handle               handle,
                                             rocblas_fill                 uplo,
@@ -7675,18 +7696,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr2_64(rocblas_handle                han
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    hpr2_batched performs the matrix-vector operations:
+    The hpr2_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*y_i**H + conj(alpha)*y_i*x_i**H
-        where alpha is a complex scalar, x_i and y_i are vectors, and A_i is an
-        n by n symmetric matrix, supplied in packed form, for i = 1, ..., batch_count.
+   
+    where ``alpha`` is a complex scalar, ``x_i`` and``y_i`` are vectors, and ``A_i`` is an
+    ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of each A_i is supplied in AP.
             - rocblas_fill_lower: The lower triangular part of each A_i is supplied in AP.
     @param[in]
@@ -7734,8 +7756,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr2_64(rocblas_handle                han
                             (1, 0) (2, 1) (4,9)
                             (2,-1) (3, 0) (5,3) --> [(1,0),(2,-1),(4,-9),(3,0),(5,-3),(6,0)]
                             (4,-9) (5,-3) (6,0)
-                    Note that the imaginary part of the diagonal elements are not accessed
-                    and are assumed to be 0.
+               Note that the imaginary parts of the diagonal elements are not accessed
+               and are assumed to be 0.
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
@@ -7789,18 +7811,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr2_batched_64(rocblas_handle           
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    hpr2_strided_batched performs the matrix-vector operations:
+    The hpr2_strided_batched functions perform the matrix-vector operations:
 
         A_i := A_i + alpha*x_i*y_i**H + conj(alpha)*y_i*x_i**H
-        where alpha is a complex scalar, x_i and y_i are vectors, and A_i is an
-        n by n symmetric matrix, supplied in packed form, for i = 1, ..., batch_count.
+   
+    where ``alpha`` is a complex scalar, ``x_i`` and ``y_i`` are vectors, and ``A_i`` is an
+    ``n`` by ``n`` symmetric matrix, supplied in packed form, for ``i`` = 1, ..., ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-            specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+            specifies either upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
             - rocblas_fill_upper: The upper triangular part of each A_i is supplied in AP.
             - rocblas_fill_lower: The lower triangular part of each A_i is supplied in AP.
     @param[in]
@@ -7816,7 +7839,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr2_batched_64(rocblas_handle           
               specifies the increment for the elements of each x_i.
     @param[in]
     stride_x  [rocblas_stride]
-              stride from the start of one vector (x_i) and the next one (x_i+1).
+              stride from the start of one vector (x_i) to the next one (x_i+1).
     @param[in]
     y         device pointer pointing to the first vector (y_1).
     @param[in]
@@ -7824,7 +7847,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr2_batched_64(rocblas_handle           
               specifies the increment for the elements of each y_i.
     @param[in]
     stride_y  [rocblas_stride]
-              stride from the start of one vector (y_i) and the next one (y_i+1).
+              stride from the start of one vector (y_i) to the next one (y_i+1).
     @param[in, out]
     AP        device array of device pointers storing the packed version of the specified triangular portion of
               each Hermitian matrix A_i. Points to the first matrix (A_1).
@@ -7854,11 +7877,11 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhpr2_batched_64(rocblas_handle           
                                 (1, 0) (2, 1) (4,9)
                                 (2,-1) (3, 0) (5,3) ---> [(1,0),(2,-1),(4,-9),(3,0),(5,-3),(6,0)]
                                 (4,-9) (5,-3) (6,0)
-                    Note that the imaginary part of the diagonal elements are not accessed
-                    and are assumed to be 0.
+               Note that the imaginary parts of the diagonal elements are not accessed
+               and are assumed to be 0.
     @param[in]
     stride_A    [rocblas_stride]
-                stride from the start of one (A_i) and the next (A_i+1).
+                stride from the start of one (A_i) to the next (A_i+1).
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
@@ -8657,7 +8680,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpmv_batched_64(rocblas_handle           
         x_i = A_i**T*x_i or
         x_i = A_i**H*x_i, 0 < i < batch_count
    
-    where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular matrix)
+    where ``x_i`` is an ``n``-element vector and ``A_i`` is an ``n`` by ``n`` (unit, or non-unit, upper or lower triangular) matrix
     with strides specifying how to retrieve ``$x_i$`` (resp. $``A_i$``) from ``$x_{i-1}$`` (resp. ``$A_i$``).
     The vectors ``x_i`` are overwritten.
 
@@ -8817,7 +8840,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpmv_strided_batched_64(rocblas_handle   
         x := A**T*x   or
         x := A**H*x,
    
-    ``x`` is a vector and ``A`` is a banded ``n`` by ``n`` matrix (see description below).
+    ``x`` is a vector, and ``A`` is a banded ``n`` by ``n`` matrix (see description below).
 
     @param[in]
     handle    [rocblas_handle]
@@ -9863,20 +9886,21 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbsv_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    trsv solves:
+    The trsv functions solve:
 
          A*x = b or
          A**T*x = b or
          A**H*x = b,
-         where x and b are vectors and A is a triangular matrix.
-         The vector x is overwritten on b.
+   
+    where ``x`` and ``b`` are vectors and ``A`` is a triangular matrix.
+    The vector ``x`` is overwritten on ``b``.
 
-    Although not widespread, some gemm kernels used by trsv may use atomic operations.
+    Although not widespread, some GEMM kernels used by trsv might use atomic operations.
     See Atomic Operations in the API Reference Guide for more information.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
@@ -9886,8 +9910,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbsv_strided_batched_64(rocblas_handle   
     @param[in]
     transA     [rocblas_operation]
             - rocblas_operation_none:    op(A) = A.
-            - rocblas_operation_transpose:   op(A) = A^T
-            - rocblas_operation_conjugate_transpose:  op(A) = A^H
+            - rocblas_operation_transpose:   op(A) = A^T.
+            - rocblas_operation_conjugate_transpose:  op(A) = A^H.
 
     @param[in]
     diag    [rocblas_diagonal]
@@ -9899,7 +9923,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztbsv_strided_batched_64(rocblas_handle   
               n specifies the number of rows of b. n >= 0.
 
     @param[in]
-    A         device pointer storing matrix A, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A, otherwise the lower triangular part of the leading n-by-n array contains the matrix A.
+    A         device pointer storing matrix A, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A. Otherwise, the lower triangular part of the leading n-by-n array contains the matrix A.
 
     @param[in]
     lda       [rocblas_int]
@@ -9999,20 +10023,21 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsv_64(rocblas_handle                han
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    trsv_batched solves:
+    The trsv_batched functions solve:
 
          A_i*x_i = b_i or
          A_i**T*x_i = b_i or
          A_i**H*x_i = b_i,
-        where (A_i, x_i, b_i) is the i-th instance of the batch.
-        x_i and b_i are vectors and A_i is an
-        n by n triangular matrix.
+   
+    where (``A_i``, ``x_i``, ``b_i``) is the i-th instance of the batch.
+    ``x_i`` and ``b_i`` are vectors and ``A_i`` is an
+    ``n`` by ``n`` triangular matrix.
 
-    The vector x is overwritten on b.
+    The vector ``x`` is overwritten on ``b``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
@@ -10022,8 +10047,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsv_64(rocblas_handle                han
     @param[in]
     transA     [rocblas_operation]
             - rocblas_operation_none:    op(A) = A.
-            - rocblas_operation_transpose:   op(A) = A^T
-            - rocblas_operation_conjugate_transpose:  op(A) = A^H
+            - rocblas_operation_transpose:   op(A) = A^T.
+            - rocblas_operation_conjugate_transpose:  op(A) = A^H.
 
     @param[in]
     diag    [rocblas_diagonal]
@@ -10035,7 +10060,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsv_64(rocblas_handle                han
               n specifies the number of rows of b. n >= 0.
 
     @param[in]
-    A         device pointer to an array of device pointers to the A_i matrices, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A_i, otherwise the lower triangular part of the leading n-by-n array contains the matrix A_i.
+    A         device pointer to an array of device pointers to the A_i matrices, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A_i. Otherwise, the lower triangular part of the leading n-by-n array contains the matrix A_i.
 
     @param[in]
     lda       [rocblas_int]
@@ -10147,19 +10172,20 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsv_batched_64(rocblas_handle           
     \brief <b> BLAS Level 2 API </b>
 
     \details
-    trsv_strided_batched solves:
+    The trsv_strided_batched functions solve:
 
          A_i*x_i = b_i or
          A_i**T*x_i = b_i or
          A_i**H*x_i = b_i,
-         where (A_i, x_i, b_i) is the i-th instance of the batch.
-         x_i and b_i are vectors and A_i is an n by n triangular matrix, for i = 1, ..., batch_count.
+   
+    where (``A_i``, ``x_i``, ``b_i``) is the i-th instance of the batch,
+    ``x_i`` and ``b_i`` are vectors, and ``A_i`` is an ``n`` by ``n`` triangular matrix, for ``i`` = 1, ..., ``batch_count``.
 
-    The vector x is overwritten on b.
+    The vector ``x`` is overwritten on ``b``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
@@ -10169,8 +10195,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsv_batched_64(rocblas_handle           
     @param[in]
     transA     [rocblas_operation]
             - rocblas_operation_none:    op(A) = A.
-            - rocblas_operation_transpose:   op(A) = A^T
-            - rocblas_operation_conjugate_transpose:  op(A) = A^H
+            - rocblas_operation_transpose:   op(A) = A^T.
+            - rocblas_operation_conjugate_transpose:  op(A) = A^H.
 
     @param[in]
     diag    [rocblas_diagonal]
@@ -10182,7 +10208,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsv_batched_64(rocblas_handle           
               n specifies the number of rows of each b_i. n >= 0.
 
     @param[in]
-    A         device pointer to the matrix A_1 of the batch, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A_i, otherwise the lower triangular part of the leading n-by-n array contains the matrix A_i.
+    A         device pointer to the matrix A_1 of the batch, of dimension ( lda, n ). If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix A_i. Otherwise, the lower triangular part of the leading n-by-n array contains the matrix A_i.
 
     @param[in]
     stride_A  [rocblas_stride]
@@ -10622,7 +10648,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpsv_batched_64(rocblas_handle           
 
     @param[in]
     stride_A  [rocblas_stride]
-              stride from the beginning of one packed matrix (AP_i) and the next (AP_i+1).
+              stride from the beginning of one packed matrix (AP_i) to the next (AP_i+1).
 
     @param[in, out]
     x         device pointer pointing to the first input vector b_1. Overwritten by each x_i on output.
@@ -10632,7 +10658,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztpsv_batched_64(rocblas_handle           
               specifies the increment for the elements of each x_i.
     @param[in]
     stride_x  [rocblas_stride]
-              stride from the beginning of one vector (x_i) and the next (x_i+1).
+              stride from the beginning of one vector (x_i) to the next (x_i+1).
     @param[in]
     batch_count [rocblas_int]
                 specifies the number of instances in the batch.
@@ -14110,17 +14136,17 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    hemm performs one of the matrix-matrix operations:
+    The hemm functions perform one of the matrix-matrix operations:
 
         C := alpha*A*B + beta*C if side == rocblas_side_left,
         C := alpha*B*A + beta*C if side == rocblas_side_right,
 
-        where alpha and beta are scalars, B and C are m by n matrices, and
-        A is a Hermitian matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``B`` and ``C`` are ``m`` by ``n`` matrices, and
+    ``A`` is a Hermitian matrix stored as either upper or lower.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     side  [rocblas_side]
@@ -14129,8 +14155,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2_strided_batched_64(rocblas_handle   
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  A is an upper triangular matrix
-            - rocblas_fill_lower:  A is a  lower triangular matrix
+            - rocblas_fill_upper:  A is an upper triangular matrix.
+            - rocblas_fill_lower:  A is a  lower triangular matrix.
 
     @param[in]
     m       [rocblas_int]
@@ -14143,25 +14169,24 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2_strided_batched_64(rocblas_handle   
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A and B are not referenced.
+            zero, then A and B are not referenced.
 
     @param[in]
     A       pointer storing matrix A on the GPU.
-            - A is m by m if side == rocblas_side_left
-            - A is n by n if side == rocblas_side_right
-            Only the upper/lower triangular part is accessed.
-            The imaginary component of the diagonal elements is not used.
+            - A is m by m if side == rocblas_side_left.
+            - A is n by n if side == rocblas_side_right.
+            - Only the upper/lower triangular part is accessed.
+            - The imaginary component of the diagonal elements is not used.
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A.
-
-                if side = rocblas_side_left,  lda >= max( 1, m ),
-                otherwise lda >= max( 1, n ).
+            - If side = rocblas_side_left,  lda >= max( 1, m ).
+            - Otherwise, lda >= max( 1, n ).
 
     @param[in]
     B       pointer storing matrix B on the GPU.
-            Matrix dimension is m by n
+            Matrix dimension is m by n.
 
     @param[in]
     ldb     [rocblas_int]
@@ -14170,11 +14195,11 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2_strided_batched_64(rocblas_handle   
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C       pointer storing matrix C on the GPU.
-            Matrix dimension is m by n
+            Matrix dimension is m by n.
 
     @param[in]
     ldc    [rocblas_int]
@@ -14242,17 +14267,17 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemm_64(rocblas_handle                han
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    hemm_batched performs a batch of the matrix-matrix operations:
+    The hemm_batched functions perform a batch of the matrix-matrix operations:
 
         C_i := alpha*A_i*B_i + beta*C_i if side == rocblas_side_left,
         C_i := alpha*B_i*A_i + beta*C_i if side == rocblas_side_right,
 
-        where alpha and beta are scalars, B_i and C_i are m by n matrices, and
-        A_i is a Hermitian matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``B_i`` and ``C_i`` are ``m`` by ``n`` matrices, and
+    ``A_i`` is a Hermitian matrix stored as either upper or lower.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     side  [rocblas_side]
@@ -14261,8 +14286,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemm_64(rocblas_handle                han
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  A_i is an upper triangular matrix
-            - rocblas_fill_lower:  A_i is a  lower triangular matrix
+            - rocblas_fill_upper:  A_i is an upper triangular matrix.
+            - rocblas_fill_lower:  A_i is a  lower triangular matrix.
 
     @param[in]
     m       [rocblas_int]
@@ -14275,25 +14300,24 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemm_64(rocblas_handle                han
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A_i and B_i are not referenced.
+            zero, then A_i and B_i are not referenced.
 
     @param[in]
     A       device array of device pointers storing each matrix A_i on the GPU.
-            - A_i is m by m if side == rocblas_side_left
-            - A_i is n by n if side == rocblas_side_right
-            Only the upper/lower triangular part is accessed.
-            The imaginary component of the diagonal elements is not used.
+            - A_i is m by m if side == rocblas_side_left.
+            - A_i is n by n if side == rocblas_side_right.
+            - Only the upper/lower triangular part is accessed.
+            - The imaginary component of the diagonal elements is not used.
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-
-                if side = rocblas_side_left,  lda >= max( 1, m ),
-                otherwise lda >= max( 1, n ).
+            - If side = rocblas_side_left,  lda >= max( 1, m ).
+            - Otherwise, lda >= max( 1, n ).
 
     @param[in]
     B       device array of device pointers storing each matrix B_i on the GPU.
-            Matrix dimension is m by n
+            Matrix dimension is m by n.
 
     @param[in]
     ldb     [rocblas_int]
@@ -14302,11 +14326,11 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemm_64(rocblas_handle                han
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C_i need not be set before entry.
+            zero, then C_i need not be set before entry.
 
     @param[in]
     C       device array of device pointers storing each matrix C_i on the GPU.
-            Matrix dimension is m by n
+            Matrix dimension is m by n.
 
     @param[in]
     ldc    [rocblas_int]
@@ -14382,17 +14406,17 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemm_batched_64(rocblas_handle           
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    hemm_strided_batched performs a batch of the matrix-matrix operations:
+    The hemm_strided_batched functions perform a batch of the matrix-matrix operations:
 
         C_i := alpha*A_i*B_i + beta*C_i if side == rocblas_side_left,
         C_i := alpha*B_i*A_i + beta*C_i if side == rocblas_side_right,
 
-        where alpha and beta are scalars, B_i and C_i are m by n matrices, and
-        A_i is a Hermitian matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``B_i`` and ``C_i`` are ``m`` by ``n`` matrices, and
+    ``A_i`` is a Hermitian matrix stored as either upper or lower.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     side  [rocblas_side]
@@ -14401,8 +14425,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemm_batched_64(rocblas_handle           
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  A_i is an upper triangular matrix
-            - rocblas_fill_lower:  A_i is a  lower triangular matrix
+            - rocblas_fill_upper:  A_i is an upper triangular matrix.
+            - rocblas_fill_lower:  A_i is a  lower triangular matrix.
 
     @param[in]
     m       [rocblas_int]
@@ -14415,44 +14439,42 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemm_batched_64(rocblas_handle           
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A_i and B_i are not referenced.
+            zero, then A_i and B_i are not referenced.
 
     @param[in]
-    A       device pointer to first matrix A_1
-            - A_i is m by m if side == rocblas_side_left
-            - A_i is n by n if side == rocblas_side_right
-            Only the upper/lower triangular part is accessed.
-            The imaginary component of the diagonal elements is not used.
+    A       device pointer to first matrix A_1.
+            - A_i is m by m if side == rocblas_side_left.
+            - A_i is n by n if side == rocblas_side_right.
+            - Only the upper/lower triangular part is accessed.
+            - The imaginary component of the diagonal elements is not used.
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-
-                if side = rocblas_side_left,  lda >= max( 1, m ),
-                otherwise lda >= max( 1, n ).
+            - If side = rocblas_side_left,  lda >= max( 1, m ).
+            - Otherwise, lda >= max( 1, n ).
 
     @param[in]
     stride_A  [rocblas_stride]
-              stride from the start of one matrix (A_i) and the next one (A_i+1).
+              stride from the start of one matrix (A_i) to the next one (A_i+1).
 
     @param[in]
-    B       device pointer to first matrix B_1 of dimension (ldb, n) on the GPU
+    B       device pointer to first matrix B_1 of dimension (ldb, n) on the GPU.
 
     @param[in]
     ldb     [rocblas_int]
             ldb specifies the first dimension of B_i.
-
-                if side = rocblas_operation_none,  ldb >= max( 1, m ),
-                otherwise ldb >= max( 1, n ).
+            - If side = rocblas_operation_none, ldb >= max( 1, m ).
+            - Otherwise, ldb >= max( 1, n ).
 
     @param[in]
     stride_B  [rocblas_stride]
-              stride from the start of one matrix (B_i) and the next one (B_i+1).
+              stride from the start of one matrix (B_i) to the next one (B_i+1).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C        device pointer to first matrix C_1 of dimension (ldc, n) on the GPU.
@@ -14463,7 +14485,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemm_batched_64(rocblas_handle           
 
     @param[in, out]
     stride_C  [rocblas_stride]
-              stride from the start of one matrix (C_i) and the next one (C_i+1).
+              stride from the start of one matrix (C_i) to the next one (C_i+1).
 
     @param[in]
     batch_count [rocblas_int]
@@ -14547,24 +14569,24 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemm_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    herk performs one of the matrix-matrix operations for a Hermitian rank-k update:
+    The herk functions perform one of the matrix-matrix operations for a Hermitian rank-k update:
 
         C := alpha*op( A )*op( A )^H + beta*C,
 
-        where  alpha and beta are scalars, op(A) is an n by k matrix, and
-        C is a n x n Hermitian matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A)`` is an ``n`` by ``k`` matrix, and
+    ``C`` is a ``n`` x ``n`` Hermitian matrix stored as either upper or lower.
 
         op( A ) = A, and A is n by k if transA == rocblas_operation_none
         op( A ) = A^H and A is k by n if transA == rocblas_operation_conjugate_transpose
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C is an upper triangular matrix
-            - rocblas_fill_lower:  C is a  lower triangular matrix
+            - rocblas_fill_upper:  C is an upper triangular matrix.
+            - rocblas_fill_lower:  C is a  lower triangular matrix.
 
     @param[in]
     transA  [rocblas_operation]
@@ -14582,29 +14604,28 @@ ROCBLAS_EXPORT rocblas_status rocblas_zhemm_strided_batched_64(rocblas_handle   
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, then A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       pointer storing matrix A on the GPU.
-            Matrix dimension is ( lda, k ) when if transA = rocblas_operation_none, otherwise (lda, n)
+            Matrix dimension is ( lda, k ) when transA = rocblas_operation_none. Otherwise, (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A.
-
-                if transA = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - If transA = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C       pointer storing matrix C on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
-            only the upper/lower triangular part is accessed.
+            Only the upper/lower triangular part is accessed.
 
     @param[in]
     ldc    [rocblas_int]
@@ -14664,24 +14685,24 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherk_64(rocblas_handle                han
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    herk_batched performs a batch of the matrix-matrix operations for a Hermitian rank-k update:
+    The herk_batched functions perform a batch of the matrix-matrix operations for a Hermitian rank-k update:
 
         C_i := alpha*op( A_i )*op( A_i )^H + beta*C_i,
 
-        where  alpha and beta are scalars, op(A) is an n by k matrix, and
-        C_i is a n x n Hermitian matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A)`` is an ``n`` by ``k`` matrix, and
+    ``C_i`` is a ``n`` x ``n`` Hermitian matrix stored as either upper or lower.
 
         op( A_i ) = A_i, and A_i is n by k if transA == rocblas_operation_none
         op( A_i ) = A_i^H and A_i is k by n if transA == rocblas_operation_conjugate_transpose
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C_i is an upper triangular matrix
-            - rocblas_fill_lower:  C_i is a  lower triangular matrix
+            - rocblas_fill_upper:  C_i is an upper triangular matrix.
+            - rocblas_fill_lower:  C_i is a  lower triangular matrix.
 
     @param[in]
     transA  [rocblas_operation]
@@ -14699,29 +14720,28 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherk_64(rocblas_handle                han
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, then A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       device array of device pointers storing each matrix_i A of dimension (lda, k)
-            when transA is rocblas_operation_none, otherwise of dimension (lda, n).
+            when transA is rocblas_operation_none. Otherwise, of dimension (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-
-                if transA = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - If transA = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C       device array of device pointers storing each matrix C_i on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
-            only the upper/lower triangular part of each C_i is accessed.
+            Only the upper/lower triangular part of each C_i is accessed.
 
     @param[in]
     ldc    [rocblas_int]
@@ -14788,12 +14808,12 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherk_batched_64(rocblas_handle           
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    herk_strided_batched performs a batch of the matrix-matrix operations for a Hermitian rank-k update:
+    The herk_strided_batched functions perform a batch of the matrix-matrix operations for a Hermitian rank-k update:
 
         C_i := alpha*op( A_i )*op( A_i )^H + beta*C_i,
 
-        where  alpha and beta are scalars, op(A) is an n by k matrix, and
-        C_i is a n x n Hermitian matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A)`` is an ``n`` by ``k`` matrix, and
+    ``C_i`` is an ``n`` x ``n`` Hermitian matrix stored as either upper or lower.
 
         op( A_i ) = A_i, and A_i is n by k if transA == rocblas_operation_none
         op( A_i ) = A_i^H and A_i is k by n if transA == rocblas_operation_conjugate_transpose
@@ -14801,12 +14821,12 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherk_batched_64(rocblas_handle           
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C_i is an upper triangular matrix
-            - rocblas_fill_lower:  C_i is a  lower triangular matrix
+            - rocblas_fill_upper:  C_i is an upper triangular matrix.
+            - rocblas_fill_lower:  C_i is a  lower triangular matrix.
 
     @param[in]
     transA  [rocblas_operation]
@@ -14824,33 +14844,32 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherk_batched_64(rocblas_handle           
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, then A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       Device pointer to the first matrix A_1 on the GPU of dimension (lda, k)
-            when transA is rocblas_operation_none, otherwise of dimension (lda, n)
+            when transA is rocblas_operation_none. Otherwise, of dimension (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-
-                if transA = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - If transA = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
 
     @param[in]
     stride_A  [rocblas_stride]
-              stride from the start of one matrix (A_i) and the next one (A_i+1).
+              stride from the start of one matrix (A_i) to the next one (A_i+1).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C       Device pointer to the first matrix C_1 on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
-            only the upper/lower triangular part of each C_i is accessed.
+            Only the upper/lower triangular part of each C_i is accessed.
 
     @param[in]
     ldc    [rocblas_int]
@@ -14858,7 +14877,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherk_batched_64(rocblas_handle           
 
     @param[in, out]
     stride_C  [rocblas_stride]
-              stride from the start of one matrix (C_i) and the next one (C_i+1).
+              stride from the start of one matrix (C_i) to the next one (C_i+1).
 
     @param[in]
     batch_count [rocblas_int]
@@ -14930,24 +14949,24 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherk_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    her2k performs one of the matrix-matrix operations for a Hermitian rank-2k update:
+    The her2k functions perform one of the matrix-matrix operations for a Hermitian rank-2k update:
 
         C := alpha*op( A )*op( B )^H + conj(alpha)*op( B )*op( A )^H + beta*C,
 
-        where  alpha and beta are scalars, op(A) and op(B) are n by k matrices, and
-        C is a n x n Hermitian matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A)`` and ``op(B)`` are ``n`` by ``k`` matrices, and
+    ``C`` is an ``n`` x ``n`` Hermitian matrix stored as either upper or lower.
 
         op( A ) = A, op( B ) = B, and A and B are n by k if trans == rocblas_operation_none
         op( A ) = A^H, op( B ) = B^H,  and A and B are k by n if trans == rocblas_operation_conjugate_transpose
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C is an upper triangular matrix
-            - rocblas_fill_lower:  C is a  lower triangular matrix
+            - rocblas_fill_upper:  C is an upper triangular matrix.
+            - rocblas_fill_lower:  C is a  lower triangular matrix.
 
     @param[in]
     trans  [rocblas_operation]
@@ -14965,40 +14984,38 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherk_strided_batched_64(rocblas_handle   
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, then A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       pointer storing matrix A on the GPU.
-            Matrix dimension is ( lda, k ) when if trans = rocblas_operation_none, otherwise (lda, n)
+            Matrix dimension is ( lda, k ) if trans = rocblas_operation_none. Otherwise, (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A.
-
-                if trans = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - If trans = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
 
     @param[in]
     B       pointer storing matrix B on the GPU.
-            Matrix dimension is ( ldb, k ) when if trans = rocblas_operation_none, otherwise (ldb, n)
+            Matrix dimension is ( ldb, k ) if trans = rocblas_operation_none. Otherwise, (ldb, n).
 
     @param[in]
     ldb     [rocblas_int]
             ldb specifies the first dimension of B.
-
-                if trans = rocblas_operation_none,  ldb >= max( 1, n ),
-                otherwise ldb >= max( 1, k ).
+            - If trans = rocblas_operation_none,  ldb >= max( 1, n ).
+            - Otherwise, ldb >= max( 1, k ).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C       pointer storing matrix C on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
-            only the upper/lower triangular part is accessed.
+            Only the upper/lower triangular part is accessed.
 
     @param[in]
     ldc    [rocblas_int]
@@ -15066,24 +15083,24 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2k_64(rocblas_handle                ha
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    her2k_batched performs a batch of the matrix-matrix operations for a Hermitian rank-2k update:
+    The her2k_batched functions perform a batch of the matrix-matrix operations for a Hermitian rank-2k update:
 
         C_i := alpha*op( A_i )*op( B_i )^H + conj(alpha)*op( B_i )*op( A_i )^H + beta*C_i,
 
-        where  alpha and beta are scalars, op(A_i) and op(B_i) are n by k matrices, and
-        C_i is a n x n Hermitian matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A_i)`` and ``op(B_i)`` are ``n`` by ``k`` matrices, and
+    ``C_i`` is an ``n`` x ``n`` Hermitian matrix stored as either upper or lower.
 
         op( A_i ) = A_i, op( B_i ) = B_i, and A_i and B_i are n by k if trans == rocblas_operation_none
         op( A_i ) = A_i^H, op( B_i ) = B_i^H,  and A_i and B_i are k by n if trans == rocblas_operation_conjugate_transpose
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C_i is an upper triangular matrix
-            - rocblas_fill_lower:  C_i is a  lower triangular matrix
+            - rocblas_fill_upper:  C_i is an upper triangular matrix.
+            - rocblas_fill_lower:  C_i is a  lower triangular matrix.
 
     @param[in]
     trans  [rocblas_operation]
@@ -15101,38 +15118,36 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2k_64(rocblas_handle                ha
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, then A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       device array of device pointers storing each matrix_i A of dimension (lda, k)
-            when trans is rocblas_operation_none, otherwise of dimension (lda, n).
+            when trans is rocblas_operation_none. Otherwise, of dimension (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-
-                if trans = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - If trans = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
     @param[in]
     B       device array of device pointers storing each matrix_i B of dimension (ldb, k)
-            when trans is rocblas_operation_none, otherwise of dimension (ldb, n).
+            when trans is rocblas_operation_none. Otherwise, of dimension (ldb, n).
 
     @param[in]
     ldb     [rocblas_int]
             ldb specifies the first dimension of B_i.
-
-                if trans = rocblas_operation_none,  ldb >= max( 1, n ),
-                otherwise ldb >= max( 1, k ).
+            - If trans = rocblas_operation_none,  ldb >= max( 1, n ).
+            - Otherwise, ldb >= max( 1, k ).
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C       device array of device pointers storing each matrix C_i on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
-            only the upper/lower triangular part of each C_i is accessed.
+            Only the upper/lower triangular part of each C_i is accessed.
 
     @param[in]
     ldc    [rocblas_int]
@@ -15207,24 +15222,24 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2k_batched_64(rocblas_handle          
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    her2k_strided_batched performs a batch of the matrix-matrix operations for a Hermitian rank-2k update:
+    The her2k_strided_batched functions perform a batch of the matrix-matrix operations for a Hermitian rank-2k update:
 
         C_i := alpha*op( A_i )*op( B_i )^H + conj(alpha)*op( B_i )*op( A_i )^H + beta*C_i,
 
-        where  alpha and beta are scalars, op(A_i) and op(B_i) are n by k matrices, and
-        C_i is a n x n Hermitian matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A_i)`` and ``op(B_i)`` are ``n`` by ``k`` matrices, and
+    ``C_i`` is an ``n`` x ``n`` Hermitian matrix stored as either upper or lower.
 
         op( A_i ) = A_i, op( B_i ) = B_i, and A_i and B_i are n by k if trans == rocblas_operation_none
         op( A_i ) = A_i^H, op( B_i ) = B_i^H,  and A_i and B_i are k by n if trans == rocblas_operation_conjugate_transpose
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C_i is an upper triangular matrix
-            - rocblas_fill_lower:  C_i is a  lower triangular matrix
+            - rocblas_fill_upper:  C_i is an upper triangular matrix.
+            - rocblas_fill_lower:  C_i is a  lower triangular matrix.
 
     @param[in]
     trans  [rocblas_operation]
@@ -15242,48 +15257,46 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2k_batched_64(rocblas_handle          
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, then A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       Device pointer to the first matrix A_1 on the GPU of dimension (lda, k)
-            when trans is rocblas_operation_none, otherwise of dimension (lda, n).
+            when trans is rocblas_operation_none. Otherwise, of dimension (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-
-                if trans = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - If trans = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
 
     @param[in]
     stride_A  [rocblas_stride]
-              stride from the start of one matrix (A_i) and the next one (A_i+1).
+              stride from the start of one matrix (A_i) to the next one (A_i+1).
 
     @param[in]
     B       Device pointer to the first matrix B_1 on the GPU of dimension (ldb, k)
-            when trans is rocblas_operation_none, otherwise of dimension (ldb, n).
+            when trans is rocblas_operation_none. Otherwise, of dimension (ldb, n).
 
     @param[in]
     ldb     [rocblas_int]
             ldb specifies the first dimension of B_i.
-
-                if trans = rocblas_operation_none,  ldb >= max( 1, n ),
-                otherwise ldb >= max( 1, k ).
+            - If trans = rocblas_operation_none,  ldb >= max( 1, n ).
+            - Otherwise, ldb >= max( 1, k ).
 
     @param[in]
     stride_B  [rocblas_stride]
-              stride from the start of one matrix (B_i) and the next one (B_i+1).
+              stride from the start of one matrix (B_i) to the next one (B_i+1).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C       Device pointer to the first matrix C_1 on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
-            only the upper/lower triangular part of each C_i is accessed.
+            Only the upper/lower triangular part of each C_i is accessed.
 
     @param[in]
     ldc    [rocblas_int]
@@ -15291,7 +15304,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2k_batched_64(rocblas_handle          
 
     @param[in, out]
     stride_C  [rocblas_stride]
-              stride from the start of one matrix (C_i) and the next one (C_i+1).
+              stride from the start of one matrix (C_i) to the next one (C_i+1).
 
     @param[in]
     batch_count [rocblas_int]
@@ -15375,26 +15388,26 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2k_strided_batched_64(rocblas_handle  
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    herkx performs one of the matrix-matrix operations for a Hermitian rank-k update:
+    The herkx functions perform one of the matrix-matrix operations for a Hermitian rank-k update:
 
         C := alpha*op( A )*op( B )^H + beta*C,
 
-        where  alpha and beta are scalars, op(A) and op(B) are n by k matrices, and
-        C is a n x n Hermitian matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A)`` and ``op(B)`` are ``n`` by ``k`` matrices, and
+    ``C`` is an ``n`` x ``n`` Hermitian matrix stored as either upper or lower.
 
-    This routine should only be used when the caller can guarantee that the result of op( A )*op( B )^T will be Hermitian.
+    This routine should only be used when the caller can guarantee that the result of ``op( A )*op( B )^T`` will be Hermitian.
 
         op( A ) = A, op( B ) = B, and A and B are n by k if trans == rocblas_operation_none
         op( A ) = A^H, op( B ) = B^H,  and A and B are k by n if trans == rocblas_operation_conjugate_transpose
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C is an upper triangular matrix
-            - rocblas_fill_lower:  C is a  lower triangular matrix
+            - rocblas_fill_upper:  C is an upper triangular matrix.
+            - rocblas_fill_lower:  C is a  lower triangular matrix.
 
     @param[in]
     trans  [rocblas_operation]
@@ -15412,39 +15425,37 @@ ROCBLAS_EXPORT rocblas_status rocblas_zher2k_strided_batched_64(rocblas_handle  
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, then A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       pointer storing matrix A on the GPU.
-            Matrix dimension is ( lda, k ) when if trans = rocblas_operation_none, otherwise (lda, n)
+            Matrix dimension is ( lda, k ) when trans = rocblas_operation_none. Otherwise, (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A.
-
-                if trans = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - If trans = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
     @param[in]
     B       pointer storing matrix B on the GPU.
-            Matrix dimension is ( ldb, k ) when if trans = rocblas_operation_none, otherwise (ldb, n)
+            Matrix dimension is ( ldb, k ) when trans = rocblas_operation_none. Otherwise, (ldb, n).
 
     @param[in]
     ldb     [rocblas_int]
             ldb specifies the first dimension of B.
-
-                if trans = rocblas_operation_none,  ldb >= max( 1, n ),
-                otherwise ldb >= max( 1, k ).
+            - If trans = rocblas_operation_none,  ldb >= max( 1, n ).
+            - Otherwise, ldb >= max( 1, k ).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C       pointer storing matrix C on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
-            only the upper/lower triangular part is accessed.
+            Only the upper/lower triangular part is accessed.
 
     @param[in]
     ldc    [rocblas_int]
@@ -15512,26 +15523,26 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherkx_64(rocblas_handle                ha
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    herkx_batched performs a batch of the matrix-matrix operations for a Hermitian rank-k update:
+    The herkx_batched functions perform a batch of the matrix-matrix operations for a Hermitian rank-k update:
 
         C_i := alpha*op( A_i )*op( B_i )^H + beta*C_i,
 
-        where  alpha and beta are scalars, op(A_i) and op(B_i) are n by k matrices, and
-        C_i is a n x n Hermitian matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A_i)`` and ``op(B_i)`` are ``n`` by ``k`` matrices, and
+    ``C_i`` is an ``n`` x ``n`` Hermitian matrix stored as either upper or lower.
 
-    This routine should only be used when the caller can guarantee that the result of op( A )*op( B )^T will be Hermitian.
+    This routine should only be used when the caller can guarantee that the result of ``op( A )*op( B )^T`` will be Hermitian.
 
         op( A_i ) = A_i, op( B_i ) = B_i, and A_i and B_i are n by k if trans == rocblas_operation_none
         op( A_i ) = A_i^H, op( B_i ) = B_i^H,  and A_i and B_i are k by n if trans == rocblas_operation_conjugate_transpose
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C_i is an upper triangular matrix
-            - rocblas_fill_lower:  C_i is a  lower triangular matrix
+            - rocblas_fill_upper:  C_i is an upper triangular matrix.
+            - rocblas_fill_lower:  C_i is a  lower triangular matrix.
 
     @param[in]
     trans  [rocblas_operation]
@@ -15549,40 +15560,38 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherkx_64(rocblas_handle                ha
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, then A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       device array of device pointers storing each matrix_i A of dimension (lda, k)
-            when trans is rocblas_operation_none, otherwise of dimension (lda, n)
+            when trans is rocblas_operation_none. Otherwise, of dimension (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-
-                if trans = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - If trans = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
 
     @param[in]
     B       device array of device pointers storing each matrix_i B of dimension (ldb, k)
-            when trans is rocblas_operation_none, otherwise of dimension (ldb, n)
+            when trans is rocblas_operation_none. Otherwise, of dimension (ldb, n).
 
     @param[in]
     ldb     [rocblas_int]
             ldb specifies the first dimension of B_i.
-
-                if trans = rocblas_operation_none,  ldb >= max( 1, n ),
-                otherwise ldb >= max( 1, k ).
+            - If trans = rocblas_operation_none,  ldb >= max( 1, n ).
+            - Otherwise, ldb >= max( 1, k ).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C       device array of device pointers storing each matrix C_i on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
-            only the upper/lower triangular part of each C_i is accessed.
+            Only the upper/lower triangular part of each C_i is accessed.
 
     @param[in]
     ldc    [rocblas_int]
@@ -15658,26 +15667,26 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherkx_batched_64(rocblas_handle          
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    herkx_strided_batched performs a batch of the matrix-matrix operations for a Hermitian rank-k update:
+    The herkx_strided_batched functions perform a batch of the matrix-matrix operations for a Hermitian rank-k update:
 
         C_i := alpha*op( A_i )*op( B_i )^H + beta*C_i,
 
-        where  alpha and beta are scalars, op(A_i) and op(B_i) are n by k matrices, and
-        C_i is a n x n Hermitian matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A_i)`` and ``op(B_i)`` are ``n`` by ``k`` matrices, and
+    ``C_i`` is an ``n`` x ``n`` Hermitian matrix stored as either upper or lower.
 
-    This routine should only be used when the caller can guarantee that the result of op( A )*op( B )^T will be Hermitian.
+    This routine should only be used when the caller can guarantee that the result of ``op( A )*op( B )^T`` will be Hermitian.
 
         op( A_i ) = A_i, op( B_i ) = B_i, and A_i and B_i are n by k if trans == rocblas_operation_none
         op( A_i ) = A_i^H, op( B_i ) = B_i^H,  and A_i and B_i are k by n if trans == rocblas_operation_conjugate_transpose
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C_i is an upper triangular matrix
-            - rocblas_fill_lower:  C_i is a  lower triangular matrix
+            - rocblas_fill_upper:  C_i is an upper triangular matrix.
+            - rocblas_fill_lower:  C_i is a  lower triangular matrix.
 
     @param[in]
     trans  [rocblas_operation]
@@ -15695,48 +15704,46 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherkx_batched_64(rocblas_handle          
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, then A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       Device pointer to the first matrix A_1 on the GPU of dimension (lda, k)
-            when trans is rocblas_operation_none, otherwise of dimension (lda, n).
+            when trans is rocblas_operation_none. Otherwise, of dimension (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-
-                if trans = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - If trans = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
 
     @param[in]
     stride_A  [rocblas_stride]
-              stride from the start of one matrix (A_i) and the next one (A_i+1)
+              stride from the start of one matrix (A_i) to the next one (A_i+1).
 
     @param[in]
     B       Device pointer to the first matrix B_1 on the GPU of dimension (ldb, k)
-            when trans is rocblas_operation_none, otherwise of dimension (ldb, n).
+            when trans is rocblas_operation_none. Otherwise, of dimension (ldb, n).
 
     @param[in]
     ldb     [rocblas_int]
             ldb specifies the first dimension of B_i.
-
-                if trans = rocblas_operation_none,  ldb >= max( 1, n ),
-                otherwise ldb >= max( 1, k ).
+            - If trans = rocblas_operation_none,  ldb >= max( 1, n ).
+            - Otherwise, ldb >= max( 1, k ).
 
     @param[in]
     stride_B  [rocblas_stride]
-              stride from the start of one matrix (B_i) and the next one (B_i+1)
+              stride from the start of one matrix (B_i) to the next one (B_i+1).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C       Device pointer to the first matrix C_1 on the GPU.
             The imaginary component of the diagonal elements are not used but are set to zero unless quick return.
-            only the upper/lower triangular part of each C_i is accessed.
+            Only the upper/lower triangular part of each C_i is accessed.
 
     @param[in]
     ldc    [rocblas_int]
@@ -15744,7 +15751,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherkx_batched_64(rocblas_handle          
 
     @param[in, out]
     stride_C  [rocblas_stride]
-              stride from the start of one matrix (C_i) and the next one (C_i+1).
+              stride from the start of one matrix (C_i) to the next one (C_i+1).
 
     @param[in]
     batch_count [rocblas_int]
@@ -15828,17 +15835,17 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherkx_strided_batched_64(rocblas_handle  
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    symm performs one of the matrix-matrix operations:
+    The symm functions perform one of the matrix-matrix operations:
 
         C := alpha*A*B + beta*C if side == rocblas_side_left,
         C := alpha*B*A + beta*C if side == rocblas_side_right,
 
-        where alpha and beta are scalars, B and C are m by n matrices, and
-        A is a symmetric matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``B`` and ``C`` are ``m`` by ``n`` matrices, and
+    ``A`` is a symmetric matrix stored as either upper or lower.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     side  [rocblas_side]
@@ -15861,24 +15868,23 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherkx_strided_batched_64(rocblas_handle  
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A and B are not referenced.
+            zero, A and B are not referenced.
 
     @param[in]
     A       pointer storing matrix A on the GPU.
-            - A is m by m if side == rocblas_side_left
-            - A is n by n if side == rocblas_side_right
-            only the upper/lower triangular part is accessed.
+            - A is m by m if side == rocblas_side_left.
+            - A is n by n if side == rocblas_side_right.
+            - Only the upper/lower triangular part is accessed.
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A.
-
-                if side = rocblas_side_left,  lda >= max( 1, m ),
-                otherwise lda >= max( 1, n ).
+            - If side = rocblas_side_left,  lda >= max( 1, m ).
+            - Otherwise, lda >= max( 1, n ).
 
     @param[in]
     B       pointer storing matrix B on the GPU.
-            Matrix dimension is m by n
+            Matrix dimension is m by n.
 
     @param[in]
     ldb     [rocblas_int]
@@ -15887,11 +15893,11 @@ ROCBLAS_EXPORT rocblas_status rocblas_zherkx_strided_batched_64(rocblas_handle  
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C       pointer storing matrix C on the GPU.
-            Matrix dimension is m by n
+            Matrix dimension is m by n.
 
     @param[in]
     ldc    [rocblas_int]
@@ -16015,17 +16021,17 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_64(rocblas_handle                han
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    symm_batched performs a batch of the matrix-matrix operations:
+    The symm_batched functions perform a batch of the matrix-matrix operations:
 
         C_i := alpha*A_i*B_i + beta*C_i if side == rocblas_side_left,
         C_i := alpha*B_i*A_i + beta*C_i if side == rocblas_side_right,
 
-        where alpha and beta are scalars, B_i and C_i are m by n matrices, and
-        A_i is a symmetric matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``B_i`` and ``C_i`` are ``m`` by ``n`` matrices, and
+    ``A_i`` is a symmetric matrix stored as either upper or lower.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     side  [rocblas_side]
@@ -16048,24 +16054,23 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_64(rocblas_handle                han
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A_i and B_i are not referenced.
+            zero, A_i and B_i are not referenced.
 
     @param[in]
     A       device array of device pointers storing each matrix A_i on the GPU.
-            - A_i is m by m if side == rocblas_side_left
-            - A_i is n by n if side == rocblas_side_right
-            only the upper/lower triangular part is accessed.
+            - A_i is m by m if side == rocblas_side_left.
+            - A_i is n by n if side == rocblas_side_right.   
+            - Only the upper/lower triangular part is accessed.
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-
-                if side = rocblas_side_left,  lda >= max( 1, m ),
-                otherwise lda >= max( 1, n ).
+            - If side = rocblas_side_left,  lda >= max( 1, m ).
+            - Otherwise, lda >= max( 1, n ).
 
     @param[in]
     B       device array of device pointers storing each matrix B_i on the GPU.
-            Matrix dimension is m by n
+            Matrix dimension is m by n.
 
     @param[in]
     ldb     [rocblas_int]
@@ -16074,7 +16079,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_64(rocblas_handle                han
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C_i need not be set before entry.
+            zero, then C_i need not be set before entry.
 
     @param[in]
     C       device array of device pointers storing each matrix C_i on the GPU.
@@ -16217,17 +16222,17 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_batched_64(rocblas_handle           
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    symm_strided_batched performs a batch of the matrix-matrix operations:
+    The symm_strided_batched functions perform a batch of the matrix-matrix operations:
 
         C_i := alpha*A_i*B_i + beta*C_i if side == rocblas_side_left,
         C_i := alpha*B_i*A_i + beta*C_i if side == rocblas_side_right,
 
-        where alpha and beta are scalars, B_i and C_i are m by n matrices, and
-        A_i is a symmetric matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``B_i`` and ``C_i`` are ``m`` by ``n`` matrices, and
+    ``A_i`` is a symmetric matrix stored as either upper or lower.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     side  [rocblas_side]
@@ -16236,8 +16241,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_batched_64(rocblas_handle           
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  A_i is an upper triangular matrix
-            - rocblas_fill_lower:  A_i is a  lower triangular matrix
+            - rocblas_fill_upper:  A_i is an upper triangular matrix.
+            - rocblas_fill_lower:  A_i is a  lower triangular matrix.
 
     @param[in]
     m       [rocblas_int]
@@ -16250,24 +16255,23 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_batched_64(rocblas_handle           
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A_i and B_i are not referenced.
+            zero, A_i and B_i are not referenced.
 
     @param[in]
-    A       device pointer to first matrix A_1
-            - A_i is m by m if side == rocblas_side_left
-            - A_i is n by n if side == rocblas_side_right
-            only the upper/lower triangular part is accessed.
+    A       device pointer to first matrix A_1.
+            - A_i is m by m if side == rocblas_side_left.
+            - A_i is n by n if side == rocblas_side_right.
+            - Only the upper/lower triangular part is accessed.
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-
-                if side = rocblas_side_left,  lda >= max( 1, m ),
-                otherwise lda >= max( 1, n ).
+            - If side = rocblas_side_left,  lda >= max( 1, m ).
+            - Otherwise, lda >= max( 1, n ).
 
     @param[in]
     stride_A  [rocblas_stride]
-              stride from the start of one matrix (A_i) and the next one (A_i+1).
+              stride from the start of one matrix (A_i) to the next one (A_i+1).
 
     @param[in]
     B       device pointer to first matrix B_1 of dimension (ldb, n) on the GPU.
@@ -16278,11 +16282,11 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_batched_64(rocblas_handle           
 
     @param[in]
     stride_B  [rocblas_stride]
-              stride from the start of one matrix (B_i) and the next one (B_i+1).
+              stride from the start of one matrix (B_i) to the next one (B_i+1).
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C        device pointer to first matrix C_1 of dimension (ldc, n) on the GPU.
@@ -16293,7 +16297,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_batched_64(rocblas_handle           
 
     @param[in, out]
     stride_C  [rocblas_stride]
-              stride from the start of one matrix (C_i) and the next one (C_i+1).
+              stride from the start of one matrix (C_i) to the next one (C_i+1).
 
     @param[in]
     batch_count [rocblas_int]
@@ -16452,32 +16456,31 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    syrk performs one of the matrix-matrix operations for a symmetric rank-k update:
+    The syrk functions perform one of the matrix-matrix operations for a symmetric rank-k update:
 
         C := alpha*op( A )*op( A )^T + beta*C,
 
-        where  alpha and beta are scalars, op(A) is an n by k matrix, and
-        C is a symmetric n x n matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A)`` is an ``n`` by ``k`` matrix, and
+    ``C`` is a symmetric ``n`` x ``n`` matrix stored as either upper or lower.
 
         op( A ) = A, and A is n by k if transA == rocblas_operation_none
         op( A ) = A^T and A is k by n if transA == rocblas_operation_transpose
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C is an upper triangular matrix
-            - rocblas_fill_lower:  C is a  lower triangular matrix
+            - rocblas_fill_upper:  C is an upper triangular matrix.
+            - rocblas_fill_lower:  C is a  lower triangular matrix.
 
     @param[in]
     transA  [rocblas_operation]
             - rocblas_operation_transpose:           op(A) = A^T
             - rocblas_operation_none:                op(A) = A
             - rocblas_operation_conjugate_transpose: op(A) = A^T
-
-            rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
+            - rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
             and zherk.
 
     @param[in]
@@ -16491,28 +16494,27 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsymm_strided_batched_64(rocblas_handle   
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       pointer storing matrix A on the GPU.
-            Matrix dimension is ( lda, k ) when if transA = rocblas_operation_none, otherwise (lda, n)
+            Matrix dimension is ( lda, k ) if transA = rocblas_operation_none. Otherwise, (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A.
-
-            if transA = rocblas_operation_none,  lda >= max( 1, n ),
-            otherwise lda >= max( 1, k ).
+            - If transA = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C       pointer storing matrix C on the GPU.
-            only the upper/lower triangular part is accessed.
+            Only the upper/lower triangular part is accessed.
 
     @param[in]
     ldc    [rocblas_int]
@@ -16620,32 +16622,31 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_64(rocblas_handle                han
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    syrk_batched performs a batch of the matrix-matrix operations for a symmetric rank-k update:
+    The syrk_batched functions perform a batch of the matrix-matrix operations for a symmetric rank-k update:
 
         C_i := alpha*op( A_i )*op( A_i )^T + beta*C_i,
 
-        where  alpha and beta are scalars, op(A_i) is an n by k matrix, and
-        C_i is a symmetric n x n matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A_i)`` is an ``n`` by ``k`` matrix, and
+    ``C_i`` is a symmetric ``n`` x ``n`` matrix stored as either upper or lower.
 
         op( A_i ) = A_i, and A_i is n by k if transA == rocblas_operation_none
         op( A_i ) = A_i^T and A_i is k by n if transA == rocblas_operation_transpose
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C_i is an upper triangular matrix
-            - rocblas_fill_lower:  C_i is a  lower triangular matrix
+            - rocblas_fill_upper:  C_i is an upper triangular matrix.
+            - rocblas_fill_lower:  C_i is a  lower triangular matrix.
 
     @param[in]
     transA  [rocblas_operation]
             - rocblas_operation_transpose:           op(A) = A^T
             - rocblas_operation_none:                op(A) = A
             - rocblas_operation_conjugate_transpose: op(A) = A^T
-
-            rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
+            - rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
             and zherk.
 
     @param[in]
@@ -16659,28 +16660,27 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_64(rocblas_handle                han
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       device array of device pointers storing each matrix_i A of dimension (lda, k)
-            when transA is rocblas_operation_none, otherwise of dimension (lda, n).
+            when transA is rocblas_operation_none. Otherwise, of dimension (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-
-                if transA = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - If transA = rocblas_operation_none,  lda >= max( 1, n ),
+            - Otherwise, lda >= max( 1, k ).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C       device array of device pointers storing each matrix C_i on the GPU.
-            only the upper/lower triangular part of each C_i is accessed.
+            Only the upper/lower triangular part of each C_i is accessed.
 
     @param[in]
     ldc    [rocblas_int]
@@ -16799,32 +16799,31 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_batched_64(rocblas_handle           
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    syrk_strided_batched performs a batch of the matrix-matrix operations for a symmetric rank-k update:
+    The syrk_strided_batched functions perform a batch of the matrix-matrix operations for a symmetric rank-k update:
 
         C_i := alpha*op( A_i )*op( A_i )^T + beta*C_i,
 
-        where  alpha and beta are scalars, op(A_i) is an n by k matrix, and
-        C_i is a symmetric n x n matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A_i)`` is an ``n`` by ``k`` matrix, and
+    ``C_i`` is a symmetric ``n`` x ``n`` matrix stored as either upper or lower.
 
         op( A_i ) = A_i, and A_i is n by k if transA == rocblas_operation_none
         op( A_i ) = A_i^T and A_i is k by n if transA == rocblas_operation_transpose
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C_i is an upper triangular matrix
-            - rocblas_fill_lower:  C_i is a  lower triangular matrix
+            - rocblas_fill_upper:  C_i is an upper triangular matrix.
+            - rocblas_fill_lower:  C_i is a  lower triangular matrix.
 
     @param[in]
     transA  [rocblas_operation]
             - rocblas_operation_transpose:           op(A) = A^T
             - rocblas_operation_none:                op(A) = A
             - rocblas_operation_conjugate_transpose: op(A) = A^T
-
-            rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
+            - rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
             and zherk.
 
     @param[in]
@@ -16838,32 +16837,31 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_batched_64(rocblas_handle           
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       Device pointer to the first matrix A_1 on the GPU of dimension (lda, k)
-            when transA is rocblas_operation_none, otherwise of dimension (lda, n).
+            when transA is rocblas_operation_none. Otherwise, of dimension (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-
-                if transA = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - If transA = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
 
     @param[in]
     stride_A  [rocblas_stride]
-              stride from the start of one matrix (A_i) and the next one (A_i+1).
+              stride from the start of one matrix (A_i) to the next one (A_i+1).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
-    C       Device pointer to the first matrix C_1 on the GPU. on the GPU.
-            only the upper/lower triangular part of each C_i is accessed.
+    C       Device pointer to the first matrix C_1 on the GPU.
+            Only the upper/lower triangular part of each C_i is accessed.
 
     @param[in]
     ldc    [rocblas_int]
@@ -16871,7 +16869,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_batched_64(rocblas_handle           
 
     @param[in, out]
     stride_C  [rocblas_stride]
-              stride from the start of one matrix (C_i) and the next one (C_i+1)
+              stride from the start of one matrix (C_i) to the next one (C_i+1)
 
     @param[in]
     batch_count [rocblas_int]
@@ -17003,12 +17001,12 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    syr2k performs one of the matrix-matrix operations for a symmetric rank-2k update:
+    The syr2k functions perform one of the matrix-matrix operations for a symmetric rank-2k update:
 
         C := alpha*(op( A )*op( B )^T + op( B )*op( A )^T) + beta*C,
 
-        where  alpha and beta are scalars, op(A) and op(B) are n by k matrix, and
-        C is a symmetric n x n matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A)`` and ``op(B)`` are ``n`` by ``k`` matrices, and
+    ``C`` is a symmetric ``n`` x ``n`` matrix stored as either upper or lower.
 
         op( A ) = A, op( B ) = B, and A and B are n by k if trans == rocblas_operation_none
         op( A ) = A^T, op( B ) = B^T, and A and B are k by n if trans == rocblas_operation_transpose
@@ -17016,20 +17014,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_strided_batched_64(rocblas_handle   
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C is an upper triangular matrix
-            - rocblas_fill_lower:  C is a  lower triangular matrix
+            - rocblas_fill_upper:  C is an upper triangular matrix.
+            - rocblas_fill_lower:  C is a  lower triangular matrix.
 
     @param[in]
     trans  [rocblas_operation]
             - rocblas_operation_transpose:           op( A ) = A^T, op( B ) = B^T
             - rocblas_operation_none:                op( A ) = A, op( B ) = B
             - rocblas_operation_conjugate_transpose: op( A ) = A^T, op( B ) = B^T
-
-            rocblas_operation_conjugate_transpose is not supported for complex types in csyr2k and zsyr2k.
+            - rocblas_operation_conjugate_transpose is not supported for complex types in csyr2k and zsyr2k.
 
     @param[in]
     n       [rocblas_int]
@@ -17042,35 +17039,34 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrk_strided_batched_64(rocblas_handle   
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       pointer storing matrix A on the GPU.
-            Matrix dimension is ( lda, k ) when if trans = rocblas_operation_none, otherwise (lda, n)
-            only the upper/lower triangular part is accessed.
+            Matrix dimension is ( lda, k ) when trans = rocblas_operation_none. Otherwise, (lda, n).
+            Only the upper/lower triangular part is accessed.
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A.
-
-            if trans = rocblas_operation_none,  lda >= max( 1, n ),
-            otherwise lda >= max( 1, k ).
+            - If trans = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
 
     @param[in]
     B       pointer storing matrix B on the GPU.
-            Matrix dimension is ( ldb, k ) when if trans = rocblas_operation_none, otherwise (ldb, n)
-            only the upper/lower triangular part is accessed.
+            Matrix dimension is ( ldb, k ) when trans = rocblas_operation_none. Otherwise, (ldb, n).
+            Only the upper/lower triangular part is accessed.
 
     @param[in]
     ldb     [rocblas_int]
             ldb specifies the first dimension of B.
-            if trans = rocblas_operation_none,  ldb >= max( 1, n ),
-            otherwise ldb >= max( 1, k ).
+            - If trans = rocblas_operation_none,  ldb >= max( 1, n ).
+            - Otherwise, ldb >= max( 1, k ).
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, C need not be set before entry.
 
     @param[in]
     C       pointer storing matrix C on the GPU.
@@ -17198,12 +17194,12 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_64(rocblas_handle                ha
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    syr2k_batched performs a batch of the matrix-matrix operations for a symmetric rank-2k update:
+    The syr2k_batched functions perform a batch of the matrix-matrix operations for a symmetric rank-2k update:
 
         C_i := alpha*(op( A_i )*op( B_i )^T + op( B_i )*op( A_i )^T) + beta*C_i,
 
-        where  alpha and beta are scalars, op(A_i) and op(B_i) are n by k matrix, and
-        C_i is a symmetric n x n matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A_i)`` and ``op(B_i)`` are ``n`` by ``k`` matrices, and
+    ``C_i`` is a symmetric ``n`` x ``n`` matrix stored as either upper or lower.
 
         op( A_i ) = A_i, op( B_i ) = B_i, and A_i and B_i are n by k if trans == rocblas_operation_none
         op( A_i ) = A_i^T, op( B_i ) = B_i^T, and A_i and B_i are k by n if trans == rocblas_operation_transpose
@@ -17211,20 +17207,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_64(rocblas_handle                ha
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C_i is an upper triangular matrix
-            - rocblas_fill_lower:  C_i is a  lower triangular matrix
+            - rocblas_fill_upper:  C_i is an upper triangular matrix.
+            - rocblas_fill_lower:  C_i is a  lower triangular matrix.
 
     @param[in]
     trans  [rocblas_operation]
             - rocblas_operation_transpose:           op( A_i ) = A_i^T, op( B_i ) = B_i^T
             - rocblas_operation_none:                op( A_i ) = A_i, op( B_i ) = B_i
             - rocblas_operation_conjugate_transpose: op( A_i ) = A_i^T, op( B_i ) = B_i^T
-
-            rocblas_operation_conjugate_transpose is not supported for complex types in csyr2k_batched and zsyr2k_batched.
+            - rocblas_operation_conjugate_transpose is not supported for complex types in csyr2k_batched and zsyr2k_batched.
 
     @param[in]
     n       [rocblas_int]
@@ -17237,31 +17232,30 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_64(rocblas_handle                ha
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       device array of device pointers storing each matrix_i A of dimension (lda, k)
-            when trans is rocblas_operation_none, otherwise of dimension (lda, n).
+            when trans is rocblas_operation_none. Otherwise, of dimension (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-                if trans = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - If trans = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
     @param[in]
     B       device array of device pointers storing each matrix_i B of dimension (ldb, k)
-            when trans is rocblas_operation_none, otherwise of dimension (ldb, n).
+            when trans is rocblas_operation_none. Otherwise, of dimension (ldb, n).
     @param[in]
     ldb     [rocblas_int]
             ldb specifies the first dimension of B.
-
-                if trans = rocblas_operation_none,  ldb >= max( 1, n ),
-                otherwise ldb >= max( 1, k ).
+            - If trans = rocblas_operation_none,  ldb >= max( 1, n ),
+            - Otherwise, ldb >= max( 1, k ).
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, C need not be set before entry.
 
     @param[in]
     C       device array of device pointers storing each matrix C_i on the GPU.
@@ -17399,12 +17393,12 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_batched_64(rocblas_handle          
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    syr2k_strided_batched performs a batch of the matrix-matrix operations for a symmetric rank-2k update:
+    The syr2k_strided_batched functions perform a batch of the matrix-matrix operations for a symmetric rank-2k update:
 
         C_i := alpha*(op( A_i )*op( B_i )^T + op( B_i )*op( A_i )^T) + beta*C_i,
 
-        where  alpha and beta are scalars, op(A_i) and op(B_i) are n by k matrix, and
-        C_i is a symmetric n x n matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A_i)`` and ``op(B_i)`` are ``n`` by ``k`` matrices, and
+    ``C_i`` is a symmetric ``n`` x ``n`` matrix stored as either upper or lower.
 
         op( A_i ) = A_i, op( B_i ) = B_i, and A_i and B_i are n by k if trans == rocblas_operation_none
         op( A_i ) = A_i^T, op( B_i ) = B_i^T, and A_i and B_i are k by n if trans == rocblas_operation_transpose
@@ -17412,20 +17406,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_batched_64(rocblas_handle          
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C_i is an upper triangular matrix
-            - rocblas_fill_lower:  C_i is a  lower triangular matrix
+            - rocblas_fill_upper:  C_i is an upper triangular matrix.
+            - rocblas_fill_lower:  C_i is a  lower triangular matrix.
 
     @param[in]
     trans  [rocblas_operation]
             - rocblas_operation_transpose:           op( A_i ) = A_i^T, op( B_i ) = B_i^T
             - rocblas_operation_none:                op( A_i ) = A_i, op( B_i ) = B_i
             - rocblas_operation_conjugate_transpose: op( A_i ) = A_i^T, op( B_i ) = B_i^T
-
-            rocblas_operation_conjugate_transpose is not supported for complex types in csyr2k_strided_batched and zsyr2k_strided_batched.
+            - rocblas_operation_conjugate_transpose is not supported for complex types in csyr2k_strided_batched and zsyr2k_strided_batched.
 
     @param[in]
     n       [rocblas_int]
@@ -17438,43 +17431,41 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_batched_64(rocblas_handle          
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       Device pointer to the first matrix A_1 on the GPU of dimension (lda, k)
-            when trans is rocblas_operation_none, otherwise of dimension (lda, n).
+            when trans is rocblas_operation_none. Otherwise, of dimension (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-
-                if trans = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - If trans = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise lda >= max( 1, k ).
 
     @param[in]
     stride_A  [rocblas_stride]
-              stride from the start of one matrix (A_i) and the next one (A_i+1)
+              stride from the start of one matrix (A_i) to the next one (A_i+1).
 
     @param[in]
     B       Device pointer to the first matrix B_1 on the GPU of dimension (ldb, k)
-            when trans is rocblas_operation_none, otherwise of dimension (ldb, n)
+            when trans is rocblas_operation_none. Otherwise, of dimension (ldb, n).
 
     @param[in]
     ldb     [rocblas_int]
             ldb specifies the first dimension of B_i.
-
-                if trans = rocblas_operation_none,  ldb >= max( 1, n ),
-                otherwise ldb >= max( 1, k ).
+            - If trans = rocblas_operation_none,  ldb >= max( 1, n ).
+            - Otherwise, ldb >= max( 1, k ).
 
     @param[in]
     stride_B  [rocblas_stride]
-              stride from the start of one matrix (B_i) and the next one (B_i+1)
+              stride from the start of one matrix (B_i) to the next one (B_i+1).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, C need not be set before entry.
 
     @param[in]
     C       Device pointer to the first matrix C_1 on the GPU.
@@ -17485,7 +17476,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_batched_64(rocblas_handle          
 
     @param[in, out]
     stride_C  [rocblas_stride]
-              stride from the start of one matrix (C_i) and the next one (C_i+1).
+              stride from the start of one matrix (C_i) to the next one (C_i+1).
 
     @param[in]
     batch_count [rocblas_int]
@@ -17642,14 +17633,14 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_strided_batched_64(rocblas_handle  
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    syrkx performs one of the matrix-matrix operations for a symmetric rank-k update:
+    The syrkx functions perform one of the matrix-matrix operations for a symmetric rank-k update:
 
         C := alpha*op( A )*op( B )^T + beta*C,
 
-        where  alpha and beta are scalars, op(A) and op(B) are n by k matrix, and
-        C is a symmetric n x n matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A)`` and ``op(B)`` are ``n`` by ``k`` matrices, and
+    ``C`` is a symmetric ``n`` x ``n`` matrix stored as either upper or lower.
 
-    This routine should only be used when the caller can guarantee that the result of op( A )*op( B )^T will be symmetric.
+    This routine should only be used when the caller can guarantee that the result of ``op( A )*op( B )^T`` will be symmetric.
 
         op( A ) = A, op( B ) = B, and A and B are n by k if trans == rocblas_operation_none
         op( A ) = A^T, op( B ) = B^T,  and A and B are k by n if trans == rocblas_operation_transpose
@@ -17657,20 +17648,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_strided_batched_64(rocblas_handle  
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C is an upper triangular matrix
-            - rocblas_fill_lower:  C is a  lower triangular matrix
+            - rocblas_fill_upper:  C is an upper triangular matrix.
+            - rocblas_fill_lower:  C is a  lower triangular matrix.
 
     @param[in]
     trans  [rocblas_operation]
             - rocblas_operation_transpose:           op( A ) = A^T, op( B ) = B^T
             - rocblas_operation_none:                op( A ) = A, op( B ) = B
             - rocblas_operation_conjugate_transpose: op( A ) = A^T, op( B ) = B^T
-
-            rocblas_operation_conjugate_transpose is not supported for complex types in csyrkx and zsyrkx.
+            - rocblas_operation_conjugate_transpose is not supported for complex types in csyrkx and zsyrkx.
 
     @param[in]
     n       [rocblas_int]
@@ -17683,39 +17673,37 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyr2k_strided_batched_64(rocblas_handle  
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       pointer storing matrix A on the GPU.
-            Matrix dimension is ( lda, k ) when if trans = rocblas_operation_none, otherwise (lda, n)
+            Matrix dimension is ( lda, k ) if trans = rocblas_operation_none. Otherwise, (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A.
-
-                if trans = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - If trans = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
 
     @param[in]
     B       pointer storing matrix B on the GPU.
-            Matrix dimension is ( ldb, k ) when if trans = rocblas_operation_none, otherwise (ldb, n)
+            Matrix dimension is ( ldb, k ) if trans = rocblas_operation_none. Otherwise (ldb, n).
 
     @param[in]
     ldb     [rocblas_int]
             ldb specifies the first dimension of B.
-
-                if trans = rocblas_operation_none,  ldb >= max( 1, n ),
-                otherwise ldb >= max( 1, k ).
+            - If trans = rocblas_operation_none,  ldb >= max( 1, n ).
+            - Otherwise, ldb >= max( 1, k ).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, C need not be set before entry.
 
     @param[in]
     C       pointer storing matrix C on the GPU.
-            only the upper/lower triangular part is accessed.
+            Only the upper/lower triangular part is accessed.
 
     @param[in]
     ldc    [rocblas_int]
@@ -17839,14 +17827,14 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrkx_64(rocblas_handle                ha
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    syrkx_batched performs a batch of the matrix-matrix operations for a symmetric rank-k update:
+    The syrkx_batched functions perform a batch of the matrix-matrix operations for a symmetric rank-k update:
 
         C_i := alpha*op( A_i )*op( B_i )^T + beta*C_i,
 
-        where  alpha and beta are scalars, op(A_i) and op(B_i) are n by k matrix, and
-        C_i is a symmetric n x n matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A_i)`` and ``op(B_i)`` are ``n`` by ``k`` matrices, and
+    ``C_i`` is a symmetric ``n`` x ``n`` matrix stored as either upper or lower.
 
-    This routine should only be used when the caller can guarantee that the result of op( A_i )*op( B_i )^T will be symmetric.
+    This routine should only be used when the caller can guarantee that the result of ``op( A_i )*op( B_i )^T`` will be symmetric.
 
         op( A_i ) = A_i, op( B_i ) = B_i, and A_i and B_i are n by k if trans == rocblas_operation_none
         op( A_i ) = A_i^T, op( B_i ) = B_i^T,  and A_i and B_i are k by n if trans == rocblas_operation_transpose
@@ -17854,20 +17842,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrkx_64(rocblas_handle                ha
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C_i is an upper triangular matrix
-            - rocblas_fill_lower:  C_i is a  lower triangular matrix
+            - rocblas_fill_upper:  C_i is an upper triangular matrix.
+            - rocblas_fill_lower:  C_i is a  lower triangular matrix.
 
     @param[in]
     trans  [rocblas_operation]
             - rocblas_operation_transpose:           op( A_i ) = A_i^T, op( B_i ) = B_i^T
             - rocblas_operation_none:                op( A_i ) = A_i, op( B_i ) = B_i
             - rocblas_operation_conjugate_transpose: op( A_i ) = A_i^T, op( B_i ) = B_i^T
-
-            rocblas_operation_conjugate_transpose is not supported for complex types in csyrkx_batched and zsyrkx_batched.
+            - rocblas_operation_conjugate_transpose is not supported for complex types in csyrkx_batched and zsyrkx_batched.
 
     @param[in]
     n       [rocblas_int]
@@ -17880,39 +17867,37 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrkx_64(rocblas_handle                ha
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       device array of device pointers storing each matrix_i A of dimension (lda, k)
-            when trans is rocblas_operation_none, otherwise of dimension (lda, n)
+            when trans is rocblas_operation_none. Otherwise, of dimension (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-
-                if trans = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - if trans = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
 
     @param[in]
     B       device array of device pointers storing each matrix_i B of dimension (ldb, k)
-            when trans is rocblas_operation_none, otherwise of dimension (ldb, n)
+            when trans is rocblas_operation_none. Otherwise, of dimension (ldb, n).
 
     @param[in]
     ldb     [rocblas_int]
             ldb specifies the first dimension of B.
-
-                if trans = rocblas_operation_none,  ldb >= max( 1, n ),
-                otherwise ldb >= max( 1, k ).
+            - If trans = rocblas_operation_none,  ldb >= max( 1, n ).
+            - Otherwise, ldb >= max( 1, k ).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, then C need not be set before entry.
 
     @param[in]
     C       device array of device pointers storing each matrix C_i on the GPU.
-            only the upper/lower triangular part of each C_i is accessed.
+            Only the upper/lower triangular part of each C_i is accessed.
 
     @param[in]
     ldc    [rocblas_int]
@@ -18049,14 +18034,14 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrkx_batched_64(rocblas_handle          
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    syrkx_strided_batched performs a batch of the matrix-matrix operations for a symmetric rank-k update:
+    The syrkx_strided_batched functions perform a batch of the matrix-matrix operations for a symmetric rank-k update:
 
         C_i := alpha*op( A_i )*op( B_i )^T + beta*C_i,
 
-        where  alpha and beta are scalars, op(A_i) and op(B_i) are n by k matrix, and
-        C_i is a symmetric n x n matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A_i)`` and ``op(B_i)`` are ``n`` by ``k`` matrices, and
+    ``C_i`` is a symmetric ``n`` x ``n`` matrix stored as either upper or lower.
 
-    This routine should only be used when the caller can guarantee that the result of op( A_i )*op( B_i )^T will be symmetric.
+    This routine should only be used when the caller can guarantee that the result of ``op( A_i )*op( B_i )^T`` will be symmetric.
 
         op( A_i ) = A_i, op( B_i ) = B_i, and A_i and B_i are n by k if trans == rocblas_operation_none
         op( A_i ) = A_i^T, op( B_i ) = B_i^T,  and A_i and B_i are k by n if trans == rocblas_operation_transpose
@@ -18064,20 +18049,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrkx_batched_64(rocblas_handle          
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C_i is an upper triangular matrix
-            - rocblas_fill_lower:  C_i is a  lower triangular matrix
+            - rocblas_fill_upper:  C_i is an upper triangular matrix.
+            - rocblas_fill_lower:  C_i is a  lower triangular matrix.
 
     @param[in]
     trans  [rocblas_operation]
             - rocblas_operation_transpose:           op( A_i ) = A_i^T, op( B_i ) = B_i^T
             - rocblas_operation_none:                op( A_i ) = A_i, op( B_i ) = B_i
             - rocblas_operation_conjugate_transpose: op( A_i ) = A_i^T, op( B_i ) = B_i^T
-
-            rocblas_operation_conjugate_transpose is not supported for complex types in csyrkx_strided_batched and zsyrkx_strided_batched.
+            - rocblas_operation_conjugate_transpose is not supported for complex types in csyrkx_strided_batched and zsyrkx_strided_batched.
 
     @param[in]
     n       [rocblas_int]
@@ -18090,47 +18074,45 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrkx_batched_64(rocblas_handle          
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
+            zero, A is not referenced and A need not be set before
             entry.
 
     @param[in]
     A       Device pointer to the first matrix A_1 on the GPU of dimension (lda, k)
-            when trans is rocblas_operation_none, otherwise of dimension (lda, n)
+            when trans is rocblas_operation_none. Otherwise, of dimension (lda, n).
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A_i.
-
-                if trans = rocblas_operation_none,  lda >= max( 1, n ),
-                otherwise lda >= max( 1, k ).
+            - If trans = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
 
     @param[in]
     stride_A  [rocblas_stride]
-              stride from the start of one matrix (A_i) and the next one (A_i+1).
+              stride from the start of one matrix (A_i) to the next one (A_i+1).
 
     @param[in]
     B       Device pointer to the first matrix B_1 on the GPU of dimension (ldb, k)
-            when trans is rocblas_operation_none, otherwise of dimension (ldb, n).
+            when trans is rocblas_operation_none. Otherwise, of dimension (ldb, n).
 
     @param[in]
     ldb     [rocblas_int]
             ldb specifies the first dimension of B_i.
-
-                if trans = rocblas_operation_none,  ldb >= max( 1, n ),
-                otherwise ldb >= max( 1, k ).
+            - If trans = rocblas_operation_none,  ldb >= max( 1, n ).
+            - Otherwise, ldb >= max( 1, k ).
 
     @param[in]
     stride_B  [rocblas_stride]
-              stride from the start of one matrix (B_i) and the next one (B_i+1).
+              stride from the start of one matrix (B_i) to the next one (B_i+1).
 
     @param[in]
     beta
             beta specifies the scalar beta. When beta is
-            zero then C need not be set before entry.
+            zero, C need not be set before entry.
 
     @param[in]
     C       Device pointer to the first matrix C_1 on the GPU.
-            only the upper/lower triangular part of each C_i is accessed.
+            Only the upper/lower triangular part of each C_i is accessed.
 
     @param[in]
     ldc    [rocblas_int]
@@ -18138,7 +18120,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrkx_batched_64(rocblas_handle          
 
     @param[in, out]
     stride_C  [rocblas_stride]
-              stride from the start of one matrix (C_i) and the next one (C_i+1).
+              stride from the start of one matrix (C_i) to the next one (C_i+1).
 
     @param[in]
     batch_count [rocblas_int]
@@ -18295,43 +18277,43 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrkx_strided_batched_64(rocblas_handle  
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    trmm performs one of the matrix-matrix operations:
+    The trmm functions perform one of the matrix-matrix operations:
 
         C := alpha*op( A )*B,   or
         C := alpha*B*op( A ),
 
-    The Legacy BLAS in-place trmm functionality,
+    The Legacy BLAS in-place trmm functionality:
 
         B := alpha*op( A )*B,   or
         B := alpha*B*op( A ),
 
-    is available by setting pointer C equal to pointer B, and ldc equal to ldb.
+    is available by setting pointer ``C`` equal to pointer ``B``, and ``ldc`` equal to ``ldb``.
 
-        alpha  is a scalar,  B  is an m by n matrix, C  is an m by n matrix,  A  is a unit, or
-        non-unit,  upper or lower triangular matrix  and  op( A )  is one  of
+    ``alpha`` is a scalar, ``B`` is an ``m`` by ``n`` matrix, ``C``  is an ``m`` by ``n`` matrix, ``A``  is a unit, or
+    non-unit, upper or lower triangular matrix, and ``op( A )`` is one of:
 
         op( A ) = A     or
         op( A ) = A^T   or
         op( A ) = A^H.
 
-        When uplo == rocblas_fill_upper the  leading  k by k
-        upper triangular part of the array  A must contain the upper
-        triangular matrix and the strictly lower triangular part of
-        A is not referenced. Here k is m when side == rocblas_side_left
-        and is n when side == rocblas_side_right.
+    When ``uplo == rocblas_fill_upper``, the leading ``k`` by ``k``
+    upper triangular part of the array ``A`` must contain the upper
+    triangular matrix and the strictly lower triangular part of
+    ``A`` is not referenced. Here, ``k`` is ``m`` when ``side == rocblas_side_left``
+    and is ``n`` when ``side == rocblas_side_right``.
 
-        When uplo == rocblas_fill_lower the  leading  k by k
-        lower triangular part of the array  A must contain the lower
-        triangular matrix  and the strictly upper triangular part of
-        A is not referenced. Here k is m when  side == rocblas_side_left
-        and is n when side == rocblas_side_right.
-
-        Note that when  diag == rocblas_diagonal_unit  the diagonal elements of
-        A  are not referenced either,  but are assumed to be  unity.
+    When ``uplo == rocblas_fill_lower``, the leading ``k`` by ``k``
+    lower triangular part of the array ``A ``must contain the lower
+    triangular matrix and the strictly upper triangular part of
+    ``A`` is not referenced. Here, ``k`` is ``m`` when ``side == rocblas_side_left``
+    and is ``n`` when ``side == rocblas_side_right``.
+    
+    Note that when ``diag == rocblas_diagonal_unit``, the diagonal elements of
+    ``A`` are not referenced either but are assumed to be unity.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     side    [rocblas_side]
@@ -18369,7 +18351,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrkx_strided_batched_64(rocblas_handle  
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A is not referenced and B need not be set before
+            zero, A is not referenced and B need not be set before
             entry.
 
     @param[in]
@@ -18377,26 +18359,22 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrkx_strided_batched_64(rocblas_handle  
             A has dimension ( lda, k ), where k is m
             when  side == rocblas_side_left  and
             is  n  when  side == rocblas_side_right.
-
-                When uplo == rocblas_fill_upper the  leading  k by k
-                upper triangular part of the array  A must contain the upper
-                triangular matrix  and the strictly lower triangular part of
-                A is not referenced.
-
-                When uplo == rocblas_fill_lower the  leading  k by k
-                lower triangular part of the array  A must contain the lower
-                triangular matrix  and the strictly upper triangular part of
-                A is not referenced.
-
-        Note that when  diag == rocblas_diagonal_unit  the diagonal elements of
-        A  are not referenced either,  but are assumed to be  unity.
+            - When uplo == rocblas_fill_upper the  leading  k by k
+            upper triangular part of the array  A must contain the upper
+            triangular matrix, and the strictly lower triangular part of
+            A is not referenced.
+            - When uplo == rocblas_fill_lower the  leading  k by k
+            lower triangular part of the array  A must contain the lower
+            triangular matrix, and the strictly upper triangular part of
+            A is not referenced.
+            - Note that when  diag == rocblas_diagonal_unit  the diagonal elements of
+            A  are not referenced either but are assumed to be  unity.
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A.
-
-                if side == rocblas_side_left,  lda >= max( 1, m ),
-                if side == rocblas_side_right, lda >= max( 1, n ).
+            - If side == rocblas_side_left,  lda >= max( 1, m ).
+            - If side == rocblas_side_right, lda >= max( 1, n ).
 
     @param[in]
     B       Device pointer to the matrix B on the GPU.
@@ -18411,7 +18389,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zsyrkx_strided_batched_64(rocblas_handle  
     @param[in]
     ldc   [rocblas_int]
           ldc specifies the first dimension of C. ldc >= max( 1, m).
-          If B and C are pointers to the same matrix then ldc must equal ldb or
+          If B and C are pointers to the same matrix, ldc must equal ldb or
           rocblas_status_invalid_value will be returned.
 
     ********************************************************************/
@@ -18541,43 +18519,43 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmm_64(rocblas_handle                han
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    trmm_batched performs one of the matrix-matrix operations:
+    The trmm_batched functions perform one of the matrix-matrix operations:
 
         C_i := alpha*op( A_i )*B_i,   or
         C_i := alpha*B_i*op( A_i )  for i = 0, 1, ... batch_count -1,
 
-    The Legacy BLAS in-place trmm_batched functionality,
+    The Legacy BLAS in-place trmm_batched functionality:
 
         B_i := alpha*op( A_i )*B_i,   or
         B_i := alpha*B_i*op( A_i )  for i = 0, 1, ... batch_count -1,
 
-    is available by setting pointer C equal to pointer B and ldc equal to ldb.
+    is available by setting pointer ``C`` equal to pointer ``B`` and ``ldc`` equal to ``ldb``.
 
-        alpha  is a scalar,  B_i  is an m by n matrix, C_i  is an m by n matrix,  A_i  is a unit, or
-        non-unit,  upper or lower triangular matrix  and  op( A_i )  is one  of
+    ``alpha`` is a scalar, ``B_i`` is an ``m`` by ``n`` matrix, ``C_i`` is an ``m`` by ``n`` matrix, ``A_i`` is a unit, or
+    non-unit, upper or lower triangular matrix, and ``op( A_i )``  is one of:
 
         op( A_i ) = A_i     or
         op( A_i ) = A_i^T   or
         op( A_i ) = A_i^H.
 
-        When uplo == rocblas_fill_upper the  leading  k by k
-        upper triangular part of the array  A must contain the upper
-        triangular matrix and the strictly lower triangular part of
-        A is not referenced. Here k is m when side == rocblas_side_left
-        and is n when side == rocblas_side_right.
+    When ``uplo == rocblas_fill_upper``, the leading ``k`` by ``k``
+    upper triangular part of the array ``A`` must contain the upper
+    triangular matrix, and the strictly lower triangular part of
+    ``A`` is not referenced. Here, ``k`` is ``m`` when ``side == rocblas_side_left``
+    and is ``n`` when ``side == rocblas_side_right``.
 
-        When uplo == rocblas_fill_lower the  leading  k by k
-        lower triangular part of the array  A must contain the lower
-        triangular matrix  and the strictly upper triangular part of
-        A is not referenced. Here k is m when  side == rocblas_side_left
-        and is n when side == rocblas_side_right.
+    When ``uplo == rocblas_fill_lower``, the leading ``k`` by ``k``
+    lower triangular part of the array ``A`` must contain the lower
+    triangular matrix, and the strictly upper triangular part of
+    ``A`` is not referenced. Here, ``k`` is ``m`` when ``side == rocblas_side_left``
+    and is ``n`` when ``side == rocblas_side_right``.
 
-        Note that when  diag == rocblas_diagonal_unit  the diagonal elements of
-        A  are not referenced either,  but are assumed to be  unity.
+    Note that when ``diag == rocblas_diagonal_unit``, the diagonal elements of
+    ``A`` are not referenced either but are assumed to be  unity.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     side    [rocblas_side]
@@ -18615,7 +18593,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmm_64(rocblas_handle                han
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A_i is not referenced and B_i need not be set before
+            zero, then A_i is not referenced and B_i need not be set before
             entry.
 
     @param[in]
@@ -18623,26 +18601,22 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmm_64(rocblas_handle                han
             Each A_i is of dimension ( lda, k ), where k is m
             when  side == rocblas_side_left  and
             is  n  when  side == rocblas_side_right.
-
-            When uplo == rocblas_fill_upper the  leading  k by k
+            - When uplo == rocblas_fill_upper the  leading  k by k
             upper triangular part of the array  A must contain the upper
-            triangular matrix  and the strictly lower triangular part of
+            triangular matrix,  and the strictly lower triangular part of
             A is not referenced.
-
-            When uplo == rocblas_fill_lower the  leading  k by k
+            - When uplo == rocblas_fill_lower the  leading  k by k
             lower triangular part of the array  A must contain the lower
-            triangular matrix  and the strictly upper triangular part of
+            triangular matrix,  and the strictly upper triangular part of
             A is not referenced.
-
-        Note that when  diag == rocblas_diagonal_unit  the diagonal elements of
-        A_i  are not referenced either,  but are assumed to be  unity.
+            - Note that when  diag == rocblas_diagonal_unit  the diagonal elements of
+            A_i  are not referenced either  but are assumed to be  unity.
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A.
-
-                if side == rocblas_side_left,  lda >= max( 1, m ),
-                if side == rocblas_side_right, lda >= max( 1, n ).
+            - If side == rocblas_side_left,  lda >= max( 1, m ).
+            - If side == rocblas_side_right, lda >= max( 1, n ).
 
     @param[in]
     B       device array of device pointers storing each matrix B_i on the GPU.
@@ -18657,7 +18631,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmm_64(rocblas_handle                han
     @param[in]
     ldc   [rocblas_int]
           ldc specifies the first dimension of C. ldc >= max( 1, m).
-          If B and C are pointers to the same array of pointers then ldc must
+          If B and C are pointers to the same array of pointers, then ldc must
           equal ldb or rocblas_status_invalid_value will be returned.
 
     @param[in]
@@ -18798,43 +18772,43 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmm_batched_64(rocblas_handle           
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    trmm_strided_batched performs one of the matrix-matrix operations:
+    The trmm_strided_batched functions performs one of the matrix-matrix operations:
 
         C_i := alpha*op( A_i )*B_i,   or
         C_i := alpha*B_i*op( A_i )  for i = 0, 1, ... batch_count -1,
 
-    The Legacy BLAS in-place trmm_strided_batched functionality,
+    The Legacy BLAS in-place trmm_strided_batched functionality:
 
         B_i := alpha*op( A_i )*B_i,   or
         B_i := alpha*B_i*op( A_i )  for i = 0, 1, ... batch_count -1,
 
-    is available by setting pointer C equal to pointer B, ldc equal to ldb, and stride_C equal to stride_B.
+    is available by setting pointer ``C`` equal to pointer ``B``, ``ldc`` equal to ``ldb``, and ``stride_C`` equal to ``stride_B``.
 
-        alpha  is a scalar,  B_i  is an m by n matrix, C_i  is an m by n matrix,  A_i  is a unit, or
-        non-unit,  upper or lower triangular matrix  and  op( A_i )  is one  of
+    ``alpha`` is a scalar, ``B_i`` is an ``m`` by ``n`` matrix, ``C_i`` is an ``m`` by ``n`` matrix, ``A_i`` is a unit, or
+    non-unit, upper or lower triangular matrix  and ``op( A_i )`` is one of:
 
         op( A_i ) = A_i   or
         op( A_i ) = A_i^T   or
         op( A_i ) = A_i^H.
 
-        When uplo == rocblas_fill_upper the  leading  k by k
-        upper triangular part of the array  A must contain the upper
-        triangular matrix and the strictly lower triangular part of
-        A is not referenced. Here k is m when side == rocblas_side_left
-        and is n when side == rocblas_side_right.
+    When ``uplo == rocblas_fill_upper``, the  leading ``k`` by ``k``
+    upper triangular part of the array ``A`` must contain the upper
+    triangular matrix, and the strictly lower triangular part of
+    ``A`` is not referenced. Here, ``k`` is ``m`` when ``side == rocblas_side_left``
+    and is ``n`` when ``side == rocblas_side_right``.
 
-        When uplo == rocblas_fill_lower the  leading  k by k
-        lower triangular part of the array  A must contain the lower
-        triangular matrix  and the strictly upper triangular part of
-        A is not referenced. Here k is m when  side == rocblas_side_left
-        and is n when side == rocblas_side_right.
+    When ``uplo == rocblas_fill_lower``, the  leading  ``k`` by ``k``
+    lower triangular part of the array ``A`` must contain the lower
+    triangular matrix, and the strictly upper triangular part of
+    ``A`` is not referenced. Here, ``k`` is ``m`` when ``side == rocblas_side_left``
+    and is ``n`` when ``side == rocblas_side_right``.
 
-        Note that when  diag == rocblas_diagonal_unit  the diagonal elements of
-        A  are not referenced either,  but are assumed to be  unity.
+    Note that when ``diag == rocblas_diagonal_unit``, the diagonal elements of
+    ``A`` are not referenced either but are assumed to be unity.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     side    [rocblas_side]
@@ -18872,7 +18846,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmm_batched_64(rocblas_handle           
     @param[in]
     alpha
             alpha specifies the scalar alpha. When alpha is
-            zero then A_i is not referenced and B_i need not be set before
+            zero, then A_i is not referenced and B_i need not be set before
             entry.
 
     @param[in]
@@ -18880,30 +18854,26 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmm_batched_64(rocblas_handle           
             Each A_i is of dimension ( lda, k ), where k is m
             when  side == rocblas_side_left  and
             is  n  when  side == rocblas_side_right.
-
-            When uplo == rocblas_fill_upper the  leading  k by k
+            - When uplo == rocblas_fill_upper, the  leading  k by k
             upper triangular part of the array  A must contain the upper
-            triangular matrix  and the strictly lower triangular part of
+            triangular matrix,  and the strictly lower triangular part of
             A is not referenced.
-
-            When uplo == rocblas_fill_lower the  leading  k by k
+            - When uplo == rocblas_fill_lower ,the  leading  k by k
             lower triangular part of the array  A must contain the lower
-            triangular matrix  and the strictly upper triangular part of
+            triangular matrix,  and the strictly upper triangular part of
             A is not referenced.
-
-        Note that when  diag == rocblas_diagonal_unit  the diagonal elements of
-        A_i  are not referenced either,  but are assumed to be  unity.
+            - Note that when  diag == rocblas_diagonal_unit,  the diagonal elements of
+            A_i  are not referenced either but are assumed to be  unity.
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A.
-
-                if side == rocblas_side_left,  lda >= max( 1, m ),
-                if side == rocblas_side_right, lda >= max( 1, n ).
+            - If side == rocblas_side_left,  lda >= max( 1, m ).
+            - If side == rocblas_side_right, lda >= max( 1, n ).
 
     @param[in]
     stride_A  [rocblas_stride]
-              stride from the start of one matrix (A_i) and the next one (A_i+1).
+              stride from the start of one matrix (A_i) to the next one (A_i+1).
 
     @param[in]
     B       Device pointer to the first matrix B_0 on the GPU.
@@ -18914,7 +18884,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmm_batched_64(rocblas_handle           
 
     @param[in]
     stride_B  [rocblas_stride]
-              stride from the start of one matrix (B_i) and the next one (B_i+1).
+              stride from the start of one matrix (B_i) to the next one (B_i+1).
 
     @param[out]
     C      Device pointer to the first matrix C_0 on the GPU.
@@ -18922,13 +18892,13 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmm_batched_64(rocblas_handle           
     @param[in]
     ldc   [rocblas_int]
           ldc specifies the first dimension of C_i. ldc >= max( 1, m).
-          If B and C pointers are to the same matrix then ldc must equal ldb or
+          If B and C pointers are to the same matrix, then ldc must equal ldb or
           rocblas_status_invalid_size will be returned.
 
     @param[in]
     stride_C  [rocblas_stride]
               stride from the start of one matrix (C_i) and the next one (C_i+1).
-              If B == C and ldb == ldc then stride_C should equal stride_B or
+              If B == C and ldb == ldc, then stride_C should equal stride_B or
               behavior is undefined.
 
     @param[in]
@@ -19093,22 +19063,21 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmm_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    trtri  compute the inverse of a matrix A, namely, invA
-    and write the result into invA;
+    The trtri functions compute the inverse of a matrix ``A``, namely, invA,
+    and write the result into ``invA``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-              specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
-
-                if rocblas_fill_upper, the lower part of A is not referenced
-                if rocblas_fill_lower, the upper part of A is not referenced
+              specifies whether upper (rocblas_fill_upper) or lower (rocblas_fill_lower):
+              - If rocblas_fill_upper, the lower part of A is not referenced.
+              - If rocblas_fill_lower, the upper part of A is not referenced.
     @param[in]
     diag      [rocblas_diagonal]
-              - 'rocblas_diagonal_non_unit', A is non-unit triangular;
-              - 'rocblas_diagonal_unit', A is unit triangular;
+              - 'rocblas_diagonal_non_unit': A is non-unit triangular.
+              - 'rocblas_diagonal_unit': A is unit triangular.
     @param[in]
     n         [rocblas_int]
               size of matrix A and invA.
@@ -19119,13 +19088,13 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrmm_strided_batched_64(rocblas_handle   
               specifies the leading dimension of A.
     @param[out]
     invA      device pointer storing matrix invA.
-    Partial inplace operation is supported. See below:
-            -If UPLO = 'U', the leading N-by-N upper triangular part of the invA will store
+              Partial inplace operation is supported. See below:
+              - If UPLO = 'U', the leading N-by-N upper triangular part of the invA will store
                 the inverse of the upper triangular matrix, and the strictly lower
-                triangular part of invA may be cleared.
-            - If UPLO = 'L', the leading N-by-N lower triangular part of the invA will store
+                triangular part of invA can be cleared.
+              - If UPLO = 'L', the leading N-by-N lower triangular part of the invA will store
                 the inverse of the lower triangular matrix, and the strictly upper
-                triangular part of invA may be cleared.
+                triangular part of invA can be cleared.
     @param[in]
     ldinvA    [rocblas_int]
               specifies the leading dimension of invA.
@@ -19172,20 +19141,20 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri(rocblas_handle                handl
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    trtri_batched  compute the inverse of A_i and write into invA_i where
-                   A_i and invA_i are the i-th matrices in the batch,
-                   for i = 1, ..., batch_count.
+    The trtri_batched functions compute the inverse of ``A_i`` and write into ``invA_i``, where
+    ``A_i`` and ``invA_i`` are the ``i``-th matrices in the batch,
+    for ``i`` = 1, ..., ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-              specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+              specifies whether upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
     @param[in]
     diag      [rocblas_diagonal]
-              - 'rocblas_diagonal_non_unit', A is non-unit triangular;
-              - 'rocblas_diagonal_unit', A is unit triangular;
+              - 'rocblas_diagonal_non_unit': A is non-unit triangular.
+              - 'rocblas_diagonal_unit': A is unit triangular.
     @param[in]
     n         [rocblas_int]
     @param[in]
@@ -19195,13 +19164,13 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri(rocblas_handle                handl
               specifies the leading dimension of each A_i.
     @param[out]
     invA      device array of device pointers storing the inverse of each matrix A_i.
-    Partial inplace operation is supported. See below:
-            -If UPLO = 'U', the leading N-by-N upper triangular part of the invA will store
+              Partial inplace operation is supported. See below:
+              - If UPLO = 'U', the leading N-by-N upper triangular part of the invA will store
                 the inverse of the upper triangular matrix, and the strictly lower
-                triangular part of invA may be cleared.
-            - If UPLO = 'L', the leading N-by-N lower triangular part of the invA will store
+                triangular part of invA can be cleared.
+              - If UPLO = 'L', the leading N-by-N lower triangular part of the invA will store
                 the inverse of the lower triangular matrix, and the strictly upper
-                triangular part of invA may be cleared.
+                triangular part of invA can be cleared.
     @param[in]
     ldinvA    [rocblas_int]
               specifies the leading dimension of each invA_i.
@@ -19254,20 +19223,20 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri_batched(rocblas_handle             
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    trtri_strided_batched compute the inverse of A_i and write into invA_i where
-                   A_i and invA_i are the i-th matrices in the batch,
-                   for i = 1, ..., batch_count.
+    The trtri_strided_batched functions compute the inverse of ``A_i`` and write into ``invA_i``, where
+    ``A_i`` and ``invA_i`` are the ``i``-th matrices in the batch,
+    for ``i`` = 1, ..., ``batch_count``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo      [rocblas_fill]
-              specifies whether the upper 'rocblas_fill_upper' or lower 'rocblas_fill_lower'
+              specifies whether upper (rocblas_fill_upper) or lower (rocblas_fill_lower).
     @param[in]
     diag      [rocblas_diagonal]
-              - 'rocblas_diagonal_non_unit', A is non-unit triangular;
-              - 'rocblas_diagonal_unit', A is unit triangular;
+              - 'rocblas_diagonal_non_unit': A is non-unit triangular.
+              - 'rocblas_diagonal_unit': A is unit triangular.
     @param[in]
     n         [rocblas_int]
     @param[in]
@@ -19281,14 +19250,12 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri_batched(rocblas_handle             
     @param[out]
     invA      device pointer storing the inverses of each matrix A_i.
               Partial inplace operation is supported. See below:
-
-                - If UPLO = 'U', the leading N-by-N upper triangular part of the invA will store
+              - If UPLO = 'U', the leading N-by-N upper triangular part of the invA will store
                 the inverse of the upper triangular matrix, and the strictly lower
-                triangular part of invA may be cleared.
-
-                - If UPLO = 'L', the leading N-by-N lower triangular part of the invA will store
+                triangular part of invA can be cleared.
+              - If UPLO = 'L', the leading N-by-N lower triangular part of the invA will store
                 the inverse of the lower triangular matrix, and the strictly upper
-                triangular part of invA may be cleared.
+                triangular part of invA can be cleared.
     @param[in]
     ldinvA    [rocblas_int]
               specifies the leading dimension of each invA_i.
@@ -19352,30 +19319,29 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri_strided_batched(rocblas_handle     
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    trsm solves:
+    The trsm functions solve:
 
         op(A)*X = alpha*B or  X*op(A) = alpha*B,
 
-        where alpha is a scalar, X and B are m by n matrices,
-
-        A is triangular matrix and op(A) is one of
+    where ``alpha`` is a scalar, ``X`` and ``B`` are ``m`` by ``n`` matrices,
+    ``A`` is a triangular matrix, and ``op(A)`` is one of:
 
         op( A ) = A   or   op( A ) = A^T   or   op( A ) = A^H.
 
-        The matrix X is overwritten on B.
+    The matrix ``X`` is overwritten on ``B``.
 
     Note about memory allocation:
-    When trsm is launched with a k evenly divisible by the internal block size of 128,
-    and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
-    memory found in the handle to increase overall performance (where k is m
-    when rocblas_side_left and is n when rocblas_side_right).
+    When trsm is launched with a ``k`` evenly divisible by the internal block size of 128,
+    and is no larger than 10 of these blocks, the API takes advantage of utilizing preallocated
+    memory found in the handle to increase overall performance (where ``k`` is ``m``
+    when ``rocblas_side_left`` and ``n`` when ``rocblas_side_right``).
 
-    Although not widespread, some gemm kernels used by trsm may use atomic operations.
+    Although not widespread, some gemm kernels used by trsm might use atomic operations.
     See Atomic Operations in the API Reference Guide for more information.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     side    [rocblas_side]
@@ -19409,22 +19375,21 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri_strided_batched(rocblas_handle     
     @param[in]
     alpha
             device pointer or host pointer specifying the scalar alpha. When alpha is
-            &zero then A is not referenced and B need not be set before
+            &zero, then A is not referenced and B need not be set before
             entry.
 
     @param[in]
     A       device pointer storing matrix A.
             of dimension ( lda, k ), where k is m
             when  rocblas_side_left  and
-            is  n  when  rocblas_side_right
-            only the upper/lower triangular part is accessed.
+            n  when  rocblas_side_right.
+            Only the upper/lower triangular part is accessed.
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A.
-
-                if side = rocblas_side_left,  lda >= max( 1, m ),
-                if side = rocblas_side_right, lda >= max( 1, n ).
+            - If side = rocblas_side_left,  lda >= max( 1, m ).
+            - If side = rocblas_side_right, lda >= max( 1, n ).
 
     @param[in,out]
     B       device pointer storing matrix B.
@@ -19544,30 +19509,29 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_64(rocblas_handle                han
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    trsm_batched performs the following batched operation:
+    The trsm_batched functions perform the following batched operation:
 
         op(A_i)*X_i = alpha*B_i or
         X_i*op(A_i) = alpha*B_i, for i = 1, ..., batch_count,
 
-        where alpha is a scalar, X and B are batched m by n matrices,
-
-        A is triangular batched matrix and op(A) is one of
+    where ``alpha`` is a scalar, ``X`` and ``B`` are batched ``m`` by ``n`` matrices,
+    ``A`` is a triangular batched matrix, and ``op(A)`` is one of:
 
         op( A ) = A   or
         op( A ) = A^T   or
         op( A ) = A^H.
 
-        Each matrix X_i is overwritten on B_i for i = 1, ..., batch_count.
+    Each matrix ``X_i`` is overwritten on ``B_i`` for ``i`` = 1, ..., ``batch_count``.
 
     Note about memory allocation:
-    When trsm is launched with a k evenly divisible by the internal block size of 128,
-    and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
-    memory found in the handle to increase overall performance (where k is m
-    when rocblas_side_left and is n when rocblas_side_right).
+    When trsm is launched with a ``k`` evenly divisible by the internal block size of 128,
+    and is no larger than 10 of these blocks, the API takes advantage of utilizing preallocated
+    memory found in the handle to increase overall performance (where ``k`` is ``m``
+    when ``rocblas_side_left`` and ``n`` when ``rocblas_side_right``).
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     side    [rocblas_side]
             - rocblas_side_left:       op(A)*X = alpha*B
@@ -19594,19 +19558,18 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_64(rocblas_handle                han
     @param[in]
     alpha
             device pointer or host pointer specifying the scalar alpha. When alpha is
-            &zero then A is not referenced and B need not be set before
+            &zero, then A is not referenced and B need not be set before
             entry.
     @param[in]
     A       device array of device pointers storing each matrix A_i on the GPU.
-            Matricies are of dimension ( lda, k ), where k is m
-            when  rocblas_side_left  and is  n  when  rocblas_side_right
-            only the upper/lower triangular part is accessed.
+            Matrices are of dimension ( lda, k ), where k is m
+            when  rocblas_side_left  and  n  when  rocblas_side_right.
+            Only the upper/lower triangular part is accessed.
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of each A_i.
-
-                if side = rocblas_side_left,  lda >= max( 1, m ),
-                if side = rocblas_side_right, lda >= max( 1, n ).
+            - If side = rocblas_side_left,  lda >= max( 1, m ).
+            - If side = rocblas_side_right, lda >= max( 1, n ).
     @param[in,out]
     B       device array of device pointers storing each matrix B_i on the GPU.
     @param[in]
@@ -19734,30 +19697,29 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_batched_64(rocblas_handle           
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    trsm_srided_batched performs the following strided batched operation:
+    The trsm_strided_batched functions perform the following strided batched operation:
 
         op(A_i)*X_i = alpha*B_i or
         X_i*op(A_i) = alpha*B_i, for i = 1, ..., batch_count,
 
-        where alpha is a scalar, X and B are strided batched m by n matrices,
-
-        A is triangular strided batched matrix and op(A) is one of
+    where ``alpha`` is a scalar, ``X`` and ``B`` are strided batched ``m`` by ``n`` matrices,
+    ``A`` is a triangular strided batched matrix, and ``op(A)`` is one of:
 
         op( A ) = A   or
         op( A ) = A^T   or
         op( A ) = A^H.
 
-        Each matrix X_i is overwritten on B_i for i = 1, ..., batch_count.
+    Each matrix ``X_i`` is overwritten on ``B_i`` for ``i`` = 1, ..., ``batch_count``.
 
     Note about memory allocation:
-    When trsm is launched with a k evenly divisible by the internal block size of 128,
-    and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
-    memory found in the handle to increase overall performance (where k is m when
-    HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT).
+    When trsm is launched with a ``k`` evenly divisible by the internal block size of 128,
+    and is no larger than 10 of these blocks, the API takes advantage of utilizing preallocated
+    memory found in the handle to increase overall performance (where ``k`` is ``m`` when
+    ``HIPBLAS_SIDE_LEFT`` and ``n`` when ``HIPBLAS_SIDE_RIGHT``).
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     side    [rocblas_side]
             - rocblas_side_left:       op(A)*X = alpha*B.
@@ -19784,20 +19746,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_batched_64(rocblas_handle           
     @param[in]
     alpha
             device pointer or host pointer specifying the scalar alpha. When alpha is
-            &zero then A is not referenced and B need not be set before
+            &zero, then A is not referenced and B need not be set before
             entry.
     @param[in]
     A       device pointer pointing to the first matrix A_1.
             of dimension ( lda, k ), where k is m
             when  rocblas_side_left  and
-            is  n  when  rocblas_side_right
-            only the upper/lower triangular part is accessed.
+            n  when  rocblas_side_right.
+            Only the upper/lower triangular part is accessed.
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of each A_i.
-
-                if side = rocblas_side_left,  lda >= max( 1, m ).
-                if side = rocblas_side_right, lda >= max( 1, n ).
+            - If side = rocblas_side_left,  lda >= max( 1, m ).
+            - If side = rocblas_side_right, lda >= max( 1, n ).
     @param[in]
     stride_a [rocblas_stride]
              stride from the start of one A_i matrix to the next A_(i + 1).
@@ -19947,25 +19908,25 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    gemm performs one of the matrix-matrix operations:
+    The gemm functions perform one of the matrix-matrix operations:
 
         C = alpha*op( A )*op( B ) + beta*C,
 
-        where op( X ) is one of
+    where ``op( X )`` is one of
 
         op( X ) = X      or
         op( X ) = X**T   or
         op( X ) = X**H,
 
-        alpha and beta are scalars, and A, B and C are matrices, with
-        op( A ) an m by k matrix, op( B ) a k by n matrix and C an m by n matrix.
+    ``alpha`` and ``beta`` are scalars, and ``A``, ``B`` and ``C`` are matrices, with
+    ``op( A )`` an ``m`` by ``k`` matrix, ``op( B )`` a ``k`` by ``n`` matrix, and ``C`` an ``m`` by ``n`` matrix.
 
-    Although not widespread, some gemm kernels may use atomic operations. See Atomic Operations
+    Although not widespread, some gemm kernels might use atomic operations. See Atomic Operations
     in the API Reference Guide for more information.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     transA    [rocblas_operation]
               specifies the form of op( A ).
@@ -20157,25 +20118,24 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemm_64(rocblas_handle                han
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    gemm_batched performs one of the batched matrix-matrix operations:
+    The gemm_batched functions perform one of the batched matrix-matrix operations:
 
         C_i = alpha*op( A_i )*op( B_i ) + beta*C_i, for i = 1, ..., batch_count,
 
-        where op( X ) is one of
+    where ``op( X )`` is one of
 
         op( X ) = X      or
         op( X ) = X**T   or
         op( X ) = X**H,
 
-        alpha and beta are scalars, and A, B and C are strided batched matrices, with
-
-        op( A ) an m by k by batch_count matrices,
-        op( B ) an k by n by batch_count matrices and
-        C an m by n by batch_count matrices.
+    ``alpha`` and ``beta`` are scalars, and ``A``, ``B``, and ``C`` are strided batched matrices, with
+    ``op( A )`` an ``m`` by ``k`` by ``batch_count`` matrix,
+    ``op( B )`` a ``k`` by ``n`` by ``batch_count`` matrix, and
+    ``C`` an ``m`` by ``n`` by ``batch_count`` matrix.
 
     @param[in]
     handle    [rocblas_handle
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     transA    [rocblas_operation]
               specifies the form of op( A ).
@@ -20380,24 +20340,24 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemm_batched_64(rocblas_handle           
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    gemm_strided_batched performs one of the strided batched matrix-matrix operations:
+    The gemm_strided_batched functions perform one of the strided batched matrix-matrix operations:
 
         C_i = alpha*op( A_i )*op( B_i ) + beta*C_i, for i = 1, ..., batch_count,
 
-        where op( X ) is one of
+    where ``op( X )`` is one of
 
         op( X ) = X      or
         op( X ) = X**T   or
         op( X ) = X**H,
 
-        alpha and beta are scalars, and A, B and C are strided batched matrices, with
-        op( A ) an m by k by batch_count strided_batched matrix,
-        op( B ) an k by n by batch_count strided_batched matrix and
-        C an m by n by batch_count strided_batched matrix.
+    ``alpha`` and ``beta`` are scalars, and ``A``, ``B``, and ``C`` are strided batched matrices, with
+    ``op( A )`` an ``m`` by ``k`` by ``batch_count`` strided_batched matrix,
+    ``op( B )`` a ``k`` by ``n`` by ``batch_count`` strided_batched matrix, and
+    ``C`` an ``m`` by ``n`` by ``batch_count`` strided_batched matrix.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     transA    [rocblas_operation]
               specifies the form of op( A ).
@@ -20642,19 +20602,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemm_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    dgmm performs one of the matrix-matrix operations:
+    The dgmm functions perform one of the matrix-matrix operations:
 
         C = A * diag(x) if side == rocblas_side_right
         C = diag(x) * A if side == rocblas_side_left
 
-        where C and A are m by n dimensional matrices. diag( x ) is a diagonal matrix
-        and x is vector of dimension n if side == rocblas_side_right and dimension m
-        if side == rocblas_side_left.
+    where ``C`` and ``A`` are ``m`` by ``n`` dimensional matrices, ``diag( x )`` is a diagonal matrix,
+    and ``x`` is vector of dimension ``n`` if ``side == rocblas_side_right`` and dimension ``m``
+    if ``side == rocblas_side_left``.
 
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     side      [rocblas_side]
               specifies the side of diag(x).
@@ -20775,18 +20735,18 @@ ROCBLAS_EXPORT rocblas_status rocblas_zdgmm_64(rocblas_handle                han
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    dgmm_batched performs one of the batched matrix-matrix operations:
+    The dgmm_batched functions perform one of the batched matrix-matrix operations:
 
         C_i = A_i * diag(x_i) for i = 0, 1, ... batch_count-1 if side == rocblas_side_right
         C_i = diag(x_i) * A_i for i = 0, 1, ... batch_count-1 if side == rocblas_side_left,
 
-        where C_i and A_i are m by n dimensional matrices. diag(x_i) is a diagonal matrix
-        and x_i is vector of dimension n if side == rocblas_side_right and dimension m
-        if side == rocblas_side_left.
+    where ``C_i`` and ``A_i`` are ``m`` by ``n`` dimensional matrices, ``diag(x_i)`` is a diagonal matrix,
+    and ``x_i`` is a vector of dimension ``n`` if ``side == rocblas_side_right`` and dimension ``m``
+    if ``side == rocblas_side_left``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     side      [rocblas_side]
               specifies the side of diag(x).
@@ -20922,18 +20882,18 @@ ROCBLAS_EXPORT rocblas_status rocblas_zdgmm_batched_64(rocblas_handle           
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    dgmm_strided_batched performs one of the batched matrix-matrix operations:
+    The dgmm_strided_batched functions perform one of the batched matrix-matrix operations:
 
         C_i = A_i * diag(x_i)   if side == rocblas_side_right   for i = 0, 1, ... batch_count-1
         C_i = diag(x_i) * A_i   if side == rocblas_side_left    for i = 0, 1, ... batch_count-1,
 
-        where C_i and A_i are m by n dimensional matrices. diag(x_i) is a diagonal matrix
-        and x_i is vector of dimension n if side == rocblas_side_right and dimension m
-        if side == rocblas_side_left.
+    where ``C_i`` and ``A_i`` are ``m`` by ``n`` dimensional matrices, ``diag(x_i)`` is a diagonal matrix,
+    and ``x_i`` is a vector of dimension ``n`` if ``side == rocblas_side_right`` and dimension ``m``
+    if ``side == rocblas_side_left``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     side      [rocblas_side]
               specifies the side of diag(x).
@@ -20951,7 +20911,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zdgmm_batched_64(rocblas_handle           
               specifies the leading dimension of A.
     @param[in]
     stride_A  [rocblas_stride]
-              stride from the start of one matrix (A_i) and the next one (A_i+1).
+              stride from the start of one matrix (A_i) to the next one (A_i+1).
     @param[in]
     x         pointer to the first vector x_0 on the GPU.
               Each x_i is of dimension n if side == rocblas_side_right and dimension
@@ -20961,7 +20921,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zdgmm_batched_64(rocblas_handle           
               specifies the increment between values of x.
     @param[in]
     stride_x  [rocblas_stride]
-              stride from the start of one vector(x_i) and the next one (x_i+1).
+              stride from the start of one vector(x_i) to the next one (x_i+1).
     @param[in, out]
     C         device pointer to the first matrix C_0 on the GPU.
               Each C_i is of dimension ( ldc, n ).
@@ -20970,7 +20930,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zdgmm_batched_64(rocblas_handle           
               specifies the leading dimension of C.
     @param[in]
     stride_C  [rocblas_stride]
-              stride from the start of one matrix (C_i) and the next one (C_i+1).
+              stride from the start of one matrix (C_i) to the next one (C_i+1).
     @param[in]
     batch_count [rocblas_int]
                 number of instances i in the batch.
@@ -21102,22 +21062,22 @@ ROCBLAS_EXPORT rocblas_status rocblas_zdgmm_strided_batched_64(rocblas_handle   
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    geam performs one of the matrix-matrix operations:
+    The geam functions perform one of the matrix-matrix operations:
 
         C = alpha*op( A ) + beta*op( B ),
 
-        where op( X ) is one of
+    where ``op( X )`` is one of:
 
         op( X ) = X      or
         op( X ) = X**T   or
         op( X ) = X**H,
 
-        alpha and beta are scalars, and A, B and C are matrices, with
-        op( A ) an m by n matrix, op( B ) an m by n matrix, and C an m by n matrix.
+    ``alpha`` and ``beta`` are scalars, and ``A``, ``B`` and ``C`` are matrices, with
+    ``op( A )`` an ``m`` by ``n`` matrix, ``op( B )`` an ``m`` by ``n`` matrix, and ``C`` an ``m`` by ``n`` matrix.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     transA    [rocblas_operation]
               specifies the form of op( A ).
@@ -21269,19 +21229,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgeam_64(rocblas_handle                han
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    geam_batched performs one of the batched matrix-matrix operations:
+    The geam_batched functions perform one of the batched matrix-matrix operations:
 
         C_i = alpha*op( A_i ) + beta*op( B_i )  for i = 0, 1, ... batch_count - 1,
 
-        where alpha and beta are scalars, and op(A_i), op(B_i) and C_i are m by n matrices
-        and op( X ) is one of
+    where ``alpha`` and ``beta`` are scalars, ``op(A_i)``, ``op(B_i)``, and ``C_i`` are ``m`` by ``n`` matrices,
+    and ``op( X )`` is one of:
 
         op( X ) = X      or
         op( X ) = X**T
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     transA    [rocblas_operation]
               specifies the form of op( A ).
@@ -21300,7 +21260,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgeam_64(rocblas_handle                han
     A         device array of device pointers storing each matrix A_i on the GPU.
               Each A_i is of dimension ( lda, k ), where k is m
               when  transA == rocblas_operation_none and
-              is  n  when  transA == rocblas_operation_transpose.
+              is n  when  transA == rocblas_operation_transpose.
     @param[in]
     lda       [rocblas_int]
               specifies the leading dimension of A.
@@ -21452,19 +21412,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgeam_batched_64(rocblas_handle           
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    geam_strided_batched performs one of the batched matrix-matrix operations:
+    The geam_strided_batched functions perform one of the batched matrix-matrix operations:
 
         C_i = alpha*op( A_i ) + beta*op( B_i )  for i = 0, 1, ... batch_count - 1,
 
-        where alpha and beta are scalars, and op(A_i), op(B_i) and C_i are m by n matrices
-        and op( X ) is one of
+    where ``alpha`` and ``beta`` are scalars, ``op(A_i)``, ``op(B_i)``, and ``C_i`` are ``m`` by ``n`` matrices,
+    and ``op( X )`` is one of:
 
         op( X ) = X      or
         op( X ) = X**T
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     transA    [rocblas_operation]
@@ -21497,7 +21457,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgeam_batched_64(rocblas_handle           
 
     @param[in]
     stride_A  [rocblas_stride]
-              stride from the start of one matrix (A_i) and the next one (A_i+1).
+              stride from the start of one matrix (A_i) to the next one (A_i+1).
 
     @param[in]
     beta      device pointer or host pointer specifying the scalar beta.
@@ -21514,7 +21474,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgeam_batched_64(rocblas_handle           
 
     @param[in]
     stride_B  [rocblas_stride]
-              stride from the start of one matrix (B_i) and the next one (B_i+1)
+              stride from the start of one matrix (B_i) to the next one (B_i+1).
 
     @param[in, out]
     C         pointer to the first matrix C_0 on the GPU.
@@ -21526,7 +21486,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgeam_batched_64(rocblas_handle           
 
     @param[in]
     stride_C  [rocblas_stride]
-              stride from the start of one matrix (C_i) and the next one (C_i+1).
+              stride from the start of one matrix (C_i) to the next one (C_i+1).
 
     @param[in]
     batch_count [rocblas_int]
@@ -21689,19 +21649,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgeam_strided_batched_64(rocblas_handle   
     \brief <b> BLAS EX API </b>
 
     \details
-    gemm_ex performs one of the matrix-matrix operations:
+    The gemm_ex functions perform one of the matrix-matrix operations:
 
         D = alpha*op( A )*op( B ) + beta*C,
 
-    where op( X ) is one of
+    where ``op( X )`` is one of
 
         op( X ) = X      or
         op( X ) = X**T   or
         op( X ) = X**H,
 
-    alpha and beta are scalars, and A, B, C, and D are matrices, with
-    op( A ) an m by k matrix, op( B ) a k by n matrix and C and D are m by n matrices.
-    C and D may point to the same matrix if their parameters are identical.
+    ``alpha`` and ``beta`` are scalars, and ``A``, ``B``, ``C``, and ``D`` are matrices, with
+    ``op( A )`` an ``m`` by ``k`` matrix, ``op( B )`` a ``k`` by ``n`` matrix, and ``C`` and ``D`` both ``m`` by ``n`` matrices.
+    ``C`` and ``D`` can point to the same matrix if their parameters are identical.
 
     Supported types are as follows:
         - rocblas_datatype_f64_r = a_type = b_type = c_type = d_type = compute_type
@@ -21720,12 +21680,12 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgeam_strided_batched_64(rocblas_handle   
         - rocblas_datatype_f32_c  = a_type = b_type = c_type = d_type = compute_type
         - rocblas_datatype_f64_c  = a_type = b_type = c_type = d_type = compute_type
 
-    Although not widespread, some gemm kernels used by gemm_ex may use atomic operations.
+    Although not widespread, some gemm kernels used by gemm_ex might use atomic operations.
     See Atomic Operations in the API Reference Guide for more information.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     transA    [rocblas_operation]
               specifies the form of op( A ).
@@ -21777,7 +21737,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgeam_strided_batched_64(rocblas_handle   
     @param[out]
     d         [void *]
               device pointer storing matrix D.
-              If d and c pointers are to the same matrix then d_type must equal c_type and ldd must equal ldc
+              If d and c pointers are to the same matrix, then d_type must equal c_type and ldd must equal ldc
               or the respective invalid status will be returned.
     @param[in]
     d_type    [rocblas_datatype]
@@ -21913,19 +21873,23 @@ ROCBLAS_EXPORT rocblas_status rocblas_gemm_ex_64(rocblas_handle    handle,
     \brief <b> BLAS EX API </b>
 
     \details
-    gemm_batched_ex performs one of the batched matrix-matrix operations:
+    The gemm_batched_ex functions perform one of the batched matrix-matrix operations:
+
         D_i = alpha*op(A_i)*op(B_i) + beta*C_i, for i = 1, ..., batch_count.
-    where op( X ) is one of
+
+    where ``op( X )`` is one of
+
         op( X ) = X      or
         op( X ) = X**T   or
         op( X ) = X**H,
-    alpha and beta are scalars, and A, B, C, and D are batched pointers to matrices, with
-    op( A ) an m by k by batch_count batched matrix,
-    op( B ) a k by n by batch_count batched matrix and
-    C and D are m by n by batch_count batched matrices.
+
+    ``alpha`` and ``beta`` are scalars, and ``A``, ``B``, ``C``, and ``D`` are batched pointers to matrices, with
+    ``op( A )`` an ``m`` by ``k`` by ``batch_count`` batched matrix,
+    ``op( B )`` a ``k`` by ``n`` by ``batch_count`` batched matrix, and
+    ``C`` and ``D`` are ``m`` by ``n`` by batch_count batched matrices.
     The batched matrices are an array of pointers to matrices.
-    The number of pointers to matrices is batch_count.
-    C and D may point to the same matrices if their parameters are identical.
+    The number of pointers to matrices is ``batch_count``.
+    ``C`` and ``D`` can point to the same matrices if their parameters are identical.
 
     Supported types are as follows:
         - rocblas_datatype_f64_r = a_type = b_type = c_type = d_type = compute_type
@@ -21942,7 +21906,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_gemm_ex_64(rocblas_handle    handle,
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     transA    [rocblas_operation]
               specifies the form of op( A ).
@@ -21994,7 +21958,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_gemm_ex_64(rocblas_handle    handle,
     @param[out]
     d         [void *]
               device array of device pointers to each matrix D_i.
-              If d and c are the same array of matrix pointers then d_type must equal c_type and ldd must equal ldc
+              If d and c are the same array of matrix pointers, then d_type must equal c_type and ldd must equal ldc
               or the respective invalid status will be returned.
     @param[in]
     d_type    [rocblas_datatype]
@@ -22082,7 +22046,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_gemm_batched_ex_64(rocblas_handle    handl
     \brief <b> BLAS EX API </b>
 
     \details
-    gemm_strided_batched_ex performs one of the strided_batched matrix-matrix operations:
+    The gemm_strided_batched_ex functions perform one of the strided_batched matrix-matrix operations:
 
         D_i = alpha*op(A_i)*op(B_i) + beta*C_i, for i = 1, ..., batch_count
 
@@ -22092,14 +22056,14 @@ ROCBLAS_EXPORT rocblas_status rocblas_gemm_batched_ex_64(rocblas_handle    handl
         op( X ) = X**T   or
         op( X ) = X**H,
 
-    alpha and beta are scalars, and A, B, C, and D are strided_batched matrices, with
-    op( A ) an m by k by batch_count strided_batched matrix,
-    op( B ) a k by n by batch_count strided_batched matrix and
-    C and D are m by n by batch_count strided_batched matrices.
-    C and D may point to the same matrices if their parameters are identical.
+    ``alpha`` and ``beta`` are scalars, and ``A``, ``B``, ``C``, and ``D`` are strided_batched matrices, with
+    ``op( A )`` an ``m`` by ``k`` by ``batch_count`` strided_batched matrix,
+    ``op( B )`` a ``k`` by ``n`` by ``batch_count`` strided_batched matrix, and
+    ``C`` and ``D`` both ``m`` by ``n`` by ``batch_count`` strided_batched matrices.
+    ``C`` and ``D`` can point to the same matrices if their parameters are identical.
 
     The strided_batched matrices are multiple matrices separated by a constant stride.
-    The number of matrices is batch_count.
+    The number of matrices is ``batch_count``.
 
     Supported types are as follows:
         - rocblas_datatype_f64_r = a_type = b_type = c_type = d_type = compute_type
@@ -22116,7 +22080,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_gemm_batched_ex_64(rocblas_handle    handl
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     transA    [rocblas_operation]
               specifies the form of op( A ).
@@ -22177,7 +22141,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_gemm_batched_ex_64(rocblas_handle    handl
     @param[out]
     d         [void *]
               device pointer storing each matrix D_i.
-              If d and c pointers are to the same matrix then d_type must equal c_type and ldd must equal ldc
+              If d and c pointers are to the same matrix, then d_type must equal c_type, ldd must equal ldc,
               and stride_d must equal stride_c or the respective invalid status will be returned.
     @param[in]
     d_type    [rocblas_datatype]
@@ -22340,26 +22304,26 @@ ROCBLAS_EXPORT rocblas_status rocblas_gemm_strided_batched_ex_64(rocblas_handle 
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    gemmt performs matrix-matrix operations and updates the upper or lower triangular part of the result matrix:
+    The gemmt functions perform matrix-matrix operations and update the upper or lower triangular part of the result matrix:
 
         C = alpha*op( A )*op( B ) + beta*C,
 
-        where op( X ) is one of
+    where ``op( X )`` is one of
 
         op( X ) = X      or
         op( X ) = X**T   or
         op( X ) = X**H,
 
-        alpha and beta are scalars. A, B  are general matrices and C is either an upper or lower triangular matrix, with
-        op( A ) an n by k matrix, op( B ) a k by n matrix and C an n by n matrix.
+    ``alpha`` and ``beta`` are scalars, ``A`` and ``B`` are general matrices, and ``C`` is either an upper or lower triangular matrix, with
+    ``op( A )`` an ``n`` by ``k`` matrix, ``op( B )`` a ``k`` by ``n`` matrix, and ``C`` an ``n`` by ``n`` matrix.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C is an upper triangular matrix
-            - rocblas_fill_lower:  C is a  lower triangular matrix
+            - rocblas_fill_upper:  C is an upper triangular matrix.
+            - rocblas_fill_lower:  C is a  lower triangular matrix.
     @param[in]
     transA    [rocblas_operation]
             - rocblas_operation_none:    op(A) = A.
@@ -22379,19 +22343,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_gemm_strided_batched_ex_64(rocblas_handle 
     @param[in]
     alpha     device pointer or host pointer specifying the scalar alpha.
     @param[in]
-    A         device pointer storing matrix A. If transa = rocblas_operation_none, then, the leading n-by-k part of the array contains the matrix A, otherwise the leading k-by-n part of the array contains the matrix A.
+    A         device pointer storing matrix A. If transa = rocblas_operation_none, then the leading n-by-k part of the array contains the matrix A. Otherwise, the leading k-by-n part of the array contains the matrix A.
     @param[in]
     lda       [rocblas_int]
-              specifies the leading dimension of A. If transA == rocblas_operation_none, must have lda >= max(1, n), otherwise, must have lda >= max(1, k).
+              specifies the leading dimension of A. If transA == rocblas_operation_none, must have lda >= max(1, n). Otherwise, must have lda >= max(1, k).
     @param[in]
-    B         device pointer storing matrix B. If transB = rocblas_operation_none, then, the leading k-by-n part of the array contains the matrix B, otherwise the leading n-by-k part of the array contains the matrix B.
+    B         device pointer storing matrix B. If transB = rocblas_operation_none, then the leading k-by-n part of the array contains the matrix B. Otherwise, the leading n-by-k part of the array contains the matrix B.
     @param[in]
     ldb       [rocblas_int]
-              specifies the leading dimension of B. If transB == rocblas_operation_none, must have ldb >= max(1, k), otherwise, must have ldb >= max(1, n)
+              specifies the leading dimension of B. If transB == rocblas_operation_none, must have ldb >= max(1, k). Otherwise, must have ldb >= max(1, n).
     @param[in]
     beta      device pointer or host pointer specifying the scalar beta.
     @param[in, out]
-    C         device pointer storing matrix C on the GPU. If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix C, otherwise the lower triangular part of the leading n-by-n array contains the matrix C.
+    C         device pointer storing matrix C on the GPU. If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains the matrix C. Otherwise, the lower triangular part of the leading n-by-n array contains the matrix C.
     @param[in]
     ldc       [rocblas_int]
               specifies the leading dimension of C. Must have ldc >= max(1, n).
@@ -22522,29 +22486,28 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemmt_64(rocblas_handle                ha
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    gemmt_batched performs matrix-matrix operations and updates the upper or lower triangular part of the result matrix:
+    The gemmt_batched functions perform matrix-matrix operations and update the upper or lower triangular part of the result matrix:
 
         C_i = alpha*op( A_i )*op( B_i ) + beta*C_i, for i = 1, ..., batch_count,
 
-        where op( X ) is one of
+    where ``op( X )`` is one of
 
         op( X ) = X      or
         op( X ) = X**T   or
         op( X ) = X**H,
 
-        alpha and beta are scalars. A, B  are general matrices and C is either an upper or lower triangular matrix, with
-
-        op( A ) an n by k by batch_count matrices,
-        op( B ) an k by n by batch_count matrices and
-        C an n by n by batch_count matrices.
+    ``alpha`` and ``beta`` are scalars, ``A`` and ``B``  are general matrices, and ``C`` is either an upper or lower triangular matrix, with
+    ``op( A )`` consisting of ``n`` by ``k`` by ``batch_count`` matrices,
+    ``op( B )`` consisting of ``k`` by ``n`` by ``batch_count`` matrices, and
+    ``C`` consisting of ``n`` by ``n`` by ``batch_count`` matrices.
 
     @param[in]
     handle    [rocblas_handle
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C is an upper triangular matrix
-            - rocblas_fill_lower:  C is a  lower triangular matrix
+            - rocblas_fill_upper:  C is an upper triangular matrix.
+            - rocblas_fill_lower:  C is a  lower triangular matrix.
     @param[in]
     transA    [rocblas_operation]
             - rocblas_operation_none:    op(A_i) = A_i.
@@ -22564,19 +22527,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemmt_64(rocblas_handle                ha
     @param[in]
     alpha     device pointer or host pointer specifying the scalar alpha.
     @param[in]
-    A         device array of device pointers storing each matrix A_i. If transa = rocblas_operation_none, then, the leading n-by-k part of the array contains each matrix A_i, otherwise the leading k-by-n part of the array contains each matrix A_i.
+    A         device array of device pointers storing each matrix A_i. If transa = rocblas_operation_none, then the leading n-by-k part of the array contains each matrix A_i. Otherwise, the leading k-by-n part of the array contains each matrix A_i.
     @param[in]
     lda       [rocblas_int]
-              specifies the leading dimension of each A_i. If transA == rocblas_operation_none, must have lda >= max(1, n), otherwise, must have lda >= max(1, k).
+              specifies the leading dimension of each A_i. If transA == rocblas_operation_none, must have lda >= max(1, n). Otherwise, must have lda >= max(1, k).
     @param[in]
-    B         device array of device pointers storing each matrix B_i. If transB = rocblas_operation_none, then, the leading k-by-n part of the array contains each matrix B_i, otherwise the leading n-by-k part of the array contains each matrix B_i.
+    B         device array of device pointers storing each matrix B_i. If transB = rocblas_operation_none, then the leading k-by-n part of the array contains each matrix B_i. Otherwise, the leading n-by-k part of the array contains each matrix B_i.
     @param[in]
     ldb       [rocblas_int]
-              specifies the leading dimension of each B_i. If transB == rocblas_operation_none, must have ldb >= max(1, k), otherwise, must have ldb >= max(1, n).
+              specifies the leading dimension of each B_i. If transB == rocblas_operation_none, must have ldb >= max(1, k). Otherwise, must have ldb >= max(1, n).
     @param[in]
     beta      device pointer or host pointer specifying the scalar beta.
     @param[in, out]
-    C         device array of device pointers storing each matrix C_i. If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains each matrix C_i, otherwise the lower triangular part of the leading n-by-n array contains each matrix C_i.
+    C         device array of device pointers storing each matrix C_i. If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains each matrix C_i. Otherwise, the lower triangular part of the leading n-by-n array contains each matrix C_i.
     @param[in]
     ldc       [rocblas_int]
               specifies the leading dimension of each C_i. Must have ldc >= max(1, n).
@@ -22718,28 +22681,28 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemmt_batched_64(rocblas_handle          
     \brief <b> BLAS Level 3 API </b>
 
     \details
-    gemmt_strided_batched performs matrix-matrix operations and updates the upper or lower triangular part of the result matrix:
+    The gemmt_strided_batched functions perform matrix-matrix operations and update the upper or lower triangular part of the result matrix:
 
         C_i = alpha*op( A_i )*op( B_i ) + beta*C_i, for i = 1, ..., batch_count,
 
-        where op( X ) is one of
+    where ``op( X )`` is one of
 
         op( X ) = X      or
         op( X ) = X**T   or
         op( X ) = X**H,
 
-        alpha and beta are scalars. A, B  are general matrices and C is either an upper or lower triangular matrix, with
-        op( A ) an n by k by batch_count strided_batched matrix,
-        op( B ) an k by n by batch_count strided_batched matrix and
-        C an n by n by batch_count strided_batched matrix.
+    ``alpha`` and ``beta`` are scalars, ``A`` and ``B`` are general matrices, and ``C`` is either an upper or lower triangular matrix, with
+    ``op( A )`` an ``n`` by ``k`` by ``batch_count`` strided_batched matrix,
+    ``op( B )`` a ``k`` by ``n`` by ``batch_count`` strided_batched matrix, and
+    ``C`` an ``n`` by ``n`` by ``batch_count`` strided_batched matrix.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C is an upper triangular matrix
-            - rocblas_fill_lower:  C is a  lower triangular matrix
+            - rocblas_fill_upper:  C is an upper triangular matrix.
+            - rocblas_fill_lower:  C is a  lower triangular matrix.
     @param[in]
     transA    [rocblas_operation]
             - rocblas_operation_none:    op(A_i) = A_i.
@@ -22759,25 +22722,25 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemmt_batched_64(rocblas_handle          
     @param[in]
     alpha     device pointer or host pointer specifying the scalar alpha.
     @param[in]
-    A         device array of device pointers storing each matrix A_i. If transa = rocblas_operation_none, then, the leading n-by-k part of the array contains each matrix A_i, otherwise the leading k-by-n part of the array contains each matrix A_i.
+    A         device array of device pointers storing each matrix A_i. If transa = rocblas_operation_none, then the leading n-by-k part of the array contains each matrix A_i. Otherwise, the leading k-by-n part of the array contains each matrix A_i.
     @param[in]
     lda       [rocblas_int]
-              specifies the leading dimension of each A_i. If transA == rocblas_operation_none, must have lda >= max(1, n), otherwise, must have lda >= max(1, k).
+              specifies the leading dimension of each A_i. If transA == rocblas_operation_none, must have lda >= max(1, n). Otherwise, must have lda >= max(1, k).
     @param[in]
     stride_a  [rocblas_stride]
               stride from the start of one A_i matrix to the next A_(i + 1).
     @param[in]
-    B         device array of device pointers storing each matrix B_i. If transB = rocblas_operation_none, then, the leading k-by-n part of the array contains each matrix B_i, otherwise the leading n-by-k part of the array contains each matrix B_i.
+    B         device array of device pointers storing each matrix B_i. If transB = rocblas_operation_none, then the leading k-by-n part of the array contains each matrix B_i. Otherwise, the leading n-by-k part of the array contains each matrix B_i.
     @param[in]
     ldb       [rocblas_int]
-              specifies the leading dimension of each B_i. If transB == rocblas_operation_none, must have ldb >= max(1, k), otherwise, must have ldb >= max(1, n).
+              specifies the leading dimension of each B_i. If transB == rocblas_operation_none, must have ldb >= max(1, k). Otherwise, must have ldb >= max(1, n).
     @param[in]
     stride_b  [rocblas_stride]
               stride from the start of one B_i matrix to the next B_(i + 1).
     @param[in]
     beta      device pointer or host pointer specifying the scalar beta.
     @param[in, out]
-    C         device array of device pointers storing each matrix C_i. If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains each matrix C_i, otherwise the lower triangular part of the leading n-by-n array contains each matrix C_i.
+    C         device array of device pointers storing each matrix C_i. If uplo == rocblas_fill_upper, the upper triangular part of the leading n-by-n array contains each matrix C_i. Otherwise, the lower triangular part of the leading n-by-n array contains each matrix C_i.
     @param[in]
     ldc       [rocblas_int]
               specifies the leading dimension of each C_i. Must have ldc >= max(1, n).
@@ -22947,18 +22910,18 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemmt_strided_batched_64(rocblas_handle  
     \brief <b> BLAS EX API </b>
 
     \details
-    geam_ex performs one of the matrix-matrix operations:
+    The geam_ex function performs one of the matrix-matrix operations:
 
         Dij = min(alpha * (Aik + Bkj), beta * Cij)
         Dij = min(alpha * Aik, alpha * Bkj) + beta * Cij
 
-    alpha and beta are scalars, and A, B, C, and D are matrices, with
-    op( A ) an m by k matrix, op( B ) a k by n matrix and C and D are m by n matrices.
-    C and D may point to the same matrix if their type and leading dimensions are identical.
+    ``alpha`` and ``beta`` are scalars, and ``A``, ``B``, ``C``, and ``D`` are matrices, with
+    ``op( A )`` an ``m`` by ``k`` matrix, ``op( B )`` a ``k`` by ``n`` matrix, and ``C`` and ``D`` both ``m`` by ``n`` matrices.
+    ``C`` and ``D`` can point to the same matrix if their type and leading dimensions are identical.
 
-    Aik refers to the element at the i-th row and k-th column of op( A ), Bkj refers to
-    the element at the k-th row and j-th column of op( B ), and Cij/Dij refers to the element
-    at the i-th row and j-th column of C/D.
+    Aik refers to the element at the ``i``-th row and ``k``-th column of ``op( A )``, Bkj refers to
+    the element at the ``k``-th row and ``j``-th column of ``op( B )``, and Cij/Dij refers to the element
+    at the ``i``-th row and ``j``-th column of ``C``/``D``.
 
     Supported types are as follows:
         - rocblas_datatype_f64_r = a_type = b_type = c_type = d_type = compute_type
@@ -22967,7 +22930,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemmt_strided_batched_64(rocblas_handle  
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     transA    [rocblas_operation]
               specifies the form of op( A ).
@@ -22994,10 +22957,9 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemmt_strided_batched_64(rocblas_handle  
               specifies the datatype of matrix A.
     @param[in]
     lda       [rocblas_int]
-              specifies the leading dimension of A
-
-              if transA == N, must have lda >= max(1, m)
-              otherwise, must have lda >= max(1, k)
+              specifies the leading dimension of A.
+              - If transA == N, must have lda >= max(1, m).
+              - Otherwise, must have lda >= max(1, k).
     @param[in]
     B         [void *]
               device pointer storing matrix B.
@@ -23006,10 +22968,9 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemmt_strided_batched_64(rocblas_handle  
               specifies the datatype of matrix B.
     @param[in]
     ldb       [rocblas_int]
-              specifies the leading dimension of B
-
-              if transB == N, must have ldb >= max(1, k)
-              otherwise, must have ldb >= max(1, n)
+              specifies the leading dimension of B.
+              - If transB == N, must have ldb >= max(1, k).
+              - Otherwise, must have ldb >= max(1, n).
     @param[in]
     beta      [const void *]
               device pointer or host pointer specifying the scalar beta. Same datatype as compute_type.
@@ -23021,25 +22982,25 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgemmt_strided_batched_64(rocblas_handle  
               specifies the datatype of matrix C.
     @param[in]
     ldc       [rocblas_int]
-              specifies the leading dimension of C, must have ldc >= max(1, m).
+              specifies the leading dimension of C. Must have ldc >= max(1, m).
     @param[out]
     D         [void *]
               device pointer storing matrix D.
-              If D and C pointers are to the same matrix then d_type must equal c_type and ldd must equal ldc
+              If D and C pointers are to the same matrix, then d_type must equal c_type and ldd must equal ldc
               or the respective invalid status will be returned.
     @param[in]
     d_type    [rocblas_datatype]
               specifies the datatype of matrix D.
     @param[in]
     ldd       [rocblas_int]
-              specifies the leading dimension of D, must have ldd >= max(1, m).
+              specifies the leading dimension of D. Must have ldd >= max(1, m).
     @param[in]
     compute_type
               [rocblas_datatype]
               specifies the datatype of computation.
     @param[in]
     geam_ex_op [rocblas_geam_ex_operation]
-              enumerant specifying the operation type, support for rocblas_geam_ex_operation_min_plus and rocblas_geam_ex_operation_plus_min.
+              enumerant specifying the operation type and support for rocblas_geam_ex_operation_min_plus and rocblas_geam_ex_operation_plus_min.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_geam_ex(rocblas_handle            handle,
@@ -23396,38 +23357,38 @@ ROCBLAS_EXPORT rocblas_status rocblas_trsm_batched_ex(rocblas_handle    handle,
     \brief <b> BLAS EX API </b>
 
     \details
-    trsm_strided_batched_ex solves:
+    The trsm_strided_batched_ex functions solve:
 
         op(A_i)*X_i = alpha*B_i or X_i*op(A_i) = alpha*B_i,
 
-    for i = 1, ..., batch_count; and where alpha is a scalar, X and B are strided batched m by n matrices,
-    A is a strided batched triangular matrix and op(A_i) is one of
+    for ``i`` = 1, ..., ``batch_count``, where ``alpha`` is a scalar, ``X`` and ``B`` are strided batched ``m`` by ``n`` matrices,
+    ``A`` is a strided batched triangular matrix, and ``op(A_i)`` is one of:
 
         op( A_i ) = A_i   or   op( A_i ) = A_i^T   or   op( A_i ) = A_i^H.
 
-    Each matrix X_i is overwritten on B_i.
+    Each matrix ``X_i`` is overwritten on ``B_i``.
 
-    This function gives the user the ability to reuse each invA_i matrix between runs.
-    If invA == NULL, rocblas_trsm_batched_ex will automatically calculate each invA_i on every run.
+    This function gives the user the ability to reuse each ``invA_i`` matrix between runs.
+    If ``invA == NULL``, ``rocblas_trsm_batched_ex`` will automatically calculate each ``invA_i`` on every run.
 
     Setting up invA:
-    Each accepted invA_i matrix consists of the packed 128x128 inverses of the diagonal blocks of
-    matrix A_i, followed by any smaller diagonal block that remains.
-    To set up invA_i it is recommended that rocblas_trtri_batched be used with matrix A_i as the input.
-    invA is a contiguous piece of memory holding each invA_i.
+    Each accepted ``invA_i`` matrix consists of the packed 128x128 inverses of the diagonal blocks of
+    matrix ``A_i``, followed by any smaller diagonal block that remains.
+    To set up ``invA_i``, it is recommended that ``rocblas_trtri_batched`` be used with matrix ``A_i`` as the input.
+    ``invA`` is a contiguous piece of memory holding each ``invA_i``.
 
-    Device memory of size 128 x k should be allocated for each invA_i ahead of time, where k is m when
-    rocblas_side_left and is n when rocblas_side_right. The actual number of elements in each invA_i
-    should be passed as invA_size.
+    Device memory of size 128 x ``k`` should be allocated for each ``invA_i`` ahead of time, where ``k`` is ``m`` when
+    ``rocblas_side_left`` and is ``n`` when ``rocblas_side_right``. The actual number of elements in each ``invA_i``
+    should be passed as ``invA_size``.
 
-    To begin, rocblas_trtri_batched must be called on the full 128x128-sized diagonal blocks of each
-    matrix A_i. Below are the restricted parameters:
+    To begin, ``rocblas_trtri_batched`` must be called on the full 128x128-sized diagonal blocks of each
+    matrix ``A_i``. Below are the restricted parameters:
       - n = 128
       - ldinvA = 128
       - stride_invA = 128x128
       - batch_count = k / 128
 
-    Then any remaining block may be added:
+    Then any remaining block can be added:
       - n = k % 128
       - invA = invA + stride_invA * previous_batch_count
       - ldinvA = 128
@@ -23435,7 +23396,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_trsm_batched_ex(rocblas_handle    handle,
 
     @param[in]
     handle  [rocblas_handle]
-            handle to the rocblas library context queue.
+            handle to the rocBLAS library context queue.
 
     @param[in]
     side    [rocblas_side]
@@ -23469,23 +23430,22 @@ ROCBLAS_EXPORT rocblas_status rocblas_trsm_batched_ex(rocblas_handle    handle,
     @param[in]
     alpha   [void *]
             device pointer or host pointer specifying the scalar alpha. When alpha is
-            &zero then A is not referenced, and B need not be set before
+            &zero, then A is not referenced, and B need not be set before
             entry.
 
     @param[in]
     A       [void *]
             device pointer storing matrix A.
-            of dimension ( lda, k ), where k is m
+            Of dimension ( lda, k ), where k is m
             when rocblas_side_left and
-            is n when rocblas_side_right
-            only the upper/lower triangular part is accessed.
+            is n when rocblas_side_right.
+            Only the upper/lower triangular part is accessed.
 
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A.
-
-                if side = rocblas_side_left,  lda >= max( 1, m ),
-                if side = rocblas_side_right, lda >= max( 1, n ).
+            - If side = rocblas_side_left,  lda >= max( 1, m ).
+            - If side = rocblas_side_right, lda >= max( 1, n ).
 
     @param[in]
     stride_A [rocblas_stride]
@@ -23494,7 +23454,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_trsm_batched_ex(rocblas_handle    handle,
     @param[in, out]
     B       [void *]
             device pointer pointing to first matrix B_i.
-            each B_i is of dimension ( ldb, n ).
+            Each B_i is of dimension ( ldb, n ).
             Before entry, the leading m by n part of each array B_i must
             contain the right-hand side of matrix B_i, and on exit is
             overwritten by the solution matrix X_i.
@@ -23515,7 +23475,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_trsm_batched_ex(rocblas_handle    handle,
     invA    [void *]
             device pointer storing the inverse diagonal blocks of each A_i.
             invA points to the first invA_1.
-            each invA_i is of dimension ( ld_invA, k ), where k is m
+            Each invA_i is of dimension ( ld_invA, k ), where k is m
             when rocblas_side_left and
             is n when rocblas_side_right.
             ld_invA must be equal to 128.
@@ -23558,12 +23518,12 @@ ROCBLAS_EXPORT rocblas_status rocblas_trsm_strided_batched_ex(rocblas_handle    
     \brief <b> BLAS EX API </b>
 
     \details
-    syrk_ex performs one of the matrix-matrix operations for a symmetric rank-k update:
+    The syrk_ex functions perform one of the matrix-matrix operations for a symmetric rank-k update:
 
         C := alpha*op( A )*op( A )^T + beta*C,
 
-        where  alpha and beta are scalars, op(A) is an n by k matrix, and
-        C is a symmetric n x n matrix stored as either upper or lower.
+    where ``alpha`` and ``beta`` are scalars, ``op(A)`` is an ``n`` by ``k`` matrix, and
+    ``C`` is a symmetric ``n`` x ``n`` matrix stored as either upper or lower.
 
         op( A ) = A, and A is n by k if transA == rocblas_operation_none
         op( A ) = A^T and A is k by n if transA == rocblas_operation_transpose
@@ -23583,20 +23543,19 @@ ROCBLAS_EXPORT rocblas_status rocblas_trsm_strided_batched_ex(rocblas_handle    
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
 
     @param[in]
     uplo    [rocblas_fill]
-            - rocblas_fill_upper:  C is an upper triangular matrix
-            - rocblas_fill_lower:  C is a  lower triangular matrix
+            - rocblas_fill_upper:  C is an upper triangular matrix.
+            - rocblas_fill_lower:  C is a  lower triangular matrix.
 
     @param[in]
     transA  [rocblas_operation]
             - rocblas_operation_transpose:           op(A) = A^T
             - rocblas_operation_none:                op(A) = A
             - rocblas_operation_conjugate_transpose: op(A) = A^T
-
-            rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
+            - rocblas_operation_conjugate_transpose is not supported for complex types. See cherk
             and zherk.
 
     @param[in]
@@ -23610,31 +23569,30 @@ ROCBLAS_EXPORT rocblas_status rocblas_trsm_strided_batched_ex(rocblas_handle    
     @param[in]
     alpha     [const void *]
             device pointer or host pointer specifying the scalar alpha. When alpha is
-            zero then A is not referenced and A need not be set before
-            entry.   Same datatype as compute_type.
+            zero, then A is not referenced and A need not be set before
+            entry. Same datatype as compute_type.
 
     @param[in]
     A       pointer storing matrix A on the GPU.
-            Matrix dimension is ( lda, k ) when if transA = rocblas_operation_none, otherwise (lda, n)
+            Matrix dimension is ( lda, k ) when transA = rocblas_operation_none. Otherwise, (lda, n).
     @param[in]
     a_type [rocblas_datatype]
            specifies the datatype of matrix A.
     @param[in]
     lda     [rocblas_int]
             lda specifies the first dimension of A.
-
-            if transA = rocblas_operation_none,  lda >= max( 1, n ),
-            otherwise lda >= max( 1, k ).
+            - If transA = rocblas_operation_none,  lda >= max( 1, n ).
+            - Otherwise, lda >= max( 1, k ).
 
     @param[in]
     beta     [const void *]
             device pointer or host pointer specifying the scalar beta. When beta is
-            zero then C need not be set before
-            entry.   Same datatype as compute_type.
+            zero, then C need not be set before
+            entry. Same datatype as compute_type.
 
     @param[in]
     C       pointer storing matrix C on the GPU.
-            only the upper/lower triangular part is accessed.
+            Only the upper/lower triangular part is accessed.
     @param[in]
     c_type [rocblas_datatype]
            specifies the datatype of matrix C.
@@ -23834,7 +23792,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_axpy_batched_ex_64(rocblas_handle   handle
     \brief <b> BLAS EX API </b>
 
     \details
-    axpy_strided_batched_ex   computes constant alpha multiplied by vector x, plus vector y over
+    The axpy_strided_batched_ex function computes constant ``alpha`` multiplied by vector ``x`` plus vector ``y`` over
     a set of strided batched vectors.
 
         y := alpha * x + y
@@ -23857,7 +23815,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_axpy_batched_ex_64(rocblas_handle   handle
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     n         [rocblas_int]
               the number of elements in each x_i and y_i.
@@ -23877,8 +23835,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_axpy_batched_ex_64(rocblas_handle   handle
     @param[in]
     stridex   [rocblas_stride]
               stride from the start of one vector (x_i) to the next one (x_i+1).
-              There are no restrictions placed on stridex. However, ensure that stridex is of appropriate size. For a typical
-              case this means stridex >= n * incx.
+              There are no restrictions placed on stridex. However, ensure that stridex is of an appropriate size. For a typical
+              case, this means stridex >= n * incx.
     @param[in, out]
     y         device pointer to the first vector y_1.
     @param[in]
@@ -23890,8 +23848,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_axpy_batched_ex_64(rocblas_handle   handle
     @param[in]
     stridey   [rocblas_stride]
               stride from the start of one vector (y_i) to the next one (y_i+1).
-              There are no restrictions placed on stridey. However, ensure that stridey is of appropriate size. For a typical
-              case this means stridey >= n * incy.
+              There are no restrictions placed on stridey. However, ensure that stridey is ofan  appropriate size. For a typical
+              case, this means stridey >= n * incy.
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
@@ -24166,16 +24124,12 @@ ROCBLAS_EXPORT rocblas_status rocblas_dotc_batched_ex_64(rocblas_handle   handle
     \brief <b> BLAS EX API </b>
 
     \details
-    dot_strided_batched_ex  performs a batch of dot products of vectors x and y.
+    The dot_strided_batched_ex functions perform a batch of dot products of vectors x and y:
 
         result_i = x_i * y_i;
 
-    dotc_strided_batched_ex  performs a batch of dot products of the conjugate of complex vector x and complex vector y
-
-        result_i = conjugate (x_i) * y_i;
-
-    where (x_i, y_i) is the i-th instance of the batch.
-    x_i and y_i are vectors, for i = 1, ..., batch_count
+    where (``x_i``, ``y_i``) is the ``i``-th instance of the batch.
+    ``x_i`` and ``y_i`` are vectors, for ``i`` = 1, ...,`` batch_count``.
 
     Currently supported datatypes are as follows:
 
@@ -24194,7 +24148,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dotc_batched_ex_64(rocblas_handle   handle
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     n         [rocblas_int]
               the number of elements in each x_i and y_i.
@@ -24208,7 +24162,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dotc_batched_ex_64(rocblas_handle   handle
               specifies the increment for the elements of each x_i.
     @param[in]
     stride_x    [rocblas_stride]
-                stride from the start of one vector (x_i) and the next one (x_i+1)
+                stride from the start of one vector (x_i) to the next one (x_i+1).
     @param[in]
     y         device pointer to the first vector (y_1) in the batch.
     @param[in]
@@ -24219,14 +24173,14 @@ ROCBLAS_EXPORT rocblas_status rocblas_dotc_batched_ex_64(rocblas_handle   handle
               specifies the increment for the elements of each y_i.
     @param[in]
     stride_y    [rocblas_stride]
-                stride from the start of one vector (y_i) and the next one (y_i+1)
+                stride from the start of one vector (y_i) to the next one (y_i+1).
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
     @param[in, out]
     result
               device array or host array of batch_count size to store the dot products of each batch.
-              return 0.0 for each element if n <= 0.
+              Returns 0.0 for each element if n <= 0.
     @param[in]
     result_type [rocblas_datatype]
                 specifies the datatype of the result.
@@ -24250,21 +24204,6 @@ ROCBLAS_EXPORT rocblas_status rocblas_dot_strided_batched_ex(rocblas_handle   ha
                                                              rocblas_datatype result_type,
                                                              rocblas_datatype execution_type);
 
-ROCBLAS_EXPORT rocblas_status rocblas_dotc_strided_batched_ex(rocblas_handle   handle,
-                                                              rocblas_int      n,
-                                                              const void*      x,
-                                                              rocblas_datatype x_type,
-                                                              rocblas_int      incx,
-                                                              rocblas_stride   stride_x,
-                                                              const void*      y,
-                                                              rocblas_datatype y_type,
-                                                              rocblas_int      incy,
-                                                              rocblas_stride   stride_y,
-                                                              rocblas_int      batch_count,
-                                                              void*            result,
-                                                              rocblas_datatype result_type,
-                                                              rocblas_datatype execution_type);
-
 ROCBLAS_EXPORT rocblas_status rocblas_dot_strided_batched_ex_64(rocblas_handle   handle,
                                                                 int64_t          n,
                                                                 const void*      x,
@@ -24279,6 +24218,91 @@ ROCBLAS_EXPORT rocblas_status rocblas_dot_strided_batched_ex_64(rocblas_handle  
                                                                 void*            result,
                                                                 rocblas_datatype result_type,
                                                                 rocblas_datatype execution_type);
+//! @}
+
+/*! @{
+    \brief <b> BLAS EX API </b>
+
+    \details
+    The dotc_strided_batched_ex functions perform a batch of dot products of the conjugate of complex vector x and complex vector y:
+
+        result_i = conjugate (x_i) * y_i;
+
+    where (``x_i``, ``y_i``) is the ``i``-th instance of the batch.
+    ``x_i`` and ``y_i`` are vectors, for ``i`` = 1, ..., ``batch_count``.
+
+    Currently supported datatypes are as follows:
+
+    --------------------------------------------------
+    | x_type | y_type | result_type | execution_type |
+    |--------|--------|-------------|----------------|
+    | f16_r  | f16_r  |    f16_r    |     f16_r      |
+    | f16_r  | f16_r  |    f16_r    |     f32_r      |
+    | bf16_r | bf16_r |    bf16_r   |     f32_r      |
+    | f32_r  | f32_r  |    f32_r    |     f32_r      |
+    | f32_r  | f32_r  |    f64_r    |     f64_r      |
+    | f64_r  | f64_r  |    f64_r    |     f64_r      |
+    | f32_c  | f32_c  |    f32_c    |     f32_c      |
+    | f64_c  | f64_c  |    f64_c    |     f64_c      |
+    --------------------------------------------------
+
+    @param[in]
+    handle    [rocblas_handle]
+              handle to the rocBLAS library context queue.
+    @param[in]
+    n         [rocblas_int]
+              the number of elements in each x_i and y_i.
+    @param[in]
+    x         device pointer to the first vector (x_1) in the batch.
+    @param[in]
+    x_type [rocblas_datatype]
+           specifies the datatype of each vector x_i.
+    @param[in]
+    incx      [rocblas_int]
+              specifies the increment for the elements of each x_i.
+    @param[in]
+    stride_x    [rocblas_stride]
+                stride from the start of one vector (x_i) to the next one (x_i+1).
+    @param[in]
+    y         device pointer to the first vector (y_1) in the batch.
+    @param[in]
+    y_type [rocblas_datatype]
+          specifies the datatype of each vector y_i.
+    @param[in]
+    incy      [rocblas_int]
+              specifies the increment for the elements of each y_i.
+    @param[in]
+    stride_y    [rocblas_stride]
+                stride from the start of one vector (y_i) to the next one (y_i+1).
+    @param[in]
+    batch_count [rocblas_int]
+                number of instances in the batch.
+    @param[in, out]
+    result
+              device array or host array of batch_count size to store the dot products of each batch.
+              Returns 0.0 for each element if n <= 0.
+    @param[in]
+    result_type [rocblas_datatype]
+                specifies the datatype of the result.
+    @param[in]
+    execution_type [rocblas_datatype]
+                  specifies the datatype of computation.
+
+    ********************************************************************/
+ROCBLAS_EXPORT rocblas_status rocblas_dotc_strided_batched_ex(rocblas_handle   handle,
+                                                              rocblas_int      n,
+                                                              const void*      x,
+                                                              rocblas_datatype x_type,
+                                                              rocblas_int      incx,
+                                                              rocblas_stride   stride_x,
+                                                              const void*      y,
+                                                              rocblas_datatype y_type,
+                                                              rocblas_int      incy,
+                                                              rocblas_stride   stride_y,
+                                                              rocblas_int      batch_count,
+                                                              void*            result,
+                                                              rocblas_datatype result_type,
+                                                              rocblas_datatype execution_type);
 
 ROCBLAS_EXPORT rocblas_status rocblas_dotc_strided_batched_ex_64(rocblas_handle   handle,
                                                                  int64_t          n,
@@ -24295,6 +24319,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dotc_strided_batched_ex_64(rocblas_handle 
                                                                  rocblas_datatype result_type,
                                                                  rocblas_datatype execution_type);
 //! @}
+
 
 /*! @{
     \brief BLAS_EX API
@@ -24436,10 +24461,10 @@ ROCBLAS_EXPORT rocblas_status rocblas_nrm2_batched_ex_64(rocblas_handle   handle
 //! @}
 
 /*! @{
-    \brief BLAS_EX API
+    \brief <b>  BLAS_EX API </b> 
 
     \details
-    nrm2_strided_batched_ex computes the euclidean norm over a batch of real or complex vectors.
+    The nrm2_strided_batched_ex functions compute the Euclidean norm over a batch of real or complex vectors.
 
         result := sqrt( x_i'*x_i ) for real vectors x, for i = 1, ..., batch_count
         result := sqrt( x_i**H*x_i ) for complex vectors, for i = 1, ..., batch_count
@@ -24459,7 +24484,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_nrm2_batched_ex_64(rocblas_handle   handle
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     n         [rocblas_int]
               number of elements in each x_i.
@@ -24473,16 +24498,16 @@ ROCBLAS_EXPORT rocblas_status rocblas_nrm2_batched_ex_64(rocblas_handle   handle
               specifies the increment for the elements of each x_i. incx must be > 0.
     @param[in]
     stride_x  [rocblas_stride]
-              stride from the start of one vector (x_i) and the next one (x_i+1).
-              There are no restrictions placed on stride_x. However, ensure that stride_x is of appropriate size. For a typical
-              case this means stride_x >= n * incx.
+              stride from the start of one vector (x_i) to the next one (x_i+1).
+              There are no restrictions placed on stride_x. However, ensure that stride_x is of an appropriate size. For a typical
+              case, this means stride_x >= n * incx.
     @param[in]
     batch_count [rocblas_int]
               number of instances in the batch.
     @param[out]
     results
               device pointer or host pointer to array for storing contiguous batch_count results.
-              return is 0.0 for each element if n <= 0, incx<=0.
+              Returns 0.0 for each element if n <= 0, incx<=0.
     @param[in]
     result_type [rocblas_datatype]
                 specifies the datatype of the result.
@@ -24709,15 +24734,16 @@ ROCBLAS_EXPORT rocblas_status rocblas_rot_batched_ex_64(rocblas_handle   handle,
     \brief <b> BLAS Level 1 API </b>
 
     \details
-    rot_strided_batched_ex applies the Givens rotation matrix defined by c=cos(alpha) and s=sin(alpha) to strided batched vectors x_i and y_i, for i = 1, ..., batch_count.
-        Scalars c and s may be stored in either host or device memory. Location is specified by calling rocblas_set_pointer_mode.
+    The rot_strided_batched_ex functions apply the Givens rotation matrix defined by ``c=cos(alpha)`` and ``s=sin(alpha)``
+    to strided batched vectors ``x_i`` and ``y_i``, for ``i`` = 1, ..., ``batch_count``.
+    Scalars ``c`` and ``s`` can be stored in either host or device memory. The location is specified by calling ``rocblas_set_pointer_mode``.
 
-    In the case where cs_type is real:
+    In the case where ``cs_type`` is real:
 
         x := c * x + s * y
         y := c * y - s * x
 
-    In the case where cs_type is complex, the imaginary part of c is ignored:
+    In the case where ``cs_type`` is complex, the imaginary part of ``c`` is ignored:
 
         x := real(c) * x + s * y
         y := real(c) * y - conj(s) * x
@@ -24739,10 +24765,10 @@ ROCBLAS_EXPORT rocblas_status rocblas_rot_batched_ex_64(rocblas_handle   handle,
 
     @param[in]
     handle  [rocblas_handle]
-            handle to the rocblas library context queue.
+            handle to the rocBLAS library context queue.
     @param[in]
     n       [rocblas_int]
-            number of elements in each x_i and y_i vectors.
+            number of elements in each of the x_i and y_i vectors.
     @param[in, out]
     x       device pointer to the first vector x_1.
     @param[in]
@@ -24753,7 +24779,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_rot_batched_ex_64(rocblas_handle   handle,
             specifies the increment between elements of each x_i.
     @param[in]
     stride_x [rocblas_stride]
-             specifies the increment from the beginning of x_i to the beginning of x_(i+1)
+             specifies the increment from the beginning of x_i to the beginning of x_(i+1).
     @param[in, out]
     y       device pointer to the first vector y_1.
     @param[in]
@@ -24764,7 +24790,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_rot_batched_ex_64(rocblas_handle   handle,
             specifies the increment between elements of each y_i.
     @param[in]
     stride_y [rocblas_stride]
-             specifies the increment from the beginning of y_i to the beginning of y_(i+1)
+             specifies the increment from the beginning of y_i to the beginning of y_(i+1).
     @param[in]
     c       device pointer or host pointer to scalar cosine component of the rotation matrix.
     @param[in]
@@ -24960,7 +24986,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_scal_batched_ex_64(rocblas_handle   handle
     \brief <b> BLAS EX API </b>
 
     \details
-    scal_strided_batched_ex  scales each element of vector x with scalar alpha over a set
+    The scal_strided_batched_ex functions scale each element of vector ``x`` with scalar ``alpha`` over a set
     of strided batched vectors.
 
         x := alpha * x
@@ -24985,7 +25011,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_scal_batched_ex_64(rocblas_handle   handle
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     n         [rocblas_int]
               the number of elements in x.
@@ -25005,8 +25031,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_scal_batched_ex_64(rocblas_handle   handle
     @param[in]
     stridex   [rocblas_stride]
               stride from the start of one vector (x_i) to the next one (x_i+1).
-              There are no restrictions placed on stridex. However, ensure that stridex is of appropriate size. For a typical
-              case this means stridex >= n * incx.
+              There are no restrictions placed on stridex. However, ensure that stridex is of an appropriate size. For a typical
+              case, this means stridex >= n * incx.
     @param[in]
     batch_count [rocblas_int]
                 number of instances in the batch.
