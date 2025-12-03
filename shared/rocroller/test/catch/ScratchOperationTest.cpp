@@ -79,7 +79,7 @@ namespace ScratchOperationTest
         }
     }
 
-    TEST_CASE("Scratch construction", "[operations][scratch]")
+    TEST_CASE("Scratch construction", "[operation][scratch]")
     {
         SECTION("Count value for range checking")
         {
