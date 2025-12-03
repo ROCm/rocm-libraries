@@ -40,13 +40,13 @@ BEGIN_HIPCUB_NAMESPACE
 struct DeviceCopy
 {
     template<typename InputBufferIt, typename OutputBufferIt, typename BufferSizeIteratorT>
-    static hipError_t Batched(void*               d_temp_storage,
-                              size_t&             temp_storage_bytes,
-                              InputBufferIt       input_buffer_it,
-                              OutputBufferIt      output_buffer_it,
-                              BufferSizeIteratorT buffer_sizes,
-                              uint32_t            num_buffers,
-                              hipStream_t         stream = 0)
+    static hipError_t Batched(void*                d_temp_storage,
+                              size_t&              temp_storage_bytes,
+                              InputBufferIt        input_buffer_it,
+                              OutputBufferIt       output_buffer_it,
+                              BufferSizeIteratorT  buffer_sizes,
+                              _HIPCUB_STD::int64_t num_buffers,
+                              hipStream_t          stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceCopy::Batched(d_temp_storage,
                                                                  temp_storage_bytes,
