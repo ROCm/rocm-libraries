@@ -25,9 +25,9 @@ struct Find2ConvTest : test_driver
     tensor<float> x;
     tensor<float> w;
     tensor<float> y;
-    Allocator::ManageDataPtr x_dev;
-    Allocator::ManageDataPtr w_dev;
-    Allocator::ManageDataPtr y_dev;
+    miopen::Allocator::ManageDataPtr x_dev;
+    miopen::Allocator::ManageDataPtr w_dev;
+    miopen::Allocator::ManageDataPtr y_dev;
 
     miopenProblemDirection_t direction = miopenProblemDirectionForward;
     // --input 16,192,28,28 --weights 32,192,5,5 --filter 2,2,1,1,1,1,
@@ -116,7 +116,7 @@ private:
         std::cerr << "Creating conv tensor descriptos..." << std::endl;
 
         auto test_set_tensor_descriptor = [problem](miopenTensorArgumentId_t name,
-                                                    TensorDescriptor& desc) {
+                                                    miopen::TensorDescriptor& desc) {
             EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, name, &desc),
                      miopenStatusSuccess);
         };
@@ -175,7 +175,7 @@ private:
             EXPECT_EQ(miopenSetFindOptionAttachBinaries(options, attach_binaries),
                      miopenStatusSuccess);
 
-            Allocator::ManageDataPtr workspace_dev;
+            miopen::Allocator::ManageDataPtr workspace_dev;
 
             if(preallocate)
             {
@@ -270,7 +270,7 @@ private:
         {
             uint64_t solver_id;
             EXPECT_EQ(miopenGetSolutionSolverId(solution, &solver_id), miopenStatusSuccess);
-            std::cerr << "Testing solver " << solver_id << " (" << solver::Id(solver_id).ToString()
+            std::cerr << "Testing solver " << solver_id << " (" << miopen::solver::Id(solver_id).ToString()
                       << ")" << std::endl;
 
             miopenTensorArgumentId_t names[3] = {
