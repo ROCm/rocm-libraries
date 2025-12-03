@@ -982,17 +982,18 @@ double compute_total_latency(const problem_t& problem,
   }
 
   // 1-1) To compute the latency, use default WGM. And WGM can't be greater than one
-  int defaultWGM           = static_cast<int>(ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD)));
-  config.workgroup_mapping = std::max(defaultWGM, 1);
+  int defaultWGM = static_cast<int>(ceil(std::sqrt(hardware.N_CU / hardware.NUM_XCD)));
+  auto config_with_default_wgm              = config;
+  config_with_default_wgm.workgroup_mapping = std::max(defaultWGM, 1);
 
   // 1-2) Find CU occupancy
-  auto [num_wgs, num_active_cus, numWaves, splitting_factor] =
-      compute_cu_occupancy(problem, hardware, config, grid_selection_t::k_split_aware, max_cus);
+  auto [num_wgs, num_active_cus, numWaves, splitting_factor] = compute_cu_occupancy(
+      problem, hardware, config_with_default_wgm, grid_selection_t::k_split_aware, max_cus);
 
   // 2) Compute latency of a wave
   // Compute latency of a wave
-  double L_wave =
-      compute_timestep_latency(problem, hardware, config, num_active_cus, splitting_factor);
+  double L_wave = compute_timestep_latency(
+      problem, hardware, config_with_default_wgm, num_active_cus, splitting_factor);
 
   // Compute latency for all waves and return it as the latency for the MT/problem
   double total_latency = L_wave * numWaves;

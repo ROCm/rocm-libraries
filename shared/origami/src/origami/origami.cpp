@@ -384,17 +384,6 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
     }
   }
 
-  for (const auto& res : results) {
-    std::cout << "M: " << problem.size.m << ", N: " << problem.size.n << ", K: " << problem.size.k
-              << ", Latency: " << res.latency << ", MT_M: " << res.config.mt.m
-              << ", MT_N: " << res.config.mt.n << ", MT_K: " << res.config.mt.k
-              << ", MI_M: " << res.config.mi.m << ", MI_N: " << res.config.mi.n
-              << ", Occupancy: " << res.config.occupancy
-              << ", WGM: " << res.config.workgroup_mapping
-              << ", NonTemporalA: " << res.config.cache_hints_a
-              << ", NonTemporalB: " << res.config.cache_hints_b << "\n";
-  }
-
   return results;
 }
 
