@@ -745,6 +745,7 @@ namespace rocRoller
                 return;
 
             auto sampleLoad = mergeables.begin()->first;
+
             auto [loadConnections, exchangeConnections, unrollReindexMap]
                 = addSwizzleLoadCT(graph, context, sampleLoad, arg);
 
@@ -774,11 +775,24 @@ namespace rocRoller
             if(maybeSampleLoadLDSTile)
             {
                 originalLDSTag = graph.mapper.get<LDS>(sampleLoad);
+
                 // A View edge was added by `addSwizzleLoadCT`.  To
-                // get the originalLDSTag we can follow the View edge.
-                newLDSTags[originalLDSTag]
-                    = only(graph.coordinates.getInputNodeIndices(originalLDSTag, CT::isEdge<View>))
-                          .value();
+                // get the new LDS tag we can follow the View edge.
+                //
+                // There may be multiple View edges if this LDS tag
+                // was also used by a previous loop.  We want the most
+                // recently added one (highest node ID).
+                auto viewInputs
+                    = graph.coordinates.getInputNodeIndices(originalLDSTag, CT::isEdge<View>)
+                          .to<std::vector>();
+
+                AssertFatal(!viewInputs.empty(),
+                            "Expected at least one View edge into originalLDSTag from "
+                            "addSwizzleLoadCT",
+                            ShowValue(originalLDSTag));
+                // Use the most recently added View edge (highest node ID)
+                auto newLDSTag = *std::max_element(viewInputs.begin(), viewInputs.end());
+                newLDSTags[originalLDSTag] = newLDSTag;
             }
 
             for(auto const [load, redundantLoads] : mergeables)
@@ -896,42 +910,38 @@ namespace rocRoller
                     tileExchangeMap[scaleLoads.at(mergeOp).second] = exchange;
                 }
 
-                // Reindex the SetCoordinate chain value and its Unroll coordinate connection
-                auto tag                = load;
-                auto remainingReindexes = unrollReindexMap;
-                while(not remainingReindexes.empty())
+                // Update the SetCoordinate value and its Unroll coordinate connection
+                auto maybeSetCoordinate = findContainingOperation<SetCoordinate>(load, graph);
+                while(maybeSetCoordinate.has_value())
                 {
-                    auto maybeSetCoordinate = findContainingOperation<SetCoordinate>(tag, graph);
-                    if(not maybeSetCoordinate)
-                    {
-                        std::string missingUnrolls = "{";
-                        for(auto const [unroll, _] : remainingReindexes)
-                            missingUnrolls + std::to_string(unroll) + " ";
-
-                        AssertFatal(maybeSetCoordinate,
-                                    "Cannot reindex, SetCoordinate not found for unroll(s):",
-                                    ShowValue(tag),
-                                    ShowValue(missingUnrolls));
-                    }
-                    tag = maybeSetCoordinate.value();
+                    auto tag = maybeSetCoordinate.value();
 
                     auto unroll = graph.mapper.get<Unroll>(tag);
-                    AssertFatal(unroll > 0,
-                                "SetCoordinate is not connected to the Unroll dimension",
-                                ShowValue(tag),
-                                ShowValue(unroll));
 
-                    auto newOp = SetCoordinate(Expression::literal(loadUnrollMap[load][unroll]));
+                    // Skip SetCoordinates that aren't connected to an Unroll dimension
+                    // (e.g., outer scope SetCoordinates)
+                    if(unroll <= 0)
+                    {
+                        maybeSetCoordinate = findContainingOperation<SetCoordinate>(tag, graph);
+                        continue;
+                    }
+
+                    // Skip unrolls that aren't in our unroll reindex map
+                    if(!unrollReindexMap.contains(unroll))
+                    {
+                        maybeSetCoordinate = findContainingOperation<SetCoordinate>(tag, graph);
+                        continue;
+                    }
+
+                    auto newValue = loadUnrollMap[load][unroll];
+                    auto newOp    = SetCoordinate(Expression::literal(newValue));
                     graph.control.setElement(tag, newOp);
 
                     auto newUnroll = unrollReindexMap.at(unroll);
                     graph.mapper.disconnect<Unroll>(tag, unroll);
                     graph.mapper.connect<Unroll>(tag, newUnroll);
 
-                    AssertFatal(remainingReindexes.contains(unroll),
-                                "Expected unroll to be in remaining reindexes: ",
-                                ShowValue(unroll));
-                    remainingReindexes.erase(unroll);
+                    maybeSetCoordinate = findContainingOperation<SetCoordinate>(tag, graph);
                 }
             }
 

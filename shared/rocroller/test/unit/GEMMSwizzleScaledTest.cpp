@@ -163,8 +163,9 @@ namespace GEMMTests
         basicGEMM<FP4, FP4, float>(gemm);
 
         std::string generatedCode = m_context->instructions()->toString();
-        // no swizzle applied for scales loaded via LDS
-        EXPECT_GT(countSubstring(generatedCode, "ds_read_u8 "), 0);
+        // Swizzle applied for scales loaded via LDS
+        EXPECT_GT(countSubstring(generatedCode, "ds_read_b32 "), 0);
+        EXPECT_GT(countSubstring(generatedCode, "v_permlane32_swap_b32 "), 0);
     }
 
     TEST_P(SwizzleScaledTestGPU, GPU_PrefetchD2LGEMMMXF4TN)
@@ -495,15 +496,12 @@ namespace GEMMTests
         basicGEMM<FP4, FP4, float>(gemm);
 
         std::string generatedCode = m_context->instructions()->toString();
-        // when both scales are loaded directly from buffer into VGPRs
-        if(loadScaleA == SolutionParams::LoadPath::BufferToVGPR
-           && loadScaleB == SolutionParams::LoadPath::BufferToVGPR)
-            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
-        // when all the things are loaded directly from buffer into LDS
         if(loadPathAB == SolutionParams::LoadPath::BufferToLDS
            && loadScaleA == SolutionParams::LoadPath::BufferToLDS
            && loadScaleB == SolutionParams::LoadPath::BufferToLDS)
+        {
             EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
+        }
         EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
     }
 

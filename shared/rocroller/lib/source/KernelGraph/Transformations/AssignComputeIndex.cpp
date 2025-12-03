@@ -117,7 +117,7 @@ namespace rocRoller
                     {
                         if(maybeElementNumber->dim == 0)
                             elementBlockNumber = getUnsignedInt(evaluate(maybeElementNumber->size));
-                        if(maybeElementNumber->dim == 1)
+                        else if(maybeElementNumber->dim == 1)
                             elementBlockIndex = getUnsignedInt(evaluate(maybeElementNumber->size));
                     }
                 }

@@ -1018,7 +1018,12 @@ namespace rocRoller
                     // When loading pre-swizzled scales from LDS, no
                     // LoadTiled node exists.
                     if(!loadTag)
+                    {
+                        Log::debug("No matching load operation found for Exchange({}); assuming it "
+                                   "is pre-swizzled from LDS.",
+                                   exchangeTag);
                         continue;
+                    }
 
                     auto const search = scaleLoadU.find(loadTag.value());
                     if(search == scaleLoadU.end() || search->second > prefetchGlobalU)
