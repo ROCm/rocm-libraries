@@ -193,7 +193,7 @@ typedef enum rocblas_status_
     rocblas_status_not_implemented = 2, /**< Function is not implemented. */
     rocblas_status_invalid_pointer = 3, /**< Invalid pointer argument. */
     rocblas_status_invalid_size    = 4, /**< Invalid size argument. */
-    rocblas_status_memory_error    = 5, /**< Failed internal memory allocation, copy, or deallocation. */
+    rocblas_status_memory_error    = 5, /**< Failed internal memory allocation, copy, or dealloc. */
     rocblas_status_internal_error  = 6, /**< Other internal library failure. */
     rocblas_status_perf_degraded   = 7, /**< Performance degraded due to low device memory. */
     rocblas_status_size_query_mismatch = 8, /**< Unmatched start/stop size query. */
