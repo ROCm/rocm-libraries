@@ -330,20 +330,71 @@ class amdsmi {
     }
 
     /**
-     * \brief Reads the GPU edge temperature.
+     * \brief Converts a temperature type enum to a string.
+     * \param type Temperature type enum value.
+     * \return String representation of the temperature type.
+     * \note Exits with failure if the temperature type is not recognized.
+     */
+    static const char* get_temp_type_name(amdsmi_temperature_type_t type) {
+        switch (type) {
+            case AMDSMI_TEMPERATURE_TYPE_EDGE:
+                return "edge";
+            case AMDSMI_TEMPERATURE_TYPE_HOTSPOT:
+                return "hotspot";
+            default:
+                std::cerr << "\nError: Failed to match temperature type " << type
+                          << " to a string\n";
+                exit(EXIT_FAILURE);
+        }
+    }
+
+    /**
+     * \brief Determines the first available GPU temperature sensor type.
+     *
+     * Attempts to read temperature from multiple sensor types in priority order.
+     * Returns the first type that successfully provides a temperature reading.
+     *
+     * \return The first successfully queried temperature sensor type.
+     * \note Exits with failure if no temperature sensors are accessible.
+     *       The result is cached as a static variable.
+     */
+    amdsmi_temperature_type_t get_temp_type() const {
+        static const amdsmi_temperature_type_t temp_type = [&] {
+            const amdsmi_temperature_type_t types[] = {
+                AMDSMI_TEMPERATURE_TYPE_EDGE,
+                AMDSMI_TEMPERATURE_TYPE_HOTSPOT,
+            };
+
+            int64_t t;
+            for (auto type : types) {
+                if (amdsmi_get_temp_metric(m_target, type, AMDSMI_TEMP_CURRENT, &t) ==
+                    AMDSMI_STATUS_SUCCESS) {
+                    return type;
+                }
+            }
+
+            std::cerr << "\nError: Failed to get any of these GPU temperatures: ";
+            bool first = true;
+            for (auto type : types) {
+                if (!first) std::cerr << ", ";
+                first = false;
+                std::cerr << get_temp_type_name(type);
+            }
+            std::cerr << "\n";
+            exit(EXIT_FAILURE);
+        }();
+
+        return temp_type;
+    }
+
+    /**
+     * \brief Reads the GPU temperature.
      * \return Temperature in °C.
-     * \note Exits the program if temperature reading fails or is <= 0.
      */
     uint16_t get_temp() const {
         int64_t t = 0;
-        PRIMBENCH_AMDSMI_CHECK(amdsmi_get_temp_metric(m_target, AMDSMI_TEMPERATURE_TYPE_EDGE,
-                                                      AMDSMI_TEMP_CURRENT, &t));
-        if (t <= 0) {
-            std::cerr << "Error: GPU temperature was " << t
-                      << "°C according to amdsmi_get_temp_metric(), while it should always be "
-                         "above 0°C\n";
-            exit(EXIT_FAILURE);
-        }
+        PRIMBENCH_AMDSMI_CHECK(
+            amdsmi_get_temp_metric(m_target, get_temp_type(), AMDSMI_TEMP_CURRENT, &t));
         return t;
     }
 
@@ -983,7 +1034,7 @@ class logger {
         ss << "{";
 
         ss << "\"results_version\":\"1.0.0\"";
-        ss << ",\"general\":" << serialize_general(algorithm, specialization_count);
+        ss << ",\"general\":" << serialize_general(algorithm, specialization_count, amdsmi);
         ss << ",\"cli_settings\":" << serialize_cli_settings(cli_settings);
 
         std::string custom_cli = serialize_custom_cli_settings(cli_settings);
@@ -1006,7 +1057,8 @@ class logger {
      * If the macro COMMIT_HASH is defined at compile time, the corresponding
      * Git commit hash is also output as the JSON key "git_commit".
      */
-    std::string serialize_general(std::string_view algorithm, size_t specialization_count) const {
+    std::string serialize_general(std::string_view algorithm, size_t specialization_count,
+                                  const amdsmi& amdsmi) const {
         std::ostringstream ss;
         ss << "{";
 
@@ -1026,6 +1078,8 @@ class logger {
         const char build_type[] = "debug";
 #endif
         ss << ",\"library_build_type\":\"" << build_type << "\"";
+
+        ss << ",\"temp_type\":\"" << amdsmi.get_temp_type_name(amdsmi.get_temp_type()) << "\"";
 
         char host_name[HOST_NAME_MAX + 1];  // +1 for null terminator
         if (gethostname(host_name, sizeof(host_name)) != 0) {

@@ -314,6 +314,12 @@ Before each specialization, primbench:
 
 Temperatures are read via AMD SMI. Warming uses short GPU workloads; cooling waits until the GPU naturally drops back into range. If either process takes more than 60 seconds, primbench aborts (`--max-warming-secs`, `--max-cooling-secs`).
 
+### GPU Temperature Sensor Selection
+
+primbench supports multiple GPU temperature sensors exposed by AMD SMI, such as *edge* and *hotspot*. At startup, it probes the available sensors and selects the first one that successfully returns a reading. The chosen sensor type is cached and used consistently for warming, cooling, and reporting. If no supported sensor can be read, primbench terminates with an error.
+
+The selected temperature sensor type is recorded in the JSON output as `context.general.temp_type`.
+
 ### GPU Cache Clearing
 
 primbench clears the GPU cache before each batch by default to reduce noise and ensure consistent timings. This simulates a "cold run" by preventing leftover data from previous kernel executions from affecting results.
