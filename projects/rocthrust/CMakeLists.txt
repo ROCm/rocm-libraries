@@ -259,6 +259,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
     enable_testing()
   endif()
 
+  # Used by tests to define their RESOURCE_GROUPS
   set(DEFAULT_GPU_RESOURCE_TYPE "gpus")
   
   # We still want the testing to be compiled to catch some errors
