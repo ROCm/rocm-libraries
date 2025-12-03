@@ -853,7 +853,7 @@ TEST(HipcubDeviceForTests, ForEachCopyNTempStore)
 }
 
 // ForEachInExtents only enables when the cccl mdspan extension is enabled
-#if(defined(__HIP_PLATFORM_NVIDIA__) && defined(__cccl_lib_mdspan)) || defined(__HIP_PLATFORM_AMD__)
+#if defined(__HIP_PLATFORM_NVIDIA__) || defined(__HIP_PLATFORM_AMD__)
 
 template<class TestParams1, class TestParams2>
 struct HipcubTestParamsMerge
@@ -1064,7 +1064,7 @@ TYPED_TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsStatic)
     HIP_CHECK(hipFree(d_input));
 }
 
-#endif // (defined(__HIP_PLATFORM_NVIDIA__) && defined(__cccl_lib_mdspan)) || defined(__HIP_PLATFORM_AMD__)
+#endif // defined(__HIP_PLATFORM_NVIDIA__) || defined(__HIP_PLATFORM_AMD__)
 
 template<class Params>
 class HipcubDeviceForBulkTests : public HipcubDeviceForTests<Params>
