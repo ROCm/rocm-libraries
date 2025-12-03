@@ -26,6 +26,14 @@ Similarly to FFTW_, hipFFTW uses the following specific types.
 
 .. doxygentypedef:: fftwf_plan
 
+.. doxygentypedef:: fftw_iodim
+
+.. doxygentypedef:: fftwf_iodim
+
+.. doxygentypedef:: fftw_iodim64
+
+.. doxygentypedef:: fftwf_iodim64
+
 Constant values
 ===============
 
@@ -139,7 +147,7 @@ input and output buffers are used when the plan is created. The plan is configur
 .. note::
   - hipFFTW does not support split complex formats, real-to-real transforms, nor distributed transforms;
   - hipFFTW does not support transforms of more than 3 dimensions, that is, ``rank > 3`` is not supported;
-  - hipFFTW does not support transforms of more than 1 batch dimension, that is, ``batch_rank > 1`` is not supported.
+  - hipFFTW does not support transforms of more than 1 batch dimension, that is, ``howmany_rank > 1`` is not supported.
 
 .. _hipfftw-basic-plan-creation:
 
@@ -238,7 +246,42 @@ The following functions can be used for creating advanced hipFFTW plans.
 Arbitrary plans
 ---------------
 
-.. TBD
+Arbitrary plans support batched transforms with arbitrary data layouts.
+
+Considering a :math:`d`-dimensional transform (:math:`d > 0`) of lengths ``n[0] x n[1] x ... x n[d-1]``
+batched ``m[0] x m[1] x ... x m[q-1]`` times (:math:`q > 0`), arbitrary input and output data layouts
+can be set via the ``dims`` and ``howmany_dims`` arguments of the plan creation functions below. Their
+``rank`` and ``howmany_rank`` arguments capture the (strictly positive) values of :math:`d` and
+:math:`q`, respectively.
+
+Specifically, ``dims`` must be an array of :math:`d` ``fftw_iodim`` (or ``fftw_iodim64``) values such
+that, for all :math:`0 \leq i < d`,
+
+- ``dims[i].n`` is equal to ``n[i]`` (must be strictly positive);
+- ``dims[i].is`` is the input stride along the ``i``-th data dimension;
+- ``dims[i].os`` is the output stride along the ``i``-th data dimension.
+
+Similarly, ``howmany_dims`` must be an array of :math:`q` ``fftw_iodim`` (or ``fftw_iodim64``) values
+such that, for all :math:`0 \leq j < q`,
+
+- ``howmany_dims[j].n`` is equal to ``m[j]`` (must be strictly positive);
+- ``howmany_dims[j].is`` is the input distance along the ``j``-th batch dimension;
+- ``howmany_dims[j].os`` is the output distance along the ``j``-th batch dimension.
+
+The following functions can be used for creating arbitrary hipFFTW plans.
+
+.. doxygenfunction:: fftw_plan_guru_dft
+.. doxygenfunction:: fftwf_plan_guru_dft
+.. doxygenfunction:: fftw_plan_guru_dft_r2c
+.. doxygenfunction:: fftwf_plan_guru_dft_r2c
+.. doxygenfunction:: fftw_plan_guru_dft_c2r
+.. doxygenfunction:: fftwf_plan_guru_dft_c2r
+.. doxygenfunction:: fftw_plan_guru64_dft
+.. doxygenfunction:: fftwf_plan_guru64_dft
+.. doxygenfunction:: fftw_plan_guru64_dft_r2c
+.. doxygenfunction:: fftwf_plan_guru64_dft_r2c
+.. doxygenfunction:: fftw_plan_guru64_dft_c2r
+.. doxygenfunction:: fftwf_plan_guru64_dft_c2r
 
 .. _hipfftw-data-layout-requirements:
 
