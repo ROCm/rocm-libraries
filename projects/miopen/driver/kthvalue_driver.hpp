@@ -456,7 +456,7 @@ int KthvalueDriver<TIO>::VerifyForward()
     else
     {
         RunForwardCPUMT();
-        auto errorOutputHostMT = miopen::rms_range(outputHost, outputHostMT);
+        auto errorOutputHostMT = miopen::rms_range(outputHostMT, output);
         if(!std::isfinite(errorOutputHostMT) || errorOutputHostMT > tolerance)
         {
             std::cout << "CPU MT version of Forward Kthvalue output FAILED: " << errorOutputHostMT << " > " << tolerance
