@@ -31,6 +31,7 @@
 
 #include "../../../config.hpp"
 
+#include "../util_macro.hpp"
 #include "../util_ptx.hpp"
 #include "../util_type.hpp"
 
@@ -84,10 +85,10 @@ StableOddEvenSort(KeyT (&keys)[ITEMS_PER_THREAD],
 {
   constexpr bool KEYS_ONLY = ::rocprim::Equals<ValueT, NullType>::VALUE;
 
-  _CCCL_PRAGMA_UNROLL_FULL()
+  _CCCL_SORT_MAYBE_UNROLL()
   for(int i = 0; i < ITEMS_PER_THREAD; ++i)
   {
-      _CCCL_PRAGMA_UNROLL_FULL()
+      _CCCL_SORT_MAYBE_UNROLL()
       for(int j = 1 & i; j < ITEMS_PER_THREAD - 1; j += 2)
       {
           if(compare_op(keys[j + 1], keys[j]))

@@ -32,6 +32,7 @@
 #include "../../../config.hpp"
 
 #include "../thread/thread_sort.hpp"
+#include "../util_macro.hpp"
 #include "../util_math.hpp"
 #include "../util_type.hpp"
 
@@ -95,7 +96,7 @@ HIPCUB_DEVICE __forceinline__ void SerialMerge(KeyT *keys_shared,
    KeyT key1 = keys_shared[keys1_beg];
    KeyT key2 = keys_shared[keys2_beg];
 
-   _CCCL_PRAGMA_UNROLL_FULL()
+   _CCCL_SORT_MAYBE_UNROLL()
    for (int item = 0; item < ITEMS_PER_THREAD; ++item)
    {
        bool p = (keys2_beg < keys2_end) &&
@@ -387,7 +388,7 @@ public:
       //
       KeyT max_key = oob_default;
 
-      _CCCL_PRAGMA_UNROLL_FULL()
+      _CCCL_SORT_MAYBE_UNROLL()
       for (int item = WARP_SORT ? 1 : 0; item < ITEMS_PER_THREAD; ++item)
       {
         if (ITEMS_PER_THREAD * static_cast<int>(linear_tid) + item < valid_items)

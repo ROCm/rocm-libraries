@@ -45,6 +45,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Changed `CCCL_MINIMUM_VERSION` to `3.0.0` to align with CUB.
 * Add support for large num_items `DeviceMerge` and `DeviceSegmentedSort`.
 * Replace `#pragma unroll` by `_CCCL_PRAGMA_UNROLL_FULL()` and `_CCCL_PRAGMA_NOUNROLL()` by `_CCCL_PRAGMA_NOUNROLL()`.
+* Add `_CCCL_SORT_MAYBE_UNROLL()` in block merge sort and thread sort. 
 
 ### Removed
 
