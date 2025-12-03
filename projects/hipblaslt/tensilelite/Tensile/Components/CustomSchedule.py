@@ -71,9 +71,15 @@ class SyncSchedule:
     def get_code(self):
         return [item[1] for item in self.schedule]
 
-def duplicate_list_items(input_list: list, repeat_count: int) -> list:
-    """Example: duplicate_list_items([1, 2, 3], 3) => [1,1,1, 2,2,2, 3,3,3]"""
-    return [item for item in input_list for _ in range(repeat_count)]
+def duplicate_list_items(input_list: list, repeat_count: int, step:int=0) -> list:
+    """
+    Duplicate each item in input_list repeat_count times. Optionally duplicate with a step
+    
+    Example:
+        duplicate_list_items([1, 2, 3], 3)    => [1,1,1, 2,2,2, 3,3,3]
+        duplicate_list_items([1, 2, 3], 3, 1) => [1,2,3, 2,3,4, 3,4,5]
+    """
+    return [item + step * j for item in input_list for j in range(repeat_count)]
 
 def verifyAscendingOrder(scheduleInfo, context: Dict = {}):
     """
@@ -1352,6 +1358,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     kernel["SwapGlobalReadOrder"] = False
     numMfma = 120
     syncs = SyncSchedule()
+    gr_inc_step = 0
 
     if isNN(kernel) and useLDSTr and TLDS==1:
         syncs.add(-1, dscnt=9, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration")
@@ -1407,6 +1414,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         lwsa   = [                                                                                                  95]
         lwsb   = [                                                                                                  95]
 
+        gr_inc_step = 1
     else:
         return False, None
 
@@ -1417,8 +1425,8 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         'LRB0':   [lrb0],
         'GRIncB': [grincb],
         # Note: each GRA/GRB item corresponds to two instructions (addr increment and read). So duplicate each item twice.
-        'GRA':    [duplicate_list_items(gra, 2)],
-        'GRB':    [duplicate_list_items(grb, 2)],
+        'GRA':    [duplicate_list_items(gra, 2, gr_inc_step)],
+        'GRB':    [duplicate_list_items(grb, 2, gr_inc_step)],
         'LRSA':   [lrsa],
         'LRSB':   [lrsb],
         'LWSA':   [lwsa],
