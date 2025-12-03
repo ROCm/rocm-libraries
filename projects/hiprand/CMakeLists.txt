@@ -214,7 +214,7 @@ else()
 endif()
 
 if(BUILD_CODE_COVERAGE)
-  target_compile_options(hiprand PUBLIC -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+  target_compile_options(hiprand PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
   target_link_options(hiprand PUBLIC -fprofile-instr-generate)
 endif()
 
