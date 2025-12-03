@@ -33,11 +33,6 @@ if(HIPSPARSE_ENABLE_ASAN)
     target_link_options(hipsparse PRIVATE -fuse-ld=lld)
 endif()
 
-if(HIPSPARSE_ENABLE_COVERAGE)
-    target_compile_options(hipsparse PRIVATE -fprofile-arcs -ftest-coverage)
-    target_link_options(hipsparse PRIVATE --coverage)
-endif()
-
 add_subdirectory(include)
 add_subdirectory(src)
 
@@ -56,7 +51,7 @@ endif()
 
 rocm_install_targets(
     TARGETS hipsparse
-    INCLUDE ${CMAKE_BINARY_DIR}/include
+    INCLUDE "${CMAKE_BINARY_DIR}/include"
 )
 
 

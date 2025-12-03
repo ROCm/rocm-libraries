@@ -214,6 +214,11 @@ endif()
 # --- Code coverage targets ---
 
 if(HIPSPARSE_ENABLE_COVERAGE)
+    set(hipsparse_coverage_dir "${CMAKE_BINARY_DIR}/lcoverage")
+    
+    target_compile_options(hipsparse PRIVATE -fprofile-arcs -ftest-coverage)
+    target_link_options(hipsparse PRIVATE --coverage)
+    
     add_custom_target(coverage_cleanup
         COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
@@ -222,19 +227,19 @@ if(HIPSPARSE_ENABLE_COVERAGE)
     
     add_custom_target(coverage_analysis
         COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-        COMMAND ./clients/staging/hipsparse-test --gtest_filter=\"\${GTEST_FILTER}\"
+        COMMAND $<TARGET_FILE:hipsparse-test> --gtest_filter=\"\{GTEST_FILTER}\"
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Running tests for coverage analysis"
     )
     
-    add_dependencies(coverage_analysis hipsparse)
+    add_dependencies(coverage_analysis hipsparse-test)
     
     add_custom_target(coverage_output
         DEPENDS coverage_analysis
         COMMAND mkdir -p lcoverage
-        COMMAND lcov --directory . --base-directory . --capture -o lcoverage/raw_main_coverage.info
-        COMMAND lcov --remove lcoverage/raw_main_coverage.info "'/opt/*'" "'/usr/*'" -o lcoverage/main_coverage.info
-        COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
+        COMMAND lcov --directory . --base-directory . --capture -o "${hipsparse_coverage_dir}/raw_main_coverage.info"
+        COMMAND lcov --remove "${hipsparse_coverage_dir}/raw_main_coverage.info" "'/opt/*'" "'/usr/*'" -o "${hipsparse_coverage_dir}/main_coverage.info"
+        COMMAND genhtml "${hipsparse_coverage_dir}/main_coverage.info" --output-directory "${hipsparse_coverage_dir}"
         COMMENT "Generating coverage report"
     )
     
