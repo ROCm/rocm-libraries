@@ -155,7 +155,7 @@ struct DevicePartition
              typename NumItemsT>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t If(void*                     d_temp_storage,
-                         std::size_t&              temp_storage_bytes,
+                         size_t&                   temp_storage_bytes,
                          InputIteratorT            d_in,
                          FirstOutputIteratorT      d_first_part_out,
                          SecondOutputIteratorT     d_second_part_out,
@@ -190,7 +190,7 @@ struct DevicePartition
              typename NumItemsT>
     HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
     static hipError_t If(void*                     d_temp_storage,
-                         std::size_t&              temp_storage_bytes,
+                         size_t&                   temp_storage_bytes,
                          InputIteratorT            d_in,
                          FirstOutputIteratorT      d_first_part_out,
                          SecondOutputIteratorT     d_second_part_out,

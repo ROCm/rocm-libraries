@@ -84,7 +84,7 @@ HIPCUB_FORCEINLINE void ThreadStore(OutputIteratorT itr, T val)
     ThreadStore(itr,
                 val,
                 detail::int_constant_t<MODIFIER>{},
-                ::std::bool_constant<::std::is_pointer<OutputIteratorT>::value>());
+                ::std::bool_constant<_HIPCUB_STD::is_pointer<OutputIteratorT>::value>());
 }
 
 namespace detail

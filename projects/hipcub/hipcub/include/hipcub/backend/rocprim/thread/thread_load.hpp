@@ -100,7 +100,7 @@ HIPCUB_FORCEINLINE detail::it_value_t<InputIteratorT> ThreadLoad(InputIteratorT 
 {
     return ThreadLoad(itr,
                       detail::int_constant_t<MODIFIER>(),
-                      ::std::bool_constant<::std::is_pointer<InputIteratorT>::value>());
+                      ::std::bool_constant<_HIPCUB_STD::is_pointer<InputIteratorT>::value>());
 }
 
 END_HIPCUB_NAMESPACE

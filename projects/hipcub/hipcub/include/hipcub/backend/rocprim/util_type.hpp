@@ -491,9 +491,9 @@ struct Uninitialized
     /// Biggest memory-access word that T is a whole multiple of and is not larger than the alignment of T
     using DeviceWord = typename UnitWord<T>::DeviceWord;
 
-    static constexpr std::size_t DATA_SIZE = sizeof(T);
-    static constexpr std::size_t WORD_SIZE = sizeof(DeviceWord);
-    static constexpr std::size_t WORDS = DATA_SIZE / WORD_SIZE;
+    static constexpr size_t DATA_SIZE = sizeof(T);
+    static constexpr size_t WORD_SIZE = sizeof(DeviceWord);
+    static constexpr size_t WORDS     = DATA_SIZE / WORD_SIZE;
 
     /// Backing storage
     DeviceWord storage[WORDS];
@@ -907,8 +907,8 @@ template<class T>
 struct is_extended_fp
     : std::integral_constant<
           bool,
-          std::is_same<__half, typename std::remove_cv<T>::type>::value
-              || std::is_same<hip_bfloat16, typename std::remove_cv<T>::type>::value>
+          _HIPCUB_STD::is_same<__half, typename std::remove_cv<T>::type>::value
+              || _HIPCUB_STD::is_same<hip_bfloat16, typename std::remove_cv<T>::type>::value>
 {};
 
 // Gets "raw" type: drops reference and const qualifier.

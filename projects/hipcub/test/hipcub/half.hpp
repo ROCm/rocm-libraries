@@ -77,17 +77,17 @@ struct half_t
         *this = half_t(float(a));
     }
 
-    /// Constructor from std::size_t
-    __host__ __device__ __forceinline__ half_t(std::size_t a)
+    /// Constructor from size_t
+    __host__ __device__ __forceinline__ half_t(size_t a)
     {
         *this = half_t(float(a));
     }
 
     /// Constructor from unsigned long long int
     template<typename T,
-             typename = typename std::enable_if<
-                 std::is_same_v<T, unsigned long long int>
-                 && (!std::is_same_v<std::size_t, unsigned long long int>)>::type>
+             typename
+             = typename std::enable_if<std::is_same_v<T, unsigned long long int>
+                                       && (!std::is_same_v<size_t, unsigned long long int>)>::type>
     __host__ __device__ __forceinline__ half_t(T a)
     {
         *this = half_t(float(a));
@@ -200,7 +200,7 @@ struct half_t
                 f = (0xff << 23) | (sign << 31);    //  inf
             }
         }
-        static_assert(sizeof(float) == sizeof(std::uint32_t), "4-byte size check");
+        static_assert(sizeof(float) == sizeof(uint32_t), "4-byte size check");
         float ret{};
         std::memcpy(&ret, &f, sizeof(float));
         return ret;

@@ -137,9 +137,9 @@ public:
 
 #if _CCCL_HAS_INT128()
 template<class T>
-using is_int128 = std::is_same<__int128_t, typename std::remove_cv<T>::type>;
+using is_int128 = _HIPCUB_STD::is_same<__int128_t, typename std::remove_cv<T>::type>;
 template<class T>
-using is_uint128 = std::is_same<__uint128_t, typename std::remove_cv<T>::type>;
+using is_uint128 = _HIPCUB_STD::is_same<__uint128_t, typename std::remove_cv<T>::type>;
 #else
 template<class T>
 using is_int128 = std::false_type;
@@ -148,17 +148,18 @@ using is_uint128 = std::false_type;
 #endif // _CCCL_HAS_INT128()
 
 template<class T>
-using is_half = std::is_same<test_utils::half, typename std::remove_cv<T>::type>;
+using is_half = _HIPCUB_STD::is_same<test_utils::half, typename std::remove_cv<T>::type>;
 
 template<class T>
-using is_bfloat16 = std::is_same<test_utils::bfloat16, typename std::remove_cv<T>::type>;
+using is_bfloat16 = _HIPCUB_STD::is_same<test_utils::bfloat16, typename std::remove_cv<T>::type>;
 
 template<class T>
-using is_native_half = std::is_same<test_utils::native_half, typename std::remove_cv<T>::type>;
+using is_native_half
+    = _HIPCUB_STD::is_same<test_utils::native_half, typename std::remove_cv<T>::type>;
 
 template<class T>
 using is_native_bfloat16
-    = std::is_same<test_utils::native_bfloat16, typename std::remove_cv<T>::type>;
+    = _HIPCUB_STD::is_same<test_utils::native_bfloat16, typename std::remove_cv<T>::type>;
 
 template<class T>
 struct convert_to_native_t_impl

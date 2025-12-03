@@ -74,7 +74,7 @@ constexpr auto tuple_bit_size_impl()
 
 template<class... Args>
 struct tuple_bit_size<::hipcub::tuple<Args...>>
-    : public std::integral_constant<std::size_t, tuple_bit_size_impl<::hipcub::tuple<Args...>, 0>()>
+    : public std::integral_constant<size_t, tuple_bit_size_impl<::hipcub::tuple<Args...>, 0>()>
 {};
 
 } // namespace detail

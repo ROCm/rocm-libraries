@@ -466,7 +466,7 @@ inline auto generate_random_data_n(OutputIterator it,
     return it + size;
 }
 
-template<std::size_t Size, std::size_t Alignment>
+template<size_t Size, size_t Alignment>
 struct alignas(Alignment) custom_aligned_type
 {
     unsigned char data[Size];
