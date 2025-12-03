@@ -38,6 +38,8 @@
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 #include <rocprim/type_traits_functions.hpp>
 
+#include _HIPCUB_STD_INCLUDE(functional)
+
 #include <hip/hip_bf16.h>
 
 BEGIN_HIPCUB_NAMESPACE
@@ -276,7 +278,7 @@ struct [[deprecated(
     constexpr uint32_t
         operator()(int32_t t, int32_t u) const
     {
-        return HIPCUB_MIN(t, u);
+        return _HIPCUB_STD::min(t, u);
     }
 };
 
@@ -290,7 +292,7 @@ struct [[deprecated(
     constexpr uint32_t
         operator()(uint32_t t, uint32_t u) const
     {
-        return HIPCUB_MIN(t, u);
+        return _HIPCUB_STD::min(t, u);
     }
 };
 
@@ -306,7 +308,7 @@ struct [[deprecated(
     __half2
         operator()(__half2 t, __half2 u) const
     {
-        return HIPCUB_MIN(t, u);
+        return _HIPCUB_STD::min(t, u);
     }
 };
 #endif // !defined(__HIP_NO_HALF_OPERATORS__)
@@ -322,7 +324,7 @@ struct [[deprecated("SIMD intrinsics are currently not supported on HIP, use Min
     __hip_bfloat162
         operator()(__hip_bfloat162 t, __hip_bfloat162 u) const
     {
-        return HIPCUB_MIN(t, u);
+        return _HIPCUB_STD::min(t, u);
     }
 };
 
@@ -343,7 +345,7 @@ struct [[deprecated(
     constexpr uint32_t
         operator()(int32_t t, int32_t u) const
     {
-        return HIPCUB_MAX(t, u);
+        return _HIPCUB_STD::max(t, u);
     }
 };
 
@@ -357,7 +359,7 @@ struct [[deprecated(
     constexpr uint32_t
         operator()(uint32_t t, uint32_t u) const
     {
-        return HIPCUB_MAX(t, u);
+        return _HIPCUB_STD::max(t, u);
     }
 };
 
@@ -372,7 +374,7 @@ struct [[deprecated(
     __half2
         operator()(__half2 t, __half2 u) const
     {
-        return HIPCUB_MAX(t, u);
+        return _HIPCUB_STD::max(t, u);
     }
 };
 #endif // !defined(__HIP_NO_HALF_OPERATORS__)
@@ -387,7 +389,7 @@ struct [[deprecated("SIMD intrinsics are currently not supported on HIP, use Max
     __hip_bfloat162
         operator()(__hip_bfloat162 t, __hip_bfloat162 u) const
     {
-        return HIPCUB_MAX(t, u);
+        return _HIPCUB_STD::max(t, u);
     }
 };
 
