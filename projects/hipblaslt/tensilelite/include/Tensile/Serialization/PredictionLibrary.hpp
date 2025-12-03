@@ -106,7 +106,7 @@ namespace TensileLite
                                 },
                                 .mi = origami_mi,
                                 .occupancy = std::max(solution->sizeMapping.CUOccupancy, static_cast<int>(1)),
-                                .workgroup_mapping = defaultWGM,
+                                .workgroup_mapping = (solution->sizeMapping.nonTemporalA>0 || solution->sizeMapping.nonTemporalB > 0) ? solution->sizeMapping.workGroupMapping : defaultWGM,
                                 .cache_hints_a = solution->sizeMapping.nonTemporalA,
                                 .cache_hints_b = solution->sizeMapping.nonTemporalB,
                                 .workspace_size = std::numeric_limits<size_t>::max(),
