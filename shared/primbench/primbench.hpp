@@ -3260,6 +3260,10 @@ class executor {
         s.spaces_per_indent = cli.get<uint32_t>(
             "spaces-per-indent", 4,
             "Number of spaces per indentation level in JSON output. Set to 0 for no indentation.");
+        if (s.spaces_per_indent > 8) {
+            std::cerr << "Error: --spaces-per-indent must be less than or equal to 8\n";
+            exit(EXIT_FAILURE);
+        }
 
         s.stream_blocking_timeout_secs = std::chrono::duration<double>(cli.get<double>(
             "stream-blocking-timeout-secs", 10.0,
