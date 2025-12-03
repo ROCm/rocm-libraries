@@ -493,7 +493,7 @@ public:
              typename ValuesInputIteratorT,
              typename ValuesOutputIteratorT,
              typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename NumItemsT   = uint32_t>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ExclusiveSumByKey(void*                 d_temp_storage,
                                         size_t&               temp_storage_bytes,
@@ -522,7 +522,7 @@ public:
              typename ValuesInputIteratorT,
              typename ValuesOutputIteratorT,
              typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename NumItemsT   = uint32_t>
     HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
     static hipError_t ExclusiveSumByKey(void*                 d_temp_storage,
                                         size_t&               temp_storage_bytes,
@@ -551,7 +551,7 @@ public:
              typename ScanOpT,
              typename InitValueT,
              typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename NumItemsT   = uint32_t>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ExclusiveScanByKey(void*                 d_temp_storage,
                                          size_t&               temp_storage_bytes,
@@ -592,7 +592,7 @@ public:
              typename ScanOpT,
              typename InitValueT,
              typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename NumItemsT   = uint32_t>
     HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
     static hipError_t ExclusiveScanByKey(void*                 d_temp_storage,
                                          size_t&               temp_storage_bytes,
@@ -623,7 +623,7 @@ public:
              typename ValuesInputIteratorT,
              typename ValuesOutputIteratorT,
              typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename NumItemsT   = uint32_t>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t InclusiveSumByKey(void*                 d_temp_storage,
                                         size_t&               temp_storage_bytes,
@@ -649,7 +649,7 @@ public:
              typename ValuesInputIteratorT,
              typename ValuesOutputIteratorT,
              typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename NumItemsT   = uint32_t>
     HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
     static hipError_t InclusiveSumByKey(void*                 d_temp_storage,
                                         size_t&               temp_storage_bytes,
@@ -677,7 +677,7 @@ public:
              typename ValuesOutputIteratorT,
              typename ScanOpT,
              typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename NumItemsT   = uint32_t>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t InclusiveScanByKey(void*                 d_temp_storage,
                                          size_t&               temp_storage_bytes,
@@ -714,7 +714,7 @@ public:
              typename ValuesOutputIteratorT,
              typename ScanOpT,
              typename EqualityOpT = ::hipcub::Equality,
-             typename NumItemsT   = std::uint32_t>
+             typename NumItemsT   = uint32_t>
     HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
     static hipError_t InclusiveScanByKey(void*                 d_temp_storage,
                                          size_t&               temp_storage_bytes,

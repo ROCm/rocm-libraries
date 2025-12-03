@@ -904,11 +904,11 @@ using HipcubDeviceForEachInExtentsParamGenerator
 
 using HipcubDeviceForEachInExtentsTestsParams = typename HipcubTestParamsMergeAll<
     HipcubDeviceForEachInExtentsParamGenerator<std::int16_t>,
-    HipcubDeviceForEachInExtentsParamGenerator<std::uint16_t>,
-    HipcubDeviceForEachInExtentsParamGenerator<std::int32_t>,
-    HipcubDeviceForEachInExtentsParamGenerator<std::uint32_t>,
-    HipcubDeviceForEachInExtentsParamGenerator<std::int64_t>,
-    HipcubDeviceForEachInExtentsParamGenerator<std::uint64_t>>::type;
+    HipcubDeviceForEachInExtentsParamGenerator<uint16_t>,
+    HipcubDeviceForEachInExtentsParamGenerator<int32_t>,
+    HipcubDeviceForEachInExtentsParamGenerator<uint32_t>,
+    HipcubDeviceForEachInExtentsParamGenerator<_HIPCUB_STD::int64_t>,
+    HipcubDeviceForEachInExtentsParamGenerator<uint64_t>>::type;
 
 template<int Rank = 0,
          typename T,
@@ -1070,10 +1070,10 @@ template<class Params>
 class HipcubDeviceForBulkTests : public HipcubDeviceForTests<Params>
 {};
 
-using HipcubDeviceForBulkTestsParams = ::testing::Types<DeviceForParams<std::int32_t>,
-                                                        DeviceForParams<std::uint32_t>,
-                                                        DeviceForParams<std::int64_t>,
-                                                        DeviceForParams<std::uint64_t>>;
+using HipcubDeviceForBulkTestsParams = ::testing::Types<DeviceForParams<int32_t>,
+                                                        DeviceForParams<uint32_t>,
+                                                        DeviceForParams<_HIPCUB_STD::int64_t>,
+                                                        DeviceForParams<uint64_t>>;
 
 TYPED_TEST_SUITE(HipcubDeviceForBulkTests, HipcubDeviceForBulkTestsParams);
 
