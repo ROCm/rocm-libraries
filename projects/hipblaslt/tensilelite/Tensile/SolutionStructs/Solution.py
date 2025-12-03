@@ -2757,10 +2757,10 @@ class Solution(collections.abc.Mapping):
         state["LdsBlockSizePerPadB"] = 128
     assert(state["LdsPadB"] >= 0)
 
-    # set ldsbspp = 0 for ldspad = 0 for DTL
+    # set ldsbspp = 0 for ldspad = 0
     for tc in ['A', 'B']:
-      if state["DirectToLds%s"%tc]:
-        state["LdsBlockSizePerPad%s"%tc] = 0 if state["LdsPad%s"%tc] == 0 else state["LdsBlockSizePerPad%s"%tc]
+      if state["LdsPad%s"%tc] == 0:
+        state["LdsBlockSizePerPad%s"%tc] = 0
 
     if (state["UnrollMajorLDSA"] or state["UnrollMajorLDSB"]) and (not state["EnableMatrixInstruction"]) and (not state["UseDotInstruction"]):
         reject(state, printRejectionReason, "UnrollMajorLDS Supports only in EnableMatrixInstruction=1 or dot2 kernel")
