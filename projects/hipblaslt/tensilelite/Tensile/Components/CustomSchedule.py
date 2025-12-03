@@ -353,10 +353,7 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
             
             7, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for prior 5 LRA0"),
             
-            19, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LRA0 launched"),
-            19, SBarrier(comment=""),
-            
-            23, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LRB0 launched"),
+            23, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="All LRB0 launched"),
             23, SBarrier(comment=""),
             
             37, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="All GRA launched"),
