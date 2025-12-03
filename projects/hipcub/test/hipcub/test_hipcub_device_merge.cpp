@@ -472,7 +472,7 @@ TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type         = int;
+    using key_type         = _HIPCUB_STD::int64_t;
     using compare_function = test_utils::less;
 
     hipStream_t stream = 0; // default
