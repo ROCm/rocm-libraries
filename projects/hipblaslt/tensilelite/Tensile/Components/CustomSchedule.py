@@ -1702,7 +1702,7 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
         'GRIncA': [grinca],
         'LRB0':   [lrb0],
         'GRIncB': [grincb],
-        # Note: each GRA/GRB item corresponds to two MFMA instructions. So duplicate each item twice.
+        # Note: each GRA/GRB item corresponds to two instructions (addr increment and read). So duplicate each item twice.
         'GRA':    [duplicate_list_items(gra, 2)],
         'GRB':    [duplicate_list_items(grb, 2)],
         'LRSA':   [lrsa],
