@@ -565,7 +565,7 @@ protected:
     TensorsConfig tensorsConfig;
     float alpha0, alpha1, beta;
 
-    PerfHelper<T> ph;
+    PerfHelper ph;
 };
 
 struct GPU_Op4dTensorGenericTest_FP32 : Op4DTensorGenericTest<float>
