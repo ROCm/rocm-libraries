@@ -42,18 +42,6 @@ BEGIN_HIPCUB_NAMESPACE
  */
 
 /// Deprecated since rocm [7.1]
-#ifndef HIPCUB_MAX
-    /// Select maximum(a, b)
-    #define HIPCUB_MAX(a, b) (((b) > (a)) ? (b) : (a))
-#endif
-
-/// Deprecated since rocm [7.1]
-#ifndef HIPCUB_MIN
-    /// Select minimum(a, b)
-    #define HIPCUB_MIN(a, b) (((b) < (a)) ? (b) : (a))
-#endif
-
-/// Deprecated since rocm [7.1]
 #ifndef HIPCUB_QUOTIENT_FLOOR
     /// Quotient of x/y rounded down to nearest integer
     #define HIPCUB_QUOTIENT_FLOOR(x, y) ((x) / (y))
