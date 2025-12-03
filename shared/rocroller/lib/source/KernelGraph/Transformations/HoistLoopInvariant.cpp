@@ -125,8 +125,7 @@ namespace rocRoller::KernelGraph
         return visitor.tags;
     }
 
-    int HoistLoopInvariant::hoistNodeBeforeLoop(
-        KernelGraph& kgraph, int nodeToHoist, int loopNode, int predecessorNode, int sequenceEdge)
+    int HoistLoopInvariant::hoistNodeBeforeLoop(KernelGraph& kgraph, int nodeToHoist, int loopNode)
     {
         int hoistedNode = duplicateControlNode(kgraph, nodeToHoist);
         Log::info("Hoisted node {} to new node {}", nodeToHoist, hoistedNode);
@@ -137,7 +136,9 @@ namespace rocRoller::KernelGraph
 
     KernelGraph HoistLoopInvariant::apply(KernelGraph const& original)
     {
-        const size_t MAX_NODES_TO_HOIST = 9999;
+        return original; // TODO: remove
+
+        const size_t MAX_NODES_TO_HOIST = 1;
         size_t       hoistedCount       = 0;
 
         auto graph = original;
@@ -148,70 +149,93 @@ namespace rocRoller::KernelGraph
         auto forLoopNodes = graph.control.getNodes<ForLoopOp>();
         for(auto loopNode : forLoopNodes)
         {
-            auto bodyNodes = graph.control.getOutputNodeIndices<Body>(loopNode);
-            for(auto bodyNode : bodyNodes)
+            Log::info("Analyzing ForLoop node {}", loopNode);
+
+            auto bodyTags = graph.control.getOutputNodeIndices<Body>(loopNode);
+            for(auto bodyTag : bodyTags)
             {
-                auto maybeAssign = graph.control.get<Assign>(bodyNode);
-                if(!maybeAssign.has_value())
-                    continue;
-                auto control = maybeAssign.value();
-
-                auto dst = graph.mapper.get(bodyNode, NaryArgument::DEST);
-
-                Log::info("Analyzing Assign node {} in loop node {}, dst coordinate {}",
-                          bodyNode,
-                          loopNode,
-                          dst);
-
-                auto   records          = tracer.coordinatesReadWrite(dst);
-                size_t writeCountInLoop = 0;
-                for(const auto& record : records)
+                Log::info("  Body node {}", bodyTag, loopNode);
+                using GD         = rocRoller::Graph::Direction;
+                auto descendants = graph.control.depthFirstVisit(bodyTag, GD::Downstream);
+                for(auto descendant : descendants)
                 {
-                    if(record.rw == ControlFlowRWTracer::WRITE
-                       || record.rw == ControlFlowRWTracer::READWRITE)
+                    auto maybeAssign = graph.control.get<Assign>(descendant);
+                    if(!maybeAssign.has_value())
+                        continue;
+
+                    auto assignNode = maybeAssign.value();
+
+                    auto dstTag = graph.mapper.get(descendant, NaryArgument::DEST);
+
+                    Log::info("Analyzing Assign node {} in loop node {}, dst coordinate {}",
+                              descendant,
+                              loopNode,
+                              dstTag);
+
+                    auto   records          = tracer.coordinatesReadWrite(dstTag);
+                    size_t writeCountInLoop = 0;
+                    for(const auto& record : records)
                     {
-                        if(isCoordinateWrittenInLoop(graph, loopNode, dst, tracer))
+                        if(record.rw == ControlFlowRWTracer::WRITE
+                           || record.rw == ControlFlowRWTracer::READWRITE)
                         {
-                            writeCountInLoop++;
+                            if(isCoordinateWrittenInLoop(graph, loopNode, dstTag, tracer))
+                            {
+                                writeCountInLoop++;
+                            }
+                        }
+                    }
+
+                    Log::info("Coordinate {} has {} writes in loop node {}",
+                              dstTag,
+                              writeCountInLoop,
+                              loopNode);
+
+                    if(writeCountInLoop > 1)
+                    {
+                        continue;
+                    }
+
+                    AssertFatal(
+                        writeCountInLoop == 1,
+                        fmt::format(
+                            "Expected exactly one write to coordinate {} in loop node {}, found {}",
+                            dstTag,
+                            loopNode,
+                            writeCountInLoop));
+
+                    auto usedTags             = extractDataFlowTags(*assignNode.expression);
+                    bool allTagsLoopInvariant = true;
+                    for(auto tag : usedTags)
+                    {
+                        const auto isWrittenInLoop
+                            = isCoordinateWrittenInLoop(graph, loopNode, tag, tracer);
+                        if(isWrittenInLoop)
+                        {
+                            allTagsLoopInvariant = false;
+                            break;
+                        }
+                    }
+
+                    Log::info("Used tags in Assign node {}: {}, all loop invariant: {}",
+                              descendant,
+                              usedTags,
+                              allTagsLoopInvariant);
+
+                    if(allTagsLoopInvariant)
+                    {
+                        Log::info(
+                            "Hoisting Assign node {} out of loop node {}", descendant, loopNode);
+                        hoistNodeBeforeLoop(graph, descendant, loopNode);
+                        hoistedCount++;
+                        if(hoistedCount >= MAX_NODES_TO_HOIST)
+                        {
+                            Log::info("Reached maximum hoisted node count of {}, stopping.",
+                                      MAX_NODES_TO_HOIST);
+                            return graph;
                         }
                     }
                 }
-
-                Log::info(
-                    "Coordinate {} has {} writes in loop node {}", dst, writeCountInLoop, loopNode);
-
-                if(writeCountInLoop > 1)
-                {
-                    continue;
-                }
-
-                AssertFatal(
-                    writeCountInLoop == 1,
-                    fmt::format(
-                        "Expected exactly one write to coordinate {} in loop node {}, found {}",
-                        dst,
-                        loopNode,
-                        writeCountInLoop));
-
-                auto usedTags             = extractDataFlowTags(*control.expression);
-                bool allTagsLoopInvariant = true;
-                for(auto tag : usedTags)
-                {
-                    const auto isWrittenInLoop
-                        = isCoordinateWrittenInLoop(graph, loopNode, tag, tracer);
-                    if(isWrittenInLoop)
-                    {
-                        allTagsLoopInvariant = false;
-                        break;
-                    }
-                }
-
-                Log::info("Used tags in Assign node {}: {}, all loop invariant: {}",
-                          bodyNode,
-                          usedTags,
-                          allTagsLoopInvariant);
-
-                AssertFatal(!allTagsLoopInvariant);
             }
         }
         return graph;

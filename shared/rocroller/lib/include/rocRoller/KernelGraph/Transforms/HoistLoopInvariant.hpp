@@ -69,11 +69,7 @@ namespace rocRoller
              * @param sequenceEdge The sequence edge leading into the loop (will be deleted)
              * @return The hoisted node, which becomes the new predecessor for subsequent operations
              */
-            static int hoistNodeBeforeLoop(KernelGraph& kgraph,
-                                           int          nodeToHoist,
-                                           int          loopNode,
-                                           int          predecessorNode,
-                                           int          sequenceEdge);
+            static int hoistNodeBeforeLoop(KernelGraph& kgraph, int nodeToHoist, int loopNode);
 
             /**
              * @brief Find the enclosing ForLoopOp for a given control node
