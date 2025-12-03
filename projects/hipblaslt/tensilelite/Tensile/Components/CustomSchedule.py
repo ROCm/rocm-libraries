@@ -658,7 +658,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
         kernel["SwapGlobalReadOrder"] = True
         #index and code pair
         syncTable = [-1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="for LRB1"),
-                     29, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for LRB0"),
+                     29, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for LRB0. For code path 0, this is actually wait for LRB0 + 1/16 LRA0"),
                      29, SBarrier(comment="for GRA"),
                      47, SWaitCnt(dscnt=0, vlcnt=14, vscnt=-1, comment="wait for previous GRB and LRA0"),
                      47, SBarrier(comment="for GRB"),
@@ -667,7 +667,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                      ]
         optSchedule = {
                 'SYNC'  : [syncTable[::2]],
-                'GRIncA': [[45, 45,45,45,45,46,46,46,46]],
+                'GRIncA': [[18, 19,20,21,22,23,24,25,26]],
                 'GRIncB': [[9,10,11,12,13,14,15,16,17]],
 
                 'LRB0': [[-1,1, 3,5, 7,9, 11,13, 15,17, 19,21],
