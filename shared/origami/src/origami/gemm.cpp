@@ -273,9 +273,9 @@ static inline double compute_cvt_overhead(const problem_t& problem,
   int b_bytes = data_type_to_bytes(problem.b_dtype);
 
   const double bytesA =
-      static_cast<double>(wave_tile_m) * config.mt.k * math::safe_ceil_div(a_bytes, 8);
+      static_cast<double>(wave_tile_m) * config.mt.k * a_bytes;
   const double bytesB =
-      static_cast<double>(wave_tile_n) * config.mt.k * math::safe_ceil_div(b_bytes, 8);
+      static_cast<double>(wave_tile_n) * config.mt.k * b_bytes;
 
   // const double mt_bytesA
   //     = static_cast<double>(MT_M) * MT_K * safe_ceil_div(element_size_A, 8);
