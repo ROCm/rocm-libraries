@@ -34,39 +34,4 @@
 
 #include <utility>
 
-BEGIN_HIPCUB_NAMESPACE
-
-/**
- * \addtogroup UtilModule
- * @{
- */
-
-/// Deprecated since rocm [7.1]
-#ifndef HIPCUB_QUOTIENT_FLOOR
-    /// Quotient of x/y rounded down to nearest integer
-    #define HIPCUB_QUOTIENT_FLOOR(x, y) ((x) / (y))
-#endif
-
-/// Deprecated since rocm [7.1]
-#ifndef HIPCUB_QUOTIENT_CEILING
-    /// Quotient of x/y rounded up to nearest integer
-    #define HIPCUB_QUOTIENT_CEILING(x, y) (((x) + (y)-1) / (y))
-#endif
-
-/// Deprecated since rocm [7.1]
-#ifndef HIPCUB_ROUND_UP_NEAREST
-    /// x rounded up to the nearest multiple of y
-    #define HIPCUB_ROUND_UP_NEAREST(x, y) (HIPCUB_QUOTIENT_CEILING(x, y) * y)
-#endif
-
-/// Deprecated since rocm [7.1]
-#ifndef HIPCUB_ROUND_DOWN_NEAREST
-    /// x rounded down to the nearest multiple of y
-    #define HIPCUB_ROUND_DOWN_NEAREST(x, y) (((x) / (y)) * y)
-#endif
-
-/** @} */ // end group UtilModule
-
-END_HIPCUB_NAMESPACE
-
 #endif // HIPCUB_ROCPRIM_MACRO_HPP_
