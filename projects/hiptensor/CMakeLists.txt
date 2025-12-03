@@ -182,7 +182,7 @@ endif()
 # disable warning about 'amdgpu-waves-per-eu'
 add_compile_options(-Wno-pass-failed)
 
-find_package( composable_kernel 1.0.0 REQUIRED PATHS $ENV{CK_DIR}/lib/cmake /opt/rocm /opt/rocm/ck COMPONENTS device_contraction_operations device_reduction_operations device_other_operations)
+find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS device_contraction_operations device_reduction_operations device_other_operations)
 rocm_package_add_dependencies("composable_kernel >= 1.0.0" COMPONENT tests)
 
 # Configure library build
