@@ -5,9 +5,7 @@
 
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
 
-namespace hipdnn_sdk
-{
-namespace helpers
+namespace hipdnn_sdk::helpers
 {
 
 template <typename T>
@@ -40,5 +38,4 @@ utilities::MigratableMemory<T> createConstantBuffer(size_t size, T value)
     return buffer;
 }
 
-} // namespace helpers
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::helpers

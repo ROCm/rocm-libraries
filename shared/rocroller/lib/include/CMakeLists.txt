@@ -233,6 +233,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/ConstantPropagation.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/FuseExpressions.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/FuseLoops.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/FuseLoops_detail.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/GraphTransform.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/GraphTransform_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/IdentifyParallelDimensions.hpp"

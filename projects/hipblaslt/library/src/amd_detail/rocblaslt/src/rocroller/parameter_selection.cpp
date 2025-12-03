@@ -104,14 +104,10 @@ std::shared_ptr<SolutionParameters>
 
     gemm->machineInstruction = pickMI(gemm->kernelType.typeA, gemm->kernelType.typeB, gemm->workgroupTile);
 
-    if(solutionIndexParameters.prefetchInFlight == 1)
-    {
+    gemm->prefetchInFlight = preferredUnrolling(kernelType.typeA, kernelType.typeB, gemm->workgroupTile);
+
+    if(gemm->prefetchInFlight <= 1)
         gemm->prefetch = false;
-    }
-    else
-    {
-        gemm->prefetchInFlight = solutionIndexParameters.prefetchInFlight;
-    }
 
     // Swizzle Scale only support in certain situations
     // Swizzle Scale also runs out of registers with FP8
