@@ -256,6 +256,82 @@ void syevd_heevd_eig7_initData(const rocblas_handle handle,
         CHECK_HIP_ERROR(dA.transfer_from(hA));
     }
 }
+template <bool CPU, bool GPU, typename T>
+void syevd_heevd_eig7_initData_gpu(const rocblas_handle handle,
+                                   const rocblas_evect evect,
+                                   const rocblas_int n,
+                                   device_strided_batch_vector<T>& dA,
+                                   const rocblas_int lda,
+                                   const rocblas_int bc,
+                                   host_strided_batch_vector<T>& hA,
+                                   std::vector<T>& A,
+                                   bool test = true)
+{
+    if(bc > 1)
+    {
+        syevd_heevd_eig7_initData<CPU, GPU>(handle, evect, n, dA, lda, bc, hA, A, test);
+    }
+
+    else
+    {
+        using S = decltype(std::real(T{}));
+
+        if(CPU)
+        {
+            // generates spectrum
+            S eps = std::numeric_limits<S>::epsilon();
+            for(auto i = 0; i < n - 1; ++i)
+                hA[0][i + i * lda] = (i + 1) * eps;
+            hA[0][n - 1 + (n - 1) * lda] = 1;
+            CHECK_HIP_ERROR(dA.transfer_from(hA));
+
+            // generates orthogonal matrix
+            rocblas_int n2 = n * n;
+            host_strided_batch_vector<T> hQ(n2, 1, n2, 1);
+            device_strided_batch_vector<T> dQ(n2, 1, n2, 1);
+            device_strided_batch_vector<T> dipiv(n, 1, n, 1);
+            rocblas_init<T>(hQ, true);
+            CHECK_HIP_ERROR(dQ.transfer_from(hQ));
+            rocsolver_geqr2_geqrf(false, true, handle, n, n, dQ.data(), n, n2, dipiv.data(), n, 1);
+
+            // generates matrix with given spectrum
+            rocsolver_ormxr_unmxr(true, handle, rocblas_side_left, rocblas_operation_transpose, n,
+                                  n, n, dQ.data(), n, dipiv.data(), dA.data(), lda);
+            rocsolver_ormxr_unmxr(true, handle, rocblas_side_right, rocblas_operation_none, n, n, n,
+                                  dQ.data(), n, dipiv.data(), dA.data(), lda);
+            CHECK_HIP_ERROR(hA.transfer_from(dA));
+
+            // make copy of original data to test vectors if required
+            if(test && evect == rocblas_evect_original)
+            {
+                for(rocblas_int i = 0; i < n; i++)
+                {
+                    for(rocblas_int j = 0; j < n; j++)
+                        A[i + j * lda] = hA[0][i + j * lda];
+                }
+            }
+        }
+
+        if(GPU)
+        {
+            // now copy to the GPU
+            CHECK_HIP_ERROR(dA.transfer_from(hA));
+        }
+    }
+}
+template <bool CPU, bool GPU, typename T>
+void syevd_heevd_eig7_initData_gpu(const rocblas_handle handle,
+                                   const rocblas_evect evect,
+                                   const rocblas_int n,
+                                   device_batch_vector<T>& dA,
+                                   const rocblas_int lda,
+                                   const rocblas_int bc,
+                                   host_batch_vector<T>& hA,
+                                   std::vector<T>& A,
+                                   bool test = true)
+{
+    syevd_heevd_eig7_initData<CPU, GPU>(handle, evect, n, dA, lda, bc, hA, A, test);
+}
 
 // Creates an `n` by `n` tridiagonal, Wilkinson matrix, which is formed as follows:
 //
@@ -482,9 +558,13 @@ void syevd_heevd_initData(const rocblas_handle handle,
                           std::vector<T>& A,
                           bool test = true)
 {
+#define USE_GPU true
     if((std::getenv("TEST_EIG7") != nullptr) || (std::getenv("SYEVD_TEST_EIG7") != nullptr))
     {
-        syevd_heevd_eig7_initData<CPU, GPU>(handle, evect, n, dA, lda, bc, hA, A, test);
+        if(USE_GPU)
+            syevd_heevd_eig7_initData_gpu<CPU, GPU>(handle, evect, n, dA, lda, bc, hA, A, test);
+        else
+            syevd_heevd_eig7_initData<CPU, GPU>(handle, evect, n, dA, lda, bc, hA, A, test);
     }
     else if((std::getenv("TEST_WILKINSON") != nullptr)
             || (std::getenv("SYEVD_TEST_WILKINSON") != nullptr))
