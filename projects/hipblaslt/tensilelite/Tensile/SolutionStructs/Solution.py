@@ -1862,6 +1862,8 @@ class Solution(collections.abc.Mapping):
           if state["LocalReadVectorWidth"] // state["MIInputPerThread"] > 1:
             padA, padB, padM = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
             ldsBlockSizePerPadA, ldsBlockSizePerPadB = calcLdsBlockSizePerPad(state["LocalReadVectorWidth"])
+            ldsBlockSizePerPadA = 0 if padA == 0 else ldsBlockSizePerPadA
+            ldsBlockSizePerPadB = 0 if padB == 0 else ldsBlockSizePerPadB
             ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
             if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > state["MaxLDS"]:
               state["LocalReadVectorWidth"] //= 2
@@ -2754,6 +2756,11 @@ class Solution(collections.abc.Mapping):
       if auto_LdsBlockSizePerPadB_for_mix:
         state["LdsBlockSizePerPadB"] = 128
     assert(state["LdsPadB"] >= 0)
+
+    # set ldsbspp = 0 for ldspad = 0 for DTL
+    for tc in ['A', 'B']:
+      if state["DirectToLds%s"%tc]:
+        state["LdsBlockSizePerPad%s"%tc] = 0 if state["LdsPad%s"%tc] == 0 else state["LdsBlockSizePerPad%s"%tc]
 
     if (state["UnrollMajorLDSA"] or state["UnrollMajorLDSB"]) and (not state["EnableMatrixInstruction"]) and (not state["UseDotInstruction"]):
         reject(state, printRejectionReason, "UnrollMajorLDS Supports only in EnableMatrixInstruction=1 or dot2 kernel")
