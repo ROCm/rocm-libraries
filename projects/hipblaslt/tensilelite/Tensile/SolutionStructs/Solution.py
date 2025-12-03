@@ -1735,7 +1735,7 @@ class Solution(collections.abc.Mapping):
               if state["_DepthUA"] * tmpBpe * state["VectorWidthA"] > 128:
                 LdsBlockSizePerPadA = roundUpToNearestMultiple(state["_DepthUA"] * tmpBpe * state["VectorWidthA"], 128)
             else:
-              if state["MatrixInstB"] == 1 and (state["MatrixInstM"] == 16 or state["DirectToLdsA"]):
+              if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
                 LdsBlockSizePerPadA = state["MacroTile0"] * tmpBpe * lrvw
               else:
                 LdsBlockSizePerPadA = 0
@@ -1749,7 +1749,7 @@ class Solution(collections.abc.Mapping):
               if state["_DepthUB"] * tmpBpe * state["VectorWidthB"] > 128:
                 LdsBlockSizePerPadB = roundUpToNearestMultiple(state["_DepthUB"] * tmpBpe * state["VectorWidthB"], 128)
             else:
-              if state["MatrixInstB"] == 1 and (state["MatrixInstM"] == 16 or state["DirectToLdsB"]):
+              if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
                 LdsBlockSizePerPadB = state["MacroTile1"] * tmpBpe * lrvw
               else:
                 LdsBlockSizePerPadB = 0
@@ -1769,6 +1769,7 @@ class Solution(collections.abc.Mapping):
           if state["UseGeneralizedNLCOneA"]:
             LdsBlockSizePerPadA = MinLdsBlockSizePerPadA
           else:
+            LdsBlockSizePerPadA = max(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
             LdsBlockSizePerPadA = roundUpToNearestMultiple(LdsBlockSizePerPadA, MinLdsBlockSizePerPadA)
 
         if state["DirectToLdsB"]:
@@ -1778,6 +1779,7 @@ class Solution(collections.abc.Mapping):
           if state["UseGeneralizedNLCOneB"]:
             LdsBlockSizePerPadB = MinLdsBlockSizePerPadB
           else:
+            LdsBlockSizePerPadB = max(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
             LdsBlockSizePerPadB = roundUpToNearestMultiple(LdsBlockSizePerPadB, MinLdsBlockSizePerPadB)
 
         return LdsBlockSizePerPadA, LdsBlockSizePerPadB
