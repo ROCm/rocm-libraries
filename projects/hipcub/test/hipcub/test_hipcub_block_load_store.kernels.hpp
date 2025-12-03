@@ -191,7 +191,7 @@ __launch_bounds__(BlockSize) __global__
     __syncthreads();
 
     // reset data
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned int item = 0; item < ItemsPerThread; ++item)
         data[item] = OutputT();
 

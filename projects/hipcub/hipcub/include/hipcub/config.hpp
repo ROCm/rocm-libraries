@@ -237,4 +237,13 @@ END_HIPCUB_NAMESPACE
     #endif
 #endif // HIPCUB_ROCPRIM_API
 
+// This API needs to be deprecated once libhipcxx is available.
+#if !defined(_CCCL_PRAGMA_UNROLL_FULL)
+    #define _CCCL_PRAGMA_UNROLL_FULL() _Pragma("unroll")
+#endif // !defined(_CCCL_PRAGMA_UNROLL_FULL)
+
+#if !defined(_CCCL_PRAGMA_NOUNROLL)
+    #define _CCCL_PRAGMA_NOUNROLL() _Pragma("nounroll")
+#endif // !defined(_CCCL_PRAGMA_NOUNROLL)
+
 #endif // HIPCUB_CONFIG_HPP_

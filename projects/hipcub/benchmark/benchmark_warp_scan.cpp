@@ -57,7 +57,7 @@ struct inclusive_scan
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
         auto                                     scan_op = hipcub::Sum();
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             wscan_t(storage).InclusiveScan(value, value, scan_op);
@@ -86,7 +86,7 @@ struct exclusive_scan
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
         auto                                     scan_op = hipcub::Sum();
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             wscan_t(storage).ExclusiveScan(value, value, init, scan_op);
@@ -118,7 +118,7 @@ struct broadcast
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             value = wscan_t(storage).Broadcast(value, src_lane);
