@@ -161,6 +161,7 @@ int TensorOpDriver<Tgpu, Tref>::AddCmdLineArgs()
                          "int");
     inflags.AddInputFlag(
         "tensor_val", 'v', "1", "Scalar value for SetTensor and ScaleTensor", "double");
+    inflags.AddInputFlag("mt", 'm', "0", "Use multithreaded CPU verification (Default=0)", "int");
     return miopenStatusSuccess;
 }
 
@@ -452,25 +453,31 @@ int TensorOpDriver<Tgpu, Tref>::VerifyForward()
     double allowedEps = std::numeric_limits<Tgpu>::epsilon() * 80;
     int match         = 1;
 
-    RunForwardCPU();
+    if(inflags.GetValueInt("mt") == 0)
+    {
+        RunForwardCPU();
 
-    match = CheckTensor(
-        (!is_set && !is_scale) ? c_verif : a_verif, (!is_set && !is_scale) ? c : a, allowedEps);
+        match = CheckTensor(
+            (!is_set && !is_scale) ? c_verif : a_verif, (!is_set && !is_scale) ? c : a, allowedEps);
 
-    if(!match)
-        return miopenStatusInternalError;
+        if(!match)
+            return miopenStatusInternalError;
 
-    printf("Tensor Op verifies on CPU and GPU\n");
+        printf("Tensor Op verifies on CPU and GPU\n");
+    }
+    else
+    {
 
-    RunForwardCPUMT();
+        RunForwardCPUMT();
 
-    match = CheckTensor(
-        (!is_set && !is_scale) ? c_mt_verif : a_mt_verif, (!is_set && !is_scale) ? c : a, allowedEps);
+        match = CheckTensor(
+            (!is_set && !is_scale) ? c_mt_verif : a_mt_verif, (!is_set && !is_scale) ? c : a, allowedEps);
 
-    if(!match)
-        return miopenStatusInternalError;
+        if(!match)
+            return miopenStatusInternalError;
 
-    printf("Tensor Op verifies on CPU MT and GPU\n");
+        printf("Tensor Op verifies on CPU MT and GPU\n");
+    }
 
     return miopenStatusSuccess;
 }
