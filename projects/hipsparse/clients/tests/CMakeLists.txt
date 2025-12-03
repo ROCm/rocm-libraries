@@ -271,6 +271,11 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
                          test_prune_csr2csr_by_percentage.yaml
                          test_prune_dense2csr.yaml
                          test_prune_dense2csr_by_percentage.yaml
+                         test_identity.yaml
+                         test_nnz.yaml
+                         test_coosort.yaml
+                         test_cscsort.yaml
+                         test_csrsort.yaml
 
                          test_axpby.yaml
                          test_rot.yaml
@@ -297,6 +302,7 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
                          test_spmv_coo_aos.yaml
                          test_spmv_coo.yaml
                          test_spmv_csr.yaml
+                         test_spmv_sell.yaml
                          test_spsv_coo.yaml
                          test_spsv_csr.yaml
                          test_spsm_coo.yaml

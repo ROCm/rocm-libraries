@@ -10,9 +10,7 @@
 
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
 
-namespace hipdnn_sdk
-{
-namespace utilities
+namespace hipdnn_sdk::utilities
 {
 
 template <class T>
@@ -119,5 +117,4 @@ private:
     size_t _count;
 };
 
-}
-}
+} // namespace hipdnn_sdk::utilities

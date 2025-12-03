@@ -109,8 +109,8 @@ inline Config parseCommandLineArgs(int argc, char* argv[])
 template <typename F>
 void run(F&& f)
 {
-    f.template operator()<half, float>(TensorLayout::NCHW);
     f.template operator()<float, float>(TensorLayout::NCHW);
+    f.template operator()<half, float>(TensorLayout::NCHW);
     f.template operator()<hip_bfloat16, float>(TensorLayout::NCHW);
     f.template operator()<float, float>(TensorLayout::NHWC);
     f.template operator()<half, float>(TensorLayout::NHWC);

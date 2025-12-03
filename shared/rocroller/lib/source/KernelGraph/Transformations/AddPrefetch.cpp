@@ -887,20 +887,21 @@ namespace rocRoller
                                       barrier);
                     }
 
-                    logger->debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
-                                  "ordering {} to {}",
-                                  globalLoads[globalLoads.size() - 1].globalChain,
-                                  segmentBoundaries[u + 1]);
-                    graph.control.addElement(Sequence(),
-                                             {globalLoads[globalLoads.size() - 1].globalChain},
-                                             {segmentBoundaries[u + 1]});
-                    logger->debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
-                                  "ordering {} to {}",
-                                  globalStores[globalStores.size() - 1].ldsChain,
-                                  segmentBoundaries[u + 1]);
-                    graph.control.addElement(Sequence(),
-                                             {globalStores[globalStores.size() - 1].ldsChain},
-                                             {segmentBoundaries[u + 1]});
+                    auto successor = (u == numUnroll - 1) ? barrier : segmentBoundaries[u + 1];
+
+                    Log::debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
+                               "ordering {} to {}",
+                               globalLoads[globalLoads.size() - 1].globalChain,
+                               successor);
+                    graph.control.addElement(
+                        Sequence(), {globalLoads[globalLoads.size() - 1].globalChain}, {successor});
+
+                    Log::debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
+                               "ordering {} to {}",
+                               globalStores[globalStores.size() - 1].ldsChain,
+                               successor);
+                    graph.control.addElement(
+                        Sequence(), {globalStores[globalStores.size() - 1].ldsChain}, {successor});
                 }
                 else
                 {
