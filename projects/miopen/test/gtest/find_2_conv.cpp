@@ -16,8 +16,6 @@
 
 #include <vector>
 
-MIOPEN_LIB_ENV_VAR(MIOPEN_LOG_LEVEL)
-
 namespace find_2_conv {
 
 struct Find2ConvTest : test_driver
