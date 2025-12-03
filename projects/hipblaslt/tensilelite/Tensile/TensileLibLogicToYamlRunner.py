@@ -33,24 +33,24 @@ from Tensile import TensileCreateLibrary, TensileLibLogicToYaml, Tensile
 import sys
 
 
-def run_hipblaslt(gemm_log, hipblaslt_bench, device_id, yaml_data):
-    with open(f"{gemm_log}", "w") as f:
+def runHipblaslt(gemmLog, hipblasltBench, deviceId, yamlData):
+    with open(f"{gemmLog}", "w") as f:
         subprocess.run(
-            [f"{hipblaslt_bench}", "--device", f"{device_id}", "--yaml", "-"],
+            [f"{hipblasltBench}", "--device", f"{deviceId}", "--yaml", "-"],
             stdout=f,
             stderr=subprocess.STDOUT,
             check=True,
-            input=yaml_data.encode("utf-8"),
+            input=yamlData.encode("utf-8"),
         )
 
 
-def extract_solution(gemm_log):
+def extractSolution(gemmLog):
     blocks = None
 
     try:
-        blocks = open(f"{gemm_log}", "r").read().split("[0]:")[1:]
+        blocks = open(f"{gemmLog}", "r").read().split("[0]:")[1:]
     except FileNotFoundError:
-        print(f"{gemm_log} does not exist in path!")
+        print(f"{gemmLog} does not exist in path!")
         raise
     if not blocks:
         raise ValueError("The benchmark output file may be corrupted.")
@@ -58,90 +58,90 @@ def extract_solution(gemm_log):
     size = blocks[0].split("\n")[1].split(",")[4:8]
     size = [int(size[i]) for i in [0, 1, 3, 2]]
 
-    solution_index = (
+    solutionIndex = (
         blocks[0].split("\n")[2].strip("--Solution index").strip(":")[1:].strip()
     )
-    solution_name = (
+    solutionName = (
         blocks[0].split("\n")[3].strip("--Solution name").strip("Cijk")[1:].strip()
     )
 
-    if not solution_name or not solution_index:
+    if not solutionName or not solutionIndex:
         raise ValueError("The benchmark output file may be corrupted.")
 
-    return solution_index, solution_name
+    return solutionIndex, solutionName
 
 
-def fix_exact_solution(config_yaml, yaml_data):
-    data = yaml.safe_load(StringIO(yaml_data))
+def fixExactSolution(configYaml, yamlData):
+    data = yaml.safe_load(StringIO(yamlData))
 
-    new_pattern = (
+    newPattern = (
         rf"\[{data[0]['M']}, {data[0]['N']}, {data[0]['batch_count']}, {data[0]['K']}\]"
     )
 
     try:
-        if Path(f"{config_yaml}").is_file():
+        if Path(f"{configYaml}").is_file():
             subprocess.run(
                 [
                     "sed",
                     "-i",
-                    rf"s/^\(.*Exact:\).*/\1 {new_pattern}/",
-                    f"{config_yaml}",
+                    rf"s/^\(.*Exact:\).*/\1 {newPattern}/",
+                    f"{configYaml}",
                 ],
                 stderr=subprocess.STDOUT,
                 check=True,
             )
     except FileNotFoundError:
-        print(f"{config_yaml} does not exist in path!")
+        print(f"{configYaml} does not exist in path!")
         raise
 
 
-def generate_config_lib(tensile_bin, config_yaml, match_table, solution_index):
+def generateConfigLib(configYaml, matchTable, solutionIndex):
     # find matching library from solution index in gemm.log
-    table = open(match_table, "r").read().split(f"{solution_index}:")[1:2]
+    table = open(matchTable, "r").read().split(f"{solutionIndex}:")[1:2]
     line = table[0].strip(":").split("\n")[0:2]
-    lib_name = line[0].strip("[")[2:-1]
-    internal_solution_index = line[1].strip("]").strip()
+    libName = line[0].strip("[")[2:-1]
+    internalSolutionIndex = line[1].strip("]").strip()
 
     # generate config yaml from library
     sys.argv = [
         "",
         "--input",
-        f"{lib_name}",
+        f"{libName}",
         "--indices",
-        f"{internal_solution_index}",
+        f"{internalSolutionIndex}",
         "--output",
-        f"{config_yaml}",
+        f"{configYaml}",
     ]
 
     TensileLibLogicToYaml.main()
 
-    return internal_solution_index
+    return internalSolutionIndex
 
 
-def build_tensile(tensilelite_path, client_path, build_dir):
-    if not os.path.isfile(client_path):
+def buildTensile(tensilelitePath, clientPath, buildDir):
+    if not os.path.isfile(clientPath):
         print("Building tensilelite client...")
         subprocess.call(
-            ["invoke", "build-client", "--build-dir", build_dir], cwd=tensilelite_path
+            ["invoke", "build-client", "--build-dir", buildDir], cwd=tensilelitePath
         )
 
 
-def generate_liblogic(tensile_bin, client_path, work_dir, config_yaml):
-    shutil.rmtree(work_dir, ignore_errors=True)
+def generateLiblogic(clientPath, workDir, configYaml):
+    shutil.rmtree(workDir, ignore_errors=True)
 
     sys.argv = [
         "",
         "--prebuilt-client",
-        f"{client_path}",
-        f"{config_yaml}",
-        f"{work_dir}",
+        f"{clientPath}",
+        f"{configYaml}",
+        f"{workDir}",
     ]
 
     Tensile.main()
 
 
-def create_library(tensile_bin, tensile_path, liblogic_path, arch):
-    shutil.rmtree(tensile_path, ignore_errors=True)
+def createLibrary(tensilePath, liblogicPath, arch):
+    shutil.rmtree(tensilePath, ignore_errors=True)
 
     sys.argv = [
         "",
@@ -151,75 +151,72 @@ def create_library(tensile_bin, tensile_path, liblogic_path, arch):
         "msgpack",
         "--architecture",
         f"{arch}",
-        f"{liblogic_path}",
-        f"{tensile_path}",
+        f"{liblogicPath}",
+        f"{tensilePath}",
         "HIP",
     ]
     TensileCreateLibrary.run()
 
 
-def main(hipblaslt_path, device_id, workspace, arch, yaml_data):
-    hipblaslt_bench = os.path.join(
-        hipblaslt_path, "build/release/clients/hipblaslt-bench"
+def main(hipblasltPath, deviceId, workspace, arch, yamlData):
+    hipblasltBench = os.path.join(
+        hipblasltPath, "build/release/clients/hipblaslt-bench"
     )
-    match_table = os.path.join(
-        hipblaslt_path, "build/release/device-library/MatchTable.yaml"
+    matchTable = os.path.join(
+        hipblasltPath, "build/release/device-library/MatchTable.yaml"
     )
-    tensilelite_path = os.path.join(hipblaslt_path, "tensilelite")
-    tensile_bin = os.path.join(tensilelite_path, "Tensile/bin/")
+    tensilelitePath = os.path.join(hipblasltPath, "tensilelite")
 
     # run test gemm
-    gemm_log = os.path.join(workspace, "gemm.log")
-    run_hipblaslt(gemm_log, hipblaslt_bench, device_id, yaml_data)
+    gemmLog = os.path.join(workspace, "gemm.log")
+    runHipblaslt(gemmLog, hipblasltBench, deviceId, yamlData)
 
     # extract solutin index and name
-    solution_index, solution_name = extract_solution(gemm_log)
+    solutionIndex, solutionName = extractSolution(gemmLog)
 
     # find matching library from solution index in gemm.log
     # generate config yaml from library
-    config_yaml = os.path.join(workspace, "config.yaml")
-    internal_solution_index = generate_config_lib(
-        tensile_bin, config_yaml, match_table, solution_index
-    )
+    configYaml = os.path.join(workspace, "config.yaml")
+    internalSolutionIndex = generateConfigLib(configYaml, matchTable, solutionIndex)
     # update output the output filename with the index
-    config_yaml = os.path.join(workspace, f"config_{internal_solution_index}.yaml")
+    configYaml = os.path.join(workspace, f"config_{internalSolutionIndex}.yaml")
 
     # if library is origami or we have multiple gemms for one index, we need to replace exact solution
-    fix_exact_solution(config_yaml, yaml_data)
+    fixExactSolution(configYaml, yamlData)
 
     # if tensile-client does not exist, build it
-    build_dir = os.path.join(workspace, "build_tmp")
-    client_path = os.path.join(build_dir, "tensilelite/client/tensilelite-client")
-    build_tensile(tensilelite_path, client_path, build_dir)
+    buildDir = os.path.join(workspace, "build_tmp")
+    clientPath = os.path.join(buildDir, "tensilelite/client/tensilelite-client")
+    buildTensile(tensilelitePath, clientPath, buildDir)
 
     # call Tensile to generate liblogic
-    work_dir = os.path.join(workspace, "WDirDevice")
-    generate_liblogic(tensile_bin, client_path, work_dir, config_yaml)
+    workDir = os.path.join(workspace, "WDirDevice")
+    generateLiblogic(clientPath, workDir, configYaml)
 
     # create a library from the new library logic
-    new_liblogic_path = os.path.join(work_dir, "3_LibraryLogic")
-    new_tensile_path = os.path.join(workspace, "tensile")
-    create_library(tensile_bin, new_tensile_path, new_liblogic_path, arch)
+    newLiblogicPath = os.path.join(workDir, "3_LibraryLogic")
+    newTensilePath = os.path.join(workspace, "tensile")
+    createLibrary(newTensilePath, newLiblogicPath, arch)
 
     # run hblt again
-    os.environ["HIPBLASLT_TENSILE_LIBPATH"] = f"{new_tensile_path}/library"
-    gemm_out_log = os.path.join(workspace, "gemm_out.log")
-    run_hipblaslt(gemm_out_log, hipblaslt_bench, device_id, yaml_data)
+    os.environ["HIPBLASLT_TENSILE_LIBPATH"] = f"{newTensilePath}/library"
+    gemmOutLog = os.path.join(workspace, "gemm_out.log")
+    runHipblaslt(gemmOutLog, hipblasltBench, deviceId, yamlData)
 
     # extract solution name
-    _, solution_name_out = extract_solution(gemm_out_log)
+    _, solutionNameOut = extractSolution(gemmOutLog)
 
     # match solution names
-    solution_name = solution_name.split("UserArgs_")[1].strip()
-    solution_name_out = solution_name_out.split("UserArgs_")[1].strip()
+    solutionName = solutionName.split("UserArgs_")[1].strip()
+    solutionNameOut = solutionNameOut.split("UserArgs_")[1].strip()
 
-    if solution_name != solution_name_out:
+    if solutionName != solutionNameOut:
         ValueError("The generated and existing libraries do not match!")
 
     return 1
 
 
-yaml_data = "- {function: matmul, M: 768, N: 3072, K: 2048, lda: 2048, ldb: 2048, ldc: 768, ldd: 768, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, alpha: 1.000000, beta: 0.000000, transA: T, transB: N, batch_count: 1, scaleA: 0, scaleB: 0, scaleC: 0, scaleD: 0, swizzleA: false, swizzleB: false, scaleAlpha_vector: false, gradient: false, use_e: false, bias_vector: false, bias_source: d, a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, scale_type: f32_r, bias_type: f32_r, compute_type: c_f32_r, activation_type: none, flush: false, any_stride: true, rotating: 512, cold_iters: 0, iters: 1, print_kernel_info: true}"
+yamlData = "- {function: matmul, M: 768, N: 3072, K: 2048, lda: 2048, ldb: 2048, ldc: 768, ldd: 768, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, alpha: 1.000000, beta: 0.000000, transA: T, transB: N, batch_count: 1, scaleA: 0, scaleB: 0, scaleC: 0, scaleD: 0, swizzleA: false, swizzleB: false, scaleAlpha_vector: false, gradient: false, use_e: false, bias_vector: false, bias_source: d, a_type: bf16_r, b_type: bf16_r, c_type: bf16_r, d_type: bf16_r, scale_type: f32_r, bias_type: f32_r, compute_type: c_f32_r, activation_type: none, flush: false, any_stride: true, rotating: 512, cold_iters: 0, iters: 1, print_kernel_info: true}"
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -244,11 +241,11 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    hipblaslt_path = args.hipblaslt
+    hipblasltPath = args.hipblaslt
     arch = args.arch
-    device_id = args.device
+    deviceId = args.device
     workspace = os.path.abspath(args.workspace)
 
     os.makedirs(workspace, exist_ok=True)
 
-    main(hipblaslt_path, device_id, workspace, arch, yaml_data)
+    main(hipblasltPath, deviceId, workspace, arch, yamlData)

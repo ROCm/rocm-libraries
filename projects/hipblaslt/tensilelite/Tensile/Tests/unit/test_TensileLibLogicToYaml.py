@@ -29,12 +29,14 @@ import yaml
 import sys
 import os
 from typing import Union
-import logging
+import tempfile
+import re
 
-parentdir = os.path.normpath(
+
+parentDir = os.path.normpath(
     os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..")
 )
-sys.path.append(parentdir)
+sys.path.append(parentDir)
 from Tensile import TensileLibLogicToYamlRunner
 
 
@@ -43,38 +45,30 @@ VALID_YAML_FILE_CONTENT = """- {function: matmul, M: 768, N: 3072, K: 2048, lda:
 
 
 @pytest.fixture
-def mock_yaml_file():
+def mockYamlFile():
     with patch(
         "builtins.open", mock_open(read_data=VALID_YAML_FILE_CONTENT)
-    ) as mock_file:
-        yield mock_file
+    ) as mockFile:
+        yield mockFile
 
 
-def extract_function(function_string: str, function: str) -> str:
-    msg_prefix = f"Invalid function: {function_string}"
-    key, _, val = function_string.partition("=")
-    if key == "function":
-        if val != function:
-            raise ValueError(f"{msg_prefix}: {function} is not valid")
-    return function_string
+def extractFunction(file: str, function: str) -> bool:
+    msgPrefix = f"Invalid function: {file}"
+    with open(file, "r") as f:
+        data = yaml.safe_load(f)[0]
+        if "function" not in data:
+            raise ValueError(f"{msgPrefix}: function not present!")
+        if data["function"] != function:
+                raise ValueError(f"{msgPrefix}: {data["function"]} is not the same as {function}")
+    return True
 
-
-import re
-
-
-class LogicFileError(Exception):  # remove
-    def __init__(self, message="Expected line is either not present or is malformed"):
-        self.message = message
-        super().__init__(self.message)
-
-
-def extract_size(file: Union[str, Path]) -> list:
-    def get_size(line: str, match):
-        match_M = re.match(r"M: (\d+)", line)
-        match_N = re.match(r"N: (\d+)", line)
-        match_K = re.match(r"K: (\d+)", line)
-        match_batch = re.match(r"batch_count: (\d+)", line)
-        matches = [match_M, match_N, match_K, match_batch]
+def extractSize(file: Union[str, Path]) -> bool:
+    def getSize(line: str, match):
+        matchM = re.match(r"M: (\d+)", line)
+        matchN = re.match(r"N: (\d+)", line)
+        matchK = re.match(r"K: (\d+)", line)
+        matchBatch = re.match(r"batch_count: (\d+)", line)
+        matches = [matchM, matchN, matchK, matchBatch]
         for m in matches:
             if m != None:
                 value = m.group(1).strip()
@@ -85,10 +79,10 @@ def extract_size(file: Union[str, Path]) -> list:
         line = f.readline()
         line = line.split(",")
         for x in line:
-            get_size(x.strip(), match)
+            getSize(x.strip(), match)
         for m in match:
             assert m > 0
-    return 1
+    return True
 
 
 REQUIRED_PARAMS = [
@@ -108,33 +102,34 @@ REQUIRED_PARAMS = [
 ]
 
 
-def check_params(file: Union[str, Path]) -> list:
+def checkParams(file: Union[str, Path]) -> bool:
     with open(file, "r") as f:
         data = yaml.safe_load(f)
         missing = [p for p in REQUIRED_PARAMS if p not in data[0]]
         if missing:
             raise ValueError(f"Missing required parameters: {missing}")
-        return 1
+        return True
 
 
-def test_matmul(mock_yaml_file):
-    assert extract_function("dummy.yaml", "matmul")
+def test_matmul(mockYamlFile):
+    assert extractFunction("dummy.yaml", "matmul")
 
 
-def test_size(mock_yaml_file):
-    assert extract_size("dummy.yaml")
+def test_size(mockYamlFile):
+    assert extractSize("dummy.yaml")
 
 
-def test_params(mock_yaml_file):
-    assert check_params("dummy.yaml")
+def test_params(mockYamlFile):
+    assert checkParams("dummy.yaml")
 
 
 @pytest.mark.xfail
 def test_TensileLibLogicToYaml():
-    hipblaslt_path = "."
-    device_id = 7
-    workspace = "/tmp/tempTestLibLogic"
-    arch = "gfx950"
-    assert TensileLibLogicToYamlRunner.main(
-        hipblaslt_path, device_id, workspace, arch, VALID_YAML_FILE_CONTENT
-    )
+    hipblasltPath = "/workspace/rocm-libraries/projects/hipblaslt/"
+    deviceId = 0
+
+    with tempfile.TemporaryDirectory() as workspace:
+        arch = "gfx950"
+        assert TensileLibLogicToYamlRunner.main(
+            hipblasltPath, deviceId, workspace, arch, VALID_YAML_FILE_CONTENT
+        )

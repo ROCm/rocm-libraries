@@ -28,7 +28,6 @@ from Tensile.Common.GlobalParameters import defaultBenchmarkCommonParameters
 from Tensile.Common.Constants import HR
 from Tensile.SolutionStructs.Problem import _defaultProblemType as defaultProblemType
 from Tensile.Common.GlobalParameters import globalParameters
-from Tensile.Common.DataType import DataType
 
 import argparse
 import os
@@ -42,33 +41,33 @@ class Quoted(str):
 
 
 # print ""
-def quoted_presenter(dumper, data):
+def quotedPresenter(dumper, data):
     return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
-
-
-def make_flow(value):
-    if isinstance(value, list):
-        return FlowList(value)
-    return value
 
 
 class FlowList(list):
     pass
 
 
+def makeFlow(value):
+    if isinstance(value, list):
+        return FlowList(value)
+    return value
+
+
 # print list in format of []
-def flow_seq(dumper, value):
+def flowSeq(dumper, value):
     return dumper.represent_sequence("tag:yaml.org,2002:seq", value, flow_style=True)
 
 
 # ignore null
-def represent_none(self, _):
+def representNone(self, _):
     return self.represent_scalar("tag:yaml.org,2002:null", "")
 
 
-yaml.add_representer(Quoted, quoted_presenter)
-yaml.add_representer(FlowList, flow_seq)
-yaml.add_representer(type(None), represent_none)
+yaml.add_representer(Quoted, quotedPresenter)
+yaml.add_representer(FlowList, flowSeq)
+yaml.add_representer(type(None), representNone)
 
 
 def tPrint(verbosity: int, arg) -> None:
@@ -129,7 +128,7 @@ def formProblemTypeYamlData(problemTypeState):
         # Print default keys with no default values
         if problemTypeKey in defaultProblemType:
             if problemTypeValue != defaultProblemType[problemTypeKey]:
-                data[problemTypeKey] = make_flow(problemTypeValue)
+                data[problemTypeKey] = makeFlow(problemTypeValue)
                 continue
 
     return data
@@ -239,7 +238,7 @@ def formForkParams(currentIndexSolution, skipMI):
 def formProblemSize(
     exactLogic,
     solutionIndex,
-    ProblemTypeStat,
+    problemTypeStat,
 ):
     data = {}
     data["BenchmarkJoinParameters"] = None
@@ -261,8 +260,8 @@ def formProblemSize(
     data["BenchmarkFinalParameters"].append(temp)
 
     temp = {}
-    BiasTypeArgs = ProblemTypeStat["BiasDataTypeList"]
-    temp["BiasTypeArgs"] = FlowList(BiasTypeArgs)
+    biasTypeArgs = problemTypeStat["BiasDataTypeList"]
+    temp["BiasTypeArgs"] = FlowList(biasTypeArgs)
 
     data["BenchmarkFinalParameters"].append(temp)
 
@@ -321,7 +320,7 @@ def TensileLibLogicToYaml(logicFilePath, solutionIndex, tensileYamlFile, skipMI)
             "Yaml file data is empty, read yaml file :{} failed".format(logicFilePath)
         )
 
-    # reads library logic file. AllsolutionStates=>has solution data for all solution index
+    # reads library logic file. AllSolutionStates=>has solution data for all solution index
     fields = LibraryIO.rawLibraryLogic(libYaml)
     (
         versionString,
@@ -329,15 +328,15 @@ def TensileLibLogicToYaml(logicFilePath, solutionIndex, tensileYamlFile, skipMI)
         architectureName,
         deviceNames,
         problemTypeState,
-        allsolutionStates,
-        indexOrder,
+        allSolutionStates,
+        _,  # indexOrder
         exactLogic,
-        rangeLogic,
-        otherFields,
+        _,  # rangeLogic
+        _,  # otherFields
     ) = fields
 
     # Extract the solution data for the user specified solution Index
-    currentIndexSolution = allsolutionStates[solutionIndex]
+    currentIndexSolution = allSolutionStates[solutionIndex]
 
     if currentIndexSolution == "":
         raise RuntimeError(
@@ -370,9 +369,9 @@ def TensileLibLogicToYaml(logicFilePath, solutionIndex, tensileYamlFile, skipMI)
     tensileYamlFileData["BenchmarkProblems"] = benchmarkProblems
 
     # # Forms the Library logic string
-    problem_size_data = formLibraryLogic(scheduleName, deviceNames, architectureName)
+    problemSizeData = formLibraryLogic(scheduleName, deviceNames, architectureName)
 
-    tensileYamlFileData["LibraryLogic"] = problem_size_data
+    tensileYamlFileData["LibraryLogic"] = problemSizeData
 
     # Write the Formed Yaml data into the Yaml File
     writeToTensileYamlFile(tensileYamlFile, tensileYamlFileData)
