@@ -6,10 +6,10 @@
 #include <optional>
 #include <unordered_map>
 
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginFlatbufferTypeHelpers.hpp>
 #include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
-#include <hipdnn_sdk/plugin/PluginFlatbufferTypeHelpers.hpp>
 #include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
 #include <miopen/miopen.h>
 

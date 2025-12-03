@@ -3,7 +3,7 @@
 
 #include "engines/plans/MiopenBatchnormFwdInferencePlan.hpp"
 #include <gtest/gtest.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace miopen_legacy_plugin;

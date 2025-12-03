@@ -6,9 +6,9 @@
 #include <memory>
 #include <set>
 
-#include <hipdnn_sdk/plugin/PluginException.hpp>
-#include <hipdnn_sdk/plugin/test_utils/MockEngineConfig.hpp>
-#include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/test_utils/MockEngineConfig.hpp>
+#include <hipdnn_plugin_sdk/test_utils/MockGraph.hpp>
 
 #include "EngineManager.hpp"
 #include "HipdnnEnginePluginExecutionContext.hpp"

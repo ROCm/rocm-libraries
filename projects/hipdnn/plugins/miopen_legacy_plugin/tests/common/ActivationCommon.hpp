@@ -6,8 +6,8 @@
 #include <exception>
 #include <optional>
 
+#include <hipdnn_plugin_sdk/PluginFlatbufferTypeHelpers.hpp>
 #include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_sdk/plugin/PluginFlatbufferTypeHelpers.hpp>
 
 namespace test_activation_common
 {

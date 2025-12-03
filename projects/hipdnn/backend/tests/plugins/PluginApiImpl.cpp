@@ -4,9 +4,9 @@
 // This file is part of the test plugin implementation.
 // It contains the API functions for the test plugin.
 
-#include <hipdnn_sdk/plugin/PluginApi.h>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
-#include <hipdnn_sdk/plugin/PluginHelpers.hpp>
+#include <hipdnn_plugin_sdk/PluginApi.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginHelpers.hpp>
 
 #include "PluginApiImpl.hpp"
 

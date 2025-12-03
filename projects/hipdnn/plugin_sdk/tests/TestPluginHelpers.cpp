@@ -5,9 +5,9 @@
 
 #define HIPDNN_PLUGIN_STATIC_DEFINE
 
-#include <hipdnn_sdk/plugin/PluginException.hpp>
-#include <hipdnn_sdk/plugin/PluginHelpers.hpp>
-#include <hipdnn_sdk/plugin/PluginLastErrorManager.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginHelpers.hpp>
+#include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
 
 using namespace hipdnn_plugin;
 

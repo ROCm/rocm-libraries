@@ -5,7 +5,7 @@
 #include <limits>
 #include <vector>
 
-#include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "MiopenConvDescriptor.hpp"
 #include "MiopenUtils.hpp"

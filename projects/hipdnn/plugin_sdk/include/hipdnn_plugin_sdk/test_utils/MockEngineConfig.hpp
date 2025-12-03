@@ -5,7 +5,7 @@
 
 #include <gmock/gmock.h>
 
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_plugin_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 
 namespace hipdnn_plugin
 {

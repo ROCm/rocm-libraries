@@ -3,8 +3,8 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
+#include <hipdnn_plugin_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_sdk/data_objects/engine_details_generated.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 
 using namespace hipdnn_plugin;
 

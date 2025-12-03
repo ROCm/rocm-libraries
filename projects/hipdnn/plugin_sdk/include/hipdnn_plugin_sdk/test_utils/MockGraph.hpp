@@ -5,7 +5,7 @@
 
 #include <gmock/gmock.h>
 
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
 namespace hipdnn_plugin
 {

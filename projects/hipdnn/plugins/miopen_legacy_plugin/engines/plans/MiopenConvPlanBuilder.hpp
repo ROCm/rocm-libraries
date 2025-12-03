@@ -4,7 +4,7 @@
 #pragma once
 
 #include "PlanBuilderInterface.hpp"
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 namespace miopen_legacy_plugin
 {

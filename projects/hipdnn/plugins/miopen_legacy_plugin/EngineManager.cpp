@@ -3,8 +3,8 @@
 
 #include <algorithm>
 
-#include <hipdnn_sdk/plugin/PluginException.hpp>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
 #include "EngineManager.hpp"
 #include "engines/MiopenEngine.hpp"

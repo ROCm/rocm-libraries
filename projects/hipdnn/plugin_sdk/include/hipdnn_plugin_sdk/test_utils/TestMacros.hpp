@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 // NOLINTBEGIN
 #define ASSERT_THROW_HIPDNN_PLUGIN_STATUS(x, status)                   \

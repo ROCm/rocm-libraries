@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_sdk/plugin/PluginException.hpp>
 #include <miopen/miopen.h>
 
 #include "MiopenActivationDescriptor.hpp"

@@ -4,7 +4,7 @@
 #pragma once
 
 #include <hip/hip_runtime.h>
-#include <hipdnn_sdk/plugin/PluginApi.h>
+#include <hipdnn_plugin_sdk/PluginApi.h>
 
 extern "C" {
 

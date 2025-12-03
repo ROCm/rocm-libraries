@@ -5,9 +5,9 @@
 
 #include <stdint.h>
 
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 namespace miopen_legacy_plugin
 {

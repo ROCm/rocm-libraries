@@ -3,9 +3,9 @@
 
 #include "MiopenUtils.hpp"
 #include <gtest/gtest.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
 
 using namespace miopen_legacy_plugin;
 

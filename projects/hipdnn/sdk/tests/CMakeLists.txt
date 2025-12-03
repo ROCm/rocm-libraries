@@ -16,14 +16,6 @@ enable_language(HIP)
 add_executable(
     hipdnn_sdk_tests
     main.cpp
-    plugin/TestPluginDataTypeHelpers.cpp
-    plugin/TestPluginException.cpp
-    plugin/TestPluginHelpers.cpp
-    plugin/TestPluginLastErrorManager.cpp
-    plugin/flatbuffer_utilities/TestEngineConfigWrapper.cpp
-    plugin/flatbuffer_utilities/TestEngineDetailsWrapper.cpp
-    plugin/flatbuffer_utilities/TestGraphWrapper.cpp
-    plugin/flatbuffer_utilities/TestNodeWrapper.cpp
     test_utilities/TestCpuFpReferenceBatchnorm.cpp
     test_utilities/TestCpuFpReferenceConvolution.cpp
     test_utilities/TestCpuFpReferenceMiopenRmsValidation.cpp

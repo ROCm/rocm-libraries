@@ -5,8 +5,8 @@
 #include <gtest/gtest.h>
 #include <set>
 
+#include <hipdnn_plugin_sdk/flatbuffer_utilities/NodeWrapper.hpp>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/NodeWrapper.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 
 using namespace hipdnn_plugin;

@@ -6,7 +6,7 @@
 #include <exception>
 #include <string>
 
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 namespace hipdnn_plugin
 {

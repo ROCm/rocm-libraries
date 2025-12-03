@@ -5,9 +5,9 @@
 
 #include <string>
 
+#include <hipdnn_plugin_sdk/PluginApi.h>
+#include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
 #include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/plugin/PluginApi.h>
-#include <hipdnn_sdk/plugin/PluginDataTypeHelpers.hpp>
 #include <hipdnn_sdk/utilities/StringUtil.hpp>
 
 // NOTE: The last_error variable must be defined in one of the plugin source files.

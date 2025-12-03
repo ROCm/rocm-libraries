@@ -164,6 +164,7 @@ add_compile_options(${EXTRA_COMPILE_OPTIONS})
 add_link_options(${EXTRA_LINK_OPTIONS})
 
 add_subdirectory(sdk)
+add_subdirectory(plugin_sdk)
 
 if(HIP_DNN_BUILD_BACKEND)
     add_subdirectory(backend)

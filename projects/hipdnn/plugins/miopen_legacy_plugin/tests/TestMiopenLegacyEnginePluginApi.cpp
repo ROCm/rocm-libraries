@@ -4,9 +4,10 @@
 #include <gtest/gtest.h>
 
 #include <MiopenLegacyPlugin.hpp>
-#include <hipdnn_sdk/plugin/EnginePluginApi.h>
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_plugin_sdk/EnginePluginApi.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_plugin_sdk/test_utilities/PluginTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 
@@ -288,7 +289,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetApplicableEngineIdsValid)
     auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t opGraph
-        = hipdnn_sdk::test_utilities::createValidConstDataGraph(serializedGraph);
+        = hipdnn_plugin::test_utilities::createValidConstDataGraph(serializedGraph);
     std::array<int64_t, 1> engineIds = {0};
     uint32_t numEngines = 0;
 
@@ -320,7 +321,7 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetEngineDetailsValid)
     auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t opGraph
-        = hipdnn_sdk::test_utilities::createValidConstDataGraph(serializedGraph);
+        = hipdnn_plugin::test_utilities::createValidConstDataGraph(serializedGraph);
     hipdnnPluginConstData_t engineDetailsOut;
 
     auto status = hipdnnEnginePluginGetEngineDetailsImpl(handle, 1, &opGraph, &engineDetailsOut);
@@ -346,12 +347,12 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetWorkspaceSizeValid)
     auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t opGraph
-        = hipdnn_sdk::test_utilities::createValidConstDataGraph(serializedGraph);
+        = hipdnn_plugin::test_utilities::createValidConstDataGraph(serializedGraph);
 
     auto engineConfigBuilder = hipdnn_sdk::test_utilities::createValidEngineConfig(1);
     auto serializedEngineConfig = engineConfigBuilder.Release();
     hipdnnPluginConstData_t engineConfig
-        = hipdnn_sdk::test_utilities::createValidConstDataEngineConfig(serializedEngineConfig);
+        = hipdnn_plugin::test_utilities::createValidConstDataEngineConfig(serializedEngineConfig);
 
     size_t workspaceSize = 0;
     auto status
@@ -372,12 +373,12 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, CreateExecutionContextValid)
     auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t opGraph
-        = hipdnn_sdk::test_utilities::createValidConstDataGraph(serializedGraph);
+        = hipdnn_plugin::test_utilities::createValidConstDataGraph(serializedGraph);
 
     auto engineConfigBuilder = hipdnn_sdk::test_utilities::createValidEngineConfig(1);
     auto serializedEngineConfig = engineConfigBuilder.Release();
     hipdnnPluginConstData_t engineConfig
-        = hipdnn_sdk::test_utilities::createValidConstDataEngineConfig(serializedEngineConfig);
+        = hipdnn_plugin::test_utilities::createValidConstDataEngineConfig(serializedEngineConfig);
 
     hipdnnEnginePluginExecutionContext_t executionContext = nullptr;
     auto status = hipdnnEnginePluginCreateExecutionContextImpl(
@@ -400,12 +401,12 @@ TEST(TestGpuMiopenLegacyEnginePluginApi, GetWorkspaceSizeFromExecutionContextVal
     auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
     auto serializedGraph = builder.Release();
     hipdnnPluginConstData_t opGraph
-        = hipdnn_sdk::test_utilities::createValidConstDataGraph(serializedGraph);
+        = hipdnn_plugin::test_utilities::createValidConstDataGraph(serializedGraph);
 
     auto engineConfigBuilder = hipdnn_sdk::test_utilities::createValidEngineConfig(1);
     auto serializedEngineConfig = engineConfigBuilder.Release();
     hipdnnPluginConstData_t engineConfig
-        = hipdnn_sdk::test_utilities::createValidConstDataEngineConfig(serializedEngineConfig);
+        = hipdnn_plugin::test_utilities::createValidConstDataEngineConfig(serializedEngineConfig);
 
     hipdnnEnginePluginExecutionContext_t executionContext = nullptr;
     auto status = hipdnnEnginePluginCreateExecutionContextImpl(

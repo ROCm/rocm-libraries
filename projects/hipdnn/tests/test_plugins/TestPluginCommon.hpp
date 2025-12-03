@@ -7,15 +7,15 @@
 #include <iostream>
 #include <memory>
 
+#include <hipdnn_plugin_sdk/EnginePluginApi.h>
+#include <hipdnn_plugin_sdk/PluginApi.h>
+#include <hipdnn_plugin_sdk/PluginDataTypeHelpers.hpp>
+#include <hipdnn_plugin_sdk/PluginHelpers.hpp>
+#include <hipdnn_plugin_sdk/PluginLastErrorManager.hpp>
+#include <hipdnn_plugin_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_plugin_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_sdk/logging/Logger.hpp>
-#include <hipdnn_sdk/plugin/EnginePluginApi.h>
-#include <hipdnn_sdk/plugin/PluginApi.h>
-#include <hipdnn_sdk/plugin/PluginDataTypeHelpers.hpp>
-#include <hipdnn_sdk/plugin/PluginHelpers.hpp>
-#include <hipdnn_sdk/plugin/PluginLastErrorManager.hpp>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/EngineConfigWrapper.hpp>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 
 struct HipdnnEnginePluginHandle
 {

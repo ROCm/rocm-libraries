@@ -4,10 +4,10 @@
 #pragma once
 
 #include <functional>
+#include <hipdnn_plugin_sdk/PluginFlatbufferTypeHelpers.hpp>
 #include <hipdnn_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_sdk/plugin/PluginFlatbufferTypeHelpers.hpp>
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/PointwisePlan.hpp>
 #include <hipdnn_sdk/utilities/PointwiseValidation.hpp>
 

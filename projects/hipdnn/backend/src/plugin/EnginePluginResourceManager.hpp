@@ -10,7 +10,7 @@
 #include <vector>
 
 #include <hip/hip_runtime.h>
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 #include "hipdnn_backend.h"
 

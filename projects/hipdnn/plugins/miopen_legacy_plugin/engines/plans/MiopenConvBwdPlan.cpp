@@ -3,7 +3,7 @@
 
 #include <array>
 
-#include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>

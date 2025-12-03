@@ -6,8 +6,8 @@
 #include <functional>
 #include <variant>
 
+#include <hipdnn_plugin_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_sdk/data_objects/graph_generated.h>
-#include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_sdk/test_utilities/FlatbufferTensorAttributesUtils.hpp>

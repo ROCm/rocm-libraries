@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <miopen/miopen.h>
 
-#include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"

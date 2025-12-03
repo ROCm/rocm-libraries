@@ -4,7 +4,7 @@
 #include "MiopenActivationDescriptor.hpp"
 #include "MiopenUtils.hpp"
 
-#include <hipdnn_sdk/plugin/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace miopen_legacy_plugin
 {

@@ -5,7 +5,7 @@
 
 #include "engines/plans/PlanInterface.hpp"
 #include <gmock/gmock.h>
-#include <hipdnn_sdk/plugin/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
 namespace miopen_legacy_plugin
 {
