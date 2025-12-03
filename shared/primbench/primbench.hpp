@@ -227,14 +227,16 @@ class amdsmi {
 
         ss << "\"vram_used_bytes\":" << serialize_optional(stats.vram_used_bytes);
 
-        ss << ",\"clocks_mhz\":{";
-        bool first = true;
-        for (const auto& kv : stats.clocks) {
-            if (!first) ss << ",";
-            ss << "\"" << kv.first << "\":" << serialize_optional(kv.second);
-            first = false;
+        if (has_clock(stats.clocks)) {
+            ss << ",\"clocks_mhz\":{";
+            bool first = true;
+            for (const auto& kv : stats.clocks) {
+                if (!first) ss << ",";
+                ss << "\"" << kv.first << "\":" << serialize_optional(kv.second);
+                first = false;
+            }
+            ss << "}";
         }
-        ss << "}";
 
         ss << ",\"metrics\":" << serialize_metrics(stats.metrics);
 
@@ -276,20 +278,22 @@ class amdsmi {
         ss << ",\"total_bytes\":" << serialize_optional(ctx.vram_total_bytes);
         ss << "}";
 
-        ss << ",\"clocks\":{";
-        bool first = true;
-        for (const auto& kv : ctx.clocks) {
-            if (!first) ss << ",";
-            ss << "\"" << kv.first << "\":";
-            if (kv.second)
-                ss << "{"
-                   << "\"min_mhz\":" << kv.second->first << ",\"max_mhz\":" << kv.second->second
-                   << "}";
-            else
-                ss << "null";
-            first = false;
+        if (has_clock(ctx.clocks)) {
+            ss << ",\"clocks\":{";
+            bool first = true;
+            for (const auto& kv : ctx.clocks) {
+                if (!first) ss << ",";
+                ss << "\"" << kv.first << "\":";
+                if (kv.second)
+                    ss << "{"
+                       << "\"min_mhz\":" << kv.second->first << ",\"max_mhz\":" << kv.second->second
+                       << "}";
+                else
+                    ss << "null";
+                first = false;
+            }
+            ss << "}";
         }
-        ss << "}";
 
         ss << ",\"stats\":" << serialize_stats(ctx.stats);
 
@@ -519,6 +523,18 @@ class amdsmi {
     template <typename T>
     std::string serialize_optional(const std::optional<T>& opt) const {
         return opt ? std::to_string(*opt) : "null";
+    }
+
+    /**
+     * \brief Checks if any clock frequency is available in the provided clock map.
+     * \tparam T The value type of the optional (either uint32_t or std::pair<uint32_t, uint32_t>).
+     * \param clocks Map of clock names to optional frequency values.
+     * \return true if at least one clock has a value, false if all are std::nullopt.
+     */
+    template <typename T>
+    static bool has_clock(const std::unordered_map<std::string, std::optional<T>>& clocks) {
+        return std::any_of(clocks.begin(), clocks.end(),
+                           [](const auto& kv) { return kv.second.has_value(); });
     }
 
     /**
