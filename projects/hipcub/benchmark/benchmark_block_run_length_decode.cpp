@@ -58,7 +58,7 @@ __global__
         = d_run_offsets[(hipBlockIdx_x + 1) * BlockSize * RunsPerThread]
           - d_run_offsets[hipBlockIdx_x * BlockSize * RunsPerThread];
 
-#pragma nounroll
+    _CCCL_PRAGMA_NOUNROLL()
     for(unsigned i = 0; i < Trials; ++i)
     {
         OffsetT decoded_window_offset = 0;

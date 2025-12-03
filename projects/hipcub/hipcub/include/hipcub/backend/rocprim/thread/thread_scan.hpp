@@ -61,7 +61,7 @@ HIPCUB_FORCEINLINE
                           ScanOp scan_op, ///< [in] Binary scan operator
                           detail::int_constant_t<LENGTH> /*length*/)
 {
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(int i = 0; i < LENGTH; ++i)
     {
         inclusive = scan_op(exclusive, input[i]);
@@ -144,7 +144,7 @@ HIPCUB_FORCEINLINE
                           ScanOp scan_op, ///< [in] Binary scan operator
                           detail::int_constant_t<LENGTH> /*length*/)
 {
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(int i = 0; i < LENGTH; ++i)
     {
         inclusive = scan_op(inclusive, input[i]);

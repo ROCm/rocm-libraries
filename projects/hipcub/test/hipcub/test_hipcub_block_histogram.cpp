@@ -117,7 +117,7 @@ void histogram_kernel(T* device_output, T* device_output_bin)
     bhistogram_t(temp_storage).Histogram(in_out, hist);
     __syncthreads();
 
-    #pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for (unsigned int offset = 0; offset < BinSize; offset += BlockSize)
     {
         if(offset + hipThreadIdx_x < BinSize)

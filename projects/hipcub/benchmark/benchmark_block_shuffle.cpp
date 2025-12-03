@@ -53,7 +53,7 @@ struct offset
         using bshuffle_t = hipcub::BlockShuffle<T, BlockSize>;
         __shared__ typename bshuffle_t::TempStorage storage;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             bshuffle_t(storage).Offset(value, value, 1);
@@ -84,7 +84,7 @@ struct rotate
         using bshuffle_t = hipcub::BlockShuffle<T, BlockSize>;
         __shared__ typename bshuffle_t::TempStorage storage;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             bshuffle_t(storage).Rotate(value, value, 1);
@@ -116,7 +116,7 @@ struct up
         using bshuffle_t = hipcub::BlockShuffle<T, BlockSize>;
         __shared__ typename bshuffle_t::TempStorage storage;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             bshuffle_t(storage).Up(values, values);
@@ -151,7 +151,7 @@ struct down
         using bshuffle_t = hipcub::BlockShuffle<T, BlockSize>;
         __shared__ typename bshuffle_t::TempStorage storage;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             bshuffle_t(storage).Down(values, values);
