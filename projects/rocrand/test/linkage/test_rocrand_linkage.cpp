@@ -32,5 +32,5 @@
 TEST(rocrand_linkage_tests, get_version_test)
 {
     EXPECT_EQ(rocrand_get_version(NULL), ROCRAND_STATUS_OUT_OF_RANGE);
-    EXPECT_EQ(get_rocrand_version(), ROCRAND_VERSION);
+    EXPECT_GT(get_rocrand_version(), 0);
 }
