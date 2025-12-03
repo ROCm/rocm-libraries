@@ -7,9 +7,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class GraphAttributes
 {
@@ -92,5 +90,4 @@ private:
     DataType _ioType = DataType::NOT_SET;
 };
 typedef GraphAttributes Context;
-}
-}
+} // namespace hipdnn_frontend::graph

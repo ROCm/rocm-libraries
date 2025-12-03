@@ -264,9 +264,9 @@ struct BNInferTestData : public BNTestData<XDataType, YDataType, AccDataType, TC
     miopen::Allocator::ManageDataPtr shift_dev;
     miopen::Allocator::ManageDataPtr estMean_dev;
     miopen::Allocator::ManageDataPtr estVariance_dev;
-    double epsilon = 1.0e-5;
-    float alpha    = static_cast<float>(1.0f);
-    float beta     = static_cast<float>(0);
+    double epsilon{1.0e-5};
+    float alpha{1.0f};
+    float beta{0.0f};
     double activ_alpha;
     double activ_beta;
     miopenActivationMode_t activ_mode;
@@ -359,8 +359,8 @@ struct BNBwdTestData : public BNTestData<XDataType, DyDataType, AccDataType, TCo
     miopen::Allocator::ManageDataPtr dBias_ref_dev;
     double epsilon = std::numeric_limits<float>::epsilon();
 
-    float alphaDataDiff = static_cast<float>(1), betaDataDiff = static_cast<float>(0);
-    float alphaParamDiff = static_cast<float>(1), betaParamDiff = static_cast<float>(0);
+    float alphaDataDiff{1.0f}, betaDataDiff{0.0f};
+    float alphaParamDiff{1.0f}, betaParamDiff{0.0f};
 
     double activ_alpha;
     double activ_beta;
@@ -474,8 +474,8 @@ struct BNFwdTrainTestData : public BNTestData<XDataType, YDataType, AccDataType,
     miopen::Allocator::ManageDataPtr runVariance_dev;
     double epsilon       = 1.0e-5;
     double averageFactor = 0.1;
-    float alpha          = static_cast<float>(1.0f);
-    float beta           = static_cast<float>(0);
+    float alpha          = 1.0f;
+    float beta           = 0.0f;
     double activ_alpha;
     double activ_beta;
     miopenActivationMode_t activ_mode;

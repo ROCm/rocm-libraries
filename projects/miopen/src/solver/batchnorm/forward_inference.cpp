@@ -65,15 +65,8 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
 
     bool bfpmixparm   = false;
     bool bbfpmixparam = false;
-    bool bfp16parm    = false;
     bool bfp32parm    = true;
-    if(problem.GetXDesc().GetType() == miopenHalf && problem.GetBnScale().GetType() == miopenHalf)
-    {
-        bfp16parm = true;
-        bfp32parm = false;
-    }
-    else if(problem.GetXDesc().GetType() == miopenHalf &&
-            problem.GetBnScale().GetType() == miopenFloat)
+    if(problem.GetXDesc().GetType() == miopenHalf && problem.GetBnScale().GetType() == miopenFloat)
     {
         bfpmixparm = true;
         bfp32parm  = false;
@@ -98,23 +91,30 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         size_t vectorsize    = problem.IsLayoutNHWC()
                                    ? (c % 4 == 0 ? 4 : (c % 2 == 0 ? 2 : 1))
                                    : (in_cstride % 4 == 0 ? 4 : (in_cstride % 2 == 0 ? 2 : 1));
-        ;
+
         if(problem.GetXDesc().GetLayout_t() == miopenTensorNHWC)
         {
             xlocalsize = std::min(size_t{c / vectorsize}, max_localsize);
-            xgridsize  = xlocalsize * ((c / vectorsize + xlocalsize - 1) / xlocalsize);
+            xgridsize  = AlignUp(size_t{c / vectorsize}, xlocalsize);
+
             ylocalsize = max_localsize / xlocalsize;
-            ygridsize  = ylocalsize * ((in_cstride + ylocalsize - 1) / ylocalsize);
+            ygridsize  = AlignUp(size_t{in_cstride}, ylocalsize);
         }
         else
         {
             xlocalsize = 1;
-            xgridsize  = c;
+            xgridsize  = AlignUp(size_t{c}, xlocalsize);
+
             ylocalsize = max_localsize;
-            ygridsize  = ylocalsize * ((in_cstride / vectorsize + ylocalsize - 1) / ylocalsize);
+            ygridsize  = AlignUp(size_t{in_cstride / vectorsize}, ylocalsize);
         }
         zlocalsize = 1;
         zgridsize  = 1;
+
+        // HIP runtime does not support non-uniform blocks
+        // Adjust the global worker sizes accordingly
+        xgridsize = AlignUp(xgridsize, xlocalsize);
+        ygridsize = AlignUp(ygridsize, ylocalsize);
 
         auto kernel = KernelInfo{};
 
@@ -122,19 +122,19 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         kernel.kernel_name = "MIOpenBatchNormFwdInfer";
         if(problem.GetMode() == miopenBNSpatial)
         { // SPATIAL kernels
-            kernel.kernel_file += "Spatial.cl";
+            kernel.kernel_file += "SpatialHIP.cpp";
             kernel.kernel_name += "SpatialEst";
         }
         else
         { // PER ACTIVATION
-            kernel.kernel_file += "PerAct.cl";
+            kernel.kernel_file += "PerActHIP.cpp";
             kernel.kernel_name += "PerActivationEst";
         }
 
         const auto build_params = KernelBuildParameters{
-            {"MIOPEN_USE_FP16", static_cast<int>(bfp16parm)},
+            {"MIOPEN_USE_FP16", static_cast<int>(bfpmixparm)},
             {"MIOPEN_USE_FP32", static_cast<int>(bfp32parm)},
-            {"MIOPEN_USE_FPMIX", static_cast<int>(bfpmixparm)},
+            {"MIOPEN_USE_BFP16", static_cast<int>(bbfpmixparam)},
             {"MIOPEN_USE_BFPMIX", static_cast<int>(bbfpmixparam)},
             {"MIO_BN_GRP0", xlocalsize},
             {"MIO_BN_GRP1", ylocalsize},
@@ -148,7 +148,7 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
             {"MIO_BN_VEC_SIZE", vectorsize},
             {"MIOPEN_NRN_OP_ID", problem.GetActivationDesc().GetMode()}};
 
-        kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+        kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
         kernel.l_wk.push_back(xlocalsize);
         kernel.l_wk.push_back(ylocalsize);

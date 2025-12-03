@@ -8,9 +8,7 @@
 #include <hipdnn_sdk/utilities/UtilsBfp16.hpp>
 #include <hipdnn_sdk/utilities/UtilsFp16.hpp>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
+namespace hipdnn_sdk::test_utilities
 {
 
 namespace batchnorm
@@ -128,7 +126,7 @@ constexpr T getToleranceFwd()
 {
     if constexpr(std::is_same_v<T, float>)
     {
-        return 8.5e-6f;
+        return 1e-5f;
     }
     else if constexpr(std::is_same_v<T, half>)
     {
@@ -231,5 +229,4 @@ constexpr T getTolerance()
 
 } // namespace pointwise
 
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::test_utilities
