@@ -38,6 +38,7 @@
 #include <iostream>
 
 #include "TestContext.hpp"
+#include <common/CommonGraphs.hpp>
 
 void writeDotToFile(const std::string& dotContent, const std::string& filename)
 {
@@ -238,4 +239,18 @@ TEST_CASE("hoistNodeBeforeLoop", "[kernel-graph][hoist-loop-invariant][helper]")
 
     std::string dotOutputAfter = graph.toDOT(true);
     writeDotToFile(dotOutputAfter, "hoistNodeBeforeLoop_after.dot");
+}
+
+TEST_CASE("hoist matrixmultiply")
+{
+    using namespace rocRoller;
+    namespace kg = rocRoller::KernelGraph;
+    using namespace kg::ControlGraph;
+    using namespace kg::CoordinateGraph;
+
+    auto example = rocRollerTest::Graphs::MatrixMultiply(DataType::Float);
+    auto graph   = example.getKernelGraph();
+    {
+        writeDotToFile(graph.toDOT(true), "hoist_matrixmultiply_before.dot");
+    }
 }

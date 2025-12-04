@@ -125,6 +125,51 @@ namespace rocRoller::KernelGraph
         return visitor.tags;
     }
 
+    HoistLoopInvariant::CoordinateToLoops
+        HoistLoopInvariant::buildCoordinateLoopMapping(KernelGraph const&         graph,
+                                                       ControlFlowRWTracer const& tracer)
+    {
+        CoordinateToLoops result;
+
+        const auto records = tracer.coordinatesReadWrite();
+
+        for(const auto& record : records)
+        {
+            Log::info("Processing record: coordinate {}, control node {}, rw {}",
+                      record.coordinate,
+                      record.control,
+                      static_cast<int>(record.rw));
+
+            if(record.rw != ControlFlowRWTracer::WRITE
+               && record.rw != ControlFlowRWTracer::READWRITE)
+            {
+                Log::info("  Skipping record due to rw type");
+                continue;
+            }
+
+            auto stack          = controlStack(record.control, graph);
+            int  containingLoop = -1;
+            for(auto it = stack.rbegin(); it != stack.rend(); ++it)
+            {
+                int node = *it;
+                Log::info("  Saw in control stack node {}",
+                          Graph::variantToString(graph.control.getElement(node)));
+
+                if(graph.control.get<ForLoopOp>(node).has_value()
+                   || graph.control.get<DoWhileOp>(node).has_value()
+                   || graph.control.get<Scope>(node).has_value())
+                {
+                    containingLoop = node;
+                    break;
+                }
+            }
+
+            result[record.coordinate][containingLoop].insert(record.control);
+        }
+
+        return result;
+    }
+
     int HoistLoopInvariant::hoistNodeBeforeLoop(KernelGraph& kgraph, int nodeToHoist, int loopNode)
     {
         int hoistedNode = duplicateControlNode(kgraph, nodeToHoist);
@@ -136,6 +181,17 @@ namespace rocRoller::KernelGraph
 
     KernelGraph HoistLoopInvariant::apply(KernelGraph const& original)
     {
+        const auto mapping = buildCoordinateLoopMapping(original, ControlFlowRWTracer(original));
+        Log::info("Coordinate to Loop Mapping:");
+        for(const auto& [coordinate, loopGroups] : mapping)
+        {
+            Log::info("Coordinate {}:", coordinate);
+            for(const auto& [loop, controlNodes] : loopGroups)
+            {
+                Log::info("  Loop {}: Control Nodes {}", loop, fmt::join(controlNodes, ", "));
+            }
+        }
+
         return original; // TODO: remove
 
         const size_t MAX_NODES_TO_HOIST = 1;

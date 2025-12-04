@@ -53,8 +53,30 @@ namespace rocRoller
         class HoistLoopInvariant : public GraphTransform
         {
         public:
+            // Type definitions for coordinate to loop mapping
+            using LoopToControlNodes = std::unordered_map<
+                int,
+                std::set<int>>; // loop node -> control nodes (set for automatic deduplication)
+            using CoordinateToLoops
+                = std::unordered_map<int, LoopToControlNodes>; // coordinate -> loop groups
+
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override;
+
+            /**
+             * @brief Build a mapping of coordinates to loop groups to control nodes
+             * 
+             * This helper function processes tracer records to create a hierarchical mapping:
+             * - For each coordinate accessed in the graph
+             * - Groups control nodes by the loop they belong to
+             * - Special key -1 is used for control nodes not in any loop
+             * 
+             * @param graph The kernel graph being analyzed
+             * @param tracer The control flow read/write tracer with access records
+             * @return Mapping of coordinate -> loop -> [control nodes]
+             */
+            static CoordinateToLoops buildCoordinateLoopMapping(KernelGraph const&         graph,
+                                                                ControlFlowRWTracer const& tracer);
 
             /**
              * @brief Hoist a single node out of a loop and insert it before the loop (for testing)
