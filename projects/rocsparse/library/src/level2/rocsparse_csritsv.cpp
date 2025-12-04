@@ -51,10 +51,11 @@ try
     auto csritsv_info = info->csritsv_info;
     if(csritsv_info == nullptr)
     {
-        rocsparse::set_minus_one_async(handle->stream,
-                                       handle->pointer_mode,
-                                       rocsparse::get_indextype<rocsparse_int>(),
-                                       position);
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::set_minus_one_async(handle->pointer_mode,
+                                           rocsparse::get_indextype<rocsparse_int>(),
+                                           position,
+                                           handle->stream));
         RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
         return rocsparse_status_success;
     }

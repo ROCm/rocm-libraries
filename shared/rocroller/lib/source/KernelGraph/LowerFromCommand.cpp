@@ -698,11 +698,9 @@ namespace rocRoller
                             = std::get<rocRoller::KernelGraph::CoordinateGraph::MacroTile>(info);
                         size_t miKScale = tile.miTileSizes.at(2);
 
-                        std::vector<size_t> expectedTile{64, 4, miKScale};
-
-                        AssertFatal(scaleTranspose == expectedTile,
+                        AssertFatal((scaleTranspose.at(0) * scaleTranspose.at(1) == 256)
+                                        && scaleTranspose.at(2) == miKScale,
                                     ShowValue(scaleTranspose),
-                                    ShowValue(expectedTile),
                                     ShowValue(valueArg),
                                     ShowValue(tile),
                                     ShowValue(tile.miTileSizes));

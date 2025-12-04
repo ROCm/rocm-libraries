@@ -8,9 +8,7 @@
 #include <memory>
 #include <unordered_map>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class BatchnormBackwardAttributes : public Attributes<BatchnormBackwardAttributes>
 {
@@ -267,5 +265,4 @@ private:
     }
 };
 typedef BatchnormBackwardAttributes Batchnorm_backward_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

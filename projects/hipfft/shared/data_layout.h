@@ -43,7 +43,7 @@ struct is_std_array<std::array<T, N>> : std::true_type
 };
 
 /**
- * @brief calculates the default strides for a given Discrete Fourier transform (row-major convention).
+ * @brief calculates the default strides for a given Discrete Fourier transform (observing row-major convention by default).
  * @note This function assumes interleaved complex representation for hermitian-symmetric data.
  * @note Empty strides are returned for empty lengths.
  * 
@@ -52,21 +52,39 @@ struct is_std_array<std::array<T, N>> : std::true_type
  * @param[in] dft_type type of transform
  * @param[in] placement placement of the transform
  * @param[in] io input/output flag
- * @param[in] lengths container of lengths for the transform of interest (row-major ordering convention)
+ * @param[in] lengths container of lengths for the transform of interest
+ * @param[in] dim_order optional vector of dimension ordering for ``lengths``. If used, the content
+ * of this vector must be a permutation of {0, 1, ..., lengths.size() - 1} (:= default natural order)
+ * and the corresponding dimension ordering is observed when generating the strides. For instance,
+ * column-major ordering is observed when setting ``dim_order`` to {lengths.size()-1, ..., 1, 0}.
  * @return desired default strides (same type as ``lengths`` input argument)
  */
 template <typename C, std::enable_if_t<std::is_integral_v<typename C::value_type>, bool> = true>
-static C default_strides(fft_transform_type   dft_type,
-                         fft_result_placement placement,
-                         fft_io               io,
-                         const C&             lengths)
+static C default_strides(fft_transform_type                        dft_type,
+                         fft_result_placement                      placement,
+                         fft_io                                    io,
+                         const C&                                  lengths,
+                         const std::optional<std::vector<size_t>>& dim_order = std::nullopt)
 {
     validate_enums_or_throw("default_strides", dft_type, placement, io);
+    if(dim_order)
+    {
+        if(dim_order->size() != lengths.size())
+            throw std::invalid_argument(
+                "default_strides: size mismatch between dim_order and lengths");
+        std::vector<size_t> natural_order(lengths.size());
+        std::iota(natural_order.begin(), natural_order.end(), 0);
+        if(!std::is_permutation(dim_order->begin(), dim_order->end(), natural_order.begin()))
+            throw std::invalid_argument("default_strides: invalid dim_order (not a permutation of "
+                                        "{0, 1, ..., lengths.size() - 1}");
+    }
+
     C                      ret(lengths);
     typename C::value_type def_stride = 1;
-    for(auto dim_idx = lengths.size(); dim_idx-- > 0;)
+    for(auto l_idx = lengths.size(); l_idx-- > 0;)
     {
-        ret[dim_idx] = def_stride;
+        const auto dim_idx = dim_order ? dim_order->at(l_idx) : l_idx;
+        ret[dim_idx]       = def_stride;
         if(dim_idx == lengths.size() - 1 && is_real(dft_type))
         {
             if((io == fft_io_out) == is_fwd(dft_type))
@@ -87,31 +105,53 @@ static C default_strides(fft_transform_type   dft_type,
 
 /**
  * @brief calculates the default distances for a given Discrete Fourier transform,
- * batched possibly multiple times (row-major convention).
+ * batched possibly multiple times (observing row-major convention by default).
  * @note This function assumes interleaved complex representation for hermitian-symmetric data.
- * @note Empty distances are returned for empty lengths or empty batches.
+ * @note Empty distances are returned for empty batches.
  * 
  * @tparam T integral value type for lengths and batches, the same type is used for the returned distances
  * @param[in] dft_type type of transform
  * @param[in] placement placement of the transform
  * @param[in] io input/output flag
- * @param[in] lengths vector of lengths for the transform of interest (row-major ordering convention)
+ * @param[in] lengths vector of lengths for the transform of interest
  * @param[in] batches vector of (possibly many) batch sizes for the transform of interest
+ * @param[in] len_dim_order optional vector of dimension ordering for ``lengths``. If used, the content
+ * of this vector must be a permutation of {0, 1, ..., lengths.size() - 1} (:= default natural order)
+ * and the corresponding dimension ordering is observed when generating the strides. For instance,
+ * column-major ordering is observed when setting ``len_dim_order`` to {lengths.size()-1, ..., 1, 0}.
  * @return std::vector<T> desired default distances (of size batches.size())
  */
 template <typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
-static std::vector<T> default_distances(fft_transform_type    dft_type,
-                                        fft_result_placement  placement,
-                                        fft_io                io,
-                                        const std::vector<T>& lengths,
-                                        const std::vector<T>& batches)
+static std::vector<T> default_distances(fft_transform_type                        dft_type,
+                                        fft_result_placement                      placement,
+                                        fft_io                                    io,
+                                        const std::vector<T>&                     lengths,
+                                        const std::vector<T>&                     batches,
+                                        const std::optional<std::vector<size_t>>& len_dim_order
+                                        = std::nullopt)
 {
     validate_enums_or_throw("default_distances", dft_type, placement, io);
-    if(batches.empty() || lengths.empty())
+    if(batches.empty())
         return std::vector<T>(); // empty as well
     auto temp_lengths = lengths;
     temp_lengths.insert(temp_lengths.begin(), batches.begin(), batches.end());
-    auto ret = default_strides(dft_type, placement, io, temp_lengths);
+    std::vector<T> ret;
+    if(!len_dim_order)
+    {
+        ret = default_strides(dft_type, placement, io, temp_lengths);
+    }
+    else
+    {
+        if(len_dim_order->size() != lengths.size())
+            throw std::invalid_argument(
+                "default_distances: size mismatch between len_dim_order and lengths");
+        std::vector<size_t> dim_order(batches.size() + lengths.size());
+        std::iota(dim_order.begin(), dim_order.begin() + batches.size(), 0);
+        for(size_t len_idx = 0; len_idx < lengths.size(); len_idx++)
+            dim_order[batches.size() + len_idx] = batches.size() + len_dim_order->at(len_idx);
+        ret = default_strides(dft_type, placement, io, temp_lengths, dim_order);
+    }
+
     ret.resize(batches.size());
     return ret;
 }
@@ -119,17 +159,18 @@ static std::vector<T> default_distances(fft_transform_type    dft_type,
  * @brief equivalent of default_distances for one-dimensional batches 
  */
 template <typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
-static T default_distance(fft_transform_type    dft_type,
-                          fft_result_placement  placement,
-                          fft_io                io,
-                          const std::vector<T>& lengths,
-                          const T&              batch_sz)
+static T default_distance(fft_transform_type                        dft_type,
+                          fft_result_placement                      placement,
+                          fft_io                                    io,
+                          const std::vector<T>&                     lengths,
+                          const T&                                  batch_sz,
+                          const std::optional<std::vector<size_t>>& len_dim_order = std::nullopt)
 {
     validate_enums_or_throw("default_distance", dft_type, placement, io);
     if(lengths.empty())
         throw std::invalid_argument("empty lengths rejected by default_distance");
-    const auto tmp
-        = default_distances(dft_type, placement, io, lengths, std::vector<T>(1, batch_sz));
+    const auto tmp = default_distances(
+        dft_type, placement, io, lengths, std::vector<T>(1, batch_sz), len_dim_order);
     return tmp.front();
 }
 

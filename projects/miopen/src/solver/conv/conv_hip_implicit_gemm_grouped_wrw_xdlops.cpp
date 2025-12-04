@@ -276,7 +276,7 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::ModelApplyToken(
 {
     if(idx == 13 && arch == "gfx90a")
         idx += 1; // skip
-    if(arch == "gfx942")
+    if(arch == "gfx942" || arch == "gfx950")
     {
         if(idx == 0)
         {
@@ -424,7 +424,8 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::RunParameterPredictionModel
 bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::IsModelApplicable(
     const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
-    if(ctx.GetStream().GetDeviceName() != "gfx90a" && ctx.GetStream().GetDeviceName() != "gfx942")
+    if(ctx.GetStream().GetDeviceName() != "gfx90a" && ctx.GetStream().GetDeviceName() != "gfx942" &&
+       ctx.GetStream().GetDeviceName() != "gfx950")
         return false;
     if(problem.GetInDataType() != miopenFloat && problem.GetInDataType() != miopenHalf &&
        problem.GetInDataType() != miopenBFloat16)
@@ -656,7 +657,7 @@ ConvSolution ConvHipImplicitGemmGroupWrwXdlops::GetSolution(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     return MakeSolutionGroupConvImplicitGemmXdlops(
         problem,
-        [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
+        [&](auto data_type_val) {
             using T = decltype(data_type_val);
             return InitInvokerFactoryWrwNCHW<2,
                                              false,
@@ -665,7 +666,7 @@ ConvSolution ConvHipImplicitGemmGroupWrwXdlops::GetSolution(
                                              miopen::conv::WrWInvokeParams>(
                 ctx, problem, config.kernel_id);
         },
-        [&](auto data_type_val, [[maybe_unused]] auto compute_type_val) {
+        [&](auto data_type_val) {
             using T = decltype(data_type_val);
             return InitInvokerFactoryNHWC<false,
                                           DeviceOpGWrwPtrs<T>,
