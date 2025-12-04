@@ -33,7 +33,8 @@ jobs:
     name: "Setup"
     runs-on: ubuntu-24.04
     outputs:
-      projects: ${{ steps.projects.outputs.projects }}
+      linux_projects: ${{ steps.projects.outputs.linux_projects }}
+      windows_projects: ${{ steps.projects.outputs.windows_projects }}
       test_type: ${{ steps.projects.outputs.test_type }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
@@ -62,10 +63,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install pydantic requests
 
-      - name: Determine projects to run
-        id: projects
+      - name: Determine Linux projects to run
+        id: linux_projects
         env:
           PROJECTS: ${{ inputs.projects }}
+          PLATFORM: "linux"
+        run: |
+          python .github/scripts/therock_configure_ci.py
+
+      - name: Determine Windows projects to run
+        id: windows_projects
+        env:
+          PROJECTS: ${{ inputs.projects }}
+          PLATFORM: "windows"
         run: |
           python .github/scripts/therock_configure_ci.py
 
@@ -95,7 +105,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        projects: ${{ fromJSON(needs.setup.outputs.projects) }}
+        projects: ${{ fromJSON(needs.setup.outputs.linux_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.linux_package_targets) }}
     uses: ./.github/workflows/therock-ci-linux.yml
     secrets: inherit
@@ -116,7 +126,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        projects: ${{ fromJSON(needs.setup.outputs.projects) }}
+        projects: ${{ fromJSON(needs.setup.outputs.windows_projects) }}
         target_bundle: ${{ fromJSON(needs.setup.outputs.windows_package_targets) }}
     uses: ./.github/workflows/therock-ci-windows.yml
     secrets: inherit
