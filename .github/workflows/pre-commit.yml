@@ -15,21 +15,8 @@ jobs:
 
       - name: Get changed files
         id: changed-files
-        env:
-          # Space-separated list of projects that have optional dependencies.
-          # These projects will have a <project>_changed output variable set.
-          PROJECTS_WITH_OPTIONAL_DEPS: "hipdnn"
         run: |
           CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD)
-          
-          # Check for optional dependencies
-          for project in $PROJECTS_WITH_OPTIONAL_DEPS; do
-            if echo "$CHANGED_FILES" | grep -qE "^(projects|shared)/$project/"; then
-              echo "${project}_changed=true" >> $GITHUB_OUTPUT
-            else
-              echo "${project}_changed=false" >> $GITHUB_OUTPUT
-            fi
-          done
           
           echo "files<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
@@ -45,24 +32,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install pre-commit
 
-      # If hipdnn_changed then FILTERED_FILES is unempty.
-      # Hence, this is only conditional on hipdnn_changed.
-      - name: Install hipDNN dependencies
-        if: steps.changed-files.outputs.hipdnn_changed == 'true'
-        run: |
-          # Install flatc for hipDNN
-          wget -q https://github.com/google/flatbuffers/releases/download/v25.9.23/Linux.flatc.binary.g++-13.zip
-          unzip -q Linux.flatc.binary.g++-13.zip
-          sudo mv flatc /usr/local/bin/
-          sudo chmod +x /usr/local/bin/flatc
-          rm Linux.flatc.binary.g++-13.zip
-
-      # Add additional project-specific dependency steps here as needed
-      # Example:
-      # - name: Install <project-name> dependencies
-      #   if: steps.changed-files.outputs.<project-name>_changed == 'true'
-      #   run: |
-      #     # Install project-specific dependencies
 
       - name: Run pre-commit checks
         run: |
@@ -80,15 +49,13 @@ jobs:
             echo "❌ Pre-commit checks FAILED"
             echo "================================================"
             echo ""
-            echo "Please fix the issues above and commit the changes."
-            echo ""
-            echo "To run pre-commit locally on eligible changed files:"
+            echo "To apply auto-fixes locally:"
             echo -n "  pre-commit run --files "
             printf "%q " "${FILTERED_FILES[@]}"
             echo ""
             echo "Or install pre-commit hooks to run automatically on commits:"
-            echo "  pip install pre-commit"
-            echo "  pre-commit install"
+            echo "To exclude files from checks, see CONTRIBUTING.md:"
+            echo "  https://github.com/ROCm/rocm-libraries/blob/develop/CONTRIBUTING.md#opting-a-project-into-pre-commit-checks"
             echo ""
             exit 1
           fi
