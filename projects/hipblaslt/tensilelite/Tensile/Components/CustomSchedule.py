@@ -783,7 +783,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
         optSchedule = {
                 'SYNC'  : [syncTable[::2]],
                 'GRIncA': [[6,6,7,7,8,8,9,9,9]],
-                'GRIncB': [[9,10,11,12,13,14,15,16,17]],
+                'GRIncB': [[33,34,35,36,37,38,39,40,41]],
 
                 'LRA0'  : [[0, 1, 2, 3, 4, 5],
                            [-1, 0, 1, 2, 3, 4]],
@@ -952,8 +952,8 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                     ]
         optSchedule = {
                     'SYNC'  : [syncTable[::2]],
-                    'GRIncA': [[0,1,2,3,4,5,6,7,8]],
-                    'GRIncB': [[9,10,11,12,13,14,15,16,17]],
+                    'GRIncA': [[35,36,37,38,39,40,41,42,43]],
+                    'GRIncB': [[0,1,2,3,4,5,6,7,8]],
 
                     'LRB0': [[-1, 0, 1, 2, 3, 4],
                              [0, 1, 2, 3, 4, 5]],
