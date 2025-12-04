@@ -31,6 +31,8 @@ def create_base_kernel():
         "PrefetchGlobalRead": 0, "PrefetchLocalRead": 0, "DirectToLds": False,
         "GlobalReadVectorWidthA": 0, "GlobalReadVectorWidthB": 0,
         "LocalReadVectorWidth": 0,
+        "WaveSeparateGlobalReadA": 0,
+        "WaveSeparateGlobalReadB": 0,
         "MatrixInstruction": [],
         "MIWaveGroup": [],
         "LDSTrInst": False,
