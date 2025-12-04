@@ -98,6 +98,32 @@ class TestCustomSchedule:
             assert 'PackB0' in schedule_info.optSchedule
             assert kernel["UsePLRPack"]
     
+    @pytest.mark.parametrize("force_unroll_sub_iter", [True, False])
+    def test_schedule_256x256x128_8bit_TN(self, force_unroll_sub_iter: bool):
+        """Tests the 256x256x128 8-bit TNschedule."""
+
+        kernel = create_base_kernel()
+        dtype_8bit = _mock_dtype(is_8bit=True, num_bytes=1)
+        kernel["ProblemType"].update({
+            "DataType": dtype_8bit, "DataTypeA": dtype_8bit, "DataTypeB": dtype_8bit,
+            "TransposeA": True, "TransposeB": False
+        })
+        kernel.update({
+            "MacroTile0": 256, "MacroTile1": 256, "DepthU": 128,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0, "DirectToLds": True,
+            "GlobalReadVectorWidthA": 16, "GlobalReadVectorWidthB": 16, "LocalReadVectorWidth": 16,
+            "MatrixInstruction": [16,16,128,1], "MIWaveGroup": [2,2], "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 8, "ForceUnrollSubIter": force_unroll_sub_iter,
+        })
+
+        has_schedule, schedule_info = hasCustomSchedule(kernel)
+
+        assert has_schedule
+        assert isinstance(schedule_info, ScheduleInfo)
+        assert schedule_info.numCodePaths == 1
+        assert schedule_info.numMfma == 64
+        valid, message = schedule_info.isValid({"kernel" : kernel})
+        assert valid, message
+    
     def test_schedule_256x96x64_16bit_TN(self):
         """Tests the 256x96x64 16-bit TN schedule."""
         kernel = create_base_kernel()
