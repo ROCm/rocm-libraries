@@ -258,6 +258,17 @@ get_temporary_buffer(my_memory_system& system, std::ptrdiff_t n)
   return thrust::make_pair(thrust::pointer<T, my_memory_system>(result.first.get()), result.second);
 }
 
+template <typename Pointer>
+void return_temporary_buffer(my_memory_system& system, Pointer p, std::ptrdiff_t n)
+{
+  system.validate_dispatch();
+
+  thrust::device_system_tag device_sys;
+  thrust::pointer<typename thrust::iterator_traits<Pointer>::value_type, 
+                           thrust::device_system_tag> device_ptr(p.get());
+  thrust::return_temporary_buffer(device_sys, device_ptr, n);
+}
+
 void TestGetTemporaryBufferDispatchExplicit()
 {
   const std::ptrdiff_t n = 9001;

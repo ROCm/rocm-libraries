@@ -82,6 +82,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/RemapOutputTilesTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ScalarExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ScaleUtilsTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ScratchOperationTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SettingsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SubDwordExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/StreamKFixupTest.cpp"
@@ -100,6 +101,15 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/WorkgroupRemapXCCTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/mxDataGeneratorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RotatingBufferTest.cpp"
+
+        "${CMAKE_CURRENT_SOURCE_DIR}/CustomMatchers.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CustomSections.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionMatchers.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SimpleTest.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TestContext.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TestContext_impl.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TestKernels.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TestKernels_impl.hpp"
 )
 
 target_include_directories(rocroller-tests-catch PRIVATE
