@@ -371,16 +371,34 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
       // Final tie-breaker: when all else is equal (including square problems),
       // consistently prefer tiles with larger MT_M
       // This ensures deterministic selection regardless of input order
-      std::stable_sort(results.begin(),
-                       results.begin() + num_same_ai,
-                       [](const prediction_result_t& a, const prediction_result_t& b) {
-                         // Prefer larger MT_M first
-                         if (a.config.mt.m != b.config.mt.m) return a.config.mt.m > b.config.mt.m;
-                         // If MT_M is same, prefer larger MT_N
-                         if (a.config.mt.n != b.config.mt.n) return a.config.mt.n > b.config.mt.n;
-                         // If both MT_M and MT_N are same, prefer larger MT_K
-                         return a.config.mt.k > b.config.mt.k;
-                       });
+      std::stable_sort(
+          results.begin(),
+          results.begin() + num_same_ai,
+          [](const prediction_result_t& a, const prediction_result_t& b) {
+            // Prefer larger MT_M first
+            if (a.config.mt.m != b.config.mt.m) return a.config.mt.m > b.config.mt.m;
+            // If MT_M is same, prefer larger MT_N
+            if (a.config.mt.n != b.config.mt.n) return a.config.mt.n > b.config.mt.n;
+            // If both MT_M and MT_N are same, prefer larger MT_K
+            if (a.config.mt.k != b.config.mt.k) return a.config.mt.k > b.config.mt.k;
+
+            // Prefer smaller WGM
+            if (a.config.workgroup_mapping != b.config.workgroup_mapping)
+              return a.config.workgroup_mapping < b.config.workgroup_mapping;
+
+            // tie-breaker for non-temporal cases. Larger number means higher priority.
+            auto get_cache_priority = [](int cache_a, int cache_b) -> int {
+              if (cache_a == 0 && cache_b == 0) return 3;
+              if (cache_a == 4) return 2;
+              if (cache_b == 4) return 1;
+              return 0;
+            };
+            int priority_a = get_cache_priority(a.config.cache_hints_a, a.config.cache_hints_b);
+            int priority_b = get_cache_priority(b.config.cache_hints_a, b.config.cache_hints_b);
+            if (priority_a != priority_b) return priority_a > priority_b;
+
+            return a.config.occupancy > b.config.occupancy;
+          });
     }
   }
 
