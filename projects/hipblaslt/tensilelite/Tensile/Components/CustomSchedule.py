@@ -633,12 +633,12 @@ def verify_scc_overlap(scheduleInfo, context: Dict = {}):
             for v in indices:
                 for interval in grIncData.intervals:
                     if inInterval(v,interval, dclIndex<dclIndexGrInc):
-                        return False, f"Code path {codePath}: {name} at index {v} can't be between {grIncData.name} {interval[0]}-{interval[1]} due to SCC usage."
+                        return False, f"{name} at index {v} can't be between {grIncData.name} {interval[0]}-{interval[1]} due to SCC usage."
 
         GRIncs = []
         for GRIncName in GRIncNames:
             GRInc = schedule_get(GRIncName, codePath, scheduleInfo)
-            assert numElements==len(GRInc), f"Code path {codePath}: {GRIncName} expected size if {numElements}, given {len(GRInc)}."
+            assert numElements==len(GRInc), f"{GRIncName} expected size if {numElements}, given {len(GRInc)}."
             GRIncs.append(GRIncData(name = GRIncName, insts = GRInc, intervals = getIntervals(GRInc)))
 
         # First check GRIncA&B together
