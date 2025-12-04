@@ -21,7 +21,7 @@
 ################################################################################
 
 from itertools import chain
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
                         StructuredModule, TextBlock, ValueEndif, ValueIf, ValueElseIf, ValueSet, SignatureBase
 from rocisa.container import vgpr, sgpr, SMEMModifiers, replaceHolder, EXEC,\
@@ -45,8 +45,9 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import Callable, Dict
 
+@dataclass
 class SyncSchedule:
-    schedule : list[tuple[int, SWaitCnt | SBarrier]] = []
+    schedule : list[tuple[int, SWaitCnt | SBarrier]] = field(default_factory=list)
 
     def add(self, idx:int, dscnt:int=-1, vlcnt:int=-1, vscnt:int=-1, comment:str="", barrier:bool=False, barrier_idx:int|None=None, barrier_comment:str=""):
         """ Add a SWaitCnt (and optionally a SBarrier) to the schedule at the given index.
