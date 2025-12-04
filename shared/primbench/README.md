@@ -48,6 +48,7 @@ struct copy_benchmark : public primbench::benchmark_interface
 {
     primbench::json meta() const override
     {
+        // primbench::json objects can be nested
         return primbench::json{}.add("algo", "copy").add("type", primbench::name<T>());
     }
 
