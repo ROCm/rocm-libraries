@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -1173,6 +1173,7 @@ void generate_real_data(const Tint&            whole_length,
 typedef std::tuple<size_t, size_t>         idx_2D_t;
 typedef std::tuple<size_t, size_t, size_t> idx_3D_t;
 
+// Instantiate data gen functions for an index type and precision
 #define INSTANTIATE_DATA_GEN(INDEX, DATATYPE)                                                        \
     template void generate_random_interleaved_data<INDEX, DATATYPE>(                                 \
         const INDEX&              whole_length,                                                      \
@@ -1436,6 +1437,7 @@ void impose_hermitian_symmetry_planar(const std::vector<size_t>& length,
                                  + std::string(hipGetErrorName(err)));
 }
 
+// Instantiate hermitian symmetry functions for a precision
 #define INSTANTIATE_IMPOSE_HERM(DATATYPE)                                                            \
     template void impose_hermitian_symmetry_interleaved<rocfft_complex<DATATYPE>>(                   \
         const std::vector<size_t>& length,                                                           \
