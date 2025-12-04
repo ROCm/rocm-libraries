@@ -562,6 +562,72 @@ def apply_swaits(timeline: list[list[ValidatorInstruction]], num_vmfma: int) -> 
             local_read.guaranteed_by = min(local_read.guaranteed_by, new_guaranteed_by)
 
 
+def verify_scc_overlap(scheduleInfo, context: Dict = {}):
+    """
+    Ensure we don't overlap scalar instruction modifying scc between GR and GRInc
+    """
+    kernel = context["kernel"]
+    DTL = kernel["DirectToLds"]
+    ShadowLimit = kernel["Use64bShadowLimit"]
+    # GRInc intervals are defined as follow:
+    # [3,2,2,2]
+    #  - s_cmp_eq_u32, s_cselect_b32,s_cselect_b32
+    #  - s_add_u32, s_add_u32 
+    #  - s_sub_u32, s_subb_u32
+    #  - s_cmp_eq_u32, s_cselect_b32
+    # with ShadowLimit disabled:
+    # [3,2,1]
+    #  - s_cmp_eq_u32, s_cselect_b32,s_cselect_b32
+    #  - s_add_u32, s_add_u32 
+    #  - s_sub_u32 
+    
+    intervalSize = [3,2,2,2] if ShadowLimit else [3,2,1]
+    numElements = sum(intervalSize)
+    
+    def getIntervals(indices):
+        output = []
+        current_start = 0
+        for size in intervalSize:
+            current_end = current_start + size
+            min_val = indices[current_start]
+            max_val = indices[current_end - 1]
+            output.append([min_val, max_val])
+            current_start = current_end
+        return output
+
+    def inInterval(value, interval, lhsGt):
+        if lhsGt:
+            return value>interval[0] and value<=interval[1]
+        else:
+            return value>=interval[0] and value<interval[1]
+
+    def getDeclarationIndex(name):
+        return list(scheduleInfo.optSchedule).index(name)
+    
+    def verify(scheduleInfo: 'ScheduleInfo', codePath: int) -> tuple[bool, str]:
+        GRIncNames = ["GRIncA", "GRIncB"]
+        GRNames = ["GRA", "GRB"]
+        for GRIncName in GRIncNames:
+            GRInc = schedule_get(GRIncName, codePath, scheduleInfo)
+            assert numElements==len(GRInc), f"Code path {codePath}: {GRIncName} expected size if {len(intervals)}, given {len(GRInc)}."
+            GRIncIntervals = getIntervals(GRInc)
+            indexGRInc = getDeclarationIndex(GRIncName)
+            for GRName in GRNames:
+                GR = schedule_get(GRName, codePath, scheduleInfo)
+                m0 = GR[0::2]
+                indexGR = getDeclarationIndex(GRName)
+                for v in m0:
+                    for interval in GRIncIntervals:
+                        assert not inInterval(v,interval, indexGRInc<indexGR), f"Code path {codePath}: {GRName} M0 at index {v} can't be between {GRIncName} {interval[0]}-{interval[1]} due to SCC usage."
+
+    # Validation needed only when we use m0 (ie. DTL).
+    if DTL:   
+        for codePath in range(scheduleInfo.numCodePaths):
+            errorMessage = verify(scheduleInfo, codePath)
+            if errorMessage:
+                return False, f"Code path {codePath}: {errorMessage}"
+    return True, ""
+
 def verify_lrs_complete_before_vmfma(schedule_info: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     """
     Ensure that the A and B data needed for VMFA at index=i is guaranteed to be in the registers before index=i.
@@ -679,12 +745,13 @@ class ScheduleInfo:
         self.__skipValidation__ = False
 
         # The set of validation rules to run inside `isValid`.
-        self.rules: List[Callable[[ScheduleInfo, dict], [bool, str]]] = []
-
-        self.rules.append(verify_ascending_order)
-        self.rules.append(verify_correct_number_of_instructions)
-        self.rules.append(verify_global_reads_not_too_early)
-        self.rules.append(verify_lrs_complete_before_vmfma)
+        self.rules: list[Callable[[ScheduleInfo, dict], [bool, str]]] = [
+            verify_correct_number_of_instructions,
+            verifyAscendingOrder,
+            verify_lrs_complete_before_vmfma,
+            verify_global_reads_not_too_early,
+            verify_scc_overlap
+        ]
 
     def disableValidation(self):
         self.__skipValidation__ = True
