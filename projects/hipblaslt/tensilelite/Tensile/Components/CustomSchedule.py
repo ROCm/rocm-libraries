@@ -321,7 +321,7 @@ def verify_scc_overlap(scheduleInfo, context: Dict = {}):
         GRNames = ["GRA", "GRB"]
         for GRIncName in GRIncNames:
             GRInc = schedule_get(GRIncName, codePath, scheduleInfo)
-            assert numElements==len(GRInc), f"Code path {codePath}: {GRIncName} expected size if {len(intervals)}, given {len(GRInc)}."
+            assert numElements==len(GRInc), f"Code path {codePath}: {GRIncName} expected size if {numElements}, given {len(GRInc)}."
             GRIncIntervals = getIntervals(GRInc)
             indexGRInc = getDeclarationIndex(GRIncName)
             for GRName in GRNames:
