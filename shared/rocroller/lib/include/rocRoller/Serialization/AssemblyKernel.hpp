@@ -133,7 +133,7 @@ namespace rocRoller
                 iot::mapRequired(io, ".workgroup_size", workgroupSize);
                 if(not iot::outputting(io))
                 {
-                    AssertFatal(workgroupSize.size() == 3);
+                    AssertFatal(workgroupSize.size() == 3, "Expected 3, got ", workgroupSize.size());
                     kern.m_workgroupSize = {workgroupSize[0], workgroupSize[1], workgroupSize[2]};
                     // The following fields are context-dependent and must be set here
                     kern.m_sgprCount     = sgpr_count;
@@ -200,7 +200,7 @@ namespace rocRoller
 
                 if(!iot::outputting(io))
                 {
-                    AssertFatal(hsa_version.size() == 2);
+                    AssertFatal(hsa_version.size() == 2, "Expected 2, got ", hsa_version.size());
                     // TODO: Set hsa_version from YAML input
                 }
             }
