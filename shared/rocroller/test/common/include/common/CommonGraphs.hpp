@@ -208,6 +208,11 @@ namespace rocRollerTest
                              int  prefetchInFlight,
                              int  prefetchLDSFactor,
                              bool prefetchMixMemOps);
+            void setScaling(bool                scaleA,
+                            bool                scaleB,
+                            rocRoller::DataType scaleTypeA     = rocRoller::DataType::E8M0,
+                            rocRoller::DataType scaleTypeB     = rocRoller::DataType::E8M0,
+                            int                 scaleBlockSize = 32);
 
             GEMMProblem const& getProblem() const
             {
@@ -227,6 +232,7 @@ namespace rocRollerTest
             GEMMProblem m_problem;
 
             rocRoller::Operations::OperationTag m_tagA, m_tagB, m_tagC, m_tagD;
+            rocRoller::Operations::OperationTag m_tagScaleA, m_tagScaleB;
             rocRoller::Operations::OperationTag m_tagNumWGs;
 
             CommandPtr m_command;
