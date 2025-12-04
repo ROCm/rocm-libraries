@@ -29,6 +29,7 @@
 #include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/KernelOptions.hpp>
 
 namespace rocRoller
 {
@@ -773,14 +774,14 @@ namespace rocRoller
             return rv;
         }
 
-        rocRoller::KernelGraph::CoordinateGraph::User newScratchCoordinate(
-            Expression::ExpressionPtr size,
-            VariableType              varType,
-            ScratchPolicy             policy,
-            ContextPtr                context)
+        rocRoller::KernelGraph::CoordinateGraph::User
+            newScratchCoordinate(Expression::ExpressionPtr size,
+                                 VariableType              varType,
+                                 ScratchPolicy             policy,
+                                 ContextPtr                context)
         {
             auto currentOffset = context->getScratchAmount(policy);
-            auto newCoordinate = CT::User(size, currentOffset);
+            auto newCoordinate = CT::User(size, currentOffset, getScratchName(policy));
             // TODO Audit bytes/bits
             // Can we move size inside the CeilDivide?
             context->allocateScratch(

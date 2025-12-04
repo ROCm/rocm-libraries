@@ -267,11 +267,11 @@ namespace rocRoller
          * @param context
          * @return User
          */
-        rocRoller::KernelGraph::CoordinateGraph::User newScratchCoordinate(
-            Expression::ExpressionPtr size,
-            VariableType              varType,
-            ScratchPolicy             policy,
-            ContextPtr                context);
+        rocRoller::KernelGraph::CoordinateGraph::User
+            newScratchCoordinate(Expression::ExpressionPtr size,
+                                 VariableType              varType,
+                                 ScratchPolicy             policy,
+                                 ContextPtr                context);
 
         /**
          * @brief Replace operation with a new operation.

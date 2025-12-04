@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include <map>
 #include <vector>
 
 #include <rocRoller/CommandSolution.hpp>
@@ -228,6 +229,8 @@ namespace rocRollerTest
 
             rocRoller::Operations::OperationTag m_tagA, m_tagB, m_tagC, m_tagD;
             rocRoller::Operations::OperationTag m_tagNumWGs;
+
+            std::map<rocRoller::ScratchPolicy, rocRoller::Operations::OperationTag> m_scratchTags;
 
             CommandPtr m_command;
         };

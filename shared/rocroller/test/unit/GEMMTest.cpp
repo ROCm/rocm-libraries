@@ -30,6 +30,7 @@
 #endif /* ROCROLLER_USE_HIP */
 
 #include <algorithm>
+#include <map>
 #include <regex>
 
 #include <rocRoller/AssemblyKernel.hpp>
@@ -40,6 +41,7 @@
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
@@ -456,30 +458,18 @@ namespace GEMMDriverTest
                 command->addOperation(rocRoller::Operations::T_Store_Tiled(tagCvt, tagTensorD));
             }
 
-            auto tileDataScratchTag = command->allocateTag();
-            command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                                      tileDataScratchTag,
-                                      ArgumentType::Value,
-                                      DataDirection::ReadWrite,
-                                      rocRoller::SCRATCH);
-
-            auto syncFlagsScratchTag = command->allocateTag();
-            command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                                      syncFlagsScratchTag,
-                                      ArgumentType::Value,
-                                      DataDirection::ReadWrite,
-                                      rocRoller::SCRATCH);
-
-            // Operations::OperationTag scratchTag[static_cast<size_t>(ScratchPolicy::Count)];
-            // for(size_t i = 0; i < static_cast<size_t>(ScratchPolicy::Count); ++i)
-            // {
-            //     scratchTag[i] = command->allocateTag();
-            //     command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
-            //                               scratchTag[i],
-            //                               ArgumentType::Value,
-            //                               DataDirection::ReadWrite, rocRoller::SCRATCH);
-            // }
-            // std::cout << "create scratchTag" << std::endl;
+            std::map<ScratchPolicy, Operations::OperationTag> scratchTag;
+            for(int i = 0; i < static_cast<int>(ScratchPolicy::Count); ++i)
+            {
+                auto policy        = static_cast<ScratchPolicy>(i);
+                scratchTag[policy] = command->allocateTag();
+                command->allocateArgument(
+                    VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                    scratchTag[policy],
+                    ArgumentType::Value,
+                    DataDirection::ReadWrite,
+                    getScratchName(policy));
+            }
 
             Operations::OperationTag tagNumWGs;
             if(gemm.streamK)
@@ -692,31 +682,18 @@ namespace GEMMDriverTest
                 commandArgs.setArgument(tagNumWGs, ArgumentType::Value, gemm.numWGs);
             }
 
-            auto tileDataScratchSpaceRequired = commandKernel.scratchSpaceRequired(
-                ScratchPolicy::TileData, commandArgs.runtimeArguments());
-            auto deviceTileDataScratch = make_shared_device<uint8_t>(tileDataScratchSpaceRequired, 0);
-            commandArgs.setArgument(tileDataScratchTag, ArgumentType::Value, deviceTileDataScratch.get());
-
-            auto syncFlagsScratchSpaceRequired = commandKernel.scratchSpaceRequired(
-                ScratchPolicy::SyncFlags, commandArgs.runtimeArguments());
-            auto deviceSyncFlagsScratch = make_shared_device<uint8_t>(syncFlagsScratchSpaceRequired, 0);
-            commandArgs.setArgument(syncFlagsScratchTag, ArgumentType::Value, deviceSyncFlagsScratch.get());
-
-            // std::shared_ptr<uint8_t> deviceScratch[static_cast<size_t>(ScratchPolicy::Count)];
-            // size_t scratchSpaceRequired[static_cast<size_t>(ScratchPolicy::Count)];
-            // for(size_t i = 0; i < static_cast<size_t>(ScratchPolicy::Count); ++i)
-            // {
-            //     scratchSpaceRequired[i] = commandKernel.scratchSpaceRequired(
-            //         static_cast<ScratchPolicy>(i), commandArgs.runtimeArguments());
-            //     // if(scratchSpaceRequired[i] > 0)
-            //     {
-            //         std::cout << "scratch space required: " << scratchSpaceRequired[i] << std::endl;
-            //         std::cout << "index: " << i << std::endl;
-            //         deviceScratch[i] = make_shared_device<uint8_t>(scratchSpaceRequired[i], 0);
-            //         commandArgs.setArgument(scratchTag[i], ArgumentType::Value, deviceScratch[i].get());
-            //     }
-            // }
-            std::cout << "set commmand arguments" << std::endl;
+            std::map<ScratchPolicy, std::shared_ptr<uint8_t>> deviceScratch;
+            std::map<ScratchPolicy, size_t>                   scratchSpaceRequired;
+            for(int i = 0; i < static_cast<int>(ScratchPolicy::Count); ++i)
+            {
+                auto policy = static_cast<ScratchPolicy>(i);
+                scratchSpaceRequired[policy]
+                    = commandKernel.scratchSpaceRequired(policy, commandArgs.runtimeArguments());
+                deviceScratch[policy] = make_shared_device<uint8_t>(
+                    std::max(scratchSpaceRequired[policy], size_t(1)), 0);
+                commandArgs.setArgument(
+                    scratchTag[policy], ArgumentType::Value, deviceScratch[policy].get());
+            }
 
             if(gemm.workgroupMappingDim != -1)
             {
@@ -829,39 +806,37 @@ namespace GEMMDriverTest
             for(int iteration = 0; iteration < numIters; ++iteration)
             {
                 ASSERT_THAT(hipMemset(deviceD.get(), 0, M * N * sizeof(TD)), HasHipSuccess(0));
-                // for(size_t i = 0; i < static_cast<size_t>(ScratchPolicy::Count); ++i)
-                // {
-                //     // if(scratchSpaceRequired[i] > 0)
-                //     {
-                //         ASSERT_THAT(hipMemset(deviceScratch[i].get(), 0, scratchSpaceRequired[i]), HasHipSuccess(0));
-                //     }
-                // }
-                ASSERT_THAT(hipMemset(deviceTileDataScratch.get(), 0, tileDataScratchSpaceRequired), HasHipSuccess(0));
-                ASSERT_THAT(hipMemset(deviceSyncFlagsScratch.get(), 0, syncFlagsScratchSpaceRequired), HasHipSuccess(0));
-
-                std::cout << "launch kernel" << std::endl;
+                for(int i = 0; i < static_cast<int>(ScratchPolicy::Count); ++i)
+                {
+                    auto policy = static_cast<ScratchPolicy>(i);
+                    ASSERT_THAT(hipMemset(deviceScratch[policy].get(),
+                                          0,
+                                          std::max(scratchSpaceRequired[policy], size_t(1))),
+                                HasHipSuccess(0));
+                }
 
                 commandKernel.launchKernel(commandArgs.runtimeArguments());
 
-                std::cout << "copy device result" << std::endl;
                 ASSERT_THAT(
                     hipMemcpy(
                         d_result.data(), deviceD.get(), M * N * sizeof(TD), hipMemcpyDeviceToHost),
                     HasHipSuccess(0));
 
-                std::cout << "verify sync flags scratch" << std::endl;
-
                 // Verify SyncFlags scratch is all zeros after kernel
-                // auto syncFlagsIdx = static_cast<size_t>(ScratchPolicy::SyncFlags);
-                auto syncFlagsResult = std::vector<uint8_t>(syncFlagsScratchSpaceRequired);
-                ASSERT_THAT(hipMemcpy(syncFlagsResult.data(),
-                                    //   deviceScratch[syncFlagsIdx].get(),
-                                    deviceSyncFlagsScratch.get(),
-                                      syncFlagsScratchSpaceRequired,
-                                      hipMemcpyDeviceToHost),
-                            HasHipSuccess(0));
-                EXPECT_TRUE(std::all_of(syncFlagsResult.begin(), syncFlagsResult.end(), [](uint8_t v) { return v == 0; }))
-                    << "SyncFlags scratch should be all zeros after kernel execution";
+                if(scratchSpaceRequired[ScratchPolicy::SyncFlags] > 0)
+                {
+                    std::vector<uint8_t> syncFlagsResult(
+                        scratchSpaceRequired[ScratchPolicy::SyncFlags]);
+                    ASSERT_THAT(hipMemcpy(syncFlagsResult.data(),
+                                          deviceScratch[ScratchPolicy::SyncFlags].get(),
+                                          scratchSpaceRequired[ScratchPolicy::SyncFlags],
+                                          hipMemcpyDeviceToHost),
+                                HasHipSuccess(0));
+                    EXPECT_TRUE(std::all_of(syncFlagsResult.begin(),
+                                            syncFlagsResult.end(),
+                                            [](uint8_t v) { return v == 0; }))
+                        << "SyncFlags scratch should be all zeros after kernel execution";
+                }
 
                 auto tol = gemmAcceptableError<TA, TB, TD>(
                     M, N, K, m_context->targetArchitecture().target());

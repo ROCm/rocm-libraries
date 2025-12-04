@@ -292,8 +292,8 @@ namespace rocRoller
             auto strideX = sizeY;
             auto strideY = literal(1u);
 
-            auto globalScratch
-                = newScratchCoordinate(simplify(sizeX * sizeY), varType, ScratchPolicy::TileData, context);
+            auto globalScratch = newScratchCoordinate(
+                simplify(sizeX * sizeY), varType, ScratchPolicy::TileData, context);
             auto globalScratchTag = graph.coordinates.addElement(globalScratch);
 
             std::vector<unsigned int> jammedSizes = {loopInfo.xLoopSize, loopInfo.yLoopSize};
@@ -579,11 +579,12 @@ namespace rocRoller
             auto doWhileTag = graph.control.addElement(
                 DoWhileOp{(DF(flagRegister) == zero), "Global sync spin loop"});
 
-            // Duplicate flag and next workgroup coordinates for reset operation
+            // Create coordinate to indicate flag index to reset
             auto resetNextWorkgroupTag = graph.coordinates.addElement(Linear(nullptr, one));
             graph.coordinates.addElement(
                 Join(), {workgroup, plusOneTag, forReceiveTileLoopCoord}, {resetNextWorkgroupTag});
 
+            // Duplicate flags scratch coordinate for reset operation
             auto resetFlagsScratchTag
                 = graph.coordinates.addElement(*graph.coordinates.get<User>(flagsScratchTag));
             graph.coordinates.addElement(Duplicate(), {resetFlagsScratchTag}, {flagsScratchTag});

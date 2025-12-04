@@ -41,14 +41,15 @@ namespace rocRoller
         {
             class StreamKGEMMSolution : public DataParallelGEMMSolution
             {
-                Operations::OperationTag m_scratchTag, m_numWGsTag;
+                std::map<ScratchPolicy, Operations::OperationTag> m_scratchTags;
+                Operations::OperationTag                          m_numWGsTag;
 
             public:
                 using DataParallelGEMMSolution::DataParallelGEMMSolution;
 
-                Operations::OperationTag getScratchTag() const override
+                Operations::OperationTag getScratchTag(ScratchPolicy scratchPolicy) const override
                 {
-                    return m_scratchTag;
+                    return m_scratchTags.at(scratchPolicy);
                 }
 
             protected:
@@ -63,13 +64,17 @@ namespace rocRoller
                                                                DataDirection::ReadOnly,
                                                                rocRoller::NUMWGS);
 
-                    m_scratchTag = command->allocateTag();
-                    command->allocateArgument(
-                        VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                        m_scratchTag,
-                        ArgumentType::Value,
-                        DataDirection::ReadWrite,
-                        rocRoller::SCRATCH);
+                    for(int i = 0; i < static_cast<int>(ScratchPolicy::Count); ++i)
+                    {
+                        auto policy           = static_cast<ScratchPolicy>(i);
+                        m_scratchTags[policy] = command->allocateTag();
+                        command->allocateArgument(
+                            VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                            m_scratchTags[policy],
+                            ArgumentType::Value,
+                            DataDirection::ReadWrite,
+                            getScratchName(policy));
+                    }
 
                     return command;
                 }

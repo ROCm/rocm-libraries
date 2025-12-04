@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "rocRoller/Serialization/YAML.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -344,14 +345,17 @@ namespace rocRoller::Client::GEMMClient
         auto runtimeArgs = commandArgs.runtimeArguments();
 
         // Note: the lifetime of deviceScratch needs to exceed kernel executions
-        std::shared_ptr<uint8_t> deviceScratch;
+        std::shared_ptr<uint8_t> deviceScratch[static_cast<size_t>(ScratchPolicy::Count)];
+
+        for(int i = 0; i < static_cast<int>(ScratchPolicy::Count); ++i)
         {
-            auto scratchSpaceRequired = commandKernel->scratchSpaceRequired(runtimeArgs);
+            auto policy               = static_cast<ScratchPolicy>(i);
+            auto scratchSpaceRequired = commandKernel->scratchSpaceRequired(policy, runtimeArgs);
             if(scratchSpaceRequired > 0)
             {
-                deviceScratch = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
+                deviceScratch[i] = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
                 commandArgs.setArgument(
-                    gemm->getScratchTag(), ArgumentType::Value, deviceScratch.get());
+                    gemm->getScratchTag(policy), ArgumentType::Value, deviceScratch[i].get());
             }
         }
 
@@ -456,6 +460,24 @@ namespace rocRoller::Client::GEMMClient
 
             auto [correct, rnorm] = validate<A, B, C, D>(
                 hostA, hostB, hostC, hostD, hostScaleA, hostScaleB, problemParams, arch);
+
+            // Verify SyncFlags scratch is all zeros after kernel
+            auto syncFlagsIdx = static_cast<size_t>(ScratchPolicy::SyncFlags);
+            if(deviceScratch[syncFlagsIdx])
+            {
+                auto syncFlagsSize
+                    = commandKernel->scratchSpaceRequired(ScratchPolicy::SyncFlags, runtimeArgs);
+                std::vector<uint8_t> syncFlagsResult(syncFlagsSize);
+                AssertFatal(hipMemcpy(syncFlagsResult.data(),
+                                      deviceScratch[syncFlagsIdx].get(),
+                                      syncFlagsSize,
+                                      hipMemcpyDeviceToHost)
+                            == (hipError_t)HIP_SUCCESS);
+                AssertFatal(std::all_of(syncFlagsResult.begin(),
+                                        syncFlagsResult.end(),
+                                        [](uint8_t v) { return v == 0; }),
+                            "SyncFlags scratch should be all zeros after kernel execution");
+            }
 
             result.checked = true;
             result.correct = correct;

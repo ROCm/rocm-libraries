@@ -28,6 +28,7 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
+#include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
 namespace rocRollerTest::Graphs
@@ -285,12 +286,16 @@ namespace rocRollerTest::Graphs
                                                          rocRoller::NUMWGS);
         }
 
-        auto tagScratch = m_command->allocateTag();
-        m_command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                                    tagScratch,
-                                    ArgumentType::Value,
-                                    DataDirection::ReadWrite,
-                                    rocRoller::SCRATCH);
+        for(int i = 0; i < static_cast<int>(ScratchPolicy::Count); ++i)
+        {
+            auto policy           = static_cast<ScratchPolicy>(i);
+            m_scratchTags[policy] = m_command->allocateTag();
+            m_command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                                        m_scratchTags[policy],
+                                        ArgumentType::Value,
+                                        DataDirection::ReadWrite,
+                                        getScratchName(policy));
+        }
     }
 
     CommandPtr GEMM::getCommand()
