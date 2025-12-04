@@ -3,10 +3,16 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
-## rocSPARSE 4.2.0 for ROCm 7.2.0
+
+## (Unreleased) rocSPARSE 4.3.0
 
 ### Added
 * Added `rocsparse_spmv_set_extra` and `rocsparse_spmv_clear_extra` functions to enable residual computation within SpMV operations. These functions allow setting additional gamma scalars and z vectors for fused computations of the form `y = alpha * op(A) * x + beta * y + sum(gamma_i * z_i)`, enabling efficient residual calculations like `r = b - A * x`.
+* Added the `debian`, `almalinux`, `rockylinux`, and `oraclelinux` OS names to install script
+
+## rocSPARSE 4.2.0 for ROCm 7.2.0
+
+### Added
 * Added sliced ELL format support to the `rocsparse_spmv` routine.
 * Added the `rocsparse_sptrsv` and `rocsparse_sptrsm` routines for triangular solve.
 * Added the `--clients-only` option to the `install.sh` and `rmake.py` scripts to only build the clients for a version of rocSPARSE that is already installed.

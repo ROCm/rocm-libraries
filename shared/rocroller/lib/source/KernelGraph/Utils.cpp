@@ -87,9 +87,7 @@ namespace rocRoller
             auto bodies
                 = graph.control.getOutputNodeIndices<CG::Body>(topOp).to<std::unordered_set>();
 
-            //
             // First, look for SetCoordinate nodes and compute their colour.
-            //
             std::map<int, std::pair<int, int>> setCoordinateColour;
             for(auto bodyTop : bodies)
             {
@@ -117,10 +115,8 @@ namespace rocRoller
             if(setCoordinateColour.empty())
                 return rv;
 
-            //
             // Next, colour SetCoordinate body operations, and any
             // coordinates that they are mapped to.
-            //
             for(auto [setCoordinate, colouring] : setCoordinateColour)
             {
                 auto [coord, value] = colouring;
@@ -137,9 +133,7 @@ namespace rocRoller
                 }
             }
 
-            //
             // Now follow traces and propagate colour
-            //
             auto trace = ControlFlowRWTracer(graph, topOp).coordinatesReadWrite();
             for(auto record : trace)
             {
@@ -185,9 +179,7 @@ namespace rocRoller
                 }
             }
 
-            //
             // Also, propagate colour up SetCoordinate-chains
-            //
             for(auto [setCoordinate, _ignore] : setCoordinateColour)
             {
                 // Go down Body edges
@@ -204,9 +196,7 @@ namespace rocRoller
                     rv.operationColour[setCoordinate][coord] = value;
             }
 
-            //
             // Find Sequence separator edges
-            //
             for(auto [bodyElem, _ignore] : rv.operationColour)
             {
                 for(auto edge : filter(graph.control.isElemType<CG::Sequence>(),
@@ -264,7 +254,7 @@ namespace rocRoller
             return {forLoopCoord, forLoop};
         }
 
-        int cloneForLoop(KernelGraph& graph, int forLoopOpTag)
+        int cloneForLoop(KernelGraph& graph, int forLoopOpTag, std::optional<std::string> name)
         {
             auto maybeForLoopOp = graph.control.get<CG::ForLoopOp>(forLoopOpTag);
             AssertFatal(maybeForLoopOp, "cloneForLoop is being called on a non-ForLoopOp");
@@ -279,7 +269,11 @@ namespace rocRoller
             auto [loopIterator, loopCondition] = split<Expression::LessThan>(forLoopOp.condition);
 
             auto [cloneForLoopCoordTag, clonedForLoopOpTag]
-                = rangeFor(graph, forLoopSize, forLoopOp.loopName, DataType::None, forLoopCoordTag);
+                = rangeFor(graph,
+                           forLoopSize,
+                           name ? *name : forLoopOp.loopName,
+                           DataType::None,
+                           forLoopCoordTag);
 
             // Reset the condition to match the original loop more
             // precisely.  This is necessary for, eg, StreamK loops
@@ -1057,7 +1051,9 @@ namespace rocRoller
 
                 auto valueExpr = setCoord.value().value;
                 AssertFatal(evaluationTimes(valueExpr)[Expression::EvaluationTime::Translate],
-                            "SetCoordinate::value should be a literal.");
+                            "SetCoordinate::value should be a literal for SetCoordinate(",
+                            tag,
+                            ")");
 
                 if(getUnsignedInt(evaluate(valueExpr)) == coordValue)
                 {
