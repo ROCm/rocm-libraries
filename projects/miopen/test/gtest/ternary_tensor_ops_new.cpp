@@ -60,26 +60,10 @@ protected:
 
     void SetUp() override { prng::reset_seed(); }
 
-    miopenStatus_t runOptimizedGPU() override
-    {
-        std::cout << "runOptimizedGPU()\n";
-        return miopenStatusNotImplemented;
-    }
-    miopenStatus_t runNaiveGPU() override
-    {
-        std::cout << "runNaiveGPU()\n";
-        return miopenStatusSuccess;
-    }
-    miopenStatus_t runOptimizedCPU() override
-    {
-        std::cout << "runOptimizedCPU()\n";
-        return miopenStatusSuccess;
-    }
-    miopenStatus_t runNaiveCPU() override
-    {
-        std::cout << "runNaiveCPU()\n";
-        return miopenStatusSuccess;
-    }
+    void runOptimizedGPU() override {}
+    void runNaiveGPU() override { std::cout << "runNaiveGPU()\n"; }
+    void runOptimizedCPU() override { std::cout << "runOptimizedCPU()\n"; }
+    void runNaiveCPU() override { std::cout << "runNaiveCPU()\n"; }
 
     std::pair<bool, std::unordered_map<std::string, double>> verifyOptimizedGPU() override
     {

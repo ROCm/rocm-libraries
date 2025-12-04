@@ -27,8 +27,10 @@
 #include <numeric>
 #include <array>
 #include <tuple>
+#include <unordered_map>
 
 #include "miopen/miopen.h"
+#include "miopen/errors.hpp"
 
 /*! @enum miopenUnitUnderTest_t
  * Enum values for selecting unit under test (UUT) in manual configuration mode.
@@ -64,7 +66,7 @@ typedef enum
 {
     miopenAfterTestFailureNone    = 0, /*!< Do not do anything on test failure. */
     miopenAfterTestFailureAnalyze = 0, /*!< Analyze and provide more information. */
-    miopenAfterTestFailureMoveOn  = 0, /*!< Move on next, more trusted, implementation. */
+    miopenAfterTestFailureMoveOn  = 0, /*!< Move on next, more trusted, reference. */
 } miopenAfterTestFailure_t;
 
 constexpr bool isValidUUT(miopenUnitUnderTest_t uut)
@@ -94,48 +96,159 @@ constexpr bool checkTestConfiguration(miopenUnitUnderTest_t uut, miopenTestRefer
     return isValidUUT(uut) && isValidREF(ref) && checkReferenceChoice(uut, ref);
 }
 
-constexpr int numberOfRunsAfterFailure = 5;
-struct ErrorAnalysisInfo
+static miopenTestReference_t getNextREF(miopenTestReference_t ref)
 {
-    int numOfRunsFailed = 0;
-    std::array<double, numberOfRunsAfterFailure> errors;
-
-    void analyze()
+    if(!isValidREF(ref))
     {
-        double percentageFailed = static_cast<double>(numOfRunsFailed) /
-                                  static_cast<double>(numberOfRunsAfterFailure) * 100.0;
-        double meanError = std::reduce(errors.begin(), errors.end()) /
-                           static_cast<double>(numberOfRunsAfterFailure);
-        double maxError = *(std::max_element(errors.begin(), errors.end()));
-
-        std::cout << percentageFailed << std::endl
-                  << meanError << std::endl
-                  << maxError << std::endl;
+        MIOPEN_THROW("Invalid reference parameter in getNextREF() call");
     }
-};
 
+    switch(ref)
+    {
+    case miopenTestReferenceNaiveGPU: return miopenTestReferenceOptimizedCPU;
+    case miopenTestReferenceOptimizedCPU: return miopenTestReferenceNaiveCPU;
+    default: return miopenTestReferenceNaiveCPU; // Maybe to do something else here? Throw error?
+    }
+}
+
+constexpr int numberOfRunsAfterFailure = 5;
+/**
+ * Base class for gtests, it provides interface to have different runs based on template parameters
+ * that will determine the configuration for run.
+ *
+ * (UnitUnderTest)    UUT - desired unit that will be tested
+ * (TestReference)    REF - desired implementation that will be treated as reference
+ * (AfterTestFailure) ATF - option that determine what to do (if anything) on test failure
+ */
 template <miopenUnitUnderTest_t UUT, miopenTestReference_t REF, miopenAfterTestFailure_t ATF>
 class GTESTBase
 {
 private:
+    /**
+     * Struct to save error values for AFT == miopenAfterTestFailureAnalyze, and do analysis
+     * of the values at the end
+     */
+    struct ErrorAnalysisInfo
+    {
+        int numOfRunsFailed = 0;
+        std::unordered_map<std::string, std::array<double, numberOfRunsAfterFailure>> errors;
+
+        void analyze()
+        {
+
+            std::cout << numOfRunsFailed << " out of " << numberOfRunsAfterFailure
+                      << " number of runs failed." << std::endl;
+            for(auto [key, value] : errors)
+            {
+                double meanError = std::reduce(value.begin(), value.begin() + numOfRunsFailed) /
+                                   static_cast<double>(numOfRunsFailed);
+                double maxError =
+                    *(std::max_element(value.begin(), value.begin() + numOfRunsFailed));
+
+                std::cout << key << ": " << std::endl
+                          << "\tmean error: " << std::to_string(meanError) << std::endl
+                          << "\tmax error: " << std::to_string(maxError) << std::endl;
+            }
+        }
+    };
+
+    miopenTestReference_t currentREF = REF;
+
     bool testFailed = false;
+    std::unordered_map<std::string, double> failureErrors;
     ErrorAnalysisInfo info;
 
 protected:
-    virtual miopenStatus_t runOptimizedGPU() = 0;
-    virtual miopenStatus_t runNaiveGPU()     = 0;
-    virtual miopenStatus_t runOptimizedCPU() = 0;
-    virtual miopenStatus_t runNaiveCPU()     = 0;
+    /**
+     * Should we avoid implementing some logic that will check whether or not some UUT is
+     * impelmented or not? Mostly OptimizedCPU and NaiveGPU are implemented, but not all operations
+     * have OptimizedGPU. Can we consider for start that it is up to developer to take care of this.
+     * For example it is resposibility of developer to not make OptimizedGPU as UUT if it is not
+     * implemented. Also, we can assume that if there is OG then for sure there is NG, if there is
+     * NG then for sure is OC, etc.
+     *
+     * Or some checks can be implemented in test itself, maybe in SetUpTestSuite?
+     */
+    virtual void runOptimizedGPU() = 0;
+    virtual void runNaiveGPU()     = 0;
+    virtual void runOptimizedCPU() = 0;
+    virtual void runNaiveCPU()     = 0;
 
-    // Use EXPECT_* instead of ASSERT_* in verifying functions so that on failure execution can
-    // continue and perform analysis in runAfterFailure()
+    /**
+     * Use EXPECT_* instead of ASSERT_* in verifying functions so that on failure execution can
+     * continue and perform additional work after falure
+     *
+     * Return value is pair where:
+     * first [bool] is true if some verifying failed, false otherwise
+     * second [unordered_map] map should contain small name of the value(s) that failed and error
+     * value(s)
+     */
     virtual std::pair<bool, std::unordered_map<std::string, double>> verifyOptimizedGPU() = 0;
     virtual std::pair<bool, std::unordered_map<std::string, double>> verifyNaiveGPU()     = 0;
     virtual std::pair<bool, std::unordered_map<std::string, double>> verifyOptimizedCPU() = 0;
 
-    miopenStatus_t analyzeAfterTestFailure() { return miopenStatusNotImplemented; }
+    /**
+     * Run numberOfRunsAfterFailure times with selected configuration, do not change the reference,
+     * after runs extract some statistical information
+     */
+    void analyzeAfterTestFailure()
+    {
+        std::cout << "Doing additional runs with selected configuration." << std::endl
+                  << "Collecting more information." << std::endl;
 
-    miopenStatus_t moveOnAfterTestFailure() { return miopenStatusNotImplemented; }
+        for(int i = 0; i < numberOfRunsAfterFailure; i++)
+        {
+            runUUT();
+            runREF();
+            verify();
+
+            if(testFailed)
+            {
+                for(auto [key, value] : failureErrors)
+                {
+                    if(!info.errors.contains(key))
+                    {
+                        info.errors.insert({key, std::array<double, numberOfRunsAfterFailure>()});
+                    }
+                    info.errors[key][info.numOfRunsFailed] = value;
+                }
+                info.numOfRunsFailed++;
+            }
+        }
+        info.analyze();
+    }
+
+    /**
+     * Change to 'more trusted' reference implementation after failure, and re-test with it. Repeat
+     * the process until verification succeeded or we've run with all of the references.
+     */
+    void moveOnAfterTestFailure()
+    {
+        std::cout << "Moving onto more trusted reference implementation." << std::endl;
+        /*
+        if(currentREF == miopenTestReferenceNaiveGPU)
+        {
+            // TODO: in future implementations this will probably mean that all data is on GPU
+            // therefore copy to cpu is needed.
+        }
+        */
+
+        while(currentREF != miopenTestReferenceNaiveCPU)
+        {
+            currentREF = getNextREF(currentREF);
+            // Print choosen reference? Or is it enough to have prints at the end of verifying
+            // methods?
+
+            // Do we need to re-run UUT?
+            runREF();
+            verify();
+
+            if(!testFailed)
+            {
+                break;
+            }
+        }
+    }
 
     void runUUT()
     {
@@ -160,11 +273,11 @@ protected:
 
     void runREF()
     {
-        if constexpr(REF == miopenTestReferenceNaiveGPU)
+        if(currentREF == miopenTestReferenceNaiveGPU)
         {
             runNaiveGPU();
         }
-        else if constexpr(REF == miopenTestReferenceOptimizedCPU)
+        else if(currentREF == miopenTestReferenceOptimizedCPU)
         {
             runOptimizedCPU();
         }
@@ -181,20 +294,20 @@ protected:
         bool failedOC = false;
         if constexpr(UUT == miopenUnitBothGPU)
         {
-            std::tie(failedOG, std::ignore) = verifyOptimizedGPU().first;
-            std::tie(failedNG, std::ignore) = verifyNaiveGPU();
+            std::tie(failedOG, failureErrors) = verifyOptimizedGPU();
+            std::tie(failedNG, failureErrors) = verifyNaiveGPU();
         }
         else if constexpr(UUT == miopenUnitOptimizedGPU)
         {
-            std::tie(failedOG, std::ignore) = verifyOptimizedGPU();
+            std::tie(failedOG, failureErrors) = verifyOptimizedGPU();
         }
         else if constexpr(UUT == miopenUnitNaiveGPU)
         {
-            std::tie(failedNG, std::ignore) = verifyNaiveGPU();
+            std::tie(failedNG, failureErrors) = verifyNaiveGPU();
         }
         else
         {
-            std::tie(failedOC, std::ignore) = verifyOptimizedCPU();
+            std::tie(failedOC, failureErrors) = verifyOptimizedCPU();
         }
         testFailed = failedOG || failedNG || failedOC;
     }
@@ -218,7 +331,7 @@ public:
             }
             else
             {
-                std::cerr << "Unknown afterFailure option" << std::endl;
+                MIOPEN_THROW("Unknown afterTestFailure option");
             }
         }
     };
