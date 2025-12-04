@@ -58,10 +58,11 @@ constexpr auto MLO_BOT_DATA_SZ0 =
 constexpr auto MLO_BOT_DATA_SZ1 =
     (MLO_POOLING_N_VERT_OUT_PIX - 1) * MLO_POOLING_STRIDE1 + MLO_POOLING_KERNEL_SZ1;
 
-// Let's use extended-precision accumulator only in FP16 pooling and only for averaging.
+// Let's use extended-precision accumulator for FP16 averaging and always for BF16.
+// BF16 uses ushort which doesn't work correctly with signed comparisons in max pooling.
 // For all other ops and datatypes, redefine macros used for accum-float conversion
 // and accum types, so they do nothing, i.e. treate FLOAT_ACCUM as FLOAT.
-#if !(AVERAGE_OPS && MIOPEN_USE_FP16)
+#if !((AVERAGE_OPS && MIOPEN_USE_FP16) || MIOPEN_USE_BFP16)
 #define MIOPEN_USE_NATIVE_DATATYPE_ACCUM 1
 #endif
 
