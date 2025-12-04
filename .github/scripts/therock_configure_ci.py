@@ -188,6 +188,7 @@ if __name__ == "__main__":
     args = {}
     github_event_name = os.getenv("GITHUB_EVENT_NAME")
     platform = os.getenv("PLATFORM")
+    args["platform"] = platform
     args["is_pull_request"] = github_event_name == "pull_request"
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
