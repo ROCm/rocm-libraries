@@ -254,24 +254,54 @@ namespace rocRoller::KernelGraph
 
         // Next, consider Unroll coordinates.
         auto unrolls = filterCoordinates<Unroll>(required, graph);
+
+        // StreamK creates a coordinate structure where Unroll coordinates are
+        // only connected via Identify edges (not CoordinateTransformEdges).
+        // findRequiredCoordinates doesn't traverse Identify edges, so these
+        // Unrolls aren't in the `required` set.
+        //
+        // Solution: Find Unrolls via the MAPPER by tracing up the control graph
+        // from the operation to find SetCoordinate nodes, which are mapped to Unrolls.
+        {
+            int current = op;
+            while(true)
+            {
+                auto parent = only(graph.control.getInputNodeIndices<Body>(current));
+                if(!parent)
+                    break;
+
+                auto maybeSetCoord = graph.control.get<SetCoordinate>(*parent);
+                if(maybeSetCoord)
+                {
+                    auto unrollCoord = graph.mapper.get<Unroll>(*parent);
+                    if(unrollCoord > 0)
+                    {
+                        unrolls.insert(unrollCoord);
+                    }
+                }
+                current = *parent;
+            }
+        }
+
         for(auto unroll : unrolls)
         {
-            std::vector<int> neighbourNodes;
-            if(direction == Graph::Direction::Upstream)
-                neighbourNodes = graph.coordinates.childNodes(unroll).to<std::vector>();
-            else
-                neighbourNodes = graph.coordinates.parentNodes(unroll).to<std::vector>();
+            // The Unroll is connected to a coordinate via an Identify edge.
+            // Follow the Identify chain and find a neighbour that's in the path.
+            auto unrollTarget = followIdentify(unroll, graph);
 
-            for(auto neighbourNode : neighbourNodes)
+            // Find a neighbour of unrollTarget that's actually in the path
+            auto coord = getNeighbourNodeInPath(unrollTarget, direction, path, graph);
+            if(coord != -1 && !isForLoop.contains(coord))
             {
-                if(path.contains(neighbourNode) && !isForLoop.contains(neighbourNode))
+                auto it = std::find(codegen.cbegin(), codegen.cend(), coord);
+                if(it == codegen.cend())
                 {
-                    auto it = std::find(codegen.cbegin(), codegen.cend(), neighbourNode);
-                    if(it == codegen.cend())
+                    // Check if this coordinate is already in ordered
+                    if(std::find(ordered.begin(), ordered.end(), coord) == ordered.end())
                     {
-                        ordered.push_back(neighbourNode);
-                        isUnroll.insert(neighbourNode);
+                        ordered.push_back(coord);
                     }
+                    isUnroll.insert(coord);
                 }
             }
         }
