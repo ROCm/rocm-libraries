@@ -412,7 +412,8 @@ namespace rocRoller
                                            int& t_n,
                                            int  maxWidth,
                                            uint macTileFastMovingDimSize,
-                                           int  numDwordsPerElement);
+                                           int  numDwordsPerElement,
+                                           bool avoidDWordX2);
 
         /**
          * @brief Get the tag of the highest SetCoordinate directly upstream from load.

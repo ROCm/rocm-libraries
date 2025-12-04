@@ -927,11 +927,14 @@ namespace rocRoller
                                            int& t_n,
                                            int  maxWidth,
                                            uint macTileFastMovingDimSize,
-                                           int  numDwordsPerElement)
+                                           int  numDwordsPerElement,
+                                           bool avoidDWordX2)
         {
             auto numDwordsPerWorkitem = t_m * numDwordsPerElement;
 
             std::vector<int> potentialFactors = {4, 3, 2, 1};
+            if(avoidDWordX2)
+                potentialFactors = {4, 3, 1};
 
             auto start = potentialFactors.begin();
             auto end   = potentialFactors.end();
