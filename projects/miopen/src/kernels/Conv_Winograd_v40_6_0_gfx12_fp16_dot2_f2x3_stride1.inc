@@ -5539,6 +5539,11 @@ s_code_end
 s_code_end
 s_code_end
 s_code_end
+// Here and below are the precomputed LDS data/filter addresses used to guarantee
+// a bank conflict-free shuffle. The LDS banking scheme changed starting with GFX12,
+// these addresses are constructed to remain conflict-free on both pre-GFX12 and GFX12+ ASICs.
+// They are precomputed because calculating them dynamically at runtime would
+// impose a performance penalty. You can think of this as analogous to data placed in the .data section.
 .long 0x00000020
 .long 0x00000044
 .long 0x00000054
