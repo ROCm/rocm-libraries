@@ -2356,9 +2356,9 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
     if isTN(kernel) and not useLDSTr and TLDS==1:
         optSchedule = {
 
-            'SYNC'   : [[-1,3, 10,10, 26,26,27, 45,45]],
+            'SYNC'   : [[-1,3, 10,10, 26,27, 45,45]],
             'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
-            'GRIncB' : [[9,11,12,13,14,15,16,17,18]],
+            'GRIncB' : [[22,22,24,24,25,25,26,27,27]],
 
             'LRA0'   : [[0,2,3,4]],  ## -2 is place holder
 
@@ -2375,7 +2375,7 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
                         [30, 33, 36, 39]],
 
             #After GRB is done.
-            'LRB1'   : [[45,46,47,48,50,51,52]],
+            'LRB1'   : [[45,46,47,48,49,50,51]],
 
             'LRSA'   : [[23]], # after LRA0 and before LRA1
             'LRSB'   : [[23]], # after LRB0 and before LRB2
@@ -2389,8 +2389,7 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 for the remaining main loop"),
                     SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete to start GRA"),
                     SBarrier(comment=""),
-                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete to start GRB"),
-                    SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Wait for GRA to complete to start LRA1"),
+                    SWaitCnt(dscnt=0, vlcnt=11, vscnt=-1, comment="Wait for LRB0/GRA to complete to start GRB/LRA1"),
                     SBarrier(comment=""),
                     SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="Wait for GRB to complete to start LRB1"),
                     SBarrier(comment=""),
