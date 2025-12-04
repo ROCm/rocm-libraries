@@ -38,6 +38,7 @@
 #include "gpubuf.h"
 #include "rocfft_against_fftw.h"
 #include "sys_mem.h"
+#include "test_callbacks.h"
 #include "test_params.h"
 
 extern int  verbose;
@@ -161,21 +162,6 @@ public:
     }
 };
 
-struct callback_test_data
-{
-    // scalar to modify the input/output with
-    double scalar;
-};
-
-void* get_load_callback_host(fft_array_type itype,
-                             fft_precision  precision,
-                             bool           round_trip_inverse);
-void  apply_load_callback(const fft_params& params, std::vector<hostbuf>& input);
-void  apply_store_callback(const fft_params& params, std::vector<hostbuf>& output);
-void* get_store_callback_host(fft_array_type otype,
-                              fft_precision  precision,
-                              bool           round_trip_inverse);
-
 static auto allocate_cpu_fft_buffer(const fft_precision        precision,
                                     const fft_array_type       type,
                                     const std::vector<size_t>& size)
@@ -247,167 +233,30 @@ inline void execute_gpu_fft(Tparams&              params,
 
     if(params.run_callbacks)
     {
-        auto add_load_cb = [&]() {
-            void* load_cb_host
-                = get_load_callback_host(params.itype, params.precision, round_trip_inverse);
-
-            callback_test_data load_cb_data_host;
-
-            if(round_trip_inverse)
+        auto runtime_err_handler = [&](const std::string& msg) {
+            ++n_hip_failures;
+            if(skip_runtime_fails)
             {
-                load_cb_data_host.scalar = params.store_cb_scalar;
+                throw ROCFFT_SKIP{msg};
             }
             else
             {
-                load_cb_data_host.scalar = params.load_cb_scalar;
+                throw ROCFFT_FAIL{msg};
             }
-
-            auto& load_cb_data_dev = all_cb_data.emplace_back();
-            auto  hip_status       = load_cb_data_dev.alloc(sizeof(callback_test_data));
-            if(hip_status != hipSuccess)
-            {
-                ++n_hip_failures;
-                std::stringstream ss;
-                ss << "Error occurred when allocating device memory for loading callback";
-                if(skip_runtime_fails)
-                {
-                    throw ROCFFT_SKIP{ss.str()};
-                }
-                else
-                {
-                    throw ROCFFT_FAIL{ss.str()};
-                }
-            }
-            hip_status = hipMemcpy(load_cb_data_dev.data(),
-                                   &load_cb_data_host,
-                                   sizeof(callback_test_data),
-                                   hipMemcpyHostToDevice);
-            if(hip_status != hipSuccess)
-            {
-                ++n_hip_failures;
-                std::stringstream ss;
-                ss << "Error occurred when copying data to device for loading callback";
-                if(skip_runtime_fails)
-                {
-                    throw ROCFFT_SKIP{ss.str()};
-                }
-                else
-                {
-                    throw ROCFFT_FAIL{ss.str()};
-                }
-            }
-            load_cb_func.push_back(load_cb_host);
-            load_cb_data.push_back(load_cb_data_dev.data());
         };
 
-        if(params.ifields.empty())
-        {
-            // for library-decomposed multi-GPU, one cb for each device
-            if(params.multiGPU > 1)
-            {
-                for(int i = 0; i < static_cast<int>(params.multiGPU); ++i)
-                {
-                    rocfft_scoped_device dev(i);
-                    add_load_cb();
-                }
-            }
-            else
-            {
-                // load cb for current HIP device
-                add_load_cb();
-            }
-        }
-        else
-        {
-            for(size_t i = 0; i < params.ifields.front().bricks.size(); ++i)
-            {
-                // load cb for this brick's device
-                rocfft_scoped_device dev(params.ifields.front().bricks[i].device);
-                add_load_cb();
-            }
-        }
-
-        auto add_store_cb = [&]() {
-            void* store_cb_host
-                = get_store_callback_host(params.otype, params.precision, round_trip_inverse);
-
-            callback_test_data store_cb_data_host;
-
-            if(round_trip_inverse)
-            {
-                store_cb_data_host.scalar = params.load_cb_scalar;
-            }
-            else
-            {
-                store_cb_data_host.scalar = params.store_cb_scalar;
-            }
-
-            auto& store_cb_data_dev = all_cb_data.emplace_back();
-            auto  hip_status        = store_cb_data_dev.alloc(sizeof(callback_test_data));
-            if(hip_status != hipSuccess)
-            {
-                ++n_hip_failures;
-                std::stringstream ss;
-                ss << "Error occurred when allocating device memory for storing callback";
-                if(skip_runtime_fails)
-                {
-                    throw ROCFFT_SKIP{ss.str()};
-                }
-                else
-                {
-                    throw ROCFFT_FAIL{ss.str()};
-                }
-            }
-
-            hip_status = hipMemcpy(store_cb_data_dev.data(),
-                                   &store_cb_data_host,
-                                   sizeof(callback_test_data),
-                                   hipMemcpyHostToDevice);
-            if(hip_status != hipSuccess)
-            {
-                ++n_hip_failures;
-                std::stringstream ss;
-                ss << "Error occurred when copying data to device for storing callback";
-                if(skip_runtime_fails)
-                {
-                    throw ROCFFT_SKIP{ss.str()};
-                }
-                else
-                {
-                    throw ROCFFT_FAIL{ss.str()};
-                }
-            }
-
-            store_cb_func.push_back(store_cb_host);
-            store_cb_data.push_back(store_cb_data_dev.data());
-        };
-
-        if(params.ofields.empty())
-        {
-            // for library-decomposed multi-GPU, one cb for each device
-            if(params.multiGPU > 1)
-            {
-                for(int i = 0; i < static_cast<int>(params.multiGPU); ++i)
-                {
-                    rocfft_scoped_device dev(i);
-                    add_store_cb();
-                }
-            }
-            else
-            {
-                // store cb for current HIP device
-                add_store_cb();
-            }
-        }
-        else
-        {
-            for(size_t i = 0; i < params.ofields.front().bricks.size(); ++i)
-            {
-                // store cb for this brick's device
-                rocfft_scoped_device dev(params.ofields.front().bricks[i].device);
-                add_store_cb();
-            }
-        }
+        get_rank_load_callbacks(params,
+                                load_cb_func,
+                                load_cb_data,
+                                runtime_err_handler,
+                                round_trip_inverse,
+                                all_cb_data);
+        get_rank_store_callbacks(params,
+                                 store_cb_func,
+                                 store_cb_data,
+                                 runtime_err_handler,
+                                 round_trip_inverse,
+                                 all_cb_data);
 
         auto fft_status
             = params.set_callbacks(&load_cb_func, &load_cb_data, &store_cb_func, &store_cb_data);
