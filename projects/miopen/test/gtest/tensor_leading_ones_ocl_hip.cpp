@@ -30,7 +30,7 @@
 #include "tensor_util.hpp"
 #include "verify.hpp"
 
-#define PERF_ENABLE 1
+#define PERF_ENABLE 0
 #if PERF_ENABLE
 #include "perf_helper.hpp"
 #endif
