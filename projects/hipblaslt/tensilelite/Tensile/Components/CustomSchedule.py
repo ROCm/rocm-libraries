@@ -1693,6 +1693,58 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         lwsb   = [95]
 
         gr_inc_step = 1
+    
+    elif isNT(kernel) and useLDSTr and TLDS == 0:
+        print("AAAAAAAAAAAAAAAAAAAAA")
+        def count_items(input_list: list[int], sv:int|None = None, ev:int|None = None):
+            """Count how many items in the list are between start value `sv` (inclusive) and end value `ev` (exclusive)"""
+            count = 0
+            sv = sv if sv is not None else input_list[0]
+            ev = ev if ev is not None else input_list[-1]
+            for item in input_list:
+                if sv <= item < ev:
+                    count += 1
+            return count
+
+        #lra0   = [0,1,2,3,5, 7,8,10,12,14, 16,17] # 12 loads
+        #lrb0   = [  18,19,21,23,25, 27,28,30,32,34, 36,37,39,41,43, 45,46,48,50,52] # 20 loads
+        lra0   = [0,1,3,5,7, 9,10,12,14,16, 18,19] # 12 loads
+        lrb0   = [  21,23,25, 27,28,30,32,34, 36,37,39,41,43, 45,46,48,50,52, 54,55] # 20 loads
+        # need two LRB1 items because a single LRB read gets only half of the data needed for MFMA
+        # note, max dscnt value is 15, so in this case 19 will be maxed at 15, thus we will wait more than needed :(
+        syncs.add(-1, dscnt=len(lrb0)-2, comment="wait for all LRA1 and two items from LRB1 before starting the sub-iteration")
+
+        i = 5 # next LRB1 is needed at index 6, so insert wait at 5
+        syncs.add(          i, dscnt=count_items(lra0,ev=i), comment="wait for the rest of LRB1 to complete") 
+        grinca = [0,1,2,3,4,5,6,7,8]
+        grincb = [9,10,12,13,14,15,16,17,18]
+
+        i = 26
+        syncs.add(                                         i, dscnt=count_items(lrb0,ev=i), barrier=True, comment="wait for all LRA0 to complete before GRA start")
+        gra    = [                                              28,30,32,36,39,42] # one index for two instructions
+
+        # syncs.add(                                                              59, dscnt=0, barrier=True, comment="wait for all LRB0 to complete before GRB start")
+        syncs.add(                                                              59, dscnt=len(lrb0)-2, vlcnt=len(gra), barrier=True, comment="wait for all LRB0 to complete before GRB start")
+        grb    = [                                                                 60,63,67,72,77,82,86,91,96,101] # one index for two instructions
+        # grb2    = [                                                                 61,64,68,73,78,83,87,92,97,102] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+
+        lrsa   = [57]
+        lrsb   = [58]
+
+        lra1   = [                                                                   61,62,63,64,65, 66,67,69,71,73, 75,76] # 12 loads
+        i = 65 # next LRB0 is needed at index 66, so insert wait at 65
+        syncs.add(                                                                               i, dscnt=count_items(lra1,ev=i), comment="wait for the rest of LRB0 to complete") 
+        lrb1 = None
+        lrb1a  = [                                                                                     78, 80, 82, 84, 86, 88, 90, 92, 94, 96, 98, 100, 102, 104, 106, 108, 110, 112, 114, 116] # 20 loads
+        lrb1b  = [                                                                                     79, 81, 83, 85, 87, 89, 91, 93, 95, 97, 99, 101, 103, 105, 107, 109, 111, 113, 115, 117] # 20 loads
+        # syncs.add(                                                                            71, vlcnt=10, barrier=True, comment="wait for previous set of global reads")
+        # lra1   = [                                                                              72,73,74,75,76, 77,78,79,80,81, 82,83] # 12 loads
+        # lrb1   = [                                                                                     84,85,86,87,88, 89,90,91,92,93, 94,95,96,97,98, 99,100,101,102,103] # 20 loads
+        lwsa   = [68]
+        lwsb   = [77]
+
+        gr_inc_step = 1
     else:
         return False, None
 
@@ -1710,12 +1762,19 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         'LWSA':   [lwsa],
         'LWSB':   [lwsb],
         'LRA1':   [lra1],
-        'LRB1':   [lrb1],
+        'LRB1':   [lrb1a, lrb1b] if lrb1 is None else [lrb1],
         'LCC':    [[numMfma-2, numMfma-1]],
     }
+
     syncCode = syncs.get_code()
+    if True:
+        for k,v in optSchedule.items():
+            print(f"{k}: {v}")
+        print(" ")
+        for s in syncCode:
+            print(f"  {s}")
     nglshift = nllshift = num_gr
-    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1 = ScheduleInfo(2 if lrb1 is None else 1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
 def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
