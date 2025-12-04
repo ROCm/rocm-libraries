@@ -901,6 +901,43 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
             }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+    elif isNT(kernel) and useLDSTr and TLDS == 0:
+        kernel["SwapGlobalReadOrder"] = True
+        #index and code pair
+        syncTable = [-1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="for LRB1"),
+                     29, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for LRB0. For code path 0, this is actually wait for LRB0 + 1/16 LRA0"),
+                     29, SBarrier(comment="for GRA"),
+                     47, SWaitCnt(dscnt=0, vlcnt=14, vscnt=-1, comment="wait for previous GRB and LRA0"),
+                     47, SBarrier(comment="for GRB"),
+                     70, SWaitCnt(dscnt=-1, vlcnt=14-3, vscnt=-1, comment="wait for previous GRA"),
+                     70, SBarrier(comment="for GRB"),
+                     ]
+        optSchedule = {
+                'SYNC'  : [syncTable[::2]],
+                'GRIncA': [[18, 19,20,21,22,23,24,25,26]],
+                'GRIncB': [[9,10,11,12,13,14,15,16,17]],
+
+                'LRB0': [[-1,1, 3,5, 7,9, 11,13, 15,17, 19,21],
+                         [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22]],
+                'LRA0': [[23, 24, 25, 26, 27, 28, 29, 30,31, 32,33, 34,35, 36,37, 38],
+                         [24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39]],
+                'GRA': [[29,29, 31,31, 33,33, 38,38, 40,40, 41,41],
+                         [30, 30, 32, 32, 34, 34, 39, 39, 41, 41, 42, 42]],
+
+                'GRB': [[57,57, 59,59, 61,61, 63,63, 65,65, 70,70, 75,75, 80,80],
+                        [58, 58, 60, 60, 62, 62, 64, 64, 66, 66, 71, 71, 76, 76, 81, 81]],
+                'LRB1': [[47,48, 50,52, 54,56, 58,60, 62,64, 66,68],
+                         [48, 49, 51, 53, 55, 57, 59, 61, 63, 65, 67, 69]],
+                'LRA1': [[70,71, 72,73, 74,75, 76,77, 78,79, 80,81, 82,83, 84,85],
+                         [71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86]],
+                
+                'LRSB': [[39]],
+                'LRSA': [[46]],
+                'LWSB': [[78]],
+                'LWSA': [[95]],
+                'LCC' : [[95, 95]],}
+        syncCode = syncTable[1::2]
+        nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     elif isNN(kernel) and useLDSTr and TLDS == 1:
         kernel["SwapGlobalReadOrder"] = True
         #index and code pair
