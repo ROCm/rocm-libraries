@@ -1953,21 +1953,21 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
         
         syncs.add(12, dscnt=12, comment="wait for the rest of LRB1 to complete") 
         lra0   = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25] # 26 loads
-        syncs.add(30, dscnt=2, barrier=True, comment="wait for all LRA0 to complete before GRA start")
         lrb0   = [27,29,31,33,35,38,40,42] # 8 loads
+        syncs.add(30, dscnt=2, barrier=True, comment="wait for all LRA0 to complete before GRA start")
 
         syncs.add(49, dscnt=0, barrier=True, comment="wait for all LRB0 to complete before GRB start")
         # one index for two instructions
         gra    = [31,32,34,36,37,39,41,43,45,46,48,50,52,53,55,57,59,60,62,64,66,67,68,69,70,71] # 26 loads
         grb    = [73,74,81,83,87,91,92,93] # 8 loads
-        num_gra, num_grb = len(gra), len(grb)
-        num_gr = num_gra + num_grb
-        # 10 from GRA and 8 from GRB will be issued after this index
-        syncs.add(58, vlcnt=num_grb+(num_gr-(10+8)), barrier=True, comment="wait for previous set of GRA")
+        num_gr = len(gra) + len(grb)
+        
+        # 8 GRBs from previous iteration + 16 GRAs from current iteration (indices 31-57) can be still pending
+        syncs.add(58, vlcnt=(8+16), barrier=True, comment="wait for previous set of GRA")
         lra1   = [59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84] # 26 loads
         
-        # 6 from GRA and 8 from GRB will be issued after this index        
-        syncs.add(65,vlcnt=num_gr-(6+8), barrier=True, comment="wait for previous set of GRB")
+        # 20 GRAs (indices 31-64) from current iteration can be still pending
+        syncs.add(65,vlcnt=20, barrier=True, comment="wait for previous set of GRB")
         lrb1   = [66,85,86,88,90,92,94,96] # 8 loads
 
         lrsa   = [49]
