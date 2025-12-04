@@ -104,7 +104,6 @@ private:
     std::vector<Tgpu> in;
     std::vector<Tgpu> out;
     std::vector<Tref> outhost;
-    std::vector<Tref> outhost_mt;
     std::vector<Tgpu> scale;
     std::vector<Tref> scalehost;
 
@@ -120,7 +119,8 @@ private:
     std::vector<Tgpu> din;
     std::vector<Tgpu> dout;
     std::vector<Tref> dinhost;
-    std::vector<Tref> dinhost_mt;
+
+    bool use_multithread = false;
 };
 
 template <typename Tgpu, typename Tref>
@@ -140,6 +140,9 @@ int LRNDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
 		MIOPEN_THROW(miopenStatusBadParm, "Cross channel LRN needs do_backward=1");
 	}
 #endif
+
+    use_multithread = (inflags.GetValueInt("mt") != 0);
+
     return 0;
 }
 
@@ -181,6 +184,7 @@ int LRNDriver<Tgpu, Tref>::AddCmdLineArgs()
                          "within",
                          "LRN Mode (within_channel or cross_channel) (Default=within)",
                          "str");
+    inflags.AddInputFlag("mt", 'M', "0", "Use multithreaded version (Default=0)", "int");
 
     return 0;
 }
@@ -246,10 +250,9 @@ int LRNDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         scale_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, workSpaceNbVal, sizeof(Tgpu)));
     }
 
-    in         = std::vector<Tgpu>(in_sz, static_cast<Tgpu>(0));
-    out        = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
-    outhost    = std::vector<Tref>(out_sz, static_cast<Tref>(0));
-    outhost_mt = std::vector<Tref>(out_sz, static_cast<Tref>(0));
+    in      = std::vector<Tgpu>(in_sz, static_cast<Tgpu>(0));
+    out     = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
+    outhost = std::vector<Tref>(out_sz, static_cast<Tref>(0));
     if(do_backward)
     {
         scale     = std::vector<Tgpu>(workSpaceNbVal, static_cast<Tgpu>(0));
@@ -263,10 +266,9 @@ int LRNDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
             }
         }
     }
-    din        = std::vector<Tgpu>(in_sz, static_cast<Tgpu>(0));
-    dout       = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
-    dinhost    = std::vector<Tref>(in_sz, static_cast<Tref>(0));
-    dinhost_mt = std::vector<Tref>(in_sz, static_cast<Tref>(0));
+    din     = std::vector<Tgpu>(in_sz, static_cast<Tgpu>(0));
+    dout    = std::vector<Tgpu>(out_sz, static_cast<Tgpu>(0));
+    dinhost = std::vector<Tref>(in_sz, static_cast<Tref>(0));
 
     for(int i = 0; i < in_sz; i++)
     {
@@ -471,58 +473,20 @@ int LRNDriver<Tgpu, Tref>::VerifyForward()
                                      in.data(),
                                      scalehost.data(),
                                      outhost.data(),
-                                     false);
+                                     use_multithread);
 
     const auto error     = miopen::rms_range(outhost, out);
     const Tref tolerance = 1.5e-4; // 1e-6;
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Forward LRN FAILED: " << error << std::endl;
+        std::cout << "Forward " << (use_multithread ? "multi" : "single")
+                  << "-threaded LRN FAILED: " << error << std::endl;
     }
     else
     {
-        printf("Forward LRN Verifies OK on CPU and GPU (err=%f)\n", error);
-    }
-
-    mloLRNForwardRunHost<Tgpu, Tref>(do_backward,
-                                     v_mode,
-                                     pad,
-                                     v_lrnN,
-                                     alphaoverarea,
-                                     v_lrnAlpha,
-                                     v_lrnBeta,
-                                     v_lrnK,
-                                     nIn,        // batch_sz,
-                                     cOut,       // n_outputs,
-                                     cIn,        // n_inputs,
-                                     hIn,        // bot_height,
-                                     wIn,        // bot_width,
-                                     hInStride,  // bot_stride,
-                                     cInStride,  // bot_channel_stride,
-                                     nInStride,  // bot_batch_stride,
-                                     hOut,       // top_height,
-                                     wOut,       // top_width,
-                                     hOutStride, // top_v_stride,
-                                     cOutStride, // top_v_channel_stride,
-                                     nOutStride, // top_v_batch_stride,
-                                     hOutStride, // scale_v_stride,
-                                     cOutStride, // scale_v_channel_stride,
-                                     nOutStride, // scale_v_batch_stride,
-                                     in.data(),
-                                     scalehost.data(),
-                                     outhost_mt.data(),
-                                     true);
-
-    const auto error_mt = miopen::rms_range(outhost_mt, out);
-
-    if(!std::isfinite(error_mt) || error_mt > tolerance)
-    {
-        std::cout << "Forward multi-threaded LRN FAILED: " << error_mt << std::endl;
-    }
-    else
-    {
-        printf("Forward multi-threaded LRN Verifies OK on CPU and GPU (err=%f)\n", error_mt);
+        std::cout << "Forward " << (use_multithread ? "multi" : "single")
+                  << "-threaded LRN verifies OK on CPU and GPU (err=" << error << ")" << std::endl;
     }
 
     return 0;
@@ -606,65 +570,20 @@ int LRNDriver<Tgpu, Tref>::VerifyBackward()
                                       scale.data(),
                                       in.data(),
                                       dinhost.data(),
-                                      false);
+                                      use_multithread);
 
     const auto error     = miopen::rms_range(dinhost, din);
     const Tref tolerance = 6.0e-5;
 
     if(!std::isfinite(error) || error > tolerance)
     {
-        std::cout << "Backward LRN FAILED: " << error << std::endl;
+        std::cout << "Backward " << (use_multithread ? "multi" : "single")
+                  << "-threaded LRN FAILED: " << error << std::endl;
     }
     else
     {
-        printf("Backward LRN Verifies OK on CPU and GPU (err=%f)\n", error);
-    }
-
-    mloLRNBackwardRunHost<Tgpu, Tref>(static_cast<int>(v_mode),
-                                      pad,
-                                      v_lrnN,
-                                      alphaoverarea,
-                                      v_lrnAlpha,
-                                      v_lrnBeta,
-                                      v_lrnK,
-                                      nIn,         // batch_sz,
-                                      cOut,        // n_outputs,
-                                      cIn,         // n_inputs,
-                                      hIn,         // bot_height,
-                                      wIn,         // bot_width,
-                                      hInStride,   // bot_stride,
-                                      cInStride,   // bot_channel_stride,
-                                      nInStride,   // bot_batch_stride,
-                                      hdInStride,  // bot_df_v_stride,
-                                      cdInStride,  // bot_df_v_channel_stride,
-                                      ndInStride,  // bot_df_v_batch_stride,
-                                      hOut,        // top_height,
-                                      wOut,        // top_width,
-                                      hOutStride,  // top_stride,
-                                      cOutStride,  // top_channel_stride,
-                                      nOutStride,  // top_batch_stride,
-                                      hdOutStride, // top_df_stride,
-                                      cdOutStride, // top_df_channel_stride,
-                                      ndOutStride, // top_df_batch_stride,
-                                      hdOutStride, // scale_stride,
-                                      cdOutStride, // scale_channel_stride,
-                                      ndOutStride, // scale_batch_stride,
-                                      out.data(),
-                                      dout.data(),
-                                      scale.data(),
-                                      in.data(),
-                                      dinhost_mt.data(),
-                                      true);
-
-    const auto error_mt = miopen::rms_range(dinhost_mt, din);
-
-    if(!std::isfinite(error_mt) || error_mt > tolerance)
-    {
-        std::cout << "Backward multi-threaded LRN FAILED: " << error_mt << std::endl;
-    }
-    else
-    {
-        printf("Backward multi-threaded LRN Verifies OK on CPU and GPU (err=%f)\n", error_mt);
+        std::cout << "Backward " << (use_multithread ? "multi" : "single")
+                  << "-threaded LRN verifies OK on CPU and GPU (err=" << error << ")" << std::endl;
     }
 
     return 0;

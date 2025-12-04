@@ -24,107 +24,14 @@
  *
  *******************************************************************************/
 
-#include <concepts>
-#include <ranges>
+#include <miopen/lrn.hpp>
+#include <tensor_util.hpp>
 
 #include "gtest_common.hpp"
-#include <tensor_util.hpp>
-#include <miopen/lrn.hpp>
-
 #include "network_data.hpp"
+#include "test_parameter_name_generator.hpp"
 
 namespace {
-
-template <typename T>
-concept Printable = requires(std::ostream& os, T t)
-{
-    os << t;
-};
-
-template <typename T>
-concept Container = requires(T t)
-{
-    // clang-format off
-    {
-        std::size(t)
-    } -> std::same_as<std::size_t>;
-    {
-        std::begin(t)
-    } -> std::same_as<typename T::iterator>;
-    {
-        std::end(t)
-    } -> std::same_as<typename T::iterator>;
-    // clang-format on
-};
-
-template <typename T>
-requires Printable<T> && std::is_move_constructible_v<T>
-struct NamedParameter
-{
-    NamedParameter(std::string parameterName, T parameterValue) noexcept
-        : name(std::move(parameterName)), value(std::move(parameterValue))
-    {
-    }
-
-    operator T() const { return value; }
-
-    const T& operator()() const noexcept { return value; }
-
-    friend std::ostream& operator<<(std::ostream& os, const NamedParameter<T>& param)
-    {
-        return os << param.name << ": " << param.value;
-    }
-
-    std::string name{};
-    T value{};
-};
-
-template <typename T>
-requires Container<T> && std::is_move_constructible_v<T>
-struct NamedContainer
-{
-    NamedContainer(std::string containerName,
-                   T containerValue,
-                   std::string valueSeparator = " ") noexcept
-        : name(std::move(containerName)),
-          value(std::move(containerValue)),
-          separator(std::move(valueSeparator))
-    {
-    }
-
-    operator T() const { return value; }
-
-    const T& operator()() const noexcept { return value; }
-
-    friend std::ostream& operator<<(std::ostream& os, const NamedContainer<T>& param)
-    {
-        os << param.name << ": [";
-
-        if(param.value.size() > 0)
-        {
-            os << *param.value.begin();
-
-            for(auto it = param.value.begin() + 1; it != param.value.end(); ++it)
-            {
-                os << param.separator << *it;
-            }
-        }
-
-        os << "]";
-
-        return os;
-    }
-
-    std::string name{};
-    T value{};
-    std::string separator{};
-};
-
-template <typename... T>
-static auto MakeNamedParameterValues(const std::string& name, T... values)
-{
-    return testing::Values(NamedParameter<T>{name, values}...);
-}
 
 using TestCase = std::tuple<NamedContainer<std::vector<int>>,
                             NamedParameter<unsigned int>,
@@ -589,30 +496,27 @@ struct verify_lrn_bwd
 
 inline auto GenCases(bool limit = false)
 {
-    std::vector<NamedContainer<std::vector<int>>> input_dims;
+    std::set<std::vector<int>> input_dims;
 
     if(limit)
     {
-        input_dims.emplace_back(
-            NamedContainer<std::vector<int>>("input_dims", {16, 32, 8, 8}, "x"));
+        input_dims.insert({16, 32, 8, 8});
     }
     else
     {
         // taken from the original test
         const int batch_factor = 0;
-        for(auto&& v : get_inputs(batch_factor))
-        {
-            input_dims.emplace_back(NamedContainer<std::vector<int>>("input_dims", v, "x"));
-        }
+        input_dims             = get_inputs(batch_factor);
     }
 
-    return testing::Combine(testing::ValuesIn(input_dims),
-                            MakeNamedParameterValues<unsigned int>("n", 1U, 4U, 5U),
-                            testing::Values(NamedParameter<double>("alpha", 1.0)),
-                            testing::Values(NamedParameter<double>("beta", 1.0)),
-                            testing::Values(NamedParameter<double>("k", 1.0)),
-                            MakeNamedParameterValues<miopenLRNMode_t>(
-                                "mode", miopenLRNWithinChannel, miopenLRNCrossChannel));
+    return testing::Combine(
+        MakeNamedParameterCollectionValues<std::vector<int>>("input_dims", input_dims, "x"),
+        MakeNamedParameterValues<unsigned int>("n", 1U, 4U, 5U),
+        testing::Values(NamedParameter<double>("alpha", 1.0)),
+        testing::Values(NamedParameter<double>("beta", 1.0)),
+        testing::Values(NamedParameter<double>("k", 1.0)),
+        MakeNamedParameterValues<miopenLRNMode_t>(
+            "mode", miopenLRNWithinChannel, miopenLRNCrossChannel));
 }
 
 inline auto GetCasesFull()
@@ -775,10 +679,9 @@ private:
 using GPU_Lrn_FP32 = LrnCommon<float>;
 using GPU_Lrn_FP16 = LrnCommon<half_float::half>;
 
-template <typename TestSuiteT>
 struct TestNameGenerator
 {
-    std::string operator()(const testing::TestParamInfo<typename TestSuiteT::ParamType>& info)
+    std::string operator()(const auto& info)
     {
         const auto& [input_dims, n, alpha, beta, k, mode] = info.param;
         std::stringstream ss;
@@ -797,39 +700,13 @@ struct TestNameGenerator
 
         return str;
     }
-
-private:
-    std::string GetRangeAsString(const std::ranges::range auto& r, std::string_view separator)
-    {
-        std::string str;
-
-        if(r.size() > 0)
-        {
-            std::stringstream ss;
-
-            ss << *r.begin();
-
-            for(auto it = r.begin() + 1; it != r.end(); ++it)
-            {
-                ss << separator << *it;
-            }
-
-            str = ss.str();
-
-            // Name format only supports letters, numbers and underscores.
-            std::transform(
-                str.begin(), str.end(), str.begin(), [](char c) { return (c == '.') ? 'p' : c; });
-        }
-
-        return str;
-    }
 };
 
 TEST_P(GPU_Lrn_FP32, TestFloat) { this->Run(); }
 TEST_P(GPU_Lrn_FP16, TestFloat16) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Lrn_FP32, GetCasesSmoke(), TestNameGenerator<GPU_Lrn_FP32>{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Lrn_FP32, GetCasesFull(), TestNameGenerator<GPU_Lrn_FP32>{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Lrn_FP32, GetCasesSmoke(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Lrn_FP32, GetCasesFull(), TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Lrn_FP16, GetCasesSmoke(), TestNameGenerator<GPU_Lrn_FP16>{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Lrn_FP16, GetCasesFull(), TestNameGenerator<GPU_Lrn_FP16>{});
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Lrn_FP16, GetCasesSmoke(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Lrn_FP16, GetCasesFull(), TestNameGenerator{});
