@@ -53,8 +53,8 @@ namespace rocRoller
 
                 return rv;
             }
-        } // namespace ELFDetail 
-   
+        } // namespace ELFDetail
+
         template <typename T>
         T fromELFFile(std::string const& filename)
         {

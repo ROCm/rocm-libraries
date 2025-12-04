@@ -432,7 +432,7 @@ namespace llvm
             }
             static const bool flow = true;
         };
-        
+
         template <>
         struct SequenceTraits<std::vector<unsigned int>>
         {
