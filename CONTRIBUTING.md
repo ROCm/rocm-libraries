@@ -220,7 +220,7 @@ By default, most projects are excluded from pre-commit checks in [`.pre-commit-c
 
 3.  **Handle Optional Dependencies in CI**: If your project requires specific system dependencies to run pre-commit hooks in CI:
     > [!IMPORTANT]
-    > This is only needed if you are adding custom pre-commit hooks that rely on external tools.
+    > This is only needed if you are adding custom pre-commit hooks that rely on external tools, and they can't be installed by the hook itself.
 
     *   Edit [`.github/workflows/pre-commit.yml`](.github/workflows/pre-commit.yml).
     *   Add your project name to the `PROJECTS_WITH_OPTIONAL_DEPS` environment variable in the "Get changed files" step.
