@@ -134,3 +134,21 @@ class TestVerifySCCOverlap(unittest.TestCase):
         optSchedule["GRA"] = [[3, 11]]
         status, message = verify_scc_overlap(sched, {"kernel": self.kernel})
         assert  status, f"Schedule should have passed validation but did not. {message}"
+
+        optSchedule["GRB"] = [[6, 11]]
+        status, message = verify_scc_overlap(sched, {"kernel": self.kernel})
+        assert not status, f"Schedule should have failed validation but did not. {message}"
+
+
+    # def test_simple_noshadow(self):
+    #     assert self.num_vmfma == 32
+    #     optSchedule = {
+    #         "SYNC": [0],
+    #         "GRIncA": [[0, 0, 1, 2, 3, 4, 5, 6, 7]],
+    #         "GRIncB": [[8, 8, 9, 10, 11, 12, 13, 14, 15]],
+    #         "GRA": [[16, 17]],
+    #         "GRB": [[18, 19]]
+    #     }
+    #     syncCode = [
+    #         SWaitCnt(dscnt=-1, vlcnt=-1, vscnt=-1, comment=""),
+    #     ]
