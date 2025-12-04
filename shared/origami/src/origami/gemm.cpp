@@ -958,26 +958,24 @@ double compute_total_latency(const problem_t& problem,
     // Use Dot2 only for M < 3
     if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2) return std::numeric_limits<double>::max();
 
-    if (batch == 1) {
-      size_t K_mod_128bytes    = K * a_bytes % 128;
-      size_t MT_K_mod_128bytes = MT_K * a_bytes % 128;
-      if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0 && batch == 1) {
-        // avoid division by 0 if K == 0
-        if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
-          // Use nontemporal B
-          if (!(config.cache_hints_b == 4)) { return std::numeric_limits<double>::max(); }
-        } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5)) {
-          // Use Non Temporal A
-          if (!(config.cache_hints_a == 4)) { return std::numeric_limits<double>::max(); }
-        } else {
-          // Never use Non Temporal
-          if (config.cache_hints_a || config.cache_hints_b) {
-            return std::numeric_limits<double>::max();
-          }
+    size_t K_mod_128bytes    = K * a_bytes % 128;
+    size_t MT_K_mod_128bytes = MT_K * a_bytes % 128;
+    if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
+      // avoid division by 0 if K == 0
+      if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
+        // Use nontemporal B
+        if (!(config.cache_hints_b == 4)) { return std::numeric_limits<double>::max(); }
+      } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5)) {
+        // Use Non Temporal A
+        if (!(config.cache_hints_a == 4)) { return std::numeric_limits<double>::max(); }
+      } else {
+        // Never use Non Temporal
+        if (config.cache_hints_a || config.cache_hints_b) {
+          return std::numeric_limits<double>::max();
         }
-      } else if (config.cache_hints_a || config.cache_hints_b) {
-        return std::numeric_limits<double>::max();
       }
+    } else if (config.cache_hints_a || config.cache_hints_b) {
+      return std::numeric_limits<double>::max();
     }
   }
 
