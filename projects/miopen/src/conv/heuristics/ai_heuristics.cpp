@@ -645,11 +645,7 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
 {
     if(problem.Is3d())
     {
-        MIOPEN_LOG_I2("TunaNet for 3D convolutions is not implemented yet, using fallback");
-        return {};
-#if 0 // Temporarily disabled to avoid unreachable code warnings. Restore when 3D TunaNet is ready.
-      // TODO: Train improved 3D TunaNet model and metadata
-      // Check cache FIRST - avoids expensive model creation if we have cached results
+        // Check cache FIRST - avoids expensive model creation if we have cached results
         auto cached_result = GetCachedPrediction(problem, device, true); // true = 3D
         if(!cached_result.empty())
         {
@@ -679,7 +675,6 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
         }
 
         return result.solver_ids;
-#endif
     }
     else
     {
@@ -726,23 +721,28 @@ namespace conv3d {
 
 // Metadata3D implementation moved to metadata_3d.cpp
 
-class Gfx942Model_3D : public Model3D
+class TunaNet3DModel : public Model3D
 {
 private:
-    const std::string arch_name;
+    const std::string device_name; // Original device name (e.g., "gfx942")
+    const std::string arch_name;   // Device name with "_3d" suffix for file paths
 
 public:
     Metadata3D metadata;
 
-    Gfx942Model_3D() : arch_name("gfx942_3d"), metadata(Metadata3D(arch_name))
+    explicit TunaNet3DModel(const std::string& device)
+        : device_name(device),
+          arch_name(device + "_3d"), // Automatically append "_3d" suffix
+          metadata(Metadata3D(arch_name))
     {
-        MIOPEN_LOG_I2("Gfx942Model_3D initialized");
+        MIOPEN_LOG_I2("TunaNet3DModel initialized for device: " << device_name
+                                                                << " (arch: " << arch_name << ")");
     }
 
     std::vector<float> Forward(const conv::ProblemDescription& problem) const override
     {
         std::vector<float> features = ToFeatures(problem);
-        MIOPEN_LOG_I2("Gfx942Model_3D: Extracted " << features.size() << " features");
+        MIOPEN_LOG_I2("TunaNet3DModel: Extracted " << features.size() << " features");
 
         // Use fdeep to run TunaNet3D inference
         const std::string model_path = Model3DPath(arch_name);
@@ -754,7 +754,7 @@ public:
 
         // Extract predictions from result
         const auto predictions = result[0].to_vector();
-        MIOPEN_LOG_I2("Gfx942Model_3D: TunaNet3D returned " << predictions.size()
+        MIOPEN_LOG_I2("TunaNet3DModel: TunaNet3D returned " << predictions.size()
                                                             << " predictions");
         return predictions;
     }
@@ -771,7 +771,7 @@ public:
         {
             return false;
         }
-        MIOPEN_LOG_I2("3D problem supported by Gfx942Model_3D");
+        MIOPEN_LOG_I2("3D problem supported by TunaNet3DModel");
         return true;
     }
 
@@ -825,7 +825,7 @@ protected:
             static_cast<float>(metadata.EncodeDirection(problem.GetDirection())), // direction
         };
 
-        MIOPEN_LOG_I2("Gfx942Model_3D: Extracted " << features.size() << " features");
+        MIOPEN_LOG_I2("TunaNet3DModel: Extracted " << features.size() << " features");
         return features;
     }
 
@@ -844,14 +844,15 @@ protected:
 std::unique_ptr<Model3D> Get3DModel(const std::string& device)
 {
     MIOPEN_LOG_I2("Get3DModel called for device: " << device);
-    // I added gfx90a to the condition for testing purposes. We don't have a 3D model for gfx90a
-    // yet.
-    if(device == "gfx942" || device == "gfx90a")
+
+    // List of devices with 3D TunaNet models
+    // Note: gfx90a included for testing purposes (no dedicated 3D model yet)
+    if(device == "gfx942" || device == "gfx950")
     {
         try
         {
-            auto model = std::make_unique<Gfx942Model_3D>();
-
+            // Pass device name to constructor - it will append "_3d" internally
+            auto model = std::make_unique<TunaNet3DModel>(device);
             MIOPEN_LOG_I2("Successfully created 3D model for device: " << device);
             return model;
         }
@@ -866,11 +867,9 @@ std::unique_ptr<Model3D> Get3DModel(const std::string& device)
             return nullptr;
         }
     }
-    else
-    {
-        MIOPEN_LOG_I2("Device " << device << " not supported for 3D models");
-        return nullptr;
-    }
+
+    MIOPEN_LOG_I2("Device " << device << " not supported for 3D models");
+    return nullptr;
 }
 
 } // namespace conv3d
