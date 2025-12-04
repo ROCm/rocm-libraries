@@ -89,9 +89,6 @@ namespace AddDeallocateTest
 
         SECTION("Downstream Barriers")
         {
-            auto topo
-                = TopologicalCompare(std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph));
-
             auto graph  = kgraph;
             auto tracer = LastRWTracer(graph);
 
@@ -103,7 +100,7 @@ namespace AddDeallocateTest
                 if(maybeLDS)
                 {
                     AddDeallocateDetail::addDownstreamBarrierInLoop(
-                        dependencies, coordinate, controls, kgraph, topo);
+                        dependencies, coordinate, controls, kgraph);
                     CHECK(dependencies.size() >= 1);
                     if(dependencies.size() == 1)
                     {
@@ -171,7 +168,7 @@ namespace AddDeallocateTest
 
             // With 4 unrolls and 2 inflight prefetches, we expect the following
             // 1. A, B deallocated three times in the main loop
-            // 2. A, B deallocate once after the main loop
+            // 2. A, B deallocate after the main loop
             // 3. C deallocated once after the prolog
             CHECK(ldsDeallocateFromKernel.size() == 5);
             CHECK(ldsDeallocateInsideLoop.size() == 3);

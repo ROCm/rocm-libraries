@@ -21,72 +21,7 @@
  *
  * ************************************************************************ */
 
+#include "test.hpp"
 #include "testing_gtsv2_nopivot.hpp"
 
-#include <hipsparse.h>
-#include <string>
-
-typedef std::tuple<int, int> gtsv2_nopivot_tuple;
-
-int gtsv2_nopivot_M_range[] = {512};
-int gtsv2_nopivot_N_range[] = {512};
-
-class parameterized_gtsv2_nopivot : public testing::TestWithParam<gtsv2_nopivot_tuple>
-{
-protected:
-    parameterized_gtsv2_nopivot() {}
-    virtual ~parameterized_gtsv2_nopivot() {}
-    virtual void SetUp() {}
-    virtual void TearDown() {}
-};
-
-Arguments setup_gtsv2_nopivot_arguments(gtsv2_nopivot_tuple tup)
-{
-    Arguments arg;
-    arg.M      = std::get<0>(tup);
-    arg.N      = std::get<1>(tup);
-    arg.timing = 0;
-    return arg;
-}
-
-TEST(gtsv2_nopivot_bad_arg, gtsv2_nopivot_float)
-{
-    testing_gtsv2_nopivot_bad_arg<float>();
-}
-
-TEST_P(parameterized_gtsv2_nopivot, gtsv2_nopivot_float)
-{
-    Arguments arg = setup_gtsv2_nopivot_arguments(GetParam());
-
-    hipsparseStatus_t status = testing_gtsv2_nopivot<float>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
-
-TEST_P(parameterized_gtsv2_nopivot, gtsv2_nopivot_double)
-{
-    Arguments arg = setup_gtsv2_nopivot_arguments(GetParam());
-
-    hipsparseStatus_t status = testing_gtsv2_nopivot<double>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
-
-TEST_P(parameterized_gtsv2_nopivot, gtsv2_nopivot_float_complex)
-{
-    Arguments arg = setup_gtsv2_nopivot_arguments(GetParam());
-
-    hipsparseStatus_t status = testing_gtsv2_nopivot<hipComplex>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
-
-TEST_P(parameterized_gtsv2_nopivot, gtsv2_nopivot_double_complex)
-{
-    Arguments arg = setup_gtsv2_nopivot_arguments(GetParam());
-
-    hipsparseStatus_t status = testing_gtsv2_nopivot<hipDoubleComplex>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
-}
-
-INSTANTIATE_TEST_SUITE_P(gtsv2_nopivot,
-                         parameterized_gtsv2_nopivot,
-                         testing::Combine(testing::ValuesIn(gtsv2_nopivot_M_range),
-                                          testing::ValuesIn(gtsv2_nopivot_N_range)));
+TEST_ROUTINE(gtsv2_nopivot, precond, arg.M, arg.N);

@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <typename T, typename U>
 void stebz_checkBadArgs(const rocblas_handle handle,
@@ -339,7 +340,7 @@ void stebz_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -355,13 +356,13 @@ void stebz_getPerfData(const rocblas_handle handle,
     {
         stebz_initData<false, true, T>(handle, n, dD, dE, hD, hE);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_stebz(handle, erange, eorder, n, vl, vu, il, iu, abstol, dD.data(), dE.data(),
                         dnev.data(), dnsplit.data(), dW.data(), dIblock.data(), dIsplit.data(),
                         dinfo.data());
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <typename T>
@@ -490,7 +491,7 @@ void testing_stebz(Arguments& argus)
                           &max_error);
 
     // collect performance data
-    if(argus.timing)
+    if(argus.timing && hot_calls > 0)
         stebz_getPerfData<T>(handle, erange, eorder, n, vl, vu, il, iu, abstol, dD, dE, dnev,
                              dnsplit, dW, dIblock, dIsplit, dinfo, hD, hE, hnev, hnsplit, hW,
                              hIblock, hIsplit, hinfo, &gpu_time_used, &cpu_time_used, hot_calls,
