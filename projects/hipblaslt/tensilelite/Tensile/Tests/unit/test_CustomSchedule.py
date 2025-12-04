@@ -40,6 +40,8 @@ def create_base_kernel():
         "UsePLRPack": False, # For asserting it gets set
         "MIWaveTileA": 2,
         "MIWaveTileB": 2,
+        "WaveSeparateGlobalReadA": 0,
+        "WaveSeparateGlobalReadB": 0,
     }
     return kernel
 
