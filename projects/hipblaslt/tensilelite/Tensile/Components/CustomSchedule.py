@@ -1361,58 +1361,52 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     gr_inc_step = 0
 
     if isNN(kernel) and useLDSTr and TLDS==1:
-        syncs.add(-1, dscnt=9, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration")
-        
+        syncs.add(-1, dscnt=9, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration")       
         lra0   = [0,1,2,3,4,6,8,10,12,14,16,18]
-        syncs.add(5, dscnt=5, comment="wait for the rest of LRB1 to complete") 
-        
+
+        syncs.add(5, dscnt=5, comment="wait for the rest of LRB1 to complete")        
         grinca = [7,7,7,9,9,9,11,11,11]
-        lrb0   = [                            20,22,24,25,27,29,31,33,35,37]
-        grincb = [                    13,13,13,15,15,15,17,17,17]
-        syncs.add(                                       26, dscnt=4, barrier=True, comment="wait for all LRA0 to complete before GRA start")
+        grincb = [13,13,13,15,15,15,17,17,17]
+        lrb0   = [20,22,24,25,27,29,31,33,35,37]
 
-        # one index for two instructions
-        gra    = [                                          28,30,32,   36,39,42]
-        syncs.add(                                                             44, dscnt=0, barrier=True, comment="wait for all LRB0 to complete before GRB start")
-        # one index for two instructions
-        grb    = [                                                                53,58,63,67,72,77,82,86,91,  96]
+        syncs.add(26, dscnt=4, barrier=True, comment="wait for all LRA0 to complete before GRA start")
+        gra    = [28,30,32,36,39,42] # one index for two instructions
+        syncs.add(44, dscnt=0, barrier=True, comment="wait for all LRB0 to complete before GRB start")
+        grb    = [53,58,63,67,72,77,82,86,91,96] # one index for two instructions
         num_gr = len(gra) + len(grb)
-        lrsa   = [                                                                   58]
-        lrsb   = [                                                                   58]
-        syncs.add(                                                                           71, vlcnt=10, barrier=True, comment="wait for previous set of global reads")
 
-        lra1   = [                                                                            72,74,76,78,80,82,84,87,
-                                                                                                         90, 92,  98,100]
-        lrb1   = [                                                                                                  99,106,107,108,109,110,111,112,113,114]
-        lwsa   = [                                                                                            95]
-        lwsb   = [                                                                                            95]
+        lrsa   = [58]
+        lrsb   = [58]
+
+        syncs.add(71, vlcnt=10, barrier=True, comment="wait for previous set of global reads")
+        lra1   = [72,74,76,78,80,82,84,87,90,92,98,100]
+        lrb1   = [99,106,107,108,109,110,111,112,113,114]
+        lwsa   = [95]
+        lwsb   = [95]
 
     elif isTN(kernel) and not useLDSTr and TLDS==1:
         syncs.add(-1, dscnt=9, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration")
-        
         lra0   = [0,1,2,3,4,6]
+
         syncs.add(5, dscnt=5, comment="wait for the rest of LRB1 to complete") 
-        
         grinca = [0,1,2,3,4,5,6,7,8]
-        lrb0   = [               8,  10,12,   14,   16,   18,20,22,24,27]
-        grincb = [                 9,10,12,13,14,15,16,17,18]
-        syncs.add(                                                   26, dscnt=9, barrier=True, comment="wait for all LRA0 to complete before GRA start")
+        grincb = [9,10,12,13,14,15,16,17,18]
+        lrb0   = [8,10,12,14,16,18,20,22,24,27]
 
-        # one index for two instructions
-        gra    = [                                                      28,30,32,36,39,42]
-        syncs.add(                                                                       44, dscnt=0, barrier=True, comment="wait for all LRB0 to complete before GRB start")
-        # one index for two instructions
-        grb    = [                                                                         53,58,63,67,72,77,82,86, 91,96]
+        syncs.add(26, dscnt=9, barrier=True, comment="wait for all LRA0 to complete before GRA start")
+        gra    = [28,30,32,36,39,42] # one index for two instructions
+        syncs.add(44, dscnt=0, barrier=True, comment="wait for all LRB0 to complete before GRB start")
+        grb    = [53,58,63,67,72,77,82,86,91,96] # one index for two instructions
         num_gr = len(gra) + len(grb)
-        lrsa   = [                                                                            58]
-        lrsb   = [                                                                            58]
-        syncs.add(                                                                                    71, vlcnt=10, barrier=True, comment="wait for previous set of global reads")
 
-        lra1   = [                                                                                     72,   76,  80,  84,
-                                                                                                                   90,     98]
-        lrb1   = [                                                                                                    99,106,107,108,109,110,111,112,113,114]
-        lwsa   = [                                                                                                  95]
-        lwsb   = [                                                                                                  95]
+        lrsa   = [58]
+        lrsb   = [58]
+        syncs.add(71, vlcnt=10, barrier=True, comment="wait for previous set of global reads")
+
+        lra1   = [72,76,80,84,90,98]
+        lrb1   = [99,106,107,108,109,110,111,112,113,114]
+        lwsa   = [95]
+        lwsb   = [95]
 
         gr_inc_step = 1
     else:
