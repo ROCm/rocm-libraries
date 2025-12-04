@@ -28,9 +28,9 @@ from pathlib import Path
 import yaml
 import sys
 import os
+import re
 from typing import Union
 import tempfile
-import re
 
 
 parentDir = os.path.normpath(
