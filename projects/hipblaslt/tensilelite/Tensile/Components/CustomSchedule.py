@@ -299,7 +299,7 @@ def verify_scc_overlap(scheduleInfo, context: Dict = {}):
       - s_add_u32, s_addc_u32 (2)
       - s_sub_u32  (2)
     
-        This function checks no scalar instructions from GR and LWS are inside these intervals.
+        This function checks no other scalar instructions is inside the above intervals.
     """
     kernel = context["kernel"]
     DTL = kernel["DirectToLds"]
@@ -971,7 +971,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
 
 def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
-
+    numMfma = 96
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
@@ -1016,6 +1016,9 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
             }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+        # TODO : GRA at index 10 can't be between GRIncB 9-11 due to SCC usage
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+        opt1.disableValidation()
     elif isNT(kernel) and useLDSTr and TLDS == 0:
         kernel["SwapGlobalReadOrder"] = True
         #index and code pair
@@ -1053,6 +1056,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                 'LCC' : [[95, 95]],}
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isNN(kernel) and useLDSTr and TLDS == 1:
         kernel["SwapGlobalReadOrder"] = True
         #index and code pair
@@ -1092,11 +1096,10 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                 }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
-
-    numMfma = 96
-    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    
     return True, opt1
 
 def _get_schedule_256x256x128_8bit(kernel, useLDSTr, TLDS):
@@ -1289,7 +1292,7 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
 
 def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
-
+    numMfma = 80
     optSchedule = dict()
     syncCode = []
 
@@ -1338,6 +1341,9 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment=""),
                    ]
         nglshift = nllshift = 13 # vmcnt shift for ngl and nll
+        #TODO . GRA at index 11 can't be between GRIncB 9-12 due to SCC usage
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+        opt1.disableValidation()
     elif isNN(kernel) and useLDSTr and TLDS==1:
         kernel["SwapGlobalReadOrder"] = True
         optSchedule = {
@@ -1375,7 +1381,7 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=-1, vlcnt=(13+10-13), vscnt=-1, comment="Wait for previous GRA to complete"),
                     SBarrier(comment="")]
         nglshift = nllshift = 13
-
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isNT(kernel) and useLDSTr and TLDS==0:
         optSchedule = {
             'SYNC': [[-1,17,17,57,57]],
@@ -1402,17 +1408,19 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
             SBarrier(comment="")
         ]
         nglshift = nllshift = 13
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
 
 
-    numMfma = 80
-    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    
+    
     return True, opt1
 
 def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    numMfma = 80
     if isNN(kernel) and useLDSTr and TLDS==1:
         kernel["SwapGlobalReadOrder"] = True
         optSchedule = {
@@ -1450,6 +1458,9 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=-1, vlcnt=(13+10-13), vscnt=-1, comment="Wait for previous GRA to complete"),
                     SBarrier(comment="")]
         nglshift = nllshift = 13
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+        #TODO. GRA at index 11 can't be between GRIncB 10-13 due to SCC usage.
+        opt1.disableValidation()
     elif isNT(kernel) and useLDSTr and TLDS==0:
         nglshift = nllshift = 0
         kernel["SwapGlobalReadOrder"] = True
@@ -1477,11 +1488,10 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
             SBarrier(comment="")
         ]
         nglshift = nllshift = 13
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
 
-    numMfma = 80
-    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
 def _get_schedule_256x240x64_16bit(kernel, useLDSTr, TLDS):
