@@ -264,7 +264,11 @@ def getDockerImage(Map conf=[:])
     // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
     def gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1151" // prebuilt dockers should have all the architectures enabled so one image can be used for all stages
 
-    def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
+    def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache"
+
+    def dockerArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd " +
+                     "--cache-from type=registry,ref=${cacheRef} " +
+                     "--build-arg PREFIX=${prefixpath} " +
                      "--build-arg GPU_ARCHS=\"${gpu_arch}\" "
     if(env.CCACHE_HOST)
     {
