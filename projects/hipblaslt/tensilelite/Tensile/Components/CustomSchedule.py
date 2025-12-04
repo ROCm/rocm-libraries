@@ -865,19 +865,18 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                      7, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="wait for LRB1"),
                      10, SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="wait for LRA0"),
                      10, SBarrier(comment="for GRA"),
-                     
+
                      47, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0-0"),
                      50, SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="for previous GRA"),
                      50, SBarrier(comment="for GRA"),
-                     
+
                      70, SWaitCnt(dscnt=-1, vlcnt=12, vscnt=-1, comment="for previous GRB"),
                      70, SBarrier(comment="for GRB"),
                      ]
         optSchedule = {
                 'SYNC'  : [syncTable[::2]],
                 'GRIncA': [[0,1,2,3,4,5,6,7,8]],
-                'GRIncB': [[9,10,11,12,13,14,15,16,17]],
-
+                'GRIncB': [[37,37,38,38,39,39,40,40,41]],
                 'LRA0': [[-1, 0, 1, 2, 3, 4, 5, 6],
                          [0, 1, 2, 3, 4, 5, 6, 7]],
                  #interleave LRB0 , GRA
@@ -895,7 +894,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                          [71, 73, 75, 77, 79, 80]],
                 'LRSA': [[20]],
                 'LRSB': [[64]],
-                'LWSA': [[40]],
+                'LWSA': [[41]],
                 'LWSB': [[90]],
                 'LCC' : [[95, 95]],
             }
@@ -968,7 +967,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                              [52, 54, 56, 58, 60, 62]],
                     'LRA1': [[63, 65, 67, 69, 71, 73, 75, 77, 79, 81, 83, 85, 87, 89, 91, 93],
                              [64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94]],
-                    
+
                     'LRSB': [[14]],
                     'LRSA': [[45]],
                     'LWSB': [[94]],
@@ -1793,7 +1792,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
             'LWSB'  : [[99]],
             'LCC'   : [[119, 119]],
         }
-        
+
         syncCode = [
             SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for prior local read. Relax a bit to dscnt=4 to reduce latency") ,
             SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for all LRB0 prior to  LRA0*3") ,
@@ -1932,14 +1931,14 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
         numMfma = 104
         kernel["SwapGlobalReadOrder"] = False
 
-        # fmt: off            
+        # fmt: off
         syncs = SyncSchedule()
-        syncs.add(-1, dscnt=3) 
+        syncs.add(-1, dscnt=3)
         grinca = [8,9,10, 11,13,14, 15,16,17]
         grincb = [19,20,21, 22,23,24, 25,26,27]
-        
-        syncs.add(      12, dscnt=12) 
-        lra0   = [0,  1, 2, 3, 4,  5, 6, 7, 8, 9, 
+
+        syncs.add(      12, dscnt=12)
+        lra0   = [0,  1, 2, 3, 4,  5, 6, 7, 8, 9,
                   10,11,12,13,14, 15,16,17,18,19,
                                 20,21,22,23,24, 25] # 26 loads
 
@@ -1955,7 +1954,7 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
 
         syncs.add(                                                                            72, vlcnt=num_gr-8, barrier=True)
         lra1   = [                                                                             73,75,76,77,78, 79,80,81,82,83,
-                                                                                                     84,85,86,87,88, 89,90,91,92,93, 
+                                                                                                     84,85,86,87,88, 89,90,91,92,93,
                                                                                                         94,95,96,97,98, 99] # 26 loads
         lrb1   = [                                                                               74,                      100,101,102] # 4 loads
 
@@ -1970,7 +1969,7 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
             """Example: extend_list([1, 2, 3], 3) => [1,1,1, 2,2,2, 3,3,3]"""
             return [item for item in input_list for _ in range(repeat_count)]
         gra    = extend_list(gra, 2)
-        grb    = extend_list(grb, 2)   
+        grb    = extend_list(grb, 2)
 
         optSchedule = {
             'SYNC':   [syncs.get_indicies()],
@@ -1989,7 +1988,7 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
             'LCC':    [[numMfma-2, numMfma-1]],
         }
         syncCode = syncs.get_code()
-               
+
         nglshift = nllshift = num_gr
     else:
         return False, None
@@ -2060,11 +2059,11 @@ def hasCustomSchedule(kernel):
     elif is256x96x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16,16,32,1] and MIWG == [2,2]:
         return _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS)
     elif is320x192x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [2, 2]:
-        return _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS) 
+        return _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS)
     elif is240x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [2,8,8]) and MI == [16,16,32,1] and MIWG == [1,4]:
         return _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS)
     elif is208x256x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [2, 8, 8]) and MI == [16, 16, 32, 1] and MIWG == [1, 4]:
         return _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS)
     elif is192x320x64DTL and is16bit and not isMixed and ([GRVWA, GRVWB, LRVW] == [8,8,8]) and MI == [16,16,32,1] and MIWG == [2,2]:
-        return _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS) 
+        return _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS)
     return False, None
