@@ -275,27 +275,33 @@ def apply_swaits(timeline: list[list[ValidatorInstruction]], num_vmfma: int) -> 
 
 def verify_scc_overlap(scheduleInfo, context: Dict = {}):
     """
-    Ensure we don't overlap scalar instruction modifying scc between GR and GRInc
-    TODO: check GRinA/B dont overlap together.
+    Ensure we don't overlap scalar instructions modifying SCC.
+    This can happen:
+        - between GRIncA and GRIncB
+        - between GRInc and GR when DLT is activated
+        - between GRInc and LWS
+        
+    By default, GRInc instructions can be split into 3 distinct intervals where we shouldn't touch SCC
+      - s_cmp_eq_u32, s_cselect_b32,s_cselect_b32 (3)
+      - s_add_u32, s_addc_u32 (2)
+      - s_sub_u32, s_subb_u32 (2)
+      - s_cmp_eq_u32, s_cselect_b32 (2)
+    With ShadowLimit disabled (`Use64bShadowLimit`):
+      - s_cmp_eq_u32, s_cselect_b32,s_cselect_b32 (3)
+      - s_add_u32, s_addc_u32 (2)
+      - s_sub_u32  (2)
+    
+        This function checks no scalar instructions from GR and LWS are inside these intervals.
     """
     kernel = context["kernel"]
     DTL = kernel["DirectToLds"]
     ShadowLimit = kernel["Use64bShadowLimit"]
-    # GRInc intervals are defined as follow:
-    # [3,2,2,2]
-    #  - s_cmp_eq_u32, s_cselect_b32,s_cselect_b32
-    #  - s_add_u32, s_add_u32 
-    #  - s_sub_u32, s_subb_u32
-    #  - s_cmp_eq_u32, s_cselect_b32
-    # with ShadowLimit disabled:
-    # [3,2,1]
-    #  - s_cmp_eq_u32, s_cselect_b32,s_cselect_b32
-    #  - s_add_u32, s_add_u32 
-    #  - s_sub_u32 
+
     
     intervalSize = [3,2,2,2] if ShadowLimit else [3,2,1]
     numElements = sum(intervalSize)
     
+    # Gets intervals from GRInc indices based on the above `intervalSize` value
     def getIntervals(indices):
         output = []
         current_start = 0
@@ -307,6 +313,8 @@ def verify_scc_overlap(scheduleInfo, context: Dict = {}):
             current_start = current_end
         return output
 
+    # Checks value is in [interval[0],interval[1]]. 
+    # if lhsGt : ]interval[0],interval[1]] else  [interval[0],interval[1][
     def inInterval(value, interval, lhsGt):
         if lhsGt:
             return value>interval[0] and value<=interval[1]
@@ -316,22 +324,32 @@ def verify_scc_overlap(scheduleInfo, context: Dict = {}):
     def getDeclarationIndex(name):
         return list(scheduleInfo.optSchedule).index(name)
     
+    
+
     def verify(scheduleInfo: 'ScheduleInfo', codePath: int) -> tuple[bool, str]:
         GRIncNames = ["GRIncA", "GRIncB"]
-        GRNames = ["GRA", "GRB"]
+        names = ["GRA", "GRB", "LWSA", "LWSB"]
         for GRIncName in GRIncNames:
             GRInc = schedule_get(GRIncName, codePath, scheduleInfo)
             assert numElements==len(GRInc), f"Code path {codePath}: {GRIncName} expected size if {numElements}, given {len(GRInc)}."
             GRIncIntervals = getIntervals(GRInc)
             indexGRInc = getDeclarationIndex(GRIncName)
-            for GRName in GRNames:
-                GR = schedule_get(GRName, codePath, scheduleInfo)
-                m0 = GR[0::2]
-                indexGR = getDeclarationIndex(GRName)
-                for v in m0:
+
+            def verifyIndices(indices, name) -> tuple[bool, str]:
+                dclIndex = getDeclarationIndex(name)
+                for v in indices:
                     for interval in GRIncIntervals:
-                        if inInterval(v,interval, indexGR<indexGRInc):
-                            return False, f"Code path {codePath}: {GRName} M0 at index {v} can't be between {GRIncName} {interval[0]}-{interval[1]} due to SCC usage."
+                        if inInterval(v,interval, dclIndex<indexGRInc):
+                            return False, f"Code path {codePath}: {name} at index {v} can't be between {GRIncName} {interval[0]}-{interval[1]} due to SCC usage."
+
+            for name in names:
+                insts = schedule_get(name, codePath, scheduleInfo)
+                # In case of GRA/GRB, just take m0 updates indices 
+                if name.startswith("GR"):
+                    insts = insts[0::2]
+                errorMessage =  verifyIndices(insts, name)
+                if errorMessage:
+                    return errorMessage
 
     # Validation needed only when we use m0 (ie. DTL).
     if DTL:   
