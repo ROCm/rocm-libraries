@@ -109,9 +109,9 @@ class TargetProperties
     template <typename T>
     struct TargetProperty : public T
     {
-        bool initialized{false};
-        bool reported{false};
-        bool enabled{false};
+        bool initialized = false;
+        bool reported    = false;
+        bool enabled     = false;
 
         TargetProperty() = default;
         TargetProperty(const std::string& tag_) : T(tag_) {}
