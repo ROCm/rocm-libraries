@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 # Create common helper target for all clients
-add_library(hipsparse-clients-common OBJECT)
+add_library(hipsparse-clients-common STATIC)
 add_library(hipsparse::clients-common ALIAS hipsparse-clients-common)
 
 target_compile_features(hipsparse-clients-common PRIVATE cxx_std_17)
@@ -16,7 +16,7 @@ target_sources(hipsparse-clients-common PRIVATE
 )
 
 target_include_directories(hipsparse-clients-common PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/clients/include>
 )
 
 target_compile_options(hipsparse-clients-common PUBLIC -Wall)
@@ -53,8 +53,8 @@ if(HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
 endif()
 
 
-# Lightweight OBJECT library for samples only
-add_library(hipsparse-samples-common OBJECT)
+# Lightweight STATIC library for samples only
+add_library(hipsparse-samples-common STATIC)
 add_library(hipsparse::samples-common ALIAS hipsparse-samples-common)
 
 target_compile_features(hipsparse-samples-common PRIVATE cxx_std_17)
@@ -64,7 +64,7 @@ target_sources(hipsparse-samples-common PRIVATE
 )
 
 target_include_directories(hipsparse-samples-common PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/clients/include>
 )
 
 target_link_libraries(hipsparse-samples-common PUBLIC roc::hipsparse)
