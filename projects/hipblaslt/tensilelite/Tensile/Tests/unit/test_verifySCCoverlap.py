@@ -38,7 +38,7 @@ class TestVerifySCCOverlap(unittest.TestCase):
         self.num_vmfma = 2 * self.kernel["MIWaveTileA"] * self.kernel["MIWaveTileB"]
 
     
-    def test_simple(self):
+    def test_gr_simple(self):
         self.kernel["Use64bShadowLimit"] = 1
         assert self.num_vmfma == 32
         optSchedule = {
@@ -69,7 +69,7 @@ class TestVerifySCCOverlap(unittest.TestCase):
         status, message = verify_scc_overlap(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed validation but did not. {message}"
 
-    def test_simple_declaration_order(self):
+    def test_gr_declaration_order(self):
         self.kernel["Use64bShadowLimit"] = 1
         assert self.num_vmfma == 32
         optSchedule = {
@@ -118,7 +118,7 @@ class TestVerifySCCOverlap(unittest.TestCase):
         assert status, f"Schedule should have passed validation but did not. {message}"
 
 
-    def test_simple_interval(self):
+    def test_gr_interval(self):
         self.kernel["Use64bShadowLimit"] = 1
         assert self.num_vmfma == 32
         optSchedule = {
@@ -161,7 +161,7 @@ class TestVerifySCCOverlap(unittest.TestCase):
         assert not status, f"Schedule should have failed validation but did not. {message}"
 
 
-    def test_simple_noshadow(self):
+    def test_gr_noshadow(self):
         self.kernel["Use64bShadowLimit"] = 0
         assert self.num_vmfma == 32
         optSchedule = {
@@ -244,3 +244,44 @@ class TestVerifySCCOverlap(unittest.TestCase):
         optSchedule["LWSB"] = [[9]]
         status, message = verify_scc_overlap(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed validation but did not. {message}"
+
+        
+    def test_gr_inc_together(self):
+        self.kernel["Use64bShadowLimit"] = 0
+        assert self.num_vmfma == 32
+        optSchedule = {
+            "SYNC": [0],
+            'LWSA': [[31]],
+            "GRIncA": [[0, 0, 1,
+                        3, 4,
+                        4]],
+            "GRA": [[16, 17]],
+            "GRIncB": [[6, 7, 8,
+                        9, 10,
+                        10]],
+            "GRB": [[18, 19]],
+            'LWSB': [[31]]
+        }
+        syncCode = [
+            SWaitCnt(dscnt=-1, vlcnt=-1, vscnt=-1, comment=""),
+        ]
+
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
+        status, message = verify_scc_overlap(sched, {"kernel": self.kernel})
+        assert status, f"Schedule should have passed validation but did not. {message}"
+
+        optSchedule["GRIncB"] = [[0, 0, 1,
+                                  9, 10,
+                                  10]]
+        status, message = verify_scc_overlap(sched, {"kernel": self.kernel})
+        assert not status, f"Schedule should have failed validation but did not. {message}"
+
+        optSchedule["GRIncB"] = [[1, 1, 2,
+                            9, 10,
+                            10]]
+        status, message = verify_scc_overlap(sched, {"kernel": self.kernel})
+        assert status, f"Schedule should have passed validation but did not. {message}"
+
+
+
+    
