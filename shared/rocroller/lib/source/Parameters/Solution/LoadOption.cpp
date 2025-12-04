@@ -59,6 +59,20 @@ namespace rocRoller
                 return mode == LoadPath::BufferToLDS;
             }
 
+            bool IsPathToLDS(LoadPath const& mode)
+            {
+                switch(mode)
+                {
+                case LoadPath::BufferToLDSViaVGPR:
+                case LoadPath::BufferToLDS:
+                case LoadPath::GlobalToLDSViaVGPR:
+                    return true;
+                default:
+                    break;
+                }
+                return false;
+            }
+
             std::string toString(LoadPath mode)
             {
                 switch(mode)

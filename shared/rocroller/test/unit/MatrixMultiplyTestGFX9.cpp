@@ -266,10 +266,10 @@ namespace MatrixMultiplyTest
 
         auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
 
-        int               expectedLocalWriteOffset = 0;
-        int               numLocalRead             = 0;
-        int               expectedLocalReadOffset  = 0;
-        int               numMFMA                  = 0;
+        int               localWriteOffset        = 0;
+        int               numLocalRead            = 0;
+        int               expectedLocalReadOffset = 0;
+        int               numMFMA                 = 0;
         std::string const mfma_pattern
             = isFP8 ? "v_mfma_f32_16x16x32_fp8_fp8" : "v_mfma_f32_16x16x32_bf8_bf8";
         for(auto const& instruction : instructions)
@@ -281,10 +281,10 @@ namespace MatrixMultiplyTest
             // the expected offset values
             if(instruction.starts_with("ds_write_b128"))
             {
-                if(expectedLocalWriteOffset > 0)
-                    EXPECT_TRUE(instruction.ends_with("offset:"
-                                                      + std::to_string(expectedLocalWriteOffset)));
-                expectedLocalWriteOffset += 1024;
+                if(localWriteOffset > 0)
+                    EXPECT_TRUE(
+                        instruction.ends_with("offset:" + std::to_string(localWriteOffset)));
+                localWriteOffset += 1024;
             }
 
             if(instruction.starts_with("ds_read_u8"))
@@ -306,7 +306,8 @@ namespace MatrixMultiplyTest
             }
         }
 
-        EXPECT_EQ(expectedLocalWriteOffset, 1024);
+        const auto expectedLocalWriteOffset = IsPathToLDS(loadPathB) ? /* A & B */ 2048 : 1024;
+        EXPECT_EQ(localWriteOffset, expectedLocalWriteOffset);
         EXPECT_EQ(numLocalRead, 16);
         EXPECT_EQ(numMFMA, 2);
     }
@@ -325,10 +326,10 @@ namespace MatrixMultiplyTest
 
         auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
 
-        int               expectedLocalWriteOffset = 0;
-        int               numLocalRead             = 0;
-        int               expectedLocalReadOffset  = 0;
-        int               numMFMA                  = 0;
+        int               localWriteOffset        = 0;
+        int               numLocalRead            = 0;
+        int               expectedLocalReadOffset = 0;
+        int               numMFMA                 = 0;
         std::string const mfma_pattern
             = isFP8 ? "v_mfma_f32_32x32x16_fp8_fp8" : "v_mfma_f32_32x32x16_bf8_bf8";
         for(auto const& instruction : instructions)
@@ -340,10 +341,10 @@ namespace MatrixMultiplyTest
             // the expected offset values
             if(instruction.starts_with("ds_write_b128"))
             {
-                if(expectedLocalWriteOffset > 0)
-                    EXPECT_TRUE(instruction.ends_with("offset:"
-                                                      + std::to_string(expectedLocalWriteOffset)));
-                expectedLocalWriteOffset += 1024;
+                if(localWriteOffset > 0)
+                    EXPECT_TRUE(
+                        instruction.ends_with("offset:" + std::to_string(localWriteOffset)));
+                localWriteOffset += 1024;
             }
 
             if(instruction.starts_with("ds_read_u8"))
@@ -365,7 +366,8 @@ namespace MatrixMultiplyTest
             }
         }
 
-        EXPECT_EQ(expectedLocalWriteOffset, 1024);
+        const auto expectedLocalWriteOffset = IsPathToLDS(loadPathB) ? /* A & B */ 2048 : 1024;
+        EXPECT_EQ(localWriteOffset, expectedLocalWriteOffset);
         EXPECT_EQ(numLocalRead, 16);
         EXPECT_EQ(numMFMA, 2);
     }
@@ -669,13 +671,15 @@ namespace MatrixMultiplyTest
         MatrixMultiplyTest,
         MatrixMultiplyNoLDSBTestGPU,
         ::testing::Combine(mfmaSupportedISAValues(),
-                           ::testing::Values(SolutionParams::LoadPath::BufferToVGPR)));
+                           ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                             SolutionParams::LoadPath::GlobalToVGPR)));
 
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiplyTest,
         MatrixMultiplyABCTestGPU,
         ::testing::Combine(mfmaSupportedISAValues(),
-                           ::testing::Values(SolutionParams::LoadPath::BufferToVGPR)));
+                           ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                             SolutionParams::LoadPath::GlobalToVGPR)));
 
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiplyTest,
@@ -685,7 +689,9 @@ namespace MatrixMultiplyTest
             ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
                                                  rocRoller::DataType::BF8),
                                ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
-                                                 SolutionParams::LoadPath::BufferToLDSViaVGPR))));
+                                                 SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiplyTest,
@@ -701,7 +707,8 @@ namespace MatrixMultiplyTest
                                                  std::pair<std::string, std::string>("N", "T"),
                                                  std::pair<std::string, std::string>("T", "N"),
                                                  std::pair<std::string, std::string>("T", "T")),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR))));
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiplyTest,
@@ -720,7 +727,8 @@ namespace MatrixMultiplyTest
                                                  std::pair<std::string, std::string>("N", "T"),
                                                  std::pair<std::string, std::string>("T", "N"),
                                                  std::pair<std::string, std::string>("T", "T")),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR))));
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiplyTest,
@@ -744,7 +752,8 @@ namespace MatrixMultiplyTest
                                                  std::pair<std::string, std::string>("N", "T"),
                                                  std::pair<std::string, std::string>("T", "N"),
                                                  std::pair<std::string, std::string>("T", "T")),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR))));
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
     TEST_P(ScaledMatrixMultiplyMixedTestGPU, GPU_ScaledMatrixMultiplyMacroTileMixed)
     {
@@ -793,7 +802,8 @@ namespace MatrixMultiplyTest
                                                  std::pair<std::string, std::string>("N", "T"),
                                                  std::pair<std::string, std::string>("T", "N"),
                                                  std::pair<std::string, std::string>("T", "T")),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR))));
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
 
     class ScaledMMTest
         : public BaseMatrixMultiplyContextFixture<std::tuple<rocRoller::DataType,
@@ -960,5 +970,6 @@ namespace MatrixMultiplyTest
             mfmaSupportedISAValues(),
             ::testing::Combine(::testing::Values(std::make_tuple(32, 32, 4),
                                                  std::make_tuple(16, 16, 8)),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToVGPR))));
+                               ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                                 SolutionParams::LoadPath::GlobalToVGPR))));
 } // namespace MatrixMultiplyTest
