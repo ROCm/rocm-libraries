@@ -1,150 +1,115 @@
 # hipDNN Roadmap
 
-This document outlines the development roadmap for hipDNN, including near-term priorities and future goals for each component. hipDNN is actively evolving to provide a comprehensive graph-based deep learning library for AMD GPUs. For a table of active operation support, see the [Operation Support doc](./OperationSupport.md).
+This document outlines the development roadmap for hipDNN, a comprehensive graph-based deep learning library for AMD GPUs. For current operation support details, refer to the [Operation Support documentation](./OperationSupport.md).
 
 > [!NOTE]
 > 📝 This roadmap is subject to change based on project priorities, community feedback, and technical requirements.
 
 ## hipDNN Core
 
-The following improvements span across all hipDNN components and represent foundational changes to the project.
+The following improvements represent foundational changes spanning all hipDNN components.
 
-### What's Next
-*The following items are current priorities but are subject to change:*
+### Near-Term Priorities
 
-- **Build Platform Integration**: Ongoing integration into [https://github.com/ROCm/TheRock](https://github.com/ROCm/TheRock) build platform
-- **Version Management**: Implementing consistent version numbering support across SDK and Backend components
+- **Version Management**: Implement consistent version numbering across Frontend, SDK, and Backend components
+- **EngineId Management**: Update engineId registration to support plugin development workflows
+- **Enhanced Logging**: Add detailed logging for API calls and runtime graph serialization capture
+- **Persistence**: Implement graph save and load functionality
+- **Benchmarking & Validation**: Develop Python-based tool suite for graph execution, performance measurement, and validation
 
-### Future Roadmap
-*The following items are longer-term goals that are not yet scheduled:*
+### Longer-Term Priorities
 
-- **Performance Infrastructure**: Adding a comprehensive benchmarking and performance tracking project for monitoring performance and accuracy across the full hipDNN installation (including all plugins)
+- **Execution Plan Persistence**: Implement save and load functionality for execution plans
+- **API Extensions**: Add support for behavioral notes and tunable knobs
+- **Plugin Systems**:
+  - Benchmarking and tuning plugin system (see [Design.md](./Design.md#high-level-architecture))
+  - Heuristic plugin system (see [Design.md](./Design.md#high-level-architecture))
 
 ## Frontend
 
-The Frontend provides the user-facing C++ API for hipDNN, focusing on ease of use and feature completeness.
+The Frontend provides the user-facing C++ API, focusing on usability and feature completeness.
 
-### What's Next
-*The following items are current priorities but are subject to change:*
+### Near-Term Priorities
 
-- **Fusion Support**: Adding operation support for Convolution & BatchNorm Fusions
-- **Backend Selection**: Adding API to select preferred backend engines
+- **Python API**: Add Python frontend for broader accessibility
+- **Engine Selection**: Enhance documentation and headers for available engines and preferred source selection
 
-### Future Roadmap
-*The following items are longer-term goals that are not yet scheduled:*
+### Longer-Term Priorities
 
-- **Python API**: Adding Python frontend API for broader accessibility
-- **Extended Operations**: Supporting additional operation types beyond current capabilities
-- **Persistence**: Implementing functionality to save and load graphs and execution plans
-- **Dynamic Loading**: Supporting runtime loading of hipDNN backend libraries
-- **Filtering engines**: Adding API to control filtering of engines based off behavorial notes
-- **Configurable engines**: Adding API to configure tunable settings provided by engines
-- **Specify compute type**: Allow users to specify the accumulator compute types for plugins to use
+- **Extended Operations**: Support additional operation types
+- **Dynamic Loading**: Enable runtime loading of hipDNN backend libraries
 
 ## Backend
 
-The Backend serves as the core engine of hipDNN, managing plugins and orchestrating graph execution. See [Design.md](./Design.md) for detailed architecture information.
+The Backend manages plugins and orchestrates graph execution. See [Design.md](./Design.md) for detailed architecture information.
 
-### What's Next
-*The following items are current priorities but are subject to change:*
+### Longer-Term Priorities
 
-### Future Roadmap
-*The following items are longer-term goals that are not yet scheduled:*
-
-- **Unique Engine IDs**: Mechanism to improve or ensure the global uniqueness of engine IDs
-- **API Extensions**: Adding support for behavioral notes and tunable knobs
-- **Improved Logging**: Enhancing logging capabilities for better debugging and monitoring
-- **Plugin Systems**:
-  - Benchmarking and tuning plugin system (see [Design.md](./Design.md#high-level-architecture) for architecture details)
-  - Heuristic plugin system (see [Design.md](./Design.md#high-level-architecture) for architecture details)
-- **Persistence**: Implementing functionality to save and load graphs and execution plans
-- **C API Support**: Adding graph building C API support for language interoperability
-- **Custom schema support**: Adding support to allow users to extend graphs without needing to recompile hipDNN backend
+- **C API Support**: Add graph building C API for language interoperability
+- **Custom Schema Support**: Allow users to extend graphs without recompiling hipDNN backend
 
 ## SDK
 
-The SDK provides shared utilities and interfaces that ensure compatibility between Frontend, Backend, and Plugins.
+The SDK provides shared utilities and interfaces ensuring compatibility between Frontend, Backend, and Plugins.
 
-### What's Next
-*The following items are current priorities but are subject to change:*
+### Near-Term Priorities
 
-- **Fusion Support**: Validating the reference fusion support for Pointwise operations
-
-### Future Roadmap
-*The following items are longer-term goals that are not yet scheduled:*
-
-The SDK may eventually be split into more focused sub-projects:
-  - Core plugin interfaces
-  - Graph manipulation utilities
-  - Reference implementations
-  - Performance utilities
-
-With extended support for:
-  - Caching mechanisms
-  - Graph matching and manipulation
-  - Additional operation schemas
-  - Benchmarking and tuning utilities
+- **SDK Refactoring**: Split SDK into focused sub-components:
+  - Testing SDK
+  - Plugin Development SDK
+  - Graph Data Object SDK
+- **Testing SDK**: Extract testing utilities from MIOpen plugin and reference implementation into a unified SDK for plugin integration testing
+- **Plugin Development SDK**: Provide plugin headers and utilities for bootstrapping plugin development
 
 ## Plugins
 
-Plugins extend hipDNN's capabilities by providing computational implementations. See [Design.md](./Design.md#engine-plugins) for plugin architecture details.
+Plugins extend hipDNN's computational capabilities. See [Design.md](./Design.md#engine-plugins) for plugin architecture details.
 
 ### MIOpen Plugin
 
-#### What's Next
-*The following items are current priorities but are subject to change:*
+#### Near-Term Priorities
 
-- **Convolution Integration**: Adding integration to support the remaining Convolution WRW operation
-- **Batch Normalization**: Adding integration to support the remaining BatchNorm training operation
-- **Fusion Support**: Adding integration to support Convolution and BatchNorm fusions
+- **Fusion Support**: Complete integration for Convolution fusions
+- **Batchnorm Inference**: Re-enable support after resolving [known issues](https://github.com/ROCm/rocm-libraries/issues/2459)
+- **Batchnorm Running Stats**: Add support for running statistics in Batchnorm operations
+- **Code Refactoring**: Extract common MIOpen plugin code into reusable SDK components
+
+### Fusilli IREE Plugin
+
+#### Near-Term Priorities
+
+- **Batchnorm Inference**: Implement Batchnorm inference with fusion support
+- **Convolution**: Implement Forward Convolution with fusion support
+
+#### Mid-Term Priorities
+
+- **Batchnorm Training**: Implement Batchnorm training with fusion support
+- **Convolution**: Implement Backward Convolution (Data & Weight) with fusion support
+- **GEMM**: Implement GEMM operations with fusion support
+
+#### Longer-Term Priorities
+
+- **Attention**: Implement Attention operations with fusion support
 
 ### General Plugin Ecosystem
 
-#### Future Roadmap
-*The following items are longer-term goals that are not yet scheduled:*
+#### Longer-Term Priorities
 
-- **Extended Plugin Support**: Developing additional plugins to extend graph support
-- **MIOpen Plugin Completion**: Finishing MIOpen plugin integration
-- **Advanced Features**:
-  - Adding support for behavioral notes and tunable knobs
-  - Implementing heuristic plugins (see [Design.md](./Design.md#high-level-architecture) for details)
-  - Implementing tuning and benchmarking plugins (see [Design.md](./Design.md#high-level-architecture) for details)
+- **Extended Plugin Support**: Develop additional plugins to broaden graph support
 
 ## Testing and Performance
 
-This section covers testing infrastructure improvements and performance benchmarking capabilities for hipDNN.
+### Near-Term Priorities
 
-### What's Next
-*The following items are current priorities but are subject to change:*
+- **Sample Validation**: Integrate [samples](../samples/README.md) into CI to validate installation and ensure functionality
+- **Reference Plugin**: Create a reference plugin using the Test SDK for validation against other plugins
 
-- **Golden Reference Data**: Leverage our golden reference data exhaustively in unit testing at plugin level & to verify reference implementations
-- **CI Platform**: Swap to leverage TheRock for CI
-- **ASAN Integration**: Add ASAN as an automatic step to CI
-- **Samples**: Run [samples](../samples/README.md) in CI to validate the installation.
+### Longer-Term Priorities
 
-### Future Roadmap
-*The following items are longer-term goals that are not yet scheduled:*
+- **ASAN Integration**: Add AddressSanitizer as an automated CI step
 
+## Contributing
 
-- **Performance/Benchmarking Project**: Create a separate benchmarking and performance project for capturing performance and accuracy for full hipDNN graphs
-  - Track performance and accuracy of hipDNN & installed plugins across a broad set of graphs
-  - **Test Categories**:
-    - Quick Suite: A quick running set of graphs to run per PR to flag severe regressions
-    - Full Suite: A long running set of graphs to run on demand to flag broad regressions (nightly or weekly frequency)
-  - **Requirements**:
-    - Minimal set of graphs maintained for pre-checkin performance checks
-    - Full set of graphs maintained for on-demand performance & accuracy checks
-    - Requires GPU
-    - Validates correctness and performance of graphs
-  - **Testing Environments**:
-    - Windows & supported Linux distros
-    - Test on all ASICs supported by hipDNN
-    - Note: Certain plugins/graphs may have ASIC restrictions
+hipDNN is an open-source project that welcomes community contributions. Your feedback shapes the project's direction.
 
-## Contributing to the Roadmap
-
-As an open-source project, hipDNN welcomes community input. Your feedback helps shape the future direction of the project.
-
-Please refer to [CONTRIBUTING.md](../CONTRIBUTING.md) for information on how to contribute to hipDNN development.
-
-For questions or suggestions, please open an issue for hipDNN.
+For contribution guidelines, see [CONTRIBUTING.md](../CONTRIBUTING.md). For questions or suggestions, please open an issue in the hipDNN repository.

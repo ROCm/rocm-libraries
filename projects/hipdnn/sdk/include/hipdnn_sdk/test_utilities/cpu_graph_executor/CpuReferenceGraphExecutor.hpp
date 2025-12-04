@@ -37,7 +37,7 @@ public:
             planExecutors.push_back(buildPlanForNode(graphWrap, node));
         }
 
-        std::vector<std::unique_ptr<ITensor>> virtualTensors;
+        std::vector<std::unique_ptr<utilities::ITensor>> virtualTensors;
         std::unordered_map<int64_t, void*> variantPackWithVirtualTensorsAdded
             = populateVariantPackWithMissingVirtualTensors(
                 variantPack, graphWrap.getTensorMap(), virtualTensors);
@@ -53,7 +53,7 @@ private:
         const std::unordered_map<int64_t, void*>& variantPack,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap,
-        std::vector<std::unique_ptr<ITensor>>& virtualTensors)
+        std::vector<std::unique_ptr<utilities::ITensor>>& virtualTensors)
     {
         std::unordered_map<int64_t, void*> updatedVariantPack = variantPack;
 

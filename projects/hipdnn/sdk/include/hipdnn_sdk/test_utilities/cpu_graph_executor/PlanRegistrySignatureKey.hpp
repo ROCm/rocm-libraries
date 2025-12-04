@@ -20,13 +20,13 @@ namespace hipdnn_sdk::test_utilities
 /*
  * For each new op we add to our Plan registry we need to update this variant key to support it.
  * This way, we can have a single registry for all operations which simplifies the graph executor.
- * Each key must have a 
+ * Each key must have a
  *  - hashSelf() method
  *  - equality operator
  *  - hash operator
  *  - Constructor to build the key from a data_object::Node && tensorMap
  *  - A static method getPlanBuilders() which returns a map of keys to plan builders for that key
- * 
+ *
 */
 using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
                                               BatchnormBwdSignatureKey,
@@ -67,3 +67,20 @@ struct PlanRegistrySignatureKeyEqual
 };
 
 }
+
+template <>
+struct fmt::formatter<hipdnn_sdk::test_utilities::PlanRegistrySignatureKey>
+{
+    static constexpr auto parse(format_parse_context& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const hipdnn_sdk::test_utilities::PlanRegistrySignatureKey& key,
+                FormatContext& ctx) const
+    {
+        return std::visit([&ctx](const auto& arg) { return fmt::format_to(ctx.out(), "{}", arg); },
+                          key);
+    }
+};
