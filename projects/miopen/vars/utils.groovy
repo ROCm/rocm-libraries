@@ -239,6 +239,7 @@ def getDockerImageName(dockerArgs)
     
     sh "cd ${env.WORKSPACE}/${env.MIOPEN_DIR}/ && md5sum Dockerfile requirements.txt dev-requirements.txt >> ${env.WORKSPACE}/factors.txt"
     def docker_hash = sh(script: "cd ${env.WORKSPACE} && md5sum factors.txt | awk '{print \$1}' | head -c 6", returnStdout: true)
+    sh "cat ${env.WORKSPACE}/factors.txt"
     sh "rm ${env.WORKSPACE}/factors.txt"
     echo "Docker tag hash: ${docker_hash}"
     image = "${image}:ci_${docker_hash}"
