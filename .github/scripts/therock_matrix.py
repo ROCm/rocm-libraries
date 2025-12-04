@@ -42,23 +42,34 @@ project_map = {
         "project_to_test": "hipblaslt, rocblas, hipblas",
     },
     "miopen": {
-        "cmake_options": ["-DTHEROCK_ENABLE_MIOPEN=ON", "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON"],
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_MIOPEN=ON",
+            "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON",
+        ],
         "additional_flags": {
             # As composable_kernel is not enabled for Windows, we only enable these flags during Linux builds
-            "linux": ["-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON", "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON", "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel"]
+            "linux": [
+                "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+                "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
+                "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
+            ]
         },
         "project_to_test": "miopen, miopen_plugin",
     },
     "fft": {
-        "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON"],
+        "cmake_options": ["-DTHEROCK_ENABLE_FFT=ON", "-DTHEROCK_ENABLE_RAND=ON"],
         "project_to_test": "hipfft, rocfft",
     },
     "hipdnn": {  # due to MIOpen plugin project being inside the hipDNN directory, we cannot have the MIOpen plugin project as a separate project for now https://github.com/ROCm/rocm-libraries/issues/2316
         "cmake_options": ["-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON"],
         "additional_flags": {
             # As composable_kernel is not enabled for Windows, we only enable these flags during Linux builds
-            "linux": ["-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON", "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON", "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel"]
-        },        
+            "linux": [
+                "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+                "-DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON",
+                "-DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
+            ]
+        },
         "project_to_test": "hipdnn, miopen_plugin",
     },
     "rocwmma": {
@@ -101,12 +112,12 @@ def collect_projects_to_run(subtrees):
             project_to_add = project_options_to_add["project_to_add"]
             # If `project_to_add` is in included, add options to the existing `project_map` entry
             if project_to_add in projects:
-                project_map[project_to_add][
+                project_map[project_to_add]["cmake_options"] += project_options_to_add[
                     "cmake_options"
-                ] += project_options_to_add['cmake_options']
+                ]
                 project_map[project_to_add][
                     "project_to_test"
-                ] += project_options_to_add['project_to_test']
+                ] += project_options_to_add["project_to_test"]
             # If `project_to_add` is not included, only run build and tests for the optional project
             else:
                 projects.add(project_to_add)
@@ -117,7 +128,6 @@ def collect_projects_to_run(subtrees):
                     "project_to_test"
                 ]
 
-
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []
     for project in projects:
@@ -125,9 +135,13 @@ def collect_projects_to_run(subtrees):
             project_map_data = project_map.get(project)
 
             # Check if platform-based additional flags are needed
-            if "additional_flags" in project_map_data and platform in project_map_data["additional_flags"]:
-                project_map_data["cmake_options"] += project_map_data["additional_flags"][platform]
-                del project_map_data["additional_flags"][platform]
+            if (
+                "additional_flags" in project_map_data
+                and platform in project_map_data["additional_flags"]
+            ):
+                project_map_data["cmake_options"] += project_map_data[
+                    "additional_flags"
+                ][platform]
 
             # To save time, only build what is needed
             project_map_data["cmake_options"] += ["-DTHEROCK_ENABLE_ALL=OFF"]
