@@ -304,13 +304,14 @@ struct config_t {
 
   constexpr bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && cache_hints_a == o.cache_hints_a &&
-           cache_hints_b == o.cache_hints_b;
+           cache_hints_b == o.cache_hints_b && workgroup_mapping == o.workgroup_mapping;
   }
 
   std::size_t hash() const {
     return std::hash<size_t>()(mt.m) ^ std::hash<size_t>()(mt.n) ^ std::hash<size_t>()(mt.k) ^
            std::hash<size_t>()(mi.m) ^ std::hash<size_t>()(mi.n) ^ std::hash<size_t>()(mi.k) ^
-           std::hash<int>()(cache_hints_a) ^ std::hash<int>()(cache_hints_b);
+           std::hash<int>()(cache_hints_a) ^ std::hash<int>()(cache_hints_b) ^
+           std::hash<int>()(workgroup_mapping);
   }
 };
 
