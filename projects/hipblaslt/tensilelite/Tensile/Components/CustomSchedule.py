@@ -305,6 +305,32 @@ def verify_lrs_complete_before_vmfma(schedule_info: 'ScheduleInfo', context: dic
             return False, f"Code path {code_path}: {error_message}"
     return True, ""
 
+def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
+    """
+    Verify that the number of instructions in the schedule is correct.
+    """
+    if "idMap" not in context:
+        # NOTE: Only skipping because the idMap is hard to construct in testing, but will always be present
+        #       when actually generating the CMS kernel.
+        printWarning("idMap not found in context. Skipping CMS validation for correct number of instructions.")
+        return True, ""
+
+    def verify(schedule_info: 'ScheduleInfo', code_path: int) -> str | None:
+        for instruction_name in schedule_info.optSchedule.keys():
+            schedule = schedule_get(instruction_name, code_path, schedule_info)
+
+            len_actual = len(schedule)
+            len_expected = len(context["idMap"][instruction_name])
+            if len_actual != len_expected:
+                return f"{instruction_name} has {len_actual} instructions, but {len_expected} instructions are required."
+        return None
+
+    for code_path in range(schedule_info.numCodePaths):
+        error_message = verify(schedule_info, code_path)
+        if error_message:
+            return False, f"Code path {code_path}: {error_message}"
+    return True, ""
+
 
 def verifyAscendingOrder(scheduleInfo, context: Dict = {}):
     """
@@ -365,6 +391,7 @@ class ScheduleInfo:
 
         # The set of validation rules to run inside `isValid`.
         self.rules: list[Callable[[ScheduleInfo, dict], [bool, str]]] = [
+            verify_correct_number_of_instructions,
             verifyAscendingOrder,
             verify_lrs_complete_before_vmfma
         ]
@@ -500,21 +527,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
 
     idMap['SYNC'] = opt1.syncCode
 
-    def convOptToStream(sched):
-        InstStreams = dict()
-        def addToStream(key, indexList, InstructionList):
-            if indexList:
-                for l in indexList:
-                    assert len(l) == len(InstructionList), \
-                        "Index list length (%u) for %s does not match instruction list length (%u)"%(len(l), key, len(InstructionList))
-            InstStreams[key] = [indexList, InstructionList]
-
-        for key,stream in opt1.optSchedule.items():
-            addToStream(key, stream, idMap[key])
-
-        return InstStreams
-
-    status, message = opt1.isValid({'kernel' : kernel})
+    status, message = opt1.isValid({'kernel' : kernel, "idMap": idMap})
     # create the case str (TN, NT, TT, or NN)
     if isTN(kernel):
         case_str = "TN"
@@ -528,7 +541,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         case_str = "Unknown"
     assert status is True, f"Custom mainloop schedule validation failed for kernel {kernel['MacroTile0']}x{kernel['MacroTile1']}x{kernel['DepthU']} {case_str}: {message}"
 
-    InstStreams = convOptToStream(opt1)
+    InstStreams = {key: [stream, idMap[key]] for key, stream in opt1.optSchedule.items()}
 
     macro = Macro("MAINLOOP", ["ID", "useGR=1", "usePLR=1", "useGRInc=1", "useLoop=1"])
 
