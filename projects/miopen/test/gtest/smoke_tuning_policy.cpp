@@ -5,10 +5,13 @@
 
 #include "get_handle.hpp"
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
+#include "gtest_common.hpp"
 #include "miopen/db_path.hpp"
 #include "../lib_env_var.hpp"
 
 MIOPEN_LIB_ENV_VAR(MIOPEN_USER_DB_PATH)
+MIOPEN_LIB_ENV_VAR(MIOPEN_ENABLE_LOGGING)
 
 class CPU_TuningPolicy_NONE : public ::testing::Test
 {
@@ -87,4 +90,29 @@ TEST_F(CPU_TuningPolicy_NONE, TestNullPolicyPointer)
     auto&& handle = get_handle();
 
     EXPECT_EQ(miopenGetTuningPolicy(&handle, nullptr), miopenStatusBadParm);
+}
+
+TEST_F(CPU_TuningPolicy_NONE, TestGetApiLogged)
+{
+    ScopedEnvironment<std::string> enable_logging(MIOPEN_ENABLE_LOGGING, "ON");
+    miopenTuningPolicy_t policy;
+    auto&& handle = get_handle();
+
+    testing::internal::CaptureStderr();
+    auto status = miopenGetTuningPolicy(&handle, &policy);
+    ASSERT_EQ(status, miopenStatusSuccess);
+    std::string output = testing::internal::GetCapturedStderr();
+    EXPECT_THAT(output, testing::HasSubstr(" miopenGetTuningPolicy("));
+}
+
+TEST_F(CPU_TuningPolicy_NONE, TestSetApiLogged)
+{
+    ScopedEnvironment<std::string> enable_logging(MIOPEN_ENABLE_LOGGING, "ON");
+    auto&& handle = get_handle();
+
+    testing::internal::CaptureStderr();
+    auto status = miopenSetTuningPolicy(&handle, miopenTuningPolicy_t::miopenTuningPolicySearch);
+    ASSERT_EQ(status, miopenStatusSuccess);
+    std::string output = testing::internal::GetCapturedStderr();
+    EXPECT_THAT(output, testing::HasSubstr(" miopenSetTuningPolicy("));
 }
