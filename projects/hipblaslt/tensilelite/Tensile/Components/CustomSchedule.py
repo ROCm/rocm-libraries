@@ -2353,10 +2353,10 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
     syncCode = []
 
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
-    if isTN(kernel) and TLDS==1:
+    if isTN(kernel) and not useLDSTr and TLDS==1:
         optSchedule = {
 
-            'SYNC'   : [[-1, 4, 10,10, 26,26,27, 48,48]],
+            'SYNC'   : [[-1,3, 10,10, 26,26,27, 45,45]],
             'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
             'GRIncB' : [[9,11,12,13,14,15,16,17,18]],
 
@@ -2375,24 +2375,24 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
                         [30, 33, 36, 39]],
 
             #After GRB is done.
-            'LRB1'   : [[48,49,50,51,52,53,54]],
+            'LRB1'   : [[45,46,47,48,50,51,52]],
 
             'LRSA'   : [[23]], # after LRA0 and before LRA1
             'LRSB'   : [[23]], # after LRB0 and before LRB2
-            'LWSA'   : [[51]], # For A
-            'LWSB'   : [[52]],
+            'LWSA'   : [[54]], # For A
+            'LWSB'   : [[54]],
 
             'LCC'    : [[55, 55]],
         }
         # note: syncCode needs to be
         syncCode = [SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for necessary prior LRA1/LRB1 before starting main loop"),
-                    SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 for the remaining main loop"),
+                    SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="Wait for prior LRA1/LRB1 for the remaining main loop"),
                     SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete to start GRA"),
                     SBarrier(comment=""),
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete to start GRB"),
                     SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Wait for GRA to complete to start LRA1"),
                     SBarrier(comment=""),
-                    SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="Wait for GRB to complete to start LRB1"),
+                    SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="Wait for GRB to complete to start LRB1"),
                     SBarrier(comment=""),
                    ]
         nglshift = nllshift = 11 # vmcnt shift for ngl and nll
