@@ -611,7 +611,7 @@ def verify_scc_overlap(scheduleInfo, context: Dict = {}):
 
     # Checks value is in [interval[0],interval[1]]. 
     # if lhsGt : ]interval[0],interval[1]] else  [interval[0],interval[1][
-    def inInterval(value, interval, lhsGt):
+    def inInterval(value : int, interval : list[int], lhsGt : bool):
         if lhsGt:
             return value>interval[0] and value<=interval[1]
         else:
@@ -627,35 +627,33 @@ def verify_scc_overlap(scheduleInfo, context: Dict = {}):
         if DTL:
             names += ["GRA", "GRB"]
 
-        def verifyIndices(GRIncName, intervals, name, indices) -> tuple[bool, str]:
+        def verifyIndices(grIncData : GRIncData, name : str, indices : list[int]) -> tuple[bool, str]:
             dclIndex = getDeclarationIndex(name)
-            indexGRInc = getDeclarationIndex(GRIncName)
+            dclIndexGrInc = getDeclarationIndex(grIncData.name)
             for v in indices:
-                for interval in intervals:
-                    if inInterval(v,interval, dclIndex<indexGRInc):
-                        return False, f"Code path {codePath}: {name} at index {v} can't be between {GRIncName} {interval[0]}-{interval[1]} due to SCC usage."
+                for interval in grIncData.intervals:
+                    if inInterval(v,interval, dclIndex<dclIndexGrInc):
+                        return False, f"Code path {codePath}: {name} at index {v} can't be between {grIncData.name} {interval[0]}-{interval[1]} due to SCC usage."
 
         GRIncs = []
         for GRIncName in GRIncNames:
             GRInc = schedule_get(GRIncName, codePath, scheduleInfo)
             assert numElements==len(GRInc), f"Code path {codePath}: {GRIncName} expected size if {numElements}, given {len(GRInc)}."
-            GRIncIntervals = getIntervals(GRInc)
-            data = GRIncData(name = GRIncName, insts = GRInc, intervals = GRIncIntervals)
-            GRIncs.append(data)
+            GRIncs.append(GRIncData(name = GRIncName, insts = GRInc, intervals = getIntervals(GRInc)))
 
-        # First check GRInc together
-        errorMessage = verifyIndices(GRIncs[0].name,GRIncs[0].intervals,GRIncs[1].name, GRIncs[1].insts)
+        # First check GRIncA&B together
+        errorMessage = verifyIndices(GRIncs[0],GRIncs[1].name, GRIncs[1].insts)
         if errorMessage:
             return errorMessage
 
-        # Then, check GR and LW
+        # Then, check GR and LW on all GRIncs
         for grIncData in GRIncs:
             for name in names:
                 insts = schedule_get(name, codePath, scheduleInfo)
                 # In case of GRA/GRB, just take m0 updates indices 
                 if name.startswith("GR"):
                     insts = insts[0::2]
-                errorMessage = verifyIndices(grIncData.name,grIncData.intervals,name, insts)
+                errorMessage = verifyIndices(grIncData, name, insts)
                 if errorMessage:
                     return errorMessage
    
