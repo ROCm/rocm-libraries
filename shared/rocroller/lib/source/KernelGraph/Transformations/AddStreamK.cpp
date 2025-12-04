@@ -292,7 +292,8 @@ namespace rocRoller
             auto strideX = sizeY;
             auto strideY = literal(1u);
 
-            auto globalScratch    = newScratchCoordinate(simplify(sizeX * sizeY), varType, context);
+            auto globalScratch
+                = newScratchCoordinate(simplify(sizeX * sizeY), varType, ScratchPolicy::TileData, context);
             auto globalScratchTag = graph.coordinates.addElement(globalScratch);
 
             std::vector<unsigned int> jammedSizes = {loopInfo.xLoopSize, loopInfo.yLoopSize};
@@ -1143,7 +1144,8 @@ namespace rocRoller
                                resultVariableType(numRemainPartialResults));
 
                 // Create scratch space for flags
-                auto flagsScratch = newScratchCoordinate(argInfo.numWGs, DataType::UInt32, context);
+                auto flagsScratch = newScratchCoordinate(
+                    argInfo.numWGs, DataType::UInt32, ScratchPolicy::SyncFlags, context);
                 auto flagsScratchTag = graph.coordinates.addElement(flagsScratch);
 
                 // Create scratch space for partially accumulated tiles

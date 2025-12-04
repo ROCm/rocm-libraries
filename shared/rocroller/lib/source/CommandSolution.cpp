@@ -644,9 +644,10 @@ namespace rocRoller
         return m_context;
     }
 
-    size_t CommandKernel::scratchSpaceRequired(RuntimeArguments const& args) const
+    size_t CommandKernel::scratchSpaceRequired(ScratchPolicy           policy,
+                                               RuntimeArguments const& args) const
     {
-        auto amount = m_context->getScratchAmount();
+        auto amount = m_context->getScratchAmount(policy);
 
         auto times = evaluationTimes(amount);
         AssertFatal(times[Expression::EvaluationTime::Translate]

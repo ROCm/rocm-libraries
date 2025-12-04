@@ -774,13 +774,17 @@ namespace rocRoller
         }
 
         rocRoller::KernelGraph::CoordinateGraph::User newScratchCoordinate(
-            Expression::ExpressionPtr size, VariableType varType, ContextPtr context)
+            Expression::ExpressionPtr size,
+            VariableType              varType,
+            ScratchPolicy             policy,
+            ContextPtr                context)
         {
-            auto currentOffset = context->getScratchAmount();
+            auto currentOffset = context->getScratchAmount(policy);
             auto newCoordinate = CT::User(size, currentOffset);
             // TODO Audit bytes/bits
             // Can we move size inside the CeilDivide?
             context->allocateScratch(
+                policy,
                 size * Expression::literal(CeilDivide(DataTypeInfo::Get(varType).elementBits, 8u)));
 
             return newCoordinate;

@@ -47,8 +47,12 @@
 namespace rocRoller
 {
     Context::Context()
-        : m_scratchAllocator(Expression::literal(0u))
     {
+        // Initialize scratch allocators for each policy with zero
+        for(int i = 0; i < static_cast<int>(ScratchPolicy::Count); ++i)
+        {
+            m_scratchAllocators[static_cast<ScratchPolicy>(i)] = Expression::literal(0u);
+        }
     }
 
     ContextPtr Context::ForDefaultHipDevice(std::string const&   kernelName,
@@ -287,14 +291,16 @@ namespace rocRoller
         m_kernel = assemblyKernel;
     }
 
-    Expression::ExpressionPtr Context::getScratchAmount() const
+    Expression::ExpressionPtr Context::getScratchAmount(ScratchPolicy policy) const
     {
-        return m_scratchAllocator;
+        auto it = m_scratchAllocators.find(policy);
+        AssertFatal(it != m_scratchAllocators.end(), "Scratch policy not found", ShowValue(policy));
+        return it->second;
     }
 
-    void Context::allocateScratch(Expression::ExpressionPtr size)
+    void Context::allocateScratch(ScratchPolicy policy, Expression::ExpressionPtr size)
     {
-        m_scratchAllocator = simplify(m_scratchAllocator + size);
+        m_scratchAllocators[policy] = simplify(m_scratchAllocators[policy] + size);
     }
 
     void Context::scheduleCopy(Instruction const& inst)

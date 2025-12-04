@@ -28,6 +28,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <ranges>
 #include <string>
@@ -128,17 +129,20 @@ namespace rocRoller
 
         /**
          * @brief Returns an expression representing how much scratch space is required (in bytes)
+         *        for the specified scratch policy.
          *
+         * @param policy The scratch policy to query
          * @return Expression::ExpressionPtr
          */
-        Expression::ExpressionPtr getScratchAmount() const;
+        Expression::ExpressionPtr getScratchAmount(ScratchPolicy policy) const;
 
         /**
-         * @brief Allocate more scratch space
+         * @brief Allocate more scratch space for the specified scratch policy.
          *
+         * @param policy The scratch policy to allocate for
          * @param size Number of bytes requested
          */
-        void allocateScratch(Expression::ExpressionPtr size);
+        void allocateScratch(ScratchPolicy policy, Expression::ExpressionPtr size);
 
         /**
          * @brief Get register scope manager.
@@ -173,10 +177,10 @@ namespace rocRoller
         std::shared_ptr<ArgumentLoader>            m_argLoader;
         std::shared_ptr<ScheduledInstructions>     m_instructions;
         std::shared_ptr<MemoryInstructions>        m_mem;
-        LabelAllocatorPtr                          m_labelAllocator;
-        std::shared_ptr<LDSAllocator>              m_ldsAllocator;
-        Expression::ExpressionPtr                  m_scratchAllocator;
-        std::shared_ptr<CopyGenerator>             m_copier;
+        LabelAllocatorPtr                                       m_labelAllocator;
+        std::shared_ptr<LDSAllocator>                           m_ldsAllocator;
+        std::map<ScratchPolicy, Expression::ExpressionPtr>      m_scratchAllocators;
+        std::shared_ptr<CopyGenerator>                          m_copier;
         std::shared_ptr<BranchGenerator>           m_brancher;
         std::shared_ptr<CrashKernelGenerator>      m_crasher;
         std::shared_ptr<RandomGenerator>           m_random;

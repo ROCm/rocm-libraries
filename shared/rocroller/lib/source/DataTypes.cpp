@@ -306,6 +306,25 @@ namespace rocRoller
         return stream << toString(n);
     }
 
+    std::string toString(ScratchPolicy s)
+    {
+        switch(s)
+        {
+        case ScratchPolicy::SyncFlags:
+            return "SyncFlags";
+        case ScratchPolicy::TileData:
+            return "TileData";
+
+        case ScratchPolicy::Count:;
+        }
+        return "Invalid";
+    }
+
+    std::ostream& operator<<(std::ostream& stream, ScratchPolicy s)
+    {
+        return stream << toString(s);
+    }
+
     std::string toString(PointerType const& p)
     {
         switch(p)
