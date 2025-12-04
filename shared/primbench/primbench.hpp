@@ -832,6 +832,7 @@ struct cli_settings {
     std::string json_out; /**< Output JSON file path */
     std::string csv_out;  /**< Output CSV file path */
     std::string filter;   /**< Regex filter of specialization names to benchmark */
+    bool dry;             /**< Flag to perform a dry run */
     std::chrono::duration<double> min_gpu_ms_per_batch; /**< Minimum GPU batch duration */
     std::chrono::duration<double> min_secs;             /**< Minimum benchmark duration */
     std::chrono::duration<double>
@@ -1174,6 +1175,7 @@ class logger {
         ss << ",\"json_out\":\"" << s.json_out << "\"";
         ss << ",\"csv_out\":\"" << s.csv_out << "\"";
         ss << ",\"filter\":\"" << s.filter << "\"";
+        ss << ",\"dry\":" << s.dry;
         ss << ",\"min_gpu_ms_per_batch\":" << s.min_gpu_ms_per_batch.count();
         ss << ",\"min_secs\":" << s.min_secs.count();
         ss << ",\"noise_timeout_secs\":" << s.noise_timeout_secs.count();
@@ -1669,6 +1671,30 @@ static constexpr int bytes_per_sec_col_width = 9;
 static constexpr const char* horizontal_bar = u8"─";
 
 /**
+ * \brief Prints the table header for dry-run mode output.
+ *
+ * \param algo_name Algorithm name to display.
+ * \param spec_col_width Width of the specialization column.
+ * \param family_col_width Width of the family column.
+ * \param specialization_count Total number of specializations.
+ */
+void print_dry_header(std::string_view algo_name, size_t spec_col_width, size_t family_col_width,
+                      size_t specialization_count) {
+    std::string status_header = "Status of " + std::string(algo_name);
+    size_t status_col_width = status_header.size();
+
+    std::cout << std::setw(status_col_width) << std::left << status_header << "  "
+              << std::setw(spec_col_width) << std::left << "Specialization"
+              << "  "
+              << "Index/" << specialization_count << "\n";
+
+    size_t underline_width = status_col_width + 2 + spec_col_width + 2 + family_col_width;
+
+    for (size_t i = 0; i < underline_width; ++i) std::cout << horizontal_bar;
+    std::cout << "\n";
+}
+
+/**
  * \brief Prints the table header for algorithm progress output.
  *
  * \param algo_name Algorithm name to display.
@@ -1719,6 +1745,27 @@ void print_warming(uint16_t gpu_temp, uint16_t min_gpu_temp) {
 void print_cooling(uint16_t gpu_temp, uint16_t max_gpu_temp) {
     std::cout << clearline << "Cooling GPU from " << red << gpu_temp << "°C" << reset << " to "
               << green << max_gpu_temp << "°C" << reset << std::flush;
+}
+
+/**
+ * \brief Prints a single line of output for dry-run mode.
+ *
+ * Displays only status, specialization and family index.
+ * Used when simulating algorithm execution without actually running benchmarks.
+ */
+void print_dry_progress(std::string_view specialization, std::string_view algo_name,
+                        size_t family_index, size_t spec_col_width, size_t family_col_width) {
+    std::ostringstream line;
+
+    std::string status_header = "Status of " + std::string(algo_name);
+    size_t status_col_width = status_header.size();
+
+    line << clearline << green << std::setw(status_col_width) << std::left << "Success" << reset;
+
+    line << "  " << std::setw(spec_col_width) << std::left << specialization;
+    line << "  " << std::setw(family_col_width) << std::right << family_index;
+
+    std::cout << line.str() << "\n" << std::flush;
 }
 
 /**
@@ -2211,6 +2258,33 @@ class state {
             exit(EXIT_FAILURE);
         }
 
+        const auto& s = m_cli_settings;
+
+        std::string name = m_meta.serialize_name();
+        size_t bytes_per_item = m_read_write_bytes / m_items;
+
+        if (s.dry) {
+            // A dry run doesn't run anything on the GPU, so output placeholder values.
+            double bytes_per_sec = 0.0;
+            double items_per_sec = 0.0;
+            double noise_percent = 0.0;
+            uint16_t start_temp = 0;
+            uint16_t end_temp = 0;
+            double elapsed_host_secs = 0.0;
+            double elapsed_gpu_secs = 0.0;
+            bool noise_timeout = false;
+
+            progress::print_dry_progress(name, m_algo, m_family_index, m_spec_col_width,
+                                         m_family_col_width);
+
+            m_logger.output_specialization(
+                m_family_index, name, m_meta.serialize(), m_kernels_per_batch, m_ms_per_batch,
+                bytes_per_sec, items_per_sec, bytes_per_item, m_items, noise_percent, start_temp,
+                end_temp, elapsed_host_secs, elapsed_gpu_secs, noise_timeout, m_amdsmi);
+
+            return;
+        }
+
         warm_up();
         cool_down();
 
@@ -2242,8 +2316,6 @@ class state {
             amdsmi::stats amdsmi_stats = m_amdsmi.get_stats();
 
             m_logger.save(batch_gpu_ms, iterations_ms, amdsmi_stats);
-
-            const auto& s = m_cli_settings;
 
             // Compute noise (CV) for recent window
             auto window_start = m_times.end() - std::min(iterations, s.batch_window_size);
@@ -2285,8 +2357,6 @@ class state {
 
             uint16_t gpu_temp = m_amdsmi.get_temp();
 
-            std::string name = m_meta.serialize_name();
-
             progress::print_progress(
                 iterations, noise_percent, bytes_per_sec, status, name, m_algo, s.batch_window_size,
                 m_family_index, m_spec_col_width, m_family_col_width, elapsed_host_secs,
@@ -2294,8 +2364,6 @@ class state {
 
             if (stop_early || noise_timeout) {
                 std::cout << "\n";
-
-                size_t bytes_per_item = m_read_write_bytes / m_items;
 
                 m_logger.output_specialization(
                     m_family_index, name, m_meta.serialize(), m_kernels_per_batch, m_ms_per_batch,
@@ -2574,8 +2642,8 @@ class state {
 
     std::function<void()> m_run_before_every_iteration_lambda = nullptr;
     std::vector<double> m_times;
-    size_t m_kernels_per_batch;
-    double m_ms_per_batch;
+    size_t m_kernels_per_batch = 0;
+    double m_ms_per_batch = 0.0;
 
     bool m_has_set_items = false;
     bool m_has_set_writes = false;
@@ -2706,6 +2774,7 @@ class cli {
             "json-out",
             "csv-out",
             "filter",
+            "dry",
             "min-gpu-ms-per-batch",
             "min-secs",
             "noise-timeout-secs",
@@ -3119,9 +3188,14 @@ class executor {
         m_family_col_width =
             std::string("Index/").size() + std::to_string(specialization_count).size();
 
-        detail::progress::print_header(algorithm, m_spec_col_width, m_family_col_width,
-                                       specialization_count,
-                                       m_cli_settings.noise_timeout_secs.count());
+        if (m_cli_settings.dry) {
+            detail::progress::print_dry_header(algorithm, m_spec_col_width, m_family_col_width,
+                                               specialization_count);
+        } else {
+            detail::progress::print_header(algorithm, m_spec_col_width, m_family_col_width,
+                                           specialization_count,
+                                           m_cli_settings.noise_timeout_secs.count());
+        }
 
         // Run all benchmarks.
         size_t family_index = 0;
@@ -3170,6 +3244,10 @@ class executor {
 
         s.filter = cli.get<std::string>("filter", "",
                                         "Regex filter of specialization names to benchmark.");
+
+        s.dry = cli.get<bool>("dry", false,
+                              "Perform a dry run. The benchmark setup is still run, and JSON and "
+                              "CSV files are still output, but `state.run()` immediately returns.");
 
         s.min_gpu_ms_per_batch = std::chrono::duration<double>(
             cli.get<double>("min-gpu-ms-per-batch", 10.0,

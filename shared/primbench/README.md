@@ -143,6 +143,7 @@ It output this `results.json`:
             "gpu_name": "AMD Instinct MI210",
             "gpu_arch": "gfx90a",
             "library_build_type": "debug",
+            "temp_type": "edge",
             "host_name": "host",
             "date": "2025-11-24T15:01:50+00:00",
             "hip_version": "6.4.43482-0f2d60242",
@@ -154,6 +155,8 @@ It output this `results.json`:
             "seed": 42,
             "json_out": "results.json",
             "csv_out": "",
+            "filter": "",
+            "dry": false,
             "min_gpu_ms_per_batch": 10,
             "min_secs": 1,
             "noise_timeout_secs": 10,
@@ -254,6 +257,7 @@ You can pass `--help` to benchmarks to print the available options. They are all
 | `--json-out`                             | JSON path to write benchmark results to. (default: results.json)                                                                                                                   |
 | `--csv-out`                              | CSV path to write benchmark results to.                                                                                                                                            |
 | `--filter`                               | Regex filter of specialization names to benchmark.                                                                                                                                 |
+| `--dry`                                  | Perform a dry run. The benchmark setup is still run, and JSON and CSV files are still output, but `state.run()` immediately returns.                                               |
 | `--min-gpu-ms-per-batch`                 | Minimum duration of a batch in milliseconds (GPU time). (default: 10)                                                                                                              |
 | `--min-secs`                             | Minimum total benchmark duration in seconds (wall time). (default: 1)                                                                                                              |
 | `--noise-timeout-secs`                   | Maximum total benchmark duration in seconds before timing out a noisy run (wall time). (default: 10)                                                                               |
