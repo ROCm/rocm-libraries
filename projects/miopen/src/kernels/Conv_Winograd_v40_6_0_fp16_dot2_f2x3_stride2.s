@@ -3,10 +3,12 @@
 
 .include "Conv_Winograd_v40_6_0_metadata.inc"
 
-KERNEL_PROLOG fp16_dot2_f2x3_stride2
-
 .if (.amdgcn.gfx_generation_number == 12)
-    .include "Conv_Winograd_v40_6_0_gfx12_fp16_dot2_f2x3_stride2.inc"
-.endif
+    KERNEL_PROLOG fp16_dot2_f2x3_stride2
 
-KERNEL_EPILOG fp16_dot2_f2x3_stride2
+    .include "Conv_Winograd_v40_6_0_gfx12_fp16_dot2_f2x3_stride2.inc"
+
+    KERNEL_EPILOG fp16_dot2_f2x3_stride2
+.else
+    .error "Unsupported gfx generation"
+.endif
