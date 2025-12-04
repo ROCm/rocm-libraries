@@ -125,7 +125,7 @@ def test_params(mockYamlFile):
 
 @pytest.mark.xfail
 def test_TensileLibLogicToYaml():
-    hipblasltPath = "/workspace/rocm-libraries/projects/hipblaslt/"
+    hipblasltPath = "."
     deviceId = 0
 
     with tempfile.TemporaryDirectory() as workspace:
