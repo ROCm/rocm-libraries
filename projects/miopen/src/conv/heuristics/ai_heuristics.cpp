@@ -823,6 +823,9 @@ protected:
 
             // Direction encoding
             static_cast<float>(metadata.EncodeDirection(problem.GetDirection())), // direction
+
+            // Group count
+            static_cast<float>(problem.GetGroupCount()), // group_count
         };
 
         MIOPEN_LOG_I2("TunaNet3DModel: Extracted " << features.size() << " features");
@@ -846,7 +849,7 @@ std::unique_ptr<Model3D> Get3DModel(const std::string& device)
     MIOPEN_LOG_I2("Get3DModel called for device: " << device);
 
     // List of devices with 3D TunaNet models
-    // Note: gfx90a included for testing purposes (no dedicated 3D model yet)
+    // Note: gfx942 included for testing purposes (no dedicated 3D model yet)
     if(device == "gfx942" || device == "gfx950")
     {
         try
