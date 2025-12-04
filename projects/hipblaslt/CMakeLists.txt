@@ -578,14 +578,16 @@ if(HIPBLASLT_ENABLE_COVERAGE)
       find_program(
         LLVM_PROFDATA
         llvm-profdata
-        HINTS llvm/bin
         REQUIRED
+        HINTS ${ROCM_PATH}/llvm/bin
+        PATHS /opt/rocm/llvm/bin
       )
       find_program(
         LLVM_COV
         llvm-cov
         REQUIRED
-        HINTS llvm/bin
+        HINTS ${ROCM_PATH}/llvm/bin
+        PATHS /opt/rocm/llvm/bin
       )
       add_custom_target(
         coverage
