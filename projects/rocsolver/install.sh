@@ -630,10 +630,10 @@ fi
 if [[ "${force_libfmt}" == true ]]; then
     if [[ "${libfmt}" == true ]]; then
         cmake_common_options+=('-DFORCE_USE_FMT_LIB_OPTION=ON')
-        cmake_common_option+=('-DUSE_FMT_LIB=ON')
+        cmake_common_options+=('-DUSE_FMT_LIB=ON')
     else
         cmake_common_options+=('-DFORCE_USE_FMT_LIB_OPTION=ON')
-        cmake_common_option+=('-DUSE_FMT_LIB=OFF')
+        cmake_common_options+=('-DUSE_FMT_LIB=OFF')
     fi
 fi
 
