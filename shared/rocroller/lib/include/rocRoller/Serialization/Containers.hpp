@@ -205,9 +205,7 @@ namespace rocRoller
                 return v.second;
             }
         };
-#ifdef ROCROLLER_USE_YAML_CPP
         ROCROLLER_SERIALIZE_VECTOR(true, int);
         ROCROLLER_SERIALIZE_VECTOR(true, unsigned int);
-#endif
     } // namespace Serialization
 } // namespace rocRoller
