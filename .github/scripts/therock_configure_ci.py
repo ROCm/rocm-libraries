@@ -66,6 +66,7 @@ def set_github_output(d: Mapping[str, str]):
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
 
+
 def retry(max_attempts, delay_seconds, exceptions):
     def decorator(func):
         def newfn(*args, **kwargs):
@@ -74,14 +75,19 @@ def retry(max_attempts, delay_seconds, exceptions):
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
-                    print(f'Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}')
+                    print(
+                        f"Exception {str(e)} thrown when attempting to run , attempt {attempt} of {max_attempts}"
+                    )
                     attempt += 1
                     if attempt < max_attempts:
                         backoff = delay_seconds * (2 ** (attempt - 1))
                         time.sleep(backoff)
             return func(*args, **kwargs)
+
         return newfn
+
     return decorator
+
 
 @retry(max_attempts=3, delay_seconds=2, exceptions=(TimeoutError))
 def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
@@ -137,12 +143,12 @@ def retrieve_projects(args):
     if args.get("is_push") or args.get("is_pull_request"):
         paths_set = set(modified_paths)
         contains_non_skippable_files = check_for_non_skippable_path(paths_set)
-        
+
         # If only skippable paths were modified, skip CI
         if not contains_non_skippable_files:
             logging.info("Only skippable paths were modified, skipping CI")
             return [], test_type
-    
+
     subtrees = get_changed_path_projects(modified_paths)
 
     if args.get("is_workflow_dispatch"):
@@ -155,7 +161,9 @@ def retrieve_projects(args):
     if args.get("is_push") or args.get("is_pull_request"):
         related_to_therock_ci = check_for_workflow_file_related_to_ci(modified_paths)
         if related_to_therock_ci:
-            logging.info("Enabling all projects since a related workflow file was modified")
+            logging.info(
+                "Enabling all projects since a related workflow file was modified"
+            )
             subtrees = list(subtree_to_project_map.keys())
             test_type = "smoke"
 
@@ -169,16 +177,18 @@ def retrieve_projects(args):
 
 
 def run(args):
+    platform = args.get("platform")
     project_to_run, test_type = retrieve_projects(args)
-    set_github_output({
-        "projects": json.dumps(project_to_run),
-        "test_type": test_type
-    })
+    set_github_output(
+        {f"{platform}_projects": json.dumps(project_to_run), "test_type": test_type}
+    )
 
 
 if __name__ == "__main__":
     args = {}
     github_event_name = os.getenv("GITHUB_EVENT_NAME")
+    platform = os.getenv("PLATFORM")
+    args["platform"] = platform
     args["is_pull_request"] = github_event_name == "pull_request"
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
