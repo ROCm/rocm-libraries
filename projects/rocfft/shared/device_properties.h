@@ -51,8 +51,11 @@ static std::string get_curr_gcn_arch_name()
     auto        dev_prop       = get_curr_device_prop();
     std::string arch_name_full = dev_prop.gcnArchName;
 
-    auto suffix_char = ":";
-    auto pos         = arch_name_full.find(suffix_char);
+    if(arch_name_full.empty())
+        throw std::runtime_error("Device GCN arch name is empty.");
+
+    auto delimiter = ":";
+    auto pos       = arch_name_full.find(delimiter);
     if(pos != std::string::npos)
         arch_name_full.erase(pos);
 
