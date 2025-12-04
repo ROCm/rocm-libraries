@@ -1,4 +1,4 @@
-// Copyright (C) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
@@ -734,7 +734,8 @@ TEST(InstanceTraits, TileInstanceStringReturnsCorrectFormat)
                                    4 /*VectorSizeB*/,
                                    4 /*VectorSizeC*/,
                                    1 /*NumGroupsToMerge*/,
-                                   false /*EnableSplitImage*/>;
+                                   false /*EnableSplitImage*/,
+                                   false /*ExplicitGemm*/>;
 
     using GemmShape = ck_tile::TileGemmShape<
         ck_tile::sequence<128 /*M_Tile*/, 128 /*N_Tile*/, 32 /*K_Tile*/>,
@@ -766,8 +767,6 @@ TEST(InstanceTraits, TileInstanceStringReturnsCorrectFormat)
         GemmShape,
         GemmUniversalTraits,
         ck_tile::GemmPipelineScheduler::Intrawave /*scheduler*/,
-        true /*has_hot_loop_v*/,
-        ck_tile::TailNumber::Full /*tail_number_v*/,
         ck_tile::element_wise::PassThrough /*AElementwiseOperation*/,
         ck_tile::element_wise::PassThrough /*BElementwiseOperation*/,
         ck_tile::bf16_t /*OutDataType*/,
@@ -799,11 +798,10 @@ TEST(InstanceTraits, TileInstanceStringReturnsCorrectFormat)
                                          GroupedConvTraitsType::FixedGemmParams::FixedVectorSize,
                                          GroupedConvTraitsType::VectorSizeC>>;
 
-    using GroupedConvFwdKernel =
-        ck_tile::device::GroupedConvolutionForwardKernel<GroupedConvTraitsType,
-                                                         TilePartitioner,
-                                                         GemmPipeline,
-                                                         ConvEpilogue>;
+    using GroupedConvFwdKernel = ck_tile::GroupedConvolutionForwardKernel<GroupedConvTraitsType,
+                                                                          TilePartitioner,
+                                                                          GemmPipeline,
+                                                                          ConvEpilogue>;
 
     std::string instance_str = ck_tile::reflect::instance_string<GroupedConvFwdKernel>();
 
@@ -819,6 +817,7 @@ TEST(InstanceTraits, TileInstanceStringReturnsCorrectFormat)
                                ",4"           // VectorSizeC
                                ",1"           // NumGroupsToMerge
                                ",0"           // EnableSplitImage
+                               ",0"           // ExplicitGemm
                                ",128"         // MPerBlock
                                ",128"         // NPerBlock
                                ",32"          // KPerBlock

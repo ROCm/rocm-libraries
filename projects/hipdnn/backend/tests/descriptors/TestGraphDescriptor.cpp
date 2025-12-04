@@ -19,7 +19,7 @@ class TestGraphDescriptor : public ::testing::Test
 public:
     static flatbuffers::FlatBufferBuilder createValidGraph()
     {
-        return hipdnn_sdk::test_utilities::createValidGraph();
+        return test_utilities::createValidGraph();
     }
 
     static void verifyGraph(const hipdnn_sdk::data_objects::GraphT& graph)

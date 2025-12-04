@@ -1070,9 +1070,8 @@ namespace hipblaslt_ext
      *  algo    The algorithm.
      *
      *  \retval int The index of the algorithm, can be used to get heuristic
-     * results from \ref getAlgosFromIndex. Returns -1 if the index stored
-     * in algo < 0. Note that the index may not be valid if the algo struct
-     * is not initialized properly.
+     * results from \ref getAlgosFromIndex. Note that the index may not be valid
+     * if the algo struct is not initialized properly.
      */
     HIPBLASLT_EXPORT int getIndexFromAlgo(hipblasLtMatmulAlgo_t& algo);
 

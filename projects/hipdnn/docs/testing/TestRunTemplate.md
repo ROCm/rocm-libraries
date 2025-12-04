@@ -7,14 +7,14 @@ This document provides a template for recording hipDNN test results. Use this te
 ## Test Run Template
 
 ```
-Name: 
-Operating System: 
-Has GPU: 
-ASIC: 
-MIOpen hash: 
-ROCm version: 
-Run environment: 
-Test results: 
+Name:
+Operating System:
+Has GPU:
+ASIC:
+MIOpen hash:
+ROCm version:
+Run environment:
+Test results:
 ```
 
 ---
@@ -38,7 +38,7 @@ Test results:
   - `make check_ctest`
   - Running installed test artifacts
   - Running built executables directly
-- **Test results**: Summary of tests ran, skipped, and passed/failed
+- **Test results**: Summary of tests run, skipped, and passed/failed
 
 ---
 
@@ -55,7 +55,7 @@ MIOpen hash: 7ae16d1b5
 ROCm version: AMD-SMI 26.0.0+842b9680 amdgpu version: 6.8.5 ROCm version: 7.1.0
 Run environment: ninja check_ctest
 
-Test results:  
+Test results:
     (3 / 4) Test Cases Passed
     (1 / 4) Test Cases Failed
     (0 / 4) Test Cases did not run

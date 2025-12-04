@@ -40,7 +40,7 @@ Run as follows:
 ```bash
 cmake ..
 ninja check_ctest
-```   
+```
 
 #### Expected Results
 
