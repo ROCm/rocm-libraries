@@ -21,7 +21,7 @@ target_include_directories(hipsparse-clients-common PUBLIC
 
 target_compile_options(hipsparse-clients-common PUBLIC -Wall)
 
-target_compile_definitions(hipsparse-clients-common PUBLIC GOOGLE_TEST)
+target_compile_definitions(hipsparse-clients-common PRIVATE GOOGLE_TEST)
 
 # GTest is required for arg_check.cpp and unit.cpp
 find_package(GTest REQUIRED)
@@ -86,4 +86,26 @@ endif()
 
 if(HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
     set_target_properties(hipsparse-samples-common PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+
+
+# Interface library for Fortran samples - reduces code repetition
+# Links against samples-common and adds Fortran-specific C++ runtime dependencies
+if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HOST)
+    add_library(hipsparse-fortran-samples-common INTERFACE)
+    add_library(hipsparse::fortran-samples-common ALIAS hipsparse-fortran-samples-common)
+    
+    target_link_libraries(hipsparse-fortran-samples-common 
+        INTERFACE 
+            hipsparse::samples-common
+    )
+    
+    # Fortran linking C++: Need explicit C++ runtime dependencies
+    if(NOT WIN32)
+        target_link_libraries(hipsparse-fortran-samples-common 
+            INTERFACE 
+                m 
+                ${CMAKE_DL_LIBS}
+        )
+    endif()
 endif()

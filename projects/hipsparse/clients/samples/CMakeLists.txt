@@ -65,13 +65,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_auxiliary.f90"
     )
     add_dependencies(example_fortran_auxiliary hipsparse_fortran)
-    # Fortran linking C++: Need explicit C++ runtime dependencies
-    target_link_libraries(example_fortran_auxiliary PRIVATE 
-        hipsparse::samples-common
-    )
-    if(NOT WIN32)
-        target_link_libraries(example_fortran_auxiliary PRIVATE m ${CMAKE_DL_LIBS})
-    endif()
+    target_link_libraries(example_fortran_auxiliary PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_auxiliary PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
     )
@@ -82,10 +76,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_csrsv2.f90"
     )
     add_dependencies(example_fortran_csrsv2 hipsparse_fortran)
-    target_link_libraries(example_fortran_csrsv2 PRIVATE hipsparse::samples-common)
-    if(NOT WIN32)
-        target_link_libraries(example_fortran_csrsv2 PRIVATE m ${CMAKE_DL_LIBS})
-    endif()
+    target_link_libraries(example_fortran_csrsv2 PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_csrsv2 PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
     )
@@ -96,10 +87,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_bsric02.f90"
     )
     add_dependencies(example_fortran_bsric02 hipsparse_fortran)
-    target_link_libraries(example_fortran_bsric02 PRIVATE hipsparse::samples-common)
-    if(NOT WIN32)
-        target_link_libraries(example_fortran_bsric02 PRIVATE m ${CMAKE_DL_LIBS})
-    endif()
+    target_link_libraries(example_fortran_bsric02 PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_bsric02 PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
     )
@@ -110,10 +98,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_csric02.f90"
     )
     add_dependencies(example_fortran_csric02 hipsparse_fortran)
-    target_link_libraries(example_fortran_csric02 PRIVATE hipsparse::samples-common)
-    if(NOT WIN32)
-        target_link_libraries(example_fortran_csric02 PRIVATE m ${CMAKE_DL_LIBS})
-    endif()
+    target_link_libraries(example_fortran_csric02 PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_csric02 PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
     )
@@ -124,10 +109,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_bsrilu02.f90"
     )
     add_dependencies(example_fortran_bsrilu02 hipsparse_fortran)
-    target_link_libraries(example_fortran_bsrilu02 PRIVATE hipsparse::samples-common)
-    if(NOT WIN32)
-        target_link_libraries(example_fortran_bsrilu02 PRIVATE m ${CMAKE_DL_LIBS})
-    endif()
+    target_link_libraries(example_fortran_bsrilu02 PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_bsrilu02 PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
     )
@@ -138,10 +120,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_csrilu02.f90"
     )
     add_dependencies(example_fortran_csrilu02 hipsparse_fortran)
-    target_link_libraries(example_fortran_csrilu02 PRIVATE hipsparse::samples-common)
-    if(NOT WIN32)
-        target_link_libraries(example_fortran_csrilu02 PRIVATE m ${CMAKE_DL_LIBS})
-    endif()
+    target_link_libraries(example_fortran_csrilu02 PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_csrilu02 PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
     )
@@ -152,10 +131,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_csrsm2.f90"
     )
     add_dependencies(example_fortran_csrsm2 hipsparse_fortran)
-    target_link_libraries(example_fortran_csrsm2 PRIVATE hipsparse::samples-common)
-    if(NOT WIN32)
-        target_link_libraries(example_fortran_csrsm2 PRIVATE m ${CMAKE_DL_LIBS})
-    endif()
+    target_link_libraries(example_fortran_csrsm2 PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_csrsm2 PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
     )
@@ -166,10 +142,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_dotci.f90"
     )
     add_dependencies(example_fortran_dotci hipsparse_fortran)
-    target_link_libraries(example_fortran_dotci PRIVATE hipsparse::samples-common)
-    if(NOT WIN32)
-        target_link_libraries(example_fortran_dotci PRIVATE m ${CMAKE_DL_LIBS})
-    endif()
+    target_link_libraries(example_fortran_dotci PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_dotci PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
     )
@@ -180,10 +153,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_roti.f90"
     )
     add_dependencies(example_fortran_roti hipsparse_fortran)
-    target_link_libraries(example_fortran_roti PRIVATE hipsparse::samples-common)
-    if(NOT WIN32)
-        target_link_libraries(example_fortran_roti PRIVATE m ${CMAKE_DL_LIBS})
-    endif()
+    target_link_libraries(example_fortran_roti PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_roti PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
     )
@@ -194,10 +164,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_spmv.f90"
     )
     add_dependencies(example_fortran_spmv hipsparse_fortran)
-    target_link_libraries(example_fortran_spmv PRIVATE hipsparse::samples-common)
-    if(NOT WIN32)
-        target_link_libraries(example_fortran_spmv PRIVATE m ${CMAKE_DL_LIBS})
-    endif()
+    target_link_libraries(example_fortran_spmv PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_spmv PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
     )
@@ -208,10 +175,7 @@ if(HIPSPARSE_ENABLE_FORTRAN AND HIPSPARSE_ENABLE_HIP AND HIPSPARSE_ENABLE_HOST)
         "${CMAKE_CURRENT_SOURCE_DIR}/example_fortran_bsrmm.f90"
     )
     add_dependencies(example_fortran_bsrmm hipsparse_fortran)
-    target_link_libraries(example_fortran_bsrmm PRIVATE hipsparse::samples-common)
-    if(NOT WIN32)
-        target_link_libraries(example_fortran_bsrmm PRIVATE m ${CMAKE_DL_LIBS})
-    endif()
+    target_link_libraries(example_fortran_bsrmm PRIVATE hipsparse::fortran-samples-common)
     set_target_properties(example_fortran_bsrmm PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
     )
