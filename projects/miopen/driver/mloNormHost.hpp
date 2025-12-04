@@ -87,7 +87,6 @@ int mloLRNForwardRunHost(bool do_scale,
 
     if(norm_region == MLO_LRN_ACROSS_CHANNELS)
     {
-        // for(int b = 0; b < n_batches; ++b)
         miopen::par_for(n_batches, min_grain, [&](int b) {
             const int b_by_bot_batch_stride     = b * bot_batch_stride;
             const int b_by_scale_v_batch_stride = b * scale_v_batch_stride;
@@ -341,18 +340,20 @@ int mloLRNBackwardRunHost(int norm_region,
         return -1;
     }
 
+    const size_t min_grain = multi_threaded ? 8 : n_batches;
+
+    // Precompute constant values used by the subsequent loops
     const Tcheck_ double_alpa_beta    = static_cast<Tcheck_>(2.) * alpha * beta;
     const int top_height_plus_pre_pad = top_height + pre_pad;
     const int top_width_plus_pre_pad  = top_width + pre_pad;
     const int n_inputs_plus_pre_pad   = n_inputs + pre_pad;
-    const size_t min_grain            = multi_threaded ? 8 : n_batches;
 
     if(norm_region == MLO_LRN_ACROSS_CHANNELS)
     {
         const Tcheck_ ratio_dta_bwd = double_alpa_beta / static_cast<Tcheck_>(local_area);
 
-        // for(int b = 0; b < n_batches; ++b)
         miopen::par_for(n_batches, min_grain, [&](int b) {
+            // Precompute constant values used by the subsequent loops
             const int b_by_top_df_batch_stride   = b * top_df_batch_stride;
             const int b_by_top_batch_stride      = b * top_batch_stride;
             const int b_by_scale_batch_stride    = b * scale_batch_stride;
@@ -361,6 +362,7 @@ int mloLRNBackwardRunHost(int norm_region,
 
             for(int j = 0; j < bot_height; ++j)
             {
+                // Precompute constant values used by the subsequent loops
                 const int top_df_ptr_base_idx_j = b_by_top_df_batch_stride + j * top_df_stride;
                 const int top_ptr_base_idx_j    = b_by_top_batch_stride + j * top_stride;
                 const int scale_ptr_base_idx_j  = b_by_scale_batch_stride + j * scale_stride;
@@ -374,6 +376,7 @@ int mloLRNBackwardRunHost(int norm_region,
                     int head            = 0;
                     Tcheck_ accum_ratio = static_cast<Tcheck_>(0);
 
+                    // Precompute constant values used by the subsequent loops
                     const int top_df_ptr_base_idx_i   = top_df_ptr_base_idx_j + i;
                     const int top_ptr_base_idx_i      = top_ptr_base_idx_j + i;
                     const int scale_ptr_base_idx_i    = scale_ptr_base_idx_j + i;
@@ -541,8 +544,8 @@ int mloLRNBackwardRunHost(int norm_region,
     }             // if (norm_region == MLO_LRN_ACROSS_CHANNELS)
     else
     {
-        // for(int b = 0; b < n_batches; ++b)
         miopen::par_for(n_batches, min_grain, [&](int b) {
+            // Precompute constant values used by the subsequent loops
             const int b_by_top_df_batch_stride   = b * top_df_batch_stride;
             const int b_by_top_batch_stride      = b * top_batch_stride;
             const int b_by_scale_batch_stride    = b * scale_batch_stride;
@@ -551,6 +554,7 @@ int mloLRNBackwardRunHost(int norm_region,
 
             for(int o = 0; o < n_inputs; ++o)
             {
+                // Precompute constant values used by the subsequent loops
                 const int top_df_ptr_base_idx_o =
                     b_by_top_df_batch_stride + o * top_df_channel_stride;
                 const int top_ptr_base_idx_o   = b_by_top_batch_stride + o * top_channel_stride;
@@ -561,6 +565,7 @@ int mloLRNBackwardRunHost(int norm_region,
 
                 for(int j = 0; j < bot_height; ++j)
                 {
+                    // Precompute constant values used by the subsequent loops
                     const int bot_df_v_ptr_base_idx_j =
                         bot_df_v_ptr_base_idx_o + j * bot_df_v_stride;
                     const int top_df_ptr_base_idx_j = top_df_ptr_base_idx_o + j * top_df_stride;
@@ -582,6 +587,7 @@ int mloLRNBackwardRunHost(int norm_region,
                         wend              = std::min(wend, top_width);
                         for(int h = hstart; h < hend; ++h)
                         {
+                            // Precompute constant values used by the subsequent loops
                             const int top_df_ptr_base_idx_h =
                                 top_df_ptr_base_idx_o + h * top_df_stride;
                             const int top_ptr_base_idx_h = top_ptr_base_idx_o + h * top_stride;
