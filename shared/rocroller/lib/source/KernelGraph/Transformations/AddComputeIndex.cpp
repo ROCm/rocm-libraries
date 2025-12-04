@@ -255,38 +255,10 @@ namespace rocRoller::KernelGraph
         // Next, consider Unroll coordinates.
         auto unrolls = filterCoordinates<Unroll>(required, graph);
 
-        // StreamK creates a coordinate structure where Unroll coordinates are
-        // only connected via Identify edges (not CoordinateTransformEdges).
-        // findRequiredCoordinates doesn't traverse Identify edges, so these
-        // Unrolls aren't in the `required` set.
-        //
-        // Solution: Find Unrolls via the MAPPER by tracing up the control graph
-        // from the operation to find SetCoordinate nodes, which are mapped to Unrolls.
-        {
-            int current = op;
-            while(true)
-            {
-                auto parent = only(graph.control.getInputNodeIndices<Body>(current));
-                if(!parent)
-                    break;
-
-                auto maybeSetCoord = graph.control.get<SetCoordinate>(*parent);
-                if(maybeSetCoord)
-                {
-                    auto unrollCoord = graph.mapper.get<Unroll>(*parent);
-                    if(unrollCoord > 0)
-                    {
-                        unrolls.insert(unrollCoord);
-                    }
-                }
-                current = *parent;
-            }
-        }
-
         for(auto unroll : unrolls)
         {
-            // The Unroll is connected to a coordinate via an Identify edge.
-            // Follow the Identify chain and find a neighbour that's in the path.
+            // In StreamK, Unroll coordinates are connected via Identify edges.
+            // followIdentify resolves these chains (or returns the original if none).
             auto unrollTarget = followIdentify(unroll, graph);
 
             // Find a neighbour of unrollTarget that's actually in the path
