@@ -45,6 +45,7 @@
 #include "gtest_common.hpp"
 #include "random.hpp"
 #include "tensor_holder.hpp"
+#include "test_parameter_name_generator.hpp"
 #include "verify.hpp"
 
 // Run CPU emulations in hierarchical reduction mode.
@@ -61,7 +62,7 @@
 
 namespace {
 
-using TestCase = std::vector<int>;
+using TestCase = NamedContainer<std::vector<int>>;
 
 //****************************************************
 // FORWARD TRAIN
@@ -1201,15 +1202,26 @@ struct verify_backward_3d_bn_spatial_use_saved
 
 //====== DRIVERS ===========================================
 
-inline auto GenCases()
+inline auto GenSmokeTestCases()
 {
-    auto s = get_3d_bn_spatial_inputs(4);
-    return testing::ValuesIn((s.insert({16, 32, 8, 8, 8}), s));
+    return testing::Values(NamedContainer<std::vector<int>>{"dims", {16, 32, 8, 8, 8}, "x"});
 }
 
-inline auto GetCases()
+inline auto GetSmokeTestCases()
 {
-    static const auto cases = GenCases();
+    static const auto cases = GenSmokeTestCases();
+    return cases;
+}
+
+inline auto GenFullTestCases()
+{
+    return MakeNamedParameterCollectionValues<std::vector<int>>(
+        "dims", get_3d_bn_spatial_inputs(4), "x");
+}
+
+inline auto GetFullTestCases()
+{
+    static const auto cases = GenFullTestCases();
     return cases;
 }
 
@@ -1223,8 +1235,8 @@ struct Bn3DSpatialTest : public testing::TestWithParam<TestCase>
     void SetUp() override
     {
         prng::reset_seed();
-        const auto dims = GetParam();
-        input           = tensor<T>{dims}.generate(tensor_elem_gen_integer{MaxValue});
+        const std::vector<int> dims = GetParam();
+        input                       = tensor<T>{dims}.generate(tensor_elem_gen_integer{MaxValue});
         tolerance = 4e-3 / std::numeric_limits<T>::epsilon(); // ck solver has tolerance of 4e-3
     }
 
@@ -1524,8 +1536,30 @@ private:
     }
 };
 
+struct TestNameGenerator
+{
+    std::string operator()(const auto& info)
+    {
+        const auto& dims = info.param;
+        std::stringstream ss;
+        std::string str;
+
+        ss << "dims_" << GetRangeAsString(dims(), "x") << "_test_id_" << info.index;
+
+        str = ss.str();
+
+        // Name format only supports letters, numbers and underscores.
+        std::transform(str.begin(), str.end(), str.begin(), [](char c) {
+            return (c == '.') ? 'p' : (std::isalnum(c) ? c : '_');
+        });
+
+        return str;
+    }
+};
+
 using GPU_Bn3DSpatial_FP32 = Bn3DSpatialTest<float>;
 
 TEST_P(GPU_Bn3DSpatial_FP32, TestFloat32) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Bn3DSpatial_FP32, GetCases());
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Bn3DSpatial_FP32, GetSmokeTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Bn3DSpatial_FP32, GetFullTestCases(), TestNameGenerator{});
