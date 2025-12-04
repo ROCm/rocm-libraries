@@ -270,7 +270,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zdscal_batched_64(rocblas_handle          
     @param[in]
     stride_x    [rocblas_stride]
                 stride from the start of one vector (x_i) and the next one (x_i+1).
-                There are no restrictions placed on stride_x. However, ensure that stride_x is ofan  appropriate size. For a typical
+                There are no restrictions placed on stride_x. However, ensure that stride_x is of an appropriate size. For a typical
                 case, this means stride_x >= n * incx.
     @param[in]
     batch_count [rocblas_int]
@@ -701,7 +701,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zcopy_strided_batched_64(rocblas_handle   
     @param[in, out]
     result
               device pointer or host pointer to store the dot product.
-              Return is 0.0 if n <= 0.
+              Return value is 0.0 if n <= 0.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_sdot(rocblas_handle handle,
@@ -1438,7 +1438,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zswap_batched_64(rocblas_handle           
     @param[in]
     stridey   [rocblas_stride]
               stride from the start of one vector (y_i) and the next one (y_i+1).
-              There are no restrictions placed on stride_x. However, ensure that stride_y is of appropriate size. For a typical
+              There are no restrictions placed on stride_x. However, ensure that stride_y is of an appropriate size. For a typical
               case, this means stride_y >= n * incy. stridey should be non zero.
      @param[in]
      batch_count [rocblas_int]
@@ -1925,7 +1925,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_zaxpy_strided_batched_64(rocblas_handle   
     @param[in, out]
     result
               device pointer or host pointer to store the asum product.
-              Return is 0.0 if n <= 0.
+              Return value is 0.0 if n <= 0.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_sasum(
@@ -1987,7 +1987,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dzasum_64(rocblas_handle                ha
     @param[out]
     results
               device array or host array of batch_count size for results.
-              Return is 0.0 if n, incx<=0.
+              Return value is 0.0 if n, incx<=0.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_sasum_batched(rocblas_handle     handle,
@@ -2070,12 +2070,12 @@ ROCBLAS_EXPORT rocblas_status rocblas_dzasum_batched_64(rocblas_handle          
     @param[in]
     stridex   [rocblas_stride]
               stride from the start of one vector (x_i) to the next one (x_i+1).
-              There are no restrictions placed on stride_x. However, ensure that stride_x is of appropriate size. For a typical
+              There are no restrictions placed on stride_x. However, ensure that stride_x is of an appropriate size. For a typical
               case, this means stride_x >= n * incx.
     @param[out]
     results
               device pointer or host pointer to array for storing contiguous batch_count results.
-              Return is 0.0 if n, incx<=0.
+              Return value is 0.0 if n, incx<=0.
     @param[in]
     batch_count [rocblas_int]
               number of instances in the batch.
@@ -2170,7 +2170,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dzasum_strided_batched_64(rocblas_handle h
     @param[in, out]
     result
               device pointer or host pointer to store the nrm2 product.
-              Return is 0.0 if n, incx<=0.
+              Return value is 0.0 if n, incx<=0.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_snrm2(
@@ -2234,7 +2234,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dznrm2_64(rocblas_handle                ha
     @param[out]
     results
               device pointer or host pointer to array of batch_count size for nrm2 results.
-              Return is 0.0 for each element if n <= 0, incx<=0.
+              Return value is 0.0 for each element if n <= 0, incx<=0.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_snrm2_batched(rocblas_handle     handle,
@@ -2326,7 +2326,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dznrm2_batched_64(rocblas_handle          
     @param[out]
     results
               device pointer or host pointer to array for storing contiguous batch_count results.
-              Return is 0.0 for each element if n <= 0, incx<=0.
+              Return value is 0.0 for each element if n <= 0, incx<=0.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_snrm2_strided_batched(rocblas_handle handle,
@@ -2644,7 +2644,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_izamax_strided_batched_64(rocblas_handle h
     @param[in, out]
     result
               device pointer or host pointer to store the amin index.
-              Return is 0.0 if n, incx<=0.
+              Return value is 0.0 if n, incx<=0.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_isamin(
@@ -11477,7 +11477,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dspmv_batched_64(rocblas_handle      handl
     @param[in]
     stridex     [rocblas_stride]
                 stride from the start of one vector (x_i) to the next one (x_i+1).
-                There are no restrictions placed on stridex. However, ensure that stridex is ofan appropriate size.
+                There are no restrictions placed on stridex. However, ensure that stridex is of an appropriate size.
                 This typically means stridex >= n * incx. stridex should be non zero.
     @param[in]
     beta      device pointer or host pointer to scalar beta.
@@ -23848,7 +23848,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_axpy_batched_ex_64(rocblas_handle   handle
     @param[in]
     stridey   [rocblas_stride]
               stride from the start of one vector (y_i) to the next one (y_i+1).
-              There are no restrictions placed on stridey. However, ensure that stridey is ofan  appropriate size. For a typical
+              There are no restrictions placed on stridey. However, ensure that stridey is of an appropriate size. For a typical
               case, this means stridey >= n * incy.
     @param[in]
     batch_count [rocblas_int]
@@ -23941,7 +23941,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_axpy_strided_batched_ex_64(rocblas_handle 
     @param[in, out]
     result
               device pointer or host pointer to store the dot product.
-              return is 0.0 if n <= 0.
+              Return value is 0.0 if n <= 0.
     @param[in]
     result_type [rocblas_datatype]
                 specifies the datatype of the result.
@@ -24058,7 +24058,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dotc_ex_64(rocblas_handle   handle,
     @param[in, out]
     result
               device array or host array of batch_count size to store the dot products of each batch.
-              return 0.0 for each element if n <= 0.
+              Return value is 0.0 for each element if n <= 0.
     @param[in]
     result_type [rocblas_datatype]
                 specifies the datatype of the result.
@@ -24359,7 +24359,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_dotc_strided_batched_ex_64(rocblas_handle 
     @param[in, out]
     results
               device pointer or host pointer to store the nrm2 product.
-              return is 0.0 if n, incx<=0.
+              Return value is 0.0 if n, incx<=0.
     @param[in]
     result_type [rocblas_datatype]
                 specifies the datatype of the result.
@@ -24429,7 +24429,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_nrm2_ex_64(rocblas_handle   handle,
     @param[out]
     results
               device pointer or host pointer to array of batch_count size for nrm2 results.
-              return is 0.0 for each element if n <= 0, incx<=0.
+              Return value is 0.0 for each element if n <= 0, incx<=0.
     @param[in]
     result_type [rocblas_datatype]
                 specifies the datatype of the result.
