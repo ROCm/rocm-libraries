@@ -152,7 +152,14 @@ struct Benchmark<T, hipcub::Sum>
     static void
         run(benchmark::State& state, size_t desired_segments, const hipStream_t stream, size_t size)
     {
-        hipError_t (*ptr_to_sum)(void*, size_t&, T*, T*, int, OffsetType*, OffsetType*, hipStream_t)
+        hipError_t (*ptr_to_sum)(void*,
+                                 size_t&,
+                                 T*,
+                                 T*,
+                                 _HIPCUB_STD::int64_t,
+                                 OffsetType*,
+                                 OffsetType*,
+                                 hipStream_t)
             = &hipcub::DeviceSegmentedReduce::Sum;
         run_benchmark<T, T>(state, desired_segments, stream, size, ptr_to_sum);
     }
@@ -164,7 +171,14 @@ struct Benchmark<T, hipcub::Min>
     static void
         run(benchmark::State& state, size_t desired_segments, const hipStream_t stream, size_t size)
     {
-        hipError_t (*ptr_to_min)(void*, size_t&, T*, T*, int, OffsetType*, OffsetType*, hipStream_t)
+        hipError_t (*ptr_to_min)(void*,
+                                 size_t&,
+                                 T*,
+                                 T*,
+                                 _HIPCUB_STD::int64_t,
+                                 OffsetType*,
+                                 OffsetType*,
+                                 hipStream_t)
             = &hipcub::DeviceSegmentedReduce::Min;
         run_benchmark<T, T>(state, desired_segments, stream, size, ptr_to_min);
     }
@@ -184,7 +198,7 @@ struct Benchmark<T, hipcub::ArgMin>
                                     size_t&,
                                     T*,
                                     KeyValue*,
-                                    int,
+                                    _HIPCUB_STD::int64_t,
                                     OffsetType*,
                                     OffsetType*,
                                     hipStream_t)

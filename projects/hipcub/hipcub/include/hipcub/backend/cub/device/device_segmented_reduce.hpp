@@ -44,16 +44,17 @@ struct DeviceSegmentedReduce
              typename OffsetIteratorT,
              typename ReductionOp,
              typename T>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t Reduce(void*           d_temp_storage,
-                                                     size_t&         temp_storage_bytes,
-                                                     InputIteratorT  d_in,
-                                                     OutputIteratorT d_out,
-                                                     int             num_segments,
-                                                     OffsetIteratorT d_begin_offsets,
-                                                     OffsetIteratorT d_end_offsets,
-                                                     ReductionOp     reduction_op,
-                                                     T               initial_value,
-                                                     hipStream_t     stream = 0)
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Reduce(void*                d_temp_storage,
+                             size_t&              temp_storage_bytes,
+                             InputIteratorT       d_in,
+                             OutputIteratorT      d_out,
+                             _HIPCUB_STD::int64_t num_segments,
+                             OffsetIteratorT      d_begin_offsets,
+                             OffsetIteratorT      d_end_offsets,
+                             ReductionOp          reduction_op,
+                             T                    initial_value,
+                             hipStream_t          stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceSegmentedReduce::Reduce(d_temp_storage,
                                                                            temp_storage_bytes,
@@ -68,14 +69,15 @@ struct DeviceSegmentedReduce
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t Sum(void*           d_temp_storage,
-                                                  size_t&         temp_storage_bytes,
-                                                  InputIteratorT  d_in,
-                                                  OutputIteratorT d_out,
-                                                  int             num_segments,
-                                                  OffsetIteratorT d_begin_offsets,
-                                                  OffsetIteratorT d_end_offsets,
-                                                  hipStream_t     stream = 0)
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Sum(void*                d_temp_storage,
+                          size_t&              temp_storage_bytes,
+                          InputIteratorT       d_in,
+                          OutputIteratorT      d_out,
+                          _HIPCUB_STD::int64_t num_segments,
+                          OffsetIteratorT      d_begin_offsets,
+                          OffsetIteratorT      d_end_offsets,
+                          hipStream_t          stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceSegmentedReduce::Sum(d_temp_storage,
                                                                         temp_storage_bytes,
@@ -88,14 +90,15 @@ struct DeviceSegmentedReduce
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t Min(void*           d_temp_storage,
-                                                  size_t&         temp_storage_bytes,
-                                                  InputIteratorT  d_in,
-                                                  OutputIteratorT d_out,
-                                                  int             num_segments,
-                                                  OffsetIteratorT d_begin_offsets,
-                                                  OffsetIteratorT d_end_offsets,
-                                                  hipStream_t     stream = 0)
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Min(void*                d_temp_storage,
+                          size_t&              temp_storage_bytes,
+                          InputIteratorT       d_in,
+                          OutputIteratorT      d_out,
+                          _HIPCUB_STD::int64_t num_segments,
+                          OffsetIteratorT      d_begin_offsets,
+                          OffsetIteratorT      d_end_offsets,
+                          hipStream_t          stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceSegmentedReduce::Min(d_temp_storage,
                                                                         temp_storage_bytes,
@@ -108,14 +111,15 @@ struct DeviceSegmentedReduce
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t ArgMin(void*           d_temp_storage,
-                                                     size_t&         temp_storage_bytes,
-                                                     InputIteratorT  d_in,
-                                                     OutputIteratorT d_out,
-                                                     int             num_segments,
-                                                     OffsetIteratorT d_begin_offsets,
-                                                     OffsetIteratorT d_end_offsets,
-                                                     hipStream_t     stream = 0)
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ArgMin(void*                d_temp_storage,
+                             size_t&              temp_storage_bytes,
+                             InputIteratorT       d_in,
+                             OutputIteratorT      d_out,
+                             _HIPCUB_STD::int64_t num_segments,
+                             OffsetIteratorT      d_begin_offsets,
+                             OffsetIteratorT      d_end_offsets,
+                             hipStream_t          stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceSegmentedReduce::ArgMin(d_temp_storage,
                                                                            temp_storage_bytes,
@@ -128,14 +132,15 @@ struct DeviceSegmentedReduce
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t Max(void*           d_temp_storage,
-                                                  size_t&         temp_storage_bytes,
-                                                  InputIteratorT  d_in,
-                                                  OutputIteratorT d_out,
-                                                  int             num_segments,
-                                                  OffsetIteratorT d_begin_offsets,
-                                                  OffsetIteratorT d_end_offsets,
-                                                  hipStream_t     stream = 0)
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Max(void*                d_temp_storage,
+                          size_t&              temp_storage_bytes,
+                          InputIteratorT       d_in,
+                          OutputIteratorT      d_out,
+                          _HIPCUB_STD::int64_t num_segments,
+                          OffsetIteratorT      d_begin_offsets,
+                          OffsetIteratorT      d_end_offsets,
+                          hipStream_t          stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceSegmentedReduce::Max(d_temp_storage,
                                                                         temp_storage_bytes,
@@ -148,14 +153,15 @@ struct DeviceSegmentedReduce
     }
 
     template<typename InputIteratorT, typename OutputIteratorT, typename OffsetIteratorT>
-    HIPCUB_RUNTIME_FUNCTION static hipError_t ArgMax(void*           d_temp_storage,
-                                                     size_t&         temp_storage_bytes,
-                                                     InputIteratorT  d_in,
-                                                     OutputIteratorT d_out,
-                                                     int             num_segments,
-                                                     OffsetIteratorT d_begin_offsets,
-                                                     OffsetIteratorT d_end_offsets,
-                                                     hipStream_t     stream = 0)
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t ArgMax(void*                d_temp_storage,
+                             size_t&              temp_storage_bytes,
+                             InputIteratorT       d_in,
+                             OutputIteratorT      d_out,
+                             _HIPCUB_STD::int64_t num_segments,
+                             OffsetIteratorT      d_begin_offsets,
+                             OffsetIteratorT      d_end_offsets,
+                             hipStream_t          stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceSegmentedReduce::ArgMax(d_temp_storage,
                                                                            temp_storage_bytes,

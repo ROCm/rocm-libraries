@@ -752,14 +752,14 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Max)
 struct ArgMinDispatch
 {
     template<typename InputIteratorT, typename OutputIteratorT, typename OffsetIteratorT>
-    auto operator()(void*           d_temp_storage,
-                    size_t&         temp_storage_bytes,
-                    InputIteratorT  d_in,
-                    OutputIteratorT d_out,
-                    int             num_segments,
-                    OffsetIteratorT d_begin_offsets,
-                    OffsetIteratorT d_end_offsets,
-                    hipStream_t     stream) const
+    auto operator()(void*                d_temp_storage,
+                    size_t&              temp_storage_bytes,
+                    InputIteratorT       d_in,
+                    OutputIteratorT      d_out,
+                    _HIPCUB_STD::int64_t num_segments,
+                    OffsetIteratorT      d_begin_offsets,
+                    OffsetIteratorT      d_end_offsets,
+                    hipStream_t          stream) const
     {
         return hipcub::DeviceSegmentedReduce::ArgMin(d_temp_storage,
                                                      temp_storage_bytes,
@@ -775,14 +775,14 @@ struct ArgMinDispatch
 struct ArgMaxDispatch
 {
     template<typename InputIteratorT, typename OutputIteratorT, typename OffsetIteratorT>
-    auto operator()(void*           d_temp_storage,
-                    size_t&         temp_storage_bytes,
-                    InputIteratorT  d_in,
-                    OutputIteratorT d_out,
-                    int             num_segments,
-                    OffsetIteratorT d_begin_offsets,
-                    OffsetIteratorT d_end_offsets,
-                    hipStream_t     stream) const
+    auto operator()(void*                d_temp_storage,
+                    size_t&              temp_storage_bytes,
+                    InputIteratorT       d_in,
+                    OutputIteratorT      d_out,
+                    _HIPCUB_STD::int64_t num_segments,
+                    OffsetIteratorT      d_begin_offsets,
+                    OffsetIteratorT      d_end_offsets,
+                    hipStream_t          stream) const
     {
         return hipcub::DeviceSegmentedReduce::ArgMax(d_temp_storage,
                                                      temp_storage_bytes,
