@@ -561,6 +561,14 @@ def apply_swaits(timeline: list[list[ValidatorInstruction]], num_vmfma: int) -> 
                 new_guaranteed_by += 0.5
             local_read.guaranteed_by = min(local_read.guaranteed_by, new_guaranteed_by)
 
+@dataclass
+class GRIncData:
+    """
+    Data structure representing GRInc-related information.
+    """
+    name: list[int]
+    intervals: list[tuple[int, int]]
+    insts: list[int]
 
 def verify_scc_overlap(scheduleInfo, context: Dict = {}):
     """
@@ -585,9 +593,8 @@ def verify_scc_overlap(scheduleInfo, context: Dict = {}):
     kernel = context["kernel"]
     DTL = kernel["DirectToLds"]
     ShadowLimit = kernel["Use64bShadowLimit"]
-
     
-    intervalSize = [3,2,2,2] if ShadowLimit else [3,2,1]
+    intervalSize = [3,2,2,2] if ShadowLimit else [3,2,1] # Values explained above
     numElements = sum(intervalSize)
     
     # Gets intervals from GRInc indices based on the above `intervalSize` value
@@ -612,37 +619,47 @@ def verify_scc_overlap(scheduleInfo, context: Dict = {}):
 
     def getDeclarationIndex(name):
         return list(scheduleInfo.optSchedule).index(name)
-    
-    
 
     def verify(scheduleInfo: 'ScheduleInfo', codePath: int) -> tuple[bool, str]:
         GRIncNames = ["GRIncA", "GRIncB"]
-        names = ["GRA", "GRB", "LWSA", "LWSB"]
+        names = ["LWSA", "LWSB"]
+        # We only care about GRA/B when DTL is activated (m0 usage)
+        if DTL:
+            names += ["GRA", "GRB"]
+
+        def verifyIndices(GRIncName, intervals, name, indices) -> tuple[bool, str]:
+            dclIndex = getDeclarationIndex(name)
+            indexGRInc = getDeclarationIndex(GRIncName)
+            for v in indices:
+                for interval in intervals:
+                    if inInterval(v,interval, dclIndex<indexGRInc):
+                        return False, f"Code path {codePath}: {name} at index {v} can't be between {GRIncName} {interval[0]}-{interval[1]} due to SCC usage."
+
+        GRIncs = []
         for GRIncName in GRIncNames:
             GRInc = schedule_get(GRIncName, codePath, scheduleInfo)
             assert numElements==len(GRInc), f"Code path {codePath}: {GRIncName} expected size if {numElements}, given {len(GRInc)}."
             GRIncIntervals = getIntervals(GRInc)
-            indexGRInc = getDeclarationIndex(GRIncName)
+            data = GRIncData(name = GRIncName, insts = GRInc, intervals = GRIncIntervals)
+            GRIncs.append(data)
 
-            def verifyIndices(indices, name) -> tuple[bool, str]:
-                dclIndex = getDeclarationIndex(name)
-                for v in indices:
-                    for interval in GRIncIntervals:
-                        if inInterval(v,interval, dclIndex<indexGRInc):
-                            return False, f"Code path {codePath}: {name} at index {v} can't be between {GRIncName} {interval[0]}-{interval[1]} due to SCC usage."
+        # First check GRInc together
+        errorMessage = verifyIndices(GRIncs[0].name,GRIncs[0].intervals,GRIncs[1].name, GRIncs[1].insts)
+        if errorMessage:
+            return errorMessage
 
+        # Then, check GR and LW
+        for grIncData in GRIncs:
             for name in names:
                 insts = schedule_get(name, codePath, scheduleInfo)
                 # In case of GRA/GRB, just take m0 updates indices 
                 if name.startswith("GR"):
                     insts = insts[0::2]
-                errorMessage =  verifyIndices(insts, name)
+                errorMessage = verifyIndices(grIncData.name,grIncData.intervals,name, insts)
                 if errorMessage:
                     return errorMessage
-
-    # Validation needed only when we use m0 (ie. DTL).
-    if DTL:   
-        for codePath in range(scheduleInfo.numCodePaths):
+   
+    for codePath in range(scheduleInfo.numCodePaths):
             errorMessage = verify(scheduleInfo, codePath)
             if errorMessage:
                 return False, f"Code path {codePath}: {errorMessage}"
