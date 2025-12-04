@@ -21,7 +21,7 @@ jobs:
           path: TheRock
 
       # Free up disk space for ROCm installation.
-      # The runner fully depletes it disk space otherwise.
+      # The runner fully depletes its disk space otherwise.
       - name: Free Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet          # 4.0G
@@ -57,6 +57,5 @@ jobs:
             -DENABLE_CLANG_TIDY=ON \
             -DROCM_PATH=/opt/rocm \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
-            -DHIP_DNN_SKIP_TESTS=ON \
             -DHIP_PLATFORM=amd
           ninja -C build tidy
