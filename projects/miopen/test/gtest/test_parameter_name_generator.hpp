@@ -53,11 +53,28 @@ concept PrintableElement = requires(std::ostream& os, T t)
 
 // Concept for iterable containers.
 template <typename T>
+<<<<<<< HEAD
 concept Container = std::ranges::range<T>;
 
 // Concept for non container types.
 template <typename T>
 concept NotContainer = !Container<T>;
+=======
+concept Container = requires(T t)
+{
+    // clang-format off
+    {
+        std::size(t)
+    } -> std::same_as<std::size_t>;
+    {
+        std::begin(t)
+    } -> std::same_as<typename T::iterator>;
+    {
+        std::end(t)
+    } -> std::same_as<typename T::iterator>;
+    // clang-format on
+};
+>>>>>>> d3e4a235a6 (Test name generation has been implemented)
 
 // Template wrapper around a test parameter.
 // It defines the << operator as required by GTest, and the cast operator that returns the wrapped
@@ -79,7 +96,11 @@ struct NamedParameter
 
     friend std::ostream& operator<<(std::ostream& os, const NamedParameter<T>& param)
     {
+<<<<<<< HEAD
         return os << param.name << ": " << std::boolalpha << param.value << std::noboolalpha;
+=======
+        return os << param.name << ": " << param.value;
+>>>>>>> d3e4a235a6 (Test name generation has been implemented)
     }
 
     std::string name{};
@@ -119,7 +140,11 @@ struct NamedContainer
 
             for(auto it = param.value.begin() + 1; it != param.value.end(); ++it)
             {
+<<<<<<< HEAD
                 os << param.separator << std::boolalpha << *it << std::noboolalpha;
+=======
+                os << param.separator << *it;
+>>>>>>> d3e4a235a6 (Test name generation has been implemented)
             }
         }
 
@@ -167,10 +192,16 @@ static auto MakeNamedParameterValues(const std::string& name, T... values)
 // NamedContainer<std::vector<int>>, and then fed into 'testing::Combine()'.
 //
 template <typename T>
+<<<<<<< HEAD
 requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T>
 static auto MakeNamedParameterCollectionValues(const std::string& name,
                                                const std::ranges::range auto& collection,
                                                const std::string& separator = " ")
+=======
+static auto MakeNamedParameterCollectionValues(const std::string& name,
+                                               const std::ranges::range auto& collection,
+                                               std::string separator = " ")
+>>>>>>> d3e4a235a6 (Test name generation has been implemented)
 {
     std::vector<NamedContainer<T>> v;
 
@@ -184,6 +215,7 @@ static auto MakeNamedParameterCollectionValues(const std::string& name,
     return testing::ValuesIn(v);
 }
 
+<<<<<<< HEAD
 template <typename T>
 requires NotContainer<T> && Printable<T> && std::is_move_constructible_v<T>
 static auto MakeNamedParameterCollectionValues(const std::string& name,
@@ -201,6 +233,8 @@ static auto MakeNamedParameterCollectionValues(const std::string& name,
     return testing::ValuesIn(v);
 }
 
+=======
+>>>>>>> d3e4a235a6 (Test name generation has been implemented)
 // The 'GetRangeAsString()' function Returns the string representation of the input collection,
 // using the user-supplied separator. The returned string meets the GTest requirements for test
 // names: only alphanumeric characters and underscores are allowed. Any dot character (i.e. '.') is
@@ -209,7 +243,11 @@ static auto MakeNamedParameterCollectionValues(const std::string& name,
 // Examples:
 //
 //      GetRangeAsString(std::vector<int>{1, 2, 3, 4}, "x") returns "1x2x3x4"
+<<<<<<< HEAD
 //      GetRangeAsString(std::vector<float>{1.1, 2.2, 3.3, 4.4}, ",") returns "1p1_2p2_3p3_4p4"
+=======
+//      GetRangeAsString(std::vector<float>{1.1, 2.2, 3.3, 4.4}, ", ") returns "1p1, 2p2, 3p3, 4p4"
+>>>>>>> d3e4a235a6 (Test name generation has been implemented)
 //
 static std::string GetRangeAsString(const std::ranges::range auto& r,
                                     std::string_view separator = " ")
@@ -224,15 +262,24 @@ static std::string GetRangeAsString(const std::ranges::range auto& r,
 
         for(auto it = r.begin() + 1; it != r.end(); ++it)
         {
+<<<<<<< HEAD
             ss << separator << std::boolalpha << *it << std::noboolalpha;
+=======
+            ss << separator << *it;
+>>>>>>> d3e4a235a6 (Test name generation has been implemented)
         }
 
         str = ss.str();
 
         // Name format only supports letters, numbers and underscores.
+<<<<<<< HEAD
         std::transform(str.begin(), str.end(), str.begin(), [](char c) -> char {
             return std::isalnum(c) ? c : ((c == '.') ? 'p' : '_');
         });
+=======
+        std::transform(
+            str.begin(), str.end(), str.begin(), [](char c) { return (c == '.') ? 'p' : c; });
+>>>>>>> d3e4a235a6 (Test name generation has been implemented)
     }
 
     return str;
