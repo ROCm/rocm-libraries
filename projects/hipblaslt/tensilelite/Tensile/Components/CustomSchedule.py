@@ -276,6 +276,7 @@ def apply_swaits(timeline: list[list[ValidatorInstruction]], num_vmfma: int) -> 
 def verify_scc_overlap(scheduleInfo, context: Dict = {}):
     """
     Ensure we don't overlap scalar instruction modifying scc between GR and GRInc
+    TODO: check GRinA/B dont overlap together.
     """
     kernel = context["kernel"]
     DTL = kernel["DirectToLds"]
@@ -329,7 +330,8 @@ def verify_scc_overlap(scheduleInfo, context: Dict = {}):
                 indexGR = getDeclarationIndex(GRName)
                 for v in m0:
                     for interval in GRIncIntervals:
-                        assert not inInterval(v,interval, indexGRInc<indexGR), f"Code path {codePath}: {GRName} M0 at index {v} can't be between {GRIncName} {interval[0]}-{interval[1]} due to SCC usage."
+                        if inInterval(v,interval, indexGR<indexGRInc):
+                            return False, f"Code path {codePath}: {GRName} M0 at index {v} can't be between {GRIncName} {interval[0]}-{interval[1]} due to SCC usage."
 
     # Validation needed only when we use m0 (ie. DTL).
     if DTL:   
