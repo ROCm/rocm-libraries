@@ -1747,21 +1747,34 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
         execPlan.deviceProp = rootPlanData.deviceProp;
         execPlan.rootPlan   = NodeFactory::CreateExplicitNode(rootPlanData, nullptr);
 
-        // TODO: some solutions require the problems to be unit_stride, otherwise the
-        //   scheme-tree may not be applicable. In this case, we can't apply the solutions.
-        //   Currently, it happens on Real3DEven with REAL_2D_SINGLE kernels. This needs to
-        //   be detected.
-
         // If we are doing tuning initialzing now, we shouldn't apply any solution,
         // since we are trying enumerating solutions now
         if(TuningBenchmarker::GetSingleton().IsInitializingTuning() == false)
         {
-            execPlan.rootScheme = ApplySolution(execPlan);
-            if(execPlan.rootScheme)
+            // Solutions are tuned on the common case of contiguous
+            // transforms.  They are not necessarily correct for
+            // non-default strides.
+            if(rocfft_plan_t::is_contiguous(
+                   execPlan.rootPlan->length, execPlan.rootPlan->inStride, execPlan.rootPlan->iDist)
+               && rocfft_plan_t::is_contiguous(execPlan.rootPlan->outputLength,
+                                               execPlan.rootPlan->outStride,
+                                               execPlan.rootPlan->oDist))
             {
-                execPlan.rootPlan = nullptr;
-                execPlan.rootPlan = NodeFactory::CreateExplicitNode(
-                    rootPlanData, nullptr, execPlan.rootScheme->curScheme);
+                execPlan.rootScheme = ApplySolution(execPlan);
+                if(execPlan.rootScheme)
+                {
+                    execPlan.rootPlan = nullptr;
+                    execPlan.rootPlan = NodeFactory::CreateExplicitNode(
+                        rootPlanData, nullptr, execPlan.rootScheme->curScheme);
+                }
+            }
+            else
+            {
+                if(LOG_TRACE_ENABLED())
+                {
+                    (*LogSingleton::GetInstance().GetTraceOS())
+                        << "transform is not contiguous, not applying solution map" << std::endl;
+                }
             }
         }
 
