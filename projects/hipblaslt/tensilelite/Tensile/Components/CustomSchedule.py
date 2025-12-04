@@ -1182,8 +1182,8 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
         optSchedule = {
 
             'SYNC'   : [[-1, 4, 13,13, 38,39, 42,43, 70,70]],
-            'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
-            'GRIncB' : [[9,11,12,13,14,15,16,17,18]],
+            'GRIncA' : [[0,1,2,3,4,5,6,6,6]],
+            'GRIncB' : [[7,7,7,8,8,8,9,9,9]],
 
             'LRA0'   : [[0,2,3,4,5]],  ## -2 is place holder
 
