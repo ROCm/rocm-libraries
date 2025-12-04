@@ -223,24 +223,24 @@ def getDockerImageName(dockerArgs)
     // the docker image build. To ensure that we rebuild the docker image only when necessary.
     // Add any other files or directories that should trigger a rebuild of the docker image when changed.
     sh """
-    cd ${env.WORKSPACE}/${env.CK_DIR} && \
-    { \
-        find cmake codegen experimental include library python tile_engine -type f -print0; \
-        find . -maxdepth 1 -type f \( \
-            -name 'CMakeLists.txt' -o \
-            -name 'Config.cmake.in' -o \
-            -name 'dev-requirements.txt' -o \
-            -name 'pyproject.toml' -o \
-            -name 'rbuild.ini' -o \
-            -name 'requirements.txt' \
-        \) -print0; \
-    } \
-    | tr '\0' '\n' \
-    | LC_ALL=C sort \
-    | xargs -d '\n' md5sum \
-    | LC_ALL=C sort \
-    | md5sum \
-    | awk '{print \$1}' >> ${env.WORKSPACE}/factors.txt"
+        cd ${env.WORKSPACE}/${env.CK_DIR} && \
+        { \
+            find cmake codegen experimental include library python tile_engine -type f -print0; \
+            find . -maxdepth 1 -type f \\( \
+                -name 'CMakeLists.txt' -o \
+                -name 'Config.cmake.in' -o \
+                -name 'dev-requirements.txt' -o \
+                -name 'pyproject.toml' -o \
+                -name 'rbuild.ini' -o \
+                -name 'requirements.txt' \
+            \\) -print0; \
+        } \
+        | tr '\\0' '\\n' \
+        | LC_ALL=C sort \
+        | xargs -d '\\n' md5sum \
+        | LC_ALL=C sort \
+        | md5sum \
+        | awk '{print \$1}' >> "${env.WORKSPACE}/factors.txt"
     """
     
     sh "cd ${env.WORKSPACE}/${env.MIOPEN_DIR}/ && md5sum Dockerfile requirements.txt dev-requirements.txt >> ${env.WORKSPACE}/factors.txt"
