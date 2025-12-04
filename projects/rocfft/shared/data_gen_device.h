@@ -22,6 +22,7 @@
 #define DATA_GEN_DEVICE_H
 
 #include "../shared/rocfft_complex.h"
+#include <hip/hip_runtime_api.h>
 
 #ifdef USE_HIPRAND
 

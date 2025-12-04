@@ -31,7 +31,6 @@
 #include "../shared/increment.h"
 #include <hip/hip_complex.h>
 #include <hip/hip_runtime.h>
-#include <hip/hip_runtime_api.h>
 #include <limits>
 
 static const unsigned int DATA_GEN_GRID_Y_MAX = 64;
@@ -1235,9 +1234,9 @@ typedef std::tuple<size_t, size_t, size_t> idx_3D_t;
                                                       DATATYPE*              input_data,             \
                                                       const hipDeviceProp_t& deviceProp)
 
-INSTANTIATE_DATA_GEN(size_t, _Float16);
-INSTANTIATE_DATA_GEN(idx_2D_t, _Float16);
-INSTANTIATE_DATA_GEN(idx_3D_t, _Float16);
+INSTANTIATE_DATA_GEN(size_t, rocfft_fp16);
+INSTANTIATE_DATA_GEN(idx_2D_t, rocfft_fp16);
+INSTANTIATE_DATA_GEN(idx_3D_t, rocfft_fp16);
 INSTANTIATE_DATA_GEN(size_t, float);
 INSTANTIATE_DATA_GEN(idx_2D_t, float);
 INSTANTIATE_DATA_GEN(idx_3D_t, float);
@@ -1457,7 +1456,7 @@ void impose_hermitian_symmetry_planar(const std::vector<size_t>& length,
                                                              DATATYPE*              input_data_imag, \
                                                              const hipDeviceProp_t& deviceProp)
 
-INSTANTIATE_IMPOSE_HERM(_Float16);
+INSTANTIATE_IMPOSE_HERM(rocfft_fp16);
 INSTANTIATE_IMPOSE_HERM(float);
 INSTANTIATE_IMPOSE_HERM(double);
 
