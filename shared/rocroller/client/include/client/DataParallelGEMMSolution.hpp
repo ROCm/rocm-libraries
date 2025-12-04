@@ -433,6 +433,11 @@ namespace rocRoller
 
                     if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
                     {
+                        AssertFatal(
+                            solutionParams.loadPathAScale
+                                    != Parameters::Solution::LoadPath::BufferToLDS
+                                || solutionParams.swizzleScale,
+                            "If loadPathAScale is BufferToLDS, swizzleScale must be enabled");
                         auto macTileAScale = KernelGraph::CoordinateGraph::MacroTile(
                             {solutionParams.macM,
                              solutionParams.macK / solutionParams.types.scaleBlockSize},
@@ -441,7 +446,7 @@ namespace rocRoller
                              solutionParams.waveN,
                              solutionParams.waveK / solutionParams.types.scaleBlockSize,
                              solutionParams.waveB},
-                            solutionParams.loadLDSScaleA ? MemoryType::LDS : MemoryType::WAVE,
+                            GetMemoryType(solutionParams.loadPathAScale),
                             {},
                             {solutionParams.swizzleTileSize.m,
                              solutionParams.swizzleTileSize.n,
@@ -451,6 +456,11 @@ namespace rocRoller
                     }
                     if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
                     {
+                        AssertFatal(
+                            solutionParams.loadPathBScale
+                                    != Parameters::Solution::LoadPath::BufferToLDS
+                                || solutionParams.swizzleScale,
+                            "If loadPathBScale is BufferToLDS, swizzleScale must be enabled");
                         auto macTileBScale = KernelGraph::CoordinateGraph::MacroTile(
                             {solutionParams.macK / solutionParams.types.scaleBlockSize,
                              solutionParams.macN},
@@ -459,7 +469,7 @@ namespace rocRoller
                              solutionParams.waveN,
                              solutionParams.waveK / solutionParams.types.scaleBlockSize,
                              solutionParams.waveB},
-                            solutionParams.loadLDSScaleB ? MemoryType::LDS : MemoryType::WAVE,
+                            GetMemoryType(solutionParams.loadPathBScale),
                             {},
                             {solutionParams.swizzleTileSize.m,
                              solutionParams.swizzleTileSize.n,
