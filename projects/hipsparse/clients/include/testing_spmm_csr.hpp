@@ -38,6 +38,8 @@
 #include <string>
 #include <typeinfo>
 
+#include <algorithm>
+
 using namespace hipsparse;
 using namespace hipsparse_test;
 
@@ -243,6 +245,9 @@ hipsparseStatus_t testing_spmm_csr(Arguments argus)
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
         return HIPSPARSE_STATUS_INTERNAL_ERROR;
     }
+
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hcsr_val, hcsr_val.size(), 1);
 
     // Some matrix properties
     J A_m = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k;

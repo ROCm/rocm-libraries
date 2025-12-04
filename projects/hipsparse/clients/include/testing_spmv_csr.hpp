@@ -210,6 +210,9 @@ hipsparseStatus_t testing_spmv_csr(Arguments argus)
         return HIPSPARSE_STATUS_INTERNAL_ERROR;
     }
 
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hval, hval.size(), 1);
+
     std::vector<T> hx(n);
     std::vector<T> hy_1(m);
     std::vector<T> hy_2(m);

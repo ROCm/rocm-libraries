@@ -26,5 +26,5 @@
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
 TEST_ROUTINE(
-    hybmv, level2, arg.M, arg.N, arg.alpha, arg.alphai, arg.beta, arg.betai, arg.part, arg.baseA);
+    hybmv, level2, arg.M, arg.N, arg.ell_width, arg.alpha, arg.alphai, arg.beta, arg.betai, arg.part, arg.baseA);
 #endif

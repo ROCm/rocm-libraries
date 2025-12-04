@@ -242,6 +242,9 @@ hipsparseStatus_t testing_spmm_csc(Arguments argus)
         return HIPSPARSE_STATUS_INTERNAL_ERROR;
     }
 
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hcsc_val, hcsc_val.size(), 1);
+
     // Some matrix properties
     J A_m = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k;
     J A_n = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? k : m;

@@ -38,4 +38,9 @@ Tests:
 - name: identity
   category: pre_checkin
   function: identity
-  N: [85746, 102942]
+  N: [85746, 102942, 495812, 991624]
+
+- name: identity
+  category: nightly
+  function: identity
+  N: [10294354, 29384756]

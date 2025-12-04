@@ -185,6 +185,9 @@ hipsparseStatus_t testing_spmv_coo(Arguments argus)
         return HIPSPARSE_STATUS_INTERNAL_ERROR;
     }
 
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hval, hval.size(), 1);
+
     std::vector<I> hrow_ind(nnz);
 
     // Convert to COO

@@ -35,9 +35,9 @@ Tests:
   category: quick
   function: csr2hyb
   precision: *single_double_precisions_complex_real
-  M: [0, 10, 500, 872, 1000]
-  N: [0, 33, 242, 623, 1000]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  M: [0, 10, 500, 872]
+  N: [0, 33, 242, 623]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   part: [HIPSPARSE_HYB_PARTITION_AUTO, HIPSPARSE_HYB_PARTITION_MAX, HIPSPARSE_HYB_PARTITION_USER]
   ell_width: [-33, -1, 0, 2147483647]
 

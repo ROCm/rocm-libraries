@@ -35,8 +35,26 @@ Tests:
   category: quick
   function: dense2csc
   precision: *single_double_precisions_complex_real
-  M: [0, 10, 500, 872, 1000]
-  N: [0, 33, 242, 623, 1000]
+  M: [0, 10, 500, 872]
+  N: [0, 33, 242, 623]
   lda: [1000]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: dense2csc
+  category: pre_checkin
+  function: dense2csc
+  precision: *single_double_precisions_complex_real
+  M: [1000, 2000]
+  N: [1000]
+  lda: [2000]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: dense2csc
+  category: nightly
+  function: dense2csc
+  precision: *single_only_precisions
+  M: [4000]
+  N: [4000]
+  lda: [4000]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
 

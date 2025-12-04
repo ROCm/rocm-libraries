@@ -526,6 +526,9 @@ hipsparseStatus_t testing_bsrsm2(Arguments argus)
     hipsparseIndexBase_t idx_base  = argus.baseA;
     hipsparseOperation_t transA    = argus.transA;
     hipsparseOperation_t transX    = argus.transB;
+    hipsparseDiagType_t    diag_type = argus.diag_type;
+    hipsparseFillMode_t    fill_mode = argus.fill_mode;
+    hipsparseSolvePolicy_t policy    = argus.solve_policy;
     std::string          filename  = argus.filename;
 
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
@@ -539,6 +542,12 @@ hipsparseStatus_t testing_bsrsm2(Arguments argus)
 
     // Set matrix index base
     CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idx_base));
+
+    // Set matrix diag type
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatDiagType(descr, diag_type));
+
+    // Set matrix fill mode
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatFillMode(descr, fill_mode));
 
     if(m == 0)
     {
@@ -686,7 +695,7 @@ hipsparseStatus_t testing_bsrsm2(Arguments argus)
                                                     dbsr_col_ind,
                                                     block_dim,
                                                     info,
-                                                    HIPSPARSE_SOLVE_POLICY_USE_LEVEL,
+                                                    policy,
                                                     dbuffer));
 
     int pos_analysis;
@@ -714,7 +723,7 @@ hipsparseStatus_t testing_bsrsm2(Arguments argus)
                                                      ldb,
                                                      dX_1,
                                                      ldx,
-                                                     HIPSPARSE_SOLVE_POLICY_USE_LEVEL,
+                                                     policy,
                                                      dbuffer));
 
         int               hposition_1;
@@ -740,7 +749,7 @@ hipsparseStatus_t testing_bsrsm2(Arguments argus)
                                                      ldb,
                                                      dX_2,
                                                      ldx,
-                                                     HIPSPARSE_SOLVE_POLICY_USE_LEVEL,
+                                                     policy,
                                                      dbuffer));
 
         hipsparseStatus_t pivot_status_2 = hipsparseXbsrsm2_zeroPivot(handle, info, dposition);
@@ -787,8 +796,8 @@ hipsparseStatus_t testing_bsrsm2(Arguments argus)
                    ldb,
                    hX_gold.data(),
                    ldx,
-                   HIPSPARSE_DIAG_TYPE_NON_UNIT,
-                   HIPSPARSE_FILL_MODE_LOWER,
+                   diag_type,
+                   fill_mode,
                    idx_base,
                    &struct_position_gold,
                    &numeric_position_gold);
@@ -843,7 +852,7 @@ hipsparseStatus_t testing_bsrsm2(Arguments argus)
                                                          ldb,
                                                          dX_1,
                                                          ldx,
-                                                         HIPSPARSE_SOLVE_POLICY_USE_LEVEL,
+                                                         policy,
                                                          dbuffer));
         }
 
@@ -870,7 +879,7 @@ hipsparseStatus_t testing_bsrsm2(Arguments argus)
                                                          ldb,
                                                          dX_1,
                                                          ldx,
-                                                         HIPSPARSE_SOLVE_POLICY_USE_LEVEL,
+                                                         policy,
                                                          dbuffer));
         }
 
@@ -878,7 +887,7 @@ hipsparseStatus_t testing_bsrsm2(Arguments argus)
 
         double gflop_count = csrsv_gflop_count(m,
                                                size_t(nnzb) * block_dim * block_dim,
-                                               HIPSPARSE_DIAG_TYPE_NON_UNIT)
+                                               diag_type)
                              * nrhs;
         double gbyte_count = bsrsv_gbyte_count<T>(mb, nnzb, block_dim) * nrhs;
 
@@ -900,11 +909,11 @@ hipsparseStatus_t testing_bsrsm2(Arguments argus)
                             display_key_t::transX,
                             hipsparse_operation2string(transX),
                             display_key_t::diag_type,
-                            hipsparse_diagtype2string(HIPSPARSE_DIAG_TYPE_NON_UNIT),
+                            hipsparse_diagtype2string(diag_type),
                             display_key_t::fill_mode,
-                            hipsparse_fillmode2string(HIPSPARSE_FILL_MODE_LOWER),
+                            hipsparse_fillmode2string(fill_mode),
                             display_key_t::solve_policy,
-                            hipsparse_solvepolicy2string(HIPSPARSE_SOLVE_POLICY_USE_LEVEL),
+                            hipsparse_solvepolicy2string(policy),
                             display_key_t::gflops,
                             gpu_gflops,
                             display_key_t::bandwidth,

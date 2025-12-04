@@ -223,6 +223,9 @@ hipsparseStatus_t testing_spmv_sell(Arguments argus)
         return HIPSPARSE_STATUS_INTERNAL_ERROR;
     }
 
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hcsr_val, hcsr_val.size(), 1);
+
     I nslices = (m - 1) / slice_size + 1;
 
     std::vector<I> hsell_slice_offsets;

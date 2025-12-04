@@ -376,6 +376,9 @@ hipsparseStatus_t testing_spgemm_csr(Arguments argus)
         return HIPSPARSE_STATUS_INTERNAL_ERROR;
     }
 
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hcsr_val_A, hcsr_val_A.size(), 1);
+
     // For sparse matrix B, use the transpose of A
     J n     = m;
     I nnz_B = nnz_A;
