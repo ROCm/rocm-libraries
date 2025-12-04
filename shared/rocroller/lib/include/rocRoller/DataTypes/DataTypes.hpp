@@ -200,19 +200,6 @@ namespace rocRoller
     std::string   toString(NaryArgument n);
     std::ostream& operator<<(std::ostream& stream, NaryArgument n);
 
-    /**
-     * Scratch memory policy; distinguishes between different scratch memory types.
-     */
-    enum class ScratchPolicy : int
-    {
-        SyncFlags = 0, //< Scratch space for synchronization flags
-        TileData, //< Scratch space for tile data
-        Count
-    };
-
-    std::string   toString(ScratchPolicy s);
-    std::ostream& operator<<(std::ostream& stream, ScratchPolicy s);
-
     inline constexpr DataType getIntegerType(bool isSigned, int sizeBytes);
 
     // Case insensitive and with special cases

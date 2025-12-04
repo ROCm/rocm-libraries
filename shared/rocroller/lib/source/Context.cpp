@@ -49,9 +49,10 @@ namespace rocRoller
     Context::Context()
     {
         // Initialize scratch allocators for each policy with zero
-        for(int i = 0; i < static_cast<int>(ScratchPolicy::Count); ++i)
+        for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
         {
-            m_scratchAllocators[static_cast<ScratchPolicy>(i)] = Expression::literal(0u);
+            m_scratchAllocators[static_cast<Operations::ScratchPolicy>(i)]
+                = Expression::literal(0u);
         }
     }
 
@@ -291,14 +292,14 @@ namespace rocRoller
         m_kernel = assemblyKernel;
     }
 
-    Expression::ExpressionPtr Context::getScratchAmount(ScratchPolicy policy) const
+    Expression::ExpressionPtr Context::getScratchAmount(Operations::ScratchPolicy policy) const
     {
         auto it = m_scratchAllocators.find(policy);
         AssertFatal(it != m_scratchAllocators.end(), "Scratch policy not found", ShowValue(policy));
         return it->second;
     }
 
-    void Context::allocateScratch(ScratchPolicy policy, Expression::ExpressionPtr size)
+    void Context::allocateScratch(Operations::ScratchPolicy policy, Expression::ExpressionPtr size)
     {
         m_scratchAllocators[policy] = simplify(m_scratchAllocators[policy] + size);
     }

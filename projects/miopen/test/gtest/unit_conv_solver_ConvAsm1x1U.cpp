@@ -35,6 +35,8 @@ auto GetConvTestCases(miopenDataType_t datatype)
     return std::vector{
         // clang-format off
         TestCase{{1, 4, 2, 2}, {4, 4, 1, 1}, {0, 0}, {1, 1}, {1, 1}, datatype},
+        // Using a stride tests the subsampling and upsampling kernel
+        TestCase{{1, 4, 4, 4}, {4, 4, 1, 1}, {0, 0}, {2, 2}, {1, 1}, datatype},
         // clang-format on
     };
 }

@@ -28,8 +28,8 @@
 
 #include "GEMMParameters.hpp"
 
-#include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
+#include <rocRoller/Operations/Scratch_fwd.hpp>
 
 using namespace rocRoller;
 
@@ -62,7 +62,8 @@ namespace rocRoller
                 {
                 }
 
-                virtual Operations::OperationTag getScratchTag(ScratchPolicy scratchPolicy) const
+                virtual Operations::OperationTag
+                    getScratchTag(Operations::ScratchPolicy scratchPolicy) const
                 {
                     return {};
                 }
@@ -72,7 +73,7 @@ namespace rocRoller
                                           SolutionParameters const& solutionParams)
                 {
                     auto commandKernel = std::make_shared<CommandKernel>(
-                        command, solutionParams.generateKernelName());
+                        command, solutionParams.generateKernelName().shortName);
                     commandKernel->setContext(m_context);
                     commandKernel->setCommandParameters(
                         this->makeCommandParameters(command, solutionParams));

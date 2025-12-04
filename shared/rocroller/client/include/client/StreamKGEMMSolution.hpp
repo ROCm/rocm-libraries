@@ -41,13 +41,14 @@ namespace rocRoller
         {
             class StreamKGEMMSolution : public DataParallelGEMMSolution
             {
-                std::map<ScratchPolicy, Operations::OperationTag> m_scratchTags;
-                Operations::OperationTag                          m_numWGsTag;
+                std::map<Operations::ScratchPolicy, Operations::OperationTag> m_scratchTags;
+                Operations::OperationTag                                      m_numWGsTag;
 
             public:
                 using DataParallelGEMMSolution::DataParallelGEMMSolution;
 
-                Operations::OperationTag getScratchTag(ScratchPolicy scratchPolicy) const override
+                Operations::OperationTag
+                    getScratchTag(Operations::ScratchPolicy scratchPolicy) const override
                 {
                     return m_scratchTags.at(scratchPolicy);
                 }
@@ -64,10 +65,11 @@ namespace rocRoller
                                                                DataDirection::ReadOnly,
                                                                rocRoller::NUMWGS);
 
-                    for(int i = 0; i < static_cast<int>(ScratchPolicy::Count); ++i)
+                    for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
                     {
-                        auto policy           = static_cast<ScratchPolicy>(i);
+                        auto policy           = static_cast<Operations::ScratchPolicy>(i);
                         m_scratchTags[policy] = command->allocateTag();
+                        command->addOperation(Operations::Scratch(m_scratchTags[policy], policy));
                         command->allocateArgument(
                             VariableType(DataType::UInt32, PointerType::PointerGlobal),
                             m_scratchTags[policy],

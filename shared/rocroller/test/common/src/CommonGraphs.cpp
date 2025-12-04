@@ -286,9 +286,9 @@ namespace rocRollerTest::Graphs
                                                          rocRoller::NUMWGS);
         }
 
-        for(int i = 0; i < static_cast<int>(ScratchPolicy::Count); ++i)
+        for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
         {
-            auto policy           = static_cast<ScratchPolicy>(i);
+            auto policy           = static_cast<Operations::ScratchPolicy>(i);
             m_scratchTags[policy] = m_command->allocateTag();
             m_command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
                                         m_scratchTags[policy],
@@ -348,10 +348,11 @@ namespace rocRollerTest::Graphs
         m_problem.unrollK = std::max(2, prefetchInFlight);
     }
 
-    void GEMM::setUnroll(unsigned int unrollX, unsigned int unrollY)
+    void GEMM::setUnroll(unsigned int unrollX, unsigned int unrollY, unsigned int unrollK)
     {
         m_problem.unrollX = unrollX;
         m_problem.unrollY = unrollY;
+        m_problem.unrollK = unrollK;
     }
 
     void GEMM::setStreamK(StreamKMode streamKMode)

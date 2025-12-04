@@ -90,6 +90,23 @@ struct FusionDescription : ProblemDescriptionBase
 
     conv::Direction GetDirection() const { return conv::Direction::Forward; }
 
+    bool IsFp32() const { return (fusion_plan_desc->input_desc).GetType() == miopenFloat; }
+
+    bool IsFp16() const { return (fusion_plan_desc->input_desc).GetType() == miopenHalf; }
+
+    bool Is2D() const { return (fusion_plan_desc->input_desc).GetLengths().size() == 4; }
+
+    bool IsLayoutContiguous() const
+    {
+        // determine input and output layouts
+        const auto in_layout  = fusion_plan_desc->input_desc.GetLayout_str();
+        const auto out_layout = fusion_plan_desc->output_desc.GetLayout_str();
+
+        return fusion_plan_desc->input_desc.GetLengths().size() == 4
+                   ? ((in_layout == "NCHW") && (out_layout == "NCHW"))
+                   : ((in_layout == "NCDHW") && (out_layout == "NCDHW"));
+    }
+
     // This and the following method should be moved to the Ops once the return type can be unified
     conv::ProblemDescription GetConvProblem(size_t idx, conv::Direction dir, int bias = 0) const
     {

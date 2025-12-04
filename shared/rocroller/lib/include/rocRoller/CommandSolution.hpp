@@ -316,7 +316,8 @@ namespace rocRoller
          * @param args The runtime arguments
          * @return size_t
          */
-        size_t scratchSpaceRequired(ScratchPolicy policy, RuntimeArguments const& args) const;
+        size_t scratchSpaceRequired(Operations::ScratchPolicy policy,
+                                    RuntimeArguments const&   args) const;
 
         /**
          * @brief Returns the workgroup size
