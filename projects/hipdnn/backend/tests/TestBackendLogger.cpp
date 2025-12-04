@@ -4,6 +4,7 @@
 #include "gtest/internal/gtest-port.h"
 #include <fcntl.h>
 #include <fstream>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <iostream>
 #include <regex>
@@ -210,4 +211,41 @@ TEST_F(TestBackendLogger, LogFileCanBeSpecifiedByEnvVar)
         << logContent;
 
     verifyStderrNotContains("Logging to custom file");
+}
+
+TEST_F(TestBackendLogger, ParamsAreNotExpandedIfLogLevelIsDisabled)
+{
+    bool wasCalledForInfo = false;
+    bool wasCalledForWarn = false;
+    bool wasCalledForError = false;
+    bool wasCalledForFatal = false;
+    std::string infoMessage("info log message");
+    std::string warnMessage("warn log message");
+    std::string errorMessage("error log message");
+    std::string fatalMessage("fatal log message");
+    auto trackingLambda = [](bool& wasCalled, std::string message) {
+        wasCalled = true;
+        return message;
+    };
+
+    // Set level to error so info and warn should be ignored
+    hipdnn_sdk::utilities::setEnv("HIPDNN_LOG_LEVEL", "error");
+
+    HIPDNN_LOG_INFO(trackingLambda(wasCalledForInfo, infoMessage));
+    HIPDNN_LOG_WARN(trackingLambda(wasCalledForWarn, warnMessage));
+    HIPDNN_LOG_ERROR(trackingLambda(wasCalledForError, errorMessage));
+    HIPDNN_LOG_FATAL(trackingLambda(wasCalledForFatal, fatalMessage));
+
+    std::string logContent = getStderrContent();
+
+    EXPECT_THAT(logContent, ::testing::Not(::testing::HasSubstr(infoMessage)));
+    EXPECT_THAT(logContent, ::testing::Not(::testing::HasSubstr(infoMessage)));
+    EXPECT_THAT(logContent, ::testing::Not(::testing::HasSubstr(warnMessage)));
+    EXPECT_THAT(logContent, ::testing::Not(::testing::HasSubstr(warnMessage)));
+    EXPECT_THAT(logContent, ::testing::HasSubstr(errorMessage));
+    EXPECT_THAT(logContent, ::testing::HasSubstr(fatalMessage));
+    EXPECT_FALSE(wasCalledForInfo);
+    EXPECT_FALSE(wasCalledForWarn);
+    EXPECT_TRUE(wasCalledForError);
+    EXPECT_TRUE(wasCalledForFatal);
 }
