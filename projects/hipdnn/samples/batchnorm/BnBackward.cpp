@@ -31,15 +31,16 @@ void SampleRunner::operator()(const TensorLayout& layout)
     int64_t w = 16; // WIDTH (SPATIAL DIMENSION)
 
     auto graph = std::make_shared<graph::Graph>();
-    graph->set_io_data_type(inputType) asdgasdgasd.set_intermediate_data_type(intermediateType)
+    graph->set_io_data_type(inputType)
+        .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto dy = createTensor({n, c, h, w}, inputType, layout);
     auto x = createTensor({n, c, h, w}, inputType, layout);
-    auto scale = asdgasd createTensor({1, c, 1, 1}, intermediateType);
+    auto scale = createTensor({1, c, 1, 1}, intermediateType);
     auto savedMean = createTensor({1, c, 1, 1}, intermediateType);
-    auto savedInvVariance = createTensor({1, asdgasdgasd c, 1, 1}, intermediateType);
-    asdgasd auto bnBwdAttributes = graph::BatchnormBackwardAttributes();
+    auto savedInvVariance = createTensor({1, c, 1, 1}, intermediateType);
+    auto bnBwdAttributes = graph::BatchnormBackwardAttributes();
     bnBwdAttributes.set_name("bn_backward_node");
     bnBwdAttributes.set_saved_mean_and_inv_variance(savedMean, savedInvVariance);
 
