@@ -32,6 +32,7 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/Task.hpp>
 #include <Tensile/Utils.hpp>
+#include <Tensile/UtilsOrigami.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
 #include <algorithm>
@@ -3216,9 +3217,9 @@ namespace TensileLite
             origami::problem_t origami_problem = {
                 .size     = {x, y, z},
                 .batch    = batch,
-                .a_dtype  = static_cast<origami::data_type_t>(problem.alphaType()),
-                .b_dtype  = static_cast<origami::data_type_t>(problem.betaType()),
-                .mi_dtype = static_cast<origami::data_type_t>(problem.computeInputType()),
+                .a_dtype  = datatypeToAnalyticalDatatype(problem.alphaType()),
+                .b_dtype  = datatypeToAnalyticalDatatype(problem.betaType()),
+                .mi_dtype = datatypeToAnalyticalDatatype(problem.computeInputType()),
             };
             origami::config_t origami_config = {
                 .mt                        = {static_cast<size_t>(sizeMapping.macroTile.x),

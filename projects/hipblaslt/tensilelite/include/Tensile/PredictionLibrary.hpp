@@ -29,7 +29,7 @@
 #include <set>
 #include <vector>
 
-#include "origami/origami.hpp"
+#include <Tensile/UtilsOrigami.hpp>
 
 namespace TensileLite
 {
@@ -159,7 +159,7 @@ namespace TensileLite
             hip::HipAMDGPU const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
             const origami::hardware_t& analytical_hardware = *(pAMDGPU->analyticalHardware);
-            auto miDataType = static_cast<origami::data_type_t>(problem.computeInputType());
+            auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
 
             if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
                 miDataType = origami::data_type_t::XFloat32;
@@ -168,10 +168,10 @@ namespace TensileLite
                 .batch       = batch,
                 .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
                 .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
-                .a_dtype     = static_cast<origami::data_type_t>(problem.a().dataType()),
-                .b_dtype     = static_cast<origami::data_type_t>(problem.b().dataType()),
-                .c_dtype     = static_cast<origami::data_type_t>(problem.c().dataType()),
-                .d_dtype     = static_cast<origami::data_type_t>(problem.d().dataType()),
+                .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                .c_dtype     = datatypeToAnalyticalDatatype(problem.c().dataType()),
+                .d_dtype     = datatypeToAnalyticalDatatype(problem.d().dataType()),
                 .mi_dtype    = miDataType,
                 .a_mx_block_size = 0, // MX Data types come from rocroller
                 .b_mx_block_size = 0, // MX Data types come from rocroller
