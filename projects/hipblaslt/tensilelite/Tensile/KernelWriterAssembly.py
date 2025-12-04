@@ -7901,7 +7901,7 @@ class KernelWriterAssembly(KernelWriter):
             if numSet0GroupB > 1 or (is_wmma_v2 and vgprPerInUnrollB > 2):
               if group == 0:
                 multiplyBy = numMIInUnroll
-                if kernel["ProblemType"]["Sparse"] == 1:
+                if kernel["ProblemType"]["Sparse"] == 2:
                   multiplyBy = numMIInUnroll // blocksPerTGroupSMFMAB
                 elif is_wmma_v3:
                   vgprLayout = wmmaV3InputVgprLayout(kernel["MatrixInstruction"], tPB["bpe"] * 8)
