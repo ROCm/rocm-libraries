@@ -75,6 +75,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
     graph::PointwiseAttributes biasAddAttributes;
     biasAddAttributes.set_name("bias_add_node");
     biasAddAttributes.set_mode(hipdnn_frontend::PointwiseMode::ADD);
+    biasAddAttributes.set_compute_data_type(inputType);
 
     auto biasOutAttr = graph->pointwise(convOutAttr, biasAttr, biasAddAttributes);
     biasOutAttr->set_output(false);
