@@ -235,6 +235,16 @@ struct device_histogram_benchmark : public benchmark_utils::autotune_interface
             };
         };
 
+        // Clear caches for other types that are either empty or already done.
+        clear_other_caches<rocprim::int128_t,
+                           int64_t,
+                           int,
+                           short,
+                           int8_t,
+                           double,
+                           float,
+                           rocprim::half>();
+
         const std::size_t size = bytes / Channels;
 
         size_t        temporary_storage_bytes = 0;
@@ -318,16 +328,6 @@ struct device_histogram_benchmark : public benchmark_utils::autotune_interface
         {
             HIP_CHECK(hipFree(d_histogram[channel]));
         }
-
-        // Clear caches for other types that are either empty or already done.
-        clear_other_caches<rocprim::int128_t,
-                           int64_t,
-                           int,
-                           short,
-                           int8_t,
-                           double,
-                           float,
-                           rocprim::half>();
     }
 };
 
