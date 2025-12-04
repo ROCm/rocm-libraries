@@ -444,7 +444,6 @@ namespace llvm
             {
                 if(index >= seq.size())
                     seq.resize(index + 1);
-                std::cout << "\n\n\nindex: " << index << std::endl;
                 return seq[index];
             }
             static const bool flow = true;
