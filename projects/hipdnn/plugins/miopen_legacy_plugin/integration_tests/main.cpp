@@ -12,7 +12,7 @@ int main(int argc, char** argv)
     ::testing::InitGoogleTest(&argc, argv);
 
     hipdnn_frontend::initializeFrontendLogging();
-    
+
     // Register HipErrorHandler to check and clear HIP errors after each test
     testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
     listeners.Append(new hipdnn_sdk::test_utilities::HipErrorHandler);

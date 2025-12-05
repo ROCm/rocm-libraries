@@ -24,16 +24,16 @@ public:
     {
         // Check and clear standard HIP error state
         auto hipError = hipGetLastError();
-        
+
         // Check and clear extended HIP error state
         auto hipExtError = hipExtGetLastError();
-        
+
         // If there were any errors, fail the test that generated them
         EXPECT_EQ(hipError, hipSuccess)
             << " hipGetLastError returned error code " << hipError << " after test "
             << testInfo.test_suite_name() << "." << testInfo.name()
             << ". Error string: " << hipGetErrorString(hipError);
-        
+
         EXPECT_EQ(hipExtError, hipSuccess)
             << " hipExtGetLastError returned error code " << hipExtError << " after test "
             << testInfo.test_suite_name() << "." << testInfo.name()
