@@ -327,9 +327,11 @@ def getDockerImage(Map conf=[:])
             
             sh """
                 DOCKER_BUILDKIT=1 docker buildx build \
-                --push \
+                --pull \
+                --tag ${image} \
                 ${dockerArgs} \
                 ${buildContext}
+                docker push ${image}
             """.stripIndent()
         }
         dockerImage = docker.image("${image}")
