@@ -2,7 +2,6 @@
 # Copyright 2019-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
-# Alternatively, we can use the rocm_agent_enumerator command
 find_program(ROCMINFO_EXECUTABLE
   rocminfo
 )
