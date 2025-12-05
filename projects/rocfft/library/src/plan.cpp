@@ -1761,7 +1761,7 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
                                              ? execPlan.rootPlan->length
                                              : execPlan.rootPlan->outputLength;
             const bool  evenLengthReal = (transformType == rocfft_transform_type_real_forward
-                                         || transformType == rocfft_transform_type_real_forward)
+                                         || transformType == rocfft_transform_type_real_inverse)
                                         && realLength.front() % 2 == 0;
             const bool stride1 = execPlan.rootPlan->inStride.front() == 1
                                  && execPlan.rootPlan->outStride.front() == 1;
