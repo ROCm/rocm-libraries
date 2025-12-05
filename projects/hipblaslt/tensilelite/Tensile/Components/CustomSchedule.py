@@ -1777,7 +1777,6 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         'LRB1':   [lrb1],
         'LCC':    [[numMfma-2, numMfma-1]],
     }
-
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
