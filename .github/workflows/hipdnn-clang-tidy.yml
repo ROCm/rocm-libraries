@@ -58,5 +58,6 @@ jobs:
             -DENABLE_CLANG_TIDY=ON \
             -DROCM_PATH=/opt/rocm \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DENABLE_CLANG_FORMAT=OFF \
             -DHIP_PLATFORM=amd
           ninja -C build tidy
