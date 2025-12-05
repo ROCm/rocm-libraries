@@ -41,26 +41,6 @@ BEGIN_HIPCUB_NAMESPACE
  * @{
  */
 
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-    #define HIPCUB_PREVENT_MACRO_SUBSTITUTION
-template<typename T, typename U>
-HIPCUB_DEPRECATED_BECAUSE("Use hip::std::min from <hip/std/functional> instead")
-constexpr __host__ __device__ auto min HIPCUB_PREVENT_MACRO_SUBSTITUTION(T&& t, U&& u)
-    -> decltype(t < u ? std::forward<T>(t) : std::forward<U>(u))
-{
-    return t < u ? std::forward<T>(t) : std::forward<U>(u);
-}
-
-template<typename T, typename U>
-HIPCUB_DEPRECATED_BECAUSE("Use hip::std::max from <hip/std/functional> instead")
-constexpr __host__ __device__ auto max HIPCUB_PREVENT_MACRO_SUBSTITUTION(T&& t, U&& u)
-    -> decltype(t < u ? std::forward<U>(u) : std::forward<T>(t))
-{
-    return t < u ? std::forward<U>(u) : std::forward<T>(t);
-}
-    #undef HIPCUB_PREVENT_MACRO_SUBSTITUTION
-#endif
-
 /// Deprecated since rocm [7.1]
 #ifndef HIPCUB_MAX
     /// Select maximum(a, b)
