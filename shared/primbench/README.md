@@ -15,14 +15,15 @@ primbench is a single-header HIP benchmarking library.
 
 ## Dependencies
 
-primbench only has three dependencies:
+primbench has the following dependencies:
 - HIP
 - AMD SMI (for querying live GPU statistics)
-- C++17 or newer
+- C++17 or later
 
 ## Example
 
-Here is an example `copy_benchmark.cpp`:
+`copy_benchmark.cpp` provides an example of how to use primbench:
+
 ```cpp
 // Only include this in one translation unit
 #include "primbench.hpp"
@@ -127,7 +128,8 @@ int main(int argc, char* argv[])
 }
 ```
 
-After putting `primbench.hpp` next to it, the benchmark can be compiled and run like so:
+After putting `primbench.hpp` next to it, the benchmark can be compiled and run:
+
 ```bash
 hipcc -o copy_benchmark copy_benchmark.cpp -lamd_smi && ./copy_benchmark
 ```
@@ -246,7 +248,7 @@ It output this `results.json`:
 
 ## Command-line Options
 
-You can pass `--help` to benchmarks to print the available options. They are all optional:
+You can also pass `--help` to benchmarks to print the available options.
 
 | Option                                   | Description                                                                                                                                                                        |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -302,7 +304,7 @@ The filter matches against the specialization name. Other valid patterns include
 
 Noise is the variance in throughput between runs. It is measured as the [coefficient of variation](https://en.wikipedia.org/wiki/Coefficient_of_variation), which is the standard deviation divided by the mean.
 
-The main goal of primbench is to reduce the amount of noise, because when a benchmark has say 10% noise, it means that a 4% performance improvement can't be distinguished from noise.
+The main goal of primbench is to reduce the amount of noise to better see performance improvements. For example,  if a benchmark has10% noise, a 4% performance improvement can't be distinguished from noise.
 
 Other processes running on the same GPU can introduce noise, so those processes should be stopped before running any benchmarks.
 
@@ -329,7 +331,7 @@ The selected temperature sensor type is recorded in the JSON output as `context.
 
 ### GPU Cache Clearing
 
-primbench clears the GPU cache before each batch by default to reduce noise and ensure consistent timings. This simulates a "cold run" by preventing leftover data from previous kernel executions from affecting results.
+primbench clears the GPU cache before each batch to reduce noise and ensure consistent timings. This simulates a "cold run" by preventing leftover data from previous kernel executions from affecting results.
 
 * The `--hot` flag skips cache clearing, allowing a "hot cache" scenario where data is reused between batches.
 * The default cache size is 256 MiB, but `PRIMBENCH_GPU_CACHE_SIZE` can be overridden at compile time to match your GPU's cache size.
@@ -338,13 +340,14 @@ primbench clears the GPU cache before each batch by default to reduce noise and 
 
 Kernels often only take a few microseconds to run on the GPU, leading to a lot of variance in how long each kernel call takes. For this reason, primbench calculates the noise across the last 10 *batches*, rather than the noise across the last 10 *kernel calls* (`--batch-window-size`).
 
-The number of kernel calls in a batch is dynamically decided, by doubling the number of kernel calls, until the batch takes *at least* 10 milliseconds to run on the GPU (`--min-gpu-ms-per-batch`).
+The number of kernel calls in a batch is dynamically decided. The number of kernel calls is doubled until the batch takes *at least* 10 milliseconds to run on the GPU (`--min-gpu-ms-per-batch`).
 
 Before timing the first batch, primbench issues a single unmeasured kernel launch as a warmup, giving the GPU a chance to cache the kernel's instructions before real measurements begin.
 
 In some cases, the recorded start time occurs before the kernel actually begins executing, since event recording is asynchronous. To reduce this timing noise, primbench queues the start, kernel, and stop events together in one atomic sequence.
 
 It does this by briefly blocking GPU execution with a lightweight spinlock kernel until all events are enqueued. Once queued, the block is released and execution proceeds:
+
 ```c++
 block(stream);
 hipEventRecord(start, stream);
@@ -360,7 +363,7 @@ When benchmarking synchronous algorithms, the `primbench::flags::sync` flag must
 
 Benchmarks can produce a CSV file alongside the JSON output by passing `--csv-out results.csv`.
 
-This CSV is a condensed version of the full `results.json` shown earlier in the readme. It includes only the most essential metrics: index, name, throughput, and noise, making it easier to read at a glance:
+This CSV is a condensed version of the `results.json` file. It includes only index, name, throughput, and noise:
 
 ```
 index,name,bytes_per_second,items_per_second,noise_timeout,noise_percent
