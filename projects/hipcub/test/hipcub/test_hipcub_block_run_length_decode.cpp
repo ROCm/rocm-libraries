@@ -141,7 +141,8 @@ TYPED_TEST(HipcubBlockRunLengthDecodeTest, TestDecode)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const LengthT max_run_length = static_cast<LengthT>(
-            std::min(1000ll, static_cast<long long>(std::numeric_limits<LengthT>::max())));
+            _HIPCUB_STD::min(1000ll,
+                             static_cast<long long>(_HIPCUB_STD::numeric_limits<LengthT>::max())));
 
         size_t num_runs    = runs_per_thread * block_size;
         auto   run_items   = test_utils::get_random_data<ItemT>(num_runs,

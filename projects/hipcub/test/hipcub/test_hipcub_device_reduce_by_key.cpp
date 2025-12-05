@@ -136,7 +136,7 @@ TYPED_TEST(HipcubDeviceReduceByKey, ReduceByKey)
                 const size_t key_count = key_count_dis(gen);
                 current_key += key_delta_dis(gen);
 
-                const size_t end = std::min(size, offset + key_count);
+                const size_t end = _HIPCUB_STD::min(size, offset + key_count);
                 for(size_t i = offset; i < end; i++)
                 {
                     keys_input[i] = test_utils::convert_to_device<key_type>(current_key);

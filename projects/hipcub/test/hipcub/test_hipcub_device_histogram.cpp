@@ -73,9 +73,11 @@ inline auto get_random_samples(size_t size, U min, U max, unsigned int seed_valu
     return test_utils::get_random_data<T>(
         size,
         static_cast<T>(
-            std::max(min1 - d / 10, static_cast<long long>(std::numeric_limits<T>::lowest()))),
+            _HIPCUB_STD::max(min1 - d / 10,
+                             static_cast<long long>(_HIPCUB_STD::numeric_limits<T>::lowest()))),
         static_cast<T>(
-            std::min(max1 + d / 10, static_cast<long long>(std::numeric_limits<T>::max()))),
+            _HIPCUB_STD::min(max1 + d / 10,
+                             static_cast<long long>(_HIPCUB_STD::numeric_limits<T>::max()))),
         seed_value);
 }
 
@@ -89,8 +91,11 @@ inline auto get_random_samples(size_t size, U min, U max, unsigned int seed_valu
     return test_utils::get_random_data<T>(
         size,
         static_cast<T>(
-            std::max(min1 - d / 10, static_cast<double>(std::numeric_limits<T>::lowest()))),
-        static_cast<T>(std::min(max1 + d / 10, static_cast<double>(std::numeric_limits<T>::max()))),
+            _HIPCUB_STD::max(min1 - d / 10,
+                             static_cast<double>(_HIPCUB_STD::numeric_limits<T>::lowest()))),
+        static_cast<T>(
+            _HIPCUB_STD::min(max1 + d / 10,
+                             static_cast<double>(_HIPCUB_STD::numeric_limits<T>::max()))),
         seed_value);
 }
 
@@ -195,7 +200,7 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
         const size_t row_stride = columns + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = std::max<size_t>(1, rows * row_stride);
+        const size_t size             = _HIPCUB_STD::max<size_t>(1, rows * row_stride);
 
         for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
@@ -522,7 +527,7 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
         const size_t row_stride = columns + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = std::max<size_t>(1, rows * row_stride);
+        const size_t size             = _HIPCUB_STD::max<size_t>(1, rows * row_stride);
 
         for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
@@ -787,7 +792,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
         const size_t row_stride = columns * channels + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = std::max<size_t>(1, rows * row_stride);
+        const size_t size             = _HIPCUB_STD::max<size_t>(1, rows * row_stride);
 
         for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
@@ -1089,7 +1094,7 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
         const size_t row_stride = columns * channels + std::get<2>(dim);
 
         const size_t row_stride_bytes = row_stride * sizeof(sample_type);
-        const size_t size = std::max<size_t>(1, rows * row_stride);
+        const size_t size             = _HIPCUB_STD::max<size_t>(1, rows * row_stride);
 
         for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {

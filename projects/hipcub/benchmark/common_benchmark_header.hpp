@@ -22,7 +22,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
@@ -42,6 +41,10 @@
 
 // HIP API
 #include <hip/hip_runtime.h>
+
+#include <hipcub/libcxx.hpp>
+
+#include _HIPCUB_LIBCXX_INCLUDE(cmath)
 
 // benchmark_utils.hpp should only be included by this header.
 // The following definition is used as guard in benchmark_utils.hpp
