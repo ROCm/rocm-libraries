@@ -243,11 +243,6 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
 
     CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idxBase));
 
-// #ifdef __HIP_PLATFORM_NVIDIA__
-//         // cusparse seems to hang, skipping tests for now
-//         return HIPSPARSE_STATUS_SUCCESS;
-// #endif
-
     // Host structures
     std::vector<int> hrow_ptr;
     std::vector<int> hcol_ind;
@@ -360,7 +355,7 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
         }
         ++max_value;
 
-        std::cout << "DDDD" << std::endl;
+        std::cout << "DDDD max_value " << max_value << std::endl;
 
         std::vector<bool> marker(max_value, false);
         for(size_t i = 0; i < hcoloring.size(); ++i)
