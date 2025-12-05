@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-find_program(HIPSPARSE_MTX2CSR hipsparse_mtx2csr PATHS /opt/rocm/bin ${ROCM_PATH}/bin)
+find_program(HIPSPARSE_MTX2CSR hipsparse_mtx2csr PATHS "/opt/rocm/bin" "${ROCM_PATH}/bin")
 
 set(TEST_MATRICES
   SNAP/amazon0312
@@ -48,8 +48,8 @@ set(TEST_MD5HASH
 )
 
 if(NOT CMAKE_MATRICES_DIR)
-  set(CMAKE_MATRICES_DIR "./")
-  message(WARNING "Unspecified CMAKE_MATRICES_DIR, the default value of CMAKE_MATRICES_DIR is set to './'")
+  set(CMAKE_MATRICES_DIR "${PROJECT_BINARY_DIR}/matrices")
+  message(WARNING "Unspecified CMAKE_MATRICES_DIR, the default value of CMAKE_MATRICES_DIR is set to '${CMAKE_MATRICES_DIR}'")
 endif()
 
 # convert relative path to absolute
@@ -58,7 +58,7 @@ get_filename_component(PROJECT_BINARY_DIR "${PROJECT_BINARY_DIR}"
 get_filename_component(CMAKE_MATRICES_DIR "${CMAKE_MATRICES_DIR}"
                        ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
 
-file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR})
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}")
 
 list(LENGTH TEST_MATRICES len)
 math(EXPR len1 "${len} - 1")
@@ -77,7 +77,7 @@ foreach(i RANGE 0 ${len1})
       # First try user specified mirror, if available
       if(DEFINED ENV{HIPSPARSE_TEST_MIRROR} AND NOT $ENV{HIPSPARSE_TEST_MIRROR} STREQUAL "")
         message("-- Downloading and extracting test matrix ${m}.tar.gz from user specified test mirror: $ENV{HIPSPARSE_TEST_MIRROR}")
-        file(DOWNLOAD $ENV{HIPSPARSE_TEST_MIRROR}/${mat}.tar.gz ${CMAKE_MATRICES_DIR}/${mat}.tar.gz
+        file(DOWNLOAD "$ENV{HIPSPARSE_TEST_MIRROR}/${mat}.tar.gz" "${CMAKE_MATRICES_DIR}/${mat}.tar.gz"
              INACTIVITY_TIMEOUT 3
              STATUS DL)
 
@@ -89,7 +89,7 @@ foreach(i RANGE 0 ${len1})
         endif()
       else()
         message("-- Downloading and extracting test matrix ${m}.tar.gz")
-        file(DOWNLOAD https://sparse.tamu.edu/MM/${m}.tar.gz ${CMAKE_MATRICES_DIR}/${mat}.tar.gz
+        file(DOWNLOAD "https://sparse.tamu.edu/MM/${m}.tar.gz" "${CMAKE_MATRICES_DIR}/${mat}.tar.gz"
              INACTIVITY_TIMEOUT 3
              STATUS DL)
 
@@ -99,7 +99,7 @@ foreach(i RANGE 0 ${len1})
         if(NOT stat EQUAL 0)
           message("-- Timeout has been reached, trying mirror ...")
           # Try again using ufl links
-          file(DOWNLOAD https://www.cise.ufl.edu/research/sparse/MM/${m}.tar.gz ${CMAKE_MATRICES_DIR}/${mat}.tar.gz
+          file(DOWNLOAD "https://www.cise.ufl.edu/research/sparse/MM/${m}.tar.gz" "${CMAKE_MATRICES_DIR}/${mat}.tar.gz"
                INACTIVITY_TIMEOUT 3
                STATUS DL)
 
@@ -113,34 +113,34 @@ foreach(i RANGE 0 ${len1})
       endif()
 
       # Check MD5 hash before continuing
-      file(MD5 ${CMAKE_MATRICES_DIR}/${mat}.tar.gz hash)
+      file(MD5 "${CMAKE_MATRICES_DIR}/${mat}.tar.gz" hash)
 
       # Compare hash
       if(NOT hash STREQUAL md5)
         message(FATAL_ERROR "${mat}.tar.gz is corrupted")
       endif()
 
-      execute_process(COMMAND tar xf ${mat}.tar.gz
+      execute_process(COMMAND tar xf "${mat}.tar.gz"
         RESULT_VARIABLE STATUS
-        WORKING_DIRECTORY ${CMAKE_MATRICES_DIR})
+        WORKING_DIRECTORY "${CMAKE_MATRICES_DIR}")
       if(STATUS AND NOT STATUS EQUAL 0)
         message(FATAL_ERROR "uncompressing failed, aborting.")
       endif()
 
-      file(RENAME ${CMAKE_MATRICES_DIR}/${mat}/${mat}.mtx ${CMAKE_MATRICES_DIR}/${mat}.mtx)
+      file(RENAME "${CMAKE_MATRICES_DIR}/${mat}/${mat}.mtx" "${CMAKE_MATRICES_DIR}/${mat}.mtx")
     else()
-      file(RENAME ${HIPSPARSE_MTX_DIR}/${mat}/${mat}.mtx ${CMAKE_MATRICES_DIR}/${mat}.mtx)
+      file(RENAME "${HIPSPARSE_MTX_DIR}/${mat}/${mat}.mtx" "${CMAKE_MATRICES_DIR}/${mat}.mtx")
     endif()
-    execute_process(COMMAND ${HIPSPARSE_MTX2CSR} ${mat}.mtx ${mat}.bin
+    execute_process(COMMAND "${HIPSPARSE_MTX2CSR}" "${mat}.mtx" "${mat}.bin"
       RESULT_VARIABLE STATUS
-      WORKING_DIRECTORY ${CMAKE_MATRICES_DIR})
+      WORKING_DIRECTORY "${CMAKE_MATRICES_DIR}")
     if(STATUS AND NOT STATUS EQUAL 0)
       message(FATAL_ERROR "${HIPSPARSE_MTX2CSR} failed, aborting.")
     else()
       message(STATUS "${mat} success.")
     endif()
     # TODO: add 'COMMAND_ERROR_IS_FATAL ANY' once cmake supported version is 3.19
-    file(REMOVE_RECURSE ${CMAKE_MATRICES_DIR}/${mat}.tar.gz ${CMAKE_MATRICES_DIR}/${mat} ${CMAKE_MATRICES_DIR}/${mat}.mtx)
+    file(REMOVE_RECURSE "${CMAKE_MATRICES_DIR}/${mat}.tar.gz" "${CMAKE_MATRICES_DIR}/${mat}" "${CMAKE_MATRICES_DIR}/${mat}.mtx")
 
   endif()
 endforeach()
