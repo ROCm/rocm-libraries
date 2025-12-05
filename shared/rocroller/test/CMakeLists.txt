@@ -223,8 +223,6 @@ if(ROCROLLER_ENABLE_COVERAGE OR BUILD_CODE_COVERAGE)
     target_compile_options(rocroller PRIVATE -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(rocroller PRIVATE -fprofile-instr-generate)
 
-    target_compile_options(rocroller-no-rtti PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-
     target_compile_options(common-test-utilities PRIVATE -fprofile-instr-generate -fcoverage-mapping)
 
     if(ROCROLLER_ENABLE_ARCH_GEN_TEST)
