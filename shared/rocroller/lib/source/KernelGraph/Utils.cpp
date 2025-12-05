@@ -879,62 +879,6 @@ namespace rocRoller
             graph.mapper.purge(nodeIdx);
         }
 
-        void bypassAndDelete(KernelGraph& graph, int nodeToRemove)
-        {
-            namespace CG = rocRoller::KernelGraph::ControlGraph;
-
-            auto location = graph.control.getLocation(nodeToRemove);
-
-            // Collect predecessors and their edge types
-            std::vector<std::pair<int, CG::ControlEdge>> predecessors;
-            for(auto const& input : location.incoming)
-            {
-                auto parent
-                    = graph.control.getNeighbours<Graph::Direction::Upstream>(input).front();
-
-                // Skip Body edges as they shouldn't be used for bypass connections
-                auto maybeBody = graph.control.get<CG::Body>(input);
-                if(!maybeBody)
-                {
-                    auto edge = graph.control.getEdge(input);
-                    predecessors.push_back({parent, edge});
-                }
-            }
-
-            // Collect successors
-            std::vector<int> successors;
-            for(auto const& output : location.outgoing)
-            {
-                // Skip Body edges as they shouldn't be used for bypass connections
-                auto maybeBody = graph.control.get<CG::Body>(output);
-                if(!maybeBody)
-                {
-                    auto child
-                        = graph.control.getNeighbours<Graph::Direction::Downstream>(output).front();
-                    successors.push_back(child);
-                }
-            }
-
-            // Create bypass connections: connect each predecessor to each successor
-            // Use Sequence edges for the bypass connections
-            for(auto const& [parent, incomingEdge] : predecessors)
-            {
-                for(auto child : successors)
-                {
-                    // Check if connection already exists to avoid duplicates
-                    auto existingEdge = graph.control.findEdge(parent, child);
-                    if(!existingEdge)
-                    {
-                        // Use the same edge type as the incoming edge for consistency
-                        graph.control.addElement(incomingEdge, {parent}, {child});
-                    }
-                }
-            }
-
-            // Now delete the node
-            deleteControlNode(graph, nodeToRemove);
-        }
-
         void updateThreadTileForLongDwords(int& t_m,
                                            int& t_n,
                                            int  maxWidth,

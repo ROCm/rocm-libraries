@@ -349,18 +349,6 @@ namespace rocRoller
         void deleteControlNode(KernelGraph& graph, int);
 
         /**
-         * @brief Remove a control node from the graph while reconnecting its predecessors to its successors.
-         * 
-         * This function bypasses the node by connecting each of its predecessors directly to each of its
-         * successors, maintaining the control flow through the graph. Body edges are handled specially - 
-         * they are not used to create bypass connections.
-         * 
-         * @param graph The kernel graph to modify
-         * @param nodeToRemove The node index to remove
-         */
-        void bypassAndDelete(KernelGraph& graph, int nodeToRemove);
-
-        /**
          * Updates the threadtile size for enabling the use of long dword instructions
          */
         void updateThreadTileForLongDwords(int& t_m,
