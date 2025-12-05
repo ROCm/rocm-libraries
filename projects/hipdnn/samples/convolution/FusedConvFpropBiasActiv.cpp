@@ -47,7 +47,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     constexpr int64_t dilW = 1; // Width dilation
 
     auto graph = std::make_shared<graph::Graph>();
-    graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    graph->set_io_data_type(inputType).set_intermediate_data_type(inputType).set_compute_data_type(
+        hipdnn_frontend::DataType::FLOAT);
 
     auto xAttr = createTensor({n, c, h, w}, inputType, layout);
     auto wAttr = createTensor({k, c, r, s}, inputType, layout);
@@ -59,8 +60,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
     convAttributes.set_dilation({dilH, dilW});
 
     auto convOutAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
-    convOutAttr->set_output(false);
-    convOutAttr->set_data_type(inputType);
     // Explicitly set output dimensions and strides so we can derive the bias shape.
     // The output dimensions aren't automatically populated until after graph->build_operation_graph(),
     // but we need them now to create the bias tensor with the correct per-channel shape.
@@ -78,8 +77,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
     biasAddAttributes.set_compute_data_type(inputType);
 
     auto biasOutAttr = graph->pointwise(convOutAttr, biasAttr, biasAddAttributes);
-    biasOutAttr->set_output(false);
-    biasOutAttr->set_data_type(inputType);
 
     // Apply ReLU activation
     graph::PointwiseAttributes activationAttributes;
