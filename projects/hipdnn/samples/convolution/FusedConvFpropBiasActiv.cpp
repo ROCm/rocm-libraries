@@ -48,7 +48,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType).set_intermediate_data_type(inputType).set_compute_data_type(
-        hipdnn_frontend::DataType::FLOAT);
+        hipdnn_frontend::DataType::FLOAT); // MIOpen requires FLOAT compute type
 
     auto xAttr = createTensor({n, c, h, w}, inputType, layout);
     auto wAttr = createTensor({k, c, r, s}, inputType, layout);
@@ -74,7 +74,8 @@ void SampleRunner::operator()(const TensorLayout& layout)
     graph::PointwiseAttributes biasAddAttributes;
     biasAddAttributes.set_name("bias_add_node");
     biasAddAttributes.set_mode(hipdnn_frontend::PointwiseMode::ADD);
-    biasAddAttributes.set_compute_data_type(inputType);
+    biasAddAttributes.set_compute_data_type(
+        hipdnn_frontend::DataType::FLOAT); // MIOpen requires FLOAT compute type
 
     auto biasOutAttr = graph->pointwise(convOutAttr, biasAttr, biasAddAttributes);
 
