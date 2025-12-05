@@ -84,14 +84,16 @@ if(WIN32 AND (HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS))
     add_custom_command(
         TARGET hipsparse POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy
-            ${PROJECT_BINARY_DIR}/staging/$<TARGET_FILE_NAME:hipsparse>
-            ${PROJECT_BINARY_DIR}/clients/staging/$<TARGET_FILE_NAME:hipsparse>
+            "${PROJECT_BINARY_DIR}/staging/$<TARGET_FILE_NAME:hipsparse>"
+            "${PROJECT_BINARY_DIR}/clients/staging/$<TARGET_FILE_NAME:hipsparse>"
     )
-    # Copy PDB file for Debug builds (using generator expression to avoid CMAKE_BUILD_TYPE check)
-    add_custom_command(
-        TARGET hipsparse POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${PROJECT_BINARY_DIR}/staging/hipsparse$<$<CONFIG:Debug>:.pdb>
-            ${PROJECT_BINARY_DIR}/clients/staging/hipsparse$<$<CONFIG:Debug>:.pdb>
-    )
+    # Copy PDB file for Debug builds
+    if(CMAKE_BUILD_TYPE MATCHES "Debug")
+        add_custom_command(
+            TARGET hipsparse POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy
+                "${PROJECT_BINARY_DIR}/staging/hipsparse.pdb"
+                "${PROJECT_BINARY_DIR}/clients/staging/hipsparse.pdb"
+        )
+    endif()
 endif()
