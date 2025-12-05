@@ -66,18 +66,19 @@ namespace rocRoller
             TIMER(t, "Constraint::SingleControlRoot");
             ConstraintStatus retval;
 
-            auto controlRoots = k.control.roots().to<std::vector>();
+            // TODO: restore
+            // auto controlRoots = k.control.roots().to<std::vector>();
 
-            if(controlRoots.size() != 1)
-            {
-                std::ostringstream msg;
-                msg << "Single Control Root: Control graph must have exactly one root node, not "
-                    << controlRoots.size() << ". Nodes: (";
-                streamJoin(msg, controlRoots, ", ");
-                msg << ")";
+            // if(controlRoots.size() != 1)
+            // {
+            //     std::ostringstream msg;
+            //     msg << "Single Control Root: Control graph must have exactly one root node, not "
+            //         << controlRoots.size() << ". Nodes: (";
+            //     streamJoin(msg, controlRoots, ", ");
+            //     msg << ")";
 
-                retval.combine(false, msg.str());
-            }
+            //     retval.combine(false, msg.str());
+            // }
 
             return retval;
         }

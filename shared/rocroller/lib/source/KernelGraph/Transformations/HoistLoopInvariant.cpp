@@ -173,9 +173,10 @@ namespace rocRoller::KernelGraph
     int HoistLoopInvariant::hoistNodeBeforeLoop(KernelGraph& kgraph, int nodeToHoist, int loopNode)
     {
         int hoistedNode = duplicateControlNode(kgraph, nodeToHoist);
-        Log::info("Hoisted node {} to new node {}", nodeToHoist, hoistedNode);
+        Log::info("HoistLoopInvariant: Hoisted node {} to new node {}", nodeToHoist, hoistedNode);
         insertBefore(kgraph, loopNode, hoistedNode, hoistedNode);
-        bypassAndDelete(kgraph, nodeToHoist);
+        // bypassAndDelete(kgraph, nodeToHoist);
+        kgraph.control.setElement(nodeToHoist, NOP{});
         return hoistedNode;
     }
 
@@ -186,17 +187,19 @@ namespace rocRoller::KernelGraph
         ControlFlowRWTracer tracer(graph);
         const auto          mapping = buildCoordinateLoopMapping(graph, tracer);
 
-        Log::info("Coordinate to Loop Mapping:");
+        Log::info("HoistLoopInvariant: Coordinate to Loop Mapping:");
         for(const auto& [coordinate, loopGroups] : mapping)
         {
-            Log::info("Coordinate {}:", coordinate);
+            Log::info("HoistLoopInvariant: Coordinate {}:", coordinate);
             for(const auto& [loop, controlNodes] : loopGroups)
             {
-                Log::info("  Loop {}: Control Nodes {}", loop, fmt::join(controlNodes, ", "));
+                Log::info("HoistLoopInvariant:   Loop {}: Control Nodes {}",
+                          loop,
+                          fmt::join(controlNodes, ", "));
             }
         }
 
-        const size_t MAX_NODES_TO_HOIST = 10; // TODO: remove
+        const size_t MAX_NODES_TO_HOIST = 9999; // TODO: remove
         size_t       hoistedCount       = 0;
 
         for(const auto& [coordinate, loopGroups] : mapping)
@@ -209,10 +212,11 @@ namespace rocRoller::KernelGraph
 
                 if(controlNodes.size() != 1)
                 {
-                    Log::info("Coordinate {} has {} writers in loop {}, skipping",
-                              coordinate,
-                              controlNodes.size(),
-                              loopNode);
+                    Log::info(
+                        "HoistLoopInvariant: Coordinate {} has {} writers in loop {}, skipping",
+                        coordinate,
+                        controlNodes.size(),
+                        loopNode);
                     continue;
                 }
 
@@ -221,16 +225,18 @@ namespace rocRoller::KernelGraph
                 auto maybeAssign = graph.control.get<Assign>(controlNode);
                 if(!maybeAssign.has_value())
                 {
-                    Log::info("Control node {} is not an Assign, skipping", controlNode);
+                    Log::info("HoistLoopInvariant: Control node {} is not an Assign, skipping",
+                              controlNode);
                     continue;
                 }
 
                 auto assignNode = maybeAssign.value();
 
-                Log::info("Analyzing Assign node {} for coordinate {} in loop {}",
-                          controlNode,
-                          coordinate,
-                          loopNode);
+                Log::info(
+                    "HoistLoopInvariant: Analyzing Assign node {} for coordinate {} in loop {}",
+                    controlNode,
+                    coordinate,
+                    loopNode);
 
                 auto usedTags = extractDataFlowTags(*assignNode.expression);
 
@@ -239,34 +245,37 @@ namespace rocRoller::KernelGraph
                 {
                     if(isCoordinateWrittenInLoop(graph, loopNode, tag, tracer))
                     {
-                        Log::info(
-                            "  DataFlowTag {} is written in loop {}, not invariant", tag, loopNode);
+                        Log::info("HoistLoopInvariant:   DataFlowTag {} is written in loop {}, not "
+                                  "invariant",
+                                  tag,
+                                  loopNode);
                         allTagsLoopInvariant = false;
                         break;
                     }
                 }
 
-                Log::info("  Used DataFlowTags: {}, all loop invariant: {}",
+                Log::info("HoistLoopInvariant:   Used DataFlowTags: {}, all loop invariant: {}",
                           fmt::join(usedTags, ", "),
                           allTagsLoopInvariant);
 
                 if(allTagsLoopInvariant)
                 {
-                    Log::info("Hoisting Assign node {} out of loop {}", controlNode, loopNode);
+                    Log::info("HoistLoopInvariant: Hoisting Assign node {} out of loop {}",
+                              controlNode,
+                              loopNode);
                     hoistNodeBeforeLoop(graph, controlNode, loopNode);
                     hoistedCount++;
 
                     if(hoistedCount >= MAX_NODES_TO_HOIST)
                     {
-                        Log::info("Reached maximum hoisted node count of {}, stopping.",
+                        Log::info("HoistLoopInvariant: Reached maximum hoisted node count of {}, "
+                                  "stopping.",
                                   MAX_NODES_TO_HOIST);
                         return graph;
                     }
                 }
             }
         }
-
-        Log::info("HoistLoopInvariant: Hoisted {} nodes total", hoistedCount);
         return graph;
     }
 
