@@ -682,7 +682,7 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractRightPartialTile)
         // clang-format off
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected,
             is_add_op::value
-                ?  _HIPCUB_STD::max(test_utils::precision<type>::value, test_utils::precision<stored_type>::value)
+                ? _HIPCUB_STD::max(test_utils::precision<type>::value, test_utils::precision<stored_type>::value)
                 : std::is_same<type, stored_type>::value 
                     ? 0 
                     : test_utils::precision<stored_type>::value));
