@@ -147,9 +147,13 @@ if(HIPSPARSE_ENABLE_HIP)
     )
 endif()
 
-if(NOT HIPSPARSE_ENABLE_HOST)
-    target_include_directories(hipsparse-test PRIVATE "${hipsparse_INCLUDE_DIRS}/hipsparse")
-endif()
+# NOTE: Commented out - unnecessary manual include directory specification
+# Include directories are already provided through target linkage:
+# hipsparse-test -> hipsparse::clients-common -> roc::hipsparse
+# Modern CMake targets should propagate usage requirements automatically
+#if(NOT HIPSPARSE_ENABLE_HOST)
+#    target_include_directories(hipsparse-test PRIVATE "${hipsparse_INCLUDE_DIRS}/hipsparse")
+#endif()
 
 target_compile_definitions(hipsparse-test PRIVATE GOOGLE_TEST)
 
