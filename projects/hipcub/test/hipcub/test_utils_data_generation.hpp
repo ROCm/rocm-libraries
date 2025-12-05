@@ -460,11 +460,11 @@ inline std::vector<T> get_random_data01(size_t size, float p, int seed_value)
     std::bernoulli_distribution distribution(p);
     std::vector<T>              data(size);
     std::generate(data.begin(),
-                  data.begin() + std::min(size, max_random_size),
+                  data.begin() + _HIPCUB_STD::min(size, max_random_size),
                   [&]() { return convert_to_device<T>(distribution(gen)); });
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
-        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
+        std::copy_n(data.begin(), _HIPCUB_STD::min(size - i, max_random_size), data.begin() + i);
     }
     return data;
 }

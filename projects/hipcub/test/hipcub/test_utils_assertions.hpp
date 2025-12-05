@@ -48,7 +48,7 @@ template<class T>
 inline void assert_eq(const std::vector<T>& result, const std::vector<T>& expected, const size_t max_length = SIZE_MAX)
 {
     if(max_length == SIZE_MAX || max_length > expected.size()) ASSERT_EQ(result.size(), expected.size());
-    for(size_t i = 0; i < std::min(result.size(), max_length); i++)
+    for(size_t i = 0; i < _HIPCUB_STD::min(result.size(), max_length); i++)
     {
         if(bit_equal(result[i], expected[i])) continue; // Check to also regard equality of NaN's, -NaN, +inf, -inf as correct.
 
@@ -74,7 +74,7 @@ inline void assert_eq(const std::vector<T>& result, const std::vector<T>& expect
 inline void assert_eq(const std::vector<test_utils::half>& result, const std::vector<test_utils::half>& expected, const size_t max_length = SIZE_MAX)
 {
     if(max_length == SIZE_MAX || max_length > expected.size()) ASSERT_EQ(result.size(), expected.size());
-    for(size_t i = 0; i < std::min(result.size(), max_length); i++)
+    for(size_t i = 0; i < _HIPCUB_STD::min(result.size(), max_length); i++)
     {
         if(bit_equal(result[i], expected[i])) continue; // Check to also regard equality of NaN's, -NaN, +inf, -inf as correct.
         ASSERT_EQ(test_utils::native_half(result[i]), test_utils::native_half(expected[i])) << "where index = " << i;
@@ -84,7 +84,7 @@ inline void assert_eq(const std::vector<test_utils::half>& result, const std::ve
 inline void assert_eq(const std::vector<test_utils::bfloat16>& result, const std::vector<test_utils::bfloat16>& expected, const size_t max_length = SIZE_MAX)
 {
     if(max_length == SIZE_MAX || max_length > expected.size()) ASSERT_EQ(result.size(), expected.size());
-    for(size_t i = 0; i < std::min(result.size(), max_length); i++)
+    for(size_t i = 0; i < _HIPCUB_STD::min(result.size(), max_length); i++)
     {
         if(bit_equal(result[i], expected[i])) continue; // Check to also regard equality of NaN's, -NaN, +inf, -inf as correct.
         ASSERT_EQ(test_utils::native_bfloat16(result[i]), test_utils::native_bfloat16(expected[i])) << "where index = " << i;

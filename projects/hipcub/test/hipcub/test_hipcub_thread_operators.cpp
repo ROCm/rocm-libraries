@@ -511,7 +511,7 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, ReduceBySegmentOp)
         pair_type              init(0, 0);
         for(size_t offset = 0; offset < input_size; offset += segment_size)
         {
-            const size_t end       = std::min(input_size, offset + segment_size);
+            const size_t end       = _HIPCUB_STD::min(input_size, offset + segment_size);
             pair_type    aggregate = init;
             for(size_t i = offset; i < end; ++i)
             {
@@ -528,7 +528,7 @@ TYPED_TEST(HipcubNCThreadOperatorsTests, ReduceBySegmentOp)
         std::vector<pair_type> output{};
         for(size_t offset = 0; offset < input_size; offset += segment_size)
         {
-            const size_t end       = std::min(input_size, offset + segment_size);
+            const size_t end       = _HIPCUB_STD::min(input_size, offset + segment_size);
             pair_type    aggregate = init;
             for(size_t i = offset; i < end; ++i)
             {

@@ -38,6 +38,8 @@
 #include <hipcub/util_allocator.hpp>
 #include <hipcub/iterator/discard_output_iterator.hpp>
 
+#include _HIPCUB_STD_INCLUDE(functional)
+
 #define AssertEquals(a, b) if ((a) != (b)) { std::cerr << "\n(" << __FILE__ << ": " << __LINE__ << ")\n"; exit(1);}
 
 #define HIP_CHECK(condition)                                                           \
@@ -573,8 +575,8 @@ void RandomBits(
             int current_bit = j * WORD_BYTES * 8;
 
             unsigned int word = 0xffffffff;
-            word &= 0xffffffff << std::max(0, begin_bit - current_bit);
-            word &= 0xffffffff >> std::max(0, (current_bit + (WORD_BYTES * 8)) - end_bit);
+            word &= 0xffffffff << _HIPCUB_STD::max(0, begin_bit - current_bit);
+            word &= 0xffffffff >> _HIPCUB_STD::max(0, (current_bit + (WORD_BYTES * 8)) - end_bit);
 
             for (int i = 0; i <= entropy_reduction; i++)
             {

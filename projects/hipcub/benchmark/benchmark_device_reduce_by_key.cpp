@@ -58,7 +58,7 @@ void run_benchmark(benchmark::State& state,
     while(offset < size)
     {
         const size_t key_count = key_counts[unique_count % key_counts.size()];
-        const size_t end       = std::min(size, offset + key_count);
+        const size_t end       = _HIPCUB_STD::min(size, offset + key_count);
         for(size_t i = offset; i < end; i++)
         {
             keys_input[i] = unique_count;

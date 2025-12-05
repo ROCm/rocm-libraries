@@ -22,7 +22,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
@@ -40,6 +39,10 @@
 
 // HIP API
 #include <hip/hip_runtime.h>
+
+#include <hipcub/libcxx.hpp>
+
+#include _HIPCUB_LIBCXX_INCLUDE(cmath)
 
 // test_utils.hpp should only be included by this header.
 // The following definition is used as guard in test_utils.hpp
