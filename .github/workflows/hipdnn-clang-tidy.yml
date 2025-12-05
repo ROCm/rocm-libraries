@@ -9,7 +9,7 @@ on:
 
 jobs:
   clang-tidy:
-    runs-on: ubuntu-24.04
+    runs-on: azure-linux-scale-rocm
     steps:
       - name: Checkout rocm-libraries
         uses: actions/checkout@v4
@@ -19,14 +19,6 @@ jobs:
         with:
           repository: ROCm/TheRock
           path: TheRock
-
-      # Free up disk space for ROCm installation.
-      # The runner fully depletes its disk space otherwise.
-      - name: Free Disk Space
-        run: |
-          sudo rm -rf /usr/share/dotnet          # 4.0G
-          sudo rm -rf /usr/share/swift           # 3.2G
-          sudo rm -rf /usr/local/lib/android     # ~13G
 
       - name: Install dependencies
         run: |
