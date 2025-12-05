@@ -1275,11 +1275,11 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 LRB1"),
                     SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRB0"),
                     SBarrier(comment=""),
-                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for previous GRB to complete"),
+                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0"),
                     SBarrier(comment=""),
-                    SWaitCnt(dscnt=-1, vlcnt=(13+8-5), vscnt=-1, comment="Wait for previous GRB to complete"),
+                    SWaitCnt(dscnt=-1, vlcnt=13, vscnt=-1, comment="Wait for previous GRA(B) to complete"),
                     SBarrier(comment=""),
-                    SWaitCnt(dscnt=-1, vlcnt=(13+10-13), vscnt=-1, comment="Wait for previous GRA to complete"),
+                    SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="Wait for previous GRB(A) to complete"),
                     SBarrier(comment="")]
         nglshift = nllshift = 13
 
