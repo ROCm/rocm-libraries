@@ -61,7 +61,7 @@ set( sample_list rocfft_example_complexcomplex rocfft_example_realcomplex rocfft
 
 foreach( sample ${sample_list} )
 
-  add_executable( ${sample} ${sample}.cpp )
+  add_executable( ${sample} ${sample}.cpp ../../../shared/data_gen_device.cpp )
 
   target_include_directories(
     ${sample}
