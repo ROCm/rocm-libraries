@@ -262,14 +262,6 @@ protected:
             }
         }
 
-        // if(std::accumulate(tensorsConfig.blens.begin(),
-        //                    tensorsConfig.blens.end(),
-        //                    4,
-        //                    std::multiplies<std::size_t>()) == 1)
-        // {
-        //     bitmap = 4;
-        // }
-
         num_wg_orig = num_wg;
         max_num_wg  = 4096;
         num_wg      = num_wg > max_num_wg ? max_num_wg : num_wg;
@@ -342,10 +334,10 @@ protected:
         std::string program_name       = "MIOpenTensorKernels.cl";
         std::string network_config_ocl = network_config + "-ocl";
 
-        handle.AddKernel("Op4dTensorGeneric",
+        handle.AddKernel(kernel_name,
                          network_config_ocl,
                          program_name,
-                         "Op4dTensorGeneric",
+                         kernel_name,
                          vld,
                          vgd,
                          params)(tensA_dev.get(),
@@ -381,7 +373,7 @@ protected:
         if constexpr(PERF_ENABLE)
         {
             ph.perfTest(handle,
-                        "Op4dTensorGeneric",
+                        kernel_name,
                         network_config_ocl,
                         false,
                         tensA_dev.get(),
@@ -429,10 +421,10 @@ protected:
         std::string program_name       = "MIOpenTensorKernelsHip.cpp";
         std::string network_config_hip = network_config + "-hip";
 
-        handle.AddKernel("Op4dTensorGeneric",
+        handle.AddKernel(kernel_name,
                          network_config_hip,
                          program_name,
-                         "Op4dTensorGeneric",
+                         kernel_name,
                          vld,
                          vgd,
                          params)(tensA_dev.get(),
@@ -468,7 +460,7 @@ protected:
         if constexpr(PERF_ENABLE)
         {
             ph.perfTest(handle,
-                        "Op4dTensorGeneric",
+                        kernel_name,
                         network_config_hip,
                         false,
                         tensA_dev.get(),
@@ -541,6 +533,7 @@ protected:
         }
     }
 
+    const std::string kernel_name{"Op4dTensorGeneric"};
     std::string network_config{};
     std::string params{};
     std::vector<size_t> vld, vgd;
