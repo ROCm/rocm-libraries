@@ -254,24 +254,26 @@ namespace rocRoller::KernelGraph
 
         // Next, consider Unroll coordinates.
         auto unrolls = filterCoordinates<Unroll>(required, graph);
+
         for(auto unroll : unrolls)
         {
-            std::vector<int> neighbourNodes;
-            if(direction == Graph::Direction::Upstream)
-                neighbourNodes = graph.coordinates.childNodes(unroll).to<std::vector>();
-            else
-                neighbourNodes = graph.coordinates.parentNodes(unroll).to<std::vector>();
+            // In StreamK, Unroll coordinates are connected via Identify edges.
+            // followIdentify resolves these chains (or returns the original if none).
+            auto unrollTarget = followIdentify(unroll, graph);
 
-            for(auto neighbourNode : neighbourNodes)
+            // Find a neighbour of unrollTarget that's actually in the path
+            auto coord = getNeighbourNodeInPath(unrollTarget, direction, path, graph);
+            if(coord != -1 && !isForLoop.contains(coord))
             {
-                if(path.contains(neighbourNode) && !isForLoop.contains(neighbourNode))
+                auto it = std::find(codegen.cbegin(), codegen.cend(), coord);
+                if(it == codegen.cend())
                 {
-                    auto it = std::find(codegen.cbegin(), codegen.cend(), neighbourNode);
-                    if(it == codegen.cend())
+                    // Check if this coordinate is already in ordered
+                    if(std::find(ordered.begin(), ordered.end(), coord) == ordered.end())
                     {
-                        ordered.push_back(neighbourNode);
-                        isUnroll.insert(neighbourNode);
+                        ordered.push_back(coord);
                     }
+                    isUnroll.insert(coord);
                 }
             }
         }
