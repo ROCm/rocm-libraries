@@ -104,9 +104,6 @@ ADD ${PROJ}/requirements.txt /requirements.txt
 ADD ${PROJ}/dev-requirements.txt /dev-requirements.txt
 ADD ${PROJ}/docs/sphinx/requirements.txt /doc-requirements.txt
 
-# Copy Composable Kernel
-COPY composablekernel /composable_kernel
-
 # Install an init system
 RUN wget https://github.com/Yelp/dumb-init/releases/download/v1.2.0/dumb-init_1.2.0_amd64.deb && \
     dpkg -i dumb-init_*.deb && rm dumb-init_*.deb && \
@@ -138,6 +135,17 @@ ENV PATH="/opt/rocm:${PATH}"
 
 ADD ${PROJ}/script/redis-cli.conf /redis-cli.conf
 ADD ${PROJ}/script/sccache_wrapper.sh /sccache_wrapper.sh
+
+# rbuild is used to trigger build of requirements.txt, dev-requirements.txt.
+RUN if [ "$USE_FIN" = "ON" ]; then \
+    rbuild prepare -s fin -d $PREFIX -DGPU_ARCHS="${GPU_ARCHS}"; \
+    else \
+    rbuild prepare -s develop -d $PREFIX -DGPU_ARCHS="${GPU_ARCHS}"; \
+    fi && \
+    ccache -s
+
+# Copy Composable Kernel
+COPY composablekernel /composable_kernel
 
 RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
@@ -176,14 +184,5 @@ RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
     sccache -s; \
     fi
 
-# rbuild is used to trigger build of requirements.txt, dev-requirements.txt.
-RUN if [ "$USE_FIN" = "ON" ]; then \
-    rbuild prepare -s fin -d $PREFIX -DGPU_ARCHS="${GPU_ARCHS}"; \
-    else \
-    rbuild prepare -s develop -d $PREFIX -DGPU_ARCHS="${GPU_ARCHS}"; \
-    fi && \
-    ccache -s
-
 # Remove CK source once built and installed
 RUN rm -rf /composable_kernel
-
