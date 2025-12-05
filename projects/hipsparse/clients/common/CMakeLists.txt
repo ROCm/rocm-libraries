@@ -5,7 +5,7 @@
 add_library(hipsparse-clients-common STATIC)
 add_library(hipsparse::clients-common ALIAS hipsparse-clients-common)
 
-target_compile_features(hipsparse-clients-common PRIVATE cxx_std_17)
+target_compile_features(hipsparse-clients-common PUBLIC cxx_std_17)
 
 target_sources(hipsparse-clients-common PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/arg_check.cpp"
@@ -57,7 +57,7 @@ endif()
 add_library(hipsparse-samples-common STATIC)
 add_library(hipsparse::samples-common ALIAS hipsparse-samples-common)
 
-target_compile_features(hipsparse-samples-common PRIVATE cxx_std_17)
+target_compile_features(hipsparse-samples-common PUBLIC cxx_std_17)
 
 target_sources(hipsparse-samples-common PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp"
