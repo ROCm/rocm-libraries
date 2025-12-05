@@ -825,7 +825,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
         kernel["UsePLRPack"] = True
 
         optSchedule = {
-            'SYNC'  : [[25, 25, 46, 46, 55, 55]],
+            'SYNC'  : [[-1, 25, 25, 46, 46, 55, 55, 72, 72]],
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
             'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
             'LRA0'  : [[0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 18, 18, 20, 20, 22, 22],
@@ -851,9 +851,12 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
             'LCC'   : [[95, 95]],
         }
 
-        syncCode = [SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete") ,
+        syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 to complete") ,
+                    SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete") ,
                     SBarrier(comment="") ,
-                    SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete") ,
+                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete") ,
+                    SBarrier(comment="") ,
+                    SWaitCnt(dscnt=-1, vlcnt=14+4, vscnt=-1, comment="Wait for global reads to complete") ,
                     SBarrier(comment="") ,
                     SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="Wait for global reads to complete") ,
                     SBarrier(comment="") ,
@@ -864,7 +867,6 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
 
     numMfma = 96
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.disableValidation()  # TODO: Remove after schedule is fixed
     return True, opt1
 
 def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
@@ -1504,8 +1506,8 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
         }
 
         syncCode = [
-            SBarrier(comment="wavefront sync at loop start"),
-            SWaitCnt(dscnt=12, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LR/LW"),
+            SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LRB1-4"),
+            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LRB1-remaining"),
             SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before GRA DirectToLds"),
             SBarrier(comment="barrier after LRA0, before GRA starts"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0 to complete before GRB DirectToLds"),
@@ -1590,7 +1592,6 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
 
     numMfma = 104
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.disableValidation()  # TODO: Fix and re-enable
     return True, opt1
 
 def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
@@ -1785,7 +1786,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
         # Note: A/B Global read orders are swapped
         # i.e. GRA contains GR for B
         optSchedule = {
-            'SYNC'  : [[-1, 17, 17, 49, 49, 59, 59]],
+            'SYNC'  : [[-1, 7, 17, 17, 49, 49, 59, 59]],
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
             'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
             'LRB0'  : [[0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10],
@@ -1809,6 +1810,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
 
         syncCode = [
             SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for prior local read. Relax a bit to dscnt=4 to reduce latency") ,
+            SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for remaining LRA1.") ,
             SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for all LRB0 prior to  LRA0*3") ,
             SBarrier(comment="") ,
             SWaitCnt(dscnt=0,  vlcnt=-1, vscnt=-1, comment="Wait for prior local read") ,
@@ -1822,7 +1824,6 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
 
     numMfma = 120
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.disableValidation()  # TODO: Remove after landing fix
     return True, opt1
 
 def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
