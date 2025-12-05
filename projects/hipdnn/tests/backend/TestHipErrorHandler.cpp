@@ -8,7 +8,7 @@
 // HipErrorHandler is registered as a test event listener that runs AFTER each test.
 // Its job is to verify tests properly clean up their HIP errors.
 
-TEST(HipErrorHandler, GenerateHipError)
+TEST(TestGpuHipErrorHandler, GenerateHipError)
 {
     // Generate a HIP error by trying to set an invalid device
     // This simulates real test scenarios where HIP API calls may fail
@@ -30,7 +30,7 @@ TEST(HipErrorHandler, GenerateHipError)
     // FAIL this test, preventing error propagation to subsequent tests.
 }
 
-TEST(HipErrorHandler, NoErrorPropagation)
+TEST(TestGpuHipErrorHandler, NoErrorPropagation)
 {
     // Verify that errors from the previous test do NOT propagate here
     // WITH HipErrorHandler: This test PASSES (no propagation)
@@ -40,7 +40,7 @@ TEST(HipErrorHandler, NoErrorPropagation)
     EXPECT_EQ(hipError, hipSuccess) << "No errors should propagate from previous test";
 }
 
-TEST(HipErrorHandler, NoExtErrorPropagation)
+TEST(TestGpuHipErrorHandler, NoExtErrorPropagation)
 {
     // Verify that extended errors from the first test do NOT propagate here
     auto hipExtError = hipExtGetLastError();

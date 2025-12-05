@@ -7,7 +7,7 @@
 // This test suite demonstrates the HIP error propagation issue.
 // Without proper error handling, errors from one test can affect subsequent tests.
 
-TEST(HipErrorPropagation, GenerateHipError)
+TEST(TestGpuHipErrorPropagation, GenerateHipError)
 {
     // Intentionally generate a HIP error by trying to set an invalid device
     // This simulates a test that generates an error but doesn't clean it up
@@ -24,7 +24,7 @@ TEST(HipErrorPropagation, GenerateHipError)
     // This is intentional to demonstrate the problem
 }
 
-TEST(HipErrorPropagation, ExpectErrorPropagation)
+TEST(TestGpuHipErrorPropagation, ExpectErrorPropagation)
 {
     // WITHOUT HipErrorHandler: This test PASSES (finds expected error from previous test)
     // WITH HipErrorHandler: This test FAILS (handler clears errors, so no error found)
@@ -43,7 +43,7 @@ TEST(HipErrorPropagation, ExpectErrorPropagation)
     }
 }
 
-TEST(HipErrorPropagation, ExpectExtErrorPropagation)
+TEST(TestGpuHipErrorPropagation, ExpectExtErrorPropagation)
 {
     // WITHOUT HipErrorHandler: This test PASSES (finds expected ext error from first test)
     // WITH HipErrorHandler: This test FAILS (handler clears errors, so no error found)
