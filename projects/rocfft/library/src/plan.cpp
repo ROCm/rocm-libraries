@@ -1751,14 +1751,28 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
         // since we are trying enumerating solutions now
         if(TuningBenchmarker::GetSingleton().IsInitializingTuning() == false)
         {
-            // Solutions are tuned on the common case of contiguous
-            // transforms.  They are not necessarily correct for
-            // non-default strides.
-            if(rocfft_plan_t::is_contiguous(
-                   execPlan.rootPlan->length, execPlan.rootPlan->inStride, execPlan.rootPlan->iDist)
-               && rocfft_plan_t::is_contiguous(execPlan.rootPlan->outputLength,
-                                               execPlan.rootPlan->outStride,
-                                               execPlan.rootPlan->oDist))
+            // Solutions do not consider strides.  Even-length real
+            // transforms need special consideration, since the
+            // even-length optimization is only valid for stride-1 on
+            // the fastest dimension.  So only apply a solution if
+            // we're not doing even-length real, or if fastest dim
+            // stride is 1.
+            const bool evenLengthReal = (transformType == rocfft_transform_type_real_forward
+                                         || transformType == rocfft_transform_type_real_forward)
+                                        && execPlan.rootPlan->length[0] % 2 == 0;
+            const bool stride1 = execPlan.rootPlan->inStride.front() == 1
+                                 && execPlan.rootPlan->outStride.front() == 1;
+            if(evenLengthReal && !stride1)
+            {
+                if(LOG_TRACE_ENABLED())
+                {
+                    (*LogSingleton::GetInstance().GetTraceOS())
+                        << "transform is even-length real but not stride-1, not applying solution "
+                           "map"
+                        << std::endl;
+                }
+            }
+            else
             {
                 execPlan.rootScheme = ApplySolution(execPlan);
                 if(execPlan.rootScheme)
@@ -1766,14 +1780,6 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
                     execPlan.rootPlan = nullptr;
                     execPlan.rootPlan = NodeFactory::CreateExplicitNode(
                         rootPlanData, nullptr, execPlan.rootScheme->curScheme);
-                }
-            }
-            else
-            {
-                if(LOG_TRACE_ENABLED())
-                {
-                    (*LogSingleton::GetInstance().GetTraceOS())
-                        << "transform is not contiguous, not applying solution map" << std::endl;
                 }
             }
         }
