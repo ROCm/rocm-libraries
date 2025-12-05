@@ -26,6 +26,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 ### Removed
 
+* Removed deprecated `hipcub:max` and `hipcub:min`. Use `hip::std::max` and `hip::std::min` instead.
 * Deprecated `hipcub::Swap`, use `rocprim::swap` instead.
 
 ### Changed
