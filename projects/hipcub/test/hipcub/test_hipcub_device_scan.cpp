@@ -105,7 +105,8 @@ std::vector<T>
     while(keys_start_index < size)
     {
         const size_t new_segment_length = segment_length_distribution(prng);
-        const size_t new_segment_end    = std::min(size, keys_start_index + new_segment_length);
+        const size_t new_segment_end
+            = _HIPCUB_STD::min(size, keys_start_index + new_segment_length);
         const T      key                = key_distribution(prng);
         std::fill(std::next(keys.begin(), keys_start_index),
                   std::next(keys.begin(), new_segment_end),

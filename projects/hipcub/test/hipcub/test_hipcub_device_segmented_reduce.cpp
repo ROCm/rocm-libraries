@@ -125,7 +125,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduceOp, Reduce)
                 const size_t segment_length = segment_length_dis(gen);
                 offsets.push_back(offset);
 
-                const size_t end   = std::min(size, offset + segment_length);
+                const size_t end   = _HIPCUB_STD::min(size, offset + segment_length);
                 max_segment_length = std::max(max_segment_length, end - offset);
 
                 result_type aggregate = init;
@@ -324,7 +324,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
                 const size_t segment_length = segment_length_dis(gen);
                 offsets.push_back(offset);
 
-                const size_t end   = std::min(size, offset + segment_length);
+                const size_t end   = _HIPCUB_STD::min(size, offset + segment_length);
                 max_segment_length = std::max(max_segment_length, end - offset);
 
                 result_type aggregate = init;
@@ -481,7 +481,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
                 const size_t segment_length = segment_length_dis(gen);
                 offsets.push_back(offset);
 
-                const size_t end   = std::min(size, offset + segment_length);
+                const size_t end   = _HIPCUB_STD::min(size, offset + segment_length);
                 max_segment_length = std::max(max_segment_length, end - offset);
 
                 result_type aggregate = init;
@@ -638,7 +638,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Max)
                 const size_t segment_length = segment_length_dis(gen);
                 offsets.push_back(offset);
 
-                const size_t end   = std::min(size, offset + segment_length);
+                const size_t end   = _HIPCUB_STD::min(size, offset + segment_length);
                 max_segment_length = std::max(max_segment_length, end - offset);
 
                 result_type aggregate = init;
@@ -848,7 +848,7 @@ void test_argminmax(typename TestFixture::params::input_type empty_value)
                 offsets.push_back(offset);
                 Iterator x(&values_input[offset]);
 
-                const size_t end   = std::min(size, offset + segment_length);
+                const size_t end   = _HIPCUB_STD::min(size, offset + segment_length);
                 max_segment_length = std::max(max_segment_length, end - offset);
                 if(offset < end)
                 {
@@ -1186,7 +1186,7 @@ TEST(HipcubDeviceSegmentedReduceLargeIndicesTests, LargeIndices)
                 const size_t segment_length = segment_length_dis(gen);
                 offsets.push_back(offset);
 
-                const offset_type end       = std::min(size, offset + segment_length);
+                const offset_type end       = _HIPCUB_STD::min(size, offset + segment_length);
                 output_type       aggregate = init;
                 aggregate = reduce_op(aggregate, gauss_sum(end) - gauss_sum(offset));
                 aggregates_expected.push_back(aggregate);
