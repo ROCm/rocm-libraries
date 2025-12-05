@@ -59,7 +59,7 @@ namespace rocRoller
             }
 
             // Non-copyable
-            ComgrMetadataNode(ComgrMetadataNode const&)            = delete;
+            ComgrMetadataNode(ComgrMetadataNode const&) = delete;
             ComgrMetadataNode& operator=(ComgrMetadataNode const&) = delete;
 
             // Movable
