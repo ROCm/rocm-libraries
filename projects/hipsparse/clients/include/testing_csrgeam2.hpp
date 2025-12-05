@@ -777,6 +777,14 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
         return HIPSPARSE_STATUS_INTERNAL_ERROR;
     }
 
+    if(idx_base_C != idx_base_A || idx_base_C != idx_base_B)
+    {
+#ifdef __HIP_PLATFORM_NVIDIA__
+        // cusparse does not properly support mixed index bases
+        return HIPSPARSE_STATUS_SUCCESS;
+#endif
+    }
+
     std::cout << "M: " << M << " N: " << N << " nnz_A: " << nnz_A << std::endl;
 
     std::cout << "hcsr_row_ptr_A" << std::endl;
@@ -881,7 +889,7 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
     void* dbuffer = (void*)dbuffer_managed.get();
 
     // hipsparse pointer mode host
-    int hnnz_C_1 = 0;
+    int hnnz_C_1;
 
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
     CHECK_HIPSPARSE_ERROR(hipsparseXcsrgeam2Nnz(handle,
