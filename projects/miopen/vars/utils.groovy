@@ -271,8 +271,8 @@ def getDockerImage(Map conf=[:])
         sh("docker buildx version")   
     }
 
-    def dockerArgs = "--export-cache type=registry,ref=${cacheRef},compression=zstd " +
-                     "--import-cache type=registry,ref=${cacheRef} " +
+    def dockerArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd " +
+                     "--cache-from type=registry,ref=${cacheRef} " +
                      "--build-arg PREFIX=${prefixpath} " +
                      "--build-arg GPU_ARCHS=\"${gpu_arch}\" "
     if(env.CCACHE_HOST)
@@ -316,10 +316,16 @@ def getDockerImage(Map conf=[:])
     catch(Exception ex)
     {
         echo "Building image..."
-        dockerImage = docker.build("${image}", "${dockerArgs} ${env.WORKSPACE}/${env.PROJ_DIR}/.")
+        def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
         withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-            dockerImage.push()
+            sh """
+                DOCKER_BUILDKIT=1 docker buildx build \
+                --push \
+                ${dockerArgs} \
+                ${buildContext}
+            """.stripIndent()
         }
+        dockerImage = docker.image("${image}")
     }
 
     if(params.INSTALL_MIOPEN == 'ON')
