@@ -5,8 +5,15 @@ include(GoogleTest)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
+# Demonstration: Error propagation WITHOUT HipErrorHandler (all tests pass)
+add_executable(public_hipdnn_backend_tests_no_handler TestHipErrorPropagation.cpp)
+target_link_libraries(public_hipdnn_backend_tests_no_handler PRIVATE GTest::gtest GTest::gtest_main hip::host)
+add_integration_test_target(public_hipdnn_backend_tests_no_handler ${CMAKE_CURRENT_BINARY_DIR})
+
+# Main integration test executable WITH HipErrorHandler
 add_executable(
     public_hipdnn_backend_tests
+    main.cpp
     IntegrationBackendDescriptor.cpp
     IntegrationBackendExecuteApi.cpp
     IntegrationEngineApi.cpp
@@ -18,14 +25,14 @@ add_executable(
     IntegrationPluginLoading.cpp
     IntegrationSetPluginPathsExt.cpp
     IntegrationVariantPackApi.cpp
+    TestHipErrorHandler.cpp
     TestUtil.cpp
 )
 
 target_compile_options(public_hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_link_libraries(
     public_hipdnn_backend_tests
-    GTest::gtest
-    GTest::gtest_main
+    GTest::gtest  # No gtest_main - we provide our own main.cpp
     Threads::Threads
     hipdnn_sdk
     hipdnn_backend
