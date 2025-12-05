@@ -217,6 +217,7 @@
 #include "blas_ex/testing_scal_batched_ex.hpp"
 #include "blas_ex/testing_scal_ex.hpp"
 #include "blas_ex/testing_scal_strided_batched_ex.hpp"
+#include "blas_ex/testing_syrk_ex.hpp"
 #include "blas_ex/testing_trsm_batched_ex.hpp"
 #include "blas_ex/testing_trsm_ex.hpp"
 #include "blas_ex/testing_trsm_strided_batched_ex.hpp"
@@ -446,6 +447,7 @@ void get_test_name(const Arguments& arg, std::string& name)
         {"syrkx", testname_syrkx},
         {"syrkx_batched", testname_syrkx_batched},
         {"syrkx_strided_batched", testname_syrkx_strided_batched},
+        {"syrkx_ex", testname_syrk_ex},
         {"trmm", testname_trmm},
         {"trmm_batched", testname_trmm_batched},
         {"trmm_strided_batched", testname_trmm_strided_batched},
@@ -537,6 +539,31 @@ struct perf_gemm_strided_batched_ex<
     {
         static const func_map map = {
             {"gemm_strided_batched_ex", testing_gemm_strided_batched_ex<Ti, To, Tc>},
+        };
+        run_function(map, arg);
+    }
+};
+
+// Template to dispatch testing_syrk_ex for performance tests
+// When Ti == void or Ti == To == Tc == bfloat16, the test is marked invalid
+template <typename Ti, typename To = Ti, typename Tc = To, typename = void>
+struct perf_syrk_ex : hipblas_test_invalid
+{
+};
+
+template <typename Ti, typename To, typename Tc>
+struct perf_syrk_ex<Ti,
+                    To,
+                    Tc,
+                    std::enable_if_t<!std::is_same<Ti, void>{}
+                                     && !(std::is_same<Ti, To>{} && std::is_same<Ti, Tc>{}
+                                          && std::is_same<Ti, hipblasBfloat16>{})>>
+    : hipblas_test_valid
+{
+    void operator()(const Arguments& arg)
+    {
+        static const func_map map = {
+            {"syrk_ex", testing_syrk_ex<Ti, To, Tc>},
         };
         run_function(map, arg);
     }
@@ -1350,6 +1377,10 @@ int run_bench_test(Arguments& arg, int unit_check, int timing)
         }
 
         hipblas_gemm_dispatch<perf_gemm_strided_batched_ex>(arg);
+    }
+    else if(!strcmp(function, "syrk_ex"))
+    {
+        hipblas_syrk_ex_dispatch<perf_syrk_ex>(arg);
     }
     else
     {

@@ -95,7 +95,7 @@ void testing_gemm_ex_bad_arg(const Arguments& arg)
     device_matrix<To> dC(M, N, ldc);
 
     device_vector<Tex> d_alpha(1), d_beta(1), d_one(1), d_zero(1);
-    Ts                 h_alpha{1}, h_beta{2}, h_one{1}, h_zero{0};
+    Ts                 h_alpha(1.0f), h_beta(2.0f), h_one(1.0f), h_zero(0.0f);
 
     if constexpr(std::is_same_v<Tex, hipblasHalf>)
         h_one = float_to_half(1.0f);
@@ -532,10 +532,10 @@ void testing_gemm_ex(const Arguments& arg)
         }
         if(norm_check)
         {
-            hipblas_error_host
-                = hipblas_abs(norm_check_general<To>('F', M, N, ldc, hC_gold, hC_host));
-            hipblas_error_device
-                = hipblas_abs(norm_check_general<To>('F', M, N, ldc, hC_gold, hC_device));
+            hipblas_error_host = hipblas_abs(
+                norm_check_general<To>('F', M, N, ldc, hC_gold.data(), hC_host.data()));
+            hipblas_error_device = hipblas_abs(
+                norm_check_general<To>('F', M, N, ldc, hC_gold.data(), hC_device.data()));
         }
     }
 

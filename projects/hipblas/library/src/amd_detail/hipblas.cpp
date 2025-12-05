@@ -33916,6 +33916,96 @@ catch(...)
     return hipblas_exception_to_status();
 }
 
+// syrk_ex
+hipblasStatus_t hipblasInternalSyrkExTypes(hipDataType       a_in,
+                                           hipDataType       c_in,
+                                           hipDataType       compute_in,
+                                           rocblas_datatype& a_out,
+                                           rocblas_datatype& c_out,
+                                           rocblas_datatype& compute_out)
+{
+    hipblasStatus_t status = HIPBLAS_STATUS_SUCCESS;
+
+    if(a_in == HIP_R_16F && c_in == HIP_R_16F && compute_in == HIP_R_32F)
+    {
+        a_out = c_out = rocblas_datatype_f16_r;
+        compute_out   = rocblas_datatype_f32_r;
+    }
+    else if(a_in == HIP_R_16F && c_in == HIP_R_32F && compute_in == HIP_R_32F)
+    {
+        a_out = rocblas_datatype_f16_r;
+        c_out = compute_out = rocblas_datatype_f32_r;
+    }
+    else if(a_in == HIP_R_16BF && c_in == HIP_R_16BF && compute_in == HIP_R_32F)
+    {
+        a_out = c_out = rocblas_datatype_bf16_r;
+        compute_out   = rocblas_datatype_f32_r;
+    }
+    else if(a_in == HIP_R_16BF && c_in == HIP_R_32F && compute_in == HIP_R_32F)
+    {
+        a_out = rocblas_datatype_bf16_r;
+        c_out = compute_out = rocblas_datatype_f32_r;
+    }
+    else if(a_in == HIP_R_32F && c_in == HIP_R_32F && compute_in == HIP_R_64F)
+    {
+        a_out = c_out = rocblas_datatype_f32_r;
+        compute_out   = rocblas_datatype_f64_r;
+    }
+    else if(a_in == HIP_R_32F && c_in == HIP_R_64F && compute_in == HIP_R_64F)
+    {
+        a_out = rocblas_datatype_f32_r;
+        c_out = compute_out = rocblas_datatype_f64_r;
+    }
+    else
+    {
+        status = HIPBLAS_STATUS_NOT_SUPPORTED;
+    }
+    return status;
+}
+
+hipblasStatus_t hipblasSyrkEx(hipblasHandle_t    handle,
+                              hipblasFillMode_t  uplo,
+                              hipblasOperation_t transa,
+                              int                n,
+                              int                k,
+                              const void*        alpha,
+                              const void*        A,
+                              hipDataType        a_type,
+                              int                lda,
+                              const void*        beta,
+                              void*              C,
+                              hipDataType        c_type,
+                              int                ldc,
+                              hipDataType        compute_type)
+try
+{
+    rocblas_datatype a_type_roc, c_type_roc, compute_type_roc;
+    hipblasStatus_t  status = hipblasInternalSyrkExTypes(
+        a_type, c_type, compute_type, a_type_roc, c_type_roc, compute_type_roc);
+
+    if(status != HIPBLAS_STATUS_SUCCESS)
+        return status;
+
+    return hipblasConvertStatus(rocblas_syrk_ex((rocblas_handle)handle,
+                                                hipblasConvertFill(uplo),
+                                                hipblasConvertOperation(transa),
+                                                n,
+                                                k,
+                                                alpha,
+                                                A,
+                                                a_type_roc,
+                                                lda,
+                                                beta,
+                                                C,
+                                                c_type_roc,
+                                                ldc,
+                                                compute_type_roc));
+}
+catch(...)
+{
+    return hipblas_exception_to_status();
+}
+
 // trsm_ex
 hipblasStatus_t hipblasTrsmEx(hipblasHandle_t    handle,
                               hipblasSideMode_t  side,

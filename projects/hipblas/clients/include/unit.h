@@ -72,6 +72,10 @@ void unit_check_general(int64_t        M,
                         host_vector<T> hCPU[],
                         host_vector<T> hGPU[]);
 
+template <typename T, typename T_hpa = T>
+void unit_check_mixed(
+    int64_t M, int64_t N, int64_t lda, const std::remove_cv_t<T_hpa>* hCPU, const T* hGPU);
+
 template <typename T>
 void unit_check_error(T error, T tolerance)
 {

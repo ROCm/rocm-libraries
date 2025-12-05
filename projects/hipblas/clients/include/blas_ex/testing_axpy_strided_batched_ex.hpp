@@ -77,7 +77,7 @@ void testing_axpy_strided_batched_ex_bad_arg(const Arguments& arg)
         device_strided_batch_vector<Tx> dx(N, incx, stridex, batch_count);
         device_strided_batch_vector<Ty> dy(N, incy, stridey, batch_count);
 
-        const Ts  h_alpha{1}, h_zero{0};
+        const Ts  h_alpha{1.0f}, h_zero{0.0f};
         const Ts* alpha = &h_alpha;
         const Ts* zero  = &h_zero;
 

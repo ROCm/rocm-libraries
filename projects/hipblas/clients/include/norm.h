@@ -29,6 +29,7 @@
 #include "host_batch_matrix.hpp"
 #include "host_batch_vector.hpp"
 #include "host_vector.hpp"
+#include "type_utils.h"
 #include "utility.h"
 
 /* =====================================================================
@@ -95,14 +96,14 @@ double norm_check_general(char           norm_type,
 
 /* ============== Norm Check for strided_batched case ============= */
 template <typename T>
-double norm_check_general(char      norm_type,
-                          int64_t   M,
-                          int64_t   N,
-                          int64_t   lda,
-                          ptrdiff_t stride_a,
-                          T*        hCPU,
-                          T*        hGPU,
-                          int64_t   batch_count)
+double norm_check_general(char    norm_type,
+                          int64_t M,
+                          int64_t N,
+                          int64_t lda,
+                          int64_t stride_a,
+                          T*      hCPU,
+                          T*      hGPU,
+                          int64_t batch_count)
 {
     // norm type can be O', 'I', 'F', 'o', 'i', 'f' for one, infinity or Frobenius norm
     // one norm is max column sum
@@ -207,6 +208,44 @@ double norm_check_general(char                      norm_type,
     }
 
     return cumulative_error;
+}
+
+template <typename T, typename U>
+double norm_check_mixed(char norm_type, int64_t M, int64_t N, int64_t lda, T* hCPU, U* hGPU)
+{
+    if constexpr(is_complex<T>)
+    {
+        return norm_check_general(norm_type, M, N, lda, hCPU, hGPU);
+    }
+    else
+    {
+        size_t              size = N * (size_t)lda;
+        host_vector<double> hCPU_double(size);
+        host_vector<double> hGPU_double(size);
+
+        for(int64_t i = 0; i < N; i++)
+        {
+            for(int64_t j = 0; j < M; j++)
+            {
+                size_t idx       = j + i * (size_t)lda;
+                hCPU_double[idx] = (double)(hCPU[idx]);
+                if constexpr(std::is_same_v<U, hipblasHalf>)
+                {
+                    hGPU_double[idx] = half_to_float(hGPU[idx]);
+                }
+                else if constexpr(std::is_same_v<U, hipblasBfloat16>)
+                {
+                    hGPU_double[idx] = bfloat16_to_float(hGPU[idx]);
+                }
+                else
+                {
+                    hGPU_double[idx] = (double)hGPU[idx];
+                }
+            }
+        }
+
+        return norm_check_general<double>(norm_type, M, N, lda, hCPU_double, hGPU_double);
+    }
 }
 
 template <typename T>
