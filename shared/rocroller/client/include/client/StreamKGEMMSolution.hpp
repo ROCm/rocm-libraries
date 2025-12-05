@@ -65,18 +65,30 @@ namespace rocRoller
                                                                DataDirection::ReadOnly,
                                                                rocRoller::NUMWGS);
 
-                    for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
-                    {
-                        auto policy           = static_cast<Operations::ScratchPolicy>(i);
-                        m_scratchTags[policy] = command->allocateTag();
-                        command->addOperation(Operations::Scratch(m_scratchTags[policy], policy));
-                        command->allocateArgument(
-                            VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                            m_scratchTags[policy],
-                            ArgumentType::Value,
-                            DataDirection::ReadWrite,
-                            getScratchName(policy));
-                    }
+                    // Create a scratch operation for tile data
+                    m_scratchTags[Operations::ScratchPolicy::None] = command->allocateTag();
+                    command->addOperation(
+                        Operations::Scratch(m_scratchTags[Operations::ScratchPolicy::None],
+                                            Operations::ScratchPolicy::None));
+                    command->allocateArgument(
+                        VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                        m_scratchTags[Operations::ScratchPolicy::None],
+                        ArgumentType::Value,
+                        DataDirection::ReadWrite,
+                        getScratchName(Operations::ScratchPolicy::None));
+
+                    // Create a scratch operation for flags
+                    m_scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter]
+                        = command->allocateTag();
+                    command->addOperation(Operations::Scratch(
+                        m_scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter],
+                        Operations::ScratchPolicy::ZeroedBeforeAndAfter));
+                    command->allocateArgument(
+                        VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                        m_scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter],
+                        ArgumentType::Value,
+                        DataDirection::ReadWrite,
+                        getScratchName(Operations::ScratchPolicy::ZeroedBeforeAndAfter));
 
                     return command;
                 }

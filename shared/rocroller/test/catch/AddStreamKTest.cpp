@@ -623,7 +623,7 @@ TEST_CASE("AddStreamK with unroll K", "[streamk][kernel-graph]")
     }
 }
 
-TEST_CASE("AddStreamK scratch policy usage", "[streamk][scratch]")
+TEST_CASE("AddStreamK scratch policy usage", "[streamk][kernel-graph][scratch]")
 {
     using namespace rocRoller;
     using namespace rocRoller::Operations;
@@ -633,9 +633,7 @@ TEST_CASE("AddStreamK scratch policy usage", "[streamk][scratch]")
 
     auto context = TestContext::ForDefaultTarget();
     auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
-
-    // Use standard mode which creates both tile data and flags scratch
-    auto mode = StreamKMode::Standard;
+    auto mode    = StreamKMode::Standard;
 
     example.setTileSize(128, 256, 8);
     example.setMFMA(32, 32, 2, 1);
@@ -731,11 +729,10 @@ TEST_CASE("AddStreamK scratch policy usage", "[streamk][scratch]")
             = kgraph.coordinates.findElements(findScratchZeroed).to<std::vector>();
         CHECK(scratchZeroedCoordinates.size() == 2);
 
-        // Check the reset flags coordinate connects to the original flags coordinate via a duplicate edge
+        // Verify the reset flags coordinate connects to the original flags coordinate via a duplicate edge
         auto resetFlagsCoordinate = -1, originalFlagsCoordinate = -1;
         for(const auto& tag : scratchZeroedCoordinates)
         {
-            std::cout << "tag: " << tag << std::endl;
             // Duplicate edge connects the reset flags coordinate to the original flags coordinate
             auto isDuplicate = isEdge<Duplicate>;
             auto outDuplicates
@@ -748,15 +745,13 @@ TEST_CASE("AddStreamK scratch policy usage", "[streamk][scratch]")
                 originalFlagsCoordinate = outDuplicates[0];
             }
         }
-        std::cout << "resetFlagsCoordinate: " << resetFlagsCoordinate << std::endl;
-        std::cout << "originalFlagsCoordinate: " << originalFlagsCoordinate << std::endl;
         CHECK(resetFlagsCoordinate != -1);
         CHECK(originalFlagsCoordinate != -1);
 
         // Duplicate coordinate should have a higher tag than the original flags coordinate
         CHECK(resetFlagsCoordinate > originalFlagsCoordinate);
 
-        // Check the graph of flags scratch coordinates matches AddStreamK implementation
+        // Verify the graph of flags scratch coordinates matches AddStreamK implementation
         auto isPassThroughEdge = isEdge<PassThrough>;
         auto isJoinEdge        = isEdge<Join>;
         auto isSplitEdge       = isEdge<Split>;
@@ -785,5 +780,32 @@ TEST_CASE("AddStreamK scratch policy usage", "[streamk][scratch]")
                   .to<std::vector>();
         CHECK(maybeResetFlagsCoordinate.size() == 1);
         CHECK(maybeResetFlagsCoordinate[0] == resetFlagsCoordinate);
+
+        // Verify there are two store flags operations
+        auto storeFlagsOps
+            = kgraph.control.findElements(kgraph.control.isElemType<StoreSGPR>()).to<std::vector>();
+        CHECK(storeFlagsOps.size() == 2);
+
+        // Verify one StoreSGPR is stores the flags and the other resets the flags
+        auto storeFlagsTag = -1, resetFlagsTag = -1;
+        for(auto const tag : storeFlagsOps)
+        {
+            auto flagCoordinateTag = kgraph.mapper.get<User>(tag);
+            if(flagCoordinateTag == resetFlagsCoordinate)
+            {
+                resetFlagsTag = tag;
+            }
+            else
+            {
+                storeFlagsTag = tag;
+            }
+        }
+        CHECK(storeFlagsTag != -1);
+        CHECK(resetFlagsTag != -1);
+
+        // Verify the reset flags happens after the store flags
+        auto order
+            = kgraph.control.compareNodes(rocRoller::UpdateCache, storeFlagsTag, resetFlagsTag);
+        CHECK(order == NodeOrdering::LeftFirst);
     }
 }

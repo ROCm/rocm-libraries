@@ -600,9 +600,9 @@ namespace rocRoller
             //   nextWorkgroupTag                     ^
             //          |                            Join
             //        Split                        /  |  \
-        //       /  |  \                      /   |   \
-        //      v   v   v                    /    |    \
-        //   Workgroup  plusOne  forReceiveTileLoop
+            //       /  |  \                      /   |   \
+            //      v   v   v                    /    |    \
+            //   Workgroup  plusOne  forReceiveTileLoop
             //
             // Note: nextWorkgroupTag and resetNextWorkgroupTag both connect to the same
             // neighbors (Workgroup, plusOne, forReceiveTileLoop) but in opposite directions
