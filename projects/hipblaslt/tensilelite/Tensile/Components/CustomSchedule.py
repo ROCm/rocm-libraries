@@ -21,7 +21,7 @@
 ################################################################################
 
 from itertools import chain
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
                         StructuredModule, TextBlock, ValueEndif, ValueIf, ValueElseIf, ValueSet, SignatureBase
 from rocisa.container import vgpr, sgpr, SMEMModifiers, replaceHolder, EXEC,\
@@ -45,8 +45,9 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import Callable, Dict
 
+@dataclass
 class SyncSchedule:
-    schedule : list[tuple[int, SWaitCnt | SBarrier]] = []
+    schedule : list[tuple[int, SWaitCnt | SBarrier]] = field(default_factory=list)
 
     def add(self, idx:int, dscnt:int=-1, vlcnt:int=-1, vscnt:int=-1, comment:str="", barrier:bool=False, barrier_idx:int|None=None, barrier_comment:str=""):
         """ Add a SWaitCnt (and optionally a SBarrier) to the schedule at the given index.
@@ -1724,17 +1725,17 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         gra    = [                                              28,30,32,36,39,42] # one index for two instructions
 
         # syncs.add(                                                              59, dscnt=0, barrier=True, comment="wait for all LRB0 to complete before GRB start")
-        syncs.add(                                                              59, dscnt=len(lrb0)-2, vlcnt=len(gra), barrier=True, comment="wait for all LRB0 to complete before GRB start")
-        grb    = [                                                                 60,63,67,72,77,82,86,91,96,101] # one index for two instructions
-        # grb2    = [                                                                 61,64,68,73,78,83,87,92,97,102] # one index for two instructions
-        num_gr = len(gra) + len(grb)
-
+        # syncs.add(                                                              59, dscnt=len(lrb0)-2, vlcnt=len(gra), barrier=True, comment="wait for all LRB0 to complete before GRB start")
+        syncs.add(                                                              59, dscnt=len(lrb0)-2, comment="wait for the first LRB0 to complete ")
         lrsa   = [57]
         lrsb   = [58]
 
         lra1   = [                                                                   61,62,63,64,65, 66,67,69,71,73, 75,76] # 12 loads
         i = 65 # next LRB0 is needed at index 66, so insert wait at 65
-        syncs.add(                                                                               i, dscnt=count_items(lra1,ev=i), comment="wait for the rest of LRB0 to complete") 
+        syncs.add(                                                                               i, dscnt=count_items(lra1,ev=i), vlcnt=len(gra), barrier=True, comment="wait for the rest of LRB0 to complete") 
+        grb    = [                                                                                 66,70,75,79,84, 88,93,97,102,106] # one index for two instructions
+        # grb2    = [                                                                 61,64,68,73,78, 83,87,92,97,102] # one index for two instructions
+        num_gr = len(gra) + len(grb)
         lrb1 = None
         lrb1a  = [                                                                                     78, 80, 82, 84, 86, 88, 90, 92, 94, 96, 98, 100, 102, 104, 106, 108, 110, 112, 114, 116] # 20 loads
         lrb1b  = [                                                                                     79, 81, 83, 85, 87, 89, 91, 93, 95, 97, 99, 101, 103, 105, 107, 109, 111, 113, 115, 117] # 20 loads
