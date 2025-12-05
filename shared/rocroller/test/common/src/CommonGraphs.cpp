@@ -290,6 +290,7 @@ namespace rocRollerTest::Graphs
         {
             auto policy           = static_cast<Operations::ScratchPolicy>(i);
             m_scratchTags[policy] = m_command->allocateTag();
+            m_command->addOperation(rocRoller::Operations::Scratch(m_scratchTags[policy], policy));
             m_command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
                                         m_scratchTags[policy],
                                         ArgumentType::Value,

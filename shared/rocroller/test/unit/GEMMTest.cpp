@@ -29,8 +29,6 @@
 #include <hip/hip_runtime.h>
 #endif /* ROCROLLER_USE_HIP */
 
-#include <algorithm>
-#include <map>
 #include <regex>
 
 #include "GEMMF8F6F4.hpp"

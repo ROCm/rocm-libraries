@@ -223,12 +223,18 @@ namespace GEMMDriverTest
                 rocRoller::Operations::Tensor(2, dataType, oneStridesN)); // E
             command->addOperation(rocRoller::Operations::T_Store_Tiled(tagRelu, tagTensorRelu));
 
-            auto tagScratch = command->allocateTag();
-            command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                                      tagScratch,
-                                      ArgumentType::Value,
-                                      DataDirection::ReadWrite,
-                                      getScratchName(Operations::ScratchPolicy::None));
+            Operations::OperationTag tagScratch[static_cast<int>(Operations::ScratchPolicy::Count)];
+            for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
+            {
+                auto policy           = static_cast<Operations::ScratchPolicy>(i);
+                tagScratch[i] = command->allocateTag();
+                command->addOperation(rocRoller::Operations::Scratch(tagScratch[i], policy));
+                command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                                          tagScratch[i],
+                                          ArgumentType::Value,
+                                          DataDirection::ReadWrite,
+                                          getScratchName(policy));
+            }
 
             auto params = std::make_shared<CommandParameters>();
             params->setManualKernelDimension(2);
