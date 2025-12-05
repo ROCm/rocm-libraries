@@ -44,6 +44,49 @@ namespace rocRoller
     namespace Serialization
     {
 
+        struct ComgrMetadataNode
+        {
+            amd_comgr_metadata_node_t handle{};
+
+            ComgrMetadataNode() = default;
+
+            ~ComgrMetadataNode()
+            {
+                if(handle.handle != 0)
+                {
+                    amd_comgr_destroy_metadata(handle);
+                }
+            }
+
+            // Non-copyable
+            ComgrMetadataNode(ComgrMetadataNode const&)            = delete;
+            ComgrMetadataNode& operator=(ComgrMetadataNode const&) = delete;
+
+            // Movable
+            ComgrMetadataNode(ComgrMetadataNode&& rhs) noexcept
+                : handle(rhs.handle)
+            {
+                rhs.handle = {};
+            }
+
+            ComgrMetadataNode& operator=(ComgrMetadataNode&& rhs) noexcept
+            {
+                if(this != &rhs)
+                {
+                    if(handle.handle != 0)
+                        amd_comgr_destroy_metadata(handle);
+                    handle     = rhs.handle;
+                    rhs.handle = {};
+                }
+                return *this;
+            }
+
+            amd_comgr_metadata_node_t* addressof()
+            {
+                return &handle;
+            }
+        };
+
         struct ComgrNodeInput
         {
             amd_comgr_metadata_node_t node;
@@ -58,25 +101,23 @@ namespace rocRoller
             template <typename T>
             void mapRequired(const char* key, T& obj)
             {
-                amd_comgr_metadata_node_t value;
-                auto                      status = amd_comgr_metadata_lookup(node, key, &value);
+                ComgrMetadataNode value;
+                auto              status = amd_comgr_metadata_lookup(node, key, value.addressof());
                 AssertFatal(status == AMD_COMGR_STATUS_SUCCESS,
                             "Key ",
                             ShowValue(key),
                             " not found in comgr metadata");
-                input(value, obj);
-                amd_comgr_destroy_metadata(value);
+                input(value.handle, obj);
             }
 
             template <typename T>
             void mapOptional(const char* key, T& obj)
             {
-                amd_comgr_metadata_node_t value;
-                auto                      status = amd_comgr_metadata_lookup(node, key, &value);
+                ComgrMetadataNode value;
+                auto              status = amd_comgr_metadata_lookup(node, key, value.addressof());
                 if(status == AMD_COMGR_STATUS_SUCCESS)
                 {
-                    input(value, obj);
-                    amd_comgr_destroy_metadata(value);
+                    input(value.handle, obj);
                 }
             }
 
@@ -98,13 +139,12 @@ namespace rocRoller
 
                 for(size_t i = 0; i < count; i++)
                 {
-                    amd_comgr_metadata_node_t elNode;
-                    status = amd_comgr_index_list_metadata(n, i, &elNode);
+                    ComgrMetadataNode elNode;
+                    status = amd_comgr_index_list_metadata(n, i, elNode.addressof());
                     AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to index list");
 
                     auto& value = SequenceTraits<T, ComgrNodeInput>::element(*this, obj, i);
-                    input(elNode, value);
-                    amd_comgr_destroy_metadata(elNode);
+                    input(elNode.handle, value);
                 }
             }
 
