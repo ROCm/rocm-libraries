@@ -43,19 +43,13 @@ namespace rocRoller
 {
     namespace Serialization
     {
-
         struct ComgrMetadataNode
         {
-            amd_comgr_metadata_node_t handle{};
-
             ComgrMetadataNode() = default;
 
             ~ComgrMetadataNode()
             {
-                if(handle.handle != 0)
-                {
-                    amd_comgr_destroy_metadata(handle);
-                }
+                reset();
             }
 
             // Non-copyable
@@ -73,17 +67,29 @@ namespace rocRoller
             {
                 if(this != &rhs)
                 {
-                    if(handle.handle != 0)
-                        amd_comgr_destroy_metadata(handle);
+                    reset();
                     handle     = rhs.handle;
                     rhs.handle = {};
                 }
                 return *this;
             }
 
-            amd_comgr_metadata_node_t* addressof()
+            [[nodiscard]] amd_comgr_metadata_node_t* addressof() noexcept
             {
                 return &handle;
+            }
+
+        private:
+            amd_comgr_metadata_node_t handle{};
+
+            void reset() noexcept
+            {
+                // A handle value of 0 indicates an uninitialized/null metadata node
+                if(handle.handle != 0)
+                {
+                    amd_comgr_destroy_metadata(handle);
+                    handle = {};
+                }
             }
         };
 
@@ -107,7 +113,7 @@ namespace rocRoller
                             "Key ",
                             ShowValue(key),
                             " not found in comgr metadata");
-                input(value.handle, obj);
+                input(*value.addressof(), obj);
             }
 
             template <typename T>
@@ -117,7 +123,7 @@ namespace rocRoller
                 auto              status = amd_comgr_metadata_lookup(node, key, value.addressof());
                 if(status == AMD_COMGR_STATUS_SUCCESS)
                 {
-                    input(value.handle, obj);
+                    input(*value.addressof(), obj);
                 }
             }
 
@@ -144,7 +150,7 @@ namespace rocRoller
                     AssertFatal(status == AMD_COMGR_STATUS_SUCCESS, "Failed to index list");
 
                     auto& value = SequenceTraits<T, ComgrNodeInput>::element(*this, obj, i);
-                    input(elNode.handle, value);
+                    input(*elNode.addressof(), value);
                 }
             }
 
