@@ -271,8 +271,8 @@ def getDockerImage(Map conf=[:])
         sh("docker buildx version")   
     }
 
-    def dockerArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd " +
-                     "--cache-from type=registry,ref=${cacheRef} " +
+    def dockerArgs = "--export-cache type=registry,ref=${cacheRef},compression=zstd " +
+                     "--import-cache type=registry,ref=${cacheRef} " +
                      "--build-arg PREFIX=${prefixpath} " +
                      "--build-arg GPU_ARCHS=\"${gpu_arch}\" "
     if(env.CCACHE_HOST)
