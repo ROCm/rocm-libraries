@@ -233,20 +233,6 @@ rocm_export_targets(
         ${PACKAGE_STATIC_DEPENDS}
 )
 
-# Add architecture functions to the ROCm-generated config
-install(CODE "
-    file(APPEND \"\${CMAKE_INSTALL_PREFIX}/\${CMAKE_INSTALL_LIBDIR}/cmake/hiptensor/hiptensorConfig.cmake\"
-         \"\\n# Include hiptensor supported architectures functions\\n\")
-    file(APPEND \"\${CMAKE_INSTALL_PREFIX}/\${CMAKE_INSTALL_LIBDIR}/cmake/hiptensor/hiptensorConfig.cmake\"
-         \"include(\\\"\\\${CMAKE_CURRENT_LIST_DIR}/hiptensorSupportedArchitectures.cmake\\\")\\n\")
-")
-
-# Install additional helper files
-rocm_install(FILES
-    "cmake/Functions/hiptensorSupportedArchitectures.cmake"
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hiptensor
-)
-
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 
 rocm_create_package(
