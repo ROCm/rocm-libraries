@@ -22,8 +22,8 @@
 #
 ################################################################################
 
-from . import __version__
-from . import LibraryIO
+from Tensile import __version__
+from Tensile import LibraryIO
 from Tensile.Common.GlobalParameters import defaultBenchmarkCommonParameters
 from Tensile.Common.Constants import HR
 from Tensile.SolutionStructs.Problem import _defaultProblemType as defaultProblemType
