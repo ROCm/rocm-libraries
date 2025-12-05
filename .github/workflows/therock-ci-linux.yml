@@ -9,13 +9,17 @@ on:
         type: string
       test_type:
         type: string
+      amdgpu_families:
+        type: string
+      test_runs_on:
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   therock-build-linux:
-    name: Build
+    name: Build (${{ inputs.amdgpu_families }})
     runs-on: azure-linux-scale-rocm
     permissions:
       id-token: write
@@ -27,7 +31,7 @@ jobs:
     env:
       CACHE_DIR: ${{ github.workspace }}/.container-cache
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
-      AMDGPU_FAMILIES: "gfx94X-dcgpu"
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       TEATIME_FORCE_INTERACTIVE: 0
       AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
@@ -143,12 +147,12 @@ jobs:
             --upload
 
   therock-test-linux:
-    name: "Test"
+    name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       project_to_test: ${{ inputs.project_to_test }}
-      amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-mi325-1gpu-ossci-rocm"
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"
       test_type: ${{ inputs.test_type }}

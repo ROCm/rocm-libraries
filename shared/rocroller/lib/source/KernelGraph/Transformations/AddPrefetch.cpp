@@ -887,20 +887,21 @@ namespace rocRoller
                                       barrier);
                     }
 
-                    logger->debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
-                                  "ordering {} to {}",
-                                  globalLoads[globalLoads.size() - 1].globalChain,
-                                  segmentBoundaries[u + 1]);
-                    graph.control.addElement(Sequence(),
-                                             {globalLoads[globalLoads.size() - 1].globalChain},
-                                             {segmentBoundaries[u + 1]});
-                    logger->debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
-                                  "ordering {} to {}",
-                                  globalStores[globalStores.size() - 1].ldsChain,
-                                  segmentBoundaries[u + 1]);
-                    graph.control.addElement(Sequence(),
-                                             {globalStores[globalStores.size() - 1].ldsChain},
-                                             {segmentBoundaries[u + 1]});
+                    auto successor = (u == numUnroll - 1) ? barrier : segmentBoundaries[u + 1];
+
+                    Log::debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
+                               "ordering {} to {}",
+                               globalLoads[globalLoads.size() - 1].globalChain,
+                               successor);
+                    graph.control.addElement(
+                        Sequence(), {globalLoads[globalLoads.size() - 1].globalChain}, {successor});
+
+                    Log::debug("  prefetch: in-loop: prefetchDirect2LDS && mixMemOps: "
+                               "ordering {} to {}",
+                               globalStores[globalStores.size() - 1].ldsChain,
+                               successor);
+                    graph.control.addElement(
+                        Sequence(), {globalStores[globalStores.size() - 1].ldsChain}, {successor});
                 }
                 else
                 {
@@ -1013,8 +1014,16 @@ namespace rocRoller
                         = (m_exchangeSegment[exchangeTag] + numInFlight) % numUnroll;
 
                     auto loadTag = getLoadForExchange(exchangeTag, graph);
-                    AssertFatal(loadTag.has_value(),
-                                "couldn't find the load associated with the exchange");
+
+                    // When loading pre-swizzled scales from LDS, no
+                    // LoadTiled node exists.
+                    if(!loadTag)
+                    {
+                        Log::debug("No matching load operation found for Exchange({}); assuming it "
+                                   "is pre-swizzled from LDS.",
+                                   exchangeTag);
+                        continue;
+                    }
 
                     auto const search = scaleLoadU.find(loadTag.value());
                     if(search == scaleLoadU.end() || search->second > prefetchGlobalU)
@@ -1032,35 +1041,6 @@ namespace rocRoller
                         graph.control.addElement(Sequence(), {topOp}, {orderBeforeTag});
                 }
             }
-        }
-
-        std::optional<int>
-            getExchangeForMultiply(KernelGraph const& graph, int multiplyTag, NaryArgument arg)
-        {
-            auto coordPredicate = [](auto const& edge) {
-                return rocRoller::KernelGraph::CoordinateGraph::isEdge<Segment>(edge)
-                       || rocRoller::KernelGraph::CoordinateGraph::isEdge<Index>(edge);
-            };
-
-            auto isExchangePredicate = [&graph](int operation) -> bool {
-                auto maybeExchange = graph.control.get<Exchange>(operation);
-                return maybeExchange.has_value();
-            };
-
-            int scale = graph.mapper.get(multiplyTag, Connections::typeArgument<MacroTile>(arg));
-            if(scale == -1)
-                return {};
-
-            auto tileTag = only(graph.coordinates.getOutputNodeIndices(scale, coordPredicate));
-            if(not tileTag)
-                return {};
-
-            auto connections = graph.mapper.getCoordinateConnections(tileTag.value());
-            for(auto connection : connections)
-                if(isExchangePredicate(connection.control))
-                    return connection.control;
-
-            return {};
         }
 
         void updateExchangeColouring(std::map<int, int>&    operationUnroll,

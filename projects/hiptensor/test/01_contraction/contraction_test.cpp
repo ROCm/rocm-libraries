@@ -494,14 +494,14 @@ namespace hiptensor
                 d_ms_ns,
                 cd_ms_ns_modes.data(),
                 computeType));
-#if 0 // TODO
+
             hiptensorDataType_t scalarType;
             CHECK_HIPTENSOR_ERROR(hiptensorOperationDescriptorGetAttribute(handle,
                         desc,
                         HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
                         (void*)&scalarType,
                         sizeof(scalarType)));
-#endif
+            assert(scalarType == *hiptensor::convertToHipTensorDataType(computeType));
 
             /**************************
             * Set the algorithm to use

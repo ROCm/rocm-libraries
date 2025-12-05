@@ -9,9 +9,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
+namespace hipdnn_sdk::test_utilities
 {
 
 template <class OutputType, class... InputTypes>
@@ -20,7 +18,8 @@ class CpuDeviceExecutor
 public:
     template <typename Op, typename InputType>
     void executeUnary(const utilities::TensorBase<InputType>& input,
-                      utilities::TensorBase<OutputType>& output, Op op)
+                      utilities::TensorBase<OutputType>& output,
+                      Op op)
     {
         const auto& inputDims = input.dims();
         const auto& outputDims = output.dims();
@@ -120,5 +119,4 @@ private:
     }
 };
 
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::test_utilities
