@@ -8,9 +8,7 @@
 
 #include <hipdnn_sdk/utilities/Allocators.hpp>
 
-namespace hipdnn_sdk
-{
-namespace utilities
+namespace hipdnn_sdk::utilities
 {
 
 template <class DeviceAlloc = DeviceAllocator<char>>
@@ -77,5 +75,4 @@ private:
     size_t _size;
 };
 
-} // namespace utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::utilities

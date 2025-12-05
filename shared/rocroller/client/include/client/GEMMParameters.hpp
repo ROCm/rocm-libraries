@@ -36,6 +36,8 @@
 #include <rocRoller/Utilities/Utils.hpp>
 
 #include "client/BenchmarkSolution.hpp"
+#include <DataGenerator.hpp>
+#include <common/SourceMatcher.hpp>
 
 namespace rocRoller
 {
@@ -67,6 +69,12 @@ namespace rocRoller
             struct MKNLTuple
             {
                 int m, k, n, l;
+            };
+
+            struct KernelNames
+            {
+                std::string fullName;
+                std::string shortName;
             };
 
             std::string toString(TransposeType trans);
@@ -120,6 +128,8 @@ namespace rocRoller
                 // When scaleA/B is ScaleMode::SingleScale
                 float scaleValueA, scaleValueB;
 
+                DGen::DataInitMode initModeA, initModeB, initModeC;
+
                 int workgroupMappingDim;
             };
 
@@ -152,8 +162,10 @@ namespace rocRoller
                 // Datatype of inputs and outputs
                 TypeParameters types;
 
-                bool loadLDSScaleA = false;
-                bool loadLDSScaleB = false;
+                Parameters::Solution::LoadPath loadPathAScale{
+                    Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
+                Parameters::Solution::LoadPath loadPathBScale{
+                    Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
 
                 bool      swizzleScale    = false;
                 MKNLTuple swizzleTileSize = {0, 0, 0, 0};
@@ -187,7 +199,7 @@ namespace rocRoller
 
                 std::string version;
 
-                std::string generateKernelName() const;
+                KernelNames generateKernelName() const;
             };
 
             struct Result
@@ -235,4 +247,11 @@ namespace rocRoller::Client::GEMMClient::CLI
      * Asserts that all values are positive.
      */
     bool ParseMKNL(const std::string& arg, rocRoller::Client::GEMMClient::MKNLTuple& x);
+
+    /**
+     * @brief Parse a DataInitMode variant from a string.
+     *
+     * Asserts that argument is well-formed.
+     */
+    bool ParseInitMode(const std::string& arg, DGen::DataInitMode& result);
 }

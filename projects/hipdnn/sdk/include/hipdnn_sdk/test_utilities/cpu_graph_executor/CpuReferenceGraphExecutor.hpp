@@ -37,7 +37,7 @@ public:
             planExecutors.push_back(buildPlanForNode(graphWrap, node));
         }
 
-        std::vector<std::unique_ptr<ITensor>> virtualTensors;
+        std::vector<std::unique_ptr<utilities::ITensor>> virtualTensors;
         std::unordered_map<int64_t, void*> variantPackWithVirtualTensorsAdded
             = populateVariantPackWithMissingVirtualTensors(
                 variantPack, graphWrap.getTensorMap(), virtualTensors);
@@ -53,7 +53,7 @@ private:
         const std::unordered_map<int64_t, void*>& variantPack,
         const std::unordered_map<int64_t, const hipdnn_sdk::data_objects::TensorAttributes*>&
             tensorMap,
-        std::vector<std::unique_ptr<ITensor>>& virtualTensors)
+        std::vector<std::unique_ptr<utilities::ITensor>>& virtualTensors)
     {
         std::unordered_map<int64_t, void*> updatedVariantPack = variantPack;
 
@@ -78,7 +78,9 @@ private:
         const auto& planBuilder = _planRegistry.getPlanBuilder(key);
         if(!planBuilder.isApplicable(node, graph.getTensorMap()))
         {
-            throw std::runtime_error("Plan builder is not applicable for the given node");
+            std::string nodeName = node.name() == nullptr ? "" : " " + node.name()->str();
+            throw std::runtime_error("Plan builder is not applicable for the given node: "
+                                     + nodeName);
         }
 
         return planBuilder.buildNodePlan(graph, node);

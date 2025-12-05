@@ -12,9 +12,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class INode
 {
@@ -159,6 +157,16 @@ public:
         }
     }
 
+    Error post_validate_node() const override // NOLINT(readability-identifier-naming)
+    {
+        if(self().attributes.compute_data_type == DataType::NOT_SET)
+        {
+            return {ErrorCode::ATTRIBUTE_NOT_SET,
+                    "Node " + self().attributes.name + " does not have a compute_data_type set"};
+        }
+        return {ErrorCode::OK, ""};
+    }
+
     std::vector<std::shared_ptr<TensorAttributes>> getNodeInputTensorAttributes() const override
     {
         std::vector<std::shared_ptr<TensorAttributes>> inputAttributes;
@@ -193,5 +201,4 @@ protected:
 
 template <typename DerivedT>
 using NodeCRTP = BaseNode<DerivedT>; // NOLINT
-}
-}
+} // namespace hipdnn_frontend::graph
