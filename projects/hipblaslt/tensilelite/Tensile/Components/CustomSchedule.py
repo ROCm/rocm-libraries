@@ -77,6 +77,15 @@ class SyncSchedule:
     def get_code(self):
         return [item[1] for item in self.schedule]
 
+def duplicate_list_items(input_list: list, repeat_count: int, step:int=0) -> list:
+    """
+    Duplicate each item in input_list repeat_count times. Optionally duplicate with a step
+    
+    Example:
+        duplicate_list_items([1, 2, 3], 3)    => [1,1,1, 2,2,2, 3,3,3]
+        duplicate_list_items([1, 2, 3], 3, 1) => [1,2,3, 2,3,4, 3,4,5]
+    """
+    return [item + step * j for item in input_list for j in range(repeat_count)]
 
 class ValidatorInstruction(ABC):
     """
@@ -1644,42 +1653,82 @@ def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
 
 def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
-    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    kernel["SwapGlobalReadOrder"] = False
+    numMfma = 120
+    syncs = SyncSchedule()
+    gr_inc_step = 0
+
     if isNN(kernel) and useLDSTr and TLDS==1:
-        numMfma = 120
-        kernel["SwapGlobalReadOrder"] = False
-        optSchedule = {
-            'SYNC': [[-1, 5, 26, 26, 44, 44, 71, 71]],
-            'LRA0': [[0, 1, 2, 3, 4, 6, 8, 10, 12, 14, 16, 18]],
-            'GRIncA': [[7, 7, 7, 9, 9, 9, 11, 11, 11]],
-            'LRB0': [[20, 22, 24, 25, 27, 29, 31, 33, 35, 37]],
-            'GRIncB': [[13, 13, 13, 15, 15, 15, 17, 17, 17]],
-            'GRA': [[28, 28, 30, 30, 32, 32, 36, 36, 39, 39, 42, 42]],
-            'GRB': [[53, 53, 58, 58, 63, 63, 67, 67, 72, 72, 77, 77, 82, 82, 86, 86, 91, 91, 96, 96]],
-            'LRSA': [[58]],
-            'LRSB': [[58]],
-            'LWSA': [[95]],
-            'LWSB': [[95]],
-            'LRA1': [[72, 74, 76, 78, 80, 82, 84, 87, 90, 92, 98, 100]],
-            'LRB1': [[99, 106, 107, 108, 109, 110, 111, 112, 113, 114]],
-            'LCC': [[118, 119]],
-        }
-        syncCode = [
-            SWaitCnt(dscnt=9, vlcnt=-1, vscnt=-1, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration"),
-            SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for the rest of LRB1 to complete"),
+        syncs.add(-1, dscnt=9, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration")       
+        lra0   = [0,1,2,3,4,6,8,10,12,14,16,18]
 
-            SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for all LRA0 to complete before GRA start"),
-            SBarrier(comment=""),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for all LRB0 to complete before GRB start"),
-            SBarrier(comment=""),
+        syncs.add(5, dscnt=5, comment="wait for the rest of LRB1 to complete")        
+        grinca = [7,7,7,9,9,9,11,11,11]
+        grincb = [13,13,13,15,15,15,17,17,17]
+        lrb0   = [20,22,24,25,27,29,31,33,35,37]
 
-            SWaitCnt(dscnt=-1, vlcnt=16, vscnt=-1, comment="wait for previous set of global reads"),
-            SBarrier(comment="")
-        ]
-        nglshift = nllshift = 16
+        syncs.add(26, dscnt=4, barrier=True, comment="wait for all LRA0 to complete before GRA start")
+        gra    = [28,30,32,36,39,42] # one index for two instructions
+        syncs.add(44, dscnt=0, barrier=True, comment="wait for all LRB0 to complete before GRB start")
+        grb    = [53,58,63,67,72,77,82,86,91,96] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+
+        lrsa   = [58]
+        lrsb   = [58]
+
+        syncs.add(71, vlcnt=10, barrier=True, comment="wait for previous set of global reads")
+        lra1   = [72,74,76,78,80,82,84,87,90,92,98,100]
+        lrb1   = [99,106,107,108,109,110,111,112,113,114]
+        lwsa   = [95]
+        lwsb   = [95]
+
+    elif isTN(kernel) and not useLDSTr and TLDS==1:
+        syncs.add(-1, dscnt=9, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration")
+        lra0   = [0,1,2,3,4,6]
+
+        syncs.add(5, dscnt=5, comment="wait for the rest of LRB1 to complete") 
+        grinca = [0,1,2,3,4,5,6,7,8]
+        grincb = [9,10,12,13,14,15,16,17,18]
+        lrb0   = [8,10,12,14,16,18,20,22,24,27]
+
+        syncs.add(26, dscnt=9, barrier=True, comment="wait for all LRA0 to complete before GRA start")
+        gra    = [28,30,32,36,39,42] # one index for two instructions
+        syncs.add(44, dscnt=0, barrier=True, comment="wait for all LRB0 to complete before GRB start")
+        grb    = [53,58,63,67,72,77,82,86,91,96] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+
+        lrsa   = [58]
+        lrsb   = [58]
+        syncs.add(71, vlcnt=10, barrier=True, comment="wait for previous set of global reads")
+
+        lra1   = [72,76,80,84,90,98]
+        lrb1   = [99,106,107,108,109,110,111,112,113,114]
+        lwsa   = [95]
+        lwsb   = [95]
+
+        gr_inc_step = 1
     else:
         return False, None
 
+    optSchedule = {
+        'SYNC':   [syncs.get_indicies()],
+        'LRA0':   [lra0],
+        'GRIncA': [grinca],
+        'LRB0':   [lrb0],
+        'GRIncB': [grincb],
+        # Note: each GRA/GRB item corresponds to two instructions (addr increment and read). So duplicate each item twice.
+        'GRA':    [duplicate_list_items(gra, 2, gr_inc_step)],
+        'GRB':    [duplicate_list_items(grb, 2, gr_inc_step)],
+        'LRSA':   [lrsa],
+        'LRSB':   [lrsb],
+        'LWSA':   [lwsa],
+        'LWSB':   [lwsb],
+        'LRA1':   [lra1],
+        'LRB1':   [lrb1],
+        'LCC':    [[numMfma-2, numMfma-1]],
+    }
+    syncCode = syncs.get_code()
+    nglshift = nllshift = num_gr
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 

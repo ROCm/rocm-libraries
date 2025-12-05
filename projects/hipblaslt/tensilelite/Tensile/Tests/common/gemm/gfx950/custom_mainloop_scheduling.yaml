@@ -1216,7 +1216,37 @@ BenchmarkProblems:
           - Range: [[6144], [8192], [1], [64, 64, 256]]
           - Exact: [3072, 4096, 1, 8192]
         - BiasTypeArgs: ['b']
-
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+      - KernelLanguage: [Assembly]
+      ForkParameters:
+      - ActivationFuncCall: [false]
+      - ClusterLocalRead: [0]
+      - DepthU: [64]
+      - DirectToLds: [true]
+      - ExpandPointerSwap: [0]
+      - GlobalReadVectorWidthA: [8]
+      - GlobalReadVectorWidthB: [8]
+      - LdsPadA: [-1]
+      - LdsPadB: [-1]
+      - LocalReadVectorWidth: [8]
+      - MatrixInstruction: 
+        - [16, 16, 32, 1, 1, 6, 10, 2, 2]
+      - PrefetchGlobalRead: [2]
+      - SourceSwap: [1]
+      - TransposeLDS: [1]
+      - UseCustomMainLoopSchedule: [true]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+      - ProblemSizes:
+        - Exact: [3072, 5120, 1, 8192]
+        - Range: [[192], [320], [1], [64, 64, 256]]
+        - Range: [[192], [320], [1], [1, 1, 64]]
+        - Range: [[192], [320], [1], [32, 64, 256]]
+        - Range: [[6144], [10240], [1], [64, 64, 256]] 
+      - BiasTypeArgs: ['b']
+      
   ########################################
   # HHS TN - standard
   ########################################
