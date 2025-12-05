@@ -62,7 +62,7 @@ public:
 
         auto variantPack = tensorBundle.toHostVariantPack();
 
-        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+        CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
     }
 
@@ -92,7 +92,7 @@ public:
 
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+        CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
     }
 
@@ -126,7 +126,7 @@ public:
 
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+        CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
     }
 
@@ -151,7 +151,7 @@ public:
 
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+        CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
     }
 
@@ -176,7 +176,7 @@ public:
 
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+        CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
     }
 
@@ -201,7 +201,7 @@ public:
 
         auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
 
-        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+        CpuReferenceGraphExecutor().execute(
             flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
     }
 };

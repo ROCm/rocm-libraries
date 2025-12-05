@@ -16,7 +16,6 @@ enable_language(HIP)
 add_executable(
     hipdnn_test_sdk_tests
     main.cpp
-    TestExample.cpp
     utilities/TestCpuFpReferenceBatchnorm.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
     utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
