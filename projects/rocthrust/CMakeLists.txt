@@ -260,7 +260,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   endif()
 
   # Used by tests to define their RESOURCE_GROUPS
-  set(DEFAULT_GPU_RESOURCE_TYPE "gpus")
+  set(DEFAULT_GPU_RESOURCE "gpus")
   
   # We still want the testing to be compiled to catch some errors
   #TODO: Get testing folder working with HIP on Windows

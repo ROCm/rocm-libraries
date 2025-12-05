@@ -65,7 +65,7 @@ function(add_hipstdpar_test TEST TEST_TYPE INTERPOSE_ALLOC)
         add_relative_test(${TEST_TARGET} ${TEST_TARGET})
         set_tests_properties(${TEST_TARGET}
             PROPERTIES
-                RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE_TYPE}:1"
+                RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
                 LABELS "hip"
         )
     endif()
