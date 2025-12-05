@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 
-from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo, verifyAscendingOrder
+from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo, verify_ascending_order
 from Tensile.Common import IsaVersion
 
 # Helper to create a mock data type
@@ -99,7 +99,7 @@ class TestCustomSchedule:
             assert 'PackA0' not in schedule_info.optSchedule
             assert 'PackB0' in schedule_info.optSchedule
             assert kernel["UsePLRPack"]
-    
+
     @pytest.mark.parametrize("force_unroll_sub_iter", [True, False])
     def test_schedule_256x256x128_8bit_TN(self, force_unroll_sub_iter: bool):
         """Tests the 256x256x128 8-bit TNschedule."""
@@ -125,7 +125,7 @@ class TestCustomSchedule:
         assert schedule_info.numMfma == 64
         valid, message = schedule_info.isValid({"kernel" : kernel})
         assert valid, message
-    
+
     def test_schedule_256x96x64_16bit_TN(self):
         """Tests the 256x96x64 16-bit TN schedule."""
         kernel = create_base_kernel()
@@ -296,7 +296,7 @@ class TestCustomSchedule:
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 2, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [4,1],
             "LDSTrInst": not transA , "TransposeLDS": 1, "MIWaveTileA": 4, "MIWaveTileB": 13,
-        })  
+        })
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
@@ -470,7 +470,7 @@ class TestCustomScheduleValidation:
         sched = ScheduleInfo(
             None, None, {"P": [[3, 2, 1]]}, None, None, None, None
         )
-        status, message = verifyAscendingOrder(sched)
+        status, message = verify_ascending_order(sched)
 
         expected = "Non-descending-order rule failed, schedule key 'P', sequence [3, 2, 1]: value 2 at index 1 is less than 3 at index 0."
         assert status == False
@@ -479,7 +479,7 @@ class TestCustomScheduleValidation:
         sched = ScheduleInfo(
             None, None, {"P": [[1, 1, 2]]}, None, None, None, None
         )
-        status, message = verifyAscendingOrder(sched)
+        status, message = verify_ascending_order(sched)
         assert status == True
 
     def test_schedule_validation_disable(self):

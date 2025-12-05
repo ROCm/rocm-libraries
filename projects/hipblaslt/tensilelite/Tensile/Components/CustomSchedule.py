@@ -41,9 +41,289 @@ from Tensile.Utilities.Decorators.Shared import CallableGuard
 from Tensile.Common.Utilities import printWarning
 
 from abc import ABC, abstractmethod
-
 from copy import deepcopy
-from typing import Callable, Dict
+from collections import Counter, defaultdict
+from typing import Callable, Dict, List, Tuple
+
+def getMostRecents(
+    vmfmaIndices: List[int],
+    counts: List[int],
+    localReadA: List[int],
+    localReadB: List[int],
+    aBeforeB: bool,
+) -> List[Dict[str, int]]:
+    """
+    For each waitcnt instruction located at `vmfmaIndices[i]`, compute how many
+    of the most recent `counts[i]` local reads belong to operand A and operand B.
+
+    This is computed by walking backwards through historical local read positions.
+
+    Args:
+        vmfmaIndices:
+            List of vmfma instruction indices where s_waitcnt appears.
+        counts:
+            Number of outstanding operations each waitcnt must account for.
+        localReadA:
+            vmfma indices where local reads for operand A occur.
+        localReadB:
+            vmfma indices where local reads for operand B occur.
+        aBeforeB:
+            True if local reads for A happen before B within a vmfma index.
+
+    Returns:
+        A list of dicts of the form:
+            [{"A": int, "B": int}, ...]
+        where each entry corresponds to the number of most-recent local reads
+        attributed to A and B for that waitcnt.
+    """
+
+    assert len(counts) == len(
+        vmfmaIndices
+    ), "Counts and vmfmaIndices must match in length."
+
+    def countMostRecent(
+        vmfma_index: int,
+        count: int,
+        history: List[Tuple[int, Dict[str, int]]],
+        aBeforeB: bool,
+    ) -> Dict[str, int]:
+        """
+        Walk backward through local-read history and count how many of the
+        most recent `count` operations were for A vs B.
+        """
+        idx = 0
+        while idx + 1 < len(history) and history[idx + 1][0] <= vmfma_index:
+            idx += 1
+
+        result = {"A": 0, "B": 0}
+        remaining = count
+
+        while idx >= 0 and remaining > 0:
+            order = ["B", "A"] if aBeforeB else ["A", "B"]
+            for operand in order:
+                delta = min(history[idx][1][operand], remaining)
+                result[operand] += delta
+                remaining -= delta
+
+            idx -= 1
+
+        return result
+
+    # Build combined event map: vmfma_index -> {"A": n, "B": n}
+    event_map: Dict[int, Dict[str, int]] = {}
+
+    for idx in localReadA:
+        event_map.setdefault(idx, {"A": 0, "B": 0})["A"] += 1
+
+    for idx in localReadB:
+        event_map.setdefault(idx, {"A": 0, "B": 0})["B"] += 1
+
+    # Historical timeline sorted by vmfma index
+    history = sorted(event_map.items())
+
+    results: List[Dict[str, int]] = []
+    for wait_count, slot in zip(counts, vmfmaIndices):
+        result = countMostRecent(slot, wait_count, history, aBeforeB)
+        results.append(result)
+
+    return results
+
+
+def verify_global_reads_not_too_earlySingleCodePath(
+    globalReadA: List[int],
+    globalReadB: List[int],
+    localReadA: List[int],
+    localReadB: List[int],
+    syncIndices: List[int],
+    syncCodes: List,
+    context: Dict,
+    positions: Dict,
+):
+    """
+    Verifies that:
+      1. All local reads complete before global reads.
+      2. Completion is confirmed by:
+         - s_waitcnt (for wave)
+         - s_barrier (for workgroup)
+
+    Returns:
+        (status: bool, message: str)
+    """
+    assert len(syncIndices) == len(
+        syncCodes
+    ), "Mismatch between number of SYNC vmfmaIndices and number of SYNC codes."
+
+    # indices of waits:
+    vmfmaIndices = []
+
+    # number outstanding of the waits:
+    counts = []
+
+    # indices of the waits with the list of sync codes:
+    indicesOfWaitsInSyncCode = []
+
+    syncCodeIndex = 0
+    for syncIndex, syncCode in zip(syncIndices, syncCodes):
+        if isinstance(syncCode, SWaitCnt):
+            vmfmaIndices.append(syncIndex)
+            counts.append(syncCode.dscnt)
+            indicesOfWaitsInSyncCode.append(syncCodeIndex)
+        syncCodeIndex += 1
+
+    aBeforeB = positions["LRA0"] < positions["LRB0"]
+    preceding = getMostRecents(vmfmaIndices, counts, localReadA, localReadB, aBeforeB)
+    for l, g, operand in [
+        (localReadA, globalReadA, "A"),
+        (localReadB, globalReadB, "B"),
+    ]:
+        if len(l) == 0 or len(g) == 0:
+            continue
+
+        lastLocal = l[-1]
+        firstGlobal = g[0]
+
+        # Find the first index after the last local read that this wave
+        # completes all the local reads for this operand (if one exists)
+        LRX = "LRA0" if operand == "A" else "LRB0"
+        GRX = "GRA" if operand == "A" else "GRB"
+        local_before_sync = positions[LRX] < positions["SYNC"]
+        global_before_sync = positions[GRX] < positions["SYNC"]
+        closedLowerBound = lastLocal + 1 - local_before_sync
+        openUpperBound = firstGlobal + 1 - global_before_sync
+
+        outstandings = []
+        waveCompleteIndex = None
+        # From the start of the schedule which waitcnt is the current one?
+        waitIndex = 0
+        for syncIndex, p in zip(vmfmaIndices, preceding):
+            if closedLowerBound <= syncIndex and syncIndex < openUpperBound:
+                outstandings.append(p[operand])
+                if waveCompleteIndex is None and p[operand] == 0:
+                    waveCompleteIndex = syncIndex
+                    break
+            waitIndex += 1
+
+        if waveCompleteIndex is None:
+            if context.get("kernel", {}).get("SwapGlobalReadOrder", False):
+                GRX == "GRB" if GRX is "GRA" else "GRA"
+
+            return False, (
+                f"Failed to verify that all local reads for {operand} ({LRX}) are complete "
+                f"before the first global read for {operand} is issued. "
+                f"Last local read for {operand} issued at vmfma_index:{lastLocal}. "
+                f"First global read for {operand} issued at vmfma_index:{firstGlobal}. "
+                f"{len(outstandings)} waitcnt operation(s) in [{closedLowerBound}, {openUpperBound}) "
+                f"provide upper bounds on the number of outstanding {LRX} operations: "
+                f"{outstandings} <-- none of these is 0."
+            )
+
+        # Check that there is a sync after the wave completion index
+        barrierFound = False
+        syncCodeIndex = indicesOfWaitsInSyncCode[waitIndex]
+        while (
+            syncCodeIndex + 1 < len(syncCodes)
+            and syncIndices[syncCodeIndex + 1] < openUpperBound
+        ):
+            if isinstance(syncCodes[syncCodeIndex + 1], SBarrier):
+                barrierFound = True
+                break
+            syncCodeIndex += 1
+
+        if not barrierFound:
+            return False, (
+                f"Failed to verify that a barrier (to sync waves) exists between completion of "
+                f"local reads for {operand} and the first global read for {operand}. "
+                f"Last local read of {operand} issued at vmfma_index {lastLocal}, "
+                f"first global read of {operand} issued at vmfma_index {firstGlobal}, "
+                f"wave completion at vmfma_index {waveCompleteIndex}. Expected a barrier "
+                f"in the range [{waveCompleteIndex}, {openUpperBound})."
+            )
+
+    return True, ""
+
+
+def verify_global_reads_not_too_early(scheduleInfo, context: Dict):
+    """
+    We require the sequence of instructions to be of the form:
+
+    last LRA0 instruction
+    [...]
+    SWaitCnt to ensure that all LRA0s are done for this wave
+    [...]
+    SBarrier to ensure that all LRA0s are done for this workgroup
+    [...]
+    First GRA instruction
+
+    Why?
+
+    GRA writes (DDR->LDS) to the LDS that LRA0 reads from (LDS->VGPR).
+
+    We don't know where in LDS GRA writes from. In theory we could determine
+    where exactly each GRA instruction writes to, but currently this is too
+    complicated and so we conservatively assume it always writes everywhere that
+    a thread in the workgroup is reading from in LRA0. Thus we must ensure
+    that every thread in every wave in the workgroup has finished all of its
+    LRA0 instructions before GRA is issued.
+
+    Exactly the same logic applies for the B operand. Note that there are no
+    constraints between LRA0 and GRB, or between LRB0 and GRA, because the LDS
+    used for A and B are completely separate.
+    """
+
+    # Get the relative order of the relevant operations within a vmfma index.
+    positions = {"SYNC": -1, "LRA0": -1, "LRB0": -1, "GRA": -1, "GRB": -1}
+    index = 0
+    for n in scheduleInfo.optSchedule.keys():
+        positions[n] = index
+        index += 1
+
+    def get(name, codePath):
+        l = scheduleInfo.optSchedule[name]
+        if len(l) == 1:
+            return l[0]
+        return l[codePath]
+
+    nCodePaths = scheduleInfo.numCodePaths
+    if not nCodePaths:
+        nCodePaths = 1
+    for codePath in range(nCodePaths):
+        globalReadA = get("GRA", codePath)
+        globalReadB = get("GRB", codePath)
+        if context.get("kernel", {}).get("SwapGlobalReadOrder", False):
+            globalReadA, globalReadB = globalReadB, globalReadA
+
+        kernel = context.get("kernel", {})
+        aDirect = kernel.get("DirectToLdsA", False) or kernel.get("DirectToLds", False)
+        bDirect = kernel.get("DirectToLdsB", False) or kernel.get("DirectToLds", False)
+
+        # The actual buffer loads correspond to the indices of the lists
+        # if using DirectToLDS.
+        if aDirect:
+            globalReadA = globalReadA[1::2]
+
+        if bDirect:
+            globalReadB = globalReadB[1::2]
+
+        localReadA = get("LRA0", codePath)
+        localReadB = get("LRB0", codePath)
+        syncIndices = get("SYNC", codePath)
+        syncCodes = scheduleInfo.syncCode
+
+        status, message = verify_global_reads_not_too_earlySingleCodePath(
+            globalReadA,
+            globalReadB,
+            localReadA,
+            localReadB,
+            syncIndices,
+            syncCodes,
+            context,
+            positions,
+        )
+        if status is False:
+            return status, message
+
+    return status, message
+
 
 @dataclass
 class SyncSchedule:
@@ -80,7 +360,7 @@ class SyncSchedule:
 def duplicate_list_items(input_list: list, repeat_count: int, step:int=0) -> list:
     """
     Duplicate each item in input_list repeat_count times. Optionally duplicate with a step
-    
+
     Example:
         duplicate_list_items([1, 2, 3], 3)    => [1,1,1, 2,2,2, 3,3,3]
         duplicate_list_items([1, 2, 3], 3, 1) => [1,2,3, 2,3,4, 3,4,5]
@@ -104,11 +384,11 @@ class LocalRead(ValidatorInstruction):
     guaranteed_by: int | float = float('inf')
 
     def validate(self) -> str | None:
-        # Needs to be guaranteed BEFORE the index at which it's needed since the 
+        # Needs to be guaranteed BEFORE the index at which it's needed since the
         # SWaitCnt is issued AFTER the vmfma.
         if self.guaranteed_by < self.needed_by:
             return None
-        
+
         guaranteed_by = self.guaranteed_by
         # Modulo for LRs that finish in next iteration.
         needed_by = self.needed_by % self.num_vmfma
@@ -124,7 +404,7 @@ class LocalRead(ValidatorInstruction):
             message = f"{self.name} at index {self.issued_at} is not valid. " + \
                         f"Needed before index {needed_by}, but only guaranteed at index {guaranteed_by}."
         return message
-     
+
 
 @dataclass
 class SWait(ValidatorInstruction):
@@ -193,13 +473,13 @@ def lr_needed_by_mfma(is_lra: bool, lr_idx: int, offset: int, schedule_info: 'Sc
         Calculate the index of the MFMA at which the given LRA will be needed by.
         """
         return int(lra_idx * n_tiles_per_lra) + offset
-    
+
     def index_lrb_needed_by_mfma(lrb_idx: int, offset: int) -> int:
         """
         Calculate the index of the MFMA at which the given LRB will be needed by.
         """
         return n_tiles_a * int(lrb_idx * n_tiles_per_lrb) + offset
-    
+
     if is_lra:
         return index_lra_needed_by_mfma(lr_idx, offset)
     else:
@@ -210,7 +490,7 @@ def create_timeline(instruction_names_to_add: list[str], code_path: int, schedul
     """
     Create a timeline from the provided schedule_info which contains only the instructions inside `instruction_names_to_add`.
     Organized as a list of lists indexed by vmfma_index + 1.
-    
+
     The +1 is required in order to handle the special case of idx=-1, which is at timeline[0].
     idx=-1 is special case that occurs BEFORE the first VMFMA but AFTER the last VMFMA.
     """
@@ -221,7 +501,7 @@ def create_timeline(instruction_names_to_add: list[str], code_path: int, schedul
 
     num_vmfma = schedule_info.numMfma
     halfway_point = num_vmfma // 2
-    
+
     # NOTE: Relative ordering of instructions must be preserved.
     #       Order dictates the order in which instructions are scheduled if they are scheduled at the same vmfmaindex.
     for name in schedule_info.optSchedule.keys():
@@ -232,8 +512,8 @@ def create_timeline(instruction_names_to_add: list[str], code_path: int, schedul
             for idx_sync, (idx_vmfma, sync) in enumerate(zip(schedule_get(name, code_path, schedule_info), schedule_info.syncCode)):
                 assert idx_vmfma >= -1, f"Code path {code_path}: SWaitCnt at index {idx_sync} is not valid. Must be >= -1."
                 if not isinstance(sync, SWaitCnt):
-                    continue 
-                
+                    continue
+
                 swait = SWait(issued_at=idx_vmfma, dscnt=sync.dscnt, vlcnt=sync.vlcnt, vscnt=sync.vscnt, comment=sync.comment)
                 timeline[idx_vmfma+1].append(swait)
         elif name.startswith("LRA") or name.startswith("LRB"):
@@ -247,7 +527,7 @@ def create_timeline(instruction_names_to_add: list[str], code_path: int, schedul
                 timeline[idx_vmfma+1].append(local_read)
         else:
             raise NotImplementedError(f"Instruction {name} not implemented")
-    
+
     return timeline
 
 def apply_swaits(timeline: list[list[ValidatorInstruction]], num_vmfma: int) -> None:
@@ -263,7 +543,7 @@ def apply_swaits(timeline: list[list[ValidatorInstruction]], num_vmfma: int) -> 
         num_left_in_flight = swait.dscnt
         if num_left_in_flight == -1:
             continue # -1 is special value to indicate doing nothing.
-        
+
         for i_lr in chain(range(i_swait-1, -1, -1), range(num_instructions-1, i_swait, -1)):
             local_read = timeline[i_lr]
             if not isinstance(local_read, LocalRead):
@@ -285,12 +565,12 @@ def apply_swaits(timeline: list[list[ValidatorInstruction]], num_vmfma: int) -> 
 def verify_lrs_complete_before_vmfma(schedule_info: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     """
     Ensure that the A and B data needed for VMFA at index=i is guaranteed to be in the registers before index=i.
-    """    
+    """
     def verify(schedule_info: 'ScheduleInfo', code_path: int) -> tuple[bool, str]:
         if len(schedule_info.mfmaReorder) != 0:
             printWarning("Do not currently support mfmaReorder in CMS validation.")
             return None
-        
+
         relevant_names = ["LRA0", "LRB0", "LRA1", "LRB1", "SYNC"]
         for name in schedule_info.optSchedule.keys():
             if name.startswith("LRA") or name.startswith("LRB"):
@@ -308,7 +588,7 @@ def verify_lrs_complete_before_vmfma(schedule_info: 'ScheduleInfo', context: dic
             if error_message:
                 return error_message
         return None
-    
+
     for code_path in range(schedule_info.numCodePaths):
         error_message = verify(schedule_info, code_path)
         if error_message:
@@ -342,14 +622,14 @@ def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context
     return True, ""
 
 
-def verifyAscendingOrder(scheduleInfo, context: Dict = {}):
+def verify_ascending_order(scheduleInfo, context: Dict = {}):
     """
     Ensure that all sequences of scheduleInfo.optSchedule are non-decreasing.
 
     Context and example: There will be a sequence of N 'GRIncA' instructions
     for incrementing the memory address that the A macro tile is read from.
     The CMS developer has the freedom to insert these N instructions into
-    'slots' of their choice. A slot is a sequence of instructions between
+    'vmfmaIndices' of their choice. A vmfma_index is a sequence of instructions between
     2 consecutive mfma instructions. Example: 'GRIncA' : [[0,1,1,3]] would
     mean that the N=4 instructions to increment the pointer appear as follows:
 
@@ -357,11 +637,10 @@ def verifyAscendingOrder(scheduleInfo, context: Dict = {}):
     instructions 2,3 : between mfma 1 and mfma 2.
     instruction 4    : between mfma 3 and mfma 4.
 
-    However, there is a correctness requirement that the N slots for these
+    However, there is a correctness requirement that the N vmfmaIndices for these
     instructions are non-decreasing. This rule is true for all groups of instructions,
     not just the 'GRIncA' instructions.
     """
-
     for k, sequences in scheduleInfo.optSchedule.items():
         for seq in sequences:
             for i in range(1, len(seq)):
@@ -388,7 +667,7 @@ class ScheduleInfo:
         syncCode,
         nglshift,
         nllshift,
-        mfmaReorder=[]
+        mfmaReorder=[],
     ):
         self.numCodePaths = numCodePaths
         self.numMfma = numMfma
@@ -400,11 +679,12 @@ class ScheduleInfo:
         self.__skipValidation__ = False
 
         # The set of validation rules to run inside `isValid`.
-        self.rules: list[Callable[[ScheduleInfo, dict], [bool, str]]] = [
-            verify_correct_number_of_instructions,
-            verifyAscendingOrder,
-            verify_lrs_complete_before_vmfma
-        ]
+        self.rules: List[Callable[[ScheduleInfo, dict], [bool, str]]] = []
+
+        self.rules.append(verify_ascending_order)
+        self.rules.append(verify_correct_number_of_instructions)
+        self.rules.append(verify_global_reads_not_too_early)
+        self.rules.append(verify_lrs_complete_before_vmfma)
 
     def disableValidation(self):
         self.__skipValidation__ = True
@@ -421,11 +701,10 @@ class ScheduleInfo:
         is invalid. It may be a false positive.
         """
 
-
         if self.__skipValidation__:
             mt0 = context.get("kernel", {}).get("MacroTile0", "?")
             mt1 = context.get("kernel", {}).get("MacroTile1", "?")
-            du  = context.get("kernel", {}).get("DepthU", "?")
+            du = context.get("kernel", {}).get("DepthU", "?")
             message = f"CMS validation explicitly disabled. Running on kernel with MT0xMT1xDepthU = {mt0}x{mt1}x{du}"
             print(f"WARNING: {message}")
 
@@ -831,6 +1110,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     elif isNT(kernel) and not useLDSTr and TLDS == 0:
+
         kernel["UsePLRPack"] = True
 
         optSchedule = {
@@ -952,7 +1232,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                          [48, 49, 51, 53, 55, 57, 59, 61, 63, 65, 67, 69]],
                 'LRA1': [[70,71, 72,73, 74,75, 76,77, 78,79, 80,81, 82,83, 84,85],
                          [71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86]],
-                
+
                 'LRSB': [[39]],
                 'LRSA': [[46]],
                 'LWSB': [[78]],
@@ -1659,10 +1939,10 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     gr_inc_step = 0
 
     if isNN(kernel) and useLDSTr and TLDS==1:
-        syncs.add(-1, dscnt=9, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration")       
+        syncs.add(-1, dscnt=9, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration")
         lra0   = [0,1,2,3,4,6,8,10,12,14,16,18]
 
-        syncs.add(5, dscnt=5, comment="wait for the rest of LRB1 to complete")        
+        syncs.add(5, dscnt=5, comment="wait for the rest of LRB1 to complete")
         grinca = [7,7,7,9,9,9,11,11,11]
         grincb = [13,13,13,15,15,15,17,17,17]
         lrb0   = [20,22,24,25,27,29,31,33,35,37]
@@ -1686,7 +1966,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         syncs.add(-1, dscnt=9, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration")
         lra0   = [0,1,2,3,4,6]
 
-        syncs.add(5, dscnt=5, comment="wait for the rest of LRB1 to complete") 
+        syncs.add(5, dscnt=5, comment="wait for the rest of LRB1 to complete")
         grinca = [0,1,2,3,4,5,6,7,8]
         grincb = [9,10,12,13,14,15,16,17,18]
         lrb0   = [8,10,12,14,16,18,20,22,24,27]
@@ -1958,10 +2238,10 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
     syncs = SyncSchedule()
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
-        syncs.add(-1, dscnt=3, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration") 
+        syncs.add(-1, dscnt=3, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration")
         lra0   = [0,1,2,3,5,7,9,11,13,15,17,19,20]
 
-        syncs.add(12, dscnt=8, comment="wait for the rest of LRB1 to complete") 
+        syncs.add(12, dscnt=8, comment="wait for the rest of LRB1 to complete")
         grinca = [4,4,4,10,10,10,14,14,14]
         lrb0   = [22,24,26,28]
         grincb = [16,16,16,18,18,18,21,21,21]
@@ -1984,11 +2264,11 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
         lrb1   = [80,98,99,100]
 
     elif isNN(kernel) and useLDSTr and TLDS==1:
-        syncs.add(-1, dscnt=3, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration") 
+        syncs.add(-1, dscnt=3, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration")
         grinca = [8,9,10,11,13,14,15,16,17]
         grincb = [19,20,21,22,23,24,25,26,27]
-        
-        syncs.add(12, dscnt=12, comment="wait for the rest of LRB1 to complete") 
+
+        syncs.add(12, dscnt=12, comment="wait for the rest of LRB1 to complete")
         lra0   = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25] # 26 loads
 
         syncs.add(30, dscnt=2, barrier=True, comment="wait for all LRA0 to complete before GRA start")
@@ -2010,11 +2290,11 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
         lwsb   = [85]
 
     elif isNT(kernel) and useLDSTr and TLDS==0:
-        syncs.add(-1, dscnt=3, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration") 
+        syncs.add(-1, dscnt=3, comment="wait for all LRA1 and one item from LRB1 before starting the sub-iteration")
         grinca = [8,9,10,11,13,14,15,16,17]
         grincb = [19,20,21,22,23,24,25,26,27]
-        
-        syncs.add(12, dscnt=12, comment="wait for the rest of LRB1 to complete") 
+
+        syncs.add(12, dscnt=12, comment="wait for the rest of LRB1 to complete")
         lra0   = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25] # 26 loads
         lrb0   = [27,29,31,33,35,38,40,42] # 8 loads
         syncs.add(30, dscnt=2, barrier=True, comment="wait for all LRA0 to complete before GRA start")
@@ -2024,11 +2304,11 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
         gra    = [31,32,34,36,37,39,41,43,45,46,48,50,52,53,55,57,59,60,62,64,66,67,68,69,70,71] # 26 loads
         grb    = [73,74,81,83,87,91,92,93] # 8 loads
         num_gr = len(gra) + len(grb)
-        
+
         # 8 GRBs from previous iteration + 16 GRAs from current iteration (indices 31-57) can be still pending
         syncs.add(58, vlcnt=(8+16), barrier=True, comment="wait for previous set of GRA")
         lra1   = [59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84] # 26 loads
-        
+
         # 20 GRAs (indices 31-64) from current iteration can be still pending
         syncs.add(65,vlcnt=20, barrier=True, comment="wait for previous set of GRB")
         lrb1   = [66,85,86,88,90,92,94,96] # 8 loads
@@ -2065,6 +2345,7 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = num_gr
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
+
 
 def hasCustomSchedule(kernel):
 
