@@ -304,9 +304,9 @@ The filter matches against the specialization name. Other valid patterns include
 
 Noise is the variance in throughput between runs. It is measured as the [coefficient of variation](https://en.wikipedia.org/wiki/Coefficient_of_variation), which is the standard deviation divided by the mean.
 
-The main goal of primbench is to reduce the amount of noise to better see performance improvements. For example,  if a benchmark has10% noise, a 4% performance improvement can't be distinguished from noise.
+primbench's primary goal is to minimize noise so that real performance improvements are easier to see. For example, if a benchmark has 10% noise, a 4% performance improvement can't be distinguished from noise.
 
-Other processes running on the same GPU can introduce noise, so those processes should be stopped before running any benchmarks.
+Other processes running on the same GPU can introduce noise, so those processes should be stopped by the user before running any benchmarks.
 
 Benchmarks that have been noisy for more than 10 seconds are automatically timed out (`--noise-timeout-secs`):
 
@@ -314,12 +314,14 @@ Benchmarks that have been noisy for more than 10 seconds are automatically timed
 
 ### GPU Warming and Cooling
 
-To reduce noise and ensure consistent timings, primbench keeps the GPU within a stable temperature range. Cold GPUs boost and inflate performance; hot GPUs throttle and add variance.
+To reduce noise and ensure consistent timings, primbench ensures the GPU is within a stable temperature range. Cold GPUs boost and inflate performance; hot GPUs throttle and add variance.
 
-Before each specialization, primbench:
+Before benchmarking a specialization, primbench:
 
 * Warms the GPU to ≥ 50 °C (`--min-gpu-temp`).
 * Cools it if it exceeds 60 °C (`--max-gpu-temp`).
+
+primbench currently does not cool down the GPU *while* benchmarking a specialization, but this may be changed in the future.
 
 Temperatures are read via AMD SMI. Warming uses short GPU workloads; cooling waits until the GPU naturally drops back into range. If either process takes more than 60 seconds, primbench aborts (`--max-warming-secs`, `--max-cooling-secs`).
 
