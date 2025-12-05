@@ -324,18 +324,14 @@ def getDockerImage(Map conf=[:])
                 docker buildx use ci-builder
                 docker buildx inspect --bootstrap
             """.stripIndent()
-
-            dockerImage = docker.build("${image}", "${dockerArgs} ${env.WORKSPACE}/${env.PROJ_DIR}/.")
-            dockerImage.push()
          
-            // sh """
-            //     DOCKER_BUILDKIT=1 docker buildx build \
-            //     --push \
-            //     --tag ${image} \
-            //     ${dockerArgs} \
-            //     ${buildContext}
-            //     docker push ${image}
-            // """.stripIndent()
+            sh """
+                DOCKER_BUILDKIT=1 docker buildx build \
+                --push \
+                --tag ${image} \
+                ${dockerArgs} \
+                ${buildContext}
+            """.stripIndent()
         }
         dockerImage = docker.image("${image}")
     }
