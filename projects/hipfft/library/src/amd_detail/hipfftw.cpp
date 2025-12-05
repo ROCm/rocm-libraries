@@ -869,6 +869,32 @@ namespace
         return ret;
     }
 
+    template <size_t rank,
+              typename iodim,
+              std::enable_if_t<
+                  std::is_same_v<iodim, hipfftw_iodim> || std::is_same_v<iodim, hipfftw_iodim64>,
+                  bool> = true>
+    hipfftw_general_layout_data<rank, 1> hipfftw_get_data_layout(const iodim* dims,
+                                                                 const iodim* howmany_dims)
+    {
+        if(!dims)
+            throw hipfftw_invalid_arg("dims argument must not be nullptr.");
+        if(!howmany_dims)
+            throw hipfftw_invalid_arg("howmany_dims argument must not be nullptr.");
+
+        hipfftw_general_layout_data<rank, 1> ret;
+        for(auto dim = rank; dim-- > 0;)
+        {
+            ret.lengths[dim]  = dims[dim].n;
+            ret.istrides[dim] = dims[dim].is;
+            ret.ostrides[dim] = dims[dim].os;
+        }
+        ret.batches[0] = howmany_dims[0].n;
+        ret.idist[0]   = howmany_dims[0].is;
+        ret.odist[0]   = howmany_dims[0].os;
+        return ret;
+    }
+
     inline void hipfftw_validate_sign(int sign)
     {
         if(sign != FFTW_FORWARD && sign != FFTW_BACKWARD)
@@ -1226,6 +1252,64 @@ static hipfftw_plan_t<prec>* hipfftw_create_advanced_complex_plan(int        ran
     else
         return hipfftw_create_advanced_plan<rocfft_transform_type_complex_inverse, prec>(
             rank, n, howmany, in, inembed, istride, idist, out, onembed, ostride, odist, flags);
+}
+
+template <rocfft_transform_type dft_type, rocfft_precision prec, typename iodim>
+static hipfftw_plan_t<prec>*
+    hipfftw_create_guru_plan(int                                                      rank,
+                             const iodim*                                             dims,
+                             int                                                      howmany_rank,
+                             const iodim*                                             howmany_dims,
+                             hipfftw_user_data_t<dft_type, prec, fft_io::fft_io_in>*  in,
+                             hipfftw_user_data_t<dft_type, prec, fft_io::fft_io_out>* out,
+                             unsigned                                                 flags)
+{
+    static_assert(std::is_same_v<iodim, hipfftw_iodim> || std::is_same_v<iodim, hipfftw_iodim64>);
+    if(rank <= 0 || howmany_rank <= 0)
+        throw hipfftw_invalid_arg("rank and howmany_rank values must be strictly positive.");
+    if(howmany_rank != 1)
+        throw hipfftw_unsupported("howmany_rank values larger than 1 are not supported.");
+    // rank == 1, 2, 3, or unsupported
+    switch(rank)
+    {
+    case 1:
+    {
+        const auto data_layout = hipfftw_get_data_layout<1, iodim>(dims, howmany_dims);
+        return hipfftw_create_plan<dft_type, prec>(data_layout, in, out, flags);
+    }
+    case 2:
+    {
+        const auto data_layout = hipfftw_get_data_layout<2, iodim>(dims, howmany_dims);
+        return hipfftw_create_plan<dft_type, prec>(data_layout, in, out, flags);
+    }
+    case 3:
+    {
+        const auto data_layout = hipfftw_get_data_layout<3, iodim>(dims, howmany_dims);
+        return hipfftw_create_plan<dft_type, prec>(data_layout, in, out, flags);
+    }
+    default:
+        throw hipfftw_unsupported("rank values larger than 3 are not supported.");
+    }
+    // unreachable
+}
+
+template <rocfft_precision prec, typename iodim>
+static hipfftw_plan_t<prec>* hipfftw_create_guru_complex_plan(int          rank,
+                                                              const iodim* dims,
+                                                              int          howmany_rank,
+                                                              const iodim* howmany_dims,
+                                                              hipfftw_complex_data_t<prec>* in,
+                                                              hipfftw_complex_data_t<prec>* out,
+                                                              int                           sign,
+                                                              unsigned                      flags)
+{
+    hipfftw_validate_sign(sign);
+    if(sign == FFTW_FORWARD)
+        return hipfftw_create_guru_plan<rocfft_transform_type_complex_forward, prec, iodim>(
+            rank, dims, howmany_rank, howmany_dims, in, out, flags);
+    else
+        return hipfftw_create_guru_plan<rocfft_transform_type_complex_inverse, prec, iodim>(
+            rank, dims, howmany_rank, howmany_dims, in, out, flags);
 }
 
 void* fftw_malloc(size_t n)
@@ -1959,6 +2043,242 @@ try
     constexpr auto dft_type = rocfft_transform_type_real_inverse;
     return hipfftw_create_advanced_plan<dft_type, prec>(
         rank, n, howmany, in, inembed, istride, idist, out, onembed, ostride, odist, flags);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return nullptr;
+}
+
+/* ------------------------------------------------------------------------- */
+/*                      GURU PLAN CREATION FUNCTIONS                         */
+/* ------------------------------------------------------------------------- */
+
+fftw_plan fftw_plan_guru_dft(int               rank,
+                             const fftw_iodim* dims,
+                             int               howmany_rank,
+                             const fftw_iodim* howmany_dims,
+                             fftw_complex*     in,
+                             fftw_complex*     out,
+                             int               sign,
+                             unsigned          flags)
+try
+{
+    constexpr auto prec = rocfft_precision_double;
+    return hipfftw_create_guru_complex_plan<prec, hipfftw_iodim>(
+        rank, dims, howmany_rank, howmany_dims, in, out, sign, flags);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return nullptr;
+}
+
+fftwf_plan fftwf_plan_guru_dft(int                rank,
+                               const fftwf_iodim* dims,
+                               int                howmany_rank,
+                               const fftwf_iodim* howmany_dims,
+                               fftwf_complex*     in,
+                               fftwf_complex*     out,
+                               int                sign,
+                               unsigned           flags)
+try
+{
+    constexpr auto prec = rocfft_precision_single;
+    return hipfftw_create_guru_complex_plan<prec, hipfftw_iodim>(
+        rank, dims, howmany_rank, howmany_dims, in, out, sign, flags);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return nullptr;
+}
+
+fftw_plan fftw_plan_guru_dft_r2c(int               rank,
+                                 const fftw_iodim* dims,
+                                 int               howmany_rank,
+                                 const fftw_iodim* howmany_dims,
+                                 double*           in,
+                                 fftw_complex*     out,
+                                 unsigned          flags)
+try
+{
+    constexpr auto prec = rocfft_precision_double;
+    return hipfftw_create_guru_plan<rocfft_transform_type_real_forward, prec, hipfftw_iodim>(
+        rank, dims, howmany_rank, howmany_dims, in, out, flags);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return nullptr;
+}
+
+fftwf_plan fftwf_plan_guru_dft_r2c(int                rank,
+                                   const fftwf_iodim* dims,
+                                   int                howmany_rank,
+                                   const fftwf_iodim* howmany_dims,
+                                   float*             in,
+                                   fftwf_complex*     out,
+                                   unsigned           flags)
+try
+{
+    constexpr auto prec = rocfft_precision_single;
+    return hipfftw_create_guru_plan<rocfft_transform_type_real_forward, prec, hipfftw_iodim>(
+        rank, dims, howmany_rank, howmany_dims, in, out, flags);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return nullptr;
+}
+
+fftw_plan fftw_plan_guru_dft_c2r(int               rank,
+                                 const fftw_iodim* dims,
+                                 int               howmany_rank,
+                                 const fftw_iodim* howmany_dims,
+                                 fftw_complex*     in,
+                                 double*           out,
+                                 unsigned          flags)
+try
+{
+    constexpr auto prec = rocfft_precision_double;
+    return hipfftw_create_guru_plan<rocfft_transform_type_real_inverse, prec, hipfftw_iodim>(
+        rank, dims, howmany_rank, howmany_dims, in, out, flags);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return nullptr;
+}
+
+fftwf_plan fftwf_plan_guru_dft_c2r(int                rank,
+                                   const fftwf_iodim* dims,
+                                   int                howmany_rank,
+                                   const fftwf_iodim* howmany_dims,
+                                   fftwf_complex*     in,
+                                   float*             out,
+                                   unsigned           flags)
+try
+{
+    constexpr auto prec = rocfft_precision_single;
+    return hipfftw_create_guru_plan<rocfft_transform_type_real_inverse, prec, hipfftw_iodim>(
+        rank, dims, howmany_rank, howmany_dims, in, out, flags);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return nullptr;
+}
+
+fftw_plan fftw_plan_guru64_dft(int                 rank,
+                               const fftw_iodim64* dims,
+                               int                 howmany_rank,
+                               const fftw_iodim64* howmany_dims,
+                               fftw_complex*       in,
+                               fftw_complex*       out,
+                               int                 sign,
+                               unsigned            flags)
+try
+{
+    constexpr auto prec = rocfft_precision_double;
+    return hipfftw_create_guru_complex_plan<prec, hipfftw_iodim64>(
+        rank, dims, howmany_rank, howmany_dims, in, out, sign, flags);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return nullptr;
+}
+
+fftwf_plan fftwf_plan_guru64_dft(int                  rank,
+                                 const fftwf_iodim64* dims,
+                                 int                  howmany_rank,
+                                 const fftwf_iodim64* howmany_dims,
+                                 fftwf_complex*       in,
+                                 fftwf_complex*       out,
+                                 int                  sign,
+                                 unsigned             flags)
+try
+{
+    constexpr auto prec = rocfft_precision_single;
+    return hipfftw_create_guru_complex_plan<prec, hipfftw_iodim64>(
+        rank, dims, howmany_rank, howmany_dims, in, out, sign, flags);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return nullptr;
+}
+
+fftw_plan fftw_plan_guru64_dft_r2c(int                 rank,
+                                   const fftw_iodim64* dims,
+                                   int                 howmany_rank,
+                                   const fftw_iodim64* howmany_dims,
+                                   double*             in,
+                                   fftw_complex*       out,
+                                   unsigned            flags)
+try
+{
+    constexpr auto prec = rocfft_precision_double;
+    return hipfftw_create_guru_plan<rocfft_transform_type_real_forward, prec, hipfftw_iodim64>(
+        rank, dims, howmany_rank, howmany_dims, in, out, flags);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return nullptr;
+}
+
+fftwf_plan fftwf_plan_guru64_dft_r2c(int                  rank,
+                                     const fftwf_iodim64* dims,
+                                     int                  howmany_rank,
+                                     const fftwf_iodim64* howmany_dims,
+                                     float*               in,
+                                     fftwf_complex*       out,
+                                     unsigned             flags)
+try
+{
+    constexpr auto prec = rocfft_precision_single;
+    return hipfftw_create_guru_plan<rocfft_transform_type_real_forward, prec, hipfftw_iodim64>(
+        rank, dims, howmany_rank, howmany_dims, in, out, flags);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return nullptr;
+}
+
+fftw_plan fftw_plan_guru64_dft_c2r(int                 rank,
+                                   const fftw_iodim64* dims,
+                                   int                 howmany_rank,
+                                   const fftw_iodim64* howmany_dims,
+                                   fftw_complex*       in,
+                                   double*             out,
+                                   unsigned            flags)
+try
+{
+    constexpr auto prec = rocfft_precision_double;
+    return hipfftw_create_guru_plan<rocfft_transform_type_real_inverse, prec, hipfftw_iodim64>(
+        rank, dims, howmany_rank, howmany_dims, in, out, flags);
+}
+catch(...)
+{
+    hipfftw_exception_handler(__func__);
+    return nullptr;
+}
+
+fftwf_plan fftwf_plan_guru64_dft_c2r(int                  rank,
+                                     const fftwf_iodim64* dims,
+                                     int                  howmany_rank,
+                                     const fftwf_iodim64* howmany_dims,
+                                     fftwf_complex*       in,
+                                     float*               out,
+                                     unsigned             flags)
+try
+{
+    constexpr auto prec = rocfft_precision_single;
+    return hipfftw_create_guru_plan<rocfft_transform_type_real_inverse, prec, hipfftw_iodim64>(
+        rank, dims, howmany_rank, howmany_dims, in, out, flags);
 }
 catch(...)
 {

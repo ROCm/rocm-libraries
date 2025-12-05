@@ -127,7 +127,7 @@ void testing_set_get_matrix_async(const Arguments& arg)
 
         cpu_time_used = get_time_us_no_sync() - cpu_time_used;
 
-        hipStreamSynchronize(stream);
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
         if(arg.unit_check)
         {
@@ -160,7 +160,7 @@ void testing_set_get_matrix_async(const Arguments& arg)
                           (rows, cols, sizeof(T), dD, ldd, hB, ldb, stream));
         }
 
-        hipStreamSynchronize(stream);
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
 
         ArgumentModel<e_M, e_N, e_lda, e_ldb, e_ldd>{}.log_args<T>(

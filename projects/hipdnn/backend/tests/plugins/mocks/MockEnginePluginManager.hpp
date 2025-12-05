@@ -12,9 +12,7 @@
 #include <set>
 #include <vector>
 
-namespace hipdnn_backend
-{
-namespace plugin
+namespace hipdnn_backend::plugin
 {
 
 class MockEnginePluginManager : public EnginePluginManager
@@ -37,5 +35,4 @@ public:
                 (const, override));
 };
 
-} // namespace plugin
-} // namespace hipdnn_backend
+} // namespace hipdnn_backend::plugin

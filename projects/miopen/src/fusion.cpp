@@ -453,7 +453,11 @@ miopenStatus_t FusionPlanDescriptor::AddOp(std::shared_ptr<FusionOpDescriptor> d
         desc->SetInputDesc(input_desc);
     else
         desc->SetInputDesc(output_desc);
-    desc->GetOutputDesc(output_desc);
+    auto status = desc->GetOutputDesc(output_desc);
+    if(status != miopenStatusSuccess)
+    {
+        return status;
+    }
     op_map.emplace_back(desc);
     op_count++;
     return miopenStatusSuccess;
@@ -996,9 +1000,8 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
     }
 
     {
-        FindMode findMode;
+        FindMode findMode(solver::Primitive::Fusion);
         auto sol = boost::optional<miopenConvSolution_t>{};
-
         if(findMode.IsFast(fusion_problem) || findMode.IsHybrid(fusion_problem))
         {
             const auto ctx      = FusionContext{handle};
@@ -1089,7 +1092,7 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
             continue;
         }
 
-        handle.RegisterInvoker(*invoker, network_config, id.ToString(), AlgorithmName{"fusion"});
+        handle.RegisterInvoker(*invoker, network_config, id.ToString());
         invokers.push_back(std::move(*invoker));
         MIOPEN_LOG_I2(miopen::ConvolutionAlgoToString(algorithm));
     }
@@ -1100,6 +1103,8 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
         return miopenStatusUnsupportedOp;
     }
 
+    handle.SetAsFound1_0(
+        network_config, AlgorithmName{"fusion"}, find_results.front().GetSolver().ToString());
     return miopenStatusSuccess;
 }
 
