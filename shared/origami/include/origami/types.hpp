@@ -64,7 +64,7 @@ inline data_type_t int_to_data_type(int dt) { return static_cast<data_type_t>(dt
  * @param type Data type
  * @return int Number of bits
  */
-int data_type_to_bits(data_type_t type);
+int datatype_to_bits(data_type_t type);
 
 /**
  * @brief Convert data_type_t to number of bytes.
@@ -73,7 +73,7 @@ int data_type_to_bits(data_type_t type);
  * @return int Number of bytes
  */
 inline int data_type_to_bytes(data_type_t type) {
-  return math::safe_ceil_div(data_type_to_bits(type), 8);
+  return math::safe_ceil_div(datatype_to_bits(type), 8);
 }
 
 /**
@@ -82,7 +82,7 @@ inline int data_type_to_bytes(data_type_t type) {
  * @param type Data type
  * @return std::string String representation of data type
  */
-std::string to_string(data_type_t type);
+std::string datatype_to_string(data_type_t type);
 
 /**
  * @brief Convert string to data_type_t enum.
@@ -90,7 +90,7 @@ std::string to_string(data_type_t type);
  * @param s String value to convert
  * @return data_type_t Corresponding data type
  */
-data_type_t string_to_data_type(std::string s);
+data_type_t string_to_datatype(std::string s);
 
 /**
  * @brief Struct to define a matrix instruction.

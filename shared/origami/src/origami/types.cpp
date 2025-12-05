@@ -9,9 +9,7 @@
 
 namespace origami {
 
-runtime_options::runtime_options() {
-  update_from_env();
-}
+runtime_options::runtime_options() { update_from_env(); }
 
 runtime_options::runtime_options(bool debug, bool heuristics, double variance)
     : debug_enabled(debug), heuristics_enabled(heuristics), heuristics_variance(variance) {}
@@ -46,12 +44,12 @@ double runtime_options::read_heuristics_variance_from_env() {
 }
 
 void runtime_options::update_from_env() {
-  debug_enabled = read_debug_from_env();
-  heuristics_enabled = read_heuristics_from_env();
+  debug_enabled       = read_debug_from_env();
+  heuristics_enabled  = read_heuristics_from_env();
   heuristics_variance = read_heuristics_variance_from_env();
 }
 
-int data_type_to_bits(data_type_t type) {
+int datatype_to_bits(data_type_t type) {
   switch (type) {
     case data_type_t::Float: return 32;
     case data_type_t::Double: return 64;
@@ -80,7 +78,7 @@ int data_type_to_bits(data_type_t type) {
   }
 }
 
-std::string to_string(data_type_t type) {
+std::string datatype_to_string(data_type_t type) {
   switch (type) {
     case data_type_t::Float: return "Float";
     case data_type_t::Double: return "Double";
@@ -109,7 +107,7 @@ std::string to_string(data_type_t type) {
   }
 }
 
-data_type_t string_to_data_type(std::string s) {
+data_type_t string_to_datatype(std::string s) {
   if (s == "f32") return data_type_t::Float;
   if (s == "c32") return data_type_t::ComplexFloat;
   if (s == "c64") return data_type_t::ComplexDouble;
@@ -129,4 +127,3 @@ data_type_t string_to_data_type(std::string s) {
 }
 
 }  // namespace origami
-

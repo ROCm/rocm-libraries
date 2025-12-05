@@ -353,14 +353,12 @@ void hardware_t::print() const {
     const auto& key  = kv.first;
     const auto& L_MI = kv.second;
 
-    std::cout << "Instruction: MI_M=" << key.MI_M << ", MI_N=" << key.MI_N
-              << ", MI_K=" << key.MI_K << ", mi_input_type=" << to_string(key.mi_input_type)
-              << " bytes\n"
+    std::cout << "Instruction: MI_M=" << key.MI_M << ", MI_N=" << key.MI_N << ", MI_K=" << key.MI_K
+              << ", mi_input_type=" << datatype_to_string(key.mi_input_type) << " bytes\n"
               << "  -> Latency (L_MI): " << L_MI << "\n";
   }
   std::cout << "===========================================================\n";
 }
-
 
 size_t hardware_t::get_mi_latency(size_t MI_M,
                                   size_t MI_N,
@@ -375,8 +373,8 @@ size_t hardware_t::get_mi_latency(size_t MI_M,
   } else {
     if (origami::runtime_options().get().debug_enabled)
       std::cerr << "Warning: Latency not found for MI_M=" << MI_M << ", MI_N=" << MI_N
-              << ", MI_K=" << MI_K << ", mi_input_type=" << to_string(mi_input_type)
-              << ". Returning latency value of 32 (really slow).\n";
+                << ", MI_K=" << MI_K << ", mi_input_type=" << datatype_to_string(mi_input_type)
+                << ". Returning latency value of 32 (really slow).\n";
     return 32 / parallel_mi_cu;  // Default latency if instruction is not found
   }
 }
@@ -388,4 +386,3 @@ std::string hardware_t::get_before_first_colon(const std::string& input) {
 }
 
 }  // namespace origami
-

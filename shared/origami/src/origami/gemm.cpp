@@ -585,8 +585,8 @@ double compute_memory_latency(const problem_t& problem,
   // Extract parameters from structured types
   const auto a_bytes = data_type_to_bytes(problem.a_dtype);
   const auto b_bytes = data_type_to_bytes(problem.b_dtype);
-  const auto a_bits  = data_type_to_bits(problem.a_dtype);
-  const auto b_bits  = data_type_to_bits(problem.b_dtype);
+  const auto a_bits  = datatype_to_bits(problem.a_dtype);
+  const auto b_bits  = datatype_to_bits(problem.b_dtype);
   size_t batch       = problem.batch;
 
   const bool a_trans = (problem.a_transpose == transpose_t::T);
@@ -751,8 +751,8 @@ double compute_tile_latency(const problem_t& problem,
   const size_t MT_N = config.mt.n;
   const size_t MT_K = config.mt.k;
 
-  const auto a_bits    = data_type_to_bits(problem.a_dtype);
-  const auto b_bits    = data_type_to_bits(problem.b_dtype);
+  const auto a_bits    = datatype_to_bits(problem.a_dtype);
+  const auto b_bits    = datatype_to_bits(problem.b_dtype);
   const size_t a_bytes = static_cast<size_t>(data_type_to_bytes(problem.a_dtype));
   const size_t d_bytes = static_cast<size_t>(data_type_to_bytes(problem.d_dtype));
 
@@ -781,7 +781,7 @@ double compute_tile_latency(const problem_t& problem,
   // 4) Epilogue: writes from all active CUs with limited bandwidth
   double mem_bw_occ            = compute_mem_bw_from_occupancy(hardware, num_active_cus);
   double mem_bw_occ_limited    = hardware.mem3_perf_ratio * mem_bw_occ;
-  size_t MT_M_rounded_128bytes = round_elements_to_128B(MT_M, data_type_to_bits(problem.a_dtype));
+  size_t MT_M_rounded_128bytes = round_elements_to_128B(MT_M, datatype_to_bits(problem.a_dtype));
 
   double L_epilogue = (static_cast<double>(num_active_cus / splitting_factor) *
                        MT_M_rounded_128bytes * MT_N * static_cast<double>(d_bytes)) /
@@ -929,8 +929,8 @@ double compute_total_latency(const problem_t& problem,
   size_t MI_N = config.mi.n;
   size_t MI_K = config.mi.k;
 
-  const int a_bits  = data_type_to_bits(problem.a_dtype);
-  const int b_bits  = data_type_to_bits(problem.b_dtype);
+  const int a_bits  = datatype_to_bits(problem.a_dtype);
+  const int b_bits  = datatype_to_bits(problem.b_dtype);
   const int a_bytes = data_type_to_bytes(problem.a_dtype);
   const int d_bytes = data_type_to_bytes(problem.d_dtype);
 

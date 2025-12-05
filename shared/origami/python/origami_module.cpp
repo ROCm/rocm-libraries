@@ -69,8 +69,8 @@ NB_MODULE(origami, m) {
       .export_values();
 
   nanobind::enum_<origami::reduction_t>(m, "reduction_t")
-      .value("Tree", origami::reduction_t::tree)
-      .value("Parallel", origami::reduction_t::parallel)
+      .value("tree", origami::reduction_t::tree)
+      .value("parallel", origami::reduction_t::parallel)
       .export_values();
 
   m.def("int_to_reduction_t", &origami::int_to_reduction_t, "Convert int to reduction_t.");
@@ -94,16 +94,32 @@ NB_MODULE(origami, m) {
       .def("get_metrics", &origami::logger_t::get_metrics, "Get all metrics as a map")
       .def("empty", &origami::logger_t::empty, "Check if logger has any metrics")
       // Overloads for templated log() method
-      .def("log", [](origami::logger_t& self, const std::string& key, int value) { self.log(key, value); },
-           "Log an integer value")
-      .def("log", [](origami::logger_t& self, const std::string& key, double value) { self.log(key, value); },
-           "Log a double value")
-      .def("log", [](origami::logger_t& self, const std::string& key, const std::string& value) { self.log(key, value); },
-           "Log a string value")
-      .def("log", [](origami::logger_t& self, const std::string& key, bool value) { self.log(key, value); },
-           "Log a boolean value")
-      .def("log", [](origami::logger_t& self, const std::string& key, size_t value) { self.log(key, value); },
-           "Log a size_t value");
+      .def(
+          "log",
+          [](origami::logger_t& self, const std::string& key, int value) { self.log(key, value); },
+          "Log an integer value")
+      .def(
+          "log",
+          [](origami::logger_t& self, const std::string& key, double value) {
+            self.log(key, value);
+          },
+          "Log a double value")
+      .def(
+          "log",
+          [](origami::logger_t& self, const std::string& key, const std::string& value) {
+            self.log(key, value);
+          },
+          "Log a string value")
+      .def(
+          "log",
+          [](origami::logger_t& self, const std::string& key, bool value) { self.log(key, value); },
+          "Log a boolean value")
+      .def(
+          "log",
+          [](origami::logger_t& self, const std::string& key, size_t value) {
+            self.log(key, value);
+          },
+          "Log a size_t value");
 
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())
@@ -165,12 +181,12 @@ NB_MODULE(origami, m) {
         &hardware_t::get_hardware_for_device,
         "This gets a hardware object for a device.");
 
-  m.def("datatype_to_bits", &origami::data_type_to_bits, "Return the number of bits in a datatype");
+  m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
   m.def("string_to_datatype",
-        &origami::string_to_data_type,
+        &origami::string_to_datatype,
         "Convert a string representation of a datatype into data_type_t enum");
   m.def("datatype_to_string",
-        &origami::to_string,
+        &origami::datatype_to_string,
         "Convert data_type_t enum to string representation");
 
   m.def("select_config",
@@ -201,5 +217,4 @@ NB_MODULE(origami, m) {
                                const origami::config_t&,
                                size_t max_cus)>(&origami::compute_total_latency),
         "Compute total latency");
-
 }
