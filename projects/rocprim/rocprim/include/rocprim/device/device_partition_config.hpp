@@ -87,7 +87,7 @@ constexpr auto algo_target_type()
     }
 }
 
-template<partition_subalgo SubAlgo, class Key, class Value>
+template<partition_subalgo SubAlgo, class Key, class Value, class Flag>
 struct partition_config_selector
 {
     using targets    = typename decltype(algo_target_type<SubAlgo>())::type;
@@ -128,7 +128,7 @@ struct partition_config_selector
         }
         else if constexpr(SubAlgo == partition_subalgo::select_predicated_flag)
         {
-            return select_predicated_flag_config_picker<Target, Key, Value>();
+            return select_predicated_flag_config_picker<Target, Key, Flag>();
         }
         else if constexpr(SubAlgo == partition_subalgo::select_unique)
         {

@@ -138,8 +138,6 @@ inline hipError_t partition_impl(void*                       temporary_storage,
             using scan_state_type = detail::lookback_scan_state<offset_type, use_sleepy_scan>;
             using block_id_type   = detail::block_id_wrapper<uint32_t, use_atomic_block_id>;
 
-            using selector = partition_config_selector<SubAlgo, key_type, value_type>;
-
             constexpr bool write_only_selected
                 = SubAlgo == partition_subalgo::select_flag
                   || SubAlgo == partition_subalgo::select_predicate
@@ -159,6 +157,12 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                             : (is_predicated_flag
                                    ? select_method::predicated_flag
                                    : (is_flag ? select_method::flag : select_method::predicate));
+
+            using flag_type =
+                typename std::conditional<method == select_method::predicated_flag,
+                                          typename std::iterator_traits<FlagIterator>::value_type,
+                                          bool>::type;
+            using selector = partition_config_selector<SubAlgo, key_type, value_type, flag_type>;
 
             detail::target_arch target_arch;
             ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
@@ -198,10 +202,6 @@ inline hipError_t partition_impl(void*                       temporary_storage,
             // vsmem size
             void*  vsmem                      = nullptr;
             size_t virtual_shared_memory_size = 0;
-            using flag_type =
-                typename std::conditional<method == select_method::predicated_flag,
-                                          typename std::iterator_traits<FlagIterator>::value_type,
-                                          bool>::type;
 
             virtual_shared_memory_size
                 = get_partition_vsmem_size_per_block<Config,
