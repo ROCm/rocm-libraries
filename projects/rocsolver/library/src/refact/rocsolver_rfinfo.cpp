@@ -100,7 +100,8 @@ static bool load_rocsparse()
     char* err = dlerror(); // clear errors
 #ifndef NDEBUG
     if(!handle)
-        rocsolver::formatting::print(stderr, "rocsolver: error loading librocsparse.so.1: {:s}\n", err);
+        rocsolver::formatting::print(stderr, "rocsolver: error loading librocsparse.so.1: {:s}\n",
+                                     err);
 #endif /* NDEBUG */
 #endif /* _WIN32 */
     if(!handle)
