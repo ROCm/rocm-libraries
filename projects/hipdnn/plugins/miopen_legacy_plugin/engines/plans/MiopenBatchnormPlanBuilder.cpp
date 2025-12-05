@@ -292,6 +292,19 @@ bool MiopenBatchnormPlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnEnginePluginHandle& handle,
     const hipdnn_plugin::IGraph& opGraph) const
 {
+    auto hasFloatComputeDataType = [](const auto& node) {
+        return node->computeDataType() == hipdnn_sdk::data_objects::DataType::FLOAT;
+    };
+
+    if(opGraph.nodeCount() != 0
+       && !std::all_of(
+           opGraph.nodeWrappers().begin(), opGraph.nodeWrappers().end(), hasFloatComputeDataType))
+    {
+        HIPDNN_LOG_ERROR("Batchnorm plan builder only supports nodes with an fp32 "
+                         "compute_data_type");
+        return false;
+    }
+
     switch(opGraph.nodeCount())
     {
     case 1:

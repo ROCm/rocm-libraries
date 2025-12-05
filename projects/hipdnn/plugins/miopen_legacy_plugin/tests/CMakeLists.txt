@@ -36,13 +36,13 @@ add_executable(
 )
 
 target_compile_options(miopen_legacy_plugin_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-target_compile_definitions(
-    miopen_legacy_plugin_tests PRIVATE COMPONENT_NAME="miopen_legacy_plugin_tests"
-)
+# target_compile_definitions(
+#     miopen_legacy_plugin_tests PRIVATE COMPONENT_NAME="miopen_legacy_plugin_tests"
+# )
 
 target_link_libraries(
     miopen_legacy_plugin_tests PUBLIC GTest::gtest GTest::gmock hip::host
-                                      miopen_legacy_plugin_private hipdnn_sdk Threads::Threads
+                                      miopen_legacy_plugin_private hipdnn_sdk hipdnn_frontend Threads::Threads
 )
 
 # make it so tests inside folders can find the mocks folder without having to use a relative path.

@@ -211,11 +211,11 @@ class TestNameValidator:
                     if not line:
                         continue
 
-                    if line.endswith("."):
+                    if line.endswith(".") and not line.endswith("..."):
                         current_suite = line[:-1]
                     elif line and current_suite:
                         test_case = line.strip()
-                        test_names.append(f"{current_suite}.{test_case}")
+                        test_names.append(f"{current_suite}.{test_case.split("#")[0].strip()}")
 
             except subprocess.TimeoutExpired:
                 print(f"Warning: Timeout running {executable}", file=sys.stderr)

@@ -64,7 +64,7 @@ protected:
 
         auto yConvTensorAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
         yConvTensorAttr->set_name("y_conv");
-        yConvTensorAttr->set_data_type(dataType);
+        yConvTensorAttr->set_data_type(hipdnn_frontend::DataType::FLOAT);
         yConvTensorAttr->set_dim(convTestCase.yDims);
         yConvTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
         yConvTensorAttr->set_uid(uid++);
@@ -82,10 +82,11 @@ protected:
             graph::PointwiseAttributes biasAttrs;
             biasAttrs.set_name("bias");
             biasAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
+            biasAttrs.set_compute_data_type(dataType);
 
             yBiasTensorAttr = graphObj.pointwise(yConvTensorAttr, biasTensorAttr, biasAttrs);
             yBiasTensorAttr->set_name("y_bias");
-            yBiasTensorAttr->set_data_type(dataType);
+            yBiasTensorAttr->set_data_type(hipdnn_frontend::DataType::FLOAT);
             yBiasTensorAttr->set_dim(convTestCase.yDims);
             yBiasTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
             yBiasTensorAttr->set_uid(uid++);

@@ -88,6 +88,19 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForWro
     EXPECT_FALSE(applicable);
 }
 
+TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForUnsupportedComputeType)
+{
+    flatbuffers::FlatBufferBuilder builder
+        = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingActivGraph();
+
+    auto mutableGraph = hipdnn_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer());
+    mutableGraph->mutable_nodes()->GetMutableObject(1)->mutate_compute_data_type(
+        hipdnn_sdk::data_objects::DataType::HALF);
+
+    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
 // ============================================================================
 // Running Statistics Validation Tests
 // ============================================================================

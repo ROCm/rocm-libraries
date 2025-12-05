@@ -229,6 +229,13 @@ bool MiopenConvPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
         return false;
     }
 
+    if(opGraph.getNode(0).compute_data_type() != hipdnn_sdk::data_objects::DataType::FLOAT)
+    {
+        HIPDNN_LOG_ERROR("BatchnormFwdTraining plan builder only supports nodes with an fp32 "
+                         "compute_data_type");
+        return false;
+    }
+
     const auto& node = opGraph.getNode(0);
     bool ret = false;
 

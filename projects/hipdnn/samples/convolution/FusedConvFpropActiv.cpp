@@ -59,7 +59,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     auto yAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
     yAttr->set_output(false);
-    yAttr->set_data_type(inputType);
+    yAttr->set_data_type(hipdnn_frontend::DataType::FLOAT);
 
     graph::PointwiseAttributes pointwiseAttributes;
     pointwiseAttributes.set_mode(hipdnn_frontend::PointwiseMode::RELU_FWD);

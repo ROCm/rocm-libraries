@@ -277,12 +277,25 @@ bool MiopenBatchnormFwdTrainingPlanBuilder::isApplicable(
         // Common batchnorm validation
         const auto& bnAttr = checkBatchnormNode(opGraph.getNodeWrapper(0));
 
+        auto hasFloatComputeDataType = [](const auto& node) {
+            return node->computeDataType() == hipdnn_sdk::data_objects::DataType::FLOAT;
+        };
+
+        if(!std::all_of(opGraph.nodeWrappers().begin(),
+                        opGraph.nodeWrappers().end(),
+                        hasFloatComputeDataType))
+        {
+            HIPDNN_LOG_ERROR("BatchnormFwdTraining plan builder only supports nodes with an fp32 "
+                             "compute_data_type");
+            return false;
+        }
+
         if(opGraph.nodeCount() == 1)
         {
             // Solo batchnorm training
             checkTensorVirtuality1Node(bnAttr, opGraph.getTensorMap());
-            HIPDNN_LOG_INFO(
-                "BatchnormFwdTraining plan builder applicable for single node batchnorm training");
+            HIPDNN_LOG_INFO("BatchnormFwdTraining plan builder applicable for single node "
+                            "batchnorm training");
             return true;
         }
 

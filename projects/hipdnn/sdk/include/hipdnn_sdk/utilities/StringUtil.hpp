@@ -59,11 +59,30 @@ std::enable_if_t<std::is_arithmetic_v<T>, std::string> // Restrict template to n
     return result + "]";
 }
 
-// Converts a vector of numbers to a. ostream "[1, 2, 3...]".
+// Converts a vector of objects to an ostream "[1, 2, 3...]".
 template <typename T>
 inline void vecToStream(std::ostream& os, const std::vector<T>& vec)
 {
-    os << vecToString(vec);
+    os << "[";
+    if(!vec.empty())
+    {
+        os << vec[0];
+        for(size_t i = 1; i < vec.size(); ++i)
+        {
+            os << ", " << vec[i];
+        }
+    }
+
+    os << "]";
+}
+
+// Converts a vector of numbers to a string "[1, 2, 3...]".
+template <typename T>
+std::enable_if_t<!std::is_arithmetic_v<T>, std::string> vecToString(const std::vector<T>& vec)
+{
+    std::stringstream stream;
+    vecToStream(stream, vec);
+    return stream.str();
 }
 
 } // namespace hipdnn_sdk::utilities
