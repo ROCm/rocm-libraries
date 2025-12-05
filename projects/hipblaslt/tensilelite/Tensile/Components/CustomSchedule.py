@@ -475,13 +475,16 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
             
             7, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for prior 5 LRA0"),
             
-            23, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="All LRB0 launched"),
+            19, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LRA0 is launched"),
+            19, SBarrier(comment=""),
+            
+            23, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="All LRB0 is launched"),
             23, SBarrier(comment=""),
             
-            35, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="All GRA launched"),
-            35, SBarrier(comment=""),
+            36, SWaitCnt(dscnt=-1, vlcnt=8+3, vscnt=-1, comment="All GRA is launched + 3 prior GRB"),
+            36, SBarrier(comment=""),
             
-            43, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="All GRB launched"),
+            43, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="All GRB is launched"),
             43, SBarrier(comment=""),
         ]
         
@@ -497,18 +500,18 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
             'LRB0'   : [[17, 19, 21],
                         [18, 20, 22]],
             
-            'GRA'    : [[19,19, 21,21, 23,23, 25,25, 27,27, 29,29, 31,31, 33,33],
-                        [20,20, 22,22, 24,24, 26,26, 28,28, 30,30, 32,32, 34,34]],
+            'GRA'    : [[20,20, 22,22, 24,24, 26,26, 28,28, 30,30, 32,32, 34,34],
+                        [21,21, 23,23, 25,25, 27,27, 29,29, 31,31, 33,33, 35,35]],
             'GRB'    : [[37,37, 39,39, 41,41],
                         [38,38, 40,40, 42,42]],
             
             'LRSA'   : [[30]],
             'LRSB'   : [[31]],
             
-            'LWSA'   : [[35]],
+            'LWSA'   : [[36]],
             'LWSB'   : [[43]],
             
-            'LRA1'   : [[35,35, 37,37, 38,38, 39,39, 40,40, 41,41, 42,42, 43,43]],
+            'LRA1'   : [[37,37, 38,38, 39,39, 40,40, 41,41, 42,42, 43,43, 44,44]],
             'LRB1'   : [[43, 44, 45]],
             
             'LCC'    : [[47, 47]],
