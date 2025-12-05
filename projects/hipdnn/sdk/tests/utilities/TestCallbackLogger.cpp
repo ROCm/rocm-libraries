@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <mutex>
 #include <regex>
@@ -141,4 +142,42 @@ TEST_F(TestCallbackLogger, CallbackReceivesFormattedPattern)
     EXPECT_TRUE(std::regex_search(logs[0], pattern))
         << "Log message did not match expected pattern.\n"
         << "Actual log: " << logs[0];
+}
+
+TEST_F(TestCallbackLogger, ParamsAreNotExpandedIfLogLevelIsDisabled)
+{
+    bool wasCalledForInfo = false;
+    bool wasCalledForWarn = false;
+    bool wasCalledForError = false;
+    bool wasCalledForFatal = false;
+    std::string infoMessage("info log message");
+    std::string warnMessage("warn log message");
+    std::string errorMessage("error log message");
+    std::string fatalMessage("fatal log message");
+    auto trackingLambda = [](bool& wasCalled, std::string message) {
+        wasCalled = true;
+        return message;
+    };
+
+    // Set level to error so info and warn should be ignored
+    auto testLogger = spdlog::get(_testLoggerName);
+    testLogger->set_level(spdlog::level::err);
+
+    HIPDNN_LOG_INFO(trackingLambda(wasCalledForInfo, infoMessage));
+    HIPDNN_LOG_WARN(trackingLambda(wasCalledForWarn, warnMessage));
+    HIPDNN_LOG_ERROR(trackingLambda(wasCalledForError, errorMessage));
+    HIPDNN_LOG_FATAL(trackingLambda(wasCalledForFatal, fatalMessage));
+
+    auto logs = getCapturedLogs();
+    ASSERT_EQ(logs.size(), 2);
+    EXPECT_THAT(logs[0], ::testing::Not(::testing::EndsWith(infoMessage)));
+    EXPECT_THAT(logs[1], ::testing::Not(::testing::EndsWith(infoMessage)));
+    EXPECT_THAT(logs[0], ::testing::Not(::testing::EndsWith(warnMessage)));
+    EXPECT_THAT(logs[1], ::testing::Not(::testing::EndsWith(warnMessage)));
+    EXPECT_THAT(logs[0], ::testing::EndsWith(errorMessage));
+    EXPECT_THAT(logs[1], ::testing::EndsWith(fatalMessage));
+    EXPECT_FALSE(wasCalledForInfo);
+    EXPECT_FALSE(wasCalledForWarn);
+    EXPECT_TRUE(wasCalledForError);
+    EXPECT_TRUE(wasCalledForFatal);
 }

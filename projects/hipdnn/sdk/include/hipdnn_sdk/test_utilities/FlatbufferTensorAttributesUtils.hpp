@@ -11,24 +11,24 @@
 namespace hipdnn_sdk::test_utilities
 {
 
-inline hipdnn_sdk::data_objects::TensorAttributesT
-    unpackTensorAttributes(const hipdnn_sdk::data_objects::TensorAttributes& tensorAttributes)
+inline data_objects::TensorAttributesT
+    unpackTensorAttributes(const data_objects::TensorAttributes& tensorAttributes)
 {
-    hipdnn_sdk::data_objects::TensorAttributesT tensorAttributesT;
+    data_objects::TensorAttributesT tensorAttributesT;
     tensorAttributes.UnPackTo(&tensorAttributesT);
     return tensorAttributesT;
 }
 
 template <typename T>
 inline std::unique_ptr<utilities::ShallowTensor<T>>
-    createShallowTensor(const hipdnn_sdk::data_objects::TensorAttributesT& tensorDetails, void* ptr)
+    createShallowTensor(const data_objects::TensorAttributesT& tensorDetails, void* ptr)
 {
     return std::make_unique<utilities::ShallowTensor<T>>(
         ptr, tensorDetails.dims, tensorDetails.strides);
 }
 
 inline std::unique_ptr<utilities::ITensor>
-    createTensorFromAttribute(const hipdnn_sdk::data_objects::TensorAttributes& attribute)
+    createTensorFromAttribute(const data_objects::TensorAttributes& attribute)
 {
     auto dims = utilities::convertFlatBufferVectorToStdVector(attribute.dims());
     auto strides = utilities::convertFlatBufferVectorToStdVector(attribute.strides());
