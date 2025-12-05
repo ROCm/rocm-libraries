@@ -35,6 +35,9 @@
 #include <Tensile/UtilsOrigami.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
+#include <Tensile/UtilsOrigami.hpp>
+#include <origami/streamk.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -622,7 +625,8 @@ namespace TensileLite
         size_t startStrideAB = problemType.useInitialStridesAB ? 0 : 1;
 
         // Pass wsStride if it's not in MBSK mode
-        bool gsuWSStride = gsu > 1 && sizeMapping.globalAccumulation != 3 && sizeMapping.streamK == 0;
+        bool gsuWSStride
+            = gsu > 1 && sizeMapping.globalAccumulation != 3 && sizeMapping.streamK == 0;
         bool skWSStride = sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel;
         if(gsuWSStride || skWSStride)
         {
@@ -932,8 +936,8 @@ namespace TensileLite
     }
 
     std::pair<int32_t, int32_t> ContractionSolution::calculateAutoWGM(Problem const&  problem,
-                                                                       Hardware const* hardware,
-                                                                       uint32_t const  skgrid) const
+                                                                      Hardware const* hardware,
+                                                                      uint32_t const  skgrid) const
     {
         // Hardware
         AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(hardware);
@@ -949,7 +953,7 @@ namespace TensileLite
            && sizeMapping.nonTemporalA < 4 /* Exclude NTs for now till we fix libs */
            && sizeMapping.nonTemporalB < 4 /* Exclude NTs for now till we fix libs */)
         {
-            int32_t  c_wgm   = 0;
+            int32_t c_wgm    = 0;
             int32_t c_wgmxcc = 0;
             // Try to find cached WGM and WGMXCC
             std::tie(c_wgm, c_wgmxcc) = paramsCache.find(problem);
@@ -964,9 +968,9 @@ namespace TensileLite
                         .batch = sizes[2],
                     };
                     origami::config_t origami_config = {
-                        .mt             = {static_cast<size_t>(sizeMapping.macroTile.x),
-                                           static_cast<size_t>(sizeMapping.macroTile.y),
-                                           static_cast<size_t>(sizeMapping.depthU)},
+                        .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
+                                          static_cast<size_t>(sizeMapping.macroTile.y),
+                                          static_cast<size_t>(sizeMapping.depthU)},
                         .cache_hints_a = sizeMapping.nonTemporalA,
                         .cache_hints_b = sizeMapping.nonTemporalB,
                     };
@@ -2983,7 +2987,7 @@ namespace TensileLite
                 // Get space required for partial tiles=
                 if(reductionStrat == origami::reduction_t::parallel)
                 {
-                    size_t splitk = skGrid / tiles;
+                    size_t splitk         = skGrid / tiles;
                     size_t idealWorkspace = requiredWorkspaceSizeGsu(problem, hardware, splitk);
                     if(idealWorkspace <= problem.workspaceSize())
                         size += idealWorkspace;
@@ -3002,21 +3006,24 @@ namespace TensileLite
         else
         {
             // TODO: Pass GSU from problem and change value[2] to gsu if gsu != default value
-            size_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : calculateAutoGSU(problem, &hardware);
+            size_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu()
+                                                       : calculateAutoGSU(problem, &hardware);
             size += requiredWorkspaceSizeGsu(problem, hardware, gsu);
         }
         return size;
     }
 
-    size_t ContractionSolution::requiredWorkspaceSizeGsu(Problem const& problem, Hardware const& hardware, size_t gsu) const
+    size_t ContractionSolution::requiredWorkspaceSizeGsu(Problem const&  problem,
+                                                         Hardware const& hardware,
+                                                         size_t          gsu) const
     {
         size_t size = 0;
 
         size_t gsuMultiplier = gsu > 1 ? gsu : 0;
         size_t batch         = problem.d().sizes()[2];
         size_t tiles         = problem.getNumTiles(sizeMapping, gsu) * batch;
-        size_t tileSize      = sizeMapping.macroTile.x * sizeMapping.macroTile.y
-                          * sizeMapping.workspaceSizePerElemC;
+        size_t tileSize
+            = sizeMapping.macroTile.x * sizeMapping.macroTile.y * sizeMapping.workspaceSizePerElemC;
         size_t bufSize = gsu > 1 ? tiles * tileSize : 0;
         size += bufSize;
 
@@ -3025,19 +3032,15 @@ namespace TensileLite
         {
             if(problem.biasSrc() == ContractionProblemGemm::TENSOR::A)
             {
-                size += problem.freeSizeA(0) * sizeMapping.workspaceSizePerElemBias
-                        * gsuMultiplier;
+                size += problem.freeSizeA(0) * sizeMapping.workspaceSizePerElemBias * gsuMultiplier;
             }
             else if(problem.biasSrc() == ContractionProblemGemm::TENSOR::B)
             {
-                size += problem.freeSizeB(0) * sizeMapping.workspaceSizePerElemBias
-                        * gsuMultiplier;
+                size += problem.freeSizeB(0) * sizeMapping.workspaceSizePerElemBias * gsuMultiplier;
             }
-            else if(problem.biasSrc() == ContractionProblemGemm::TENSOR::D
-                    && (gsuMultiplier == 0))
+            else if(problem.biasSrc() == ContractionProblemGemm::TENSOR::D && (gsuMultiplier == 0))
             {
-                size += problem.d().totalLogicalElements() * problem.computeTypeElementSize()
-                        * gsu;
+                size += problem.d().totalLogicalElements() * problem.computeTypeElementSize() * gsu;
             }
         }
 

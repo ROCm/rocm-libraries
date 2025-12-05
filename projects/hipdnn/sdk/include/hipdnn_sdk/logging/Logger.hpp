@@ -20,20 +20,25 @@
     {                                           \
     } while(0)
 #else
-#define _HIPDNN_INTERNAL_LOG_ACTION(level, ...)       \
-    do                                                \
-    {                                                 \
-        if(auto logger = spdlog::get(COMPONENT_NAME)) \
-        {                                             \
-            logger->level(__VA_ARGS__);               \
-        }                                             \
+#define _HIPDNN_INTERNAL_LOG_ACTION(spdlog_level, ...) \
+    do                                                 \
+    {                                                  \
+        auto logger = spdlog::get(COMPONENT_NAME);     \
+        if(logger && logger->should_log(spdlog_level)) \
+        {                                              \
+            logger->log(spdlog_level, __VA_ARGS__);    \
+        }                                              \
     } while(0)
 #endif // COMPONENT_NAME
 
-#define HIPDNN_LOG_INFO(...) _HIPDNN_INTERNAL_LOG_ACTION(info, __VA_ARGS__)
-#define HIPDNN_LOG_WARN(...) _HIPDNN_INTERNAL_LOG_ACTION(warn, __VA_ARGS__)
-#define HIPDNN_LOG_ERROR(...) _HIPDNN_INTERNAL_LOG_ACTION(error, __VA_ARGS__)
-#define HIPDNN_LOG_FATAL(...) _HIPDNN_INTERNAL_LOG_ACTION(critical, __VA_ARGS__)
+#define HIPDNN_LOG_INFO(...) \
+    _HIPDNN_INTERNAL_LOG_ACTION(spdlog::level::level_enum::info, __VA_ARGS__)
+#define HIPDNN_LOG_WARN(...) \
+    _HIPDNN_INTERNAL_LOG_ACTION(spdlog::level::level_enum::warn, __VA_ARGS__)
+#define HIPDNN_LOG_ERROR(...) \
+    _HIPDNN_INTERNAL_LOG_ACTION(spdlog::level::level_enum::err, __VA_ARGS__)
+#define HIPDNN_LOG_FATAL(...) \
+    _HIPDNN_INTERNAL_LOG_ACTION(spdlog::level::level_enum::critical, __VA_ARGS__)
 #endif // HIPDNN_BACKEND_COMPILATION
 
 namespace hipdnn::logging

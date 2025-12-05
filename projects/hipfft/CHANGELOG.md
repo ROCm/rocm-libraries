@@ -5,6 +5,10 @@ Documentation for hipFFT is available at
 
 ## hipFFT 1.0.22 (unreleased)
 
+### Resolved issues
+
+* Fixed potential launch failure of data generation kernels in test and benchmark programs.
+
 ## hipFFT 1.0.21 for ROCm 7.1.0
 
 ### Added
