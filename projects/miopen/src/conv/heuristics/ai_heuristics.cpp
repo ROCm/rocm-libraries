@@ -639,72 +639,84 @@ PredictionResult ProcessPredictions(const std::vector<float>& predictions,
     return result;
 }
 
+/**
+ * @brief Common logic for running TunaNet prediction and caching results
+ * @param problem Convolution problem description
+ * @param device GPU device name
+ * @param is3d Whether this is a 3D or 2D problem
+ * @param predictions Raw model predictions (solver probabilities)
+ * @param solver_map Mapping from solver indices to solver names
+ * @return Sorted solver IDs with highest probability first
+ */
+static std::vector<uint64_t>
+ProcessAndCachePredictions(const conv::ProblemDescription& problem,
+                           const std::string& device,
+                           bool is3d,
+                           const std::vector<float>& predictions,
+                           const std::unordered_map<size_t, std::string>& solver_map)
+{
+    const std::string model_type = is3d ? "3D " : "";
+
+    // Process predictions (sort by probability, filter invalid solvers)
+    auto result = ProcessPredictions(predictions, solver_map, is3d);
+
+    // Cache results for future use
+    StorePredictionCache(problem, device, is3d, result.any_solver_ids);
+
+    // Log results if verbose logging enabled
+    if(miopen::IsLogging(LoggingLevel::Info2))
+    {
+        std::stringstream ss;
+        for(auto& id : result.solver_ids)
+            ss << solver::Id{id}.ToString() << " ID:" << id << ", ";
+        MIOPEN_LOG_I2(model_type << "TunaNet Result: " << ss.str());
+    }
+
+    return result.solver_ids;
+}
+
 std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
                                     const ExecutionContext& ctx,
                                     const std::string& device)
 {
-    if(problem.Is3d())
-    {
-        // Check cache FIRST - avoids expensive model creation if we have cached results
-        auto cached_result = GetCachedPrediction(problem, device, true); // true = 3D
-        if(!cached_result.empty())
-        {
-            return cached_result;
-        }
+    const bool is3d = problem.Is3d();
 
-        // Create 3D model using metadata instance
-        std::unique_ptr<conv3d::Model3D> model3d = conv3d::Get3DModel(device);
-        if(!model3d || !model3d->IsProblemSupported(problem, ctx))
+    // Check cache FIRST - avoids expensive model creation if we have cached results
+    auto cached_result = GetCachedPrediction(problem, device, is3d);
+    if(!cached_result.empty())
+    {
+        return cached_result;
+    }
+
+    if(is3d)
+    {
+        // 3D path: Use TunaNet3D model
+        std::unique_ptr<conv3d::Model3D> model = conv3d::Get3DModel(device);
+        if(!model || !model->IsProblemSupported(problem, ctx))
         {
-            return {};
+            return {}; // Fallback: empty vector
         }
 
         MIOPEN_LOG_I2("Evaluating 3D TunaNet");
-        std::vector<float> res = model3d->Forward(problem);
+        std::vector<float> predictions = model->Forward(problem);
 
-        // Process predictions using model's metadata (same as 2D)
-        auto result = ProcessPredictions(res, model3d->GetSolverMap(), true); // true = 3D
-
-        StorePredictionCache(problem, device, true, result.any_solver_ids); // true = 3D
-        if(miopen::IsLogging(LoggingLevel::Info2))
-        {
-            std::stringstream ss;
-            for(auto& id : result.solver_ids)
-                ss << solver::Id{id}.ToString() << " ID:" << id << ", ";
-            MIOPEN_LOG_I2("3D TunaNet Result: " << ss.str());
-        }
-
-        return result.solver_ids;
+        return ProcessAndCachePredictions(
+            problem, device, true, predictions, model->GetSolverMap());
     }
     else
     {
-        // Check cache FIRST - avoids expensive model creation if we have cached results
-        auto cached_result = GetCachedPrediction(problem, device, false); // false = 2D
-        if(!cached_result.empty())
-        {
-            return cached_result;
-        }
-
-        // Only create model if cache miss - expensive but necessary
+        // 2D path: Use original TunaNet model
         std::unique_ptr<Model> model = GetModel(device);
         if(!model || !model->IsProblemSupported(problem, ctx))
-            return {};
+        {
+            return {}; // Fallback: empty vector
+        }
 
         MIOPEN_LOG_I2("Evaluating TunaNet");
-        std::vector<float> res = model->Forward(problem);
+        std::vector<float> predictions = model->Forward(problem);
 
-        // Process predictions using helper function
-        auto result = ProcessPredictions(res, model->metadata.solver_map, false); // false = 2D
-
-        StorePredictionCache(problem, device, false, result.any_solver_ids); // false = 2D
-        if(miopen::IsLogging(LoggingLevel::Info2))
-        {
-            std::stringstream ss;
-            for(auto& id : result.solver_ids)
-                ss << solver::Id{id}.ToString() << " ID:" << id << ", ";
-            MIOPEN_LOG_I2("TunaNet Result: " << ss.str());
-        }
-        return result.solver_ids;
+        return ProcessAndCachePredictions(
+            problem, device, false, predictions, model->metadata.solver_map);
     }
 }
 
