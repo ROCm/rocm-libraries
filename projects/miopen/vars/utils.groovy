@@ -225,7 +225,7 @@ def getDockerImageName(dockerArgs)
     sh """
         cd ${env.WORKSPACE}/${env.CK_DIR} && \
         { \
-            find cmake codegen experimental include library python tile_engine -type f -print0; \
+            find cmake experimental include library -type f -print0; \
             find . -maxdepth 1 -type f \\( \
                 -name 'CMakeLists.txt' -o \
                 -name 'Config.cmake.in' -o \
