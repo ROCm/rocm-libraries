@@ -17,15 +17,8 @@ if(ENABLE_CLANG_TIDY)
                            ${CMAKE_BINARY_DIR} ${CLANG_TIDY_HIP_ARGS}
     )
 
-    find_program(
-        RUN_CLANG_TIDY_EXE NAMES run-clang-tidy-20 PATHS # ${LLVM_TOOL_PATHS}
-                                                         /usr/bin /usr/local/bin
-    )
-
     # Alternatively, this could be separate from the ENABLE_CLANG_TIDY flag
     if(RUN_CLANG_TIDY_EXE)
-        message(STATUS "Found run-clang-tidy-20 at ${RUN_CLANG_TIDY_EXE}")
-
         processorcount(N)
         if(NOT N EQUAL 0)
             set(CLANG_TIDY_JOBS ${N})
