@@ -229,11 +229,12 @@ NB_MODULE(origami, m) {
         "max_cus"_a = 0,
         "Select best grid size for the given configuration");
   m.def("select_workgroup_mapping",
+        &origami::select_workgroup_mapping,
         "problem"_a,
         "hardware"_a,
         "config"_a,
         "skGrid"_a,
-        &origami::select_workgroup_mapping,
+
         "Select best workgroup mapping");
   m.def("rank_configs",
         &origami::rank_configs,
@@ -242,25 +243,28 @@ NB_MODULE(origami, m) {
         "configs"_a,
         "Rank configurations by performance");
   m.def("select_config_mnk",
+        &origami::select_config_mnk,
         "M"_a,
         "N"_a,
         "K"_a,
         "hardware"_a,
         "configs"_a,
-        &origami::select_config_mnk,
+
         "Select best configuration for M,N,K dimensions");
   m.def("select_topk_configs",
+        &origami::select_topk_configs,
         "problem"_a,
         "hardware"_a,
         "configs"_a,
         "topk"_a,
-        &origami::select_topk_configs,
+
         "Select topk configurations");
   m.def("compute_perf_gflops",
+        &origami::compute_perf_gflops,
         "hardware"_a,
         "problem"_a,
         "latency"_a,
-        &origami::compute_perf_gflops,
+
         "Compute performance in GFLOPS");
 
   // StreamK functions
@@ -269,6 +273,7 @@ NB_MODULE(origami, m) {
         "problem"_a,
         "hardware"_a,
         "config"_a,
+        "algorithm"_a,
         "Select best StreamK reduction strategy");
 
   // GEMM functions
