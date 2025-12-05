@@ -281,7 +281,7 @@ struct config_t {
   int occupancy;
 
   /// Reorder workgroup id for L2 reuse.
-  mutable int workgroup_mapping{};
+  int workgroup_mapping{};
 
   /// Whether operand A is accessed with cache-flags.
   int cache_hints_a{};
@@ -294,7 +294,7 @@ struct config_t {
   std::size_t workspace_size_per_elem_c{};
 
   /// Reduction strategy.
-  mutable reduction_t reduction_strategy{};
+  reduction_t reduction_strategy{};
 
   /// Runtime options (if null, uses global singleton)
   const runtime_options* runtime_opts{nullptr};

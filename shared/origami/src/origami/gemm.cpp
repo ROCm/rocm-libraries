@@ -108,10 +108,11 @@ std::tuple<size_t, size_t, size_t, size_t> compute_cu_occupancy(const problem_t&
     }
   } else  // as what StreamK predicts
   {
-    config.reduction_strategy =
+    auto config_with_reduction = config;
+    config_with_reduction.reduction_strategy =
         streamk::select_reduction(problem, hardware, config, grid_selection);
 
-    num_wgs = streamk::select_grid_size(problem, hardware, config, grid_selection, max_cus);
+    num_wgs = streamk::select_grid_size(problem, hardware, config_with_reduction, grid_selection, max_cus);
 
     // output variables
     num_active_cus = num_wgs < hardware.N_CU ? num_wgs : hardware.N_CU;
@@ -871,10 +872,10 @@ double compute_tile_latency(const problem_t& problem,
     config.logger.log("L_prologue", L_prologue);
     config.logger.log("L_epilogue", L_epilogue);
     config.logger.log("L_tile_total", L_tile_total);
-    config.logger.log("Effective Tile Peanlty", effective_tile_penalty);
+    config.logger.log("Effective Tile Penalty", effective_tile_penalty);
     config.logger.log("Problem K quant", problem_k_quant);
     config.logger.log("K quant overhead", (problem_k_quant * 50000));
-    config.logger.log("Problem Tiile Quant", utilization);
+    config.logger.log("Problem Tile Quant", utilization);
     config.logger.log("Real Occupancy", utilization);
     config.logger.log("Output Utilization Penalty", output_utilization_penalty);
     config.logger.log("Output Utilization", output_utilization);
@@ -937,6 +938,7 @@ double compute_total_latency(const problem_t& problem,
     config.logger.log(
         "Problem_Size",
         std::to_string(int(M)) + "x" + std::to_string(int(N)) + "x" + std::to_string(int(K)));
+    config.logger.log("Batch", std::to_string(int(batch)));
     config.logger.log("Macro_Tile",
                       std::to_string(int(MT_M)) + "x" + std::to_string(int(MT_N)) + "x" +
                           std::to_string(int(MT_K)));
@@ -1057,8 +1059,8 @@ double compute_total_latency(const problem_t& problem,
     config.logger.log("Output Tile Size", MT_M * MT_N);
     config.logger.log("Tile M/N", MT_M / MT_N);
     config.logger.log("Tile N/M", MT_N / MT_M);
-    config.logger.log("Problem M/N", MT_M / MT_N);
-    config.logger.log("Problem N/M", MT_N / MT_M);
+    config.logger.log("Problem M/N", M / N);
+    config.logger.log("Problem N/M", N / M);
     size_t occupancy_percent = num_active_cus / hardware.N_CU;
     config.logger.log("Peak theoretical GFLOPs based on occupancy", 1300 * occupancy_percent);
     if (get_runtime_options(config).debug_enabled) { config.logger.print(); }
