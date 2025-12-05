@@ -1757,9 +1757,12 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
             // the fastest dimension.  So only apply a solution if
             // we're not doing even-length real, or if fastest dim
             // stride is 1.
-            const bool evenLengthReal = (transformType == rocfft_transform_type_real_forward
+            const auto& realLength     = transformType == rocfft_transform_type_real_forward
+                                             ? execPlan.rootPlan->length
+                                             : execPlan.rootPlan->outputLength;
+            const bool  evenLengthReal = (transformType == rocfft_transform_type_real_forward
                                          || transformType == rocfft_transform_type_real_forward)
-                                        && execPlan.rootPlan->length[0] % 2 == 0;
+                                        && realLength.front() % 2 == 0;
             const bool stride1 = execPlan.rootPlan->inStride.front() == 1
                                  && execPlan.rootPlan->outStride.front() == 1;
             if(evenLengthReal && !stride1)
