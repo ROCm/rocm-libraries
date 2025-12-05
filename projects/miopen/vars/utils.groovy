@@ -319,6 +319,13 @@ def getDockerImage(Map conf=[:])
         def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
         withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
             sh """
+                docker buildx inspect ci-builder >/dev/null 2>&1 || \
+                docker buildx create --name ci-builder --driver docker-container --use
+                docker buildx use ci-builder
+                docker buildx inspect --bootstrap
+            """.stripIndent()
+            
+            sh """
                 DOCKER_BUILDKIT=1 docker buildx build \
                 --push \
                 ${dockerArgs} \
