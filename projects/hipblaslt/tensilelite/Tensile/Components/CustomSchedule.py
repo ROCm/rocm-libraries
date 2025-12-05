@@ -782,7 +782,7 @@ class ScheduleInfo:
         # The set of validation rules to run inside `isValid`.
         self.rules: list[Callable[[ScheduleInfo, dict], [bool, str]]] = [
             verify_correct_number_of_instructions,
-            verifyAscendingOrder,
+            verify_ascending_order,
             verify_lrs_complete_before_vmfma,
             verify_global_reads_not_too_early,
             verify_scc_overlap
