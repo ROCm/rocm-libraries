@@ -435,7 +435,7 @@ namespace GEMMTests
             }
 
             std::map<Operations::ScratchPolicy, Operations::OperationTag> scratchTags;
-            Operations::OperationTag                                     tagNumWGs;
+            Operations::OperationTag                                      tagNumWGs;
             if(gemm.streamK)
             {
                 tagNumWGs      = command->allocateTag();
@@ -676,8 +676,7 @@ namespace GEMMTests
                         policy, commandArgs.runtimeArguments());
                     if(scratchSpaceRequired[i] > 0)
                     {
-                        deviceScratch[i]
-                            = make_shared_device<uint8_t>(scratchSpaceRequired[i], 0);
+                        deviceScratch[i] = make_shared_device<uint8_t>(scratchSpaceRequired[i], 0);
                         commandArgs.setArgument(
                             scratchTags.at(policy), ArgumentType::Value, deviceScratch[i].get());
                     }
@@ -799,9 +798,8 @@ namespace GEMMTests
                 {
                     if(scratchSpaceRequired[i] > 0)
                     {
-                        ASSERT_THAT(
-                            hipMemset(deviceScratch[i].get(), 0, scratchSpaceRequired[i]),
-                            HasHipSuccess(0));
+                        ASSERT_THAT(hipMemset(deviceScratch[i].get(), 0, scratchSpaceRequired[i]),
+                                    HasHipSuccess(0));
                     }
                 }
 
@@ -831,9 +829,8 @@ namespace GEMMTests
                                           scratchSpaceRequired[zeroedIdx],
                                           hipMemcpyDeviceToHost),
                                 HasHipSuccess(0));
-                    EXPECT_TRUE(std::all_of(zeroedResult.begin(),
-                                            zeroedResult.end(),
-                                            [](uint8_t v) { return v == 0; }))
+                    EXPECT_TRUE(std::all_of(
+                        zeroedResult.begin(), zeroedResult.end(), [](uint8_t v) { return v == 0; }))
                         << "ZeroedBeforeAndAfter scratch should be all zeros after kernel "
                            "execution";
                 }

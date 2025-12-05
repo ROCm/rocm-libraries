@@ -585,29 +585,29 @@ namespace rocRoller
             auto doWhileTag = graph.control.addElement(
                 DoWhileOp{(DF(flagRegister) == zero), "Global sync spin loop"});
 
-        // The coordinate graph for load, store, and reset flags:
-        //
-        //     Workgroup
-        //           |
-        //      PassThrough
-        //          |
-        //          v
-        //   flagsScratchTag <-Duplicate-- resetFlagsScratchTag
-        //          |                             ^
-        //     PassThrough                   PassThrough
-        //          |                             |
-        //          v                      resetNextWorkgroupTag
-        //   nextWorkgroupTag                     ^
-        //          |                            Join
-        //        Split                        /  |  \
+            // The coordinate graph for load, store, and reset flags:
+            //
+            //     Workgroup
+            //           |
+            //      PassThrough
+            //          |
+            //          v
+            //   flagsScratchTag <-Duplicate-- resetFlagsScratchTag
+            //          |                             ^
+            //     PassThrough                   PassThrough
+            //          |                             |
+            //          v                      resetNextWorkgroupTag
+            //   nextWorkgroupTag                     ^
+            //          |                            Join
+            //        Split                        /  |  \
         //       /  |  \                      /   |   \
         //      v   v   v                    /    |    \
         //   Workgroup  plusOne  forReceiveTileLoop
-        //
-        // Note: nextWorkgroupTag and resetNextWorkgroupTag both connect to the same
-        // neighbors (Workgroup, plusOne, forReceiveTileLoop) but in opposite directions
-        // (Split vs Join). This allows loading flags from WG+1+i and resetting flags
-        // at the same index.
+            //
+            // Note: nextWorkgroupTag and resetNextWorkgroupTag both connect to the same
+            // neighbors (Workgroup, plusOne, forReceiveTileLoop) but in opposite directions
+            // (Split vs Join). This allows loading flags from WG+1+i and resetting flags
+            // at the same index.
 
             // Create coordinate to indicate flag index to reset
             auto resetNextWorkgroupTag = graph.coordinates.addElement(Linear(nullptr, one));

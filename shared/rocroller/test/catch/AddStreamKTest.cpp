@@ -713,10 +713,9 @@ TEST_CASE("AddStreamK scratch policy usage", "[streamk][scratch]")
             return maybeUser->argumentName == getScratchName(ScratchPolicy::None);
         };
 
-        auto scratchNoneCoordinates = kgraph.coordinates.findElements(findScratchNone).to<std::vector>();
+        auto scratchNoneCoordinates
+            = kgraph.coordinates.findElements(findScratchNone).to<std::vector>();
         CHECK(scratchNoneCoordinates.size() == 1);
-
-
     }
 
     SECTION("Load, store, and reset flags scratch space correctly")
@@ -727,28 +726,27 @@ TEST_CASE("AddStreamK scratch policy usage", "[streamk][scratch]")
                 return false;
             return maybeUser->argumentName == getScratchName(ScratchPolicy::ZeroedBeforeAndAfter);
         };
-        
+
         auto scratchZeroedCoordinates
             = kgraph.coordinates.findElements(findScratchZeroed).to<std::vector>();
         CHECK(scratchZeroedCoordinates.size() == 2);
 
         // Check the reset flags coordinate connects to the original flags coordinate via a duplicate edge
         auto resetFlagsCoordinate = -1, originalFlagsCoordinate = -1;
-        for (const auto& tag : scratchZeroedCoordinates)
+        for(const auto& tag : scratchZeroedCoordinates)
         {
             std::cout << "tag: " << tag << std::endl;
             // Duplicate edge connects the reset flags coordinate to the original flags coordinate
             auto isDuplicate = isEdge<Duplicate>;
-            auto outDuplicates    = kgraph.coordinates.getOutputNodeIndices(tag, isDuplicate)
-                                .to<std::vector>();
+            auto outDuplicates
+                = kgraph.coordinates.getOutputNodeIndices(tag, isDuplicate).to<std::vector>();
 
             CHECK((outDuplicates.size() == 1 || outDuplicates.empty()));
-            if (outDuplicates.size() == 1)
+            if(outDuplicates.size() == 1)
             {
-                resetFlagsCoordinate = tag;
+                resetFlagsCoordinate    = tag;
                 originalFlagsCoordinate = outDuplicates[0];
             }
-
         }
         std::cout << "resetFlagsCoordinate: " << resetFlagsCoordinate << std::endl;
         std::cout << "originalFlagsCoordinate: " << originalFlagsCoordinate << std::endl;
@@ -758,26 +756,33 @@ TEST_CASE("AddStreamK scratch policy usage", "[streamk][scratch]")
         // Duplicate coordinate should have a higher tag than the original flags coordinate
         CHECK(resetFlagsCoordinate > originalFlagsCoordinate);
 
-
+        // Check the graph of flags scratch coordinates matches AddStreamK implementation
         auto isPassThroughEdge = isEdge<PassThrough>;
-        auto isJoinEdge = isEdge<Join>;
-        auto isSplitEdge = isEdge<Split>;
-        auto maybeNextWorkgroupTag = kgraph.coordinates.getOutputNodeIndices(originalFlagsCoordinate, isPassThroughEdge).to<std::vector>();
+        auto isJoinEdge        = isEdge<Join>;
+        auto isSplitEdge       = isEdge<Split>;
+        auto maybeNextWorkgroupTag
+            = kgraph.coordinates.getOutputNodeIndices(originalFlagsCoordinate, isPassThroughEdge)
+                  .to<std::vector>();
         CHECK(maybeNextWorkgroupTag.size() == 1);
         auto nextWorkgroupTag = maybeNextWorkgroupTag[0];
-        auto maybeSplit = kgraph.coordinates.getOutputNodeIndices(nextWorkgroupTag, isSplitEdge).to<std::vector>();
+        auto maybeSplit = kgraph.coordinates.getOutputNodeIndices(nextWorkgroupTag, isSplitEdge)
+                              .to<std::vector>();
         CHECK(maybeSplit.size() == 3);
-        // CHECK(maybeSplit[0] == maybeSplit[1]);
-        // CHECK(maybeSplit[1] == maybeSplit[2]);
-        auto maybeResetNextWorkgroupTag0 = kgraph.coordinates.getOutputNodeIndices(maybeSplit[0], isJoinEdge).to<std::vector>();
-        auto maybeResetNextWorkgroupTag1 = kgraph.coordinates.getOutputNodeIndices(maybeSplit[1], isJoinEdge).to<std::vector>();
-        auto maybeResetNextWorkgroupTag2 = kgraph.coordinates.getOutputNodeIndices(maybeSplit[2], isJoinEdge).to<std::vector>();
+        auto maybeResetNextWorkgroupTag0
+            = kgraph.coordinates.getOutputNodeIndices(maybeSplit[0], isJoinEdge).to<std::vector>();
+        auto maybeResetNextWorkgroupTag1
+            = kgraph.coordinates.getOutputNodeIndices(maybeSplit[1], isJoinEdge).to<std::vector>();
+        auto maybeResetNextWorkgroupTag2
+            = kgraph.coordinates.getOutputNodeIndices(maybeSplit[2], isJoinEdge).to<std::vector>();
         CHECK(maybeResetNextWorkgroupTag0.size() == 1);
         CHECK(maybeResetNextWorkgroupTag1.size() == 1);
         CHECK(maybeResetNextWorkgroupTag2.size() == 1);
         CHECK(maybeResetNextWorkgroupTag0[0] == maybeResetNextWorkgroupTag1[0]);
         CHECK(maybeResetNextWorkgroupTag1[0] == maybeResetNextWorkgroupTag2[0]);
-        auto maybeResetFlagsCoordinate = kgraph.coordinates.getOutputNodeIndices(maybeResetNextWorkgroupTag0[0], isPassThroughEdge).to<std::vector>();
+        auto maybeResetFlagsCoordinate
+            = kgraph.coordinates
+                  .getOutputNodeIndices(maybeResetNextWorkgroupTag0[0], isPassThroughEdge)
+                  .to<std::vector>();
         CHECK(maybeResetFlagsCoordinate.size() == 1);
         CHECK(maybeResetFlagsCoordinate[0] == resetFlagsCoordinate);
     }

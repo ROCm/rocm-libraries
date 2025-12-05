@@ -226,14 +226,15 @@ namespace GEMMDriverTest
             Operations::OperationTag tagScratch[static_cast<int>(Operations::ScratchPolicy::Count)];
             for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
             {
-                auto policy           = static_cast<Operations::ScratchPolicy>(i);
+                auto policy   = static_cast<Operations::ScratchPolicy>(i);
                 tagScratch[i] = command->allocateTag();
                 command->addOperation(rocRoller::Operations::Scratch(tagScratch[i], policy));
-                command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                                          tagScratch[i],
-                                          ArgumentType::Value,
-                                          DataDirection::ReadWrite,
-                                          getScratchName(policy));
+                command->allocateArgument(
+                    VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                    tagScratch[i],
+                    ArgumentType::Value,
+                    DataDirection::ReadWrite,
+                    getScratchName(policy));
             }
 
             auto params = std::make_shared<CommandParameters>();
@@ -338,7 +339,7 @@ namespace GEMMDriverTest
                 commandArgs.setArgument(command->getNextTag(), ArgumentType::Value, gemm.numWGs);
             }
             std::shared_ptr<uint8_t>
-                deviceScratch[static_cast<size_t>(Operations::ScratchPolicy::Count)];
+                   deviceScratch[static_cast<size_t>(Operations::ScratchPolicy::Count)];
             size_t scratchSpaceRequired[static_cast<size_t>(Operations::ScratchPolicy::Count)];
             for(size_t i = 0; i < static_cast<size_t>(Operations::ScratchPolicy::Count); ++i)
             {
