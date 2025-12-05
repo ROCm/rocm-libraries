@@ -204,24 +204,24 @@ add_custom_command(
 set(HIPSPARSE_COMMON "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_common.yaml")
 add_custom_command(
     OUTPUT "${HIPSPARSE_COMMON}"
-    COMMAND ${CMAKE_COMMAND} -E copy ../include/hipsparse_common.yaml "${HIPSPARSE_COMMON}"
-    DEPENDS ../include/hipsparse_common.yaml
+    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/clients/include/hipsparse_common.yaml" "${HIPSPARSE_COMMON}"
+    DEPENDS "${PROJECT_SOURCE_DIR}/clients/include/hipsparse_common.yaml"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 set(HIPSPARSE_TEMPLATE "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_template.yaml")
 add_custom_command(
     OUTPUT "${HIPSPARSE_TEMPLATE}"
-    COMMAND ${CMAKE_COMMAND} -E copy ../include/hipsparse_template.yaml "${HIPSPARSE_TEMPLATE}"
-    DEPENDS ../include/hipsparse_template.yaml
+    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/clients/include/hipsparse_template.yaml" "${HIPSPARSE_TEMPLATE}"
+    DEPENDS "${PROJECT_SOURCE_DIR}/clients/include/hipsparse_template.yaml"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
 set(HIPSPARSE_GENTEST "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_gentest.py")
 add_custom_command(
     OUTPUT "${HIPSPARSE_GENTEST}"
-    COMMAND ${CMAKE_COMMAND} -E copy ../common/hipsparse_gentest.py "${HIPSPARSE_GENTEST}"
-    DEPENDS ../common/hipsparse_gentest.py
+    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py" "${HIPSPARSE_GENTEST}"
+    DEPENDS "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
@@ -323,8 +323,8 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
 # Prepare testing data
 set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_test.data")
 add_custom_command(OUTPUT "${HIPSPARSE_TEST_DATA}"
-                   COMMAND ${Python3_EXECUTABLE} ../common/hipsparse_gentest.py -m ${PROJECT_BINARY_DIR}/matrices -I ../include hipsparse_test.yaml -o "${HIPSPARSE_TEST_DATA}"
-                   DEPENDS ../common/hipsparse_gentest.py hipsparse_test.yaml ../include/hipsparse_common.yaml ${HIPSPARSE_TEST_YAMLS}
+                   COMMAND ${Python3_EXECUTABLE} "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py" -m ${PROJECT_BINARY_DIR}/matrices -I "${PROJECT_SOURCE_DIR}/clients/include" "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_test.yaml" -o "${HIPSPARSE_TEST_DATA}"
+                   DEPENDS "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py" "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_test.yaml" "${PROJECT_SOURCE_DIR}/clients/include/hipsparse_common.yaml" ${HIPSPARSE_TEST_YAMLS}
                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 add_custom_target(hipsparse-test-data
   DEPENDS "${HIPSPARSE_TEST_DATA}" )
