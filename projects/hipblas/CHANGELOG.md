@@ -7,7 +7,7 @@ Documentation for hipBLAS is available at
 
 ### Added
 
-* Added the `hipblasSyrkEx()` API
+* Added the `hipblasSyrkEx()` API.
 
 ## hipBLAS 3.2.0 for ROCm 7.2
 
