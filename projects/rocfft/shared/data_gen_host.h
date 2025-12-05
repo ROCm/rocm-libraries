@@ -25,6 +25,7 @@
 #include "hostbuf.h"
 #include "increment.h"
 #include "index_partition_omp.h"
+#include "rocfft_complex.h"
 #include <complex>
 #include <limits>
 #include <random>

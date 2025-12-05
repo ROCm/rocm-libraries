@@ -27,10 +27,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
+
+#include "TestContext.hpp"
 
 TEST_CASE("Replace tile", "[kernel-graph]")
 {
@@ -221,5 +224,221 @@ TEST_CASE("ForLoop utils", "[kernel-graph]")
 
         CHECK(not Expression::identical(clonedUpper, Expression::literal(10u)));
         CHECK(Expression::identical(originalUpper, clonedUpper));
+    }
+}
+
+TEST_CASE("updateThreadTileForLongDwords", "[kernel-graph]")
+{
+    using namespace rocRoller::KernelGraph;
+
+    SECTION("Factor 4 is optimal")
+    {
+        int  t_m                      = 8;
+        int  t_n                      = 1;
+        int  maxWidth                 = 4;
+        uint macTileFastMovingDimSize = 64;
+        int  numDwordsPerElement      = 1;
+        bool avoidDWordX2             = false;
+
+        updateThreadTileForLongDwords(
+            t_m, t_n, maxWidth, macTileFastMovingDimSize, numDwordsPerElement, avoidDWordX2);
+
+        // With factor 4: t_m = 8/4 = 2, t_n = 1*4 = 4
+        CHECK(t_m == 2);
+        CHECK(t_n == 4);
+    }
+
+    SECTION("Factor 3 when 4 doesn't divide evenly")
+    {
+        int  t_m                      = 6;
+        int  t_n                      = 1;
+        int  maxWidth                 = 4;
+        uint macTileFastMovingDimSize = 64;
+        int  numDwordsPerElement      = 1;
+        bool avoidDWordX2             = false;
+
+        updateThreadTileForLongDwords(
+            t_m, t_n, maxWidth, macTileFastMovingDimSize, numDwordsPerElement, avoidDWordX2);
+
+        // With factor 3: t_m = 6/3 = 2, t_n = 1*3 = 3
+        CHECK(t_m == 2);
+        CHECK(t_n == 3);
+    }
+
+    SECTION("Factor 2 when only 2 divides evenly")
+    {
+        int  t_m                      = 10;
+        int  t_n                      = 1;
+        int  maxWidth                 = 4;
+        uint macTileFastMovingDimSize = 64;
+        int  numDwordsPerElement      = 1;
+        bool avoidDWordX2             = false;
+
+        updateThreadTileForLongDwords(
+            t_m, t_n, maxWidth, macTileFastMovingDimSize, numDwordsPerElement, avoidDWordX2);
+
+        // With factor 2: t_m = 10/2 = 5, t_n = 1*2 = 2
+        CHECK(t_m == 5);
+        CHECK(t_n == 2);
+    }
+
+    SECTION("avoidDWordX2 skips factor 2")
+    {
+        int  t_m                      = 10;
+        int  t_n                      = 1;
+        int  maxWidth                 = 4;
+        uint macTileFastMovingDimSize = 64;
+        int  numDwordsPerElement      = 1;
+        bool avoidDWordX2             = true;
+
+        updateThreadTileForLongDwords(
+            t_m, t_n, maxWidth, macTileFastMovingDimSize, numDwordsPerElement, avoidDWordX2);
+
+        // Factor 2 is skipped, only factor 1 works: no change
+        CHECK(t_m == 10);
+        CHECK(t_n == 1);
+    }
+
+    SECTION("macTileFastMovingDimSize limits factor")
+    {
+        int  t_m                      = 8;
+        int  t_n                      = 2;
+        int  maxWidth                 = 4;
+        uint macTileFastMovingDimSize = 4; // t_n * factor must be <= 4
+        int  numDwordsPerElement      = 1;
+        bool avoidDWordX2             = false;
+
+        updateThreadTileForLongDwords(
+            t_m, t_n, maxWidth, macTileFastMovingDimSize, numDwordsPerElement, avoidDWordX2);
+
+        // Factor 4 would make t_n = 8 > 4, factor 3 would make t_n = 6 > 4
+        // Factor 2 works: t_n = 2*2 = 4 <= 4
+        CHECK(t_m == 4);
+        CHECK(t_n == 4);
+    }
+
+    SECTION("maxWidth limits factor")
+    {
+        int  t_m                      = 8;
+        int  t_n                      = 1;
+        int  maxWidth                 = 2; // Only factors <= 2 can be used
+        uint macTileFastMovingDimSize = 64;
+        int  numDwordsPerElement      = 1;
+        bool avoidDWordX2             = false;
+
+        updateThreadTileForLongDwords(
+            t_m, t_n, maxWidth, macTileFastMovingDimSize, numDwordsPerElement, avoidDWordX2);
+
+        // maxWidth = 2, so only factor 2 or 1 possible
+        CHECK(t_m == 4);
+        CHECK(t_n == 2);
+    }
+
+    SECTION("numDwordsPerElement > 1")
+    {
+        int  t_m                      = 8;
+        int  t_n                      = 1;
+        int  maxWidth                 = 4;
+        uint macTileFastMovingDimSize = 64;
+        int  numDwordsPerElement      = 2; // Each element uses 2 dwords
+        bool avoidDWordX2             = false;
+
+        updateThreadTileForLongDwords(
+            t_m, t_n, maxWidth, macTileFastMovingDimSize, numDwordsPerElement, avoidDWordX2);
+
+        // numDwordsPerWorkitem = 8 * 2 = 16
+        // Factor 4: 16 % 4 == 0, dwordFactor = 4/2 = 2
+        // t_m = 8/2 = 4, t_n = 1*2 = 2
+        CHECK(t_m == 4);
+        CHECK(t_n == 2);
+    }
+
+    SECTION("No valid factor - no change")
+    {
+        int  t_m                      = 7; // Prime number
+        int  t_n                      = 1;
+        int  maxWidth                 = 4;
+        uint macTileFastMovingDimSize = 64;
+        int  numDwordsPerElement      = 1;
+        bool avoidDWordX2             = false;
+
+        updateThreadTileForLongDwords(
+            t_m, t_n, maxWidth, macTileFastMovingDimSize, numDwordsPerElement, avoidDWordX2);
+
+        // 7 is not divisible by 4, 3, or 2, so only factor 1 works
+        CHECK(t_m == 7);
+        CHECK(t_n == 1);
+    }
+}
+
+TEST_CASE("createInternalTile", "[kernel-graph]")
+{
+    using namespace rocRoller;
+    namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+
+    auto ctx = TestContext::ForDefaultTarget();
+
+    SECTION("Basic VGPR tile creation")
+    {
+        auto graph  = KernelGraph::KernelGraph();
+        auto params = std::make_shared<CommandParameters>();
+
+        // Create a simple MacroTile 64x64 in VGPR
+        auto macroTile    = CT::MacroTile({64, 64}, MemoryType::VGPR, {4, 4});
+        auto macroTileTag = graph.coordinates.addElement(macroTile);
+
+        // Create internal tile
+        auto internalTag = KernelGraph::createInternalTile(
+            graph, DataType::Float, macroTileTag, params, ctx.get());
+
+        CHECK(internalTag != -1);
+        auto internalTile = graph.coordinates.getNode<CT::MacroTile>(internalTag);
+        CHECK(internalTile.sizes[0] == 64);
+        CHECK(internalTile.sizes[1] == 64);
+        CHECK(internalTile.memoryType == MemoryType::VGPR);
+    }
+
+    SECTION("LDS tile creation")
+    {
+        auto graph  = KernelGraph::KernelGraph();
+        auto params = std::make_shared<CommandParameters>();
+
+        // Create a MacroTile in LDS
+        auto macroTile    = CT::MacroTile({64, 64}, MemoryType::LDS, {4, 4});
+        auto macroTileTag = graph.coordinates.addElement(macroTile);
+
+        // Create internal tile
+        auto internalTag = KernelGraph::createInternalTile(
+            graph, DataType::Float, macroTileTag, params, ctx.get());
+
+        CHECK(internalTag != -1);
+        auto internalTile = graph.coordinates.getNode<CT::MacroTile>(internalTag);
+        CHECK(internalTile.sizes[0] == 64);
+        CHECK(internalTile.sizes[1] == 64);
+        // LDS tiles should be converted to VGPR
+        CHECK(internalTile.memoryType == MemoryType::VGPR);
+    }
+
+    SECTION("Tile with numWaveTiles")
+    {
+        auto graph  = KernelGraph::KernelGraph();
+        auto params = std::make_shared<CommandParameters>();
+
+        // Create a MacroTile 128x128 in VGPR
+        auto macroTile    = CT::MacroTile({128, 128}, MemoryType::VGPR, {4, 4});
+        auto macroTileTag = graph.coordinates.addElement(macroTile);
+
+        std::vector<unsigned int> numWaveTiles = {2, 2};
+
+        // Create internal tile with wave tiles
+        auto internalTag = KernelGraph::createInternalTile(
+            graph, DataType::Float, macroTileTag, numWaveTiles, false, params, ctx.get());
+
+        CHECK(internalTag != -1);
+        auto internalTile = graph.coordinates.getNode<CT::MacroTile>(internalTag);
+        // Size should be divided by numWaveTiles
+        CHECK(internalTile.sizes[0] == 64);
+        CHECK(internalTile.sizes[1] == 64);
+        CHECK(internalTile.memoryType == MemoryType::VGPR);
     }
 }
