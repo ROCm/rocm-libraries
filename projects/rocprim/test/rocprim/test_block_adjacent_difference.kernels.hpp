@@ -617,8 +617,10 @@ template<unsigned int First,
          class Type,
          class FlagType,
          class FlagOpType,
-         TestBlockAdjacentDifferenceMethod Method,
-         unsigned int                      BlockSize = 256U>
+         unsigned int                                 Method,
+         unsigned int                                 BlockSize = 256U,
+         rocprim::block_adjacent_difference_algorithm Algorithm
+         = rocprim::block_adjacent_difference_algorithm::default_algorithm>
 struct static_for
 {
     static void run()
@@ -636,7 +638,8 @@ struct static_for
                                            BlockSize,
                                            items[First]>();
         }
-        static_for<First + 1, Last, Type, FlagType, FlagOpType, Method, BlockSize>::run();
+        static_for<First + 1, Last, Type, FlagType, FlagOpType, Method, BlockSize, Algorithm>::
+            run();
     }
 };
 
@@ -644,9 +647,10 @@ template<unsigned int N,
          class Type,
          class FlagType,
          class FlagOpType,
-         TestBlockAdjacentDifferenceMethod Method,
-         unsigned int                      BlockSize>
-struct static_for<N, N, Type, FlagType, FlagOpType, Method, BlockSize>
+         unsigned int                                 Method,
+         unsigned int                                 BlockSize,
+         rocprim::block_adjacent_difference_algorithm Algorithm>
+struct static_for<N, N, Type, FlagType, FlagOpType, Method, BlockSize, Algorithm>
 {
     static void run() {}
 };

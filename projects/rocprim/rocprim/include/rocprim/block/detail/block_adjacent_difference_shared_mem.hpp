@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_BLOCK_DETAIL_BLOCK_ADJACENT_DIFFERENCE_IMPL_HPP_
-#define ROCPRIM_BLOCK_DETAIL_BLOCK_ADJACENT_DIFFERENCE_IMPL_HPP_
+#ifndef ROCPRIM_BLOCK_DETAIL_BLOCK_ADJACENT_DIFFERENCE_SHARED_MEM_HPP_
+#define ROCPRIM_BLOCK_DETAIL_BLOCK_ADJACENT_DIFFERENCE_SHARED_MEM_HPP_
 
 #include "../../config.hpp"
 #include "../../detail/various.hpp"
@@ -92,7 +92,7 @@ template<typename T,
          unsigned int BlockSizeX,
          unsigned int BlockSizeY = 1,
          unsigned int BlockSizeZ = 1>
-class block_adjacent_difference_impl
+class block_adjacent_difference_shared_mem
 {
 public:
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
@@ -344,6 +344,10 @@ public:
     }
 
 private:
+    // Helper function to retrieve the default boundary value when operating in "Flags" mode (AsFlags = true).
+    // This is typically used for discontinuity detection (e.g., head flags).
+    // The boundary item (the very first item with no predecessor) is by definition the start of a segment,
+    // so it returns 1 (true) to flag it.
     template<unsigned int ItemsPerThread>
     ROCPRIM_DEVICE
     int get_default_item(const T (&)[ItemsPerThread],
@@ -353,6 +357,10 @@ private:
         return 1;
     }
 
+    // Helper function to retrieve the default boundary value when operating in standard mode (AsFlags = false).
+    // This is used for standard adjacent difference calculations.
+    // For the boundary item (which has no predecessor), the standard behavior in this implementation
+    // is to return the item itself (effectively input[i] - nothing/identity), preserving the original value.
     template<unsigned int ItemsPerThread>
     ROCPRIM_DEVICE
     T get_default_item(const T (&input)[ItemsPerThread],
@@ -367,4 +375,4 @@ private:
 
 END_ROCPRIM_NAMESPACE
 
-#endif // ROCPRIM_BLOCK_DETAIL_BLOCK_ADJACENT_DIFFERENCE_IMPL_HPP_
+#endif // ROCPRIM_BLOCK_DETAIL_BLOCK_ADJACENT_DIFFERENCE_SHARED_MEM_HPP_
