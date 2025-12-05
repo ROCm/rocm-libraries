@@ -777,10 +777,10 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
         return HIPSPARSE_STATUS_INTERNAL_ERROR;
     }
 
-    if(idx_base_C != idx_base_A || idx_base_C != idx_base_B)
+    if(idx_base_C != idx_base_A || idx_base_C != idx_base_B || M == 0 || N == 0)
     {
 #ifdef __HIP_PLATFORM_NVIDIA__
-        // cusparse does not properly support mixed index bases
+        // cusparse does not support mixed index bases nor does it properly handle m == 0 or n == 0
         return HIPSPARSE_STATUS_SUCCESS;
 #endif
     }
