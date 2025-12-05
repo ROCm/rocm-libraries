@@ -26,17 +26,17 @@ include: hipsparse_common.yaml
 
 
 Tests:
-# - name: csrgeam2_bad_arg
-#   category: pre_checkin
-#   function: csrgeam2_bad_arg
-#   precision: *single_double_precisions_complex_real
+- name: csrgeam2_bad_arg
+  category: pre_checkin
+  function: csrgeam2_bad_arg
+  precision: *single_double_precisions_complex_real
 
 - name: csrgeam2
   category: quick
   function: csrgeam2
-  precision: *double_only_precisions
-  M: [0, 1, 10]
-  N: [0, 1, 10]
+  precision: *single_double_precisions_complex_real
+  M: [0, 586, 1985]
+  N: [0, 439, 2948]
   alpha: [0.0, 1.0]
   alphai: [-0.5]
   beta: [0.0, 2.0]
@@ -45,37 +45,23 @@ Tests:
   baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
 
-# - name: csrgeam2
-#   category: quick
-#   function: csrgeam2
-#   precision: *single_double_precisions_complex_real
-#   M: [0, 1, 2, 10, 50, 647, 1799]
-#   N: [0, 1, 2, 10, 13, 523, 3712]
-#   alpha: [0.0, 1.0]
-#   alphai: [-0.5]
-#   beta: [0.0, 2.0]
-#   betai: [-0.5]
-#   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-#   baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-#   baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-
-# - name: csrgeam2
-#   category: pre_checkin
-#   function: csrgeam2
-#   precision: *single_double_precisions_complex_real
-#   M: 1
-#   N: 1
-#   alpha: [0.0, 1.0]
-#   alphai: [-0.5]
-#   beta: [0.0, 2.0]
-#   betai: [-0.5]
-#   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-#   baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-#   baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-#   filename: [nos1,
-#              nos2,
-#              nos3,
-#              nos4,
-#              nos5,
-#              nos6,
-#              nos7]
+- name: csrgeam2
+  category: pre_checkin
+  function: csrgeam2
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  alpha: [2.0]
+  alphai: [-0.5]
+  beta: [2.0]
+  betai: [-0.5]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos1,
+             nos2,
+             nos3,
+             nos4,
+             nos5,
+             nos6,
+             nos7]

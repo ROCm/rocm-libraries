@@ -731,7 +731,6 @@ void testing_csrgeam2_bad_arg(const Arguments& argus)
 template <typename T>
 hipsparseStatus_t testing_csrgeam2(Arguments argus)
 {
-    std::cout << "AAAA" << std::endl;
     int                  M          = argus.M;
     int                  N          = argus.N;
     hipsparseIndexBase_t idx_base_A = argus.baseA;
@@ -740,9 +739,6 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
     std::string          filename   = argus.filename;
     T                    h_alpha    = make_DataType<T>(argus.alpha);
     T                    h_beta     = make_DataType<T>(argus.beta);
-
-    std::cout << "M: " << M << " N: " << N << " filename: " << filename << std::endl;
-    std::cout << "h_alpha: " << h_alpha << " h_beta: " << h_beta << std::endl;
 
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
@@ -785,22 +781,6 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
 #endif
     }
 
-    std::cout << "M: " << M << " N: " << N << " nnz_A: " << nnz_A << std::endl;
-
-    std::cout << "hcsr_row_ptr_A" << std::endl;
-    for(int i = 0; i < M + 1; i++)
-    {
-        std::cout << hcsr_row_ptr_A[i] << " ";
-    }
-    std::cout << "" << std::endl;
-
-    std::cout << "hcsr_col_ind_A" << std::endl;
-    for(int i = 0; i < nnz_A; i++)
-    {
-        std::cout << hcsr_col_ind_A[i] << " ";
-    }
-    std::cout << "" << std::endl;
-
     // B = A so that we can compute the square of A
     int              nnz_B = nnz_A;
     std::vector<int> hcsr_row_ptr_B(M + 1, 0);
@@ -842,8 +822,6 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
     T*   dalpha  = (T*)dalpha_managed.get();
     T*   dbeta   = (T*)dbeta_managed.get();
 
-    std::cout << "AAAA" << std::endl;
-
     // copy data from CPU to device
     CHECK_HIP_ERROR(
         hipMemcpy(dAptr, hcsr_row_ptr_A.data(), sizeof(int) * (M + 1), hipMemcpyHostToDevice));
@@ -855,8 +833,6 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
     CHECK_HIP_ERROR(
         hipMemcpy(dBcol, hcsr_col_ind_B.data(), sizeof(int) * nnz_B, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dBval, hcsr_val_B.data(), sizeof(T) * nnz_B, hipMemcpyHostToDevice));
-
-    std::cout << "BBBB" << std::endl;
 
     // Obtain csrgeam2 buffer size
     size_t bufferSize;
@@ -882,7 +858,6 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
                                                            (int*)nullptr,
                                                            &bufferSize));
 
-    std::cout << "bufferSize: " << bufferSize << std::endl;
     // Allocate buffer on the device
     auto dbuffer_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(char) * bufferSize), device_free};
@@ -908,8 +883,6 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
                                                 &hnnz_C_1,
                                                 dbuffer));
 
-    std::cout << "hnnz_C_1: " << hnnz_C_1 << std::endl;
-
     // Allocate result matrix
     auto dCcol_1_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * hnnz_C_1), device_free};
     auto dCval_1_managed = hipsparse_unique_ptr{device_malloc(sizeof(T) * hnnz_C_1), device_free};
@@ -928,8 +901,6 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
     int* dCcol_2 = (int*)dCcol_2_managed.get();
     T*   dCval_2 = (T*)dCval_2_managed.get();
     int* dnnz_C  = (int*)dnnz_C_managed.get();
-
-    std::cout << "CCCC" << std::endl;
 
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
     CHECK_HIPSPARSE_ERROR(hipsparseXcsrgeam2Nnz(handle,
@@ -951,8 +922,6 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
     // Copy output from device to CPU
     int hnnz_C_2;
     CHECK_HIP_ERROR(hipMemcpy(&hnnz_C_2, dnnz_C, sizeof(int), hipMemcpyDeviceToHost));
-
-    std::cout << "hnnz_C_2: " << hnnz_C_2 << std::endl;
 
     if(argus.unit_check)
     {
@@ -979,8 +948,6 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
                                                  dCcol_1,
                                                  dbuffer));
 
-        std::cout << "DDDD" << std::endl;
-
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
         CHECK_HIPSPARSE_ERROR(hipsparseXcsrgeam2(handle,
                                                  M,
@@ -1002,7 +969,6 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
                                                  dCptr_2,
                                                  dCcol_2,
                                                  dbuffer));
-        std::cout << "EEEE" << std::endl;
 
         // Copy output from device to CPU
         std::vector<int> hcsr_row_ptr_C_1(M + 1);
@@ -1011,8 +977,6 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
         std::vector<int> hcsr_col_ind_C_2(hnnz_C_2);
         std::vector<T>   hcsr_val_C_1(hnnz_C_1);
         std::vector<T>   hcsr_val_C_2(hnnz_C_2);
-
-        std::cout << "FFFF" << std::endl;
 
         CHECK_HIP_ERROR(hipMemcpy(
             hcsr_row_ptr_C_1.data(), dCptr_1, sizeof(int) * (M + 1), hipMemcpyDeviceToHost));
@@ -1027,12 +991,9 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
         CHECK_HIP_ERROR(
             hipMemcpy(hcsr_val_C_2.data(), dCval_2, sizeof(T) * hnnz_C_2, hipMemcpyDeviceToHost));
 
-        std::cout << "GGGG" << std::endl;
-
         // Compute csrgemm host solution
         std::vector<int> hcsr_row_ptr_C_gold(M + 1);
 
-        std::cout << "HHHH" << std::endl;
         int nnz_C_gold = host_csrgeam_nnz(M,
                                           N,
                                           h_alpha,
@@ -1046,12 +1007,9 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
                                           idx_base_B,
                                           idx_base_C);
 
-        std::cout << "nnz_C_gold: " << nnz_C_gold << std::endl;
-
         std::vector<int> hcsr_col_ind_C_gold(nnz_C_gold);
         std::vector<T>   hcsr_val_C_gold(nnz_C_gold);
 
-        std::cout << "IIII" << std::endl;
         host_csrgeam(M,
                      N,
                      h_alpha,
@@ -1069,54 +1027,10 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
                      idx_base_B,
                      idx_base_C);
 
-        std::cout << "hcsr_row_ptr_C_gold" << std::endl;
-        for(int i = 0; i < M + 1; i++)
-        {
-            std::cout << hcsr_row_ptr_C_gold[i] << " ";
-        }
-        std::cout << "" << std::endl;
-
-        std::cout << "hcsr_col_ind_C_gold" << std::endl;
-        for(int i = 0; i < nnz_C_gold; i++)
-        {
-            std::cout << hcsr_col_ind_C_gold[i] << " ";
-        }
-        std::cout << "" << std::endl;
-
-        std::cout << "hcsr_row_ptr_C_1" << std::endl;
-        for(int i = 0; i < M + 1; i++)
-        {
-            std::cout << hcsr_row_ptr_C_1[i] << " ";
-        }
-        std::cout << "" << std::endl;
-
-        std::cout << "hcsr_col_ind_C_1" << std::endl;
-        for(int i = 0; i < hnnz_C_1; i++)
-        {
-            std::cout << hcsr_col_ind_C_1[i] << " ";
-        }
-        std::cout << "" << std::endl;
-
-        std::cout << "hcsr_row_ptr_C_2" << std::endl;
-        for(int i = 0; i < M + 1; i++)
-        {
-            std::cout << hcsr_row_ptr_C_2[i] << " ";
-        }
-        std::cout << "" << std::endl;
-
-        std::cout << "hcsr_col_ind_C_2" << std::endl;
-        for(int i = 0; i < hnnz_C_2; i++)
-        {
-            std::cout << hcsr_col_ind_C_2[i] << " ";
-        }
-        std::cout << "" << std::endl;
-
-        std::cout << "JJJJ" << std::endl;
         // Check nnz of C
         unit_check_general(1, 1, 1, &nnz_C_gold, &hnnz_C_1);
         unit_check_general(1, 1, 1, &nnz_C_gold, &hnnz_C_2);
 
-        std::cout << "KKKK" << std::endl;
         // Check structure and entries of C
         unit_check_general(1, M + 1, 1, hcsr_row_ptr_C_gold.data(), hcsr_row_ptr_C_1.data());
         unit_check_general(1, M + 1, 1, hcsr_row_ptr_C_gold.data(), hcsr_row_ptr_C_2.data());
@@ -1124,7 +1038,6 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
         unit_check_general(1, nnz_C_gold, 1, hcsr_col_ind_C_gold.data(), hcsr_col_ind_C_2.data());
         unit_check_near(1, nnz_C_gold, 1, hcsr_val_C_gold.data(), hcsr_val_C_1.data());
         unit_check_near(1, nnz_C_gold, 1, hcsr_val_C_gold.data(), hcsr_val_C_2.data());
-        std::cout << "LLLL" << std::endl;
     }
 
     if(argus.timing)

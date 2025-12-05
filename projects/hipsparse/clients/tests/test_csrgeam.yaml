@@ -35,12 +35,12 @@ Tests:
   category: quick
   function: csrgeam
   precision: *single_double_precisions_complex_real
-  M: [0, 50, 647, 1799]
-  N: [0, 13, 523, 3712]
-  alpha: [0.0, 1.0]
-  alphai: [-0.5]
-  beta: [0.0, 2.0]
-  betai: [-0.5]
+  M: [0, 687, 3756]
+  N: [0, 928, 1928]
+  alpha: [-1.0, 0.5]
+  alphai: [0.5]
+  beta: [1.0, -2.0]
+  betai: [0.25]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
@@ -51,10 +51,10 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: 1
   N: 1
-  alpha: [0.0, 1.0]
-  alphai: [-0.5]
-  beta: [0.0, 2.0]
-  betai: [-0.5]
+  alpha: [1.0]
+  alphai: [-0.75]
+  beta: [2.0]
+  betai: [0.75]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
