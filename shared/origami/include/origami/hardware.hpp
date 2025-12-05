@@ -1,5 +1,28 @@
-// Copyright Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright 2025 AMD ROCm(TM) Software
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
 
 #pragma once
 
@@ -52,8 +75,9 @@ class hardware_t {
     double mem2_perf_ratio;
     double mem3_perf_ratio;
     size_t parallel_mi_cu;  ///< Number of parallel matrix instructions per compute unit
-    std::tuple<double, double, double> mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
-    double mem_clock_ratio;  ///< Memory clock ratio relative to compute clock
+    std::tuple<double, double, double>
+        mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
+    double mem_clock_ratio;          ///< Memory clock ratio relative to compute clock
 
     constexpr architecture_constants(size_t num_xcds,
                                      double mem1_perf_ratio,
@@ -107,17 +131,18 @@ class hardware_t {
       INSTRUCTION_MAP;
 
   architecture_t arch;  ///< GPU architecture type
-  size_t N_CU;  ///< Number of Compute Units
+  size_t N_CU;          ///< Number of Compute Units
   size_t lds_capacity;  ///< Capacity of Local Data Share (LDS) in bytes
   double mem1_perf_ratio;
   double mem2_perf_ratio;
   double mem3_perf_ratio;
-  size_t L2_capacity;  ///< Capacity of L2 cache in bytes
-  size_t CU_per_L2;  ///< Number of compute units per L2 cache domain
+  size_t L2_capacity;        ///< Capacity of L2 cache in bytes
+  size_t CU_per_L2;          ///< Number of compute units per L2 cache domain
   double compute_clock_ghz;  ///< Compute clock frequency in GHz
-  size_t parallel_mi_cu;  ///< Number of parallel matrix instructions per compute unit
-  std::tuple<double, double, double> mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
-  size_t NUM_XCD;  ///< Number of XCDs (XGMI Complex Die)
+  size_t parallel_mi_cu;     ///< Number of parallel matrix instructions per compute unit
+  std::tuple<double, double, double>
+      mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
+  size_t NUM_XCD;                  ///< Number of XCDs (XGMI Complex Die)
 
   /**
    * @brief Construct hardware_t with explicit parameters.
