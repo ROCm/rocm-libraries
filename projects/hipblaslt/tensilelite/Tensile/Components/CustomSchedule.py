@@ -1713,7 +1713,6 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         gr_inc_step = 1
     
     elif isNT(kernel) and useLDSTr and TLDS == 0:
-
         lra0   = [0,1,3,5,7, 9,10,12,14,16, 18,19] # 12 loads
         lrb0   = [21,23,25,27,28, 30,32,34,36,37, 39,41,43,45,46, 48,50,52,54,55] # 20 loads
         # need two LRB1 items because a single LRB read gets only half of the data needed for MFMA
