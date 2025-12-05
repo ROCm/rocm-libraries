@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 ################################################################################
 #
 # MIT License
@@ -22,8 +24,6 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 ################################################################################
-
-#!/usr/bin/env python3
 
 import argparse
 import origami
