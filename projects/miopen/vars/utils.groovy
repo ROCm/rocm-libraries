@@ -266,6 +266,11 @@ def getDockerImage(Map conf=[:])
 
     def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache"
 
+    // Test for dockerx
+    withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+        sh("docker buildx version")   
+    }
+
     def dockerArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd " +
                      "--cache-from type=registry,ref=${cacheRef} " +
                      "--build-arg PREFIX=${prefixpath} " +
