@@ -53,9 +53,8 @@ prediction_result_t select_config(const problem_t& problem,
  *
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
- * @param mt Macro-tile of the kernel.
- * @param mi Matrix-instruction of the kernel.
- * @param wgms List of possible workgroup-mappings.
+ * @param config Kernel configuration.
+ * @param skGrid StreamK grid size.
  * @return std::tuple<size_t, size_t>
  */
 std::tuple<int, int> select_workgroup_mapping(const problem_t& problem,

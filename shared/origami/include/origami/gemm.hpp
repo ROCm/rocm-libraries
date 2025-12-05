@@ -186,6 +186,7 @@ double compute_timestep_latency(const problem_t& problem,
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
+ * @param max_cus
  * @return double Latency in cycles.
  */
 double compute_total_latency(const problem_t& problem,

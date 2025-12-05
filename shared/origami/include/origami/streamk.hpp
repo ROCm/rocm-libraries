@@ -66,7 +66,7 @@ reduction_t select_reduction(const problem_t& problem,
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
  * @param grid_selection_t grid selection algorithm (@see origami::grid_selection_t)
- * @param biggest_allowable_split
+ * @param max_cus Maximum number of CUs to use.
  * @return size_t Dimensions of the grid launched.
  */
 size_t select_grid_size(const problem_t& problem,
