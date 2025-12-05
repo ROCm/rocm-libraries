@@ -128,6 +128,7 @@ set( hipfft-test_source
   multi_stream_test.cpp
   ../../shared/array_validator.cpp
   ../../shared/test_callbacks.cpp
+  ../../shared/data_gen_device.cpp
   )
 
 add_executable( hipfft-test ${hipfft-test_source} ${hipfft-test_includes} )

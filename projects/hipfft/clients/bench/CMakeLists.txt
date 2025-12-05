@@ -24,7 +24,7 @@ CMAKE_MINIMUM_REQUIRED(VERSION 3.16)
 
 project( hipfft-clients-bench LANGUAGES CXX )
 
-set( hipfft_bench_source bench.cpp ../../shared/array_validator.cpp )
+set( hipfft_bench_source bench.cpp ../../shared/array_validator.cpp ../../shared/data_gen_device.cpp )
 set( hipfft_bench_includes bench.h ../../shared/array_validator.h )
 
 add_executable( hipfft-bench ${hipfft_bench_source} ${hipfft_bench_includes} )
