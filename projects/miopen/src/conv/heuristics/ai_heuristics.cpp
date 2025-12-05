@@ -724,19 +724,15 @@ namespace conv3d {
 class TunaNet3DModel : public Model3D
 {
 private:
-    const std::string device_name; // Original device name (e.g., "gfx942")
-    const std::string arch_name;   // Device name with "_3d" suffix for file paths
+    const std::string device_name; // Device name (e.g., "gfx942", "gfx950")
 
 public:
     Metadata3D metadata;
 
     explicit TunaNet3DModel(const std::string& device)
-        : device_name(device),
-          arch_name(device + "_3d"), // Automatically append "_3d" suffix
-          metadata(Metadata3D(arch_name))
+        : device_name(device), metadata(Metadata3D(device))
     {
-        MIOPEN_LOG_I2("TunaNet3DModel initialized for device: " << device_name
-                                                                << " (arch: " << arch_name << ")");
+        MIOPEN_LOG_I2("TunaNet3DModel initialized for device: " << device_name);
     }
 
     std::vector<float> Forward(const conv::ProblemDescription& problem) const override
@@ -745,7 +741,7 @@ public:
         MIOPEN_LOG_I2("TunaNet3DModel: Extracted " << features.size() << " features");
 
         // Use fdeep to run TunaNet3D inference
-        const std::string model_path = Model3DPath(arch_name);
+        const std::string model_path = Model3DPath(device_name);
         const auto model             = fdeep::load_model(model_path);
 
         // Convert features to fdeep tensor
@@ -832,13 +828,13 @@ protected:
         return features;
     }
 
-    static std::string Model3DPath(const std::string& arch)
+    static std::string Model3DPath(const std::string& device)
     {
-        const auto file_path = GetSystemDbPath() / (arch + ".tn.model");
+        const auto file_path = GetSystemDbPath() / (device + "_3d.tn.model");
         if(!fs::exists(file_path))
         {
             MIOPEN_THROW(miopenStatusInternalError,
-                         "Unable to load 3D AI model file:" + file_path.string());
+                         "Unable to load 3D AI model file: " + file_path.string());
         }
         return file_path.string();
     }

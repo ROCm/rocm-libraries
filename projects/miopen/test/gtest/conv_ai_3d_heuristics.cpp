@@ -145,14 +145,14 @@ protected:
 };
 
 // --- Metadata3D tests ---
-// Note: Metadata3D expects full architecture name with "_3d" suffix
+// Note: Metadata3D now accepts device name and appends "_3d" internally
 // for some reason cppcheck raises a syntax error/warning here, but it compiles fine.
 // cppcheck-suppress syntaxError
 TEST_F(GPU_Conv3DAIHeuristics_FP32, Metadata3D_LoadValidArchitecture)
 {
-    conv3d::Metadata3D metadata(device_name + "_3d");
+    conv3d::Metadata3D metadata(device_name);
     ASSERT_TRUE(metadata.IsValid());
-    EXPECT_EQ(metadata.GetArchName(), device_name + "_3d");
+    EXPECT_EQ(metadata.GetModelPrefix(), device_name + "_3d");
     EXPECT_GT(metadata.GetNumInputs(), 0);
     EXPECT_GT(metadata.GetNumOutputs(), 0);
     EXPECT_GT(metadata.GetNumSolvers(), 0);
@@ -162,7 +162,7 @@ TEST_F(GPU_Conv3DAIHeuristics_FP32, Metadata3D_LoadValidArchitecture)
 
 TEST_F(GPU_Conv3DAIHeuristics_FP32, Metadata3D_EncodeDirection)
 {
-    conv3d::Metadata3D metadata(device_name + "_3d");
+    conv3d::Metadata3D metadata(device_name);
     ASSERT_TRUE(metadata.IsValid());
     auto fwd_encoded = metadata.EncodeDirection(miopen::conv::Direction::Forward);
     auto bwd_encoded = metadata.EncodeDirection(miopen::conv::Direction::BackwardData);
@@ -174,7 +174,7 @@ TEST_F(GPU_Conv3DAIHeuristics_FP32, Metadata3D_EncodeDirection)
 
 TEST_F(GPU_Conv3DAIHeuristics_FP32, Metadata3D_EncodePrecision)
 {
-    conv3d::Metadata3D metadata(device_name + "_3d");
+    conv3d::Metadata3D metadata(device_name);
     ASSERT_TRUE(metadata.IsValid());
     auto fp32_encoded = metadata.EncodePrecision(miopenFloat);
     auto fp16_encoded = metadata.EncodePrecision(miopenHalf);
@@ -186,7 +186,7 @@ TEST_F(GPU_Conv3DAIHeuristics_FP32, Metadata3D_EncodePrecision)
 
 TEST_F(GPU_Conv3DAIHeuristics_FP32, Metadata3D_EncodeLayouts)
 {
-    conv3d::Metadata3D metadata(device_name + "_3d");
+    conv3d::Metadata3D metadata(device_name);
     ASSERT_TRUE(metadata.IsValid());
     auto ncdhw_in  = metadata.EncodeInLayout("NCDHW");
     auto ndhwc_in  = metadata.EncodeInLayout("NDHWC");
