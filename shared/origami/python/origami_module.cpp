@@ -16,6 +16,8 @@
 #include "origami/types.hpp"
 
 using hardware_t = origami::hardware_t;
+namespace nb     = nanobind;
+using namespace nb::literals;
 
 NB_MODULE(origami, m) {
   nanobind::enum_<hardware_t::architecture_t>(m, "architecture_t")
@@ -191,23 +193,59 @@ NB_MODULE(origami, m) {
 
   m.def("select_config",
         &origami::select_config,
+        "problem"_a,
+        "hardware"_a,
+        "configs"_a,
         "Select best configuration based on problem and hardware");
   m.def("select_grid_size",
         &origami::streamk::select_grid_size,
+        "problem"_a,
+        "hardware"_a,
+        "config"_a,
+        "algorithm"_a,
+        "max_cus"_a = 0,
         "Select best grid size for the given configuration");
   m.def("select_workgroup_mapping",
+        "problem"_a,
+        "hardware"_a,
+        "config"_a,
+        "skGrid"_a,
         &origami::select_workgroup_mapping,
         "Select best workgroup mapping");
-  m.def("rank_configs", &origami::rank_configs, "Rank configurations by performance");
+  m.def("rank_configs",
+        &origami::rank_configs,
+        "problem"_a,
+        "hardware"_a,
+        "configs"_a,
+        "Rank configurations by performance");
   m.def("select_config_mnk",
+        "M"_a,
+        "N"_a,
+        "K"_a,
+        "hardware"_a,
+        "configs"_a,
         &origami::select_config_mnk,
         "Select best configuration for M,N,K dimensions");
-  m.def("select_topk_configs", &origami::select_topk_configs, "Select topk configurations");
-  m.def("compute_perf_gflops", &origami::compute_perf_gflops, "Compute performance in GFLOPS");
+  m.def("select_topk_configs",
+        "problem"_a,
+        "hardware"_a,
+        "configs"_a,
+        "topk"_a,
+        &origami::select_topk_configs,
+        "Select topk configurations");
+  m.def("compute_perf_gflops",
+        "hardware"_a,
+        "problem"_a,
+        "latency"_a,
+        &origami::compute_perf_gflops,
+        "Compute performance in GFLOPS");
 
   // StreamK functions
   m.def("select_reduction",
         &origami::streamk::select_reduction,
+        "problem"_a,
+        "hardware"_a,
+        "config"_a,
         "Select best StreamK reduction strategy");
 
   // GEMM functions
@@ -216,5 +254,9 @@ NB_MODULE(origami, m) {
                                const origami::hardware_t&,
                                const origami::config_t&,
                                size_t max_cus)>(&origami::compute_total_latency),
+        "problem"_a,
+        "hardware"_a,
+        "config"_a,
+        "max_cus"_a,
         "Compute total latency");
 }

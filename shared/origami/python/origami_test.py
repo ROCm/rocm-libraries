@@ -236,7 +236,6 @@ def main():
 
     if args.print:
         hardware.print()
-        hardware.print_debug_info()
         with open("configs.log", "w") as file:
             for config in configs:
                 file.write(

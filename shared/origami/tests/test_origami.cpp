@@ -17,7 +17,7 @@ TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
       auto hardware_fast = make_hardware(gpu_arch, 304, 65536, 8, 1.0, 1.0, 1.0, 4000000, 1.8);
       auto problem =
           make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
-      auto config = make_config(128, 128, 64, 32, 32, 8, 1, 0, 0);
+      auto config = make_config(128, 128, 64, 32, 32, 8, 1);
 
       auto config_slow = config;
       auto config_fast = config;
