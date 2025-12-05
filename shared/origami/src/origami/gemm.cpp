@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -112,7 +113,8 @@ std::tuple<size_t, size_t, size_t, size_t> compute_cu_occupancy(const problem_t&
     config_with_reduction.reduction_strategy =
         streamk::select_reduction(problem, hardware, config, grid_selection);
 
-    num_wgs = streamk::select_grid_size(problem, hardware, config_with_reduction, grid_selection, max_cus);
+    num_wgs = streamk::select_grid_size(
+        problem, hardware, config_with_reduction, grid_selection, max_cus);
 
     // output variables
     num_active_cus = num_wgs < hardware.N_CU ? num_wgs : hardware.N_CU;
@@ -913,6 +915,8 @@ double compute_total_latency(const problem_t& problem,
                              const hardware_t& hardware,
                              const config_t& config,
                              size_t max_cus) {
+  assert(config.is_valid());
+
   // Extract parameters from structured types
   size_t M     = problem.size.m;
   size_t N     = problem.size.n;

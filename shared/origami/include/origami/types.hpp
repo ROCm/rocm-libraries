@@ -274,27 +274,27 @@ struct runtime_options {
  */
 struct config_t {
   /// Macro tile and matrix-instruction shape.
-  dim3_t mt;
-  dim3_t mi;
+  dim3_t mt{0, 0, 0};
+  dim3_t mi{0, 0, 0};
 
   /// Occupancy (number of waves resident per CU).
-  int occupancy;
+  int occupancy = -1;
 
   /// Reorder workgroup id for L2 reuse.
-  int workgroup_mapping{};
+  int workgroup_mapping = 0;
 
   /// Whether operand A is accessed with cache-flags.
-  int cache_hints_a{};
+  int cache_hints_a = 0;
 
   /// Whether operand B is accessed with cache-flags.
-  int cache_hints_b{};
+  int cache_hints_b = 0;
 
   /// Workspace size parameters.
-  std::size_t workspace_size{};
-  std::size_t workspace_size_per_elem_c{};
+  std::size_t workspace_size            = 0;
+  std::size_t workspace_size_per_elem_c = 0;
 
   /// Reduction strategy.
-  reduction_t reduction_strategy{};
+  reduction_t reduction_strategy = reduction_t::none;
 
   /// Runtime options (if null, uses global singleton)
   const runtime_options* runtime_opts{nullptr};
@@ -312,6 +312,14 @@ struct config_t {
            std::hash<size_t>()(mi.m) ^ std::hash<size_t>()(mi.n) ^ std::hash<size_t>()(mi.k) ^
            std::hash<int>()(cache_hints_a) ^ std::hash<int>()(cache_hints_b) ^
            std::hash<int>()(workgroup_mapping);
+  }
+
+  void validate() const {
+    if (!is_valid()) { throw std::runtime_error("Invalid config_t"); }
+  }
+
+  bool is_valid() const {
+    return mt.m > 0 && mt.n > 0 && mt.k > 0 && mi.m > 0 && mi.n > 0 && mi.k > 0 && occupancy > 0;
   }
 };
 
@@ -333,27 +341,27 @@ struct prediction_result_t {
  */
 struct problem_t {
   /// Size of the problem: M, N, K.
-  dim3_t size;
+  dim3_t size{0, 0, 0};
 
   /// Batch size.
-  std::size_t batch;
+  std::size_t batch = 1;
 
   /// Transpose types (TT, TN, NT, TT.)
-  transpose_t a_transpose;
-  transpose_t b_transpose;
+  transpose_t a_transpose = transpose_t::N;
+  transpose_t b_transpose = transpose_t::N;
 
   /// Data types: A, B, C, D.
-  data_type_t a_dtype;
-  data_type_t b_dtype;
-  data_type_t c_dtype;
-  data_type_t d_dtype;
+  data_type_t a_dtype = data_type_t::None;
+  data_type_t b_dtype = data_type_t::None;
+  data_type_t c_dtype = data_type_t::None;
+  data_type_t d_dtype = data_type_t::None;
 
   /// Compute type.
-  data_type_t mi_dtype;
+  data_type_t mi_dtype = data_type_t::None;
 
   /// MX block size.
-  std::size_t a_mx_block_size;
-  std::size_t b_mx_block_size;
+  std::size_t a_mx_block_size = 0;
+  std::size_t b_mx_block_size = 0;
 };
 
 /**
