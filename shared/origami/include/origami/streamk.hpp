@@ -50,7 +50,7 @@ size_t select_grid_size(const problem_t& problem,
                         const hardware_t& hardware,
                         const config_t& config,
                         grid_selection_t algorithm,
-                        size_t max_cus);
+                        size_t max_cus = 0);
 
 }  // namespace streamk
 }  // namespace origami
