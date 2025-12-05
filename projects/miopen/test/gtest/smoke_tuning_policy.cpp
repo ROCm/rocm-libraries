@@ -107,12 +107,22 @@ TEST_F(CPU_TuningPolicy_NONE, TestGetApiLogged)
 
 TEST_F(CPU_TuningPolicy_NONE, TestSetApiLogged)
 {
-    ScopedEnvironment<std::string> enable_logging(MIOPEN_ENABLE_LOGGING, "ON");
+    miopenTuningPolicy_t original_policy;
     auto&& handle = get_handle();
 
-    testing::internal::CaptureStderr();
-    auto status = miopenSetTuningPolicy(&handle, miopenTuningPolicy_t::miopenTuningPolicySearch);
+    auto status = miopenGetTuningPolicy(&handle, &original_policy);
     ASSERT_EQ(status, miopenStatusSuccess);
-    std::string output = testing::internal::GetCapturedStderr();
-    EXPECT_THAT(output, testing::HasSubstr(" miopenSetTuningPolicy("));
+
+    {
+        ScopedEnvironment<std::string> enable_logging(MIOPEN_ENABLE_LOGGING, "ON");
+
+        testing::internal::CaptureStderr();
+        status = miopenSetTuningPolicy(&handle, miopenTuningPolicy_t::miopenTuningPolicySearch);
+        ASSERT_EQ(status, miopenStatusSuccess);
+        std::string output = testing::internal::GetCapturedStderr();
+        EXPECT_THAT(output, testing::HasSubstr(" miopenSetTuningPolicy("));
+    }
+
+    status = miopenSetTuningPolicy(&handle, original_policy);
+    ASSERT_EQ(status, miopenStatusSuccess);
 }
