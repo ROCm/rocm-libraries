@@ -266,14 +266,7 @@ def getDockerImage(Map conf=[:])
 
     def cacheRef = "${env.MIOPEN_DOCKER_IMAGE_URL}-ci-docker:cache"
 
-    // Test for dockerx
-    withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-        sh("docker buildx version")   
-    }
-
-    def dockerArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd " +
-                     "--cache-from type=registry,ref=${cacheRef} " +
-                     "--build-arg PREFIX=${prefixpath} " +
+    def dockerArgs = "--build-arg PREFIX=${prefixpath} " +
                      "--build-arg GPU_ARCHS=\"${gpu_arch}\" "
     if(env.CCACHE_HOST)
     {
@@ -317,23 +310,35 @@ def getDockerImage(Map conf=[:])
     {
         echo "Building image..."
         def buildContext = "${env.WORKSPACE}/${env.PROJ_DIR}/."
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
-            sh """
-                docker buildx inspect ci-builder >/dev/null 2>&1 || \
-                docker buildx create --name ci-builder --driver docker-container --use
-                docker buildx use ci-builder
-                docker buildx inspect --bootstrap
-            """.stripIndent()
-         
-            sh """
-                DOCKER_BUILDKIT=1 docker buildx build \
-                --push \
-                --tag ${image} \
-                ${dockerArgs} \
-                ${buildContext}
-            """.stripIndent()
+        def dockerCacheArgs = "--cache-to type=registry,ref=${cacheRef},compression=zstd " +
+                              "--cache-from type=registry,ref=${cacheRef} "
+
+        try {
+            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                sh """
+                    docker buildx inspect ci-builder >/dev/null 2>&1 || \
+                    docker buildx create --name ci-builder --driver docker-container --use
+                    docker buildx use ci-builder
+                    docker buildx inspect --bootstrap
+                """.stripIndent()
+            
+                sh """
+                    DOCKER_BUILDKIT=1 docker buildx build \
+                    --push \
+                    --tag ${image} \
+                    ${dockerCacheArgs} \
+                    ${dockerArgs} \
+                    ${buildContext}
+                """.stripIndent()
+            }
+            dockerImage = docker.image("${image}")
+        } catch (Exception bex) {
+            echo "Buildx not available or failed, falling back to docker.build"
+            dockerImage = docker.build("${image}", "${dockerArgs} ${buildContext}")
+            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+                dockerImage.push()
+            }
         }
-        dockerImage = docker.image("${image}")
     }
 
     if(params.INSTALL_MIOPEN == 'ON')
