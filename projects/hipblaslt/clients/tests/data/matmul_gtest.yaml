@@ -1721,7 +1721,7 @@ Tests:
   bias_type: bf16_r
   unit_check: 0
   norm_check: 1
-  gpu_arch: '942'
+  gpu_arch: '9(42|50)'
 
 - name: matmul_dgelu_bf16_NN
   category: pre_checkin
