@@ -24,15 +24,29 @@ else()
     endif()
 endif()
 
-# Create symlink for matrices directory
+# Make matrices accessible to test executable
 # Test executable is in clients/staging/ and looks for ../matrices/
-# This symlink makes ../matrices/ resolve correctly to the actual matrices location
 file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/clients")
-file(CREATE_LINK 
-    "${PROJECT_BINARY_DIR}/matrices" 
-    "${PROJECT_BINARY_DIR}/clients/matrices" 
-    SYMBOLIC
-)
+
+if(WIN32)
+    # On Windows: Copy matrices directory after build to avoid symlink issues
+    # Symlinks cause OSError in TheRock's fileset_tool.py during staging
+    # POST_BUILD ensures this runs after matrices are downloaded/generated
+    add_custom_command(
+        TARGET hipsparse-test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${PROJECT_BINARY_DIR}/matrices"
+            "${PROJECT_BINARY_DIR}/clients/matrices"
+        COMMENT "Copying matrices for Windows test environment"
+    )
+else()
+    # On Linux: Use symlink for efficiency
+    file(CREATE_LINK 
+        "${PROJECT_BINARY_DIR}/matrices" 
+        "${PROJECT_BINARY_DIR}/clients/matrices" 
+        SYMBOLIC
+    )
+endif()
 
 add_executable(hipsparse-test)
 
