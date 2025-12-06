@@ -312,6 +312,14 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
         CHECK_HIP_ERROR(
             hipMemcpy(hreordering.data(), dreordering, sizeof(int) * m, hipMemcpyDeviceToHost));
 
+        std::cout << "hcoloring" << std::endl;
+        for(size_t i = 0; i < hcoloring.size(); i++)
+        {
+            std::cout << hcoloring[i] << " ";
+        }
+        std::cout << "" << std::endl;
+
+
         std::cout << "BBBB" << std::endl;
         // Check that two adjacent nodes do not have the same color
         for(int row = 0; row < m; ++row)
@@ -363,6 +371,15 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
             marker[hcoloring[i]] = true;
         }
 
+        std::cout << "marker" << std::endl;
+        for(size_t i = 0; i < marker.size(); i++)
+        {
+            std::cout << marker[i] << " ";
+        }
+        std::cout << "" << std::endl;
+
+        std::cout << "EEEE" << std::endl;
+
         for(int i = 0; i < max_value; ++i)
         {
             EXPECT_HIPSPARSE_STATUS(marker[i] ? HIPSPARSE_STATUS_SUCCESS
@@ -370,7 +387,7 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
                                     HIPSPARSE_STATUS_SUCCESS);
         }
 
-        std::cout << "EEEE" << std::endl;
+        std::cout << "FFFF" << std::endl;
     }
 
     hipsparseDestroyColorInfo(colorInfo);
