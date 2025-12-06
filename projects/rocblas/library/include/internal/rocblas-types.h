@@ -53,7 +53,7 @@
 #define ROCBLAS_INTERNAL_ONLY_EXPORT_NOINLINE \
     ROCBLAS_EXPORT __attribute__((noinline)) ROCBLAS_INTERNAL_DEPRECATION
 
-/*! \brief rocblas_handle is a structure holding the rocblas library context.
+/*! \brief rocblas_handle is a structure holding the rocBLAS library context.
  * It must be initialized using rocblas_create_handle(),
  * and the returned handle must be passed
  * to all subsequent library function calls.
@@ -71,8 +71,8 @@ typedef struct ihipEvent_t* hipEvent_t;
 struct rocblas_device_malloc_base;
 
 // integer types
-/*! \brief To specify whether int32 is used for LP64 or int64 is used for ILP64.
- * This define should be considered deprecated as being supplanted by additional interfaces and was never tested */
+/*! \brief Specifies whether ``int32`` is used for ``LP64`` or ``int64`` is used for ``ILP64``.
+ * This define is deprecated. It was never tested and has been replaced by other interfaces.  */
 #if defined(rocblas_ILP64)
 typedef int64_t rocblas_int;
 #else
@@ -90,7 +90,7 @@ typedef double rocblas_double;
 #ifdef ROCM_USE_FLOAT16
 typedef _Float16 rocblas_half;
 #else
-/*! \brief Structure definition for rocblas_half */
+/*! \brief Structure to represent an unsigned 16-bit integer type. */
 typedef struct rocblas_half
 {
     uint16_t data;
@@ -114,8 +114,8 @@ namespace std
 
 /* ============================================================================================ */
 
-/*! Parameter constants.
- *  numbering is consistent with CBLAS, ACML and most standard C BLAS libraries
+/*! These are parameter constants, with
+ *  numbering consistent with CBLAS, ACML, and most standard C BLAS libraries.
  */
 
 /*! \brief Used to specify whether the matrix is to be transposed or not. */
@@ -127,8 +127,8 @@ typedef enum rocblas_operation_
     = 113 /**< Operate with the conjugate transpose of the matrix. */
 } rocblas_operation;
 
-/*! \brief Used by the Hermitian, symmetric and triangular matrix
- * routines to specify whether the upper, or lower triangle is being referenced.
+/*! \brief Used by the Hermitian, symmetric, and triangular matrix
+ * routines to specify whether the upper or lower triangle is being referenced.
  */
 typedef enum rocblas_fill_
 {
@@ -137,7 +137,7 @@ typedef enum rocblas_fill_
     rocblas_fill_full  = 123
 } rocblas_fill;
 
-/*! \brief It is used by the triangular matrix routines to specify whether the
+/*! \brief Used by the triangular matrix routines to specify whether the
  * matrix is unit triangular.
  */
 typedef enum rocblas_diagonal_
@@ -146,7 +146,7 @@ typedef enum rocblas_diagonal_
     rocblas_diagonal_unit     = 132, /**< Unit triangular. */
 } rocblas_diagonal;
 
-/*! \brief Indicates the side matrix A is located relative to matrix B during multiplication. */
+/*! \brief Indicates the side matrix A is located on, relative to matrix B, during multiplication. */
 typedef enum rocblas_side_
 {
     rocblas_side_left  = 141, /**< Multiply general matrix by symmetric,
@@ -156,11 +156,11 @@ typedef enum rocblas_side_
     rocblas_side_both  = 143
 } rocblas_side;
 
-/*! Parameter constants.
- *  Numbering continues into next free decimal range but not shared with other BLAS libraries
+/*! These are parameter constants, with
+ *  numbering that continues into the next free decimal range but is not shared with other BLAS libraries.
  */
 
-/*! \brief Indicates the precision width of data stored in a blas type. */
+/*! \brief Indicates the precision width of the data stored in a BLAS type. */
 typedef enum rocblas_datatype_
 {
     rocblas_datatype_f16_r   = 150, /**< 16-bit floating point, real */
@@ -179,37 +179,37 @@ typedef enum rocblas_datatype_
     rocblas_datatype_u32_c   = 167, /**< 32-bit unsigned integer, complex */
     rocblas_datatype_bf16_r  = 168, /**< 16-bit bfloat, real */
     rocblas_datatype_bf16_c  = 169, /**< 16-bit bfloat, complex */
-    rocblas_datatype_invalid = 255, /**< Invalid datatype value, do not use */
+    rocblas_datatype_invalid = 255, /**< Invalid datatype value. Do not use. */
 } rocblas_datatype;
 
 /* ============================================================================================ */
 /**
- *   @brief rocblas status codes definition
+ *   @brief rocBLAS status codes definition.
  */
 typedef enum rocblas_status_
 {
-    rocblas_status_success         = 0, /**< Success */
-    rocblas_status_invalid_handle  = 1, /**< Handle not initialized, invalid or null */
-    rocblas_status_not_implemented = 2, /**< Function is not implemented */
-    rocblas_status_invalid_pointer = 3, /**< Invalid pointer argument */
-    rocblas_status_invalid_size    = 4, /**< Invalid size argument */
-    rocblas_status_memory_error    = 5, /**< Failed internal memory allocation, copy or dealloc */
-    rocblas_status_internal_error  = 6, /**< Other internal library failure */
-    rocblas_status_perf_degraded   = 7, /**< Performance degraded due to low device memory */
-    rocblas_status_size_query_mismatch = 8, /**< Unmatched start/stop size query */
-    rocblas_status_size_increased      = 9, /**< Queried device memory size increased */
-    rocblas_status_size_unchanged      = 10, /**< Queried device memory size unchanged */
-    rocblas_status_invalid_value       = 11, /**< Passed argument not valid */
-    rocblas_status_continue            = 12, /**< Nothing preventing function to proceed */
+    rocblas_status_success         = 0, /**< Success. */
+    rocblas_status_invalid_handle  = 1, /**< Handle is uninitialized, invalid, or null. */
+    rocblas_status_not_implemented = 2, /**< Function is not implemented. */
+    rocblas_status_invalid_pointer = 3, /**< Invalid pointer argument. */
+    rocblas_status_invalid_size    = 4, /**< Invalid size argument. */
+    rocblas_status_memory_error    = 5, /**< Failed internal memory allocation, copy, or dealloc. */
+    rocblas_status_internal_error  = 6, /**< Other internal library failure. */
+    rocblas_status_perf_degraded   = 7, /**< Performance degraded due to low device memory. */
+    rocblas_status_size_query_mismatch = 8, /**< Unmatched start/stop size query. */
+    rocblas_status_size_increased      = 9, /**< Queried device memory size increased. */
+    rocblas_status_size_unchanged      = 10, /**< Queried device memory size unchanged. */
+    rocblas_status_invalid_value       = 11, /**< Passed argument not valid. */
+    rocblas_status_continue            = 12, /**< Nothing preventing function from proceeding. */
     rocblas_status_check_numerics_fail
-    = 13, /**< Will be set if the vector/matrix has a NaN/Infinity/denormal value */
+    = 13, /**< Set if the vector/matrix has a NaN/Infinity/denormal value. */
     rocblas_status_excluded_from_build
-    = 14, /**< Function is not available in build, likely a function requiring Tensile built without Tensile */
+    = 14, /**< Function is not available in build. It likely requires Tensile but was built without it. */
     rocblas_status_arch_mismatch
-    = 15, /**< The function requires a feature absent from the device architecture */
+    = 15, /**< The function requires a feature absent from the device architecture. */
 } rocblas_status;
 
-/*! \brief Indicates if scalar pointers are on host or device. This is used for
+/*! \brief Indicates whether scalar pointers are on the host or device. This is used for
 *    scalars alpha and beta and for scalar function return values. */
 typedef enum rocblas_pointer_mode_
 {
@@ -219,14 +219,14 @@ typedef enum rocblas_pointer_mode_
     rocblas_pointer_mode_device = 1
 } rocblas_pointer_mode;
 
-/*! \brief Indicates if atomics operations are allowed. Not allowing atomic operations
-*    may generally improve determinism and repeatability of results at a cost of performance.
-*    Defaults to rocblas_atomics_allowed.  */
+/*! \brief Indicates whether atomics operations are allowed. Not allowing atomic operations
+*    can generally improve determinism and repeatability of results at a cost to performance.
+*    Defaults to ``rocblas_atomics_allowed``.  */
 typedef enum rocblas_atomics_mode_
 {
-    /*! \brief Algorithms will refrain from atomics where applicable */
+    /*! \brief Algorithms refrain from atomics where applicable */
     rocblas_atomics_not_allowed = 0,
-    /*! \brief Algorithms will take advantage of atomics where applicable */
+    /*! \brief Algorithms take advantage of atomics where applicable */
     rocblas_atomics_allowed = 1,
 } rocblas_atomics_mode;
 
@@ -243,22 +243,22 @@ typedef enum rocblas_performance_metric_
     rocblas_cu_efficiency_performance_metric = 2
 } rocblas_performance_metric;
 
-/*! \brief Indicates if layer is active with bitmask*/
+/*! \brief Indicates whether the layer is active by means of a bitmask.*/
 typedef enum rocblas_layer_mode_
 {
     /*! \brief No logging will take place. */
     rocblas_layer_mode_none = 0x0,
-    /*! \brief A line containing the function name and value of arguments passed will be printed with each rocBLAS function call. */
+    /*! \brief A line containing the function name and value of arguments passed is printed with each rocBLAS function call. */
     rocblas_layer_mode_log_trace = 0x1,
-    /*! \brief Outputs a line each time a rocBLAS function is called, this line can be used with rocblas-bench to make the same call again. */
+    /*! \brief Outputs a line each time a rocBLAS function is called. This line can be used with rocblas-bench to make the same call again. */
     rocblas_layer_mode_log_bench = 0x2,
     /*! \brief Outputs a YAML description of each rocBLAS function called, along with its arguments and number of times it was called. */
     rocblas_layer_mode_log_profile = 0x4,
-    /*! \brief Outputs to the same stream as trace logging with limited internal API details like GEMM backend used */
+    /*! \brief Outputs to the same stream as trace logging with limited internal API details, such as the GEMM backend that was used. */
     rocblas_layer_mode_log_internal = 0x8,
 } rocblas_layer_mode;
 
-/*! \brief Indicates if layer is active with bitmask*/
+/*! \brief Indicates whether the layer is active by means of a bitmask.*/
 typedef enum rocblas_gemm_algo_
 {
     rocblas_gemm_algo_standard       = 0x0,
@@ -272,22 +272,22 @@ typedef enum rocblas_geam_ex_operation_
     rocblas_geam_ex_operation_plus_min = 0x1, // Cij = min(Aik, Bkj) + Cij
 } rocblas_geam_ex_operation;
 
-/*! \brief Control flags passed into gemm algorithms invoked by Tensile Host */
+/*! \brief Controls the flags passed into GEMM algorithms invoked by the Tensile host. */
 typedef enum rocblas_gemm_flags_
 {
     /*! \brief Default empty flags */
     rocblas_gemm_flags_none = 0x0,
-    /*! \brief Before ROCm 6.0 rocblas_gemm_flags_pack_int8x4 = 0x1, as has now been removed so is available for future use */
-    /*! \brief Select the gemm problem with the highest efficiency per compute unit used. Useful for running multiple smaller problems
-    * simultaneously. This takes precedence over the performance metric set in rocblas_handle and currently only works for
+    /*! \brief Before ROCm 6.0, ``rocblas_gemm_flags_pack_int8x4 = 0x1`` was in use. This has now been removed and is available for future use. */
+    /*! \brief Select the GEMM problem with the highest efficiency per compute unit used, which is useful for running multiple smaller problems
+    * simultaneously. This takes precedence over the performance metric set in ``rocblas_handle`` and currently only works for
     * gemm_*_ex problems. */
     rocblas_gemm_flags_use_cu_efficiency = 0x2,
-    /*! \brief Select an alternate implementation for the MI200 FP16 HPA
-    * (High Precision Accumulate) GEMM kernel utilizing the BF16 matrix
+    /*! \brief Select an alternate implementation for the Instinct MI200 ``FP16`` HPA
+    * (High Precision Accumulate) GEMM kernel. This implementation uses the ``BF16`` matrix
     * instructions with reduced accuracy in cases where computation cannot
-    * tolerate the FP16 matrix instructions flushing subnormal FP16
+    * tolerate the ``FP16`` matrix instructions, flushing subnormal ``FP16``
     * input/output data to zero. See the "MI200 (gfx90a) Considerations"
-    * section for more details. */
+    * section of the rocBLAS design notes documentation for more details. */
     rocblas_gemm_flags_fp16_alt_impl        = 0x4,
     rocblas_gemm_flags_check_solution_index = 0x8,
     rocblas_gemm_flags_fp16_alt_impl_rnz    = 0x10,
