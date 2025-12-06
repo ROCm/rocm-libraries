@@ -1,0 +1,567 @@
+/*! \file */
+/* ************************************************************************
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+
+#include "rocsparse_bsric0_strided_batched_kernel_9_16.hpp"
+#include "rocsparse_common.hpp"
+#include "rocsparse_utility.hpp"
+
+namespace rocsparse
+{
+    template <uint32_t BLOCKSIZE,
+              uint32_t MAX_NNZB,
+              uint32_t BSRDIM,
+              typename T,
+              typename I,
+              typename J>
+    ROCSPARSE_DEVICE_ILF void bsric0_9_16_device(rocsparse_direction direction,
+                                                 J                   mb,
+                                                 J                   block_dim,
+                                                 const I* __restrict__ bsr_row_ptr,
+                                                 const J* __restrict__ bsr_col_ind,
+                                                 T* __restrict__ bsr_val,
+                                                 const I* __restrict__ bsr_diag_ind,
+                                                 int* __restrict__ block_done,
+                                                 const J* __restrict__ block_map,
+                                                 J* __restrict__ zero_pivot,
+                                                 rocsparse_index_base idx_base)
+    {
+        constexpr static uint32_t DIMX = BLOCKSIZE / BSRDIM;
+        constexpr static uint32_t DIMY = BSRDIM;
+
+        J tidx = hipThreadIdx_x;
+        J tidy = hipThreadIdx_y;
+        J tid  = DIMX * tidy + tidx;
+
+        __shared__ J columns[MAX_NNZB];
+        __shared__ I index[MAX_NNZB];
+        __shared__ J local_index[MAX_NNZB];
+        __shared__ T row_sum[BSRDIM][BSRDIM + 1];
+        __shared__ T temp[BSRDIM][BSRDIM + 1];
+        __shared__ T values[BSRDIM][BSRDIM + 1];
+        __shared__ T local_values[BSRDIM][BSRDIM + 1];
+
+        // Current block row this wavefront is working on
+        J block_row = block_map[hipBlockIdx_x];
+
+        // Block diagonal entry point of the current block row
+        I block_row_diag = bsr_diag_ind[block_row];
+
+        // If one thread in the warp breaks here, then all threads in
+        // the warp break so no divergence
+        if(block_row_diag == -1)
+        {
+            if(tidx == 0 && tidy == 0)
+            {
+                rocsparse::atomic_min(zero_pivot, block_row + idx_base);
+
+                // Last lane in wavefront writes "we are done" flag for its block row
+                __hip_atomic_store(
+                    &block_done[block_row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+            }
+
+            return;
+        }
+
+        // Block row entry point
+        I block_row_begin = bsr_row_ptr[block_row] - idx_base;
+
+        // Write current block row column indices to shared memory
+        for(I j = block_row_begin + tid; j < block_row_diag + 1; j += DIMX * DIMY)
+        {
+            columns[j - block_row_begin] = bsr_col_ind[j] - idx_base;
+        }
+
+        // Block row sum accumulator
+        for(J i = tidx; i < BSRDIM; i += DIMX)
+        {
+            row_sum[tidy][i] = static_cast<T>(0);
+        }
+
+        __threadfence_block();
+
+        // Loop over non-diagonal block columns of current block row
+        for(I j = block_row_begin; j < block_row_diag; j++)
+        {
+            // Block column index currently being processes
+            J block_col = bsr_col_ind[j] - idx_base;
+
+            // Beginning of the row that corresponds to block_col
+            I local_block_begin = bsr_row_ptr[block_col] - idx_base;
+
+            // Diagonal entry point of row block_col
+            I local_block_diag = bsr_diag_ind[block_col];
+
+            // Structural zero pivot, do not process this row
+            if(local_block_diag == -1)
+            {
+                // If one thread in the warp breaks here, then all threads in
+                // the warp break so no divergence
+                break;
+            }
+
+            for(J q = tidx; q < block_dim; q += DIMX)
+            {
+                if(direction == rocsparse_direction_row)
+                {
+                    values[tidy][q]
+                        = (tidy < block_dim)
+                              ? bsr_val[block_dim * block_dim * j + block_dim * tidy + q]
+                              : static_cast<T>(0);
+                }
+                else
+                {
+                    values[tidy][q]
+                        = (tidy < block_dim)
+                              ? bsr_val[block_dim * block_dim * j + block_dim * q + tidy]
+                              : static_cast<T>(0);
+                }
+
+                temp[tidy][q] = static_cast<T>(0);
+            }
+
+            I count = 0;
+            I l     = local_block_begin;
+            I k     = 0;
+            J col_k = columns[k];
+
+            while(l <= local_block_diag && col_k <= block_col)
+            {
+                J col_l = bsr_col_ind[l] - idx_base;
+                col_k   = columns[k];
+
+                if(col_l < col_k)
+                {
+                    l++;
+                }
+                else if(col_l > col_k)
+                {
+                    k++;
+                }
+                else
+                {
+                    index[count]       = block_dim * block_dim * (k + block_row_begin);
+                    local_index[count] = block_dim * block_dim * l;
+
+                    k++;
+                    l++;
+
+                    count++;
+                }
+            }
+
+            __threadfence_block();
+
+            // Spin loop until dependency has been resolved
+            while(!__hip_atomic_load(
+                &block_done[block_col], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT))
+                ;
+
+            __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+
+            for(J q = tidx; q < block_dim; q += DIMX)
+            {
+                if(direction == rocsparse_direction_row)
+                {
+                    local_values[tidy][q] = (tidy < block_dim)
+                                                ? bsr_val[block_dim * block_dim * local_block_diag
+                                                          + block_dim * tidy + q]
+                                                : static_cast<T>(0);
+                }
+                else
+                {
+                    local_values[tidy][q] = (tidy < block_dim)
+                                                ? bsr_val[block_dim * block_dim * local_block_diag
+                                                          + block_dim * q + tidy]
+                                                : static_cast<T>(0);
+                }
+            }
+
+            // Loop over the row the current column index depends on
+            // Each lane processes one entry
+            for(I l = 0; l < count - 1; l++)
+            {
+                J idx2 = local_index[l];
+                I idx  = index[l];
+
+                for(J q = tidx; q < block_dim; q += DIMX)
+                {
+                    // Local row sum
+                    T local_sum = static_cast<T>(0);
+
+                    for(J p = 0; p < block_dim; p++)
+                    {
+                        if(direction == rocsparse_direction_row)
+                        {
+                            T v1      = bsr_val[idx2 + block_dim * q + p];
+                            T v2      = (tidy < block_dim) ? bsr_val[idx + block_dim * tidy + p]
+                                                           : static_cast<T>(0);
+                            local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        }
+                        else
+                        {
+                            T v1      = bsr_val[idx2 + block_dim * p + q];
+                            T v2      = (tidy < block_dim) ? bsr_val[idx + block_dim * p + tidy]
+                                                           : static_cast<T>(0);
+                            local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                        }
+                    }
+
+                    temp[tidy][q] += local_sum;
+                }
+            }
+
+            __threadfence_block();
+
+            for(J k = 0; k < block_dim; k++)
+            {
+                // Current value
+                T val = values[tidy][k];
+
+                // Load diagonal entry
+                T diag_val = local_values[k][k];
+
+                // Row has numerical zero pivot
+                if(diag_val == static_cast<T>(0))
+                {
+                    if(tidx == 0 && tidy == 0)
+                    {
+                        // We are looking for the first zero pivot
+                        rocsparse::atomic_min(zero_pivot, block_col + idx_base);
+                    }
+
+                    diag_val = static_cast<T>(1);
+                }
+
+                // Local row sum
+                T local_sum = temp[tidy][k];
+
+                for(I p = 0; p < k; p++)
+                {
+                    T v1      = local_values[k][p];
+                    T v2      = values[tidy][p];
+                    local_sum = rocsparse::fma(v1, rocsparse::conj(v2), local_sum);
+                }
+
+                // Compute the Cholesky factor and writes it to global memory
+                val             = (val - local_sum) / diag_val;
+                values[tidy][k] = val;
+
+                __threadfence_block();
+
+                for(J q = tidx; q < block_dim; q += DIMX)
+                {
+                    row_sum[tidy][q]
+                        = rocsparse::fma(val, rocsparse::conj(values[q][k]), row_sum[tidy][q]);
+                }
+
+                __threadfence_block();
+            }
+
+            // Write values back to global memory
+            for(J q = tidx; q < block_dim; q += DIMX)
+            {
+                if(tidy < block_dim)
+                {
+                    if(direction == rocsparse_direction_row)
+                    {
+                        bsr_val[block_dim * block_dim * j + block_dim * tidy + q] = values[tidy][q];
+                    }
+                    else
+                    {
+                        bsr_val[block_dim * block_dim * j + block_dim * q + tidy] = values[tidy][q];
+                    }
+                }
+            }
+
+            __threadfence();
+        }
+
+        // Load current diagonal block into shared memory
+        for(J q = tidx; q < block_dim; q += DIMX)
+        {
+            if(direction == rocsparse_direction_row)
+            {
+                values[tidy][q]
+                    = (tidy < block_dim)
+                          ? bsr_val[block_dim * block_dim * block_row_diag + block_dim * tidy + q]
+                          : static_cast<T>(0);
+            }
+            else
+            {
+                values[tidy][q]
+                    = (tidy < block_dim)
+                          ? bsr_val[block_dim * block_dim * block_row_diag + block_dim * q + tidy]
+                          : static_cast<T>(0);
+            }
+        }
+
+        __threadfence_block();
+
+        // Handle diagonal block column of block row.
+        for(J k = 0; k < block_dim; k++)
+        {
+            if(k == tidy)
+            {
+                values[k][k] = rocsparse::sqrt(rocsparse::abs(values[k][k] - row_sum[k][k]));
+            }
+
+            __threadfence_block();
+
+            // Load value
+            T val = values[tidy][k];
+
+            // Load diagonal entry
+            T diag_val = values[k][k];
+
+            // Row has numerical zero pivot
+            if(diag_val == static_cast<T>(0))
+            {
+                if(tidx == 0 && tidy == 0)
+                {
+                    // We are looking for the first zero pivot
+                    rocsparse::atomic_min(zero_pivot, block_row + idx_base);
+                }
+
+                // Normally would break here but to avoid divergence set diag_val to one and continue
+                // The zero pivot has already been set so further computation does not matter
+                diag_val = static_cast<T>(1);
+            }
+
+            // Local row sum
+            T local_sum = row_sum[tidy][k];
+
+            if(k < tidy)
+            {
+                val             = (val - local_sum) / diag_val;
+                values[tidy][k] = val;
+
+                __threadfence_block();
+
+                for(J q = tidx; q < block_dim; q += DIMX)
+                {
+                    row_sum[tidy][q]
+                        = rocsparse::fma(val, rocsparse::conj(values[q][k]), row_sum[tidy][q]);
+                }
+            }
+
+            __threadfence_block();
+        }
+
+        // Write values back to global memory
+        for(J q = tidx; q < block_dim; q += DIMX)
+        {
+            if(tidy < block_dim)
+            {
+                if(direction == rocsparse_direction_row)
+                {
+                    bsr_val[block_dim * block_dim * block_row_diag + block_dim * tidy + q]
+                        = values[tidy][q];
+                }
+                else
+                {
+                    bsr_val[block_dim * block_dim * block_row_diag + block_dim * q + tidy]
+                        = values[tidy][q];
+                }
+            }
+        }
+
+        if(tidx == 0 && tidy == 0)
+        {
+            // Last lane in wavefront writes "we are done" flag for its block row
+            __hip_atomic_store(
+                &block_done[block_row], 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+        }
+    }
+
+    template <uint32_t BLOCKSIZE,
+              uint32_t MAX_NNZB,
+              uint32_t BBDIM,
+              typename T,
+              typename I,
+              typename J>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void bsric0_strided_batched_kernel_9_16(rocsparse_direction  dir,
+                                            J                    mb,
+                                            const I*             bsr_row_ptr,
+                                            const J*             bsr_col_ind,
+                                            T*                   bsr_val,
+                                            int64_t              bsr_val_stride,
+                                            const I*             bsr_diag_ind,
+                                            J                    bsr_dim,
+                                            int32_t*             done_array,
+                                            int64_t              done_array_stride,
+                                            const J*             map,
+                                            J*                   zero_pivot,
+                                            int64_t              zero_pivot_stride,
+                                            rocsparse_index_base idx_base)
+    {
+        const auto batch_index = hipBlockIdx_y;
+        rocsparse::bsric0_9_16_device<BLOCKSIZE, MAX_NNZB, BBDIM>(
+            dir,
+            mb,
+            bsr_dim,
+            bsr_row_ptr,
+            bsr_col_ind,
+            bsr_val + batch_index * bsr_val_stride,
+            bsr_diag_ind,
+            done_array + batch_index * done_array_stride,
+            map,
+            zero_pivot + batch_index * done_array_stride,
+            idx_base);
+    }
+
+    template <uint32_t BLOCKSIZE,
+              uint32_t MAX_NNZB,
+              uint32_t BBDIM,
+              typename T,
+              typename I,
+              typename J>
+    rocsparse_status bsric0_strided_batched_kernel_9_16_launch(rocsparse_handle    handle,
+                                                               rocsparse_direction dir,
+                                                               int64_t             batch_count,
+                                                               int64_t             mb,
+                                                               const void*         bsr_row_ptr,
+                                                               const void*         bsr_col_ind,
+                                                               void*               bsr_val,
+                                                               int64_t             bsr_val_stride,
+                                                               const void*         bsr_diag_ind,
+                                                               int64_t             bsr_dim,
+                                                               int32_t*            done_array,
+                                                               int64_t     done_array_stride,
+                                                               const void* row_map,
+                                                               void*       zero_pivot,
+                                                               int64_t     zero_pivot_stride,
+                                                               rocsparse_index_base idx_base)
+    {
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::bsric0_strided_batched_kernel_9_16<BLOCKSIZE, MAX_NNZB, BBDIM>),
+            dim3(mb, batch_count),
+            dim3(4, 16),
+            0,
+            handle->stream,
+            dir,
+            static_cast<J>(mb),
+            reinterpret_cast<const I*>(bsr_row_ptr),
+            reinterpret_cast<const J*>(bsr_col_ind),
+            reinterpret_cast<T*>(bsr_val),
+            bsr_val_stride,
+            reinterpret_cast<const I*>(bsr_diag_ind),
+            static_cast<J>(bsr_dim),
+            reinterpret_cast<int32_t*>(done_array),
+            done_array_stride,
+            reinterpret_cast<const J*>(row_map),
+            reinterpret_cast<J*>(zero_pivot),
+            zero_pivot_stride,
+            idx_base);
+        return rocsparse_status_success;
+    }
+
+    template <uint32_t BLOCKSIZE,
+              uint32_t MAX_NNZB,
+              uint32_t BBDIM,
+              typename T,
+              typename I,
+              typename... P>
+    static rocsparse::bsric0_kernel_9_16_launch_t find_kernel_9_16_j(const rocsparse_indextype j,
+                                                                     P... p)
+    {
+        return (j == rocsparse_indextype_i32) ? bsric0_strided_batched_kernel_9_16_launch<BLOCKSIZE,
+                                                                                          MAX_NNZB,
+                                                                                          BBDIM,
+                                                                                          T,
+                                                                                          I,
+                                                                                          int32_t>
+               : (j == rocsparse_indextype_i64)
+                   ? bsric0_strided_batched_kernel_9_16_launch<BLOCKSIZE,
+                                                               MAX_NNZB,
+                                                               BBDIM,
+                                                               T,
+                                                               I,
+                                                               int64_t>
+                   : nullptr;
+    }
+
+    template <uint32_t BLOCKSIZE, uint32_t MAX_NNZB, uint32_t BBDIM, typename T, typename... P>
+    static rocsparse::bsric0_kernel_9_16_launch_t find_kernel_9_16_i(const rocsparse_indextype i,
+                                                                     P... p)
+    {
+        return (i == rocsparse_indextype_i32)
+                   ? rocsparse::find_kernel_9_16_j<BLOCKSIZE, MAX_NNZB, BBDIM, T, int32_t>(p...)
+               : (i == rocsparse_indextype_i64)
+                   ? rocsparse::find_kernel_9_16_j<BLOCKSIZE, MAX_NNZB, BBDIM, T, int64_t>(p...)
+                   : nullptr;
+    }
+
+    template <uint32_t BLOCKSIZE, uint32_t MAX_NNZB, uint32_t BBDIM, typename... P>
+    static rocsparse::bsric0_kernel_9_16_launch_t find_kernel_9_16_t(const rocsparse_datatype i,
+                                                                     P... p)
+    {
+        return (i == rocsparse_datatype_f32_r)
+                   ? rocsparse::find_kernel_9_16_i<BLOCKSIZE, MAX_NNZB, BBDIM, float>(p...)
+               : (i == rocsparse_datatype_f32_c) ? rocsparse::
+                       find_kernel_9_16_i<BLOCKSIZE, MAX_NNZB, BBDIM, rocsparse_float_complex>(p...)
+               : (i == rocsparse_datatype_f64_c) ? rocsparse::
+                       find_kernel_9_16_i<BLOCKSIZE, MAX_NNZB, BBDIM, rocsparse_double_complex>(
+                           p...)
+               : (i == rocsparse_datatype_f64_r)
+                   ? rocsparse::find_kernel_9_16_i<BLOCKSIZE, MAX_NNZB, BBDIM, double>(p...)
+                   : nullptr;
+    }
+
+    template <uint32_t BLOCKSIZE, uint32_t MAX_NNZB, typename... P>
+    static rocsparse::bsric0_kernel_9_16_launch_t find_kernel_9_16_bdim(const int32_t bdim, P... p)
+    {
+        return (bdim == 16) ? rocsparse::find_kernel_9_16_t<BLOCKSIZE, MAX_NNZB, 16>(p...)
+                            : nullptr;
+    }
+
+    template <uint32_t BLOCKSIZE, typename... P>
+    static rocsparse::bsric0_kernel_9_16_launch_t find_kernel_9_16_maxnnzb(const int32_t i, P... p)
+    {
+        return (i == 32)    ? rocsparse::find_kernel_9_16_bdim<BLOCKSIZE, 32>(p...)
+               : (i == 64)  ? rocsparse::find_kernel_9_16_bdim<BLOCKSIZE, 64>(p...)
+               : (i == 128) ? rocsparse::find_kernel_9_16_bdim<BLOCKSIZE, 128>(p...)
+                            : nullptr;
+    }
+
+}
+
+rocsparse::bsric0_kernel_9_16_launch_t
+    rocsparse::find_bsric0_strided_batched_kernel_9_16_launch(uint32_t            blocksize,
+                                                              uint32_t            maxnnzb,
+                                                              uint32_t            bbdim,
+                                                              rocsparse_datatype  t_type,
+                                                              rocsparse_indextype i_type,
+                                                              rocsparse_indextype j_type)
+{
+    if(blocksize == 64)
+    {
+        return rocsparse::find_kernel_9_16_maxnnzb<64>(maxnnzb, bbdim, t_type, i_type, j_type);
+    }
+    else
+    {
+        return nullptr;
+    }
+}
