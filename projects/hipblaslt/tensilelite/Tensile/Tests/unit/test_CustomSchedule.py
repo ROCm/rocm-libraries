@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 
-from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo, verifyAscendingOrder
+from Tensile.Components.CustomSchedule import hasCustomSchedule, ScheduleInfo, verify_ascending_order
 from Tensile.Common import IsaVersion
 
 # Helper to create a mock data type
@@ -31,6 +31,9 @@ def create_base_kernel():
         "PrefetchGlobalRead": 0, "PrefetchLocalRead": 0, "DirectToLds": False,
         "GlobalReadVectorWidthA": 0, "GlobalReadVectorWidthB": 0,
         "LocalReadVectorWidth": 0,
+        "WaveSeparateGlobalReadA": 0,
+        "WaveSeparateGlobalReadB": 0,
+        "Use64bShadowLimit" : 1,
         "MatrixInstruction": [],
         "MIWaveGroup": [],
         "LDSTrInst": False,
@@ -97,7 +100,7 @@ class TestCustomSchedule:
             assert 'PackA0' not in schedule_info.optSchedule
             assert 'PackB0' in schedule_info.optSchedule
             assert kernel["UsePLRPack"]
-    
+
     @pytest.mark.parametrize("force_unroll_sub_iter", [True, False])
     def test_schedule_256x256x128_8bit_TN(self, force_unroll_sub_iter: bool):
         """Tests the 256x256x128 8-bit TNschedule."""
@@ -123,7 +126,7 @@ class TestCustomSchedule:
         assert schedule_info.numMfma == 64
         valid, message = schedule_info.isValid({"kernel" : kernel})
         assert valid, message
-    
+
     def test_schedule_256x96x64_16bit_TN(self):
         """Tests the 256x96x64 16-bit TN schedule."""
         kernel = create_base_kernel()
@@ -294,7 +297,7 @@ class TestCustomSchedule:
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 2, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [4,1],
             "LDSTrInst": not transA , "TransposeLDS": 1, "MIWaveTileA": 4, "MIWaveTileB": 13,
-        })  
+        })
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
@@ -432,8 +435,15 @@ class TestCustomSchedule:
         valid, message = schedule_info.isValid({"kernel" : kernel})
         assert valid, message
 
-    @pytest.mark.parametrize("transA, transB", [(True, False), (False, False)])
-    def test_schedule_208x256x64_16bit(self, transA, transB):
+    @pytest.mark.parametrize(
+        # fmt: off
+        "transA, transB, lds_tr_inst,  tr_lds", [
+        (  True,  False,       False,       1),
+        ( False,  False,        True,       1),
+        ( False,   True,        True,       0)
+        # fmt: on
+        ])        
+    def test_schedule_208x256x64_16bit(self, transA, transB, lds_tr_inst,  tr_lds):
         """Tests the 208x256x64 16-bit schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
@@ -446,7 +456,7 @@ class TestCustomSchedule:
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "DirectToLds": True,
             "GlobalReadVectorWidthA": 2, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [1,4],
-            "LDSTrInst": not transA, "TransposeLDS": 1, "MIWaveTileA": 13, "MIWaveTileB": 4,
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 13, "MIWaveTileB": 4,
         })
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
@@ -468,7 +478,7 @@ class TestCustomScheduleValidation:
         sched = ScheduleInfo(
             None, None, {"P": [[3, 2, 1]]}, None, None, None, None
         )
-        status, message = verifyAscendingOrder(sched)
+        status, message = verify_ascending_order(sched)
 
         expected = "Non-descending-order rule failed, schedule key 'P', sequence [3, 2, 1]: value 2 at index 1 is less than 3 at index 0."
         assert status == False
@@ -477,7 +487,7 @@ class TestCustomScheduleValidation:
         sched = ScheduleInfo(
             None, None, {"P": [[1, 1, 2]]}, None, None, None, None
         )
-        status, message = verifyAscendingOrder(sched)
+        status, message = verify_ascending_order(sched)
         assert status == True
 
     def test_schedule_validation_disable(self):
