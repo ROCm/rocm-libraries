@@ -1795,7 +1795,7 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
 
             'SYNC'   : [[-1, 4, 13,13, 38,39, 42,43, 70,70]],
             'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
-            'GRIncB' : [[9,11,12,13,14,15,16,17,18]],
+            'GRIncB' : [[29,30,31,32,33,34,35,36,37]],
 
             'LRA0'   : [[0,2,3,4,5]],  ## -2 is place holder
 
@@ -1913,7 +1913,8 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     numMfma = 80
-    if isNN(kernel) and useLDSTr and TLDS==1:
+    # Temp disable this for now.
+    if isNN(kernel) and useLDSTr and TLDS==1 and False:
         kernel["SwapGlobalReadOrder"] = True
         optSchedule = {
             'SYNC'   : [[-1,
