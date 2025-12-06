@@ -399,12 +399,11 @@ class LocalRead(ValidatorInstruction):
             message = f"{self.name} at index {floor(self.issued_at)} is not valid. " + \
                         "There are no guarantees on when it will be done."
         else:
-            if isinstance(guaranteed_by, float):
-                # Special case to handle idx=-1 which is written as numVMFMA - 0.5
-                # TODO: Need to handle new sub-index resolution case.
+            if self.num_vmfma - 1 + 0.5 < guaranteed_by < self.num_vmfma:
+                # Special case to handle idx=-1 which is written as numVMFMA + 0.5
                 guaranteed_by = -1
             else:
-                guaranteed_by %= self.num_vmfma
+                guaranteed_by = floor(guaranteed_by) % self.num_vmfma
             message = f"{self.name} at index {floor(self.issued_at)} is not valid. " + \
                         f"Needed before index {needed_by}, but only guaranteed at index {guaranteed_by}."
         return message
@@ -539,7 +538,7 @@ def lr_needed_by_mfma(is_lra: bool, lr_idx: int, offset: int, schedule_info: 'Sc
         return index_lrb_needed_by_mfma(lr_idx, offset)
 
 
-def create_timeline(instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution', sub_index_resolution: bool = False) -> list[list[ValidatorInstruction]]:
+def create_timeline(instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution') -> list[list[ValidatorInstruction]]:
     """
     Create a timeline from the provided schedule_info which contains only the instructions inside `instruction_names_to_add`.
     Organized as a list of lists indexed by vmfma_index + 1.
@@ -551,12 +550,8 @@ def create_timeline(instruction_names_to_add: list[str], code_path: int, schedul
         instruction_names_to_add:   The list of instruction names to add to the timeline.
         code_path:                  The code path to create a timeline out of.
         schedule_info:              The schedule information to add to the timeline.
-        kernel:                     The kernel to add to the timeline.
-        sub_index_resolution:       If True, the issued_at index will be resolved to a sub-index within a vmfma index.
-                                    E.g. if issuing [GRA, SWaitCnt, SBarrier, LRA1] at index 5, the issued_at indices for each would be
-                                    [5, 5.25, 5.5, 5.75] I.e. vmfma_index + i/len(instructions @ vmfma_index)  
+        kernel:                     The kernel to add to the timeline. 
     """
-    # TODO: Always do sub_index_resultion. Fix any issues with other validation tests that don't work with it.
     # NOTE: numMfma + 1 to account for special idx=-1.
     #       idx=-1 is special case that occurs BEFORE the first VMFMA but AFTER the last VMFMA.
     #       Instructions at idx=-1 happen after all instructions at idx=numVMFMA-1 and BEFORE all instructions (including the VMFMA) at idx=0.
@@ -620,17 +615,19 @@ def create_timeline(instruction_names_to_add: list[str], code_path: int, schedul
         else:
             raise NotImplementedError(f"Instruction {name} not implemented")
     
-    if sub_index_resolution:
-        for i_vmfma, instructions in enumerate(timeline):
-            for i_instruction, instruction in enumerate(instructions):
-                # NOTE: Because idx=-1 is special and occurs AFTER the insturctions scheduled at idx=numVMFMA-1 but BEFORE the VMFMA at indx=0, we need to adjust the sub_index_resolution so that the instructions at idx=(numVMFMA-1) have [0, 0.5) and the instructions at idx=0 have [0.5, 1).
-                divisor = len(instructions)
-                if i_vmfma == 0:
-                    divisor *= 2
-                    instruction.issued_at += 0.5
-                if i_vmfma == len(timeline) - 1:
-                    divisor *= 2
-                instruction.issued_at += i_instruction / divisor
+    # Resolve issued_at index to a sub-index resolution
+    # E.g. if issuing [GRA, SWaitCnt, SBarrier, LRA1] at index 5, the issued_at indices for each would be [5, 5.25, 5.5, 5.75].
+    # I.e. vmfma_index + i/len(instructions @ vmfma_index) 
+    # NOTE: Because idx=-1 is special and occurs AFTER the insturctions scheduled at idx=numVMFMA-1 but BEFORE the VMFMA at indx=0, we need to adjust the index so that the instructions at idx=(numVMFMA-1) have [0, 0.5) and the instructions at idx=0 have [0.5, 1).
+    for i_vmfma, instructions in enumerate(timeline):
+        for i_instruction, instruction in enumerate(instructions):
+            divisor = len(instructions)
+            if i_vmfma == 0:
+                divisor *= 2
+                instruction.issued_at += 0.5
+            if i_vmfma == len(timeline) - 1:
+                divisor *= 2
+            instruction.issued_at += i_instruction / divisor
 
     return timeline
 
@@ -833,7 +830,7 @@ def verify_grs_complete_before_lr1s(schedule_info: 'ScheduleInfo', context: dict
             return None
         
         relevant_names = ["GRA", "GRB", "LRA1", "LRB1", "SYNC"]
-        timeline = create_timeline(relevant_names, code_path, schedule_info, context["kernel"], sub_index_resolution=True)
+        timeline = create_timeline(relevant_names, code_path, schedule_info, context["kernel"])
 
         linear_timeline = []
         GRAs: list[GlobalRead] = []
