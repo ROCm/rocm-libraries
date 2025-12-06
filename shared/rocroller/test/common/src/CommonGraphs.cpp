@@ -286,17 +286,24 @@ namespace rocRollerTest::Graphs
                                                          rocRoller::NUMWGS);
         }
 
-        for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
-        {
-            auto policy           = static_cast<Operations::ScratchPolicy>(i);
-            m_scratchTags[policy] = m_command->allocateTag();
-            m_command->addOperation(rocRoller::Operations::Scratch(m_scratchTags[policy], policy));
-            m_command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                                        m_scratchTags[policy],
-                                        ArgumentType::Value,
-                                        DataDirection::ReadWrite,
-                                        getScratchName(policy));
-        }
+        m_scratchTags[Operations::ScratchPolicy::None] = m_command->allocateTag();
+        m_command->addOperation(rocRoller::Operations::Scratch(
+            m_scratchTags[Operations::ScratchPolicy::None], Operations::ScratchPolicy::None));
+        m_command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                                    m_scratchTags[Operations::ScratchPolicy::None],
+                                    ArgumentType::Value,
+                                    DataDirection::ReadWrite,
+                                    getScratchName(Operations::ScratchPolicy::None));
+        m_scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter] = m_command->allocateTag();
+        m_command->addOperation(rocRoller::Operations::Scratch(
+            m_scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter],
+            Operations::ScratchPolicy::ZeroedBeforeAndAfter));
+        m_command->allocateArgument(
+            VariableType(DataType::UInt32, PointerType::PointerGlobal),
+            m_scratchTags[Operations::ScratchPolicy::ZeroedBeforeAndAfter],
+            ArgumentType::Value,
+            DataDirection::ReadWrite,
+            getScratchName(Operations::ScratchPolicy::ZeroedBeforeAndAfter));
     }
 
     CommandPtr GEMM::getCommand()

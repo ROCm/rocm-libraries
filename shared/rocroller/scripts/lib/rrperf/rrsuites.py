@@ -139,6 +139,32 @@ SGEMM_256x256x16384 = dict(
     M=256, N=256, K=16384, mac_m=64, mac_n=64, mac_k=64, types=fp32
 )
 
+FP4GEMM_7680x8448x8448 = dict(
+    M=7680,
+    N=8448,
+    K=8448,
+    types=TypeParameters(
+        type_A="fp4",
+        type_B="fp4",
+        type_C="float",
+        type_D="float",
+        type_acc="float",
+    ),
+)
+
+FP4GEMM_2048x2048x396288 = dict(
+    M=2048,
+    N=2048,
+    K=396288,
+    types=TypeParameters(
+        type_A="fp4",
+        type_B="fp4",
+        type_C="float",
+        type_D="float",
+        type_acc="float",
+    ),
+)
+
 
 def update_parameters(*args, **kwargs):
     rv = {}
@@ -568,6 +594,44 @@ def streamk_sweep():
                                     trans_B="T",
                                 ),
                             )
+
+
+def streamk_fp4_sweep():
+    for twoTile, twoTileDPFirst in [(True, False), (False, True), (False, False)]:
+        for base in [FP4GEMM_2048x2048x396288]:
+            # 16x16x128 wave dimensions
+            for mac_m in [64, 128, 256]:
+                for mac_n in [64, 128, 256]:
+                    for mac_k in [128]:
+                        for wave_m in [16, 32]:
+                            wave_n = 16 if wave_m == 16 else 32
+                            wave_k = 128 if wave_m == 16 else 64
+                            if (
+                                twoTile or twoTileDPFirst
+                            ) and mac_m * mac_n * mac_k >= (wave_m * wave_m * mac_k):
+                                # currently these run out of VGPRs.
+                                pass
+                            else:
+                                yield mkGEMM(
+                                    base,
+                                    mac_m=mac_m,
+                                    mac_n=mac_n,
+                                    mac_k=mac_k,
+                                    wave_m=wave_m,
+                                    wave_n=wave_n,
+                                    wave_k=wave_k,
+                                    workgroup_size_x=128,
+                                    workgroup_size_y=2,
+                                    visualize=False,
+                                    prefetch=False,
+                                    streamKTwoTile=twoTile,
+                                    streamKTwoTileDPFirst=twoTileDPFirst,
+                                    types=TypeParameters(
+                                        base["types"],
+                                        trans_A="T",
+                                        trans_B="N",
+                                    ),
+                                )
 
 
 def streamk_smallMN_largeK_fp32():
@@ -2061,6 +2125,7 @@ def all():
         yield from fp8_kernels()
         yield from mxfp8_kernels()
         yield from mx_gemms_f8f6f4()
+        yield from streamk_fp4_sweep()
 
     yield from sgemm()
     yield from hgemm()
