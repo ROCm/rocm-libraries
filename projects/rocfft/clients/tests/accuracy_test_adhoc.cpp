@@ -493,6 +493,7 @@ const auto adhoc_nondefault_layout_real_tokens = {
     "real_forward_len_9_8_double_ip_batch_6908_istride_14_1_R_ostride_7_1_HI_idist_924_odist_462_ioffset_0_0_ooffset_0_0",
     "real_forward_len_486_double_op_batch_7014_istride_7014_R_ostride_7014_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
     "real_forward_len_486_double_op_batch_910_istride_910_R_ostride_910_HI_idist_1_odist_1_ioffset_0_0_ooffset_0_0",
+    "real_forward_len_26_52_double_op_batch_3899_istride_240_4_R_ostride_224_7_HI_idist_15600_odist_8960_ioffset_0_0_ooffset_0_0",
     // clang-format on
 };
 
