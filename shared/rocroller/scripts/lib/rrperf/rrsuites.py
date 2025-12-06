@@ -599,7 +599,6 @@ def streamk_sweep():
 def streamk_fp4_sweep():
     for twoTile, twoTileDPFirst in [(True, False), (False, True), (False, False)]:
         for base in [FP4GEMM_2048x2048x396288]:
-            # 16x16x128 wave dimensions
             for mac_m in [64, 128, 256]:
                 for mac_n in [64, 128, 256]:
                     for mac_k in [128]:
@@ -624,6 +623,7 @@ def streamk_fp4_sweep():
                                     workgroup_size_y=2,
                                     visualize=False,
                                     prefetch=False,
+                                    streamK=True,
                                     streamKTwoTile=twoTile,
                                     streamKTwoTileDPFirst=twoTileDPFirst,
                                     types=TypeParameters(
@@ -644,6 +644,7 @@ def streamk_smallMN_largeK_fp32():
             prefetch=False,  # TODO: Fix k loop unrolling with stream k
             # prefetchInFlight=2,
             # prefetchLDSFactor=2,
+            streamK=True,
             streamKTwoTile=twoTile,
             streamKTwoTileDPFirst=twoTileDPFirst,
             types=TypeParameters(
