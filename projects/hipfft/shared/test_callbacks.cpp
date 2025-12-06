@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,10 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "../../shared/accuracy_test.h"
-#include "../../shared/rocfft_complex.h"
-
-#include <hip/hip_runtime.h>
+#include "test_callbacks.h"
+#include "rocfft_complex.h"
 
 // load/store callbacks - cbdata in each is actually a scalar double
 // with a number to apply to each element
@@ -30,7 +28,7 @@ __host__ __device__ Tdata load_callback(Tdata* input, size_t offset, void* cbdat
 {
     auto testdata = static_cast<const callback_test_data*>(cbdata);
     // multiply each element by scalar
-    return input[offset] * testdata->scalar;
+    return input[offset] * static_cast<decltype(std::real(input[offset]))>(testdata->scalar);
 }
 
 __device__ auto load_callback_dev_half           = load_callback<rocfft_fp16>;
@@ -48,7 +46,7 @@ __host__ __device__ Tdata
 {
     auto testdata = static_cast<const callback_test_data*>(cbdata);
     // subtract each element by scalar
-    return input[offset] - testdata->scalar;
+    return input[offset] - static_cast<decltype(std::real(input[offset]))>(testdata->scalar);
 }
 
 __device__ auto load_callback_round_trip_inverse_dev_half
@@ -64,9 +62,10 @@ __device__ auto load_callback_round_trip_inverse_dev_double
 __device__ auto load_callback_round_trip_inverse_dev_complex_double
     = load_callback_round_trip_inverse<rocfft_complex<double>>;
 
-void* get_load_callback_host(fft_array_type itype,
-                             fft_precision  precision,
-                             bool           round_trip_inverse = false)
+void* get_load_callback_host(fft_array_type             itype,
+                             fft_precision              precision,
+                             callback_hip_error_handler runtime_err_handler,
+                             bool                       round_trip_inverse)
 {
     void* load_callback_host = nullptr;
     switch(itype)
@@ -79,52 +78,58 @@ void* get_load_callback_host(fft_array_type itype,
         case fft_precision_half:
             if(round_trip_inverse)
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(
-                              &load_callback_host,
-                              HIP_SYMBOL(load_callback_round_trip_inverse_dev_complex_half),
-                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(
+                       &load_callback_host,
+                       HIP_SYMBOL(load_callback_round_trip_inverse_dev_complex_half),
+                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             else
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                              HIP_SYMBOL(load_callback_dev_complex_half),
-                                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(&load_callback_host,
+                                       HIP_SYMBOL(load_callback_dev_complex_half),
+                                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             return load_callback_host;
         case fft_precision_single:
             if(round_trip_inverse)
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(
-                              &load_callback_host,
-                              HIP_SYMBOL(load_callback_round_trip_inverse_dev_complex_float),
-                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(
+                       &load_callback_host,
+                       HIP_SYMBOL(load_callback_round_trip_inverse_dev_complex_float),
+                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             else
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                              HIP_SYMBOL(load_callback_dev_complex_float),
-                                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(&load_callback_host,
+                                       HIP_SYMBOL(load_callback_dev_complex_float),
+                                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             return load_callback_host;
         case fft_precision_double:
             if(round_trip_inverse)
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(
-                              &load_callback_host,
-                              HIP_SYMBOL(load_callback_round_trip_inverse_dev_complex_double),
-                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(
+                       &load_callback_host,
+                       HIP_SYMBOL(load_callback_round_trip_inverse_dev_complex_double),
+                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             else
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                              HIP_SYMBOL(load_callback_dev_complex_double),
-                                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(&load_callback_host,
+                                       HIP_SYMBOL(load_callback_dev_complex_double),
+                                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             return load_callback_host;
         }
@@ -136,51 +141,52 @@ void* get_load_callback_host(fft_array_type itype,
         case fft_precision_half:
             if(round_trip_inverse)
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                              HIP_SYMBOL(load_callback_round_trip_inverse_dev_half),
-                                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(&load_callback_host,
+                                       HIP_SYMBOL(load_callback_round_trip_inverse_dev_half),
+                                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             else
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                              HIP_SYMBOL(load_callback_dev_half),
-                                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(
+                       &load_callback_host, HIP_SYMBOL(load_callback_dev_half), sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             return load_callback_host;
         case fft_precision_single:
             if(round_trip_inverse)
             {
-                EXPECT_EQ(
-                    hipMemcpyFromSymbol(&load_callback_host,
-                                        HIP_SYMBOL(load_callback_round_trip_inverse_dev_float),
-                                        sizeof(void*)),
-                    hipSuccess);
+                if(hipMemcpyFromSymbol(&load_callback_host,
+                                       HIP_SYMBOL(load_callback_round_trip_inverse_dev_float),
+                                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             else
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                              HIP_SYMBOL(load_callback_dev_float),
-                                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(
+                       &load_callback_host, HIP_SYMBOL(load_callback_dev_float), sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             return load_callback_host;
         case fft_precision_double:
             if(round_trip_inverse)
             {
-                EXPECT_EQ(
-                    hipMemcpyFromSymbol(&load_callback_host,
-                                        HIP_SYMBOL(load_callback_round_trip_inverse_dev_double),
-                                        sizeof(void*)),
-                    hipSuccess);
+                if(hipMemcpyFromSymbol(&load_callback_host,
+                                       HIP_SYMBOL(load_callback_round_trip_inverse_dev_double),
+                                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             else
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                              HIP_SYMBOL(load_callback_dev_double),
-                                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(
+                       &load_callback_host, HIP_SYMBOL(load_callback_dev_double), sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
 
             return load_callback_host;
@@ -198,7 +204,7 @@ __host__ __device__ static void
 {
     auto testdata = static_cast<callback_test_data*>(cbdata);
     // add scalar to each element
-    output[offset] = element + testdata->scalar;
+    output[offset] = element + static_cast<decltype(std::real(output[offset]))>(testdata->scalar);
 }
 __device__ auto store_callback_dev_half           = store_callback<rocfft_fp16>;
 __device__ auto store_callback_dev_complex_half   = store_callback<rocfft_complex<rocfft_fp16>>;
@@ -213,7 +219,7 @@ __host__ __device__ static void store_callback_round_trip_inverse(
 {
     auto testdata = static_cast<callback_test_data*>(cbdata);
     // divide each element by scalar
-    output[offset] = element / testdata->scalar;
+    output[offset] = element / static_cast<decltype(std::real(output[offset]))>(testdata->scalar);
 }
 __device__ auto store_callback_round_trip_inverse_dev_half
     = store_callback_round_trip_inverse<rocfft_fp16>;
@@ -228,9 +234,10 @@ __device__ auto store_callback_round_trip_inverse_dev_double
 __device__ auto store_callback_round_trip_inverse_dev_complex_double
     = store_callback_round_trip_inverse<rocfft_complex<double>>;
 
-void* get_store_callback_host(fft_array_type otype,
-                              fft_precision  precision,
-                              bool           round_trip_inverse = false)
+void* get_store_callback_host(fft_array_type             otype,
+                              fft_precision              precision,
+                              callback_hip_error_handler runtime_err_handler,
+                              bool                       round_trip_inverse)
 {
     void* store_callback_host = nullptr;
     switch(otype)
@@ -243,52 +250,58 @@ void* get_store_callback_host(fft_array_type otype,
         case fft_precision_half:
             if(round_trip_inverse)
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(
-                              &store_callback_host,
-                              HIP_SYMBOL(store_callback_round_trip_inverse_dev_complex_half),
-                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(
+                       &store_callback_host,
+                       HIP_SYMBOL(store_callback_round_trip_inverse_dev_complex_half),
+                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             else
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                              HIP_SYMBOL(store_callback_dev_complex_half),
-                                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(&store_callback_host,
+                                       HIP_SYMBOL(store_callback_dev_complex_half),
+                                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             return store_callback_host;
         case fft_precision_single:
             if(round_trip_inverse)
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(
-                              &store_callback_host,
-                              HIP_SYMBOL(store_callback_round_trip_inverse_dev_complex_float),
-                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(
+                       &store_callback_host,
+                       HIP_SYMBOL(store_callback_round_trip_inverse_dev_complex_float),
+                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             else
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                              HIP_SYMBOL(store_callback_dev_complex_float),
-                                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(&store_callback_host,
+                                       HIP_SYMBOL(store_callback_dev_complex_float),
+                                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             return store_callback_host;
         case fft_precision_double:
             if(round_trip_inverse)
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(
-                              &store_callback_host,
-                              HIP_SYMBOL(store_callback_round_trip_inverse_dev_complex_double),
-                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(
+                       &store_callback_host,
+                       HIP_SYMBOL(store_callback_round_trip_inverse_dev_complex_double),
+                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             else
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                              HIP_SYMBOL(store_callback_dev_complex_double),
-                                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(&store_callback_host,
+                                       HIP_SYMBOL(store_callback_dev_complex_double),
+                                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             return store_callback_host;
         }
@@ -300,52 +313,52 @@ void* get_store_callback_host(fft_array_type otype,
         case fft_precision_half:
             if(round_trip_inverse)
             {
-                EXPECT_EQ(
-                    hipMemcpyFromSymbol(&store_callback_host,
-                                        HIP_SYMBOL(store_callback_round_trip_inverse_dev_half),
-                                        sizeof(void*)),
-                    hipSuccess);
+                if(hipMemcpyFromSymbol(&store_callback_host,
+                                       HIP_SYMBOL(store_callback_round_trip_inverse_dev_half),
+                                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             else
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                              HIP_SYMBOL(store_callback_dev_half),
-                                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(
+                       &store_callback_host, HIP_SYMBOL(store_callback_dev_half), sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             return store_callback_host;
         case fft_precision_single:
             if(round_trip_inverse)
             {
-                EXPECT_EQ(
-                    hipMemcpyFromSymbol(&store_callback_host,
-                                        HIP_SYMBOL(store_callback_round_trip_inverse_dev_float),
-                                        sizeof(void*)),
-                    hipSuccess);
+                if(hipMemcpyFromSymbol(&store_callback_host,
+                                       HIP_SYMBOL(store_callback_round_trip_inverse_dev_float),
+                                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             else
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                              HIP_SYMBOL(store_callback_dev_float),
-                                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(
+                       &store_callback_host, HIP_SYMBOL(store_callback_dev_float), sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             return store_callback_host;
         case fft_precision_double:
             if(round_trip_inverse)
             {
-                EXPECT_EQ(
-                    hipMemcpyFromSymbol(&store_callback_host,
-                                        HIP_SYMBOL(store_callback_round_trip_inverse_dev_double),
-                                        sizeof(void*)),
-                    hipSuccess);
+                if(hipMemcpyFromSymbol(&store_callback_host,
+                                       HIP_SYMBOL(store_callback_round_trip_inverse_dev_double),
+                                       sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             else
             {
-                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                              HIP_SYMBOL(store_callback_dev_double),
-                                              sizeof(void*)),
-                          hipSuccess);
+                if(hipMemcpyFromSymbol(
+                       &store_callback_host, HIP_SYMBOL(store_callback_dev_double), sizeof(void*))
+                   != hipSuccess)
+                    runtime_err_handler("hipMemcpyFromSymbol failed");
             }
             return store_callback_host;
         }
@@ -576,5 +589,169 @@ void apply_load_callback(const fft_params& params, std::vector<hostbuf>& input)
     default:
         // this is FFTW data which should always be interleaved (if complex)
         abort();
+    }
+}
+
+// For a specified rank, get a vector of load callback function +
+// data pointers.  The pointers need to be in the order that
+// fields+bricks were specified to the FFT plan.  Pointers need to be
+// copied to the host from the device specified by the respective
+// brick.
+void get_rank_load_callbacks(const fft_params&                          params,
+                             std::vector<void*>&                        load_cb_func,
+                             std::vector<void*>&                        load_cb_data,
+                             callback_hip_error_handler                 runtime_err_handler,
+                             bool                                       round_trip_inverse,
+                             std::vector<gpubuf_t<callback_test_data>>& all_cb_data,
+                             int                                        rank)
+{
+    // Copy callback pointer from current device and add to output vec
+    auto add_load_cb = [&]() {
+        void* load_cb_host = get_load_callback_host(
+            params.itype, params.precision, runtime_err_handler, round_trip_inverse);
+
+        callback_test_data load_cb_data_host;
+
+        if(round_trip_inverse)
+        {
+            load_cb_data_host.scalar = params.store_cb_scalar;
+        }
+        else
+        {
+            load_cb_data_host.scalar = params.load_cb_scalar;
+        }
+
+        auto& load_cb_data_dev = all_cb_data.emplace_back();
+        auto  hip_status       = load_cb_data_dev.alloc(sizeof(callback_test_data));
+        if(hip_status != hipSuccess)
+        {
+            runtime_err_handler(
+                "Error occurred when allocating device memory for loading callback");
+        }
+        hip_status = hipMemcpy(load_cb_data_dev.data(),
+                               &load_cb_data_host,
+                               sizeof(callback_test_data),
+                               hipMemcpyHostToDevice);
+        if(hip_status != hipSuccess)
+        {
+            runtime_err_handler("Error occurred when copying device memory for loading callback");
+        }
+        load_cb_func.push_back(load_cb_host);
+        load_cb_data.push_back(load_cb_data_dev.data());
+    };
+
+    if(params.ifields.empty())
+    {
+        // for library-decomposed multi-GPU, one cb for each device
+        if(params.multiGPU > 1)
+        {
+            for(int i = 0; i < static_cast<int>(params.multiGPU); ++i)
+            {
+                rocfft_scoped_device dev(i);
+                add_load_cb();
+            }
+        }
+        else
+        {
+            // load cb for current HIP device
+            add_load_cb();
+        }
+    }
+    else
+    {
+        // user-specified decomposition - copy func+data for each brick
+        // on this rank
+        for(size_t i = 0; i < params.ifields.front().bricks.size(); ++i)
+        {
+            if(params.ifields.front().bricks[i].rank != rank)
+                continue;
+
+            // load cb for this brick's device
+            rocfft_scoped_device dev(params.ifields.front().bricks[i].device);
+            add_load_cb();
+        }
+    }
+}
+
+// For a specified rank, get a vector of store callback function +
+// data pointers.  The pointers need to be in the order that
+// fields+bricks were specified to the FFT plan.  Pointers need to be
+// copied to the host from the device specified by the respective
+// brick.
+void get_rank_store_callbacks(const fft_params&                          params,
+                              std::vector<void*>&                        store_cb_func,
+                              std::vector<void*>&                        store_cb_data,
+                              callback_hip_error_handler                 runtime_err_handler,
+                              bool                                       round_trip_inverse,
+                              std::vector<gpubuf_t<callback_test_data>>& all_cb_data,
+                              int                                        rank)
+{
+    // Copy callback pointer from current device and add to output vec
+    auto add_store_cb = [&]() {
+        void* store_cb_host = get_store_callback_host(
+            params.otype, params.precision, runtime_err_handler, round_trip_inverse);
+
+        callback_test_data store_cb_data_host;
+
+        if(round_trip_inverse)
+        {
+            store_cb_data_host.scalar = params.load_cb_scalar;
+        }
+        else
+        {
+            store_cb_data_host.scalar = params.store_cb_scalar;
+        }
+
+        auto& store_cb_data_dev = all_cb_data.emplace_back();
+        auto  hip_status        = store_cb_data_dev.alloc(sizeof(callback_test_data));
+        if(hip_status != hipSuccess)
+        {
+            runtime_err_handler(
+                "Error occurred when allocating device memory for storing callback");
+        }
+
+        hip_status = hipMemcpy(store_cb_data_dev.data(),
+                               &store_cb_data_host,
+                               sizeof(callback_test_data),
+                               hipMemcpyHostToDevice);
+        if(hip_status != hipSuccess)
+        {
+            runtime_err_handler("Error occurred when copying device memory for storing callback");
+        }
+
+        store_cb_func.push_back(store_cb_host);
+        store_cb_data.push_back(store_cb_data_dev.data());
+    };
+
+    if(params.ofields.empty())
+    {
+        // for library-decomposed multi-GPU, one cb for each device
+        if(params.multiGPU > 1)
+        {
+            for(int i = 0; i < static_cast<int>(params.multiGPU); ++i)
+            {
+                rocfft_scoped_device dev(i);
+                add_store_cb();
+            }
+        }
+        else
+        {
+            // store cb for current HIP device
+            add_store_cb();
+        }
+    }
+    else
+    {
+        // user-specified decomposition - copy func+data for each brick
+        // on this rank
+        for(size_t i = 0; i < params.ofields.front().bricks.size(); ++i)
+        {
+            if(params.ofields.front().bricks[i].rank != rank)
+                continue;
+
+            // store cb for this brick's device
+            rocfft_scoped_device dev(params.ofields.front().bricks[i].device);
+            add_store_cb();
+        }
     }
 }
