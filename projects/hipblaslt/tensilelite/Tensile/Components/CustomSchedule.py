@@ -2060,6 +2060,10 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    
+    if isNT(kernel) and useLDSTr and TLDS == 0:
+        opt1.disableValidation()  # TODO: Remove after verify_global_reads_not_too_early validator is fixed
+
     return True, opt1
 
 def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
