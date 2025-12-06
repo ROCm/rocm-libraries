@@ -85,6 +85,10 @@ namespace rocRoller
 
                 bool operator()(int a, int b) const;
 
+                std::vector<int> const& downstreamTagReplacements(int node) const;
+                
+                std::optional<bool> orderByDownstreamTagReplacements(int a, int b) const;
+
                 /**
                  * Looks for memory nodes downstream of `node` in a breadth-first search of the
                  * control graph. Returns the first memory node found, or `std::nullopt` if none
@@ -130,6 +134,7 @@ namespace rocRoller
                 ControlFlowRWTracer                                 m_tracer;
                 mutable std::unordered_map<int, std::optional<int>> m_downstreamMemoryNodes;
                 mutable std::unordered_map<int, std::vector<int>>   m_reversedTagDependencies;
+                mutable std::unordered_map<int, std::vector<int>>   m_downstreamTagReplacements;
             };
         }
     }

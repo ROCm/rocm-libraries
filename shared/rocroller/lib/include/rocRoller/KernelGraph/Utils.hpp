@@ -62,6 +62,9 @@ namespace rocRoller
 
             bool operator()(int a, int b) const
             {
+                if(a == b)
+                    return false;
+
                 return m_graph->control.compareNodes(rocRoller::UpdateCache, a, b)
                        == ControlGraph::NodeOrdering::LeftFirst;
             }

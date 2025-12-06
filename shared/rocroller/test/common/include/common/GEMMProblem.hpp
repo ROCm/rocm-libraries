@@ -190,8 +190,8 @@ inline std::string toString(GEMMProblem const& values)
 
     ShowOption(splitStoreTileIntoWaveBlocks);
 
-    ShowOption(loadLDSScaleA);
-    ShowOption(loadLDSScaleB);
+    ShowString(loadScalePathA);
+    ShowString(loadScalePathB);
 
     ShowOption(workgroupMappingDim);
     ShowOption(workgroupMappingValue);

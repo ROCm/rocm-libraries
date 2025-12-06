@@ -76,6 +76,8 @@ namespace rocRoller::KernelGraph
          */
         std::vector<ReadWriteRecord> coordinatesReadWrite(int coordinate) const;
 
+        std::vector<ReadWriteRecord> opReadWrite(int op) const;
+
         void operator()(ControlGraph::AssertOp const& op, int tag);
         void operator()(ControlGraph::Assign const& op, int tag);
         void operator()(ControlGraph::Barrier const& op, int tag);
@@ -134,6 +136,20 @@ namespace rocRoller::KernelGraph
          */
         void trace(int start);
     };
+
+    inline constexpr ControlFlowRWTracer::ReadWrite combine(ControlFlowRWTracer::ReadWrite a, ControlFlowRWTracer::ReadWrite b)
+    {
+        if(a == b)
+            return a;
+
+        if(a == ControlFlowRWTracer::Count)
+            return b;
+
+        if(b == ControlFlowRWTracer::Count)
+            return a;
+
+        return ControlFlowRWTracer::READWRITE;
+    }
 
     std::string toString(ControlFlowRWTracer::ReadWrite rw);
 

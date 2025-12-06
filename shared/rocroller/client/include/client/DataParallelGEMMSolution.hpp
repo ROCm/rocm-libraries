@@ -258,6 +258,8 @@ namespace rocRoller
                 {
                     auto params = std::make_shared<CommandParameters>();
 
+                    params->tailLoops = false;
+
                     int wave_m = 0, wave_n = 0, wave_k = 0, wave_b = 0;
 
                     auto typeA = fromString<DataType>(solutionParams.types.typeA);

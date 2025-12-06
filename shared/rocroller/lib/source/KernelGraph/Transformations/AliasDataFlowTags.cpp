@@ -113,7 +113,8 @@ namespace rocRoller
                 for(int s : sizes)
                     size *= s;
 
-                return std::make_tuple(memoryType, layoutType, dataType, size);
+                // return std::make_tuple(memoryType, layoutType, dataType, size);
+                return std::make_tuple(memoryType, LayoutType::MATRIX_A, dataType, size);
             }
 
             std::string TagExtent::toString() const

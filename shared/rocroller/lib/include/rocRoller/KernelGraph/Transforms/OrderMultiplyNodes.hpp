@@ -55,5 +55,28 @@ namespace rocRoller
                 return {&NoUnorderedMultiplyNodes};
             }
         };
+
+        class OrderExchangeNodes : public GraphTransform
+        {
+        public:
+            OrderExchangeNodes() = default;
+
+            KernelGraph apply(KernelGraph const& original) override;
+            std::string name() const override
+            {
+                return "OrderExchangeNodes";
+            }
+
+            inline std::vector<GraphConstraint> preConstraints() const override
+            {
+                return {};
+            }
+
+            inline std::vector<GraphConstraint> postConstraints() const override
+            {
+                return {};
+                // return {&NoUnorderedExchangeNodes};
+            }
+        };
     }
 }
