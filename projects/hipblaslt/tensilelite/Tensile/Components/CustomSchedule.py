@@ -49,9 +49,11 @@ from typing import Callable, Dict, List, Tuple
 def getMostRecents(
     vmfmaIndices: List[int],
     counts: List[int],
-    localReadA: List[int],
-    localReadB: List[int],
-    aBeforeB: bool,
+    localReadA0: List[int],
+    localReadB0: List[int],
+    localReadA1: List[int],
+    localReadB1: List[int],
+    positions: Dict[str, int],
 ) -> List[Dict[str, int]]:
     """
     For each waitcnt instruction located at `vmfmaIndices[i]`, compute how many
@@ -68,8 +70,6 @@ def getMostRecents(
             vmfma indices where local reads for operand A occur.
         localReadB:
             vmfma indices where local reads for operand B occur.
-        aBeforeB:
-            True if local reads for A happen before B within a vmfma index.
 
     Returns:
         A list of dicts of the form:
@@ -85,13 +85,13 @@ def getMostRecents(
     def countMostRecent(
         vmfma_index: int,
         count: int,
-        history: List[Tuple[int, Dict[str, int]]],
-        aBeforeB: bool,
+        history: List[Tuple[int, List[str]]],
     ) -> Dict[str, int]:
         """
         Walk backward through local-read history and count how many of the
         most recent `count` operations were for A vs B.
         """
+
         idx = 0
         while idx + 1 < len(history) and history[idx + 1][0] <= vmfma_index:
             idx += 1
@@ -100,41 +100,52 @@ def getMostRecents(
         remaining = count
 
         while idx >= 0 and remaining > 0:
-            order = ["B", "A"] if aBeforeB else ["A", "B"]
-            for operand in order:
-                delta = min(history[idx][1][operand], remaining)
-                result[operand] += delta
-                remaining -= delta
+            for operand in history[idx][1][::-1]:
+                if operand == "LRA0":
+                    result["A"] += 1
+                if operand == "LRB0":
+                    result["B"] += 1
+                remaining -= 1
+                if remaining == 0:
+                    break
 
             idx -= 1
 
         return result
 
-    # Build combined event map: vmfma_index -> {"A": n, "B": n}
-    event_map: Dict[int, Dict[str, int]] = {}
+    X = [
+        ("LRA0", localReadA0),
+        ("LRB0", localReadB0),
+        ("LRA1", localReadA1),
+        ("LRB1", localReadB1),
+    ]
+    X.sort(key=lambda x: positions[x[0]])
 
-    for idx in localReadA:
-        event_map.setdefault(idx, {"A": 0, "B": 0})["A"] += 1
+    history = {}
+    for symbol, values in X:
+        for v in values:  # iterate over each int inside the list
+            if v not in history:
+                history[v] = []
+            history[v].append(symbol)
 
-    for idx in localReadB:
-        event_map.setdefault(idx, {"A": 0, "B": 0})["B"] += 1
-
-    # Historical timeline sorted by vmfma index
-    history = sorted(event_map.items())
+    # Convert dict → sorted list of tuples (v, ["A","B",...])
+    history = sorted(history.items(), key=lambda t: t[0])
 
     results: List[Dict[str, int]] = []
     for wait_count, slot in zip(counts, vmfmaIndices):
-        result = countMostRecent(slot, wait_count, history, aBeforeB)
+        result = countMostRecent(slot, wait_count, history)
         results.append(result)
 
     return results
 
 
-def verify_global_reads_not_too_earlySingleCodePath(
+def verify_global_reads_not_too_early_single_code_path(
     globalReadA: List[int],
     globalReadB: List[int],
-    localReadA: List[int],
-    localReadB: List[int],
+    localReadA0: List[int],
+    localReadB0: List[int],
+    localReadA1: List[int],
+    localReadB1: List[int],
     syncIndices: List[int],
     syncCodes: List,
     context: Dict,
@@ -171,11 +182,18 @@ def verify_global_reads_not_too_earlySingleCodePath(
             indicesOfWaitsInSyncCode.append(syncCodeIndex)
         syncCodeIndex += 1
 
-    aBeforeB = positions["LRA0"] < positions["LRB0"]
-    preceding = getMostRecents(vmfmaIndices, counts, localReadA, localReadB, aBeforeB)
+    preceding = getMostRecents(
+        vmfmaIndices,
+        counts,
+        localReadA0,
+        localReadB0,
+        localReadA1,
+        localReadB1,
+        positions,
+    )
     for l, g, operand in [
-        (localReadA, globalReadA, "A"),
-        (localReadB, globalReadB, "B"),
+        (localReadA0, globalReadA, "A"),
+        (localReadB0, globalReadB, "B"),
     ]:
         if len(l) == 0 or len(g) == 0:
             continue
@@ -272,14 +290,22 @@ def verify_global_reads_not_too_early(scheduleInfo, context: Dict):
     """
 
     # Get the relative order of the relevant operations within a vmfma index.
-    positions = {"SYNC": -1, "LRA0": -1, "LRB0": -1, "GRA": -1, "GRB": -1}
+    positions = {
+        "SYNC": -1,
+        "LRA0": -1,
+        "LRB0": -1,
+        "GRA": -1,
+        "GRB": -1,
+        "LRA1": -1,
+        "LRB1": -1,
+    }
     index = 0
     for n in scheduleInfo.optSchedule.keys():
         positions[n] = index
         index += 1
 
     def get(name, codePath):
-        l = scheduleInfo.optSchedule[name]
+        l = scheduleInfo.optSchedule.get(name, [[]])
         if len(l) == 1:
             return l[0]
         return l[codePath]
@@ -305,16 +331,20 @@ def verify_global_reads_not_too_early(scheduleInfo, context: Dict):
         if bDirect:
             globalReadB = globalReadB[1::2]
 
-        localReadA = get("LRA0", codePath)
-        localReadB = get("LRB0", codePath)
+        localReadA0 = get("LRA0", codePath)
+        localReadB0 = get("LRB0", codePath)
+        localReadA1 = get("LRA1", codePath)
+        localReadB1 = get("LRB1", codePath)
         syncIndices = get("SYNC", codePath)
         syncCodes = scheduleInfo.syncCode
 
-        status, message = verify_global_reads_not_too_earlySingleCodePath(
+        status, message = verify_global_reads_not_too_early_single_code_path(
             globalReadA,
             globalReadB,
-            localReadA,
-            localReadB,
+            localReadA0,
+            localReadB0,
+            localReadA1,
+            localReadB1,
             syncIndices,
             syncCodes,
             context,
