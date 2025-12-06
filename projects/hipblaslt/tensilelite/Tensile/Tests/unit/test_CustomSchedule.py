@@ -33,6 +33,7 @@ def create_base_kernel():
         "LocalReadVectorWidth": 0,
         "WaveSeparateGlobalReadA": 0,
         "WaveSeparateGlobalReadB": 0,
+        "Use64bShadowLimit" : 1,
         "MatrixInstruction": [],
         "MIWaveGroup": [],
         "LDSTrInst": False,

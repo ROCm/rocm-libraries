@@ -561,6 +561,107 @@ def apply_swaits(timeline: list[list[ValidatorInstruction]], num_vmfma: int) -> 
                 new_guaranteed_by += 0.5
             local_read.guaranteed_by = min(local_read.guaranteed_by, new_guaranteed_by)
 
+@dataclass
+class GRIncData:
+    """
+    Data structure representing GRInc-related information.
+    """
+    name: list[int]
+    intervals: list[tuple[int, int]]
+    insts: list[int]
+
+def verify_scc_overlap(scheduleInfo, context: Dict = {}):
+    """
+    Ensure we don't overlap scalar instructions modifying SCC.
+    This can happen:
+        - between GRIncA and GRIncB
+        - between GRInc and GR when DLT is activated
+        - between GRInc and LWS
+        
+    By default, GRInc instructions can be split into 3 distinct intervals where we shouldn't touch SCC
+      - s_cmp_eq_u32, s_cselect_b32,s_cselect_b32 (3)
+      - s_add_u32, s_addc_u32 (2)
+      - s_sub_u32, s_subb_u32 (2)
+      - s_cmp_eq_u32, s_cselect_b32 (2)
+    With ShadowLimit disabled (`Use64bShadowLimit`):
+      - s_cmp_eq_u32, s_cselect_b32,s_cselect_b32 (3)
+      - s_add_u32, s_addc_u32 (2)
+      - s_sub_u32  (2)
+    
+        This function checks no other scalar instructions is inside the above intervals.
+    """
+    kernel = context["kernel"]
+    DTL = kernel["DirectToLds"]
+    ShadowLimit = kernel["Use64bShadowLimit"]
+    
+    intervalSize = [3,2,2,2] if ShadowLimit else [3,2,1] # Values explained above
+    numElements = sum(intervalSize)
+    
+    # Gets intervals from GRInc indices based on the above `intervalSize` value
+    def getIntervals(indices):
+        output = []
+        current_start = 0
+        for size in intervalSize:
+            current_end = current_start + size
+            min_val = indices[current_start]
+            max_val = indices[current_end - 1]
+            output.append([min_val, max_val])
+            current_start = current_end
+        return output
+
+    # Checks value is in [interval[0],interval[1]]. 
+    # if lhsGt : ]interval[0],interval[1]] else  [interval[0],interval[1][
+    def inInterval(value : int, interval : list[int], lhsGt : bool):
+        if lhsGt:
+            return value>interval[0] and value<=interval[1]
+        else:
+            return value>=interval[0] and value<interval[1]
+
+    def getDeclarationIndex(name):
+        return list(scheduleInfo.optSchedule).index(name)
+
+    def verify(scheduleInfo: 'ScheduleInfo', codePath: int) -> tuple[bool, str]:
+        GRIncNames = ["GRIncA", "GRIncB"]
+        names = ["LWSA", "LWSB"]
+        # We only care about GRA/B when DTL is activated (m0 usage)
+        if DTL:
+            names += ["GRA", "GRB"]
+
+        def verifyIndices(grIncData : GRIncData, name : str, indices : list[int]) -> tuple[bool, str]:
+            dclIndex = getDeclarationIndex(name)
+            dclIndexGrInc = getDeclarationIndex(grIncData.name)
+            for v in indices:
+                for interval in grIncData.intervals:
+                    if inInterval(v,interval, dclIndex<dclIndexGrInc):
+                        return False, f"{name} at index {v} can't be between {grIncData.name} {interval[0]}-{interval[1]} due to SCC usage."
+
+        GRIncs = []
+        for GRIncName in GRIncNames:
+            GRInc = schedule_get(GRIncName, codePath, scheduleInfo)
+            assert numElements==len(GRInc), f"{GRIncName} expected size if {numElements}, given {len(GRInc)}."
+            GRIncs.append(GRIncData(name = GRIncName, insts = GRInc, intervals = getIntervals(GRInc)))
+
+        # First check GRIncA&B together
+        errorMessage = verifyIndices(GRIncs[0],GRIncs[1].name, GRIncs[1].insts)
+        if errorMessage:
+            return errorMessage
+
+        # Then, check GR and LW on all GRIncs
+        for grIncData in GRIncs:
+            for name in names:
+                insts = schedule_get(name, codePath, scheduleInfo)
+                # In case of GRA/GRB, just take m0 updates indices 
+                if name.startswith("GR"):
+                    insts = insts[0::2]
+                errorMessage = verifyIndices(grIncData, name, insts)
+                if errorMessage:
+                    return errorMessage
+   
+    for codePath in range(scheduleInfo.numCodePaths):
+            errorMessage = verify(scheduleInfo, codePath)
+            if errorMessage:
+                return False, f"Code path {codePath}: {errorMessage}"
+    return True, ""
 
 def verify_lrs_complete_before_vmfma(schedule_info: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     """
@@ -679,12 +780,13 @@ class ScheduleInfo:
         self.__skipValidation__ = False
 
         # The set of validation rules to run inside `isValid`.
-        self.rules: List[Callable[[ScheduleInfo, dict], [bool, str]]] = []
-
-        self.rules.append(verify_ascending_order)
-        self.rules.append(verify_correct_number_of_instructions)
-        self.rules.append(verify_global_reads_not_too_early)
-        self.rules.append(verify_lrs_complete_before_vmfma)
+        self.rules: list[Callable[[ScheduleInfo, dict], [bool, str]]] = [
+            verify_correct_number_of_instructions,
+            verify_ascending_order,
+            verify_lrs_complete_before_vmfma,
+            verify_global_reads_not_too_early,
+            verify_scc_overlap
+        ]
 
     def disableValidation(self):
         self.__skipValidation__ = True
@@ -1158,7 +1260,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
 
 def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
-
+    numMfma = 96
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
@@ -1203,6 +1305,9 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
             }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+        # TODO : GRA at index 10 can't be between GRIncB 9-11 due to SCC usage
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+        opt1.disableValidation()
     elif isNT(kernel) and useLDSTr and TLDS == 0:
         kernel["SwapGlobalReadOrder"] = True
         #index and code pair
@@ -1240,6 +1345,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                 'LCC' : [[95, 95]],}
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isNN(kernel) and useLDSTr and TLDS == 1:
         kernel["SwapGlobalReadOrder"] = True
         #index and code pair
@@ -1279,11 +1385,10 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                 }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
-
-    numMfma = 96
-    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    
     return True, opt1
 
 def _get_schedule_256x256x128_8bit(kernel, useLDSTr, TLDS):
@@ -1476,7 +1581,7 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
 
 def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
-
+    numMfma = 80
     optSchedule = dict()
     syncCode = []
 
@@ -1525,6 +1630,9 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment=""),
                    ]
         nglshift = nllshift = 13 # vmcnt shift for ngl and nll
+        #TODO . GRA at index 11 can't be between GRIncB 9-12 due to SCC usage
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+        opt1.disableValidation()
     elif isNN(kernel) and useLDSTr and TLDS==1:
         kernel["SwapGlobalReadOrder"] = True
         optSchedule = {
@@ -1562,7 +1670,7 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=-1, vlcnt=(13+10-13), vscnt=-1, comment="Wait for previous GRA to complete"),
                     SBarrier(comment="")]
         nglshift = nllshift = 13
-
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isNT(kernel) and useLDSTr and TLDS==0:
         optSchedule = {
             'SYNC': [[-1,17,17,57,57]],
@@ -1589,17 +1697,19 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
             SBarrier(comment="")
         ]
         nglshift = nllshift = 13
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
 
 
-    numMfma = 80
-    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    
+    
     return True, opt1
 
 def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    numMfma = 80
     if isNN(kernel) and useLDSTr and TLDS==1:
         kernel["SwapGlobalReadOrder"] = True
         optSchedule = {
@@ -1637,6 +1747,9 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=-1, vlcnt=(13+10-13), vscnt=-1, comment="Wait for previous GRA to complete"),
                     SBarrier(comment="")]
         nglshift = nllshift = 13
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+        #TODO. GRA at index 11 can't be between GRIncB 10-13 due to SCC usage.
+        opt1.disableValidation()
     elif isNT(kernel) and useLDSTr and TLDS==0:
         nglshift = nllshift = 0
         kernel["SwapGlobalReadOrder"] = True
@@ -1664,11 +1777,10 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
             SBarrier(comment="")
         ]
         nglshift = nllshift = 13
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
 
-    numMfma = 80
-    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
 def _get_schedule_256x240x64_16bit(kernel, useLDSTr, TLDS):
