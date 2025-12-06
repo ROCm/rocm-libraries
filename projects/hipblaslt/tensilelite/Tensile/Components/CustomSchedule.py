@@ -1023,8 +1023,11 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
             
             7, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for prior 5 LRA0"),
             
-            23, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="All LRB0 launched"),
-            23, SBarrier(comment=""),
+            19, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="All LRA0 is launched"),
+            19, SBarrier(comment=""),
+            
+            20, SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="All LRB0 launched"),
+            20, SBarrier(comment=""),
             
             35, SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="All GRA launched"),
             35, SBarrier(comment=""),
@@ -1042,8 +1045,8 @@ def _get_schedule_256x96x64_16bit(kernel, useLDSTr, TLDS):
             
             'LRA0'   : [[1, 3,3, 5,5,   7,7, 9,9, 11,11, 13,13, 15,15, 17],
                         [2, 4,4, 6,6,   8,8, 10,10, 12,12, 14,14, 16,16, 18]],
-            'LRB0'   : [[17, 19, 21],
-                        [18, 20, 22]],
+            'LRB0'   : [[13, 15, 17],
+                        [14, 16, 18]],
             
             'GRA'    : [[19,19, 21,21, 23,23, 25,25, 27,27, 29,29, 31,31, 33,33],
                         [20,20, 22,22, 24,24, 26,26, 28,28, 30,30, 32,32, 34,34]],
