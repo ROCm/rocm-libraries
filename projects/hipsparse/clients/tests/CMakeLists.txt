@@ -24,6 +24,12 @@ else()
     endif()
 endif()
 
+# Make matrices accessible to test executable
+# Test executable is in clients/staging/ and looks for ../matrices/
+# TheRock CI expects matrices at clients/matrices/ (set via HIPSPARSE_CLIENTS_MATRICES_DIR)
+# Jenkins expects them accessible via relative path from executable
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/clients")
+
 add_executable(hipsparse-test)
 
 target_sources(hipsparse-test PRIVATE
@@ -162,12 +168,35 @@ if(HIPSPARSE_ENABLE_CUDA)
     target_link_libraries(hipsparse-test PRIVATE ${CUDA_LIBRARIES})
 endif()
 
-# Set output directory to match old build system
-# Test executable looks for matrices at ../matrices/ relative to its location
-# Old system: build/staging/hipsparse-test -> build/staging/../matrices = build/matrices
+# Set output directory - Jenkins expects clients/staging
 set_target_properties(hipsparse-test PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
 )
+
+# Create symlink/copy for matrices after build completes
+# This ensures matrices are accessible at ../matrices/ from build tree executable
+# and at clients/matrices/ for TheRock CI (via HIPSPARSE_CLIENTS_MATRICES_DIR env var)
+if(WIN32)
+    # On Windows: Copy matrices directory after build to avoid symlink issues
+    # Symlinks cause OSError in TheRock's fileset_tool.py during staging
+    add_custom_command(
+        TARGET hipsparse-test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${PROJECT_BINARY_DIR}/matrices"
+            "${PROJECT_BINARY_DIR}/clients/matrices"
+        COMMENT "Copying matrices for Windows test environment"
+    )
+else()
+    # On Linux: Create symlink after test target is built
+    # POST_BUILD ensures matrices are downloaded first (via hipsparse-common dependency)
+    add_custom_command(
+        TARGET hipsparse-test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+            "${PROJECT_BINARY_DIR}/matrices"
+            "${PROJECT_BINARY_DIR}/clients/matrices"
+        COMMENT "Creating symlink for test matrices"
+    )
+endif()
 
 # Build mtx2csr converter
 if(NOT CONVERT_SOURCE)
@@ -195,7 +224,7 @@ add_custom_command(
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-set(HIPSPARSE_COMMON "${PROJECT_BINARY_DIR}/staging/hipsparse_common.yaml")
+set(HIPSPARSE_COMMON "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_common.yaml")
 add_custom_command(
     OUTPUT "${HIPSPARSE_COMMON}"
     COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/clients/include/hipsparse_common.yaml" "${HIPSPARSE_COMMON}"
@@ -203,7 +232,7 @@ add_custom_command(
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-set(HIPSPARSE_TEMPLATE "${PROJECT_BINARY_DIR}/staging/hipsparse_template.yaml")
+set(HIPSPARSE_TEMPLATE "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_template.yaml")
 add_custom_command(
     OUTPUT "${HIPSPARSE_TEMPLATE}"
     COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/clients/include/hipsparse_template.yaml" "${HIPSPARSE_TEMPLATE}"
@@ -211,7 +240,7 @@ add_custom_command(
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
-set(HIPSPARSE_GENTEST "${PROJECT_BINARY_DIR}/staging/hipsparse_gentest.py")
+set(HIPSPARSE_GENTEST "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_gentest.py")
 add_custom_command(
     OUTPUT "${HIPSPARSE_GENTEST}"
     COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py" "${HIPSPARSE_GENTEST}"
@@ -315,7 +344,7 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
                          test_spvv.yaml)
 
 # Prepare testing data
-set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparse_test.data")
+set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_test.data")
 add_custom_command(OUTPUT "${HIPSPARSE_TEST_DATA}"
                    COMMAND ${Python3_EXECUTABLE} "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py" -m ${PROJECT_BINARY_DIR}/matrices -I "${PROJECT_SOURCE_DIR}/clients/include" "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_test.yaml" -o "${HIPSPARSE_TEST_DATA}"
                    DEPENDS "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py" "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_test.yaml" "${PROJECT_SOURCE_DIR}/clients/include/hipsparse_common.yaml" ${HIPSPARSE_TEST_YAMLS}
@@ -369,7 +398,7 @@ file(GLOB dll_files
     \"C:/Windows/System32/libomp140*.dll\"
 )
 foreach(dll IN LISTS dll_files)
-    file(COPY \"\${dll}\" DESTINATION \"${PROJECT_BINARY_DIR}/staging/\")
+    file(COPY \"\${dll}\" DESTINATION \"${PROJECT_BINARY_DIR}/clients/staging/\")
 endforeach()
 ")
     add_custom_command(
