@@ -818,16 +818,15 @@ extern "C" __global__ void OpTensorLeadingOnes(MIOPEN_TYPE* a,
     /* Special case for leading ones where the total no. of threads is the
      * inner_product of the tensor dims. Each thread just updates one value
      */
+
     MIOPEN_TYPE* a_off = a + Aoffset;
     MIOPEN_TYPE* b_off = b + Boffset;
     MIOPEN_TYPE* c_off = c + Coffset;
 
     int gid = (bitmap == 0xF) ? (blockIdx.x * blockDim.x + threadIdx.x) : blockIdx.x;
-    int gid = blockIdx.x;
 
     // num_wg: the number of workgroups should be launched
     // MAX_NUM_WG: the maximum number of workgroups actually launched
-
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wfloat-equal"
     if(beta == static_cast<MIOPEN_TYPE>(0))
@@ -916,6 +915,8 @@ extern "C" __global__ void OpTensorLeadingOnesGeneric(MIOPEN_TYPE* a,
     /* Special case for leading ones where the total no. of threads is the
      * inner_product of the tensor dims. Each thread just updates one value
      */
+
+    
     MIOPEN_TYPE* a_off = a + Aoffset;
     MIOPEN_TYPE* b_off = b + Boffset;
     MIOPEN_TYPE* c_off = c + Coffset;
@@ -924,7 +925,6 @@ extern "C" __global__ void OpTensorLeadingOnesGeneric(MIOPEN_TYPE* a,
 
     // num_wg: the number of workgroups should be launched
     // MAX_NUM_WG: the maximum number of workgroups actually launched
-
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wfloat-equal"
     if(beta == static_cast<MIOPEN_TYPE>(0))
