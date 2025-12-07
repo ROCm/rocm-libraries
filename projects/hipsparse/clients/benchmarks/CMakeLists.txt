@@ -30,11 +30,9 @@ if(HIPSPARSE_ENABLE_CUDA)
     target_link_libraries(hipsparse-bench PRIVATE ${CUDA_LIBRARIES})
 endif()
 
-# Set output directory - backward compatible with Jenkins expectations
-# Jenkins expects build/{release|debug}/clients/staging/
-# Note: PROJECT_BINARY_DIR already includes the build type directory from install.sh
+# Set output directory to match old build system
 set_target_properties(hipsparse-bench PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
 )
 
 rocm_install(TARGETS hipsparse-bench COMPONENT benchmarks)
