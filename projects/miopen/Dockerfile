@@ -19,16 +19,14 @@ ARG COMPILER_LAUNCHER=""
 ENV APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=DontWarn
 
 # Support multiarch
-RUN dpkg --add-architecture i386
-
+RUN dpkg --add-architecture i386 && \
 # Install preliminary dependencies and add rocm gpg key
-RUN apt-get update && \
+    apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
         apt-utils ca-certificates curl libnuma-dev gnupg2 wget  && \
-    curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/rocm-keyring.gpg
-
+    curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/rocm-keyring.gpg && \
 # Get and install amdgpu-install.
-RUN wget https://repo.radeon.com/amdgpu-install/7.1/ubuntu/jammy/amdgpu-install_7.1.70100-1_all.deb --no-check-certificate && \
+    wget https://repo.radeon.com/amdgpu-install/7.1/ubuntu/jammy/amdgpu-install_7.1.70100-1_all.deb --no-check-certificate && \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
        ./amdgpu-install_7.1.70100-1_all.deb
@@ -37,30 +35,23 @@ RUN wget https://repo.radeon.com/amdgpu-install/7.1/ubuntu/jammy/amdgpu-install_
 RUN export ROCM_APT_VER=7.1; \
     echo $ROCM_APT_VER &&\
     sh -c 'echo deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/rocm-keyring.gpg] https://repo.radeon.com/amdgpu/30.20/ubuntu jammy main > /etc/apt/sources.list.d/amdgpu.list' &&\
-    sh -c 'echo deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/rocm-keyring.gpg] https://repo.radeon.com/rocm/apt/$ROCM_APT_VER jammy main > /etc/apt/sources.list.d/rocm.list'
-
-RUN sh -c "echo deb http://mirrors.kernel.org/ubuntu jammy main universe | tee -a /etc/apt/sources.list" && \
+    sh -c 'echo deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/rocm-keyring.gpg] https://repo.radeon.com/rocm/apt/$ROCM_APT_VER jammy main > /etc/apt/sources.list.d/rocm.list' && \
+# Install rocm components
+    sh -c "echo deb http://mirrors.kernel.org/ubuntu jammy main universe | tee -a /etc/apt/sources.list" && \
     amdgpu-install -y --usecase=rocm --no-dkms
 
-## Sccache binary built from source for ROCm, only install if CK_SCCACHE is defined
+## Sccache binary built from source for ROCm, only install if MIOPEN_SCCACHE is defined
 ARG SCCACHE_REPO_URL=http://compute-artifactory.amd.com/artifactory/rocm-generic-experimental/rocm-sccache
 ENV SCCACHE_INSTALL_LOCATION=/usr/local/.cargo/bin
 ENV PATH=$PATH:${SCCACHE_INSTALL_LOCATION}
 ENV MIOPEN_SCCACHE=$MIOPEN_SCCACHE
-RUN if [ "$MIOPEN_SCCACHE" != "" ]; then \
-    mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
-    curl ${SCCACHE_REPO_URL}/portable/0.2.16/sccache-0.2.16-alpha.1-rocm --output ${SCCACHE_INSTALL_LOCATION}/sccache && \
-    chmod +x ${SCCACHE_INSTALL_LOCATION}/sccache; \
-    fi
 
-# Add DVC repo
+# Install DVC + other dependencies
 RUN mkdir -p /etc/apt/keyrings && \
     wget -qO - https://dvc.org/deb/iterative.asc | sudo gpg --dearmor -o /etc/apt/keyrings/packages.iterative.gpg && \
     echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/packages.iterative.gpg] https://dvc.org/deb/ stable main" | sudo tee /etc/apt/sources.list.d/dvc.list && \
-    chmod 644 /etc/apt/keyrings/packages.iterative.gpg /etc/apt/sources.list.d/dvc.list
-
-# Install dependencies
-RUN apt-get update && \
+    chmod 644 /etc/apt/keyrings/packages.iterative.gpg /etc/apt/sources.list.d/dvc.list && \
+    apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
     build-essential \
     cmake \
@@ -147,6 +138,7 @@ RUN if [ "$USE_FIN" = "ON" ]; then \
 # Copy Composable Kernel
 COPY composablekernel /composable_kernel
 
+# Build and install Composable Kernel
 RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
     mkdir -p ${SCCACHE_INSTALL_LOCATION} && \
@@ -179,10 +171,9 @@ RUN echo Building for GPU Archs: ${GPU_ARCHS} && \
     -D GPU_ARCHS=${GPU_ARCHS} \
     -D MIOPEN_REQ_LIBS_ONLY=ON \
     -D CMAKE_CXX_FLAGS=" -O3 " .. && \
-    make -j ${num_threads} install && \    
+    make -j ${num_threads} install && \   
     if [ "$MIOPEN_SCCACHE" != "" ]; then \
     sccache -s; \
-    fi
-
+    fi && \
 # Remove CK source once built and installed
-RUN rm -rf /composable_kernel
+    rm -rf /composable_kernel
