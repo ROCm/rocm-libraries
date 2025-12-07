@@ -49,20 +49,6 @@ def locateExe( defaultPath, exeName ): # /opt/rocm/bin, hip-clang
     return exePath
   return None
 
-def get_rocm_version_or_none():
-    """Gets the ROCm version from the version file."""
-    try:
-        rocmpath = os.environ.get("ROCM_PATH", "/opt/rocm")
-        version_file_path = os.path.join(rocmpath, ".info/version")
-
-        with open(version_file_path, 'r') as f:
-            # Read the first line and strip whitespace
-            version_string = f.readline().strip()
-            return version_string
-    except (FileNotFoundError, IOError):
-        return None
-
-
 def walkDict(root, path=""):
     """
     Recursively walks a structure which may consist of dictionaries, lists,
@@ -200,16 +186,9 @@ def findConfigs(rootDir=None):
     globaParamArchsStr = ';'.join(availableArchs)
     os.environ["PyTestBuildArchNames"] = globaParamArchsStr
 
-    rocm_version = get_rocm_version_or_none()
-
     params = []
     for (dirpath, dirnames, filenames) in os.walk(rootDir):
         for filename in filenames:
-            # Conditionally skip icache_flush.yaml on rocm 7.1 due to ROCm bug.
-            if filename == "icache_flush.yaml" and rocm_version and rocm_version.startswith("7.1"):
-                print(f"INFO: Skipping '{filename}' on ROCm {rocm_version}.")
-                continue
-
             # Skip build client script
             if filename == "build_client.yaml":
                 continue
