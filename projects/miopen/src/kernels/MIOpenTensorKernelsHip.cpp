@@ -916,7 +916,6 @@ extern "C" __global__ void OpTensorLeadingOnesGeneric(MIOPEN_TYPE* a,
      * inner_product of the tensor dims. Each thread just updates one value
      */
 
-    
     MIOPEN_TYPE* a_off = a + Aoffset;
     MIOPEN_TYPE* b_off = b + Boffset;
     MIOPEN_TYPE* c_off = c + Coffset;
