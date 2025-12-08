@@ -377,40 +377,6 @@ bool checkComputeTypesLogErrors(
         return false;
     }
 }
-
-void checkSupportedActivation(const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr)
-{
-    if(activAttr.operation() != hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD)
-    {
-        throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "Activation mode must be RELU_FORWARD");
-    }
-    if(activAttr.elu_alpha().has_value() || activAttr.softplus_beta().has_value()
-       || activAttr.swish_beta().has_value() || activAttr.relu_lower_clip_slope().has_value()
-       || (activAttr.relu_lower_clip().has_value() && !activAttr.relu_upper_clip().has_value()))
-    {
-        throw hipdnn_plugin::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Fusion supports only relu, clipped relu (relu_upper_clip set), or CLAMP "
-            "(relu_upper_clip and relu_lower_clip set)");
-    }
-}
-
-bool checkSupportedActivationLogErrors(
-    const hipdnn_sdk::data_objects::PointwiseAttributes& activAttr)
-{
-    try
-    {
-        checkSupportedActivation(activAttr);
-        return true;
-    }
-    catch(const hipdnn_plugin::HipdnnPluginException& e)
-    {
-        HIPDNN_LOG_INFO(e.what());
-        return false;
-    }
-}
-
 } // namespace
 
 bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
@@ -434,11 +400,6 @@ bool MiopenConvFwdBiasActivPlanBuilder::isApplicable(const HipdnnEnginePluginHan
                                    std::get<0>(nodeAttrs.value()),
                                    std::get<1>(nodeAttrs.value()),
                                    opGraph.getTensorMap()))
-    {
-        return false;
-    }
-
-    if(!checkSupportedActivationLogErrors(std::get<2>(nodeAttrs.value())))
     {
         return false;
     }

@@ -263,7 +263,7 @@ test_conv_common::ConvTestCase validConvTestCase5d()
 test_activation_common::ActivTestCase validActivTestCase()
 {
     return {hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
-            std::nullopt,
+            0.0,
             std::nullopt,
             std::nullopt,
             std::nullopt,
