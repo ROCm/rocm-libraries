@@ -23,6 +23,7 @@
 #pragma once
 #include <algorithm>
 #include <array>
+#include <hip/hip_runtime.h>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -58,4 +59,16 @@ template <typename T>
 bool checkNotInList(const T& a, const std::vector<T> b)
 {
     return std::find(b.begin(), b.end(), a) == b.end();
+}
+
+// Helper to get device properties from HIP runtime
+template <typename T, typename Func>
+inline T getDeviceProperty(int deviceId, Func propertyGetter, T defaultValue = T{})
+{
+    hipDeviceProp_t prop;
+    if(hipGetDeviceProperties(&prop, deviceId) == hipSuccess)
+    {
+        return propertyGetter(prop);
+    }
+    return defaultValue;
 }
