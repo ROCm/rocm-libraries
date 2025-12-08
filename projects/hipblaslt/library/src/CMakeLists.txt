@@ -3,10 +3,6 @@
 
 add_subdirectory(amd_detail)
 
-target_compile_options(hipblaslt PRIVATE -fvisibility=default)
-# Prevent the linker from discarding unused sections so static data symbols are kept
-target_link_options(hipblaslt PRIVATE -Wl,--no-gc-sections)
-
 target_sources(hipblaslt
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/include/auxiliary.hpp"
@@ -31,7 +27,6 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/tensile_host.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/UserDrivenTuningParser.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/utility.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/include/rocblaslt/utility.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/rocroller/include/analytical_utils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/rocroller/include/gemm.hpp"
@@ -41,9 +36,4 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/rocroller/include/runtime_args_selection.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/rocroller/include/solution_cache.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/rocroller/include/solution_selection.hpp"
-)
-# Make sure the variables defined in utility.cpp are exported from the library
-set_source_files_properties(
-  ${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/rocblaslt/src/utility.cpp
-  PROPERTIES COMPILE_OPTIONS "-fvisibility=default"
 )

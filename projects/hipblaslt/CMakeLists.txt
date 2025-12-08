@@ -545,56 +545,40 @@ endif()
 
 if(HIPBLASLT_ENABLE_COVERAGE)
     target_compile_options(hipblaslt PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt PRIVATE -fprofile-instr-generate)
+    target_link_options(hipblaslt PUBLIC -fprofile-instr-generate)
 
     target_compile_options(hipblaslt-clients-common PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt-clients-common PRIVATE -fprofile-instr-generate)
+    target_link_options(hipblaslt-clients-common PUBLIC -fprofile-instr-generate)
 
-    target_compile_options(hipblaslt-bench PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(hipblaslt-bench PRIVATE -fprofile-instr-generate)
-
-    target_compile_options(hipblaslt-test PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping -fvisibility=default)
-    target_link_options(hipblaslt-test PRIVATE -fprofile-instr-generate)
-    target_compile_definitions(hipblaslt-test PRIVATE CODE_COVERAGE)
-    
-    # Add the internal header path for coverage builds
-    set(TENSILELITE_DIR ${PROJECT_SOURCE_DIR}/tensilelite)
-    target_link_libraries(
-        hipblaslt-test
-        PRIVATE
-		hipblaslt-clients-common
-  		hipblaslt
-            roc::origami
-            tensilelite::tensilelite-host
-    )
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
     add_custom_target(
         code_cov_tests
         DEPENDS hipblaslt-test
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${coverage_dir}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${coverage_dir}/profraw"
-        COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="${coverage_dir}/profraw/hipblaslt-coverage_%p.profraw" $<TARGET_FILE:hipblaslt-test>
+        COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="${coverage_dir}/profraw/hipblaslt-coverage_%p.profraw"
+                                        GTEST_LISTENER=NO_PASS_LINE_IN_LOG
+                                        $<TARGET_FILE:hipblaslt-test>
+                                        --precompile=hipblaslt-test-precompile.db
       )
       find_program(
         LLVM_PROFDATA
         llvm-profdata
+        HINTS llvm/bin
         REQUIRED
-        HINTS ${ROCM_PATH}/llvm/bin
-        PATHS /opt/rocm/llvm/bin
       )
       find_program(
         LLVM_COV
         llvm-cov
         REQUIRED
-        HINTS ${ROCM_PATH}/llvm/bin
-        PATHS /opt/rocm/llvm/bin
+        HINTS llvm/bin
       )
       add_custom_target(
         coverage
         DEPENDS code_cov_tests
         COMMAND ${LLVM_PROFDATA} merge -sparse "${coverage_dir}/profraw/hipblaslt-coverage_*.profraw" -o "${coverage_dir}/hipblaslt.profdata"
-        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata"
-        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" -format=html -output-dir="${coverage_dir}"
-        COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" -format=lcov > "${coverage_dir}/coverage.info"
+        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*"
+        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=html -output-dir="${coverage_dir}"
+        COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hipblaslt> -instr-profile="${coverage_dir}/hipblaslt.profdata" --ignore-filename-regex=".*Tensile.*|.*origami.*" -format=lcov > "${coverage_dir}/coverage.info"
       )
 endif()
