@@ -1,0 +1,12 @@
+CompileFlags:
+  Add:
+    - -x
+    - hip
+    - -std=c++17
+    - -nogpulib                                      # Disable automatic GPU library linking
+    - -isystem /opt/rocm/include
+    - --cuda-path=/opt/rocm
+    - --rocm-path=/opt/rocm                          # ROCm installation directory
+    - -ferror-limit=0                                # No error limit for complete analysis
+Index:
+  Background: Build                                  # Background indexing for better performance

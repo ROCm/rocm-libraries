@@ -36,14 +36,13 @@
 #include <miopen/temp_file.hpp>
 #include <miopen/filesystem.hpp>
 
-#include <boost/optional.hpp>
 #include <boost/thread.hpp>
 
 #include <array>
 #include <cstdio>
-#include <cstdlib>
 #include <fstream>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <string>
 #include <thread>
@@ -57,13 +56,13 @@ static fs::path& exe_path()
     static fs::path exe_path;
     return exe_path;
 }
-static boost::optional<fs::path>& thread_logs_root()
+static std::optional<fs::path>& thread_logs_root()
 {
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
     static std::mutex mutex;
     std::lock_guard<std::mutex> lock(mutex);
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-    static boost::optional<fs::path> path(boost::none);
+    static std::optional<fs::path> path{std::nullopt};
     return path;
 }
 
@@ -318,7 +317,7 @@ protected:
                                     const std::array<std::pair<std::string, TValue>, count> values,
                                     TDb db)
     {
-        boost::optional<DbRecord> record = db.FindRecord(key);
+        auto record = db.FindRecord(key);
 
         EXPECT(record);
 

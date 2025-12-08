@@ -227,8 +227,6 @@ using GPU_UnitTestConvSolverFwd_FP32 = miopen::unit_tests::UnitTestConvSolverFwd
 using GPU_UnitTestConvSolverBwd_FP32 = miopen::unit_tests::UnitTestConvSolverBwd;
 using GPU_UnitTestConvSolverWrw_FP32 = miopen::unit_tests::UnitTestConvSolverWrw;
 
-using GPU_UnitTestConvSolverFwd_TF32 = miopen::unit_tests::UnitTestConvSolverFwd;
-
 using GPU_UnitTestConvSolverFwd_I8 = miopen::unit_tests::UnitTestConvSolverFwd;
 using GPU_UnitTestConvSolverBwd_I8 = miopen::unit_tests::UnitTestConvSolverBwd;
 using GPU_UnitTestConvSolverWrw_I8 = miopen::unit_tests::UnitTestConvSolverWrw;

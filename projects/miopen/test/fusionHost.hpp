@@ -24,22 +24,21 @@
  *
  *******************************************************************************/
 #pragma once
-// #include "test.hpp"
 #include <array>
 #include <iostream>
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <utility>
+#include <miopen/miopen.h>
 #include <miopen/convolution.hpp>
 #include <miopen/batch_norm.hpp>
 #include <miopen/activ.hpp>
-#include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
-#include <utility>
+#include <miopen/fusion_plan.hpp>
 #include "get_handle.hpp"
 #include "tensor_holder.hpp"
 #include "verify.hpp"
-#include <miopen/fusion_plan.hpp>
 
 template <class T>
 void convHostForward(const tensor<T>& input,
@@ -669,8 +668,31 @@ void batchNormPerActHostBwdTrain(const tensor<XDataType>& x_input,
                 dxhat    = 0.;
                 dxhathat = 0.;
 
-                mean       = savedMean(0, cidx, row, column);   // HxW elements
-                elemInvVar = savedInvVar(0, cidx, row, column); // HxW elements
+                if(!savedMean.data.empty())
+                {
+                    mean       = savedMean(0, cidx, row, column);   // HxW elements
+                    elemInvVar = savedInvVar(0, cidx, row, column); // HxW elements
+                }
+                else
+                {
+                    double variance_accum = 0.;
+                    double mean_accum     = 0.;
+
+                    // process the batch per channel
+                    for(int bidx = 0; bidx < n_batch; bidx++)
+                    { // via mini_batch
+                        auto inval = static_cast<double>(x_input(bidx, cidx, row, column));
+                        mean_accum += inval;
+                        variance_accum += inval * inval;
+                    } // end for (n)
+
+                    mean_accum /= n;
+                    variance_accum /= n;
+                    variance_accum += (-mean_accum * mean_accum);
+
+                    mean       = mean_accum;
+                    elemInvVar = 1.0 / sqrt(variance_accum);
+                }
 
                 for(int bidx = 0; bidx < n_batch; bidx++)
                 { // via mini_batch
