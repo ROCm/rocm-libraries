@@ -1990,8 +1990,7 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     numMfma = 80
-    # Temp disable this for now.
-    if isNN(kernel) and useLDSTr and TLDS==1 and False:
+    if isNN(kernel) and useLDSTr and TLDS==1:
         kernel["SwapGlobalReadOrder"] = True
         optSchedule = {
             'SYNC'   : [[-1,
