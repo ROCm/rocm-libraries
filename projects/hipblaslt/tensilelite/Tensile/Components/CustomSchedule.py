@@ -1557,9 +1557,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
             }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
-        # TODO : GRA at index 10 can't be between GRIncB 9-11 due to SCC usage
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-        opt1.disableValidation()
     elif isNT(kernel) and useLDSTr and TLDS == 0:
         kernel["SwapGlobalReadOrder"] = True
         #index and code pair
