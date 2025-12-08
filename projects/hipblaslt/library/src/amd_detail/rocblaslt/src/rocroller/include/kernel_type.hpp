@@ -90,7 +90,7 @@ struct std::hash<KernelType>
         size_t typeAccHash = std::hash<rocRoller::DataType>{}(k.typeAcc);
         size_t scaleTypeAHash = std::hash<ScaleType>{}(k.scaleTypeA);
         size_t scaleTypeBHash = std::hash<ScaleType>{}(k.scaleTypeB);
-        size_t transAHash = std::hash<bool>{}(k.transB);
+        size_t transAHash = std::hash<bool>{}(k.transA);
         size_t transBHash = std::hash<bool>{}(k.transB);
 
         return typeAHash ^ (typeBHash << 1) ^ (typeCHash << 2) ^
