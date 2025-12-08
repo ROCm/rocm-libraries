@@ -38,13 +38,11 @@ protected:
         graphObj.set_name("BatchnormFwd+ActivTest");
         graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-        int64_t uid = 1;
         auto dataType = getDataTypeEnumFromType<DataType>();
         auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
 
         auto xAttr = graph::makeTensorAttributes(
             "x", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
-        xAttr.set_uid(uid++);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto meanAttr
@@ -52,7 +50,6 @@ protected:
                                           intermediateDataType,
                                           derivedDims,
                                           generateStrides(derivedDims, layout.strideOrder));
-        meanAttr.set_uid(uid++);
         auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
 
         auto invVarianceAttr
@@ -60,7 +57,6 @@ protected:
                                           intermediateDataType,
                                           derivedDims,
                                           generateStrides(derivedDims, layout.strideOrder));
-        invVarianceAttr.set_uid(uid++);
         auto invVarianceTensorAttr
             = std::make_shared<graph::TensorAttributes>(std::move(invVarianceAttr));
 
@@ -69,7 +65,6 @@ protected:
                                           intermediateDataType,
                                           derivedDims,
                                           generateStrides(derivedDims, layout.strideOrder));
-        scaleAttr.set_uid(uid++);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
         auto biasAttr
@@ -77,7 +72,6 @@ protected:
                                           intermediateDataType,
                                           derivedDims,
                                           generateStrides(derivedDims, layout.strideOrder));
-        biasAttr.set_uid(uid++);
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         graph::BatchnormInferenceAttributes bnAttrs;
@@ -89,7 +83,7 @@ protected:
                                                         scaleTensorAttr,
                                                         biasTensorAttr,
                                                         bnAttrs);
-        setTensorAttributeDetails(yTensorAttr, uid, dataType, testCase.dims, layout, false);
+        setTensorAttributeDetails(yTensorAttr, dataType, testCase.dims, layout, false);
 
         graph::PointwiseAttributes pointwiseAttrs;
         pointwiseAttrs.set_name("activation");
@@ -120,14 +114,13 @@ protected:
         }
 
         auto outTensorAttr = graphObj.pointwise(yTensorAttr, pointwiseAttrs);
-        setTensorAttributeDetails(outTensorAttr, uid, dataType, testCase.dims, layout, true);
+        setTensorAttributeDetails(outTensorAttr, dataType, testCase.dims, layout, true);
 
         this->registerValidator(outTensorAttr, tolerance);
         this->verifyGraph(graphObj, testCase.seed);
     }
 
     void setTensorAttributeDetails(std::shared_ptr<graph::TensorAttributes>& tensorAttr,
-                                   int64_t& uid,
                                    hipdnn_frontend::DataType dataType,
                                    const std::vector<int64_t>& dims,
                                    const TensorLayout& layout,
@@ -137,10 +130,6 @@ protected:
         tensorAttr->set_dim(dims);
         tensorAttr->set_stride(generateStrides(dims, layout.strideOrder));
         tensorAttr->set_output(isOutput);
-        if(!tensorAttr->has_uid())
-        {
-            tensorAttr->set_uid(uid++);
-        }
     }
 };
 
