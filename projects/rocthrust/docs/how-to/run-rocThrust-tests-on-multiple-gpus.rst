@@ -11,7 +11,7 @@ To run tests on multiple GPUs, you can use the CTest resource allocation feature
   * the resource specification file which describes the resources available on the system, and
   * the ``RESOURCE_GROUPS`` property of tests, which describes the resources required by each individual test.
 
-You can generate a resource specification file using the ``GenerateResourceSpec.cmake`` utility script. After you have cloned the ``rocThrust`` repository and built rocThrust with the ``-DBUILD_TESTS=ON`` option, change directory to the ``build`` directory and run:
+You can generate a resource specification file using the ``GenerateResourceSpec.cmake`` utility script. After you have cloned the ``rocm-libraries`` repository and built rocThrust with the ``-DBUILD_TESTS=ON`` option, change directory to the ``build`` directory and run:
 
 .. code:: shell
 

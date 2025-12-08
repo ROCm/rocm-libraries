@@ -9,6 +9,10 @@ Documentation for rocThrust available at
 
 * If you are using rocThrust on the host-side only, you can now build using g++ or non-HIP-aware clang++. To configure rocThrust in this-way, set the new CMake option `ROCTHRUST_DEVICE_SYSTEM` to `CPP` (other options include `HIP`, `CUDA`, `OpenMP`, and `TBB`), and set `CXX` to g++ or clang++. Then install rocThrust via `make install`. When you compile your application, don't forget to include the rocThrust include directory (`-I /opt/rocm/include`), since this won't happen automatically like it does when building with hipcc. Note that currently, rocThrust tests and benchmarks cannot be built when configuring rocThrust for host-side-only use.
 
+### Changed
+
+* Improved the `GenerateResourceSpec.cmake` script and the documentation on how to run rocThrust tests on multiple GPUs.
+
 ## rocThrust 4.2.0 for ROCm 7.2
 
 ### Added
