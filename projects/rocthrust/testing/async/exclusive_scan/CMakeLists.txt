@@ -39,8 +39,8 @@ function(add_thrust_test_exclusive TEST)
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/testing/"
     )
-    add_test(NAME ${TEST} COMMAND ${TEST_TARGET})
-    set_tests_properties(${TEST}
+    add_test(NAME "exclusive_${TEST}" COMMAND ${TEST_TARGET})
+    set_tests_properties("exclusive_${TEST}"
         PROPERTIES
             RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
             LABELS upstream
