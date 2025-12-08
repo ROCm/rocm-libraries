@@ -1924,8 +1924,8 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
             61, 61  # wait GRA.
             ]],
             # Addr. update (be done before GRA/GRB).
-            'GRIncA' : [[0,0,1,1,2,2,3,3,4]],
-            'GRIncB' : [[5,6,7,8,9,10,11,12,13]],
+            'GRIncA' : [[5,6,7,8,9,10,11,12,13]],
+            'GRIncB' : [[0,0,1,1,2,2,3,3,4]],
             # Current iteration.
             'LRA0'   : [[8,9,10,11,12,13,14,15,16,17]],
             'LRB0'   : [[0,1,2,3,4,5,6,7]],
@@ -2001,8 +2001,8 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
             61, 61 # Wait previous GR.
             ]],
             # Addr. update (be done before GRA/GRB).
-            'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
-            'GRIncB' : [[21,21,21,22,22,22,23,23,23]],
+            'GRIncA' : [[21,21,21,22,22,22,23,23,23]],
+            'GRIncB' : [[0,1,2,3,4,5,6,7,8]],
             # Current iteration.
             'LRA0'   : [[5,5,7,7,9,9,11,11,13,13,15,15,17,18,19,20]],
             'LRB0'   : [[0,0,1,2,3]],
