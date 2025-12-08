@@ -29,13 +29,13 @@ Tests:
 - name: spgemmreuse_csr_bad_arg
   category: pre_checkin
   function: spgemmreuse_csr_bad_arg
-  indextype: *i32_i64
+  indextype: *i32
   precision: *single_double_precisions_complex_real
 
 - name: spgemmreuse_csr
   category: quick
   function: spgemmreuse_csr
-  indextype: *i32_i64
+  indextype: *i32
   precision: *single_double_precisions_complex_real
   M: [77, 981]
   K: [64, 1723]
@@ -49,7 +49,7 @@ Tests:
 - name: spgemmreuse_csr
   category: pre_checkin
   function: spgemmreuse_csr
-  indextype: *i32_i64
+  indextype: *i32
   precision: *single_double_precisions_complex_real
   M: 1
   K: 1
