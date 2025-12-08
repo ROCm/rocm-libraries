@@ -34,13 +34,14 @@ protected:
         const ConvTestCase& testCase = this->GetParam();
 
         hipdnn_frontend::graph::Graph graphObj;
-
         graphObj.set_name("ConvolutionBackwardDataTest");
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
-
-        int64_t uid = 1;
 
         auto dataType = getDataTypeEnumFromType<DataType>();
+        graphObj.set_intermediate_data_type(dataType)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(dataType);
+
+        int64_t uid = 1;
 
         auto dyAttr = graph::makeTensorAttributes(
             "dy", dataType, testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder));
@@ -65,10 +66,7 @@ protected:
         {
             dxTensorAttr->set_uid(uid++);
         }
-        dxTensorAttr->set_dim(testCase.xDims);
-        dxTensorAttr->set_stride(generateStrides(testCase.xDims, layout.strideOrder));
         dxTensorAttr->set_output(true);
-        dxTensorAttr->set_data_type(dataType);
 
         this->registerValidator(dxTensorAttr, tolerance);
         this->verifyGraph(graphObj, testCase.seed);

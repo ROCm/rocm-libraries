@@ -39,12 +39,14 @@ protected:
         hipdnn_frontend::graph::Graph graphObj;
 
         graphObj.set_name("BatchnormInferenceTest");
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
-
-        int64_t uid = 1;
 
         auto dataType = getDataTypeEnumFromType<DataType>();
         auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
+        graphObj.set_intermediate_data_type(intermediateDataType)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(dataType);
+
+        int64_t uid = 1;
 
         auto xAttr = graph::makeTensorAttributes(
             "X", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
@@ -99,9 +101,6 @@ protected:
             yTensorAttr->set_uid(uid++);
         }
 
-        yTensorAttr->set_data_type(dataType);
-        yTensorAttr->set_dim(testCase.dims);
-        yTensorAttr->set_stride(generateStrides(testCase.dims, layout.strideOrder));
         yTensorAttr->set_output(true);
 
         this->registerValidator(yTensorAttr, tolerance);

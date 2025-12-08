@@ -34,13 +34,14 @@ protected:
         const ConvTestCase& testCase = this->GetParam();
 
         hipdnn_frontend::graph::Graph graphObj;
-
         graphObj.set_name("ConvolutionForwardTest");
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
-
-        int64_t uid = 1;
 
         auto dataType = getDataTypeEnumFromType<DataType>();
+        graphObj.set_intermediate_data_type(dataType)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(dataType);
+
+        int64_t uid = 1;
 
         auto xAttr = graph::makeTensorAttributes(
             "x", dataType, testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder));
@@ -66,9 +67,6 @@ protected:
             yAttr->set_uid(uid++);
         }
         yAttr->set_output(true);
-        yAttr->set_data_type(dataType);
-        yAttr->set_dim(testCase.yDims);
-        yAttr->set_stride(generateStrides(testCase.yDims, layout.strideOrder));
 
         this->registerValidator(yAttr, tolerance);
 

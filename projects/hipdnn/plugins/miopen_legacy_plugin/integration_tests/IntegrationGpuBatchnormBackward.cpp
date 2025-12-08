@@ -57,15 +57,17 @@ protected:
 
         auto derivedDims = getDerivedShape(testCase.dims);
 
+        auto dataType = getDataTypeEnumFromType<DataType>();
+        auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
+
         hipdnn_frontend::graph::Graph graphObj;
 
         graphObj.set_name("BatchnormBackwardTest");
         graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+        graphObj.set_intermediate_data_type(intermediateDataType);
+        graphObj.set_io_data_type(dataType);
 
         int64_t uid = 1;
-
-        auto dataType = getDataTypeEnumFromType<DataType>();
-        auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
 
         auto xAttr = graph::makeTensorAttributes(
             "x", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
@@ -115,9 +117,6 @@ protected:
         {
             dxTensorAttr->set_uid(uid++);
         }
-        dxTensorAttr->set_data_type(dataType);
-        dxTensorAttr->set_dim(testCase.dims);
-        dxTensorAttr->set_stride(generateStrides(testCase.dims, layout.strideOrder));
         dxTensorAttr->set_output(true);
 
         auto& dscaleTensorAttr = outputTensorsAttr[1];

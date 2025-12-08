@@ -31,13 +31,14 @@ protected:
         const auto& [convTestCase, doBias, activTestCase] = this->GetParam();
 
         graph::Graph graphObj;
-
         graphObj.set_name(doBias ? "ConvFwdBiasActivTest" : "ConvFwdActivTest");
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
-
-        int64_t uid = 1;
 
         auto dataType = getDataTypeEnumFromType<DataType>();
+        graphObj.set_intermediate_data_type(dataType)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(dataType);
+
+        int64_t uid = 1;
 
         auto xAttr
             = graph::makeTensorAttributes("x",
@@ -63,10 +64,7 @@ protected:
         convAttrs.set_dilation(convTestCase.convDilation);
 
         auto yConvTensorAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
-        yConvTensorAttr->set_name("y_conv");
         yConvTensorAttr->set_data_type(dataType);
-        yConvTensorAttr->set_dim(convTestCase.yDims);
-        yConvTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
         yConvTensorAttr->set_uid(uid++);
 
         std::shared_ptr<graph::TensorAttributes> yBiasTensorAttr;
@@ -84,10 +82,7 @@ protected:
             biasAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
 
             yBiasTensorAttr = graphObj.pointwise(yConvTensorAttr, biasTensorAttr, biasAttrs);
-            yBiasTensorAttr->set_name("y_bias");
             yBiasTensorAttr->set_data_type(dataType);
-            yBiasTensorAttr->set_dim(convTestCase.yDims);
-            yBiasTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
             yBiasTensorAttr->set_uid(uid++);
         }
 
@@ -121,10 +116,6 @@ protected:
 
         auto yTensorAttr
             = graphObj.pointwise(doBias ? yBiasTensorAttr : yConvTensorAttr, activAttrs);
-        yTensorAttr->set_name("y");
-        yTensorAttr->set_data_type(dataType);
-        yTensorAttr->set_dim(convTestCase.yDims);
-        yTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
         yTensorAttr->set_output(true);
         yTensorAttr->set_uid(uid);
 

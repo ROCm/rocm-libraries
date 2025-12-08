@@ -131,9 +131,6 @@ protected:
                                                 biasTensorAttr,
                                                 bnInfAttrs);
 
-        bnY->set_name("BN_Y");
-        bnY->set_dim(dims);
-        bnY->set_stride(generateStrides(dims, layout.strideOrder));
         bnY->set_uid(BatchnormActivationTensorIds::BN_Y_UID);
 
         auto dyAttr = graph::makeTensorAttributes(
@@ -171,9 +168,6 @@ protected:
         }
 
         auto dxDrelu = graphObj.pointwise(bnY, dyTensorAttr, activBwdAttrs);
-        dxDrelu->set_name("DX_drelu");
-        dxDrelu->set_dim(dims);
-        dxDrelu->set_stride(generateStrides(dims, layout.strideOrder));
         dxDrelu->set_uid(BatchnormActivationTensorIds::DX_DRELU_UID);
 
         graph::BatchnormBackwardAttributes bnBwdAttrs;
@@ -185,26 +179,16 @@ protected:
             = graphObj.batchnorm_backward(dxDrelu, xTensorAttr, scaleTensorAttr, bnBwdAttrs);
 
         auto& dxOut = bnBwdOuts[0];
-        dxOut->set_name("dx");
-        dxOut->set_dim(dims);
-        dxOut->set_data_type(dataType);
-        dxOut->set_stride(generateStrides(dims, layout.strideOrder));
         dxOut->set_output(true);
         dxOut->set_uid(BatchnormActivationTensorIds::DX_OUT_UID);
 
         auto& dscaleOut = bnBwdOuts[1];
-        dscaleOut->set_name("dscale");
         dscaleOut->set_data_type(intermediateDataType);
-        dscaleOut->set_dim(channelDims);
-        dscaleOut->set_stride(generateStrides(channelDims, layout.strideOrder));
         dscaleOut->set_output(true);
         dscaleOut->set_uid(BatchnormActivationTensorIds::DSCALE_OUT_UID);
 
         auto& dbiasOut = bnBwdOuts[2];
-        dbiasOut->set_name("dbias");
         dbiasOut->set_data_type(intermediateDataType);
-        dbiasOut->set_dim(channelDims);
-        dbiasOut->set_stride(generateStrides(channelDims, layout.strideOrder));
         dbiasOut->set_output(true);
         dbiasOut->set_uid(BatchnormActivationTensorIds::DBIAS_OUT_UID);
 

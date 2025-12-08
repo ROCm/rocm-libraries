@@ -34,13 +34,14 @@ protected:
         const ConvTestCase& testCase = this->GetParam();
 
         hipdnn_frontend::graph::Graph graphObj;
-
         graphObj.set_name("ConvolutionBackwardWeightTest");
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
-
-        int64_t uid = 1;
 
         auto dataType = getDataTypeEnumFromType<DataType>();
+        graphObj.set_intermediate_data_type(dataType)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(dataType);
+
+        int64_t uid = 1;
 
         auto xAttr = graph::makeTensorAttributes(
             "x", dataType, testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder));
@@ -65,10 +66,12 @@ protected:
         {
             dwTensorAttr->set_uid(uid++);
         }
+        dwTensorAttr->set_output(true);
+
+        // Set these explicitly since grouped convs cannot infer tensor shape.
+        // Infer behavior will assume groups == 1, but some cases have groups > 1.
         dwTensorAttr->set_dim(testCase.wDims);
         dwTensorAttr->set_stride(generateStrides(testCase.wDims, layout.strideOrder));
-        dwTensorAttr->set_output(true);
-        dwTensorAttr->set_data_type(dataType);
 
         this->registerValidator(dwTensorAttr, tolerance);
         this->verifyGraph(graphObj, testCase.seed);

@@ -36,11 +36,14 @@ protected:
 
         hipdnn_frontend::graph::Graph graphObj;
         graphObj.set_name("BatchnormFwd+ActivTest");
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-        int64_t uid = 1;
         auto dataType = getDataTypeEnumFromType<DataType>();
         auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
+        graphObj.set_intermediate_data_type(intermediateDataType)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(dataType);
+
+        int64_t uid = 1;
 
         auto xAttr = graph::makeTensorAttributes(
             "x", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
@@ -89,7 +92,7 @@ protected:
                                                         scaleTensorAttr,
                                                         biasTensorAttr,
                                                         bnAttrs);
-        setTensorAttributeDetails(yTensorAttr, uid, dataType, testCase.dims, layout, false);
+        yTensorAttr->set_data_type(dataType);
 
         graph::PointwiseAttributes pointwiseAttrs;
         pointwiseAttrs.set_name("activation");
@@ -120,27 +123,10 @@ protected:
         }
 
         auto outTensorAttr = graphObj.pointwise(yTensorAttr, pointwiseAttrs);
-        setTensorAttributeDetails(outTensorAttr, uid, dataType, testCase.dims, layout, true);
+        outTensorAttr->set_output(true);
 
         this->registerValidator(outTensorAttr, tolerance);
         this->verifyGraph(graphObj, testCase.seed);
-    }
-
-    void setTensorAttributeDetails(std::shared_ptr<graph::TensorAttributes>& tensorAttr,
-                                   int64_t& uid,
-                                   hipdnn_frontend::DataType dataType,
-                                   const std::vector<int64_t>& dims,
-                                   const TensorLayout& layout,
-                                   bool isOutput)
-    {
-        tensorAttr->set_data_type(dataType);
-        tensorAttr->set_dim(dims);
-        tensorAttr->set_stride(generateStrides(dims, layout.strideOrder));
-        tensorAttr->set_output(isOutput);
-        if(!tensorAttr->has_uid())
-        {
-            tensorAttr->set_uid(uid++);
-        }
     }
 };
 
