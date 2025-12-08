@@ -2024,11 +2024,14 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         lrsa   = [57]
         lrsb   = [58]
 
-        syncs.add(59, dscnt=len(lrb0)-2, comment="wait for the first LRB0 to complete ")
+        # This wait serves dual purpose
+        syncs.add(59, dscnt=len(lrb0)-2, vlcnt=len(gra), barrier=True,
+                  comment="wait for the first LRB0 to complete to start 2nd batch of MFMAs and also make GRs from the previous iteration is done before LRA1 starts")
         lra1   = [61,62,63,64,65, 66,67,69,71,73, 75,76] # 12 loads
 
         i = 65 # next LRB0 is needed at index 66, so insert wait at 65
-        syncs.add(i, dscnt=count_items(lra1,ev=i), vlcnt=len(gra), barrier=True, comment="wait for the rest of LRB0 to complete") 
+        syncs.add(i, dscnt=count_items(lra1,ev=i), barrier=True, 
+                  comment="wait for the rest of LRB0 to complete across all waves before GRB start") 
         grb    = [66,70,75,79,84, 88,93,97,102,106] # one index for two instructions
         num_gr = len(gra) + len(grb)
 
@@ -2062,8 +2065,8 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     
     if isNT(kernel) and useLDSTr and TLDS == 0:
-        opt1.disableValidation()  # TODO: Remove after verify_global_reads_not_too_early validator is fixed
-
+        opt1.disableValidation()  # TODO: Remove after verify_global_reads_not_too_early validator is fixed: https://github.com/ROCm/rocm-libraries/issues/3188
+    
     return True, opt1
 
 def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
