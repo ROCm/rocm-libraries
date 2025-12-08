@@ -8,10 +8,6 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
-using namespace hipdnn_sdk::test_utilities;
-using namespace hipdnn_sdk::data_objects;
-using namespace hipdnn_sdk::utilities;
-
 namespace hipdnn_sdk_test_utils
 {
 

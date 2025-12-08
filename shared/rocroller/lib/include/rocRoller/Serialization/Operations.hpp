@@ -395,6 +395,25 @@ namespace rocRoller
             }
         };
 
+        template <typename IO, typename Context>
+        struct MappingTraits<Operations::Scratch, IO, Context>
+        {
+            using TOp = Operations::Scratch;
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, TOp& op, Context& ctx)
+            {
+                iot::mapRequired(io, "scratchPolicy", op.m_policy);
+            }
+
+            static void mapping(IO& io, TOp& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
         template <>
         struct DefaultConstruct<Operations::Operation, Operations::Operation>
         {
@@ -530,6 +549,16 @@ namespace rocRoller
             static Operations::Operation call()
             {
                 return Operations::Nop();
+            }
+        };
+
+        template <>
+        struct DefaultConstruct<Operations::Operation, Operations::Scratch>
+        {
+            static Operations::Operation call()
+            {
+                return Operations::Scratch(Operations::OperationTag(-1),
+                                           Operations::ScratchPolicy::None);
             }
         };
 

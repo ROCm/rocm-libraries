@@ -33,4 +33,15 @@ struct _rocsparse_dnvec_descr
     void*              values{};
     const void*        const_values{};
     rocsparse_datatype data_type{};
+    int64_t            batch_stride{};
+    int64_t            batch_count{1};
+    int64_t            inc{1};
+    _rocsparse_dnvec_descr() = default;
+    _rocsparse_dnvec_descr(int64_t            batch_count_,
+                           int64_t            nitems_,
+                           rocsparse_datatype data_type_,
+                           const void*        const_values_,
+                           void*              values_,
+                           int64_t            inc_,
+                           int64_t            batch_stride_);
 };

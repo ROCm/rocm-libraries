@@ -50,7 +50,10 @@ struct ConvolutionWrwParams
     hipdnn_sdk::data_objects::ConvMode convMode;
 };
 
-template <typename InputDataType, typename AccumulatorType>
+template <typename XDataType,
+          typename DyDataType,
+          typename OutputDataType,
+          typename ComputeDataType>
 class ConvolutionWrwPlan : public IGraphNodePlanExecutor
 {
 public:
@@ -61,36 +64,39 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        auto shallowXTensor = createShallowTensor<InputDataType>(
-            _params.xTensor, variantPack.at(_params.xTensor.uid));
+        auto shallowXTensor
+            = createShallowTensor<XDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
 
-        auto shallowDWTensor = createShallowTensor<InputDataType>(
+        auto shallowDWTensor = createShallowTensor<OutputDataType>(
             _params.dwTensor, variantPack.at(_params.dwTensor.uid));
 
-        auto shallowDYTensor = createShallowTensor<InputDataType>(
+        auto shallowDYTensor = createShallowTensor<DyDataType>(
             _params.dyTensor, variantPack.at(_params.dyTensor.uid));
 
-        CpuFpReferenceConvolutionImpl<InputDataType, AccumulatorType>::convBwdWeight(
-            *shallowXTensor,
-            *shallowDWTensor,
-            *shallowDYTensor,
-            _params.stride,
-            _params.dilation,
-            _params.prePadding,
-            _params.postPadding);
+        CpuFpReferenceConvolution::wgrad(*shallowXTensor,
+                                         *shallowDWTensor,
+                                         *shallowDYTensor,
+                                         _params.stride,
+                                         _params.dilation,
+                                         _params.prePadding,
+                                         _params.postPadding);
     }
 
 private:
     ConvolutionWrwParams _params;
 };
 
-template <hipdnn_sdk::data_objects::DataType InputDataTypeEnum,
-          hipdnn_sdk::data_objects::DataType AccumulatorDataTypeEnum>
+template <hipdnn_sdk::data_objects::DataType XDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType DyDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_sdk::data_objects::DataType ComputeDataTypeEnum>
 class ConvolutionWrwPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
-    using InputDataType = DataTypeToNative<InputDataTypeEnum>;
-    using AccumulatorDataType = DataTypeToNative<AccumulatorDataTypeEnum>;
+    using XDataType = DataTypeToNative<XDataTypeEnum>;
+    using DyDataType = DataTypeToNative<DyDataTypeEnum>;
+    using OutputDataType = DataTypeToNative<OutputDataTypeEnum>;
+    using ComputeDataType = DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
         const hipdnn_sdk::data_objects::Node& node,
@@ -107,9 +113,9 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dw_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dy_tensor_uid());
 
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), InputDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dw_tensor_uid(), InputDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), InputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), XDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dw_tensor_uid(), OutputDataTypeEnum);
+        CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), DyDataTypeEnum);
 
         return true;
     }
@@ -129,13 +135,14 @@ public:
             *tensorMap.at(nodeAttributes->x_tensor_uid()),
             *tensorMap.at(nodeAttributes->dw_tensor_uid()),
             *tensorMap.at(nodeAttributes->dy_tensor_uid()),
-            convertFlatBufferVectorToStdVector(nodeAttributes->pre_padding()),
-            convertFlatBufferVectorToStdVector(nodeAttributes->post_padding()),
-            convertFlatBufferVectorToStdVector(nodeAttributes->stride()),
-            convertFlatBufferVectorToStdVector(nodeAttributes->dilation()),
+            utilities::convertFlatBufferVectorToStdVector(nodeAttributes->pre_padding()),
+            utilities::convertFlatBufferVectorToStdVector(nodeAttributes->post_padding()),
+            utilities::convertFlatBufferVectorToStdVector(nodeAttributes->stride()),
+            utilities::convertFlatBufferVectorToStdVector(nodeAttributes->dilation()),
             nodeAttributes->conv_mode());
 
-        return std::make_unique<ConvolutionWrwPlan<InputDataType, AccumulatorDataType>>(
+        return std::make_unique<
+            ConvolutionWrwPlan<XDataType, DyDataType, OutputDataType, ComputeDataType>>(
             std::move(params));
     }
 };

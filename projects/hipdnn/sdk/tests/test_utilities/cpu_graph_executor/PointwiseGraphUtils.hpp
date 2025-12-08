@@ -14,10 +14,6 @@
 
 #include "PointwiseTensorBundles.hpp"
 
-using namespace hipdnn_sdk::test_utilities;
-using namespace hipdnn_sdk::data_objects;
-using namespace hipdnn_sdk::utilities;
-
 namespace hipdnn_sdk_test_utils
 {
 
@@ -30,8 +26,9 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                              hipdnn_sdk::data_objects::DataType accumulatorDataType,
                              hipdnn_sdk::data_objects::DataType outputDataType,
                              hipdnn_frontend::PointwiseMode operation,
-                             unsigned int seed = getGlobalTestSeed(),
-                             const TensorLayout& layout = TensorLayout::NCHW,
+                             unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
+                             const hipdnn_sdk::utilities::TensorLayout& layout
+                             = hipdnn_sdk::utilities::TensorLayout::NCHW,
                              std::optional<float> reluLowerClip = std::nullopt,
                              std::optional<float> reluUpperClip = std::nullopt,
                              std::optional<float> reluLowerClipSlope = std::nullopt,
@@ -46,7 +43,7 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     int64_t uid = 1;
 
     // Create input tensor attribute
-    auto inputStrides = generateStrides(inputDims, layout.strideOrder);
+    auto inputStrides = hipdnn_sdk::utilities::generateStrides(inputDims, layout.strideOrder);
     const auto& inputDimsCopy = inputDims;
     auto inputAttr = hipdnn_frontend::graph::makeTensorAttributes(
         "Input", hipdnn_frontend::fromSdkType(input0DataType), inputDimsCopy, inputStrides);
@@ -90,8 +87,16 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     }
     outputTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(outputDataType));
     outputTensorAttr->set_dim(outputDims);
-    outputTensorAttr->set_stride(generateStrides(outputDims, layout.strideOrder));
+    outputTensorAttr->set_stride(
+        hipdnn_sdk::utilities::generateStrides(outputDims, layout.strideOrder));
     outputTensorAttr->set_output(true);
+
+    // Ensure properties are inferred
+    auto validateResult = graph->validate();
+    if(validateResult.is_bad())
+    {
+        throw std::runtime_error("Graph validation failed: " + validateResult.get_message());
+    }
 
     // Serialize graph and create tensor bundle
     auto serializedGraph = graph->buildFlatbufferOperationGraph();
@@ -115,8 +120,9 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
                               hipdnn_sdk::data_objects::DataType accumulatorDataType,
                               hipdnn_sdk::data_objects::DataType outputDataType,
                               hipdnn_frontend::PointwiseMode operation,
-                              unsigned int seed = getGlobalTestSeed(),
-                              const TensorLayout& layout = TensorLayout::NCHW,
+                              unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
+                              const hipdnn_sdk::utilities::TensorLayout& layout
+                              = hipdnn_sdk::utilities::TensorLayout::NCHW,
                               std::optional<float> reluLowerClip = std::nullopt,
                               std::optional<float> reluUpperClip = std::nullopt,
                               std::optional<float> reluLowerClipSlope = std::nullopt,
@@ -131,7 +137,7 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     int64_t uid = 1;
 
     // Create input tensor attributes
-    auto input1Strides = generateStrides(input1Dims, layout.strideOrder);
+    auto input1Strides = hipdnn_sdk::utilities::generateStrides(input1Dims, layout.strideOrder);
     const auto& input1DimsCopy = input1Dims;
     auto input1Attr = hipdnn_frontend::graph::makeTensorAttributes(
         "Input1", hipdnn_frontend::fromSdkType(input0DataType), input1DimsCopy, input1Strides);
@@ -139,7 +145,7 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     auto input1TensorAttr
         = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(input1Attr));
 
-    auto input2Strides = generateStrides(input2Dims, layout.strideOrder);
+    auto input2Strides = hipdnn_sdk::utilities::generateStrides(input2Dims, layout.strideOrder);
     const auto& input2DimsCopy = input2Dims;
     auto input2Attr = hipdnn_frontend::graph::makeTensorAttributes(
         "Input2", hipdnn_frontend::fromSdkType(input1DataType), input2DimsCopy, input2Strides);
@@ -183,8 +189,16 @@ inline std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     }
     outputTensorAttr->set_data_type(hipdnn_frontend::fromSdkType(outputDataType));
     outputTensorAttr->set_dim(outputDims);
-    outputTensorAttr->set_stride(generateStrides(outputDims, layout.strideOrder));
+    outputTensorAttr->set_stride(
+        hipdnn_sdk::utilities::generateStrides(outputDims, layout.strideOrder));
     outputTensorAttr->set_output(true);
+
+    // Ensure properties are inferred
+    auto validateResult = graph->validate();
+    if(validateResult.is_bad())
+    {
+        throw std::runtime_error("Graph validation failed: " + validateResult.get_message());
+    }
 
     // Serialize graph and create tensor bundle
     auto serializedGraph = graph->buildFlatbufferOperationGraph();
