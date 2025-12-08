@@ -641,7 +641,7 @@ void BuildAsm(const std::string& name,
         action.SetLogging(true);
         auto optAsm = miopen::SplitSpaceSeparated(options);
 #if WORKAROUND_ISSUE_3001
-        if(target.Xnack() && !*target.Xnack())
+        if(!target.isXnackEnabled())
             optAsm.emplace_back("-mno-xnack");
 #endif
         compiler::lc::gcnasm::RemoveOptionsUnwanted(optAsm);
