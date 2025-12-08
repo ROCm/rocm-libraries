@@ -39,6 +39,8 @@
 
 #if defined(__HIP_PLATFORM_NVIDIA__)
     #include <cuda_fp16.h>
+#else
+    #include <rocprim/type_traits.hpp>
 #endif
 
 #include <cstring>
@@ -331,20 +333,10 @@ inline std::ostream& operator<<(std::ostream &out, const half_t &x)
  * Traits overloads
  ******************************************************************************/
 
-#if defined(__HIP_PLATFORM_NVIDIA__)
-_CCCL_SUPPRESS_DEPRECATED_PUSH
-#else
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-#endif
 template<>
 struct hipcub::NumericTraits<half_t>
-    : hipcub::BaseTraits<hipcub::FLOATING_POINT, unsigned short, half_t>
+    : hipcub::BaseTraits<hipcub::FLOATING_POINT, true, unsigned short, half_t>
 {};
-#if defined(__HIP_PLATFORM_NVIDIA__)
-_CCCL_SUPPRESS_DEPRECATED_POP
-#else
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-#endif
 
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
