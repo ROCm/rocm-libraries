@@ -49,19 +49,19 @@ TEST(bsrxmv_bad_arg, bsrxmv_bad_arg_double_complex)
 
 TEST(bsrxmv, bsrxmv_float)
 {
-    Arguments         arg;
+    Arguments arg;
     testing_bsrxmv<float>(arg);
 }
 
 TEST(bsrxmv, bsrxmv_double)
 {
-    Arguments         arg;
+    Arguments arg;
     testing_bsrxmv<double>(arg);
 }
 
 TEST(bsrxmv, bsrxmv_hipComplex)
 {
-    Arguments         arg;
+    Arguments arg;
     testing_bsrxmv<hipComplex>(arg);
 }
 #endif
