@@ -129,12 +129,16 @@ if(WIN32)
     # when consuming the hipdnn_sdk.  We need to clear these options Refer to issue:
     # https://github.com/ROCm/TheRock/issues/2003
 
-    # Can't do this to an alias
-    get_property(aliased_target_name TARGET spdlog::spdlog_header_only PROPERTY ALIASED_TARGET)
-    message(STATUS "spdlog::spdlog_header_only aliased target name: '${aliased_target_name}'")
+    if(TARGET spdlog::spdlog_header_only)
+        # Can't do this to an alias
+        get_property(aliased_target_name TARGET spdlog::spdlog_header_only PROPERTY ALIASED_TARGET)
+        message(STATUS "spdlog::spdlog_header_only aliased target name: '${aliased_target_name}'")
 
-    if(NOT aliased_target_name)
-        set_target_properties(spdlog::spdlog_header_only PROPERTIES INTERFACE_COMPILE_OPTIONS "")
+        if(NOT aliased_target_name)
+            set_target_properties(
+                spdlog::spdlog_header_only PROPERTIES INTERFACE_COMPILE_OPTIONS ""
+            )
+        endif()
     endif()
 endif()
 

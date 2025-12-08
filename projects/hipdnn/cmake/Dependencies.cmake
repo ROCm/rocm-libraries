@@ -102,7 +102,7 @@ endfunction()
 
 # Fetches FlatBuffers
 function(_fetch_flatbuffers VERSION HASH)
-    _determine_git_tag(v 23.1.21)
+    _determine_git_tag(v 25.9.23)
 
     _save_var(FLATBUFFERS_BUILD_FLATC)
     _save_var(FLATBUFFERS_INSTALL)
@@ -145,7 +145,7 @@ endfunction()
 
 # Fetches spdlog
 function(_fetch_spdlog VERSION HASH)
-    _determine_git_tag(v v1.15.2)
+    _determine_git_tag(v v1.15.3)
 
     fetchcontent_declare(
         spdlog

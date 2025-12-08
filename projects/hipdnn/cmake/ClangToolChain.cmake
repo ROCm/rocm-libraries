@@ -27,7 +27,7 @@
 # Platform-specific compiler configuration
 if(WIN32)
     set(DEFAULT_ROCM_COMPILER_EXTENSION ".exe")
-    set(CMAKE_RC_COMPILER rc.exe)
+    set(CMAKE_RC_COMPILER "CMAKE_RC_COMPILER-NOTREQUIRED")
 endif()
 
 # Common compiler configuration

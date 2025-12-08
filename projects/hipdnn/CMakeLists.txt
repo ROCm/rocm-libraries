@@ -13,13 +13,14 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake" CACHE STRING
-                                                                                "Toolchain file"
-)
-
+if(NOT CMAKE_TOOLCHAIN_FILE)
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+        CACHE FILEPATH "Toolchain file"
+    )
+endif()
 set(HIPDNN_VERSION "0.0.1")
 
-project(hipDNN VERSION ${HIPDNN_VERSION} LANGUAGES CXX)
+project(hipDNN VERSION ${HIPDNN_VERSION} LANGUAGES CXX HIP)
 
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/CheckPreCommit.cmake)
 
