@@ -180,8 +180,16 @@ class TestCustomSchedule:
         valid, message = schedule_info.isValid({"kernel" : kernel})
         assert valid, message
 
-    @pytest.mark.parametrize("transA, transB", [(True, False), (False, False)])
-    def test_schedule_256x192x64_16bit_TN(self, transA, transB):
+    @pytest.mark.parametrize(
+        # fmt: off
+        "transA, transB, lds_tr_inst,  tr_lds", [
+        (  True,  False,       False,       1),
+        ( False,  False,        True,       1),
+        ( False,   True,        True,       0)
+        # fmt: on
+        ])        
+    def test_schedule_256x192x64_16bit(self, transA, transB, lds_tr_inst,  tr_lds):
+
         """Tests the 256x192x64 16-bit TN schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
@@ -194,7 +202,7 @@ class TestCustomSchedule:
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
-            "LDSTrInst": not transA, "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 6,
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 8, "MIWaveTileB": 6,
         })
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
