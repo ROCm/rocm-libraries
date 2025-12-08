@@ -188,7 +188,6 @@ def verify_global_reads_not_too_early_single_code_path(
         waitIndex = 0
         for syncIndex, precede in zip(vmfmaIndices, preceding):
             if closedLowerBound <= syncIndex and syncIndex < openUpperBound:
-                print(precede)
                 count = precede[LRX]
                 outstandings.append(count)
                 if waveCompleteIndex is None and count == 0:
@@ -2460,9 +2459,6 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    
-    if isNT(kernel) and useLDSTr and TLDS == 0:
-        opt1.disableValidation()  # TODO: Remove after verify_global_reads_not_too_early validator is fixed: https://github.com/ROCm/rocm-libraries/issues/3188
     
     return True, opt1
 
