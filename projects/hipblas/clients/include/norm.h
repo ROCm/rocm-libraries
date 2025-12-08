@@ -255,8 +255,20 @@ double vector_norm_1(int64_t M, int64_t incx, T* hx_gold, T* hx)
     double max_err      = 0.0;
     for(int64_t i = 0; i < M; i++)
     {
-        max_err += hipblas_abs((hx_gold[i * incx] - hx[i * incx]));
-        max_err_scal += hipblas_abs(hx_gold[i * incx]);
+        if constexpr(std::is_same_v<T, hipblasHalf>)
+        {
+            double hx_value;
+            double gold_value;
+            hx_value   = half_to_float(hx[i * incx]);
+            gold_value = half_to_float(hx_gold[i * incx]);
+            max_err += hipblas_abs(gold_value - hx_value);
+            max_err_scal += hipblas_abs(gold_value);
+        }
+        else
+        {
+            max_err += hipblas_abs(hx_gold[i * incx] - hx[i * incx]);
+            max_err_scal += hipblas_abs(hx_gold[i * incx]);
+        }
     }
 
     if(hipblas_abs(max_err_scal) < 1e6)
