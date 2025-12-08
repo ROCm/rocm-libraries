@@ -286,7 +286,8 @@ std::vector<Solution> EvaluateConvSolutions(const ExecutionContext& ctx,
     // test timing of solver reported by system db
     const auto& handle = ctx.GetStream();
     AutoEnableProfiling enableProfiling{handle};
-    bool is_optimal = true;
+    FindCoreResult core_result;
+    core_result.is_optimal = true;
 
     // reverse solutions so that EvaluateInvokers registers the fastest solution last
     auto sol_itr = solutions.rbegin();
@@ -306,7 +307,7 @@ std::vector<Solution> EvaluateConvSolutions(const ExecutionContext& ctx,
         AlgorithmName algo{
             ConvolutionAlgoToDirectionalString(id.GetAlgo(), problem.GetDirection())};
         std::vector<Solution> eval_sol = EvaluateInvokers(
-            handle, conv_sols, algo, problem.MakeNetworkConfig(), invoke_ctx, is_optimal, false);
+            handle, conv_sols, algo, problem.MakeNetworkConfig(), invoke_ctx, core_result, false);
 
         if(!eval_sol.empty())
             eval_sols.emplace_back(eval_sol.front());
@@ -375,16 +376,16 @@ std::vector<Solution> VerifiedFDBSolution(const ExecutionContext& ctx,
             // system db result is good
             // add to user fdb so this check is skipped next time
             MIOPEN_LOG_I2("TrustVerify: Add system db entry to user db");
-            auto fallback  = FallbackPath();
-            auto ret       = FindCoreResult();
-            ret.is_optimal = true;
-            auto copy_sols = conv.GetSolutions(ctx, problem, 4, &fallback, &invoke_ctx);
+            auto fallback          = FallbackPath();
+            auto core_result       = FindCoreResult();
+            core_result.is_optimal = true;
+            auto copy_sols         = conv.GetSolutions(ctx, problem, 4, &fallback, &invoke_ctx);
             for(const auto& s : copy_sols)
             {
                 auto solution = Solution{solver::Id{s.solution_id}, s.time, s.workspace_size};
-                ret.solutions.emplace_back(std::move(solution));
+                core_result.solutions.emplace_back(std::move(solution));
             }
-            return ret;
+            return core_result;
         }
         else
         {
@@ -411,6 +412,9 @@ std::vector<Solution> VerifiedFDBSolution(const ExecutionContext& ctx,
                 MIOPEN_LOG_W("Find Ended: " << record.GetKey());
             else
                 MIOPEN_LOG_I("Find Ended: " << record.GetKey());
+
+            ctx.generic_search_worst_time = ctx_copy.generic_search_worst_time;
+            ctx.generic_search_best_time  = ctx_copy.generic_search_best_time;
 
             return ret;
         }
@@ -518,6 +522,9 @@ std::vector<Solution> FindConvolution(const ExecutionContext& ctx,
                 MIOPEN_LOG_W("Find Ended: " << record.GetKey());
             else
                 MIOPEN_LOG_I("Find Ended: " << record.GetKey());
+
+            ctx.generic_search_worst_time = ctx_copy.generic_search_worst_time;
+            ctx.generic_search_best_time  = ctx_copy.generic_search_best_time;
 
             return ret;
         });
