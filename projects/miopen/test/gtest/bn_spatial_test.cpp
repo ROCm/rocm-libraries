@@ -1358,11 +1358,7 @@ public:
         {
             if constexpr(MIO_BN_SP_TEST_DEBUG == 1)
                 std::cout << "Running back propagation spatial with S set." << std::endl;
-<<<<<<< HEAD
             test_helpers::CompareResults(
-=======
-            CompareResults(
->>>>>>> a5cd4bbcf2 (Ported bn_spatial_test from CTest to GTest)
                 verify_backward_bn_spatial_use_saved<T, PREC_TYPE>{
                     input, dy_input, scale, savedMean, savedInvVar},
                 tolerance);
