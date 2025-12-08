@@ -23,27 +23,33 @@ struct BatchnormBwdParams
     BatchnormBwdParams() = default;
     BatchnormBwdParams(const hipdnn_sdk::data_objects::TensorAttributes& dyAttributes,
                        const hipdnn_sdk::data_objects::TensorAttributes& xAttributes,
-                       const hipdnn_sdk::data_objects::TensorAttributes& meanAttributes,
-                       const hipdnn_sdk::data_objects::TensorAttributes& invVarianceAttributes,
+                       const hipdnn_sdk::data_objects::TensorAttributes* meanAttributes,
+                       const hipdnn_sdk::data_objects::TensorAttributes* invVarianceAttributes,
                        const hipdnn_sdk::data_objects::TensorAttributes& scaleAttributes,
                        const hipdnn_sdk::data_objects::TensorAttributes& dxAttributes,
                        const hipdnn_sdk::data_objects::TensorAttributes& dscaleAttributes,
                        const hipdnn_sdk::data_objects::TensorAttributes& dbiasAttributes)
         : dyTensor(unpackTensorAttributes(dyAttributes))
         , xTensor(unpackTensorAttributes(xAttributes))
-        , meanTensor(unpackTensorAttributes(meanAttributes))
-        , invVarianceTensor(unpackTensorAttributes(invVarianceAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
         , dxTensor(unpackTensorAttributes(dxAttributes))
         , dscaleTensor(unpackTensorAttributes(dscaleAttributes))
         , dbiasTensor(unpackTensorAttributes(dbiasAttributes))
     {
+        if(meanAttributes != nullptr)
+        {
+            meanTensor = unpackTensorAttributes(*meanAttributes);
+        }
+        if(invVarianceAttributes != nullptr)
+        {
+            invVarianceTensor = unpackTensorAttributes(*invVarianceAttributes);
+        }
     }
 
     hipdnn_sdk::data_objects::TensorAttributesT dyTensor;
     hipdnn_sdk::data_objects::TensorAttributesT xTensor;
-    hipdnn_sdk::data_objects::TensorAttributesT meanTensor;
-    hipdnn_sdk::data_objects::TensorAttributesT invVarianceTensor;
+    std::optional<hipdnn_sdk::data_objects::TensorAttributesT> meanTensor;
+    std::optional<hipdnn_sdk::data_objects::TensorAttributesT> invVarianceTensor;
     hipdnn_sdk::data_objects::TensorAttributesT scaleTensor;
     hipdnn_sdk::data_objects::TensorAttributesT dxTensor;
     hipdnn_sdk::data_objects::TensorAttributesT dscaleTensor;
@@ -72,11 +78,20 @@ public:
         auto shallowXTensor
             = createShallowTensor<XDataType>(_params.xTensor, variantPack.at(_params.xTensor.uid));
 
-        auto shallowMeanTensor = createShallowTensor<MeanVarianceDataType>(
-            _params.meanTensor, variantPack.at(_params.meanTensor.uid));
+        std::unique_ptr<utilities::TensorBase<MeanVarianceDataType>> shallowMeanTensor;
+        if(_params.meanTensor.has_value())
+        {
+            shallowMeanTensor = createShallowTensor<MeanVarianceDataType>(
+                _params.meanTensor.value(), variantPack.at(_params.meanTensor.value().uid));
+        }
 
-        auto shallowInvVarianceTensor = createShallowTensor<MeanVarianceDataType>(
-            _params.invVarianceTensor, variantPack.at(_params.invVarianceTensor.uid));
+        std::unique_ptr<utilities::TensorBase<MeanVarianceDataType>> shallowInvVarianceTensor;
+        if(_params.invVarianceTensor.has_value())
+        {
+            shallowInvVarianceTensor = createShallowTensor<MeanVarianceDataType>(
+                _params.invVarianceTensor.value(),
+                variantPack.at(_params.invVarianceTensor.value().uid));
+        }
 
         auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
@@ -90,14 +105,15 @@ public:
         auto shallowDbiasTensor = createShallowTensor<ScaleBiasDataType>(
             _params.dbiasTensor, variantPack.at(_params.dbiasTensor.uid));
 
-        CpuFpReferenceBatchnorm::backward(*shallowDyTensor,
-                                          *shallowXTensor,
-                                          *shallowMeanTensor,
-                                          *shallowInvVarianceTensor,
-                                          *shallowScaleTensor,
-                                          *shallowDxTensor,
-                                          *shallowDscaleTensor,
-                                          *shallowDbiasTensor);
+        CpuFpReferenceBatchnorm::backward(
+            *shallowDyTensor,
+            *shallowXTensor,
+            *shallowScaleTensor,
+            *shallowDxTensor,
+            *shallowDscaleTensor,
+            *shallowDbiasTensor,
+            shallowMeanTensor != nullptr ? shallowMeanTensor.get() : nullptr,
+            shallowInvVarianceTensor != nullptr ? shallowInvVarianceTensor.get() : nullptr);
     }
 
 private:
@@ -136,18 +152,21 @@ public:
             return false;
         }
 
-        if(!nodeAttributes->mean_tensor_uid().has_value()
-           || !nodeAttributes->inv_variance_tensor_uid().has_value())
-        {
-            throw std::runtime_error(
-                "BatchnormBackwardAttributes mean or inv_variance tensor is optional.  Cpu ref "
-                "implementation currently doesnt support optional tensors");
-        }
-
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dy_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->x_tensor_uid());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid().value());
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid().value());
+        if(nodeAttributes->mean_tensor_uid().has_value())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid().value());
+            CHECK_TENSOR_TYPE(
+                tensorMap, nodeAttributes->mean_tensor_uid().value(), MeanVarianceDataTypeEnum);
+        }
+        if(nodeAttributes->inv_variance_tensor_uid().has_value())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid().value());
+            CHECK_TENSOR_TYPE(tensorMap,
+                              nodeAttributes->inv_variance_tensor_uid().value(),
+                              MeanVarianceDataTypeEnum);
+        }
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->scale_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dx_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dscale_tensor_uid());
@@ -155,10 +174,6 @@ public:
 
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), DyDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), XDataTypeEnum);
-        CHECK_TENSOR_TYPE(
-            tensorMap, nodeAttributes->mean_tensor_uid().value(), MeanVarianceDataTypeEnum);
-        CHECK_TENSOR_TYPE(
-            tensorMap, nodeAttributes->inv_variance_tensor_uid().value(), MeanVarianceDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dx_tensor_uid(), OutputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dscale_tensor_uid(), ScaleBiasDataTypeEnum);
@@ -178,10 +193,23 @@ public:
         }
 
         const auto& tensorMap = graph.getTensorMap();
+
+        const hipdnn_sdk::data_objects::TensorAttributes* meanAttr = nullptr;
+        if(nodeAttributes->mean_tensor_uid().has_value())
+        {
+            meanAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
+        }
+
+        const hipdnn_sdk::data_objects::TensorAttributes* invVarAttr = nullptr;
+        if(nodeAttributes->inv_variance_tensor_uid().has_value())
+        {
+            invVarAttr = tensorMap.at(nodeAttributes->inv_variance_tensor_uid().value());
+        }
+
         BatchnormBwdParams params(*tensorMap.at(nodeAttributes->dy_tensor_uid()),
                                   *tensorMap.at(nodeAttributes->x_tensor_uid()),
-                                  *tensorMap.at(nodeAttributes->mean_tensor_uid().value()),
-                                  *tensorMap.at(nodeAttributes->inv_variance_tensor_uid().value()),
+                                  meanAttr,
+                                  invVarAttr,
                                   *tensorMap.at(nodeAttributes->scale_tensor_uid()),
                                   *tensorMap.at(nodeAttributes->dx_tensor_uid()),
                                   *tensorMap.at(nodeAttributes->dscale_tensor_uid()),

@@ -53,12 +53,17 @@ struct BatchnormBwdSignatureKey
 
         auto dyTensorAttr = tensorMap.at(nodeAttributes->dy_tensor_uid());
         auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
-        auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
         auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
         auto dxTensorAttr = tensorMap.at(nodeAttributes->dx_tensor_uid());
 
-        if(dyTensorAttr == nullptr || xTensorAttr == nullptr || meanTensorAttr == nullptr
-           || scaleTensorAttr == nullptr || dxTensorAttr == nullptr)
+        const hipdnn_sdk::data_objects::TensorAttributes* meanTensorAttr = nullptr;
+        if(nodeAttributes->mean_tensor_uid().has_value())
+        {
+            meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
+        }
+
+        if(dyTensorAttr == nullptr || xTensorAttr == nullptr || scaleTensorAttr == nullptr
+           || dxTensorAttr == nullptr)
         {
             throw std::runtime_error("One or more tensor attributes could not be found in the map, "
                                      "failed to construct key");
@@ -67,7 +72,16 @@ struct BatchnormBwdSignatureKey
         dyDataType = dyTensorAttr->data_type();
         xDataType = xTensorAttr->data_type();
         scaleBiasDataType = scaleTensorAttr->data_type();
-        meanVarianceDataType = meanTensorAttr->data_type();
+
+        if(meanTensorAttr != nullptr)
+        {
+            meanVarianceDataType = meanTensorAttr->data_type();
+        }
+        else
+        {
+            meanVarianceDataType = scaleBiasDataType;
+        }
+
         computeDataType = node.compute_data_type();
         outputDataType = dxTensorAttr->data_type();
     }

@@ -323,12 +323,12 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNchw)
 
     CpuFpReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
                                       scaleTensor,
                                       dxTensor,
                                       dscaleTensor,
-                                      dbiasTensor);
+                                      dbiasTensor,
+                                      &meanTensor,
+                                      &invVarianceTensor);
 }
 
 TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormBackwardNchw)
@@ -344,12 +344,12 @@ TEST(TestCpuFpReferenceBatchnormBfp16, BatchnormBackwardNchw)
 
     CpuFpReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
                                       scaleTensor,
                                       dxTensor,
                                       dscaleTensor,
-                                      dbiasTensor);
+                                      dbiasTensor,
+                                      &meanTensor,
+                                      &invVarianceTensor);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp16, BatchnormBackwardNchw)
@@ -365,12 +365,12 @@ TEST(TestCpuFpReferenceBatchnormFp16, BatchnormBackwardNchw)
 
     CpuFpReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
                                       scaleTensor,
                                       dxTensor,
                                       dscaleTensor,
-                                      dbiasTensor);
+                                      dbiasTensor,
+                                      &meanTensor,
+                                      &invVarianceTensor);
 }
 
 TEST(TestCpuFpReferenceBatchnormMixedPrecision, BatchnormBackwardNchw)
@@ -386,12 +386,12 @@ TEST(TestCpuFpReferenceBatchnormMixedPrecision, BatchnormBackwardNchw)
 
     CpuFpReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
                                       scaleTensor,
                                       dxTensor,
                                       dscaleTensor,
-                                      dbiasTensor);
+                                      dbiasTensor,
+                                      &meanTensor,
+                                      &invVarianceTensor);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBackwardNchw)
@@ -407,12 +407,12 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBackwardNchw)
 
     CpuFpReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
                                       scaleTensor,
                                       dxTensor,
                                       dscaleTensor,
-                                      dbiasTensor);
+                                      dbiasTensor,
+                                      &meanTensor,
+                                      &invVarianceTensor);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNhwc)
@@ -428,12 +428,12 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNhwc)
 
     CpuFpReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
                                       scaleTensor,
                                       dxTensor,
                                       dscaleTensor,
-                                      dbiasTensor);
+                                      dbiasTensor,
+                                      &meanTensor,
+                                      &invVarianceTensor);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBwdSanityValidationNchw)
@@ -485,12 +485,12 @@ TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBwdSanityValidationNchw)
 
     CpuFpReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
                                       scaleTensor,
                                       dxTensor,
                                       dscaleTensor,
-                                      dbiasTensor);
+                                      dbiasTensor,
+                                      &meanTensor,
+                                      &invVarianceTensor);
 
     auto tolerance = 1e-6;
 
@@ -525,12 +525,12 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackward2D)
 
     CpuFpReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
                                       scaleTensor,
                                       dxTensor,
                                       dscaleTensor,
-                                      dbiasTensor);
+                                      dbiasTensor,
+                                      &meanTensor,
+                                      &invVarianceTensor);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackward3D)
@@ -556,12 +556,12 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackward3D)
 
     CpuFpReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
                                       scaleTensor,
                                       dxTensor,
                                       dscaleTensor,
-                                      dbiasTensor);
+                                      dbiasTensor,
+                                      &meanTensor,
+                                      &invVarianceTensor);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNcdhw)
@@ -587,12 +587,12 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNcdhw)
 
     CpuFpReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
                                       scaleTensor,
                                       dxTensor,
                                       dscaleTensor,
-                                      dbiasTensor);
+                                      dbiasTensor,
+                                      &meanTensor,
+                                      &invVarianceTensor);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNdhwc)
@@ -617,12 +617,13 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNdhwc)
 
     CpuFpReferenceBatchnorm::backward(dyTensor,
                                       xTensor,
-                                      meanTensor,
-                                      invVarianceTensor,
                                       scaleTensor,
                                       dxTensor,
                                       dscaleTensor,
-                                      dbiasTensor);
+                                      dbiasTensor,
+                                      &meanTensor,
+                                      &invVarianceTensor);
+}
 }
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwBasic)

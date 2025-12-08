@@ -47,9 +47,11 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
     BatchnormBwdParams params;
     initTensorValues(params.dyTensor, DataType::FLOAT, planTensorBundle.dyTensor, 1);
     initTensorValues(params.xTensor, DataType::FLOAT, planTensorBundle.xTensor, 2);
-    initTensorValues(params.meanTensor, DataType::FLOAT, planTensorBundle.meanTensor, 3);
+    params.meanTensor.emplace();
+    initTensorValues(*params.meanTensor, DataType::FLOAT, planTensorBundle.meanTensor, 3);
+    params.invVarianceTensor.emplace();
     initTensorValues(
-        params.invVarianceTensor, DataType::FLOAT, planTensorBundle.invVarianceTensor, 4);
+        *params.invVarianceTensor, DataType::FLOAT, planTensorBundle.invVarianceTensor, 4);
     initTensorValues(params.scaleTensor, DataType::FLOAT, planTensorBundle.scaleTensor, 5);
     initTensorValues(params.dxTensor, DataType::FLOAT, planTensorBundle.dxTensor, 6);
     initTensorValues(params.dscaleTensor, DataType::FLOAT, planTensorBundle.dscaleTensor, 7);
@@ -69,12 +71,12 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
 
     CpuFpReferenceBatchnorm::backward(directTensorBundle.dyTensor,
                                       directTensorBundle.xTensor,
-                                      directTensorBundle.meanTensor,
-                                      directTensorBundle.invVarianceTensor,
                                       directTensorBundle.scaleTensor,
                                       directTensorBundle.dxTensor,
                                       directTensorBundle.dscaleTensor,
-                                      directTensorBundle.dbiasTensor);
+                                      directTensorBundle.dbiasTensor,
+                                      &directTensorBundle.meanTensor,
+                                      &directTensorBundle.invVarianceTensor);
 
     bwdPlan.execute(variantPack);
 
