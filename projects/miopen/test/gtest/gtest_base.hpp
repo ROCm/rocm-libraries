@@ -65,8 +65,8 @@ typedef enum
 typedef enum
 {
     miopenAfterTestFailureNone    = 0, /*!< Do not do anything on test failure. */
-    miopenAfterTestFailureAnalyze = 0, /*!< Analyze and provide more information. */
-    miopenAfterTestFailureMoveOn  = 0, /*!< Move on next, more trusted, reference. */
+    miopenAfterTestFailureAnalyze = 1, /*!< Analyze and provide more information. */
+    miopenAfterTestFailureMoveOn  = 2, /*!< Move on next, more trusted, reference. */
 } miopenAfterTestFailure_t;
 
 constexpr bool isValidUUT(miopenUnitUnderTest_t uut)
@@ -154,7 +154,7 @@ private:
 
     miopenTestReference_t currentREF = REF;
 
-    bool testFailed = false;
+    bool testOK = true;
     std::unordered_map<std::string, double> failureErrors;
     ErrorAnalysisInfo info;
 
@@ -166,6 +166,8 @@ protected:
      * For example it is resposibility of developer to not make OptimizedGPU as UUT if it is not
      * implemented. Also, we can assume that if there is OG then for sure there is NG, if there is
      * NG then for sure is OC, etc.
+     *
+     * These should be able to be called several times without invoking SetUp again.
      *
      * Or some checks can be implemented in test itself, maybe in SetUpTestSuite?
      */
@@ -179,7 +181,7 @@ protected:
      * continue and perform additional work after falure
      *
      * Return value is pair where:
-     * first [bool] is true if some verifying failed, false otherwise
+     * first [bool] is false if some verifying failed, true otherwise
      * second [unordered_map] map should contain small name of the value(s) that failed and error
      * value(s)
      */
@@ -202,7 +204,7 @@ protected:
             runREF();
             verify();
 
-            if(testFailed)
+            if(!testOK)
             {
                 for(auto [key, value] : failureErrors)
                 {
@@ -243,7 +245,7 @@ protected:
             runREF();
             verify();
 
-            if(!testFailed)
+            if(testOK)
             {
                 break;
             }
@@ -289,27 +291,27 @@ protected:
 
     void verify()
     {
-        bool failedOG = false;
-        bool failedNG = false;
-        bool failedOC = false;
+        bool optimizedGPU_OK = true;
+        bool naiveGPU_OK     = true;
+        bool optimizedCPU_OK = true;
         if constexpr(UUT == miopenUnitBothGPU)
         {
-            std::tie(failedOG, failureErrors) = verifyOptimizedGPU();
-            std::tie(failedNG, failureErrors) = verifyNaiveGPU();
+            std::tie(optimizedGPU_OK, failureErrors) = verifyOptimizedGPU();
+            std::tie(naiveGPU_OK, failureErrors)     = verifyNaiveGPU();
         }
         else if constexpr(UUT == miopenUnitOptimizedGPU)
         {
-            std::tie(failedOG, failureErrors) = verifyOptimizedGPU();
+            std::tie(optimizedGPU_OK, failureErrors) = verifyOptimizedGPU();
         }
         else if constexpr(UUT == miopenUnitNaiveGPU)
         {
-            std::tie(failedNG, failureErrors) = verifyNaiveGPU();
+            std::tie(naiveGPU_OK, failureErrors) = verifyNaiveGPU();
         }
         else
         {
-            std::tie(failedOC, failureErrors) = verifyOptimizedCPU();
+            std::tie(optimizedCPU_OK, failureErrors) = verifyOptimizedCPU();
         }
-        testFailed = failedOG || failedNG || failedOC;
+        testOK = optimizedGPU_OK && naiveGPU_OK && optimizedCPU_OK;
     }
 
 public:
@@ -319,7 +321,7 @@ public:
         runREF();
         verify();
 
-        if(testFailed && ATF != miopenAfterTestFailureNone)
+        if(!testOK && ATF != miopenAfterTestFailureNone)
         {
             if constexpr(ATF == miopenAfterTestFailureAnalyze)
             {
