@@ -38,37 +38,28 @@ Tests:
   M: 1
   N: 1
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  filename: [nos1]
+  filename: [nos1,
+             nos2,
+             nos3]
 
-# - name: csrcolor
-#   category: quick
-#   function: csrcolor
-#   precision: *single_double_precisions_complex_real
-#   M: 1
-#   N: 1
-#   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-#   filename: [nos1,
-#              nos2,
-#              nos3]
+- name: csrcolor
+  category: pre_checkin
+  function: csrcolor
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos4,
+             nos5,
+             nos6,
+             nos7]
 
-# - name: csrcolor
-#   category: pre_checkin
-#   function: csrcolor
-#   precision: *single_double_precisions_complex_real
-#   M: 1
-#   N: 1
-#   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-#   filename: [nos4,
-#              nos5,
-#              nos6,
-#              nos7]
-
-# - name: csrcolor
-#   category: pre_checkin
-#   function: csrcolor
-#   precision: *single_double_precisions_complex_real
-#   M: 1
-#   N: 1
-#   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-#   filename: [shipsec1,
-#              bmwcra_1]
+- name: csrcolor
+  category: pre_checkin
+  function: csrcolor
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [shipsec1,
+             bmwcra_1]

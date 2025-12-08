@@ -260,8 +260,6 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
         return HIPSPARSE_STATUS_INTERNAL_ERROR;
     }
 
-    std::cout << "m: " << m << " k: " << k << " nnz: " << nnz << std::endl;
-
     hipsparseColorInfo_t colorInfo;
     CHECK_HIPSPARSE_ERROR(hipsparseCreateColorInfo(&colorInfo));
 
@@ -284,7 +282,6 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
     CHECK_HIP_ERROR(hipMemcpy(dcol_ind, hcol_ind.data(), sizeof(int) * nnz, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dval, hval.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
 
-    std::cout << "AAAA" << std::endl;
     int ncolors;
 
     CHECK_HIPSPARSE_ERROR(hipsparseXcsrcolor(handle,
@@ -299,9 +296,7 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
                                              dcoloring,
                                              dreordering,
                                              colorInfo));
-    std::cout << "ncolors: " << ncolors << std::endl;
     CHECK_HIP_ERROR(hipDeviceSynchronize());
-    std::cout << "ncolors: " << ncolors << std::endl;
 
     if(argus.unit_check)
     {
@@ -312,15 +307,6 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
         CHECK_HIP_ERROR(
             hipMemcpy(hreordering.data(), dreordering, sizeof(int) * m, hipMemcpyDeviceToHost));
 
-        std::cout << "hcoloring" << std::endl;
-        for(size_t i = 0; i < hcoloring.size(); i++)
-        {
-            std::cout << hcoloring[i] << " ";
-        }
-        std::cout << "" << std::endl;
-
-
-        std::cout << "BBBB" << std::endl;
         // Check that two adjacent nodes do not have the same color
         for(int row = 0; row < m; ++row)
         {
@@ -343,8 +329,6 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
             }
         }
 
-        std::cout << "CCCC" << std::endl;
-
         // Check if colors are contiguous
         int max_value = 0;
         for(size_t i = 0; i < hcoloring.size(); ++i)
@@ -363,22 +347,12 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
         }
         ++max_value;
 
-        std::cout << "DDDD max_value " << max_value << std::endl;
-
+#ifdef __HIP_PLATFORM_AMD__
         std::vector<bool> marker(max_value, false);
         for(size_t i = 0; i < hcoloring.size(); ++i)
         {
             marker[hcoloring[i]] = true;
         }
-
-        std::cout << "marker" << std::endl;
-        for(size_t i = 0; i < marker.size(); i++)
-        {
-            std::cout << marker[i] << " ";
-        }
-        std::cout << "" << std::endl;
-
-        std::cout << "EEEE" << std::endl;
 
         for(int i = 0; i < max_value; ++i)
         {
@@ -386,8 +360,7 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
                                               : HIPSPARSE_STATUS_INTERNAL_ERROR,
                                     HIPSPARSE_STATUS_SUCCESS);
         }
-
-        std::cout << "FFFF" << std::endl;
+#endif
     }
 
     hipsparseDestroyColorInfo(colorInfo);
