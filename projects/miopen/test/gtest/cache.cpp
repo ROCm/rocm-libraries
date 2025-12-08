@@ -23,17 +23,18 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include <gtest/gtest.h>
 
 #include <miopen/binary_cache.hpp>
 #include <miopen/bz2.hpp>
 #include <miopen/kern_db.hpp>
 #include <miopen/temp_file.hpp>
-#include <algorithm>
-#include <vector>
+
 #include "test.hpp"
 #include "random.hpp"
 
-#include <gtest/gtest.h>
+#include <algorithm>
+#include <vector>
 
 #if MIOPEN_ENABLE_SQLITE
 std::vector<char> random_bytes(size_t length)
@@ -108,7 +109,7 @@ TEST(CPU_Cache_NONE, check_kern_db)
         EXPECT_TRUE(clean_db.StoreRecordUnsafe(cfg0));
         auto readout = clean_db.FindRecordUnsafe(cfg0);
         EXPECT_TRUE(readout);
-        EXPECT_TRUE(readout.get() == cfg0.kernel_blob);
+        EXPECT_TRUE(readout.value() == cfg0.kernel_blob);
         EXPECT_TRUE(clean_db.RemoveRecordUnsafe(cfg0));
         EXPECT_FALSE(clean_db.FindRecordUnsafe(cfg0));
     }
