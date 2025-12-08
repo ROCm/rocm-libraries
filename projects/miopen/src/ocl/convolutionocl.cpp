@@ -26,7 +26,6 @@
 
 #include <miopen/convolution.hpp>
 
-#include <miopen/algorithm.hpp>
 #include <miopen/conv_algo_name.hpp>
 #include <miopen/conv/solver_finders.hpp>
 #include <miopen/check_numerics.hpp>
@@ -41,9 +40,7 @@
 #include <miopen/invoker.hpp>
 #include <miopen/kernel.hpp>
 #include <miopen/solution.hpp>
-#include <miopen/tensor_ops.hpp>
 #include <miopen/tensor.hpp>
-#include <miopen/util.hpp>
 #include <miopen/visit_float.hpp>
 #include <miopen/datatype.hpp>
 #include <miopen/any_solver.hpp>
@@ -56,9 +53,8 @@
 
 #include <cassert>
 #include <functional>
+#include <optional>
 #include <type_traits>
-
-#include <boost/range/adaptors.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_IMMED_FALLBACK)
 MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_DUMP_TENSOR_PATH)
@@ -205,7 +201,10 @@ static Invoker PrepareInvoker(ExecutionContext ctx,
     auto db           = MakeConvDbGetter(ctx);
     auto solution     = solver.FindSolution(ctx, problem, db, {}); // auto tune is not expected here
     auto& handle      = ctx.GetStream();
-    auto invoker = handle.PrepareInvoker(*solution.invoker_factory, solution.construction_params);
+    // NOLINTBEGIN (bugprone-unchecked-optional-access)
+    auto invoker =
+        handle.PrepareInvoker(solution.invoker_factory.value(), solution.construction_params);
+    // NOLINTEND (bugprone-unchecked-optional-access)
     const auto algo = AlgorithmName{solver_id.GetAlgo(problem.GetDirection())};
 
     handle.RegisterInvoker(invoker, config, solver_id.ToString(), algo);
@@ -427,7 +426,7 @@ std::vector<Solution> FindConvolution(const ExecutionContext& ctx,
                                       bool force_attach_binary)
 {
     auto results         = std::vector<Solution>{};
-    auto sol             = boost::optional<miopenConvSolution_t>{};
+    auto sol             = std::optional<miopenConvSolution_t>{};
     const auto& conv     = problem.GetConv();
     const auto& findMode = conv.findMode;
     auto fallback        = FallbackPath();
