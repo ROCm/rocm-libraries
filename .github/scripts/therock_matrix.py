@@ -19,10 +19,11 @@ subtree_to_project_map = {
     "projects/rocsolver": "solver",
     "projects/rocsparse": "sparse",
     "projects/rocthrust": "prim",
+    "projects/rocwmma": "rocwmma",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
     "shared/rocroller": "blas",
-    "shared/tensile": "blas"
+    "shared/tensile": "blas",
 }
 
 project_map = {
@@ -39,17 +40,21 @@ project_map = {
         "project_to_test": "hipblaslt, rocblas, hipblas",
     },
     "miopen": {
-        "cmake_options": "-DTHEROCK_ENABLE_MIOPEN=ON -DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON -DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON -DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
-        "project_to_test": "miopen",
+        "cmake_options": "-DTHEROCK_ENABLE_MIOPEN=ON -DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON -DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON -DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON -DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
+        "project_to_test": "miopen, miopen_plugin",
     },
     "fft": {
         "cmake_options": "-DTHEROCK_ENABLE_FFT=ON",
         "project_to_test": "hipfft, rocfft",
     },
-    "hipdnn": {
-        "cmake_options": "-DTHEROCK_ENABLE_HIPDNN=ON",
-        "project_to_test": "hipdnn",
-    }
+    "hipdnn": {  # due to MIOpen plugin project being inside the hipDNN directory, we cannot have the MIOpen plugin project as a separate project for now https://github.com/ROCm/rocm-libraries/issues/2316
+        "cmake_options": "-DTHEROCK_ENABLE_MIOPEN_PLUGIN=ON -DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON -DTHEROCK_USE_EXTERNAL_COMPOSABLE_KERNEL=ON -DTHEROCK_COMPOSABLE_KERNEL_SOURCE_DIR=../composable_kernel",
+        "project_to_test": "hipdnn, miopen_plugin",
+    },
+    "rocwmma": {
+        "cmake_options": "-DTHEROCK_ENABLE_ROCWMMA=ON",
+        "project_to_test": "rocwmma",
+    },
 }
 
 # For certain math components, they are optional during building and testing.
@@ -60,14 +65,15 @@ additional_options = {
     "sparse": {
         "cmake_options": "-DTHEROCK_ENABLE_SPARSE=ON",
         "project_to_test": "rocsparse, hipsparse",
-        "project_to_add": "blas"
+        "project_to_add": "blas",
     },
     "solver": {
         "cmake_options": "-DTHEROCK_ENABLE_SOLVER=ON",
         "project_to_test": "rocsolver, hipsolver",
-        "project_to_add": "blas"
-    }
+        "project_to_add": "blas",
+    },
 }
+
 
 def collect_projects_to_run(subtrees):
     projects = set()
@@ -75,22 +81,30 @@ def collect_projects_to_run(subtrees):
     for subtree in subtrees:
         if subtree in subtree_to_project_map:
             projects.add(subtree_to_project_map.get(subtree))
-            
+
     # Check if an optional math component was included.
     for project in list(projects):
         if project in additional_options:
             project_options_to_add = additional_options[project]
-            
+
             project_to_add = project_options_to_add["project_to_add"]
             # If `project_to_add` is in included, add options to the existing `project_map` entry
             if project_to_add in projects:
-                project_map[project_to_add]["cmake_options"] += f" {project_options_to_add["cmake_options"]}"
-                project_map[project_to_add]["project_to_test"] += f", {project_options_to_add["project_to_test"]}"
+                project_map[project_to_add][
+                    "cmake_options"
+                ] += f" {project_options_to_add['cmake_options']}"
+                project_map[project_to_add][
+                    "project_to_test"
+                ] += f", {project_options_to_add['project_to_test']}"
             # If `project_to_add` is not included, only run build and tests for the optional project
             else:
                 projects.add(project_to_add)
-                project_map[project_to_add]["cmake_options"] = project_options_to_add["cmake_options"]
-                project_map[project_to_add]["project_to_test"] = project_options_to_add["project_to_test"]
+                project_map[project_to_add]["cmake_options"] = project_options_to_add[
+                    "cmake_options"
+                ]
+                project_map[project_to_add]["project_to_test"] = project_options_to_add[
+                    "project_to_test"
+                ]
 
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []

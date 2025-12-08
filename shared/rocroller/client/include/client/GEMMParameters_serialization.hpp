@@ -151,6 +151,9 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "types", params.types);
             iot::mapRequired(io, "scaleValue_A", params.scaleValueA);
             iot::mapRequired(io, "scaleValue_B", params.scaleValueB);
+            iot::mapRequired(io, "initMode_A", DGen::toString(params.initModeA));
+            iot::mapRequired(io, "initMode_B", DGen::toString(params.initModeB));
+            iot::mapRequired(io, "initMode_C", DGen::toString(params.initModeC));
             iot::mapRequired(io, "workgroupMappingDim", params.workgroupMappingDim);
         }
 
@@ -258,8 +261,8 @@ namespace rocRoller::Serialization
 
             iot::mapRequired(io, "types", params.types);
 
-            iot::mapRequired(io, "loadLDSScale_A", params.loadLDSScaleA);
-            iot::mapRequired(io, "loadLDSScale_B", params.loadLDSScaleB);
+            iot::mapRequired(io, "loadScale_A", params.loadPathAScale);
+            iot::mapRequired(io, "loadScale_B", params.loadPathBScale);
             iot::mapRequired(io, "swizzleScale", params.swizzleScale);
             iot::mapRequired(io, "swizzleTileSize", params.swizzleTileSize);
             iot::mapRequired(io, "prefetchScale", params.prefetchScale);

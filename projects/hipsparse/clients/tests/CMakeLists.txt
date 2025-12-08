@@ -49,8 +49,8 @@ else()
   if(NOT CMAKE_MATRICES_DIR STREQUAL "${PROJECT_BINARY_DIR}/matrices")
     message("Copy matrix files from ${CMAKE_MATRICES_DIR} to ${PROJECT_BINARY_DIR}/matrices")
 
-    execute_process(COMMAND cp -r ${CMAKE_MATRICES_DIR} ${PROJECT_BINARY_DIR}/matrices RESULT_VARIABLE STATUS WORKING_DIRECTORY ${CMAKE_MATRICES_DIR})
-
+    file(COPY ${CMAKE_MATRICES_DIR}/ DESTINATION ${PROJECT_BINARY_DIR}/matrices)
+  
     if(STATUS AND NOT STATUS EQUAL 0)
       message(FATAL_ERROR "Failed to copy matrix .bin files, aborting.")
     endif()
@@ -116,6 +116,7 @@ set(HIPSPARSE_TEST_SOURCES
   test_spmv_coo.cpp
   test_spmv_coo_aos.cpp
   test_spmv_csr.cpp
+  test_spmv_sell.cpp
   test_axpby.cpp
   test_gather.cpp
   test_scatter.cpp
@@ -195,6 +196,11 @@ endif()
 # Target link libraries
 target_link_libraries(hipsparse-test PRIVATE GTest::gtest roc::hipsparse)
 
+# Link against stdc++fs for std::experimental::filesystem support
+if(NOT WIN32)
+  target_link_libraries(hipsparse-test PRIVATE stdc++fs)
+endif()
+
 # Add OpenMP if available
 if(OPENMP_FOUND AND THREADS_FOUND)
   target_link_libraries(hipsparse-test PRIVATE OpenMP::OpenMP_CXX ${OpenMP_CXX_FLAGS})
@@ -226,12 +232,22 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
                          test_csrsv2.yaml
                          test_gemvi.yaml
                          test_hybmv.yaml
-                         
+
                          test_bsrmm.yaml
                          test_bsrsm2.yaml
                          test_csrmm.yaml
                          test_csrsm2.yaml
                          test_gemmi.yaml
+
+                         test_csric02.yaml
+                         test_csrilu02.yaml
+                         test_bsric02.yaml
+                         test_bsrilu02.yaml
+                         test_gtsv.yaml
+                         test_gtsv2_nopivot.yaml
+                         test_gtsv2_strided_batch.yaml
+                         test_gtsv_interleaved_batch.yaml
+                         test_gpsv_interleaved_batch.yaml
 
                          test_bsr2csr.yaml
                          test_coo2csr.yaml
@@ -254,12 +270,49 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
                          test_prune_csr2csr.yaml
                          test_prune_csr2csr_by_percentage.yaml
                          test_prune_dense2csr.yaml
-                         test_prune_dense2csr_by_percentage.yaml)
+                         test_prune_dense2csr_by_percentage.yaml
+                         test_identity.yaml
+                         test_nnz.yaml
+                         test_coosort.yaml
+                         test_cscsort.yaml
+                         test_csrsort.yaml
+
+                         test_axpby.yaml
+                         test_rot.yaml
+                         test_gather.yaml
+                         test_scatter.yaml
+                         test_sddmm_coo_aos.yaml
+                         test_sddmm_coo.yaml
+                         test_sddmm_csc.yaml
+                         test_sddmm_csr.yaml
+                         test_dense_to_sparse_coo.yaml
+                         test_dense_to_sparse_csc.yaml
+                         test_dense_to_sparse_csr.yaml
+                         test_sparse_to_dense_coo.yaml
+                         test_sparse_to_dense_csc.yaml
+                         test_sparse_to_dense_csr.yaml
+                         test_spgemm_csr.yaml
+                         test_spgemmreuse_csr.yaml
+                         test_spmm_batched_coo.yaml
+                         test_spmm_batched_csc.yaml
+                         test_spmm_batched_csr.yaml
+                         test_spmm_coo.yaml
+                         test_spmm_csc.yaml
+                         test_spmm_csr.yaml
+                         test_spmv_coo_aos.yaml
+                         test_spmv_coo.yaml
+                         test_spmv_csr.yaml
+                         test_spmv_sell.yaml
+                         test_spsv_coo.yaml
+                         test_spsv_csr.yaml
+                         test_spsm_coo.yaml
+                         test_spsm_csr.yaml
+                         test_spvv.yaml)
 
 # Prepare testing data
 set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparse_test.data")
 add_custom_command(OUTPUT "${HIPSPARSE_TEST_DATA}"
-                   COMMAND ${python} ../common/hipsparse_gentest.py -m ${PROJECT_BINARY_DIR}/matrices -I ../include hipsparse_test.yaml -o "${HIPSPARSE_TEST_DATA}"
+                   COMMAND ${Python3_EXECUTABLE} ../common/hipsparse_gentest.py -m ${PROJECT_BINARY_DIR}/matrices -I ../include hipsparse_test.yaml -o "${HIPSPARSE_TEST_DATA}"
                    DEPENDS ../common/hipsparse_gentest.py hipsparse_test.yaml ../include/hipsparse_common.yaml ${HIPSPARSE_TEST_YAMLS}
                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 add_custom_target(hipsparse-test-data

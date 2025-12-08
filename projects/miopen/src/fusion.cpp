@@ -453,7 +453,11 @@ miopenStatus_t FusionPlanDescriptor::AddOp(std::shared_ptr<FusionOpDescriptor> d
         desc->SetInputDesc(input_desc);
     else
         desc->SetInputDesc(output_desc);
-    desc->GetOutputDesc(output_desc);
+    auto status = desc->GetOutputDesc(output_desc);
+    if(status != miopenStatusSuccess)
+    {
+        return status;
+    }
     op_map.emplace_back(desc);
     op_count++;
     return miopenStatusSuccess;
@@ -998,7 +1002,6 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
     {
         FindMode findMode(solver::Primitive::Fusion);
         auto sol = boost::optional<miopenConvSolution_t>{};
-
         if(findMode.IsFast(fusion_problem) || findMode.IsHybrid(fusion_problem))
         {
             const auto ctx      = FusionContext{handle};

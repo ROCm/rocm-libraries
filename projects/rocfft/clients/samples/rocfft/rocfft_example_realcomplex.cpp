@@ -158,11 +158,11 @@ int main(int argc, char* argv[])
 
     if(forward)
     {
-        initreal_cm(length, istride, gpu_in);
+        initreal_cm(length, istride, static_cast<double*>(gpu_in));
     }
     else
     {
-        init_hermitiancomplex_cm(length, ilength, istride, gpu_in);
+        init_hermitiancomplex_cm(length, ilength, istride, static_cast<hipDoubleComplex*>(gpu_in));
     }
 
     // Print the input:

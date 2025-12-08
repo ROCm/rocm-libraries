@@ -712,8 +712,8 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "DirectToVgpr%c does not supports enableGLTr%c and GlobalReadVectorWidth != 8"%(tc, tc))
       return False
 
-    # TLU=False case, need GlobalReadVectorWidth == LocalReadVectorWidth
-    if (not state["ProblemType"]["TLU%c"%tc]) and \
+    # TLU=False or enableGLTr case, need GlobalReadVectorWidth == LocalReadVectorWidth
+    if ((not state["ProblemType"]["TLU%c"%tc]) or state["enableGLTr%c"%tc]) and \
        state["GlobalReadVectorWidth%c"%tc] != state["LocalReadVectorWidth"]:
       reject(state, printRejectionReason, "DirectToVgpr%c does not supports TLU=False GlobalReadVectorWidth%c(%u) != LocalReadVectorWidth(%u)"%(tc, tc, state["GlobalReadVectorWidth%c"%tc], state["LocalReadVectorWidth"]))
       return False
@@ -1863,6 +1863,9 @@ class Solution(collections.abc.Mapping):
             ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata = calcLdsNumBytes(padA, ldsBlockSizePerPadA, padB, ldsBlockSizePerPadB)
             if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > state["MaxLDS"]:
               state["LocalReadVectorWidth"] //= 2
+
+        if state["enableGLTrA"] or state["enableGLTrB"]:
+          state["LocalReadVectorWidth"] = 8
       else:
         if state["UseDotInstruction"]:
           # dot2: LRVW should be equal to NumDotElements * InnerUnroll
@@ -2017,6 +2020,8 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "GRVWB * DataTypeB.numBytes() > 16")
 
       disableGNLC = False # Set to true to disable GNLC if needed
+      if state["UseSgprForGRO"] == 1:
+        disableGNLC = True
       isMixedPrec = (state["ProblemType"]["DataTypeA"].numBytes() != state["ProblemType"]["DataTypeB"].numBytes())
       if state["DirectToLds"] and state["LocalSplitU"] == 1 \
          and not isMixedPrec and not state["ProblemType"]["Sparse"] \

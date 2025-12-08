@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "../level2/rocsparse_csrsv.hpp"
+#include "../level2/rocsparse_csrsv_deprecated_template.hpp"
 #include "internal/level2/rocsparse_csrsv.h"
 #include "internal/precond/rocsparse_csrilu0.h"
 #include "rocsparse_csrilu0.hpp"
@@ -94,8 +95,8 @@ namespace rocsparse
                                                          temp_buffer));
 
         // setup info->singular_pivot
-        csrilu0_info->create_singular_pivot_async(rocsparse::get_indextype<rocsparse_int>(),
-                                                  handle->stream);
+        csrilu0_info->create_singular_pivot_async(
+            static_cast<int64_t>(1), rocsparse::get_indextype<rocsparse_int>(), handle->stream);
 
         RETURN_IF_HIP_ERROR(hipMemcpyAsync(csrilu0_info->get_singular_pivot(),
                                            csrilu0_info->get_zero_pivot(),
