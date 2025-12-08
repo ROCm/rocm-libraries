@@ -3,8 +3,6 @@
 
 #include "unit_conv_solver_group_xdlops.hpp"
 
-#define SOLVER_NAME_DEV_APP ConvHipImplicitGemmGroupFwdXdlops
-
 namespace {
 
 // numeric part of test case
@@ -41,8 +39,8 @@ auto GetConvFullTestCases()
 auto GetDevApplicabilityConvCase()
 {
     // For device applicability checks
-    return GetConvTestForGroupXdlops(
-        miopenHalf, miopenTensorNHWC, std::move(GetConvSmokeTestCases()[0]));
+    return GetConvTestForGroupXdlops<miopenHalf>(miopenTensorNHWC,
+                                                 std::move(GetConvSmokeTestCases()[0]));
 }
 
 // Deterministic test case (for CPU deterministic applicability test)
@@ -54,7 +52,7 @@ auto GetDeterministicConvCase()
         // clang-format on
     };
 
-    return GetConvTestForGroupXdlops(miopenHalf, miopenTensorNHWC, std::move(test_case));
+    return GetConvTestForGroupXdlops<miopenHalf>(miopenTensorNHWC, std::move(test_case));
 }
 
 const auto& GetTestParams()
@@ -110,7 +108,8 @@ TEST_P(GPU_UnitTestConvSolverImplicitGemmGroupFwdXdlops_FP32, ConvHipImplicitGem
     this->RunTest(miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops{});
 };
 
-TEST_P(CPU_UnitTestConvSolverImplicitGemmGroupFwdXdlopsDevApplicability_FP16, SOLVER_NAME_DEV_APP)
+TEST_P(CPU_UnitTestConvSolverImplicitGemmGroupFwdXdlopsDevApplicability_FP16,
+       ConvHipImplicitGemmGroupFwdXdlops)
 {
     this->RunTest(miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops{});
 };

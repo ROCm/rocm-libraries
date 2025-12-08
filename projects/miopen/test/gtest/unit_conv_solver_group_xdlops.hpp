@@ -22,8 +22,8 @@ struct GroupXdlopsNumericData
     bool deterministic = false;
 };
 
-ConvTestCase GetConvTestForGroupXdlops(miopenDataType_t datatype,
-                                       miopenTensorLayout_t layout,
+template <typename datatype>
+ConvTestCase GetConvTestForGroupXdlops(miopenTensorLayout_t layout,
                                        GroupXdlopsNumericData&& conv_numeric_data)
 {
     ConvTestCase conv_test_case = {{datatype, layout, std::move(conv_numeric_data.x)},
