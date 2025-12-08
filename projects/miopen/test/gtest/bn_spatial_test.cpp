@@ -39,6 +39,7 @@
 #include <limits>
 #include <memory>
 #include <utility>
+#include <sstream>
 #include <type_traits>
 
 #include <miopen/batch_norm.hpp>
@@ -1190,6 +1191,14 @@ auto CompareResults(VerifyT&& verifier, double tolerance = 0.0)
 
 using TestCase = std::vector<int>;
 
+auto NameGenerator(const ::testing::TestParamInfo<TestCase>& info)
+{
+    std::stringstream name{};
+    name << "n" << info.param[0] << "c" << info.param[1] << "h" << info.param[2] << "w" << info.param[3];
+    return name.str();
+}
+} // namespace
+
 //====== DRIVERS ===========================================
 template <class T>
 class batch_norm_spatial_test : public testing::TestWithParam<TestCase>
@@ -1434,10 +1443,8 @@ using GPU_BN_Spatial_FP32 = batch_norm_spatial_test<float>;
 TEST_P(GPU_BN_Spatial_FP16, TestFloat16) { Run(); }
 TEST_P(GPU_BN_Spatial_FP32, TestFloat32) { Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Spatial_FP16, GetCases());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Spatial_FP32, GetCases());
+INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Spatial_FP16, GetCases(), [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Spatial_FP32, GetCases(), [](const auto& info) { return NameGenerator(info); });
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP16, GetCases(false));
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP32, GetCases(false));
-
-} // namespace
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP16, GetCases(false), [](const auto& info) { return NameGenerator(info); });
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP32, GetCases(false), [](const auto& info) { return NameGenerator(info); });
