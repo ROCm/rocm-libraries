@@ -624,6 +624,92 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardNdhwc)
                                       &meanTensor,
                                       &invVarianceTensor);
 }
+
+TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsNchw)
+{
+    // Test backward pass without providing saved mean and invVariance
+    // The function should compute them from x
+    Tensor<float> xTensor({6, 3, 32, 32});
+    Tensor<float> dyTensor({6, 3, 32, 32});
+    Tensor<float> dxTensor({6, 3, 32, 32});
+    Tensor<float> scaleTensor({1, 3});
+    Tensor<float> dscaleTensor({1, 3});
+    Tensor<float> dbiasTensor({1, 3});
+
+    xTensor.fillWithRandomValues(-1.0f, 1.0f, 456);
+    dyTensor.fillWithRandomValues(-0.5f, 0.5f, 789);
+    for(int i = 0; i < 3; i++)
+    {
+        scaleTensor.setHostValue(1.5f, 0, i);
+    }
+
+    CpuFpReferenceBatchnorm::backward<float, float, float, float, float, float>(
+        dyTensor, xTensor, scaleTensor, dxTensor, dscaleTensor, dbiasTensor, nullptr, nullptr);
+
+    // Verify outputs were populated (basic sanity check)
+    for(int i = 0; i < 3; i++)
+    {
+        EXPECT_TRUE(std::isfinite(dscaleTensor.getHostValue(0, i)));
+        EXPECT_TRUE(std::isfinite(dbiasTensor.getHostValue(0, i)));
+    }
+}
+
+TEST(TestCpuFpReferenceBatchnormFp64, BatchnormBwdSanityValidationNchwWithoutSavedStats)
+{
+    const std::vector<int64_t> dims = {1, 1, 2, 2};
+
+    Tensor<double> xTensor(dims);
+    Tensor<double> dyTensor(dims);
+    Tensor<double> dxTensor(dims);
+    Tensor<double> scaleTensor({1, 1});
+    Tensor<double> dscaleTensor({1, 1});
+    Tensor<double> dbiasTensor({1, 1});
+
+    // x = [1, 2, 3, 4]
+    xTensor.setHostValue(1.0, 0, 0, 0, 0);
+    xTensor.setHostValue(2.0, 0, 0, 0, 1);
+    xTensor.setHostValue(3.0, 0, 0, 1, 0);
+    xTensor.setHostValue(4.0, 0, 0, 1, 1);
+
+    // gradient dy = [0.1, 0.2, 0.3, 0.4]
+    dyTensor.setHostValue(0.1, 0, 0, 0, 0);
+    dyTensor.setHostValue(0.2, 0, 0, 0, 1);
+    dyTensor.setHostValue(0.3, 0, 0, 1, 0);
+    dyTensor.setHostValue(0.4, 0, 0, 1, 1);
+
+    // scale (one channel) = 2.0
+    scaleTensor.setHostValue(2.0, 0, 0);
+
+    // When mean and invVariance are not provided, they are computed from x:
+    // mean = (1+2+3+4)/4 = 2.5
+    // variance = [(-1.5)^2 + (-0.5)^2 + (0.5)^2 + (1.5)^2] / 4 = 1.25
+    // inv_variance = 1 / sqrt(1.25 + 1e-5) = 0.894423613312618
+
+    // Expected values should be identical to BatchnormBwdSanityValidationNchw
+    auto expectedDbias = 1.0;
+    auto expectedDscale = 0.447211806656309;
+    std::vector<double> expectedDx
+        = {-2.14659950e-06, -7.15533166e-07, 7.15533166e-07, 2.14659950e-06};
+
+    CpuFpReferenceBatchnorm::backward<double, double, double, double, double, double>(
+        dyTensor,
+        xTensor,
+        scaleTensor,
+        dxTensor,
+        dscaleTensor,
+        dbiasTensor,
+        nullptr,
+        nullptr,
+        BATCHNORM_DEFAULT_EPSILON);
+
+    auto tolerance = 1e-6;
+
+    EXPECT_NEAR(dbiasTensor.getHostValue(0, 0), expectedDbias, tolerance);
+    EXPECT_NEAR(dscaleTensor.getHostValue(0, 0), expectedDscale, tolerance);
+    EXPECT_NEAR(dxTensor.getHostValue(0, 0, 0, 0), expectedDx[0], tolerance);
+    EXPECT_NEAR(dxTensor.getHostValue(0, 0, 0, 1), expectedDx[1], tolerance);
+    EXPECT_NEAR(dxTensor.getHostValue(0, 0, 1, 0), expectedDx[2], tolerance);
+    EXPECT_NEAR(dxTensor.getHostValue(0, 0, 1, 1), expectedDx[3], tolerance);
 }
 
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwBasic)

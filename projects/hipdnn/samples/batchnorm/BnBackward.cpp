@@ -113,12 +113,12 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
         test_utilities::CpuFpReferenceBatchnorm::backward(dyTensor,
                                                           xTensor,
-                                                          savedMeanTensor,
-                                                          savedInvVarTensor,
                                                           scaleTensor,
                                                           dxRefTensor,
                                                           dscaleRefTensor,
-                                                          dbiasRefTensor);
+                                                          dbiasRefTensor,
+                                                          &savedMeanTensor,
+                                                          &savedInvVarTensor);
 
         auto tolerance = test_utilities::batchnorm::getToleranceBackward<InputType>();
 
