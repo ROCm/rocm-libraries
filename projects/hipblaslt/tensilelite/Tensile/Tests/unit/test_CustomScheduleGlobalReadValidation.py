@@ -25,10 +25,11 @@ import pytest
 from Tensile.Components.CustomSchedule import (
     ScheduleInfo,
     verify_global_reads_not_too_early,
-    getMostRecents,
+    get_most_recent_local_reads,
 )
 
 from rocisa.instruction import SBarrier, SWaitCnt
+
 
 def getSyncsAndCodes(waitcnts: dict, barriers: list):
     """
@@ -57,6 +58,7 @@ def getSyncsAndCodes(waitcnts: dict, barriers: list):
 
     return syncs, codes
 
+
 def scheduleFromSequence(seq: list):
     """
     Utility for unit tests. Constructs a schedule from a sequence description.
@@ -76,6 +78,8 @@ def scheduleFromSequence(seq: list):
         "grb": [],
         "lra0": [],
         "lrb0": [],
+        "lra1": [],
+        "lrb1": [],
         "waitcnt": {},
         "barrier": [],
     }
@@ -96,19 +100,51 @@ def scheduleFromSequence(seq: list):
         "SYNC": syncs,
         "GRA": [counts["gra"]],
         "LRA0": [counts["lra0"]],
+        "LRA1": [counts["lra1"]],
         "GRB": [counts["grb"]],
         "LRB0": [counts["lrb0"]],
+        "LRB1": [counts["lrb1"]],
     }
     numCodePaths = 1
     return ScheduleInfo(numCodePaths, None, optSchedule, syncCode, None, None, None)
 
 
 class TestCustomScheduleGlobalReadValidation:
-    def test_get_most_recent(self):
+
+    def test_get_most_recent_basic(self):
         """
         Test of utility function used to determine how many of the most recent ds_read
         operations are for A, and how many are for B.
         """
+
+        def get_most_recent_local_reads_without_lr1(indices, counts, A, B, aBeforeB):
+            """
+            Assume that LRA0 appears before LRB0 within mfma index slots, and
+            don't include LRA1 or LRB1 in the analysis.
+            """
+            positions = {"LRA1": -1, "LRB1": -1, "LRA0": 1 - aBeforeB, "LRB0": aBeforeB}
+
+            localReads = [
+                ("LRA0", A),
+                ("LRB0", B),
+                ("LRA1", []),
+                ("LRB1", []),
+            ]
+            localReads.sort(key=lambda x: positions[x[0]])
+
+            history = {}
+            for symbol, values in localReads:
+                for v in values:
+                    if v not in history:
+                        history[v] = []
+                    history[v].append(symbol)
+            history = sorted(history.items(), key=lambda t: t[0])
+
+            mr = get_most_recent_local_reads(indices, counts, history)
+            filtered = []
+            for l in mr:
+                filtered.append({"A": l["LRA0"], "B": l["LRB0"]})
+            return filtered
 
         A = [0, 1, 4, 6, 8, 9]
         B = [2, 6, 7]
@@ -125,7 +161,9 @@ class TestCustomScheduleGlobalReadValidation:
         counts = [2]
         aBeforeB = True
         bBeforeA = not aBeforeB
-        result = getMostRecents(indices, counts, A, B, aBeforeB)
+        result = get_most_recent_local_reads_without_lr1(
+            indices, counts, A, B, aBeforeB
+        )
         expected0 = [{"A": 2, "B": 0}]
         assert result == expected0
 
@@ -137,14 +175,18 @@ class TestCustomScheduleGlobalReadValidation:
         # index               ^
         indices = [6]
         counts = [4]
-        result = getMostRecents(indices, counts, A, B, aBeforeB)
+        result = get_most_recent_local_reads_without_lr1(
+            indices, counts, A, B, aBeforeB
+        )
         expected1 = [{"A": 2, "B": 2}]
         assert result == expected1
 
         # Multiple indices and counts are handled independently
         indices = [1, 6]
         counts = [2, 4]
-        result = getMostRecents(indices, counts, A, B, aBeforeB)
+        result = get_most_recent_local_reads_without_lr1(
+            indices, counts, A, B, aBeforeB
+        )
         assert result == [expected0[0], expected1[0]]
 
         A = [1, 1, 1]
@@ -164,12 +206,42 @@ class TestCustomScheduleGlobalReadValidation:
         # and so as we're going in reverse chronological order, we take B).
         #
         # index=5, count=0: A:0 B:0
-        result = getMostRecents(indices, counts, A, B, aBeforeB)
+        result = get_most_recent_local_reads_without_lr1(
+            indices, counts, A, B, aBeforeB
+        )
         assert result == [{"A": 3, "B": 3}, {"A": 0, "B": 2}, {"A": 0, "B": 0}]
 
         # Changed so that B is before A.
-        result = getMostRecents(indices, counts, A, B, bBeforeA)
+        result = get_most_recent_local_reads_without_lr1(
+            indices, counts, A, B, bBeforeA
+        )
         assert result == [{"A": 3, "B": 3}, {"A": 1, "B": 1}, {"A": 0, "B": 0}]
+
+    def test_get_most_recent(self):
+        """
+        Testing that within vmfma index ordering is correctly handled.
+        """
+
+        indices = [10, 10, 10, 10]
+        counts = [1, 2, 3, 4]
+
+        history = [[7, ["LRA0", "LRA1", "LRB0", "LRB1"]]]
+        foo = get_most_recent_local_reads(indices, counts, history)
+        # counts = 1
+        assert foo[0] == {"LRA0": 0, "LRB0": 0, "LRA1": 0, "LRB1": 1}
+        # counts = 2
+        assert foo[1] == {"LRA0": 0, "LRB0": 1, "LRA1": 0, "LRB1": 1}
+        # counts = 3
+        assert foo[2] == {"LRA0": 0, "LRB0": 1, "LRA1": 1, "LRB1": 1}
+        # counts = 4
+        assert foo[3] == {"LRA0": 1, "LRB0": 1, "LRA1": 1, "LRB1": 1}
+
+        history = [[7, ["LRB1", "LRB0", "LRA1", "LRA0"]]]
+        foo = get_most_recent_local_reads(indices, counts, history)
+        assert foo[0] == {"LRA0": 1, "LRB0": 0, "LRA1": 0, "LRB1": 0}
+        assert foo[1] == {"LRA0": 1, "LRB0": 0, "LRA1": 1, "LRB1": 0}
+        assert foo[2] == {"LRA0": 1, "LRB0": 1, "LRA1": 1, "LRB1": 0}
+        assert foo[3] == {"LRA0": 1, "LRB0": 1, "LRA1": 1, "LRB1": 1}
 
     def test_basic(self):
         schedule = scheduleFromSequence(
@@ -235,7 +307,7 @@ class TestCustomScheduleGlobalReadValidation:
 
     def test_negative_lda_before_ldb_so_grb_unsafe(self):
         """
-        scheduleFromSequence is implemented with LRA0 after LDB0.
+        scheduleFromSequence is implemented with LRA0 after LRB0.
         """
         schedule = scheduleFromSequence(
             [
@@ -257,6 +329,27 @@ class TestCustomScheduleGlobalReadValidation:
             "1 waitcnt operation(s) in [1, 3) provide upper bounds on the number of outstanding LRB0 operations: [1] <-- none of these is 0."
         )
         assert status is False
+
+    def test_interleave_gr_and_lrs(self):
+        """
+        This is like the preceding test, but now the waitcnt 1 is for an unrelated ds_load
+        """
+        schedule = scheduleFromSequence(
+            [
+                ("lrb0", 0),
+                ("lra0", 0),
+                ("lrb1", 0),
+                ("waitcnt", 1, 1),
+                ("barrier", 1),
+                ("grb", 2),
+                ("waitcnt", 0, 9),
+                ("barrier", 9),
+                ("gra", 10),
+            ]
+        )
+        status, message = verify_global_reads_not_too_early(schedule, {})
+        assert message == ""
+        assert status is True
 
     def test_different_simd_codes(self):
         """
@@ -800,5 +893,116 @@ class TestCustomScheduleGlobalReadValidation:
             "Failed to verify that a barrier (to sync waves) exists between completion of local reads for A and the first global read for A. "
             "Last local read of A issued at vmfma_index 5, first global read of A issued at vmfma_index 10, wave completion at vmfma_index 5. "
             "Expected a barrier in the range [5, 10)."
+        )
+        assert status is False
+
+    def test_on_the_edge(self):
+        schedule = ScheduleInfo(
+            1,  # 1 code path.
+            None,
+            {
+                "LRA0": [[0, 1, 2, 3]],
+                "LRB0": [[2, 3, 4, 5, 6, 7]],
+                "SYNC": [[4, 4, 8, 8]],
+                "GRA": [[4]],
+                "GRB": [[10]],
+            },
+            [
+                SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment=""),
+                SBarrier(),
+                SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+                SBarrier(),
+            ],
+            None,
+            None,
+            None,
+        )
+        status, message = verify_global_reads_not_too_early(schedule, {})
+        assert message == ""
+        assert status is True
+
+    def test_on_the_edge_tipped_by_a(self):
+        schedule = ScheduleInfo(
+            1,  # 1 code path.
+            None,
+            {
+                "LRA0": [[0, 1, 2, 3]],
+                "LRB0": [[2, 3, 4, 5, 6, 7]],
+                "SYNC": [[4, 4, 8, 8]],
+                "GRA": [[4]],
+                "GRB": [[10]],
+            },
+            [
+                SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment=""),
+                SBarrier(),
+                SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+                SBarrier(),
+            ],
+            None,
+            None,
+            None,
+        )
+        status, message = verify_global_reads_not_too_early(schedule, {})
+        assert message == (
+            "Failed to verify that all local reads for A (LRA0) are complete before the first global read for A is issued. "
+            "Last local read for A issued at vmfma_index:3. First global read for A issued at vmfma_index:4. "
+            "1 waitcnt operation(s) in [3, 5) provide upper bounds on the number of outstanding LRA0 operations: [1] <-- none of these is 0."
+        )
+        assert status is False
+
+    def test_on_the_edge_tipped_by_a_saved_by_lr1(self):
+        schedule = ScheduleInfo(
+            1,  # 1 code path.
+            None,
+            {
+                "LRA0": [[0, 1, 2, 3]],
+                "LRA1": [[3, 4]],
+                "LRB0": [[2, 3, 4, 5, 6, 7]],
+                "SYNC": [[4, 4, 8, 8]],
+                "GRA": [[4]],
+                "GRB": [[10]],
+            },
+            [
+                SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment=""),
+                SBarrier(),
+                SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+                SBarrier(),
+            ],
+            None,
+            None,
+            None,
+        )
+        status, message = verify_global_reads_not_too_early(schedule, {})
+        assert message == ""
+        assert status is True
+
+    def test_lr1_in_the_middle(self):
+        schedule = ScheduleInfo(
+            1,  # 1 code path.
+            None,
+            {
+                "LRA0": [2 * [3]],
+                "LRA1": [3 * [3]],
+                "LRB0": [[]],
+                "LRB1": [4 * [3]],
+                "SYNC": [[3, 3]],
+                "GRA": [[4]],
+                "GRB": [[]],
+            },
+            [
+                # 3 LRA1 and 4 LRB1 can be outstanding.
+                SWaitCnt(dscnt=3 + 4 + 1, vlcnt=-1, vscnt=-1, comment=""),
+                SBarrier(),
+            ],
+            None,
+            None,
+            None,
+        )
+        status, message = verify_global_reads_not_too_early(schedule, {})
+        assert message == (
+            "Failed to verify that all local reads for A (LRA0) are complete before the first global read for A is issued. "
+            "Last local read for A issued at vmfma_index:3. "
+            "First global read for A issued at vmfma_index:4. "
+            "1 waitcnt operation(s) in [3, 5) provide upper bounds on the number of outstanding LRA0 operations: [1] <-- none of these is 0."
         )
         assert status is False
