@@ -1,5 +1,5 @@
 {
-    "generated_on": "27 Nov 2025, 09:30:51",
+    "generated_on": "07 Dec 2025, 10:51:00",
     "gpu": {
         "num_cu": 304,
         "arch": "gfx942"
@@ -7,6 +7,11 @@
     "version_info": {
         "miopen_version": "8e7018af9b"
     },
+    "sessions": [
+        1,
+        72
+    ],
+    "note": "Data merged from sessions: [1, 72]",
     "solver_name": "ConvHipImplicitGemm3DGroupBwdXdlops",
     "output_params": [
         "000_kernel_name",
