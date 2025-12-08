@@ -3,6 +3,14 @@
 declare -a input_args
 input_args="$@"
 
+# install.sh-only flags (not passed to rmake.py)
+# Add new install.sh-specific flags to this list for automatic filtering
+declare -a install_sh_only_flags
+install_sh_only_flags=(
+  "--clean-deps"
+  "--skip-aocl"
+)
+
 #use readlink rather than realpath for CentOS 6.10 support
 ROCBLAS_SRC_PATH=`dirname "$(readlink -m $0)"`
 
@@ -34,6 +42,17 @@ check_exit_code( )
   if (( $1 != 0 )); then
     exit $1
   fi
+}
+
+# Filter out install.sh-only flags from arguments before passing to rmake.py
+# Uses the install_sh_only_flags array defined at the top of the script
+filter_rmake_args( )
+{
+  local args="$1"
+  for flag in "${install_sh_only_flags[@]}"; do
+    args=$(echo "${args}" | sed -e "s/${flag}//g")
+  done
+  echo "${args}"
 }
 
 # This function is helpful for dockerfiles that do not have sudo installed, but the default user is root
@@ -83,6 +102,12 @@ install_zypper_packages( )
 
 install_msgpack_from_source( )
 {
+    # Clean msgpack if requested
+    if [[ "${clean_deps}" == true ]] && [[ -d "${build_dir}/deps/msgpack-c" ]]; then
+      printf "\033[33mRemoving existing msgpack build (--clean-deps specified)\033[0m\n"
+      rm -rf "${build_dir}/deps/msgpack-c"
+    fi
+    
     if [[ ! -d "${build_dir}/deps/msgpack-c" ]]; then
       pushd .
       mkdir -p ${build_dir}/deps
@@ -98,15 +123,30 @@ install_msgpack_from_source( )
 
 install_aocl_from_source( )
 {
+    # Clean AOCL if requested (before skip check, so --clean-deps --skip-aocl removes AOCL)
+    if [[ "${clean_deps}" == true ]] && [[ -d "${build_dir}/deps/aocl" ]]; then
+      printf "\033[33mRemoving existing AOCL build (--clean-deps specified)\033[0m\n"
+      rm -rf "${build_dir}/deps/aocl"
+    fi
+    
+    # Skip AOCL installation if requested
+    if [[ "${skip_aocl}" == true ]]; then
+      printf "\033[33mSkipping AOCL installation (--skip-aocl specified)\033[0m\n"
+      return
+    fi
+    
     if [[ ! -d "${build_dir}/deps/aocl" ]]; then
       pushd .
       mkdir -p ${build_dir}/deps
       cd ${build_dir}/deps
+      printf "\033[32mBuilding \033[33mAOCL 5.1\033[32m from source\033[0m\n"
       git clone --quiet -b AOCL-5.1-GA https://github.com/amd/aocl.git
       cd aocl
       CXX=${cxx} CC=${cc} ${cmake_executable} -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON  -DENABLE_ILP64=ON  -DENABLE_AOCL_BLAS=ON -DENABLE_AOCL_UTILS=ON -DENABLE_AOCL_LAPACK=OFF -DENABLE_MULTITHREADING=ON -DOpenMP_libomp_LIBRARY="" -DCMAKE_INSTALL_PREFIX=$PWD/install_package
       elevate_if_not_root ${cmake_executable} --build build --config release -j --target install
       popd
+    else
+      printf "\033[32mAOCL already built at \033[33m${build_dir}/deps/aocl\033[32m (use --clean-deps to force rebuild)\033[0m\n"
     fi
 }
 
@@ -330,6 +370,15 @@ rocBLAS dependency & installation helper script. Invokes rmake.py for build step
 
     --no-msgpack                     Build Tensile backend not to use MessagePack.
 
+  Dependency Management Options:
+
+    --clean-deps                     Remove existing dependency builds before building.
+                                     Affects AOCL, BLIS, googletest, and msgpack.
+                                     Use with --skip-aocl to clean AOCL without rebuilding it.
+
+    --skip-aocl                      Skip AOCL installation; use next available BLAS library
+                                     (AOCL-BLIS from /opt, bundled BLIS, or system BLAS).
+
 EOF
 }
 
@@ -342,9 +391,11 @@ build_clients=false
 build_dir=$(readlink -m ./build)
 build_release=true
 build_release_debug=false
+clean_deps=false
 install_dependencies=false
 install_package=false
 rmake_invoked=false
+skip_aocl=false
 tensile_msgpack_backend=true
 update_cmake=false
 
@@ -356,7 +407,7 @@ update_cmake=false
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-  GETOPT_PARSE=$(getopt --name "${0}" --longoptions build_dir:,cleanup,clients,clients,clients-only,cmake_install,debug,dependencies,help,install,no-msgpack,relwithdebinfo,rmake_invoked --options :cdghik -- "$@")
+  GETOPT_PARSE=$(getopt --name "${0}" --longoptions build_dir:,clean-deps,cleanup,clients,clients,clients-only,cmake_install,debug,dependencies,help,install,no-msgpack,relwithdebinfo,rmake_invoked,skip-aocl --options :cdghik -- "$@")
 else
   echo "Need a new version of getopt"
   exit 1
@@ -406,11 +457,17 @@ while true; do
         build_release=false
         build_release_debug=true
         shift ;;
+    --clean-deps)
+        clean_deps=true
+        shift ;;
     --no-msgpack)
         tensile_msgpack_backend=false
         shift ;;
     --rmake_invoked)
         rmake_invoked=true
+        shift ;;
+    --skip-aocl)
+        skip_aocl=true
         shift ;;
     --) shift ; break ;;
     *)  echo "Unexpected command line parameter received; aborting";
@@ -425,6 +482,12 @@ printf "\033[32mCreating project build directory in: \033[33m${build_dir}\033[0m
 
 install_blis()
 {
+    # Clean BLIS if requested
+    if [[ "${clean_deps}" == true ]] && [[ -d "${build_dir}/deps/blis" ]]; then
+      printf "\033[33mRemoving existing BLIS build (--clean-deps specified)\033[0m\n"
+      rm -rf "${build_dir}/deps/blis"
+    fi
+    
     if [[ ! -e "/opt/AMD/aocl/aocl-linux-gcc-4.2.0/gcc/lib_ILP64/libblis-mt.a" ]] &&
         [[ ! -e "/opt/AMD/aocl/aocl-linux-aocc-4.1.0/aocc/lib_ILP64/libblis-mt.a" ]] &&
         [[ ! -e "/opt/AMD/aocl/aocl-linux-aocc-4.0/lib_ILP64/libblis-mt.a"  ]] &&
@@ -547,7 +610,9 @@ if [[ "${rmake_invoked}" == false ]]; then
   rm -rf ${full_build_dir}
 
   #rmake.py at top level same as install.sh
-  python3 ./rmake.py --install_invoked ${input_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH}
+  # Filter out install.sh-only flags from args passed to rmake.py
+  filtered_args=$(filter_rmake_args "${input_args}")
+  python3 ./rmake.py --install_invoked ${filtered_args} --build_dir=${build_dir} --src_path=${ROCBLAS_SRC_PATH}
   check_exit_code "$?"
 
   popd
