@@ -12,13 +12,15 @@ project(hipdnn_samples VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 
 find_package(hip REQUIRED)
+find_package(Threads REQUIRED)
 find_package(hipdnn_frontend CONFIG REQUIRED)
+
 
 # Helper function to add a hipDNN sample executable NAME: The name of the executable target SOURCE:
 # The source file for the sample
 function(add_hipdnn_sample NAME SOURCE)
-    add_executable(${NAME} ${SOURCE})
-    target_link_libraries(${NAME} PRIVATE hip::host hipdnn_frontend)
+add_executable(${NAME} ${SOURCE})
+target_link_libraries(${NAME} PRIVATE hip::host hipdnn_frontend)
 endfunction()
 
 # Temporarily disabled bn_inference due to https://github.com/ROCm/rocm-libraries/issues/2459
@@ -32,3 +34,31 @@ add_hipdnn_sample(conv_dgrad convolution/ConvDgrad.cpp)
 add_hipdnn_sample(conv_fprop convolution/ConvFprop.cpp)
 add_hipdnn_sample(fused_conv_fprop_activ convolution/FusedConvFpropActiv.cpp)
 add_hipdnn_sample(conv_wgrad convolution/ConvWgrad.cpp)
+
+if(WIN32)
+    # On Windows, spdlog::spdlog_header_only has some INTERFACE_COMPILE_OPTIONS that cause issues
+    # when consuming the hipdnn_sdk.  We need to clear these options Refer to issue:
+    # https://github.com/ROCm/TheRock/issues/2003
+
+    set(SPDLOG_TARGET "")
+
+    # on TheRock vs Windows standalone builds we see different target names for spdlog
+    # find the one that exists and modify that one. 
+    if(TARGET spdlog::spdlog_header_only)
+        set(SPDLOG_TARGET "spdlog::spdlog_header_only")
+    elseif(TARGET spdlog_header_only)
+        set(SPDLOG_TARGET "spdlog_header_only")
+    else()
+        message(STATUS "spdlog target not found. Skipping spdlog configuration.")
+    endif()
+    
+    if(SPDLOG_TARGET)
+        message(STATUS "Found spdlog target: ${SPDLOG_TARGET}")
+        
+        # Can't modify properties of an alias target
+        get_property(aliased_target_name TARGET ${SPDLOG_TARGET} PROPERTY ALIASED_TARGET)
+        if(NOT aliased_target_name)
+            set_target_properties(${SPDLOG_TARGET} PROPERTIES INTERFACE_COMPILE_OPTIONS "")
+        endif()
+    endif()
+endif()

@@ -95,6 +95,7 @@ message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
 find_package(miopen CONFIG REQUIRED)
+find_package(Threads REQUIRED)
 
 add_library(
     miopen_legacy_plugin_private
@@ -129,12 +130,26 @@ if(WIN32)
     # when consuming the hipdnn_sdk.  We need to clear these options Refer to issue:
     # https://github.com/ROCm/TheRock/issues/2003
 
-    # Can't do this to an alias
-    get_property(aliased_target_name TARGET spdlog::spdlog_header_only PROPERTY ALIASED_TARGET)
-    message(STATUS "spdlog::spdlog_header_only aliased target name: '${aliased_target_name}'")
+    set(SPDLOG_TARGET "")
 
-    if(NOT aliased_target_name)
-        set_target_properties(spdlog::spdlog_header_only PROPERTIES INTERFACE_COMPILE_OPTIONS "")
+    # on TheRock vs Windows standalone builds we see different target names for spdlog
+    # find the one that exists and modify that one. 
+    if(TARGET spdlog::spdlog_header_only)
+        set(SPDLOG_TARGET "spdlog::spdlog_header_only")
+    elseif(TARGET spdlog_header_only)
+        set(SPDLOG_TARGET "spdlog_header_only")
+    else()
+        message(STATUS "spdlog target not found. Skipping spdlog configuration.")
+    endif()
+    
+    if(SPDLOG_TARGET)
+        message(STATUS "Found spdlog target: ${SPDLOG_TARGET}")
+        
+        # Can't modify properties of an alias target
+        get_property(aliased_target_name TARGET ${SPDLOG_TARGET} PROPERTY ALIASED_TARGET)
+        if(NOT aliased_target_name)
+            set_target_properties(${SPDLOG_TARGET} PROPERTIES INTERFACE_COMPILE_OPTIONS "")
+        endif()
     endif()
 endif()
 
