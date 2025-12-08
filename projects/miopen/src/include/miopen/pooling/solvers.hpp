@@ -64,12 +64,12 @@ struct PerformanceConfigPooling2d : PerfConfigBase<PerformanceConfigPooling2d<Op
     int out_pix_tile1;
     int local_size0;
     int local_size1;
-    static constexpr int min_out_pix_tile0 = (OpType == OperationType::Forward) ? 1 : 1;
+    static constexpr int min_out_pix_tile0 = 1;
     static constexpr int max_out_pix_tile0 = (OpType == OperationType::Forward) ? 1 : 4;
-    static constexpr int min_out_pix_tile1 = (OpType == OperationType::Forward) ? 1 : 1;
+    static constexpr int min_out_pix_tile1 = 1;
     static constexpr int max_out_pix_tile1 = (OpType == OperationType::Forward) ? 16 : 8;
     static constexpr int min_local_size0   = (OpType == OperationType::Forward) ? 8 : 4;
-    static constexpr int max_local_size0   = (OpType == OperationType::Forward) ? 32 : 32;
+    static constexpr int max_local_size0   = 32;
     static constexpr int min_local_size1   = (OpType == OperationType::Forward) ? 8 : 4;
     static constexpr int max_local_size1   = (OpType == OperationType::Forward) ? 128 : 16;
 

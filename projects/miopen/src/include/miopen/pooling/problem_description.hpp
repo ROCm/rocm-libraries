@@ -117,35 +117,24 @@ struct ProblemDescription : ProblemDescriptionTag
         // The column names match the driver command line argument names
         f(static_cast<uint64_t>(self.direction), "direction");
         f(static_cast<uint64_t>(self.pooling.GetPaddingMode()), "pad_mode");
-        f(self.pooling.GetStrides().size() > 2 ? static_cast<uint64_t>(self.pooling.GetStrides()[0])
-                                               : 0,
-          "pool_stride_d");
-        f(self.pooling.GetStrides().size() > 2
-              ? static_cast<uint64_t>(self.pooling.GetStrides()[1])
-              : static_cast<uint64_t>(self.pooling.GetStrides()[0]),
+        f(self.pooling.GetStrides().size() > 2 ? self.pooling.GetStrides()[0] : 0, "pool_stride_d");
+        f(self.pooling.GetStrides().size() > 2 ? self.pooling.GetStrides()[1]
+                                               : self.pooling.GetStrides()[0],
           "pool_stride_h");
-        f(self.pooling.GetStrides().size() > 2
-              ? static_cast<uint64_t>(self.pooling.GetStrides()[2])
-              : static_cast<uint64_t>(self.pooling.GetStrides()[1]),
+        f(self.pooling.GetStrides().size() > 2 ? self.pooling.GetStrides()[2]
+                                               : self.pooling.GetStrides()[1],
           "pool_stride_w");
-        f(self.pooling.GetPads().size() > 2 ? static_cast<uint64_t>(self.pooling.GetPads()[0]) : 0,
-          "pad_d");
-        f(self.pooling.GetPads().size() > 2 ? static_cast<uint64_t>(self.pooling.GetPads()[1])
-                                            : static_cast<uint64_t>(self.pooling.GetPads()[0]),
+        f(self.pooling.GetPads().size() > 2 ? self.pooling.GetPads()[0] : 0, "pad_d");
+        f(self.pooling.GetPads().size() > 2 ? self.pooling.GetPads()[1] : self.pooling.GetPads()[0],
           "pad_h");
-        f(self.pooling.GetPads().size() > 2 ? static_cast<uint64_t>(self.pooling.GetPads()[2])
-                                            : static_cast<uint64_t>(self.pooling.GetPads()[1]),
+        f(self.pooling.GetPads().size() > 2 ? self.pooling.GetPads()[2] : self.pooling.GetPads()[1],
           "pad_w");
-        f(self.pooling.GetLengths().size() > 2 ? static_cast<uint64_t>(self.pooling.GetLengths()[0])
-                                               : 0,
-          "win_d");
-        f(self.pooling.GetLengths().size() > 2
-              ? static_cast<uint64_t>(self.pooling.GetLengths()[1])
-              : static_cast<uint64_t>(self.pooling.GetLengths()[0]),
+        f(self.pooling.GetLengths().size() > 2 ? self.pooling.GetLengths()[0] : 0, "win_d");
+        f(self.pooling.GetLengths().size() > 2 ? self.pooling.GetLengths()[1]
+                                               : self.pooling.GetLengths()[0],
           "win_h");
-        f(self.pooling.GetLengths().size() > 2
-              ? static_cast<uint64_t>(self.pooling.GetLengths()[2])
-              : static_cast<uint64_t>(self.pooling.GetLengths()[1]),
+        f(self.pooling.GetLengths().size() > 2 ? self.pooling.GetLengths()[2]
+                                               : self.pooling.GetLengths()[1],
           "win_w");
     }
 
