@@ -70,12 +70,13 @@ else()
   find_package(FFTW3f CONFIG QUIET )
   if( FFTW3_FOUND AND FFTW3f_FOUND )
     message(STATUS "FFTW3 found by using the FFTW3Config.cmake")
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_UPPER)
     if ( NOT WIN32 )
-      get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_RELEASE)
-      get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_RELEASE)
+      get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
+      get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_LOCATION_${CMAKE_BUILD_TYPE_UPPER})
     else()
-      get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_RELEASE)
-      get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_RELEASE)
+      get_target_property(fftw3_libs FFTW3::fftw3 IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
+      get_target_property(fftw3f_libs FFTW3::fftw3f IMPORTED_IMPLIB_${CMAKE_BUILD_TYPE_UPPER})
     endif()
 
     # Look for omp (preferred) or thread libraries. These are not a
@@ -126,6 +127,8 @@ set( hipfft-test_source
   multi_device_test.cpp
   multi_stream_test.cpp
   ../../shared/array_validator.cpp
+  ../../shared/test_callbacks.cpp
+  ../../shared/data_gen_device.cpp
   )
 
 add_executable( hipfft-test ${hipfft-test_source} ${hipfft-test_includes} )
@@ -135,7 +138,7 @@ set( TEST_TARGETS hipfft-test )
 # MPI worker for MPI tests
 if( HIPFFT_MPI_ENABLE )
   # build MPI worker to support the tests
-  add_executable( hipfft_mpi_worker hipfft_mpi_worker.cpp )
+  add_executable( hipfft_mpi_worker hipfft_mpi_worker.cpp ../../shared/test_callbacks.cpp )
   list( APPEND TEST_TARGETS hipfft_mpi_worker )
   target_include_directories( hipfft_mpi_worker
     PRIVATE
@@ -183,15 +186,33 @@ foreach( target ${TEST_TARGETS} )
     CXX_STANDARD_REQUIRED ON
     )
 
-    if( BUILD_CLIENTS_TESTS_OPENMP )
-      set_target_properties( ${TEST_TARGETS} PROPERTIES
-         BUILD_RPATH "${BUILD_RPATH}"
-      )
-      set_target_properties( ${TEST_TARGETS} PROPERTIES
-        INSTALL_RPATH "${INSTALL_RPATH}"
-      )
-    endif()
+  if( BUILD_CLIENTS_TESTS_OPENMP )
+    set_target_properties( ${TEST_TARGETS} PROPERTIES
+       BUILD_RPATH "${BUILD_RPATH}"
+    )
+    set_target_properties( ${TEST_TARGETS} PROPERTIES
+      INSTALL_RPATH "${INSTALL_RPATH}"
+    )
+  endif()
 
+  if( USE_HIPRAND )
+    if( NOT hiprand_FOUND )
+      find_package( hiprand REQUIRED )
+    endif()
+    
+    if( BUILD_WITH_LIB STREQUAL "CUDA" )
+      # nvcc doesn't know what do with hiprand.so.1.1, but we can try linking it to hiprand.so,
+      # assuming that it's in the same directory.
+      get_target_property( HIPRAND_FILE_PATH hip::hiprand LOCATION )
+      string( REGEX REPLACE ".so(.[0-9]*)*" ".so" HIPRAND_FILE_PATH_NOVER "${HIPRAND_FILE_PATH}" )
+      message( "Renamed hiprand so filename: ${HIPRAND_FILE_PATH_NOVER}" )
+      
+      target_link_libraries( ${target} PRIVATE ${HIPRAND_FILE_PATH_NOVER} )
+    else()
+      target_link_libraries( ${target} PRIVATE hip::hiprand )
+    endif()
+  endif()
+  
   if( BUILD_WITH_LIB STREQUAL "ROCM" )
     target_compile_options( ${target} PRIVATE ${WARNING_FLAGS} )
     target_link_libraries( ${target}
@@ -203,12 +224,6 @@ foreach( target ${TEST_TARGETS} )
       target_compile_options( ${target} PRIVATE --offload-arch=${gpu_target} )
     endforeach()
 
-    if( NOT hiprand_FOUND )
-      find_package( hiprand REQUIRED )
-    endif()
-    if( USE_HIPRAND )
-      target_link_libraries( ${target} PRIVATE hip::hiprand )
-    endif()
   else()
     target_compile_definitions( ${target} PRIVATE __HIP_PLATFORM_NVIDIA__)
     target_include_directories( ${target} PRIVATE ${HIP_INCLUDE_DIRS})
@@ -226,7 +241,6 @@ foreach( target ${TEST_TARGETS} )
     endif()
     target_compile_definitions( ${target} PUBLIC _CUFFT_BACKEND )
   endif()
-
 
   target_include_directories( ${target}
     PRIVATE

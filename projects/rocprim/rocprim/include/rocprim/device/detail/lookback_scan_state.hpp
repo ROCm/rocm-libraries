@@ -1035,7 +1035,7 @@ hipError_t is_sleep_scan_state_used(const hipStream_t stream, bool& use_sleep)
     {
         return error;
     }
-    else if(const hipError_t error = hipGetDeviceProperties(&prop, device_id))
+    if(const hipError_t error = hipGetDeviceProperties(&prop, device_id))
     {
         return error;
     }
@@ -1051,8 +1051,8 @@ hipError_t is_sleep_scan_state_used(const hipStream_t stream, bool& use_sleep)
 template<typename LookbackScanState>
 constexpr bool is_lookback_kernel_runnable()
 {
-#if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
-    if(device_target_arch() == target_arch::gfx908)
+#if (!defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0) && __has_builtin(__builtin_amdgcn_processor_is)
+    if constexpr(__builtin_amdgcn_processor_is("gfx908"))
     {
         // For gfx908 kernels with both version of lookback_scan_state can run: with and without
         // sleep

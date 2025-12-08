@@ -38,6 +38,7 @@
 #include "gpubuf.h"
 #include "rocfft_against_fftw.h"
 #include "sys_mem.h"
+#include "test_callbacks.h"
 #include "test_params.h"
 
 extern int  verbose;
@@ -161,23 +162,6 @@ public:
     }
 };
 
-struct callback_test_data
-{
-    // scalar to modify the input/output with
-    double scalar;
-    // base address of input, to ensure that each callback gets an offset from that base
-    void* base;
-};
-
-void* get_load_callback_host(fft_array_type itype,
-                             fft_precision  precision,
-                             bool           round_trip_inverse);
-void  apply_load_callback(const fft_params& params, std::vector<hostbuf>& input);
-void  apply_store_callback(const fft_params& params, std::vector<hostbuf>& output);
-void* get_store_callback_host(fft_array_type otype,
-                              fft_precision  precision,
-                              bool           round_trip_inverse);
-
 static auto allocate_cpu_fft_buffer(const fft_precision        precision,
                                     const fft_array_type       type,
                                     const std::vector<size_t>& size)
@@ -218,12 +202,14 @@ inline void execute_cpu_fft(fft_params&                                  params,
 
     // run FFTW (which may destroy CPU input)
     apply_load_callback(params, *input_ptr);
+    params.apply_host_load_ops(*input_ptr);
     fftw_run<Tfloat>(contiguous_params.transform_type, cpu_plan, *input_ptr, cpu_output);
     // clean up
     fftw_destroy_plan_type(cpu_plan);
     // ask FFTW to fully clean up, since it tries to cache plan details
     fftw_cleanup();
     cpu_plan = nullptr;
+    params.apply_host_store_ops(cpu_output);
     apply_store_callback(params, cpu_output);
 }
 
@@ -236,115 +222,44 @@ inline void execute_gpu_fft(Tparams&              params,
                             std::vector<hostbuf>& gpu_output,
                             bool                  round_trip_inverse = false)
 {
-    gpubuf_t<callback_test_data> load_cb_data_dev;
-    gpubuf_t<callback_test_data> store_cb_data_dev;
+    // Vector of callback data - at function scope so they live until
+    // after the transform is completed
+    std::vector<gpubuf_t<callback_test_data>> all_cb_data;
+
+    std::vector<void*> load_cb_func;
+    std::vector<void*> load_cb_data;
+    std::vector<void*> store_cb_func;
+    std::vector<void*> store_cb_data;
+
     if(params.run_callbacks)
     {
-        void* load_cb_host
-            = get_load_callback_host(params.itype, params.precision, round_trip_inverse);
-
-        callback_test_data load_cb_data_host;
-
-        if(round_trip_inverse)
-        {
-            load_cb_data_host.scalar = params.store_cb_scalar;
-        }
-        else
-        {
-            load_cb_data_host.scalar = params.load_cb_scalar;
-        }
-
-        load_cb_data_host.base = pibuffer.front();
-
-        auto hip_status = hipSuccess;
-
-        hip_status = load_cb_data_dev.alloc(sizeof(callback_test_data));
-        if(hip_status != hipSuccess)
-        {
+        auto runtime_err_handler = [&](const std::string& msg) {
             ++n_hip_failures;
-            std::stringstream ss;
-            ss << "Error occurred when allocating device memory for loading callback";
             if(skip_runtime_fails)
             {
-                throw ROCFFT_SKIP{ss.str()};
+                throw ROCFFT_SKIP{msg};
             }
             else
             {
-                throw ROCFFT_FAIL{ss.str()};
+                throw ROCFFT_FAIL{msg};
             }
-        }
-        hip_status = hipMemcpy(load_cb_data_dev.data(),
-                               &load_cb_data_host,
-                               sizeof(callback_test_data),
-                               hipMemcpyHostToDevice);
-        if(hip_status != hipSuccess)
-        {
-            ++n_hip_failures;
-            std::stringstream ss;
-            ss << "Error occurred when copying data to device for loading callback";
-            if(skip_runtime_fails)
-            {
-                throw ROCFFT_SKIP{ss.str()};
-            }
-            else
-            {
-                throw ROCFFT_FAIL{ss.str()};
-            }
-        }
+        };
 
-        void* store_cb_host
-            = get_store_callback_host(params.otype, params.precision, round_trip_inverse);
+        get_rank_load_callbacks(params,
+                                load_cb_func,
+                                load_cb_data,
+                                runtime_err_handler,
+                                round_trip_inverse,
+                                all_cb_data);
+        get_rank_store_callbacks(params,
+                                 store_cb_func,
+                                 store_cb_data,
+                                 runtime_err_handler,
+                                 round_trip_inverse,
+                                 all_cb_data);
 
-        callback_test_data store_cb_data_host;
-
-        if(round_trip_inverse)
-        {
-            store_cb_data_host.scalar = params.load_cb_scalar;
-        }
-        else
-        {
-            store_cb_data_host.scalar = params.store_cb_scalar;
-        }
-
-        store_cb_data_host.base = pobuffer.front();
-
-        hip_status = store_cb_data_dev.alloc(sizeof(callback_test_data));
-        if(hip_status != hipSuccess)
-        {
-            ++n_hip_failures;
-            std::stringstream ss;
-            ss << "Error occurred when allocating device memory for storing callback";
-            if(skip_runtime_fails)
-            {
-                throw ROCFFT_SKIP{ss.str()};
-            }
-            else
-            {
-                throw ROCFFT_FAIL{ss.str()};
-            }
-        }
-
-        hip_status = hipMemcpy(store_cb_data_dev.data(),
-                               &store_cb_data_host,
-                               sizeof(callback_test_data),
-                               hipMemcpyHostToDevice);
-        if(hip_status != hipSuccess)
-        {
-            ++n_hip_failures;
-            std::stringstream ss;
-            ss << "Error occurred when copying data to device for storing callback";
-            if(skip_runtime_fails)
-            {
-                throw ROCFFT_SKIP{ss.str()};
-            }
-            else
-            {
-                throw ROCFFT_FAIL{ss.str()};
-            }
-        }
-
-        auto fft_status = params.set_callbacks(
-            load_cb_host, load_cb_data_dev.data(), store_cb_host, store_cb_data_dev.data());
+        auto fft_status
+            = params.set_callbacks(&load_cb_func, &load_cb_data, &store_cb_func, &store_cb_data);
         if(fft_status != fft_status_success)
             throw std::runtime_error("set callback failure");
     }
@@ -352,41 +267,43 @@ inline void execute_gpu_fft(Tparams&              params,
     // Execute the transform:
     auto fft_status = params.execute(pibuffer.data(), pobuffer.data());
     if(fft_status != fft_status_success)
-        throw std::runtime_error("plan execution failure");
-    // work around potential problem of following hipMemcpy
-    // not properly waiting for rocFFT's kernels to finish
-    if(hipDeviceSynchronize() != hipSuccess)
-        throw std::runtime_error("hipDeviceSynchronize after execute failed");
+        throw std::runtime_error("FFT plan execution failure");
 
     // if not comparing, then just executing the GPU FFT is all we
     // need to do
     if(!fftw_compare)
         return;
 
-    // finalize a multi-GPU transform
-    params.multi_gpu_finalize(obuffer, pobuffer);
-
     ASSERT_TRUE(!gpu_output.empty()) << "no output buffers";
-    for(unsigned int idx = 0; idx < gpu_output.size(); ++idx)
+
+    // if output is in multiple bricks, collect it into the
+    // host buffer where the results need to go
+    params.multi_gpu_finalize(gpu_output, obuffer, pobuffer);
+
+    if(params.ofields.empty())
     {
-        ASSERT_TRUE(gpu_output[idx].data() != nullptr)
-            << "output buffer index " << idx << " is empty";
-        auto hip_status = hipMemcpy(gpu_output[idx].data(),
-                                    pobuffer.at(idx),
-                                    gpu_output[idx].size(),
-                                    hipMemcpyDeviceToHost);
-        if(hip_status != hipSuccess)
+        // otherwise, copy directly from the device
+        for(unsigned int idx = 0; idx < gpu_output.size(); ++idx)
         {
-            ++n_hip_failures;
-            std::stringstream ss;
-            ss << "hipMemcpy failure";
-            if(skip_runtime_fails)
+            ASSERT_TRUE(gpu_output[idx].data() != nullptr)
+                << "output buffer index " << idx << " is empty";
+            auto hip_status = hipMemcpy(gpu_output[idx].data(),
+                                        pobuffer.at(idx),
+                                        gpu_output[idx].size(),
+                                        hipMemcpyDeviceToHost);
+            if(hip_status != hipSuccess)
             {
-                throw ROCFFT_SKIP{ss.str()};
-            }
-            else
-            {
-                throw ROCFFT_FAIL{ss.str()};
+                ++n_hip_failures;
+                std::stringstream ss;
+                ss << "hipMemcpy failure";
+                if(skip_runtime_fails)
+                {
+                    throw ROCFFT_SKIP{ss.str()};
+                }
+                else
+                {
+                    throw ROCFFT_FAIL{ss.str()};
+                }
             }
         }
     }
@@ -547,7 +464,6 @@ void check_output_strides(const std::vector<hostbuf>& output, Tparams& params)
 // run rocFFT inverse transform
 template <class Tparams>
 inline void run_round_trip_inverse(Tparams&              params,
-                                   std::vector<gpubuf>&  ibuffer,
                                    std::vector<gpubuf>&  obuffer,
                                    std::vector<void*>&   pibuffer,
                                    std::vector<void*>&   pobuffer,
@@ -593,8 +509,7 @@ inline void run_round_trip_inverse(Tparams&              params,
             // shouldn't have been touched.
             if(params.check_output_strides)
             {
-                auto hip_status
-                    = hipMemset(obuffer[i].data(), OUTPUT_INIT_PATTERN, obuffer_sizes[i]);
+                auto hip_status = hipMemset(pobuffer[i], OUTPUT_INIT_PATTERN, obuffer_sizes[i]);
                 if(hip_status != hipSuccess)
                 {
                     ++n_hip_failures;
@@ -612,14 +527,17 @@ inline void run_round_trip_inverse(Tparams&              params,
             }
         }
     }
+
     if(params.multiGPU > 1)
     {
         if(verbose > 0)
         {
             std::cout << "scattering data for multi-GPU inverse" << std::endl;
         }
-        params.multi_gpu_prepare(ibuffer, pibuffer, pobuffer);
+        std::vector<hostbuf> cpu_input;
+        params.multi_gpu_prepare(cpu_input, obuffer, pibuffer, pobuffer);
     }
+
     // execute GPU transform
     execute_gpu_fft(params, pibuffer, pobuffer, obuffer, gpu_output, true);
 }
@@ -1273,6 +1191,9 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         pobuffer[i] = obuffer->at(i).data();
     }
 
+    // scatter data out to multi-GPUs if this is a multi-GPU test
+    params.multi_gpu_prepare(cpu_input, ibuffer, pibuffer, pobuffer);
+
     // Run CPU transform
     //
     // NOTE: This must happen after input is copied to GPU and input
@@ -1310,9 +1231,6 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
                 std::cout << "CPU Output L2 norm:   " << cpu_output_norm.l_2 << "\n";
             }
         });
-
-    // scatter data out to multi-GPUs if this is a multi-GPU test
-    params.multi_gpu_prepare(ibuffer, pibuffer, pobuffer);
 
     // execute GPU transform
     std::vector<hostbuf> gpu_output
@@ -1414,7 +1332,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         params_inverse.inverse_from_forward(params);
 
         run_round_trip_inverse<Tparams>(
-            params_inverse, *obuffer, ibuffer, pobuffer, pibuffer, gpu_input_data);
+            params_inverse, *obuffer, pobuffer, pibuffer, gpu_input_data);
     }
 
     if(fftw_compare)

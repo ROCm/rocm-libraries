@@ -1,3 +1,7 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+include_guard(GLOBAL)
 include(FetchContent)
 
 set(GOOGLETEST_DIR "" CACHE STRING "Location of local GoogleTest repo to build against")

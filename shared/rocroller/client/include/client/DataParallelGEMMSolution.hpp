@@ -379,19 +379,32 @@ namespace rocRoller
                                             solutionParams.architecture.toString(),
                                             toString(solutionParams.types.scaleTypeB)));
 
+                    if(solutionParams.swizzleScale)
+                    {
+                        if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
+                        {
+                            AssertFatal(solutionParams.swizzleTileSize.m > 0
+                                            && solutionParams.swizzleTileSize.k > 0,
+                                        "Invalid SwizzleTileSize for A.",
+                                        ShowValue(solutionParams.swizzleTileSize.m),
+                                        ShowValue(solutionParams.swizzleTileSize.k));
+                        }
+
+                        if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
+                        {
+                            AssertFatal(solutionParams.swizzleTileSize.n > 0
+                                            && solutionParams.swizzleTileSize.l > 0,
+                                        "Invalid SwizzleTileSize for B.",
+                                        ShowValue(solutionParams.swizzleTileSize.n),
+                                        ShowValue(solutionParams.swizzleTileSize.l));
+                        }
+                    }
+
                     params->setManualKernelDimension(2);
                     params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
-                    auto memoryTypeA = MemoryType::WAVE;
-                    auto memoryTypeB = MemoryType::WAVE;
-                    if(solutionParams.direct2LDSA)
-                        memoryTypeA = MemoryType::WAVE_Direct2LDS;
-                    else if(solutionParams.loadLDSA)
-                        memoryTypeA = MemoryType::LDS;
-                    if(solutionParams.direct2LDSA)
-                        memoryTypeB = MemoryType::WAVE_Direct2LDS;
-                    else if(solutionParams.loadLDSB)
-                        memoryTypeB = MemoryType::LDS;
+                    auto memoryTypeA = GetMemoryType(solutionParams.loadPathA);
+                    auto memoryTypeB = GetMemoryType(solutionParams.loadPathB);
 
                     auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macK},
@@ -420,6 +433,11 @@ namespace rocRoller
 
                     if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
                     {
+                        AssertFatal(
+                            solutionParams.loadPathAScale
+                                    != Parameters::Solution::LoadPath::BufferToLDS
+                                || solutionParams.swizzleScale,
+                            "If loadPathAScale is BufferToLDS, swizzleScale must be enabled");
                         auto macTileAScale = KernelGraph::CoordinateGraph::MacroTile(
                             {solutionParams.macM,
                              solutionParams.macK / solutionParams.types.scaleBlockSize},
@@ -428,11 +446,21 @@ namespace rocRoller
                              solutionParams.waveN,
                              solutionParams.waveK / solutionParams.types.scaleBlockSize,
                              solutionParams.waveB},
-                            solutionParams.loadLDSScaleA ? MemoryType::LDS : MemoryType::WAVE);
+                            GetMemoryType(solutionParams.loadPathAScale),
+                            {},
+                            {solutionParams.swizzleTileSize.m,
+                             solutionParams.swizzleTileSize.n,
+                             solutionParams.swizzleTileSize.k,
+                             1});
                         params->setDimensionInfo(*m_tagLoadScaleA, macTileAScale);
                     }
                     if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
                     {
+                        AssertFatal(
+                            solutionParams.loadPathBScale
+                                    != Parameters::Solution::LoadPath::BufferToLDS
+                                || solutionParams.swizzleScale,
+                            "If loadPathBScale is BufferToLDS, swizzleScale must be enabled");
                         auto macTileBScale = KernelGraph::CoordinateGraph::MacroTile(
                             {solutionParams.macK / solutionParams.types.scaleBlockSize,
                              solutionParams.macN},
@@ -441,7 +469,12 @@ namespace rocRoller
                              solutionParams.waveN,
                              solutionParams.waveK / solutionParams.types.scaleBlockSize,
                              solutionParams.waveB},
-                            solutionParams.loadLDSScaleB ? MemoryType::LDS : MemoryType::WAVE);
+                            GetMemoryType(solutionParams.loadPathBScale),
+                            {},
+                            {solutionParams.swizzleTileSize.m,
+                             solutionParams.swizzleTileSize.n,
+                             solutionParams.swizzleTileSize.l,
+                             1});
                         params->setDimensionInfo(*m_tagLoadScaleB, macTileBScale);
                     }
 
@@ -602,7 +635,7 @@ namespace rocRoller
                     // predicates
                     // unrollK size match predicates
 
-                    if(params->unrollX <= 1 && params->unrollY <= 1 && !params->streamK)
+                    if(params->tailLoops and not params->streamK)
                     {
                         auto unrollKPredicate = (aSizeExps[1] % macKExp == zero);
                         setComment(unrollKPredicate, "K must be a multiple of macK.");

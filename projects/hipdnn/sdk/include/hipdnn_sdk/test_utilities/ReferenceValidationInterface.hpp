@@ -9,25 +9,18 @@
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <type_traits>
 
-namespace hipdnn_sdk
-{
-namespace test_utilities
+namespace hipdnn_sdk::test_utilities
 {
 
-using namespace hipdnn_sdk::utilities;
-
-template <class T>
 class IReferenceValidation
 {
 public:
     virtual ~IReferenceValidation() = default;
 
-    virtual bool allClose(const ITensor& reference, const ITensor& implementation) = 0;
-    virtual bool allClose(IMigratableMemory<T>& reference, IMigratableMemory<T>& implementation)
+    virtual bool allClose(utilities::ITensor& reference, utilities::ITensor& implementation) const
         = 0;
 };
 
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::test_utilities
 
 // NOLINTEND(portability-template-virtual-member-function)

@@ -27,8 +27,6 @@
 #include "gemm.hpp"
 #include "runtime_args_selection.hpp"
 
-#include <rocRoller/Parameters/Solution/StreamK.hpp>
-
 #include "utility.hpp"
 
 using namespace rocRoller;
@@ -63,7 +61,6 @@ void setPredicates(std::shared_ptr<GemmKernel> gemmKernel)
     });
 
     // parameters
-    auto unrollKExp        = literal(params->unrollK);
     auto workgroupTileMExp = literal(solutionParams->workgroupTile.m);
     auto workgroupTileNExp = literal(solutionParams->workgroupTile.n);
     auto workgroupTileKExp = literal(solutionParams->workgroupTile.k);
@@ -71,10 +68,6 @@ void setPredicates(std::shared_ptr<GemmKernel> gemmKernel)
     // constants
     auto zero = literal(0u);
     auto one  = literal(1u);
-
-    // sanitize parameters
-    auto sanUnrollKExp
-        = convert(DataType::UInt32, conditional(unrollKExp <= zero, one, unrollKExp));
 
     // predicates
     std::stringstream ss;
@@ -90,9 +83,8 @@ void setPredicates(std::shared_ptr<GemmKernel> gemmKernel)
     commandKernel->addPredicate(unrollYPredicate);
     ss.str("");
 
-    auto unrollKPredicate = (aSizeExps[1] % (workgroupTileKExp * sanUnrollKExp) == zero);
-    ss << "K must be a multiple of workgroupTile.k=" << solutionParams->workgroupTile.k
-       << " * unrollK=" << rocRoller::Expression::evaluate(sanUnrollKExp);
+    auto unrollKPredicate = (aSizeExps[1] % workgroupTileKExp == zero);
+    ss << "K must be a multiple of workgroupTile.k=" << solutionParams->workgroupTile.k;
     setComment(unrollKPredicate, ss.str());
     commandKernel->addPredicate(unrollKPredicate);
     ss.str("");
@@ -327,12 +319,6 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
     {
-        auto memoryTypeA = MemoryType::WAVE;
-        if(gemm->direct2LDSA)
-            memoryTypeA = MemoryType::WAVE_Direct2LDS;
-        else if(gemm->loadLDSA)
-            memoryTypeA = MemoryType::LDS;
-
         auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
             {gemm->workgroupTile.m, gemm->workgroupTile.k},
             LayoutType::MATRIX_A,
@@ -340,7 +326,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
              gemm->machineInstruction.n,
              gemm->machineInstruction.k,
              gemm->machineInstruction.b},
-            memoryTypeA);
+            GetMemoryType(gemm->loadPathA));
         params->setDimensionInfo(tagLoadA, macTileA);
     }
 
@@ -361,12 +347,6 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     }
 
     {
-        auto memoryTypeB = MemoryType::WAVE;
-        if(gemm->direct2LDSB)
-            memoryTypeB = MemoryType::WAVE_Direct2LDS;
-        else if(gemm->loadLDSB)
-            memoryTypeB = MemoryType::LDS;
-
         auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
             {gemm->workgroupTile.k, gemm->workgroupTile.n},
             LayoutType::MATRIX_B,
@@ -374,7 +354,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
              gemm->machineInstruction.n,
              gemm->machineInstruction.k,
              gemm->machineInstruction.b},
-            memoryTypeB);
+            GetMemoryType(gemm->loadPathB));
         params->setDimensionInfo(tagLoadB, macTileB);
     }
 

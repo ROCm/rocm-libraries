@@ -8,9 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 // Any class extending Attributes must have an inputs & outputs map.
 // The map needs to have TensorAttributes as the value.
@@ -30,6 +28,7 @@ private:
 
 public:
     std::string name;
+    DataType compute_data_type = DataType::NOT_SET; // NOLINT(readability-identifier-naming)
 
     DerivedT& set_name(const std::string& nameValue) // NOLINT(readability-identifier-naming)
     {
@@ -40,6 +39,19 @@ public:
     const std::string& get_name() const // NOLINT(readability-identifier-naming)
     {
         return name;
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    DerivedT& set_compute_data_type(DataType value)
+    {
+        compute_data_type = value;
+        return self();
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    DataType get_compute_data_type() const
+    {
+        return compute_data_type;
     }
 
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -61,8 +73,12 @@ public:
             }
         }
 
+        if(get_compute_data_type() == DataType::NOT_SET)
+        {
+            set_compute_data_type(graphAttributes.get_compute_data_type());
+        }
+
         return {};
     }
 };
-}
-}
+} // namespace hipdnn_frontend::graph

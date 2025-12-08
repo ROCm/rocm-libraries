@@ -21,6 +21,8 @@
 # SOFTWARE.
 
 option(BENCHMARK_CONFIG_TUNING "Benchmark device-level functions using various configs" OFF)
+option(BENCHMARK_AUTOTUNED_TYPES_ONLY "Benchmark autotuned types only, which lowers the benchmarking runtime" OFF)
+
 include(../cmake/ConfigAutotune.cmake)
 include(ConfigAutotuneSettings.cmake)
 
@@ -76,6 +78,10 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
 
   if(BUILD_NAIVE_BENCHMARK)
     target_compile_definitions(${BENCHMARK_TARGET} PUBLIC BUILD_NAIVE_BENCHMARK)
+  endif()
+
+  if(BENCHMARK_AUTOTUNED_TYPES_ONLY)
+    target_compile_definitions(${BENCHMARK_TARGET} PUBLIC BENCHMARK_AUTOTUNED_TYPES_ONLY)
   endif()
 
   target_link_libraries(${BENCHMARK_TARGET}

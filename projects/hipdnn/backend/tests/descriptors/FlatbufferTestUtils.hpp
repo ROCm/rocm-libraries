@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace hipdnn_sdk::test_utilities
+namespace hipdnn_backend::test_utilities
 {
 
 inline flatbuffers::FlatBufferBuilder createValidGraph()
@@ -37,4 +37,4 @@ inline flatbuffers::FlatBufferBuilder createValidEngineDetails(int64_t engineId)
     return builder;
 }
 
-}
+} // namespace hipdnn_backend::test_utilities

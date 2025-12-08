@@ -14,6 +14,9 @@
 *.dylib
 *.dll
 
+# Hipdnn Local install
+install/
+
 # Fortran module files
 *.mod
 
@@ -36,6 +39,10 @@ tags
 # Editors
 .vscode
 .cline_storage
+
+#code ql
+scripts*/codeql-*/
+scripts*/*_codeql_*/
 
 # build-in-source directory
 
@@ -60,9 +67,11 @@ _doxygen/
 .idea/
 cmake-build*/
 build*/
+CMakeUserPresets.json
 
 # Python virtualenv
 .venv/
+hipdnn_env/
 
 # Python cache
 __pycache__/

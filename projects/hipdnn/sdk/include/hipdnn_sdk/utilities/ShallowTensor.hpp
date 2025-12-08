@@ -12,9 +12,7 @@
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 
-namespace hipdnn_sdk
-{
-namespace utilities
+namespace hipdnn_sdk::utilities
 {
 
 template <class T>
@@ -64,12 +62,12 @@ public:
         return _memory.count();
     }
 
-    const IMigratableMemory<T>& memory() const override
+    const MigratableMemoryBase<T>& memory() const override
     {
         return _memory;
     }
 
-    IMigratableMemory<T>& memory() override
+    MigratableMemoryBase<T>& memory() override
     {
         return _memory;
     }
@@ -86,6 +84,13 @@ public:
         throwNotSupported();
     }
 
+    size_t fillWithData([[maybe_unused]] const void* data,
+                        [[maybe_unused]] size_t maxBytesCopied) override
+    {
+        throwNotSupported();
+        return 0;
+    }
+
 private:
     static void throwNotSupported()
     {
@@ -100,5 +105,4 @@ private:
     bool _packed;
 };
 
-}
-}
+} // namespace hipdnn_sdk::utilities

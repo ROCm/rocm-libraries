@@ -28,8 +28,11 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
+#include <rocRoller/Parameters/Solution/LoadOption.hpp>
 #include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <string>
+
+namespace SolutionParams = rocRoller::Parameters::Solution;
 
 struct GEMMProblem
 {
@@ -66,11 +69,9 @@ struct GEMMProblem
     unsigned int unrollY = 0;
     unsigned int unrollK = 0;
 
-    bool loadLDSA    = true;
-    bool loadLDSB    = true;
-    bool storeLDSD   = true;
-    bool direct2LDSA = false;
-    bool direct2LDSB = false;
+    bool                     storeLDSD = true;
+    SolutionParams::LoadPath loadPathA{SolutionParams::LoadPath::BufferToLDSViaVGPR};
+    SolutionParams::LoadPath loadPathB{SolutionParams::LoadPath::BufferToLDSViaVGPR};
 
     bool fuseLoops                 = true;
     bool tailLoops                 = true;
@@ -99,8 +100,8 @@ struct GEMMProblem
 
     bool splitStoreTileIntoWaveBlocks = false;
 
-    bool loadLDSScaleA = false;
-    bool loadLDSScaleB = false;
+    SolutionParams::LoadPath loadScalePathA{SolutionParams::LoadPath::BufferToVGPR};
+    SolutionParams::LoadPath loadScalePathB{SolutionParams::LoadPath::BufferToVGPR};
 
     int  workgroupMappingDim   = -1;
     int  workgroupMappingValue = -1;

@@ -10,13 +10,11 @@
 
 #include <hipdnn_sdk/utilities/MigratableMemory.hpp>
 
-namespace hipdnn_sdk
-{
-namespace utilities
+namespace hipdnn_sdk::utilities
 {
 
 template <class T>
-class ShallowHostOnlyMigratableMemory : public IMigratableMemory<T>
+class ShallowHostOnlyMigratableMemory : public MigratableMemoryBase<T>
 {
 public:
     explicit ShallowHostOnlyMigratableMemory(void* shallowMemory = nullptr, size_t count = 0)
@@ -119,5 +117,4 @@ private:
     size_t _count;
 };
 
-}
-}
+} // namespace hipdnn_sdk::utilities

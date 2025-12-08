@@ -2,10 +2,26 @@
 # Change Log for MIOpen
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
-## (Unreleased) MIOpen <upcoming_release_number> for ROCm <upcoming_release_number>
-### Changed
+## (Unreleased) MIOpen 3.5.1 for ROCm 8.0.0
 
-* `MIOPEN_FIND_ENFORCE` no longer forces Normal for `MIOPEN_FIND_MODE` when using non-database update operations.
+## MIOpen 3.5.1 for ROCm 7.2.0
+### Changed
+* Ported several OCL kernels to HIP
+* Improved user DB file locking to better handle network storage
+
+### Optimized
+* [Conv] Improve Composable Kernel (CK) kernel selection during tuning.
+* Added 3D heuristics for gfx950
+* [Conv] Added Winograd Fury 4.6.0 for gfx12 for improved convolution performance
+* Added optional timestamps to MIOpen logging
+* Added option to log when MIOpen starts and finishes tuning
+* Improved performance for MIOpen check numerics capabilities
+
+### Resolved issues
+* Addressed an issue in the stride adjustment logic for ASM (MISA) kernels when the output dimension is one
+* Fixed an issue with the CK bwd solver applicability checks when deterministic is set
+* [BatchNorm] Fixed issue where batchnorm tuning would give incorrect results
+* Fixed issue where generic search was not providing sufficient warm-up for some kernels
 
 ## MIOpen 3.5.1 for ROCm 7.1.0
 ### Added
@@ -13,6 +29,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * Added a new trust verify find mode.
 * Ported Op4dTensorLite kernel from OpenCL to HIP.
 * Implemented a generic HIP kernel for backwards layer normalization.
+* [BatchNorm] Enabled tuning using `miopenSetTuningPolicy`.
 
 ### Changed
 
@@ -21,7 +38,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Optimized
 
 * [Conv] Enabled Composable Kernel (CK) implicit gemms on gfx950.
-* [Conv] Improve Composable Kernel (CK) kernel selection during tuning
 
 ### Resolved issues
 

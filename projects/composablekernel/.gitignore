@@ -36,7 +36,13 @@ tags
 # Editors
 .vscode
 
-# build-in-source directory
+# CMake formatting configuration (local)
+.cmake-format.yaml
+
+# Cline
+.cline*
+
+# build-in-source directory (see exceptions below)
 build*
 
 # emacs temporary/backup files
@@ -58,10 +64,16 @@ _doxygen/
 docs/doxygen/html
 docs/doxygen/xml
 
-# JetBrains IDE
+# JetBrains IDE (see build* exceptions below)
 .idea/
 cmake-build*/
 build*/
+
+# LSP configuration
+.clangd
+
+# User-defined CMake presets
+CMakeUserPresets.json
 
 # Python virtualenv
 .venv/
@@ -71,3 +83,7 @@ __pycache__/
 
 .cache/
 
+# Exceptions to build* patterns above
+# The experimental/builder directory should be tracked despite matching build*
+!experimental/builder
+!experimental/builder/**

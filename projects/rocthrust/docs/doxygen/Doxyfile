@@ -2403,7 +2403,9 @@ PREDEFINED             = THRUST_DOXYGEN_INVOKED \
                          THRUST_PREVENT_MACRO_SUBSTITUTION= \
                          THRUST_EXEC_CHECK_DISABLE= \
                          THRUST_ALIAS_ATTRIBUTE(x)= \
-                         THRUST_DEPRECATED_BECAUSE(x)=
+                         THRUST_DEPRECATED_BECAUSE(x)= \
+                         "__attribute__(x)=" \
+                         "[[no_unique_address]]="
 
 # If the MACRO_EXPANSION and EXPAND_ONLY_PREDEF tags are set to YES then this
 # tag can be used to specify a list of macro names that should be expanded. The
