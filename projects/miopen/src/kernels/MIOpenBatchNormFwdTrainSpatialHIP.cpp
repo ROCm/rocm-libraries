@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 // NOTE: These included headers should be standalone, they shouldn't rely on each other,
 // otherwise the dependencies will be pretty messed up.
@@ -108,6 +85,8 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
 
         if(lid < segment)
         {
+            // The original OpenCL kernel unrolled the loop with a hint of 2 when using FP16.
+            // Using this unrollHint and the static_unroll_count struct replicates this.
             constexpr int unrollHint =
                 mio_config::input_type_strategy == type_strategy::fp16 ? 2 : 1;
             static_unroll_count<unsigned int, 0, nloopm, 1, unrollHint>{[&](unsigned int n) {
@@ -172,6 +151,8 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
             FpAccumType inhat = cast<FpAccumType>(0.);
             FpPrecType value;
 
+            // The original OpenCL kernel unrolled the loop with a hint of 2 when using FP16.
+            // Using this unrollHint and the static_unroll_count struct replicates this.
             constexpr int unrollHint =
                 mio_config::input_type_strategy == type_strategy::fp16 ? 2 : 1;
 
@@ -292,11 +273,10 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                 hwidx                     = remkey - (nidx * mio_bn_config::hw);
                 index                     = nidx * mio_bn_config::chw + chwid + hwidx;
 
-                // TODO: mio_bn_config::nchw could smaller than 3, mio_bn_config::nchw - 3
-                // may result in a negative result, index is unsigned int, so the value on
-                // the right of `<` will decay to unsigned int, a negative value will become
-                // a really large positive value.
-                if(index < (mio_bn_config::nchw - 3))
+                // index is unsigned int, so if the result would normally end up negative,
+                // the value wraps around and the check fails. Improves on the
+                // previous way of handling which was: if(index < (mio_bn_config::nchw - 3))
+                if(index - 3 < (mio_bn_config::nchw))
                 {
                     read4 = *(reinterpret_cast<const fp_type4*>(in + index));
                     miopen::batchnorm::_accumulate(mean, read4);
@@ -331,7 +311,7 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                 // Note: hip compiler has a bug, it throws compiler warning for comparing unsigned
                 // int with 0 value, when rem is 0. but when rem is 0, this code block should not be
                 // compiled due to the if constexpr used above.
-                if(static_cast<int>(lid) < static_cast<int>(rem))
+                if(lid < rem)
                 {
                     unsigned int remkey = lid + less;
                     nidx                = remkey / mio_bn_config::hw;
@@ -607,6 +587,9 @@ template <typename FpType,
           typename FpAccumCType>
 struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
 {
+    static constexpr unsigned int ngrps  = MIO_BN_NGRPS;
+    static constexpr unsigned int ngrps2 = MIO_BN_NGRPS2;
+
     static constexpr __forceinline__ __device__ void Norm(const FpType* __restrict__ in,
                                                           FpType* __restrict__ out,
                                                           const FpPrecType* scale,
@@ -689,6 +672,8 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
                                       ygid * ystride * mio_bn_config::vec_size_y +
                                       xgid * xstride * mio_bn_config::vec_size_x;
 
+            // The original OpenCL kernel unrolled the loop only when this condition was met.
+            // Using this unrollHint and the static_unroll_count struct replicates this.
             constexpr unsigned int unrollHint =
                 mio_bn_config::hw > mio_bn_config::loop_unroll_max_hw ? 1 : 2;
 
@@ -756,9 +741,9 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
         if(xgid * mio_bn_config::vec_size_x >= mio_bn_config::c)
             return;
 
-        for(unsigned int zoffset = zlid; zoffset < MIO_BN_NGRPS2; zoffset += zgrp_sz)
+        for(unsigned int zoffset = zlid; zoffset < ngrps2; zoffset += zgrp_sz)
         {
-            for(unsigned int yoffset = ylid; yoffset < MIO_BN_NGRPS; yoffset += ygrp_sz)
+            for(unsigned int yoffset = ylid; yoffset < ngrps; yoffset += ygrp_sz)
             {
                 mean += miopen::batchnorm::loadFromStash<FpPrecType_C>(
                     (FpType_C*)(meanvarbuff),
@@ -786,7 +771,9 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
         if constexpr(!mio_bn_config::use_amdgcn || mio_bn_config::launch_dim.grp0 > 1 ||
                      (mio_bn_config::lds_gcn_size == 1) || mio_bn_config::vec_size_x > 1)
         {
-            __shared__ FpAccumCType lcl_data[2 * mio_bn_config::lds_size];
+            __shared__ FpAccumCType
+                lcl_data[2 * MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL];
+
             miopen::reduction::lds_reduce2_2d(mean,
                                               variance,
                                               INHW,
@@ -799,8 +786,10 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
         else
         {
             commitID = 64;
-            __shared__ FpAccumCType lcl_data_x[mio_bn_config::lds_gcn_size];
-            __shared__ FpAccumCType lcl_data_y[mio_bn_config::lds_gcn_size];
+            __shared__ FpAccumCType
+                lcl_data_x[MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL / 64];
+            __shared__ FpAccumCType
+                lcl_data_y[MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL / 64];
             miopen::reduction::gcn_reduce2(
                 mean, variance, INHW, lcl_data_x, lcl_data_y, ylid + zlid * ygrp_sz);
         }
@@ -809,9 +798,9 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImplVar2
         variance    = miopen::max(variance, cast<FpPrecType_C>(0.));
         invVariance = miopen::rsqrt(variance + cast<FpPrecType_C>(epsilon));
 
-        for(unsigned int zoffset = zlid; zoffset < MIO_BN_NGRPS2; zoffset += zgrp_sz)
+        for(unsigned int zoffset = zlid; zoffset < ngrps2; zoffset += zgrp_sz)
         {
-            for(unsigned int yoffset = ylid; yoffset < MIO_BN_NGRPS; yoffset += ygrp_sz)
+            for(unsigned int yoffset = ylid; yoffset < ngrps; yoffset += ygrp_sz)
             {
 
                 storeToStash(mean,
