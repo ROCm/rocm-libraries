@@ -1,5 +1,5 @@
 {
-    "generated_on": "27 Nov 2025, 09:25:38",
+    "generated_on": "07 Dec 2025, 10:44:36",
     "gpu": {
         "num_cu": 304,
         "arch": "gfx942"
@@ -7,6 +7,11 @@
     "version_info": {
         "miopen_version": "8e7018af9b"
     },
+    "sessions": [
+        1,
+        72
+    ],
+    "note": "Data merged from sessions: [1, 72]",
     "num_inputs": 24,
     "num_solvers": 12,
     "num_outputs": 12,
