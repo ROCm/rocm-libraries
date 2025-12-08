@@ -36,14 +36,12 @@
 #include <miopen/readonlyramdb.hpp>
 #include <miopen/temp_file.hpp>
 
-#include <boost/optional.hpp>
-
 #include <array>
 #include <cstdio>
-#include <cstdlib>
 #include <fstream>
 #include <mutex>
 #include <limits>
+#include <optional>
 #include <random>
 #include <shared_mutex>
 #include <string>
@@ -73,14 +71,14 @@ static fs::path& exe_path()
     return exe_path;
 }
 
-static boost::optional<fs::path>& thread_logs_root()
+static std::optional<fs::path>& thread_logs_root()
 {
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
     static std::mutex mutex;
     std::lock_guard<std::mutex> lock(mutex);
 
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-    static boost::optional<fs::path> path(boost::none);
+    static std::optional<fs::path> path;
     return path;
 }
 
@@ -310,7 +308,7 @@ protected:
     static void ValidateSingleEntry(
         TKey key, const std::array<std::pair<const std::string, TValue>, count> values, TDb& db)
     {
-        boost::optional<DbRecord> record = db.FindRecord(key);
+        auto record = db.FindRecord(key);
 
         EXPECT(record);
 
@@ -709,12 +707,14 @@ private:
         std::ofstream log_err;
         std::streambuf *cout_buf = nullptr, *cerr_buf = nullptr;
 
-        if(thread_logs_root())
+        if(thread_logs_root().has_value())
         {
-            const auto out_path =
-                *thread_logs_root() / ("thread-" + std::to_string(id) + "_" + log_postfix + ".log");
-            const auto err_path = *thread_logs_root() /
+            // NOLINTBEGIN (bugprone-unchecked-optional-access)
+            const auto out_path = thread_logs_root().value() /
+                                  ("thread-" + std::to_string(id) + "_" + log_postfix + ".log");
+            const auto err_path = thread_logs_root().value() /
                                   ("thread-" + std::to_string(id) + "_" + log_postfix + "-err.log");
+            // NOLINTEND (bugprone-unchecked-optional-access)
 
             fs::remove(out_path);
             fs::remove(err_path);
@@ -729,7 +729,7 @@ private:
 
         worker();
 
-        if(thread_logs_root())
+        if(thread_logs_root().has_value())
         {
             std::cout.rdbuf(cout_buf);
             std::cerr.rdbuf(cerr_buf);
@@ -994,9 +994,10 @@ public:
                                 " --" + ArgsHelper::path_arg + " " + temp_file.Path() +
                                 " --" + ArgsHelper::db_class_arg + " " + ArgsHelper::db_class::Get<TDb>();
 
-                if(thread_logs_root())
+                if(thread_logs_root().has_value())
                 {
-                    args += std::string{" --"} + ArgsHelper::logs_path_arg + " " + *thread_logs_root();
+                // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
+                    args += std::string{" --"} + ArgsHelper::logs_path_arg + " " + thread_logs_root().value();
                 }
 
                 if(full_set())
@@ -1079,9 +1080,10 @@ public:
                                " --" + ArgsHelper::path_arg + " " + temp_file +
                                " --" + ArgsHelper::db_class_arg + " " + ArgsHelper::db_class::Get<TDb>();
 
-                if(thread_logs_root())
+                if(thread_logs_root().has_value())
                 {
-                    args += std::string{" --"} + ArgsHelper::logs_path_arg + " " + *thread_logs_root();
+                    // NOLINTNEXTLINE (bugprone-unchecked-optional-access)
+                    args += std::string{" --"} + ArgsHelper::logs_path_arg + " " + thread_logs_root().value();
                 }
 
                 if(full_set())
