@@ -231,7 +231,7 @@ bool MiopenConvPlanBuilder::isApplicable(const HipdnnEnginePluginHandle& handle,
 
     if(opGraph.getNode(0).compute_data_type() != hipdnn_sdk::data_objects::DataType::FLOAT)
     {
-        HIPDNN_LOG_ERROR("BatchnormFwdTraining plan builder only supports nodes with an fp32 "
+        HIPDNN_LOG_ERROR("Convolution plan builder only supports nodes with an fp32 "
                          "compute_data_type");
         return false;
     }
