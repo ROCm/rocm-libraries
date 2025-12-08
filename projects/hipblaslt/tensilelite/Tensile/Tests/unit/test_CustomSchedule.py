@@ -171,7 +171,6 @@ class TestCustomSchedule:
         })
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
-        schedule_info.disableValidation()  # TODO: disable once fix has been added
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
