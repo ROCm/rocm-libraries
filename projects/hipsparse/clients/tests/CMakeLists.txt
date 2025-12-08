@@ -354,6 +354,7 @@ add_custom_target(hipsparse-test-data
 
 add_dependencies(hipsparse-test hipsparse-test-data hipsparse-common)
 
+# Install test-specific files (tests component)
 rocm_install(TARGETS hipsparse-test COMPONENT tests)
 rocm_install(FILES ${HIPSPARSE_TEST_DATA} DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test" COMPONENT tests)
 
@@ -365,26 +366,10 @@ rocm_install(
     COMPONENT tests
     FILES_MATCHING PATTERN "*.bin"
 )
-rocm_install(
-    FILES "${HIPSPARSE_COMMON}" "${HIPSPARSE_TEMPLATE}"
-    COMPONENT clients-common
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test"
-)
-rocm_install(
-    PROGRAMS "${HIPSPARSE_GENTEST}"
-    COMPONENT clients-common
-    DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipsparse/test"
-)
-rocm_install(
-    PROGRAMS "${HIPSPARSE_CONVERT}"
-    COMPONENT clients-common
-    DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
-rocm_install(
-    FILES "${HIPSPARSE_CLIENTMATRICES}"
-    COMPONENT clients-common
-    DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test"
-)
+
+# NOTE: Installation of clients-common files (HIPSPARSE_COMMON, HIPSPARSE_TEMPLATE,
+# HIPSPARSE_GENTEST, HIPSPARSE_CONVERT, HIPSPARSE_CLIENTMATRICES) has been moved to
+# clients/CMakeLists.txt where they logically belong as shared client utilities.
 
 # Windows-specific DLL copying (using script to avoid foreach in CMakeLists)
 if(WIN32)
