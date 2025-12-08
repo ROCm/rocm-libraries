@@ -17,24 +17,42 @@
     },
     {
       "name": "debug",
-      "displayName": "Debug Build Configuration",
+      "displayName": "Debug Build Configuration with Install Prefix Set To Bin Dir",
       "inherits": ["base-hipdnn"],
       "binaryDir": "${sourceDir}/build/debug",
       "installDir": "${sourceDir}/build/debug/installdir",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/debug/install/"
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/debug/installdir"
       }
     },
     {
       "name": "release",
-      "displayName": "Release Build Configuration",
+      "displayName": "Release Build Configuration with Install Prefix Set To Bin Dir",
       "inherits": ["base-hipdnn"],
       "binaryDir": "${sourceDir}/build/release",
       "installDir": "${sourceDir}/build/release/installdir",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/release/install/"
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/release/installdir"
+      }
+    },
+    {
+      "name": "debug-default-install",
+      "displayName": "Debug Build Configuration",
+      "inherits": ["base-hipdnn"],
+      "binaryDir": "${sourceDir}/build/debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release-default-install",
+      "displayName": "Release Build Configuration",
+      "inherits": ["base-hipdnn"],
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
       }
     }
   ],
@@ -51,13 +69,23 @@
       "targets": ["all"]
     },
     {
-      "name": "dev-install-debug",
+      "name": "install-debug",
       "configurePreset": "debug",
       "targets": ["install"]
     },
     {
-      "name": "dev-install-release",
+      "name": "install-release",
       "configurePreset": "release",
+      "targets": ["install"]
+    },
+    {
+      "name": "install-debug-default",
+      "configurePreset": "debug-default-install",
+      "targets": ["install"]
+    },
+    {
+      "name": "install-release-default",
+      "configurePreset": "release-default-install",
       "targets": ["install"]
     }
   ],
