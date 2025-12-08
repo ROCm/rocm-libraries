@@ -507,7 +507,7 @@ class TestCustomScheduleValidation:
         scheduleInfo.disableValidation()
         status, message = scheduleInfo.isValid({"kernel" : {"DepthU": 42}})
         assert status == True
-        assert message == "CMS validation explicitly disabled. Running on kernel with MT0xMT1xDepthU = ?x?x42"
+        assert message == "CMS validation explicitly disabled. Running on kernel with MT0xMT1xDepthU = ?x?x42 NN"
 
         # A non-empty verification message means that the schedule info is considered invalid.
         status, message = ScheduleInfo(
