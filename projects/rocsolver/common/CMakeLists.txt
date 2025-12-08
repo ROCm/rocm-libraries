@@ -33,9 +33,8 @@ if (NOT USE_FMT_LIB)
    add_library(c++23_compiler_flags INTERFACE)
    target_compile_features(c++23_compiler_flags INTERFACE cxx_std_23)
    target_link_libraries(rocsolver-common INTERFACE c++23_compiler_flags)
-   # add libstdc++ requirement
-   target_compile_options(c++23_compiler_flags INTERFACE -stdlib=libstdc++)
 else()
+   #if (USE_FMT_LIB)
    # add preprocessor definition for aliased printing
    target_compile_definitions(rocsolver-common INTERFACE USE_FMT_LIB)
    if(ROCSOLVER_EMBED_FMT)
