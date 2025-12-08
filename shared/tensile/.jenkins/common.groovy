@@ -125,7 +125,7 @@ def runTestCommand(platform, project, jobName, testMark, boolean runHostTest=tru
             if ${runHostTest}; then
               pushd build
               echo "Running full test suite..."
-              ./TensileTests --gtest_output=xml:tensile-tests.xml ${markSkipExtendedTest} --gtest_color=yes
+              ./TensileTests ${markSkipExtendedTest} --gtest_output=xml:tensile-tests.xml --gtest_color=yes
               FAILED_TESTS=$(grep -oP 'testcase name="\K[^"]+(?=".*?status="run"[^>]*?result="failed")?' tensile-tests.xml)
               if [ -z "$FAILED_TESTS" ]; then
                   echo "All tests passed."
@@ -133,7 +133,7 @@ def runTestCommand(platform, project, jobName, testMark, boolean runHostTest=tru
                 echo "Rerunning failed tests with debug info..."
                 for test in $FAILED_TESTS; do
                     echo "... $test"
-                    TENSILE_DC=0x8040 ./TensileTests --gtest_output=xml:tensile-tests.xml ${markSkipExtendedTest} --gtest_color=yes
+                    TENSILE_DC=0x8040 ./TensileTests  ${markSkipExtendedTest} --gtest_output=xml:tensile-tests.xml --gtest_color=yes
                 done
               fi
               check_err
