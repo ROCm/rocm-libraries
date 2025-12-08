@@ -23,15 +23,12 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <array>
-#include <cassert>
 #include <miopen/batch_norm.hpp>
 #include <miopen/fusion.hpp>
 #include <miopen/fusion_plan.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/visit_float.hpp>
-#include <miopen/stringutils.hpp>
 #include <miopen/solver_id.hpp>
 #include <miopen/fusion/solvers.hpp>
 #include <miopen/fusion/fusion_invoke_params.hpp>
@@ -40,13 +37,15 @@
 #include <miopen/find_solution.hpp>
 #include <miopen/conv/solver_finders.hpp>
 #include <miopen/driver_arguments.hpp>
-#include <miopen/config.hpp>
 
-#include <ostream>
-#include <ios>
-#include <algorithm>
-#include <string>
 #include <half/half.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <optional>
+#include <ostream>
+#include <string>
 
 #define MIOPEN_CHECK(x)          \
     if(x != miopenStatusSuccess) \
@@ -453,7 +452,11 @@ miopenStatus_t FusionPlanDescriptor::AddOp(std::shared_ptr<FusionOpDescriptor> d
         desc->SetInputDesc(input_desc);
     else
         desc->SetInputDesc(output_desc);
-    desc->GetOutputDesc(output_desc);
+    auto status = desc->GetOutputDesc(output_desc);
+    if(status != miopenStatusSuccess)
+    {
+        return status;
+    }
     op_map.emplace_back(desc);
     op_count++;
     return miopenStatusSuccess;
@@ -996,9 +999,8 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
     }
 
     {
-        FindMode findMode;
-        auto sol = boost::optional<miopenConvSolution_t>{};
-
+        FindMode findMode(solver::Primitive::Fusion);
+        auto sol = std::optional<miopenConvSolution_t>{};
         if(findMode.IsFast(fusion_problem) || findMode.IsHybrid(fusion_problem))
         {
             const auto ctx      = FusionContext{handle};
@@ -1089,7 +1091,7 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
             continue;
         }
 
-        handle.RegisterInvoker(*invoker, network_config, id.ToString(), AlgorithmName{"fusion"});
+        handle.RegisterInvoker(*invoker, network_config, id.ToString());
         invokers.push_back(std::move(*invoker));
         MIOPEN_LOG_I2(miopen::ConvolutionAlgoToString(algorithm));
     }
@@ -1100,6 +1102,8 @@ miopenStatus_t FusionPlanDescriptor::Compile(const Handle& handle)
         return miopenStatusUnsupportedOp;
     }
 
+    handle.SetAsFound1_0(
+        network_config, AlgorithmName{"fusion"}, find_results.front().GetSolver().ToString());
     return miopenStatusSuccess;
 }
 

@@ -28,6 +28,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
+#include <hipblaslt_arguments.hpp>
 #include <iostream>
 
 #include "helper.h"
@@ -36,23 +37,32 @@ using clock_point  = std::chrono::time_point<std::chrono::steady_clock>;
 using double_micro = std::chrono::duration<double, std::micro>;
 using HHSRunner    = Runner<hipblasLtHalf, hipblasLtHalf, hipblasLtHalf, float, float>;
 
-size_t warmups  = 10;
-size_t hotIters = 1000;
+size_t warmups     = 10;
+size_t hotIters    = 1000;
+size_t getAllIters = 100; // used for when requested_solution != 1
 int    algoIdx;
 
-double_micro total_getHeur      = double_micro::zero();
-double_micro total_matmul       = double_micro::zero();
-double_micro total_ext_getHeur  = double_micro::zero();
-double_micro total_ext_getAll   = double_micro::zero();
-double_micro total_ext_getByIdx = double_micro::zero();
-double_micro total_run          = double_micro::zero();
+double_micro total_getHeur         = double_micro::zero();
+double_micro total_getHeur100      = double_micro::zero();
+double_micro total_getHeurNeg1     = double_micro::zero();
+double_micro total_matmul          = double_micro::zero();
+double_micro total_ext_getHeur     = double_micro::zero(); // start of ext
+double_micro total_ext_getHeur100  = double_micro::zero();
+double_micro total_ext_getHeurNeg1 = double_micro::zero();
+double_micro total_ext_getAll      = double_micro::zero();
+double_micro total_ext_getByIdx    = double_micro::zero();
+double_micro total_run             = double_micro::zero();
 
-double_micro best_getHeur      = double_micro::max();
-double_micro best_matmul       = double_micro::max();
-double_micro best_ext_getHeur  = double_micro::max();
-double_micro best_ext_getAll   = double_micro::max();
-double_micro best_ext_getByIdx = double_micro::max();
-double_micro best_run          = double_micro::max();
+double_micro best_getHeur         = double_micro::max();
+double_micro best_getHeur100      = double_micro::max();
+double_micro best_getHeurNeg1     = double_micro::max();
+double_micro best_matmul          = double_micro::max();
+double_micro best_ext_getHeur     = double_micro::max(); // start of ext
+double_micro best_ext_getHeur100  = double_micro::max();
+double_micro best_ext_getHeurNeg1 = double_micro::max();
+double_micro best_ext_getAll      = double_micro::max();
+double_micro best_ext_getByIdx    = double_micro::max();
+double_micro best_run             = double_micro::max();
 
 void printUsage(char* programName)
 {
@@ -60,10 +70,11 @@ void printUsage(char* programName)
               << "options:\n"
               << "\t-h, --help\t\t\tShow this help message\n"
               << "\t-i, --iters\t\t\tHot iterations, default is 1000.\n"
-              << "\t-j, --cold_iters\t\t\tWarmup iterations, default is 10.\n";
+              << "\t-j, --cold_iters\t\t\tWarmup iterations, default is 10.\n"
+              << "\t-k, --get_all_iters\t\t\tHot iterations for getAll, default is 100.\n";
 }
 
-int parseArgs(int argc, char** argv, size_t& cold, size_t& hot)
+int parseArgs(int argc, char** argv, size_t& cold, size_t& hot, size_t& getAllIters)
 {
     if(argc <= 1)
     {
@@ -87,6 +98,10 @@ int parseArgs(int argc, char** argv, size_t& cold, size_t& hot)
             else if(arg == "-j" || arg == "--cold_iters")
             {
                 cold = std::stoul(argv[++i]);
+            }
+            else if(arg == "-k" || arg == "--get_all_iters")
+            {
+                getAllIters = std::stoul(argv[++i]);
             }
         }
         else
@@ -115,7 +130,9 @@ void simpleGemm(hipblasLtHandle_t  handle,
                 void*              d_d,
                 void*              d_workspace,
                 int64_t            max_workspace_size,
-                hipStream_t        stream);
+                hipStream_t        stream,
+                int                requested_solutions,
+                int&               returned_solutions);
 
 void simpleGemmExt(hipblasLtHandle_t  handle,
                    hipblasOperation_t trans_a,
@@ -132,7 +149,9 @@ void simpleGemmExt(hipblasLtHandle_t  handle,
                    void*              d_d,
                    void*              d_workspace,
                    int64_t            max_workspace_size,
-                   hipStream_t        stream);
+                   hipStream_t        stream,
+                   int                requested_solutions,
+                   int&               returned_solutions);
 
 void simpleGemmGetAllAlgosExt(hipblasLtHandle_t  handle,
                               hipblasOperation_t trans_a,
@@ -149,7 +168,8 @@ void simpleGemmGetAllAlgosExt(hipblasLtHandle_t  handle,
                               void*              d_d,
                               void*              d_workspace,
                               int64_t            max_workspace_size,
-                              hipStream_t        stream);
+                              hipStream_t        stream,
+                              int&               returned_solutions);
 
 void simpleGemmGetAlgoByIndexExt(hipblasLtHandle_t  handle,
                                  hipblasOperation_t trans_a,
@@ -166,45 +186,92 @@ void simpleGemmGetAlgoByIndexExt(hipblasLtHandle_t  handle,
                                  void*              d_d,
                                  void*              d_workspace,
                                  int64_t            max_workspace_size,
-                                 hipStream_t        stream);
+                                 hipStream_t        stream,
+                                 int&               returned_solutions);
 
-void calcOverheadGetHeuristic();
-void calcOverheadExtGetHeuristic();
-void calcOverheadExtGetAllAlgos();
-void calcOverheadExtGetAlgoByIdx();
+int calcOverheadGetHeuristic(int requested_solutions = 1);
+int calcOverheadExtGetHeuristic(int requested_solutions = 1);
+int calcOverheadExtGetAllAlgos();
+int calcOverheadExtGetAlgoByIdx();
 
 int main(int argc, char** argv)
 {
-    if(auto err = parseArgs(argc, argv, warmups, hotIters))
+    if(auto err = parseArgs(argc, argv, warmups, hotIters, getAllIters))
     {
         printUsage(argv[0]);
         return err;
     }
 
-    std::cout << "[overhead]:function,api_name,us/iter,best_us\n";
-    calcOverheadGetHeuristic();
-    std::cout << "api_overhead,hipblasLtMatmulAlgoGetHeuristic,"
-              << std::to_string(total_getHeur.count() / hotIters) << ","
-              << std::to_string(best_getHeur.count()) << std::endl;
-    std::cout << "api_overhead,hipblasLtMatmul," << std::to_string(total_matmul.count() / hotIters)
-              << "," << std::to_string(best_matmul.count()) << std::endl;
+    int returned_sol;
+    // new: test get heuristic with requested-solution = 100, -1
+    int requested_solutions = 1;
 
-    calcOverheadExtGetHeuristic(); // calls ext::run hotIters times
-    std::cout << "api_overhead,hipblaslt_ext::algoGetHeuristic,"
-              << std::to_string(total_ext_getHeur.count() / hotIters) << ","
+    // ----------- Heuristic ----------- //
+    std::cout << "[overhead]:function,api_name,num_sols,us/iter,best_us\n";
+    // calls hipblasLtMatmul hotIters times
+    returned_sol = calcOverheadGetHeuristic();
+    std::cout << "api_overhead,hipblasLtMatmulAlgoGetHeuristic," << std::to_string(returned_sol)
+              << "," << std::to_string(total_getHeur.count() / hotIters) << ","
+              << std::to_string(best_getHeur.count()) << std::endl;
+
+    // calls ext::run hotIters times
+    returned_sol = calcOverheadExtGetHeuristic();
+    std::cout << "api_overhead,hipblaslt_ext::algoGetHeuristic," << std::to_string(returned_sol)
+              << "," << std::to_string(total_ext_getHeur.count() / hotIters) << ","
               << std::to_string(best_ext_getHeur.count()) << std::endl;
 
-    calcOverheadExtGetAllAlgos(); // calls ext::run hotIters times
-    std::cout << "api_overhead,hipblaslt_ext::getAllAlgos,"
-              << std::to_string(total_ext_getAll.count() / hotIters) << ","
+    // ----------- GetAll ----------- //
+    // won't calls ext::run, and note that the hot iter is getAllIters
+    returned_sol = calcOverheadExtGetAllAlgos();
+    std::cout << "api_overhead,hipblaslt_ext::getAllAlgos," << std::to_string(returned_sol) << ","
+              << std::to_string(total_ext_getAll.count() / getAllIters) << ","
               << std::to_string(best_ext_getAll.count()) << std::endl;
 
-    calcOverheadExtGetAlgoByIdx(); // calls ext::run hotIters times
-    std::cout << "api_overhead,hipblaslt_ext::getAlgosFromIndex,"
-              << std::to_string(total_ext_getByIdx.count() / hotIters) << ","
+    // ----------- GetByIdx ----------- //
+    // calls ext::run hotIters times
+    returned_sol = calcOverheadExtGetAlgoByIdx();
+    std::cout << "api_overhead,hipblaslt_ext::getAlgosFromIndex," << std::to_string(returned_sol)
+              << "," << std::to_string(total_ext_getByIdx.count() / hotIters) << ","
               << std::to_string(best_ext_getByIdx.count()) << std::endl;
-    std::cout << "api_overhead,hipblaslt_ext::run,"
-              << std::to_string(total_run.count() / (hotIters * 3)) << ","
+
+    // ----------- GetHeuristic(100) ----------- //
+    requested_solutions = 100;
+    // won't calls hipblasLtMatmul if requested_solutions != 1, and note that the hot iter is getAllIters
+    returned_sol = calcOverheadGetHeuristic(requested_solutions);
+    std::cout << "api_overhead,hipblasLtMatmulAlgoGetHeuristic[100],"
+              << std::to_string(returned_sol) << ","
+              << std::to_string(total_getHeur100.count() / getAllIters) << ","
+              << std::to_string(best_getHeur100.count()) << std::endl;
+    // won't calls ext::run if requested_solutions != 1, and note that the hot iter is getAllIters
+    returned_sol = calcOverheadExtGetHeuristic(requested_solutions);
+    std::cout << "api_overhead,hipblaslt_ext::algoGetHeuristic[100],"
+              << std::to_string(returned_sol) << ","
+              << std::to_string(total_ext_getHeur100.count() / getAllIters) << ","
+              << std::to_string(best_ext_getHeur100.count()) << std::endl;
+
+    // ----------- GetHeuristic(-1) ----------- //
+    requested_solutions = -1;
+    // won't calls hipblasLtMatmul if requested_solutions != 1, and note that the hot iter is getAllIters
+    returned_sol = calcOverheadGetHeuristic(requested_solutions);
+    std::cout << "api_overhead,hipblasLtMatmulAlgoGetHeuristic[Neg1],"
+              << std::to_string(returned_sol) << ","
+              << std::to_string(total_getHeurNeg1.count() / getAllIters) << ","
+              << std::to_string(best_getHeurNeg1.count()) << std::endl;
+    // won't calls ext::run if requested_solutions != 1, and note that the hot iter is getAllIters
+    returned_sol = calcOverheadExtGetHeuristic(requested_solutions);
+    std::cout << "api_overhead,hipblaslt_ext::algoGetHeuristic[Neg1],"
+              << std::to_string(returned_sol) << ","
+              << std::to_string(total_ext_getHeurNeg1.count() / getAllIters) << ","
+              << std::to_string(best_ext_getHeurNeg1.count()) << std::endl;
+
+    // ----------- matmul ----------- //
+    // put matmul exec time in the end
+    returned_sol = 0;
+    std::cout << "api_overhead,hipblasLtMatmul," << std::to_string(returned_sol) << ","
+              << std::to_string(total_matmul.count() / hotIters) << ","
+              << std::to_string(best_matmul.count()) << std::endl;
+    std::cout << "api_overhead,hipblaslt_ext::run," << std::to_string(returned_sol) << ","
+              << std::to_string(total_run.count() / (hotIters * 2)) << ","
               << std::to_string(best_run.count()) << std::endl;
 
     return 0;
@@ -213,10 +280,14 @@ int main(int argc, char** argv)
 /////////////////////////////////////////
 // hipBLASLt GetHeuristic & MatMul
 /////////////////////////////////////////
-void calcOverheadGetHeuristic()
+int calcOverheadGetHeuristic(int requested_solutions)
 {
+    requested_solutions
+        = requested_solutions < 0 ? HIPBLASLT_MAX_REQUESTED_SOLUTION_NUM : requested_solutions;
+
     HHSRunner runner(1024, 512, 1024, 1, 1.f, 1.f, 32 * 1024 * 1024);
-    runner.run([&runner] {
+    int       returned_sols = 0;
+    runner.run([&] {
         simpleGemm(runner.handle,
                    HIPBLAS_OP_N,
                    HIPBLAS_OP_N,
@@ -232,8 +303,12 @@ void calcOverheadGetHeuristic()
                    runner.d_d,
                    runner.d_workspace,
                    runner.max_workspace_size,
-                   runner.stream);
+                   runner.stream,
+                   requested_solutions,
+                   returned_sols);
     });
+
+    return returned_sols;
 }
 
 void simpleGemm(hipblasLtHandle_t  handle,
@@ -251,7 +326,9 @@ void simpleGemm(hipblasLtHandle_t  handle,
                 void*              d_d,
                 void*              d_workspace,
                 int64_t            max_workspace_size,
-                hipStream_t        stream)
+                hipStream_t        stream,
+                int                requested_solutions,
+                int&               returned_solutions)
 {
     hipblasLtMatrixLayout_t matA, matB, matC, matD;
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matA, HIP_R_16F, m, k, m));
@@ -317,9 +394,8 @@ void simpleGemm(hipblasLtHandle_t  handle,
     //
     for(size_t iter = 0; iter < warmups; ++iter)
     {
-        const int                        request_solutions = 1;
-        hipblasLtMatmulHeuristicResult_t heuristicResult[request_solutions];
-        int                              returnedAlgoCount = 0;
+        std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResult(requested_solutions);
+        int                                           returnedAlgoCount = 0;
         CHECK_HIPBLASLT_ERROR(hipblasLtMatmulAlgoGetHeuristic(handle,
                                                               matmul,
                                                               matA,
@@ -327,10 +403,11 @@ void simpleGemm(hipblasLtHandle_t  handle,
                                                               matC,
                                                               matD,
                                                               pref,
-                                                              request_solutions,
-                                                              heuristicResult,
+                                                              requested_solutions,
+                                                              heuristicResult.data(),
                                                               &returnedAlgoCount));
 
+        returned_solutions = returnedAlgoCount;
         if(returnedAlgoCount == 0)
         {
             std::cerr << "No valid solution found!" << std::endl;
@@ -339,38 +416,41 @@ void simpleGemm(hipblasLtHandle_t  handle,
         }
 
         uint64_t workspace_size = 0;
-        for(int i = 0; i < returnedAlgoCount; i++)
-            workspace_size = max(workspace_size, heuristicResult[i].workspaceSize);
+        if(requested_solutions == 1)
+        {
+            for(int i = 0; i < returnedAlgoCount; i++)
+                workspace_size = max(workspace_size, heuristicResult[i].workspaceSize);
 
-        CHECK_HIPBLASLT_ERROR(hipblasLtMatmul(handle,
-                                              matmul,
-                                              &alpha,
-                                              d_a,
-                                              matA,
-                                              d_b,
-                                              matB,
-                                              &beta,
-                                              d_c,
-                                              matC,
-                                              d_d,
-                                              matD,
-                                              &heuristicResult[0].algo,
-                                              d_workspace,
-                                              workspace_size,
-                                              stream));
+            CHECK_HIPBLASLT_ERROR(hipblasLtMatmul(handle,
+                                                  matmul,
+                                                  &alpha,
+                                                  d_a,
+                                                  matA,
+                                                  d_b,
+                                                  matB,
+                                                  &beta,
+                                                  d_c,
+                                                  matC,
+                                                  d_d,
+                                                  matD,
+                                                  &heuristicResult[0].algo,
+                                                  d_workspace,
+                                                  workspace_size,
+                                                  stream));
+        }
     }
 
     clock_point start_getHeur, end_getHeur;
     clock_point start_matmul, end_matmul;
+    size_t      iters = (requested_solutions == 1) ? hotIters : getAllIters;
 
     //
     // hot-iters
     //
-    for(size_t iter = 0; iter < hotIters; ++iter)
+    for(size_t iter = 0; iter < iters; ++iter)
     {
-        const int                        request_solutions = 1;
-        hipblasLtMatmulHeuristicResult_t heuristicResult[request_solutions];
-        int                              returnedAlgoCount = 0;
+        std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResult(requested_solutions);
+        int                                           returnedAlgoCount = 0;
 
         start_getHeur = std::chrono::steady_clock::now();
         CHECK_HIPBLASLT_ERROR(hipblasLtMatmulAlgoGetHeuristic(handle,
@@ -380,14 +460,28 @@ void simpleGemm(hipblasLtHandle_t  handle,
                                                               matC,
                                                               matD,
                                                               pref,
-                                                              request_solutions,
-                                                              heuristicResult,
+                                                              requested_solutions,
+                                                              heuristicResult.data(),
                                                               &returnedAlgoCount));
         end_getHeur           = std::chrono::steady_clock::now();
         double_micro duration = end_getHeur - start_getHeur;
-        best_getHeur          = std::min(best_getHeur, duration);
-        total_getHeur += duration;
+        if(requested_solutions == 1)
+        {
+            best_getHeur = std::min(best_getHeur, duration);
+            total_getHeur += duration;
+        }
+        else if(requested_solutions == HIPBLASLT_MAX_REQUESTED_SOLUTION_NUM)
+        {
+            best_getHeurNeg1 = std::min(best_getHeurNeg1, duration);
+            total_getHeurNeg1 += duration;
+        }
+        else
+        {
+            best_getHeur100 = std::min(best_getHeur100, duration);
+            total_getHeur100 += duration;
+        }
 
+        returned_solutions = returnedAlgoCount;
         if(returnedAlgoCount == 0)
         {
             std::cerr << "No valid solution found!" << std::endl;
@@ -396,30 +490,33 @@ void simpleGemm(hipblasLtHandle_t  handle,
         }
 
         uint64_t workspace_size = 0;
-        for(int i = 0; i < returnedAlgoCount; i++)
-            workspace_size = max(workspace_size, heuristicResult[i].workspaceSize);
+        if(requested_solutions == 1)
+        {
+            for(int i = 0; i < returnedAlgoCount; i++)
+                workspace_size = max(workspace_size, heuristicResult[i].workspaceSize);
 
-        start_matmul = std::chrono::steady_clock::now();
-        CHECK_HIPBLASLT_ERROR(hipblasLtMatmul(handle,
-                                              matmul,
-                                              &alpha,
-                                              d_a,
-                                              matA,
-                                              d_b,
-                                              matB,
-                                              &beta,
-                                              d_c,
-                                              matC,
-                                              d_d,
-                                              matD,
-                                              &heuristicResult[0].algo,
-                                              d_workspace,
-                                              workspace_size,
-                                              stream));
-        end_matmul  = std::chrono::steady_clock::now();
-        duration    = end_matmul - start_matmul;
-        best_matmul = std::min(best_matmul, duration);
-        total_matmul += duration;
+            start_matmul = std::chrono::steady_clock::now();
+            CHECK_HIPBLASLT_ERROR(hipblasLtMatmul(handle,
+                                                  matmul,
+                                                  &alpha,
+                                                  d_a,
+                                                  matA,
+                                                  d_b,
+                                                  matB,
+                                                  &beta,
+                                                  d_c,
+                                                  matC,
+                                                  d_d,
+                                                  matD,
+                                                  &heuristicResult[0].algo,
+                                                  d_workspace,
+                                                  workspace_size,
+                                                  stream));
+            end_matmul  = std::chrono::steady_clock::now();
+            duration    = end_matmul - start_matmul;
+            best_matmul = std::min(best_matmul, duration);
+            total_matmul += duration;
+        }
     }
 
     freeResource();
@@ -430,10 +527,14 @@ void simpleGemm(hipblasLtHandle_t  handle,
 /////////////////////////////////////////
 // hipBLASLt_ext - algoGetHeuristic & run
 /////////////////////////////////////////
-void calcOverheadExtGetHeuristic()
+int calcOverheadExtGetHeuristic(int requested_solutions)
 {
+    requested_solutions
+        = requested_solutions < 0 ? HIPBLASLT_MAX_REQUESTED_SOLUTION_NUM : requested_solutions;
+
     HHSRunner runner(1024, 512, 1024, 1, 1.f, 1.f, 32 * 1024 * 1024);
-    runner.run([&runner] {
+    int       returned_sols = 0;
+    runner.run([&] {
         simpleGemmExt(runner.handle,
                       HIPBLAS_OP_N,
                       HIPBLAS_OP_N,
@@ -449,8 +550,12 @@ void calcOverheadExtGetHeuristic()
                       runner.d_d,
                       runner.d_workspace,
                       runner.max_workspace_size,
-                      runner.stream);
+                      runner.stream,
+                      requested_solutions,
+                      returned_sols);
     });
+
+    return returned_sols;
 }
 
 void simpleGemmExt(hipblasLtHandle_t  handle,
@@ -468,7 +573,9 @@ void simpleGemmExt(hipblasLtHandle_t  handle,
                    void*              d_d,
                    void*              d_workspace,
                    int64_t            max_workspace_size,
-                   hipStream_t        stream)
+                   hipStream_t        stream,
+                   int                requested_solutions,
+                   int&               returned_solutions)
 {
     hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
@@ -491,59 +598,82 @@ void simpleGemmExt(hipblasLtHandle_t  handle,
     //
     for(size_t iter = 0; iter < warmups; ++iter)
     {
-        const int                                     request_solutions = 1;
         std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResult;
-        CHECK_HIPBLASLT_ERROR(gemm.algoGetHeuristic(request_solutions, gemmPref, heuristicResult));
+        CHECK_HIPBLASLT_ERROR(
+            gemm.algoGetHeuristic(requested_solutions, gemmPref, heuristicResult));
 
+        returned_solutions = heuristicResult.size();
         if(heuristicResult.empty())
         {
             std::cerr << "[GemmExt]:No valid solution found!" << std::endl;
             return;
         }
 
-        // Make sure to initialize every time when algo changes
-        gemm.setMaxWorkspaceBytes(max_workspace_size);
-        CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResult[0].algo, d_workspace));
-        CHECK_HIPBLASLT_ERROR(gemm.run(stream));
+        if(requested_solutions == 1)
+        {
+            // Make sure to initialize every time when algo changes
+            gemm.setMaxWorkspaceBytes(max_workspace_size);
+            CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResult[0].algo, d_workspace));
+            CHECK_HIPBLASLT_ERROR(gemm.run(stream));
+        }
     }
 
     clock_point start_ext_getHeur, end_ext_getHeur;
     clock_point start_ext_run, end_ext_run;
+    size_t      iters = (requested_solutions == 1) ? hotIters : getAllIters;
 
     //
     // hot-iters
     //
-    for(size_t iter = 0; iter < hotIters; ++iter)
+    for(size_t iter = 0; iter < iters; ++iter)
     {
-        const int                                     request_solutions = 1;
         std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResult;
 
         start_ext_getHeur = std::chrono::steady_clock::now();
-        CHECK_HIPBLASLT_ERROR(gemm.algoGetHeuristic(request_solutions, gemmPref, heuristicResult));
+        CHECK_HIPBLASLT_ERROR(
+            gemm.algoGetHeuristic(requested_solutions, gemmPref, heuristicResult));
         end_ext_getHeur       = std::chrono::steady_clock::now();
         double_micro duration = end_ext_getHeur - start_ext_getHeur;
-        best_ext_getHeur      = std::min(best_ext_getHeur, duration);
-        total_ext_getHeur += duration;
 
+        if(requested_solutions == 1)
+        {
+            best_ext_getHeur = std::min(best_ext_getHeur, duration);
+            total_ext_getHeur += duration;
+        }
+        else if(requested_solutions == HIPBLASLT_MAX_REQUESTED_SOLUTION_NUM)
+        {
+            best_ext_getHeurNeg1 = std::min(best_ext_getHeurNeg1, duration);
+            total_ext_getHeurNeg1 += duration;
+        }
+        else
+        {
+            best_ext_getHeur100 = std::min(best_ext_getHeur100, duration);
+            total_ext_getHeur100 += duration;
+        }
+
+        returned_solutions = heuristicResult.size();
         if(heuristicResult.empty())
         {
             std::cerr << "[GemmExt]:No valid solution found!" << std::endl;
             return;
         }
 
-        // save the algoIdx for testing getByIdx
-        algoIdx = hipblaslt_ext::getIndexFromAlgo(heuristicResult[0].algo);
+        if(requested_solutions == 1)
+        {
+            // save the algoIdx for testing getByIdx
+            algoIdx = hipblaslt_ext::getIndexFromAlgo(heuristicResult[0].algo);
 
-        // Make sure to initialize every time when algo changes
-        gemm.setMaxWorkspaceBytes(max_workspace_size);
-        CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResult[0].algo, d_workspace));
+            // Make sure to initialize every time when algo changes
+            gemm.setMaxWorkspaceBytes(max_workspace_size);
+            CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResult[0].algo, d_workspace));
 
-        start_ext_run = std::chrono::steady_clock::now();
-        CHECK_HIPBLASLT_ERROR(gemm.run(stream));
-        end_ext_run = std::chrono::steady_clock::now();
-        duration    = end_ext_run - start_ext_run;
-        best_run    = std::min(best_run, duration);
-        total_run += duration;
+            start_ext_run = std::chrono::steady_clock::now();
+            CHECK_HIPBLASLT_ERROR(gemm.run(stream));
+            end_ext_run = std::chrono::steady_clock::now();
+            duration    = end_ext_run - start_ext_run;
+            best_run    = std::min(best_run, duration);
+            total_run += duration;
+        }
     }
 
     return;
@@ -552,10 +682,11 @@ void simpleGemmExt(hipblasLtHandle_t  handle,
 /////////////////////////////////////////
 // hipBLASLt_ext - getAllAlgos & run
 /////////////////////////////////////////
-void calcOverheadExtGetAllAlgos()
+int calcOverheadExtGetAllAlgos()
 {
     HHSRunner runner(1024, 512, 1024, 1, 1.f, 1.f, 32 * 1024 * 1024);
-    runner.run([&runner] {
+    int       returned_sols = 0;
+    runner.run([&runner, &returned_sols] {
         simpleGemmGetAllAlgosExt(runner.handle,
                                  HIPBLAS_OP_N,
                                  HIPBLAS_OP_N,
@@ -571,8 +702,11 @@ void calcOverheadExtGetAllAlgos()
                                  runner.d_d,
                                  runner.d_workspace,
                                  runner.max_workspace_size,
-                                 runner.stream);
+                                 runner.stream,
+                                 returned_sols);
     });
+
+    return returned_sols;
 }
 
 void simpleGemmGetAllAlgosExt(hipblasLtHandle_t  handle,
@@ -590,7 +724,8 @@ void simpleGemmGetAllAlgosExt(hipblasLtHandle_t  handle,
                               void*              d_d,
                               void*              d_workspace,
                               int64_t            max_workspace_size,
-                              hipStream_t        stream)
+                              hipStream_t        stream,
+                              int&               returned_solutions)
 {
     hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
@@ -640,16 +775,12 @@ void simpleGemmGetAllAlgosExt(hipblasLtHandle_t  handle,
             }
         }
 
+        returned_solutions = validIdx.size();
         if(validIdx.empty())
         {
             std::cerr << "[GetAllAlgosExt]:No valid solution found!" << std::endl;
             return;
         }
-
-        // Make sure to initialize every time when algo changes
-        gemm.setMaxWorkspaceBytes(workspace_size);
-        CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace));
-        CHECK_HIPBLASLT_ERROR(gemm.run(stream));
     }
 
     clock_point start_ext_getAll, end_ext_getAll;
@@ -658,7 +789,7 @@ void simpleGemmGetAllAlgosExt(hipblasLtHandle_t  handle,
     //
     // hot-iters
     //
-    for(size_t iter = 0; iter < hotIters; ++iter)
+    for(size_t iter = 0; iter < getAllIters; ++iter)
     {
         std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResult;
         start_ext_getAll = std::chrono::steady_clock::now();
@@ -693,22 +824,12 @@ void simpleGemmGetAllAlgosExt(hipblasLtHandle_t  handle,
             }
         }
 
+        returned_solutions = validIdx.size();
         if(validIdx.empty())
         {
             std::cerr << "[GetAllAlgosExt]:No valid solution found!" << std::endl;
             return;
         }
-
-        // Make sure to initialize every time when algo changes
-        gemm.setMaxWorkspaceBytes(workspace_size);
-        CHECK_HIPBLASLT_ERROR(gemm.initialize(heuristicResult[validIdx[0]].algo, d_workspace));
-
-        start_ext_run = std::chrono::steady_clock::now();
-        CHECK_HIPBLASLT_ERROR(gemm.run(stream));
-        end_ext_run = std::chrono::steady_clock::now();
-        duration    = end_ext_run - start_ext_run;
-        best_run    = std::min(best_run, duration);
-        total_run += duration;
     }
 
     return;
@@ -717,10 +838,11 @@ void simpleGemmGetAllAlgosExt(hipblasLtHandle_t  handle,
 /////////////////////////////////////////
 // hipBLASLt_ext - getAlgosFromIndex & run
 /////////////////////////////////////////
-void calcOverheadExtGetAlgoByIdx()
+int calcOverheadExtGetAlgoByIdx()
 {
     HHSRunner runner(1024, 512, 1024, 1, 1.f, 1.f, 32 * 1024 * 1024);
-    runner.run([&runner] {
+    int       returned_sols = 0;
+    runner.run([&runner, &returned_sols] {
         simpleGemmGetAlgoByIndexExt(runner.handle,
                                     HIPBLAS_OP_N,
                                     HIPBLAS_OP_N,
@@ -736,8 +858,11 @@ void calcOverheadExtGetAlgoByIdx()
                                     runner.d_d,
                                     runner.d_workspace,
                                     runner.max_workspace_size,
-                                    runner.stream);
+                                    runner.stream,
+                                    returned_sols);
     });
+
+    return returned_sols;
 }
 
 void simpleGemmGetAlgoByIndexExt(hipblasLtHandle_t  handle,
@@ -755,7 +880,8 @@ void simpleGemmGetAlgoByIndexExt(hipblasLtHandle_t  handle,
                                  void*              d_d,
                                  void*              d_workspace,
                                  int64_t            max_workspace_size,
-                                 hipStream_t        stream)
+                                 hipStream_t        stream,
+                                 int&               returned_solutions)
 {
     hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
@@ -807,6 +933,7 @@ void simpleGemmGetAlgoByIndexExt(hipblasLtHandle_t  handle,
             }
         }
 
+        returned_solutions = heuristicResult.size();
         if(heuristicResult.empty())
         {
             std::cerr << "[GetAlgoByIndexExt]:No valid solution found!" << std::endl;
@@ -862,6 +989,7 @@ void simpleGemmGetAlgoByIndexExt(hipblasLtHandle_t  handle,
             }
         }
 
+        returned_solutions = heuristicResult.size();
         if(heuristicResult.empty())
         {
             std::cerr << "[GetAlgoByIndexExt]:No valid solution found!" << std::endl;
