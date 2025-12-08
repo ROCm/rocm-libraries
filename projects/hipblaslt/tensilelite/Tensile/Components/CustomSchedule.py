@@ -1950,7 +1950,6 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment="")]
         nglshift = nllshift = 13
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-        opt1.disableValidation()  # TODO: RE-enable after fixing https://github.com/ROCm/rocm-libraries/issues/3181
     elif isNT(kernel) and useLDSTr and TLDS==0:
         optSchedule = {
             'SYNC': [[-1,17,17,57,57]],
