@@ -26,8 +26,7 @@ endif()
 
 if(HIPSPARSE_ENABLE_CUDA)
     target_compile_definitions(hipsparse-bench PRIVATE __HIP_PLATFORM_NVIDIA__)
-    target_include_directories(hipsparse-bench PRIVATE ${HIP_INCLUDE_DIRS})
-    target_link_libraries(hipsparse-bench PRIVATE ${CUDA_LIBRARIES})
+    target_link_libraries(hipsparse-bench PRIVATE CUDA::cudart CUDA::cuda_driver)
 endif()
 
 # Set output directory - Jenkins expects clients/staging

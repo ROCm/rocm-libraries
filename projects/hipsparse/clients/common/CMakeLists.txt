@@ -39,11 +39,8 @@ endif()
 
 if(HIPSPARSE_ENABLE_CUDA)
     target_compile_definitions(hipsparse-clients-common PUBLIC __HIP_PLATFORM_NVIDIA__)
-    target_include_directories(hipsparse-clients-common PUBLIC 
-        ${HIP_INCLUDE_DIRS}
-        ${CUDA_INCLUDE_DIRS}
-    )
-    target_link_libraries(hipsparse-clients-common PUBLIC ${CUDA_LIBRARIES})
+    target_include_directories(hipsparse-clients-common PUBLIC ${CUDA_INCLUDE_DIRS})
+    target_link_libraries(hipsparse-clients-common PUBLIC CUDA::cudart CUDA::cuda_driver)
 elseif(HIPSPARSE_ENABLE_HIP)
     target_link_libraries(hipsparse-clients-common PUBLIC hip::host)
 endif()
@@ -75,11 +72,8 @@ endif()
 
 if(HIPSPARSE_ENABLE_CUDA)
     target_compile_definitions(hipsparse-samples-common PUBLIC __HIP_PLATFORM_NVIDIA__)
-    target_include_directories(hipsparse-samples-common PUBLIC 
-        ${HIP_INCLUDE_DIRS}
-        ${CUDA_INCLUDE_DIRS}
-    )
-    target_link_libraries(hipsparse-samples-common PUBLIC ${CUDA_LIBRARIES})
+    target_include_directories(hipsparse-samples-common PUBLIC ${CUDA_INCLUDE_DIRS})
+    target_link_libraries(hipsparse-samples-common PUBLIC CUDA::cudart CUDA::cuda_driver)
 elseif(HIPSPARSE_ENABLE_HIP)
     target_link_libraries(hipsparse-samples-common PUBLIC hip::host)
 endif()
