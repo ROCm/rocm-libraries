@@ -169,7 +169,7 @@ else()
 endif()
 # tolerate comma as a value separator since the compiler does the
 # same
-string(REPLACE "," ";" GPU_TARGETS ${GPU_TARGETS})
+string(REPLACE "," ";" GPU_TARGETS "${GPU_TARGETS}")
 rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
   
 # HIP is required - library and clients use HIP to access the device
