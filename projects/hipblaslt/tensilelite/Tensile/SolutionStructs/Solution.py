@@ -1495,7 +1495,9 @@ class Solution(collections.abc.Mapping):
 
     # Check if CMS is available for this solution
     hasCMS,_ = hasCustomSchedule(state)
-    state["UseCustomMainLoopSchedule"] = hasCMS
+    # List of state params which does not support CMS
+    disableCMS = state["UnrollLoopSwapGlobalReadOrder"]
+    state["UseCustomMainLoopSchedule"] = hasCMS and not disableCMS
 
     # 0: Normal mode. Hardware applies all of the normal data dependency checks
     # 1: Full expert mode (not suppoeted yet). Disable hardware checks against: VA_VDST, VA_SDST, VA_SSRC, VA_VCC, VM_VSRC and SA_SDST.
