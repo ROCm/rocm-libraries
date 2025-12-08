@@ -173,6 +173,9 @@ if(HIP_DNN_BUILD_FRONTEND)
     add_subdirectory(frontend)
 endif()
 
+add_subdirectory(test_sdk)
+add_subdirectory(plugin_sdk)
+
 add_subdirectory(tests)
 
 if(HIP_DNN_BUILD_PLUGINS)

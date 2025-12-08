@@ -36,7 +36,6 @@
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/solver/gemm_common.hpp>
 
-#include <boost/any.hpp>
 #include <boost/range/adaptors.hpp>
 
 namespace miopen {

@@ -412,8 +412,9 @@ bool ConvAsmBwdWrW3x3::IsApplicable(const ExecutionContext& ctx,
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
+    if(target.isXnackEnabled())
         return false;
+
     if(!problem.IsLayoutDefault())
         return false;
     if(problem.IsTensorsCasted())

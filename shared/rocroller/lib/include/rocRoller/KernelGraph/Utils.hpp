@@ -70,17 +70,65 @@ namespace rocRoller
             KernelGraph const* m_graph;
         };
 
-        // Return value of colourByUnrollValue.  A colour-mapping is...
+        /**
+         * @brief Mapping from unroll-coordinate to unroll-value.
+         *
+         * For example, consider a control-subgraph similar to
+         *
+         *     SetCoordinate(coordinate=4, value=0)
+         *     SetCoordinate(coordinate=5, value=1)
+         *
+         * where coordinate tags 4 and 5 are both correspond to Unroll
+         * coordinates.
+         *
+         * The ColourMapping would be {4:0, 5:1}.
+         */
+        using ColourMapping = std::map<int, int>;
+
+        /**
+         * @brief Colouring of operations and coordinates by unroll value.
+         *
+         * Return value of `colourByUnrollValue`.
+         */
         struct UnrollColouring
         {
-            std::map<int, std::map<int, int>>
-                operationColour; //< Mapping: operation tag to colour-mapping.
-            std::map<int, std::map<int, int>>
-                          coordinateColour; //< Mapping: coordinate tag to colour-mapping.
-            std::set<int> separators; //< Separator edges in the control graph
+            std::map<int, ColourMapping> operationColour; //< Operation colouring.
+            std::map<int, ColourMapping> coordinateColour; //< Coordinate colouring.
+            std::set<int>                separators; //< Separator edges in the control graph
         };
 
         std::string toString(UnrollColouring const&);
+
+        /**
+         * @brief Colour operations and coordinates by unroll value.
+         *
+         * Starts at `topOp` (or the top of the graph if `topOp` is
+         * -1) and traverses its body.
+         *
+         * Unroll tags in `exclude` are excluded from the colouring
+         * (ignored).
+         *
+         * For example, consider a control-subgraph similar to
+         *
+         *     SetCoordinate(coordinate=4, value=0)
+         *         SetCoordinate(coordinate=5, value=1)
+         *             A = LoadTiled()
+         *         SetCoordinate(coordinate=7, value=3)
+         *             C = LoadTiled()
+         *     B = Assign(A + C)
+         *
+         * Then:
+         *
+         * - The LoadTiled operation for A will be coloured {4:0, 5:1}.
+         * - The LoadTiled operation for C will be coloured {4:0, 7:3}.
+         * - The A coordinate will be coloured {4:0, 5:1}.
+         * - The C coordinate will be coloured {4:0, 7:3}.
+         * - The Assign operation for B will be coloured {4:0, 5:1, 7:3}.
+         * - The B coordinate will be coloured {4:0, 5:1, 7:3}.
+         */
+        UnrollColouring colourByUnrollValue(KernelGraph const&             kgraph,
+                                            int                            topOp   = -1,
+                                            std::unordered_set<int> const& exclude = {});
 
         /**
          * @brief Get the name of a ForLoop operation.
@@ -88,22 +136,15 @@ namespace rocRoller
         std::string getForLoopName(KernelGraph const& graph, int tag);
 
         /**
-         * @brief
+         * @brief Return DataFlowTag of LHS of binary expression in Assign node.
          */
-        UnrollColouring colourByUnrollValue(KernelGraph const&             kgraph,
-                                            int                            topOp   = -1,
-                                            std::unordered_set<int> const& exclude = {});
-
-        /**
-        * @brief Return DataFlowTag of LHS of binary expression in Assign node.
-        */
         template <Expression::CBinary T>
         std::tuple<int, Expression::ExpressionPtr> getBinaryLHS(KernelGraph const& kgraph,
                                                                 int                assign);
 
         /**
-        * @brief Return DataFlowTag of RHS of binary expression in Assign node.
-        */
+         * @brief Return DataFlowTag of RHS of binary expression in Assign node.
+         */
         template <Expression::CBinary T>
         std::tuple<int, Expression::ExpressionPtr> getBinaryRHS(KernelGraph const& kgraph,
                                                                 int                assign);
@@ -128,8 +169,10 @@ namespace rocRoller
          * @brief Create a clone of a ForLoopOp. This new ForLoopOp
          * will use the same ForLoop Dimension as the original
          * ForLoopOp.
-        */
-        int cloneForLoop(KernelGraph& graph, int tag);
+         */
+        int cloneForLoop(KernelGraph&               graph,
+                         int                        tag,
+                         std::optional<std::string> name = std::nullopt);
 
         /**
          * @brief Remove a node and all of its children from the control graph
@@ -176,8 +219,8 @@ namespace rocRoller
         std::optional<int> findUnrollNeighbour(KernelGraph const& kgraph, int forLoopCoord);
 
         /**
-        * @brief Return DataFlowTag of DEST of Assign node.
-        */
+         * @brief Return DataFlowTag of DEST of Assign node.
+         */
         int getDEST(KernelGraph const& kgraph, int assign);
 
         /**
@@ -257,9 +300,22 @@ namespace rocRoller
         std::optional<int> findTopOfContainingOperation(int candidate, KernelGraph const& kgraph);
 
         /**
-         * @brief Create a new coordinate representing data within the scratch space. This will return a
-         * coordinate that can be added to a coordinate graph. It also allocates the required scratch space
-         * within the context.
+         * @brief Follow Identify edges.
+         *
+         * Starting from the coordinate tag, follow outgoing Identify
+         * edges until there aren't any more.  Returns the coordinate
+         * at the end of the Identify chain.
+         *
+         * If there aren't any outgoing Identify edges, this returns
+         * the original coordinate tag.
+         */
+        int followIdentify(int coordinateTag, KernelGraph const& graph);
+
+        /**
+         * @brief Create a new coordinate representing data within the
+         * scratch space. This will return a coordinate that can be
+         * added to a coordinate graph. It also allocates the required
+         * scratch space within the context.
          *
          * @param size
          * @param varType
@@ -274,6 +330,7 @@ namespace rocRoller
          *
          * @param op Operation to replace.
          * @param newOp Replacement.
+         * @param includeBody If true, transfer Body edges.
          *
          * Does not delete the original operation.
          */
@@ -355,7 +412,8 @@ namespace rocRoller
                                            int& t_n,
                                            int  maxWidth,
                                            uint macTileFastMovingDimSize,
-                                           int  numDwordsPerElement);
+                                           int  numDwordsPerElement,
+                                           bool avoidDWordX2);
 
         /**
          * @brief Get the tag of the highest SetCoordinate directly upstream from load.
@@ -659,21 +717,21 @@ namespace rocRoller
                              int                                  subdimStride);
 
         /**
-        * @brief ceil(a/b) = (a+b-1)/b
-        *
-        * @param sdSize SubDimension size
-        * @param tileSize MacroTile size
-        *
-        */
+         * @brief ceil(a/b) = (a+b-1)/b
+         *
+         * @param sdSize SubDimension size
+         * @param tileSize MacroTile size
+         *
+         */
         Expression::ExpressionPtr tileCeilDivide(Expression::ExpressionPtr sdSize, int tileSize);
 
         /**
-        * @brief Identifies whether a registerTag has an associated deallocate node.
-        *
-        * @param graph
-        * @param registerTag
-        *
-        */
+         * @brief Identifies whether a registerTag has an associated deallocate node.
+         *
+         * @param graph
+         * @param registerTag
+         *
+         */
         bool hasDeallocate(const KernelGraph& graph, int tag);
 
         /**
@@ -688,27 +746,27 @@ namespace rocRoller
         int duplicateChain(KernelGraph& graph, std::vector<int> const& startNodes);
 
         /**
-        * @brief Get the unroll coordinate size, given the unroll coordinate tag.
-        */
+         * @brief Get the unroll coordinate size, given the unroll coordinate tag.
+         */
         unsigned int getUnrollSize(KernelGraph const& graph, int unroll);
 
         /**
-        * @brief Get coordinates required by the code-generator.
-        */
+         * @brief Get coordinates required by the code-generator.
+         */
         std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph,
                                                      int                tag,
                                                      bool isStorePartOfGlobalToLDSOp = false);
 
         /**
-        * @brief Get the first and last nodes from a set of nodes that are totally ordered
-        */
+         * @brief Get the first and last nodes from a set of nodes that are totally ordered
+         */
         template <typename T>
         std::pair<int, int> getFirstAndLastNodes(KernelGraph const& graph, T const& nodes);
 
         /**
-        * @brief Remove redundant body edges in control graph. This is a baseline method for
-        *        verifying correctness.
-        */
+         * @brief Remove redundant body edges in control graph. This is a baseline method for
+         *        verifying correctness.
+         */
         void removeRedundantBodyEdgesBaselineMethod(KernelGraph& graph);
 
         /**
@@ -728,6 +786,7 @@ namespace rocRoller
          * relationship in order from the root of the graph, including `control` itself.
          */
         std::deque<int> controlStack(int control, KernelGraph const& graph);
+
         /**
          * Returns all of the nodes that contain `control` with a body
          * relationship in order from the root of the graph, including `control` itself.
@@ -735,8 +794,8 @@ namespace rocRoller
         std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph);
 
         /**
-        * @brief Connect all nodes in A with all nodes in B using edge with EdgeType
-        */
+         * @brief Connect all nodes in A with all nodes in B using edge with EdgeType
+         */
         template <typename EdgeType>
         void connectAllPairs(std::vector<int> const& A, std::vector<int> const& B, KernelGraph& kg);
 
@@ -766,9 +825,15 @@ namespace rocRoller
             std::vector<int> getAssociatedOps(KernelGraph const& kgraph, int srcOpTag);
 
         /**
-        * @brief Return true for operations that read from global to store into LDS and false otherwise.
-        */
+         * @brief Return true for operations that read from global to store into LDS and false otherwise.
+         */
         bool isGlobalToLDSOp(KernelGraph const& graph, int op);
+
+        /**
+         * @brief Find the Exchange node ...
+         */
+        std::optional<int>
+            getExchangeForMultiply(KernelGraph const& graph, int multiplyTag, NaryArgument arg);
     }
 }
 

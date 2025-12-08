@@ -33,8 +33,6 @@
 #include <miopen/env.hpp>
 #include <miopen/tensor.hpp>
 
-#include <boost/any.hpp>
-
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_FFT)
 
 namespace miopen {
