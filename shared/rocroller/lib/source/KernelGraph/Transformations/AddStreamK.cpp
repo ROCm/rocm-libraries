@@ -1226,10 +1226,7 @@ namespace rocRoller
             int         postAccumulationCond;
             if(accumInfo.accumulatorTile != -1)
             {
-                auto accumTileIdxEnd
-                    = (argInfo.numSKTilesPerWG * wgExpr + DF(forTileIncr) + DF(forAccumIncr) - one)
-                      % numAccumTiles;
-                auto remainAccumTiles = numAccumTiles - accumTileIdxEnd - one;
+                auto remainAccumTiles = numAccumTiles - DF(lastAccumTile) - one;
                 auto numRemainPartialResults
                     = (remainAccumTiles + argInfo.numSKTilesPerWG - one) / argInfo.numSKTilesPerWG;
 
@@ -1264,7 +1261,7 @@ namespace rocRoller
                 // Add send and receive
                 auto hasFirstAccumTile        = DF(firstAccumTile) == zero;
                 auto doesntHaveFirstAccumTile = DF(firstAccumTile) != zero;
-                auto doesntHaveLastAccumTile  = accumTileIdxEnd < (numAccumTiles - one);
+                auto doesntHaveLastAccumTile  = DF(lastAccumTile) < (numAccumTiles - one);
 
                 sendInfo = sendTile(graph,
                                     doesntHaveFirstAccumTile,
