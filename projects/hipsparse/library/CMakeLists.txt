@@ -36,7 +36,7 @@ endif()
 if(HIPSPARSE_ENABLE_CUDA)
     target_compile_definitions(hipsparse PRIVATE __HIP_PLATFORM_NVIDIA__)
     target_include_directories(hipsparse PRIVATE
-        $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
+        $<BUILD_INTERFACE:${CUDAToolkit_INCLUDE_DIRS}>
         $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}>
     )
 elseif(HIPSPARSE_ENABLE_HIP)

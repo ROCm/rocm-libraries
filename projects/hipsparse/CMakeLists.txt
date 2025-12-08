@@ -83,7 +83,7 @@ find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
 if(HIPSPARSE_ENABLE_CUDA)
     find_package(HIP REQUIRED CONFIG)
-    find_package(CUDA REQUIRED)
+    find_package(CUDAToolkit REQUIRED)
 elseif(HIPSPARSE_ENABLE_HIP)
     find_package(hip REQUIRED CONFIG)
     find_package(rocsparse REQUIRED)

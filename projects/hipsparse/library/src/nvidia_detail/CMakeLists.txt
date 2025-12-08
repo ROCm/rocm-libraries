@@ -19,14 +19,14 @@ set(SEARCH_SYMBOL "cusparseCreateSpVec")
 set(SEARCH_RESULTS "")
 if(WIN32)
     execute_process(
-        COMMAND dumpbin /EXPORTS ${CUDA_cusparse_LIBRARY}
+        COMMAND dumpbin /EXPORTS $<TARGET_FILE:CUDA::cusparse>
         COMMAND findstr ${SEARCH_SYMBOL}
         OUTPUT_VARIABLE SEARCH_RESULTS
         ERROR_VARIABLE ERR
     )
 else()
     execute_process(
-        COMMAND objdump -T ${CUDA_cusparse_LIBRARY}
+        COMMAND objdump -T $<TARGET_FILE:CUDA::cusparse>
         COMMAND grep ${SEARCH_SYMBOL}
         OUTPUT_VARIABLE SEARCH_RESULTS
         ERROR_VARIABLE ERR
@@ -39,4 +39,4 @@ else()
     target_compile_definitions(hipsparse PRIVATE CUDART_10_1_UPDATE_VERSION=1)
 endif()
 
-target_link_libraries(hipsparse PRIVATE ${CUDA_cusparse_LIBRARY})
+target_link_libraries(hipsparse PRIVATE CUDA::cusparse)
