@@ -25,7 +25,7 @@ import pytest
 from Tensile.Components.CustomSchedule import (
     ScheduleInfo,
     verify_global_reads_not_too_early,
-    getMostRecents,
+    get_most_recent_local_reads,
 )
 
 from rocisa.instruction import SBarrier, SWaitCnt
@@ -117,13 +117,34 @@ class TestCustomScheduleGlobalReadValidation:
         operations are for A, and how many are for B.
         """
 
-        def getMostRecentsSansLR1(indices, counts, A, B, aBeforeB):
+        def get_most_recent_local_reads_without_lr1(indices, counts, A, B, aBeforeB):
             """
             Assume that LRA0 appears before LRB0 within mfma index slots, and
             don't include LRA1 or LRB1 in the analysis.
             """
             positions = {"LRA1": -1, "LRB1": -1, "LRA0": 1 - aBeforeB, "LRB0": aBeforeB}
-            return getMostRecents(indices, counts, A, B, [], [], positions)
+
+            localReads = [
+                ("LRA0", A),
+                ("LRB0", B),
+                ("LRA1", []),
+                ("LRB1", []),
+            ]
+            localReads.sort(key=lambda x: positions[x[0]])
+
+            history = {}
+            for symbol, values in localReads:
+                for v in values:
+                    if v not in history:
+                        history[v] = []
+                    history[v].append(symbol)
+            history = sorted(history.items(), key=lambda t: t[0])
+
+            mr = get_most_recent_local_reads(indices, counts, history)
+            filtered = []
+            for l in mr:
+                filtered.append({"A": l["LRA0"], "B": l["LRB0"]})
+            return filtered
 
         A = [0, 1, 4, 6, 8, 9]
         B = [2, 6, 7]
@@ -140,7 +161,9 @@ class TestCustomScheduleGlobalReadValidation:
         counts = [2]
         aBeforeB = True
         bBeforeA = not aBeforeB
-        result = getMostRecentsSansLR1(indices, counts, A, B, aBeforeB)
+        result = get_most_recent_local_reads_without_lr1(
+            indices, counts, A, B, aBeforeB
+        )
         expected0 = [{"A": 2, "B": 0}]
         assert result == expected0
 
@@ -152,14 +175,18 @@ class TestCustomScheduleGlobalReadValidation:
         # index               ^
         indices = [6]
         counts = [4]
-        result = getMostRecentsSansLR1(indices, counts, A, B, aBeforeB)
+        result = get_most_recent_local_reads_without_lr1(
+            indices, counts, A, B, aBeforeB
+        )
         expected1 = [{"A": 2, "B": 2}]
         assert result == expected1
 
         # Multiple indices and counts are handled independently
         indices = [1, 6]
         counts = [2, 4]
-        result = getMostRecentsSansLR1(indices, counts, A, B, aBeforeB)
+        result = get_most_recent_local_reads_without_lr1(
+            indices, counts, A, B, aBeforeB
+        )
         assert result == [expected0[0], expected1[0]]
 
         A = [1, 1, 1]
@@ -179,38 +206,42 @@ class TestCustomScheduleGlobalReadValidation:
         # and so as we're going in reverse chronological order, we take B).
         #
         # index=5, count=0: A:0 B:0
-        result = getMostRecentsSansLR1(indices, counts, A, B, aBeforeB)
+        result = get_most_recent_local_reads_without_lr1(
+            indices, counts, A, B, aBeforeB
+        )
         assert result == [{"A": 3, "B": 3}, {"A": 0, "B": 2}, {"A": 0, "B": 0}]
 
         # Changed so that B is before A.
-        result = getMostRecentsSansLR1(indices, counts, A, B, bBeforeA)
+        result = get_most_recent_local_reads_without_lr1(
+            indices, counts, A, B, bBeforeA
+        )
         assert result == [{"A": 3, "B": 3}, {"A": 1, "B": 1}, {"A": 0, "B": 0}]
 
     def test_get_most_recent(self):
         """
-        Testing that LRA1 and LRB1 are correctly handled.
+        Testing that within vmfma index ordering is correctly handled.
         """
 
         indices = [10, 10, 10, 10]
         counts = [1, 2, 3, 4]
-        LRA0 = [7]
-        LRA1 = [7]
-        LRB0 = [7]
-        LRB1 = [7]
 
-        positions = {"LRA0": 0, "LRA1": 1, "LRB0": 2, "LRB1": 3}
-        foo = getMostRecents(indices, counts, LRA0, LRB0, LRA1, LRB1, positions)
-        assert foo[0] == {"A": 0, "B": 0}
-        assert foo[1] == {"A": 0, "B": 1}
-        assert foo[2] == {"A": 0, "B": 1}
-        assert foo[3] == {"A": 1, "B": 1}
+        history = [[7, ["LRA0", "LRA1", "LRB0", "LRB1"]]]
+        foo = get_most_recent_local_reads(indices, counts, history)
+        # counts = 1
+        assert foo[0] == {"LRA0": 0, "LRB0": 0, "LRA1": 0, "LRB1": 1}
+        # counts = 2
+        assert foo[1] == {"LRA0": 0, "LRB0": 1, "LRA1": 0, "LRB1": 1}
+        # counts = 3
+        assert foo[2] == {"LRA0": 0, "LRB0": 1, "LRA1": 1, "LRB1": 1}
+        # counts = 4
+        assert foo[3] == {"LRA0": 1, "LRB0": 1, "LRA1": 1, "LRB1": 1}
 
-        positions = {"LRA0": 3, "LRA1": 2, "LRB0": 1, "LRB1": 0}
-        foo = getMostRecents(indices, counts, LRA0, LRB0, LRA1, LRB1, positions)
-        assert foo[0] == {"A": 1, "B": 0}
-        assert foo[1] == {"A": 1, "B": 0}
-        assert foo[2] == {"A": 1, "B": 1}
-        assert foo[3] == {"A": 1, "B": 1}
+        history = [[7, ["LRB1", "LRB0", "LRA1", "LRA0"]]]
+        foo = get_most_recent_local_reads(indices, counts, history)
+        assert foo[0] == {"LRA0": 1, "LRB0": 0, "LRA1": 0, "LRB1": 0}
+        assert foo[1] == {"LRA0": 1, "LRB0": 0, "LRA1": 1, "LRB1": 0}
+        assert foo[2] == {"LRA0": 1, "LRB0": 1, "LRA1": 1, "LRB1": 0}
+        assert foo[3] == {"LRA0": 1, "LRB0": 1, "LRA1": 1, "LRB1": 1}
 
     def test_basic(self):
         schedule = scheduleFromSequence(
@@ -945,9 +976,33 @@ class TestCustomScheduleGlobalReadValidation:
         assert message == ""
         assert status is True
 
-    def test_regression_3188(self):
-        """
-        Test that bug in https://github.com/ROCm/rocm-libraries/issues/3188 is fixed
-        TODO(newling)
-        """
-        pass
+    def test_lr1_in_the_middle(self):
+        schedule = ScheduleInfo(
+            1,  # 1 code path.
+            None,
+            {
+                "LRA0": [2 * [3]],
+                "LRA1": [3 * [3]],
+                "LRB0": [[]],
+                "LRB1": [4 * [3]],
+                "SYNC": [[3, 3]],
+                "GRA": [[4]],
+                "GRB": [[]],
+            },
+            [
+                # 3 LRA1 and 4 LRB1 can be outstanding.
+                SWaitCnt(dscnt=3 + 4 + 1, vlcnt=-1, vscnt=-1, comment=""),
+                SBarrier(),
+            ],
+            None,
+            None,
+            None,
+        )
+        status, message = verify_global_reads_not_too_early(schedule, {})
+        assert message == (
+            "Failed to verify that all local reads for A (LRA0) are complete before the first global read for A is issued. "
+            "Last local read for A issued at vmfma_index:3. "
+            "First global read for A issued at vmfma_index:4. "
+            "1 waitcnt operation(s) in [3, 5) provide upper bounds on the number of outstanding LRA0 operations: [1] <-- none of these is 0."
+        )
+        assert status is False
