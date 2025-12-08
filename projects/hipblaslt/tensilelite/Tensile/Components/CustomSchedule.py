@@ -850,6 +850,36 @@ def verify_scc_overlap(scheduleInfo, context: Dict = {}):
                 return False, f"Code path {codePath}: {errorMessage}"
     return True, ""
 
+
+def verify_gr_inc_order(scheduleInfo, context: Dict = {}):
+    """
+    Ensure GRInc A and B are done before GR A & B.
+    When using `SwapGlobalReadOrder=True`, one should check GRIncB is done before GRA (and GRIncA before GRB)
+    """
+    SwapGR = context["kernel"]["SwapGlobalReadOrder"]
+
+    def getDeclarationIndex(name):
+        return list(scheduleInfo.optSchedule).index(name)
+
+    def verify(scheduleInfo: 'ScheduleInfo', codePath: int) -> tuple[bool, str]:
+        GRIncNames = ["GRIncA", "GRIncB"]
+        GRNames = ["GRA", "GRB"] if not SwapGR else ["GRB", "GRA"]
+
+        for [grIncName, grName] in zip(GRIncNames, GRNames):
+            grInc = schedule_get(grIncName, codePath, scheduleInfo)
+            gr = schedule_get(grName, codePath, scheduleInfo)[1::2] # ignore m0
+            grIncDclAfter = getDeclarationIndex(grIncName)>getDeclarationIndex(grName)
+            # Fails if GrInc is after Gr or if same index but grInc is declared after.
+            if max(grInc)>min(gr) or (grIncDclAfter and max(grInc) == min(gr)):
+                 return False, f"{grIncName} finishes after {grName} starts ({max(grInc)} vs {min(gr)})"
+
+    for codePath in range(scheduleInfo.numCodePaths):
+            errorMessage = verify(scheduleInfo, codePath)
+            if errorMessage:
+                return False, f"Code path {codePath}: {errorMessage}"
+    
+    return True, ""
+
 def verify_lrs_complete_before_vmfma(schedule_info: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     """
     Ensure that the A and B data needed for VMFA at index=i is guaranteed to be in the registers before index=i.
@@ -1031,7 +1061,8 @@ class ScheduleInfo:
             verify_global_reads_not_too_early,
             # NOTE: Must run after verify_lrs_complete_before_vmfma to ensure that the position of the LR1s is valid.
             verify_grs_complete_before_lr1s,
-            verify_scc_overlap
+            verify_scc_overlap,
+            verify_gr_inc_order
         ]
 
     def disableValidation(self):
