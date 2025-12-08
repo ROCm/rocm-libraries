@@ -358,9 +358,10 @@ rocm_install(TARGETS hipsparse-test COMPONENT tests)
 rocm_install(FILES ${HIPSPARSE_TEST_DATA} DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test" COMPONENT tests)
 
 # Install matrices for tests component - needed for TheRock CI artifact testing
+# TheRock CI expects matrices at <install-prefix>/clients/matrices/
 rocm_install(
     DIRECTORY "${PROJECT_BINARY_DIR}/matrices/"
-    DESTINATION "matrices"
+    DESTINATION "clients/matrices"
     COMPONENT tests
     FILES_MATCHING PATTERN "*.bin"
 )
