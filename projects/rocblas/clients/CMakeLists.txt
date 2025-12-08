@@ -156,6 +156,9 @@ if ( BUILD_FORTRAN_CLIENTS )
 endif()
 project( rocblas-clients LANGUAGES CXX C ${fortran_language} )
 
+# Note: BUILD_DIR is a custom variable passed by rmake.py (via -DBUILD_DIR=<build_path>)
+# to locate bundled dependencies. Use rmake.py or install.sh to build, not cmake directly.
+
 if ( BUILD_FORTRAN_CLIENTS )
   set(rocblas_f90_source_clients
       include/rocblas_fortran.f90
