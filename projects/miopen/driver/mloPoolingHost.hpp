@@ -486,7 +486,7 @@ bool mloPoolingForwardRunHostAndVerify_mt(PoolingConfig poolConf,
     return (match);
 }
 
-template <typename Tgpu_, typename Tcheck_>
+template <bool is_mt = false, typename Tgpu_, typename Tcheck_>
 void bwd_pooling_compute(const TensorDimsStrides& bot_dims_strides,
                          const TensorDimsStrides& top_dims_strides,
                          const PoolingConfig& poolConf,
@@ -514,8 +514,17 @@ void bwd_pooling_compute(const TensorDimsStrides& bot_dims_strides,
                     // skip top points that don't have associated bottom points
                     if(bot_idx == std::numeric_limits<size_t>::max())
                         continue;
-                    bot_df_v_ptr[bot_idx] += static_cast<Tcheck_>(top_df_ptr[top_idx]);
-                    ++num_flops[bot_idx];
+                    if constexpr(is_mt)
+                    {
+                        std::atomic_ref<Tcheck_>(bot_df_v_ptr[bot_idx])
+                            .fetch_add(static_cast<Tcheck_>(top_df_ptr[top_idx]));
+                        std::atomic_ref<int>(num_flops[bot_idx])++;
+                    }
+                    else
+                    {
+                        bot_df_v_ptr[bot_idx] += static_cast<Tcheck_>(top_df_ptr[top_idx]);
+                        ++num_flops[bot_idx];
+                    }
                 }
             }
         }
@@ -665,15 +674,15 @@ void mloPoolingBackwardRunHost_mt(
     std::vector<int> num_flops(bot_df.GetElementSize(), 0);
 
     miopen::par_ford(bot_dims_strides.n_batchs, bot_dims_strides.n_outputs)([&](int b, int o) {
-        bwd_pooling_compute(bot_dims_strides,
-                            top_dims_strides,
-                            poolConf,
-                            bot_df_v_ptr,
-                            top_df_ptr,
-                            b,
-                            o,
-                            mask_ptr,
-                            num_flops);
+        bwd_pooling_compute<true>(bot_dims_strides,
+                                  top_dims_strides,
+                                  poolConf,
+                                  bot_df_v_ptr,
+                                  top_df_ptr,
+                                  b,
+                                  o,
+                                  mask_ptr,
+                                  num_flops);
     });
 
     stats.max_num_flops_per_res = *(std::max_element(num_flops.begin(), num_flops.end()));
