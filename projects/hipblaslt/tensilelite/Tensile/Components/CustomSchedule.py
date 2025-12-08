@@ -1053,7 +1053,11 @@ class ScheduleInfo:
             mt0 = context.get("kernel", {}).get("MacroTile0", "?")
             mt1 = context.get("kernel", {}).get("MacroTile1", "?")
             du = context.get("kernel", {}).get("DepthU", "?")
-            message = f"CMS validation explicitly disabled. Running on kernel with MT0xMT1xDepthU = {mt0}x{mt1}x{du}"
+            transA = context.get("kernel", {}).get("TransA")
+            transB = context.get("kernel", {}).get("TransB")
+            transA = "T" if transA else "N"
+            transB = "T" if transB else "N"
+            message = f"CMS validation explicitly disabled. Running on kernel with MT0xMT1xDepthU = {mt0}x{mt1}x{du} {transA}{transB}"
             print(f"WARNING: {message}")
 
             # All rules bypassed, considered valid.
