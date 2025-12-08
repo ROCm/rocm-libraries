@@ -127,12 +127,12 @@ def runTestCommand(platform, project, jobName, testMark, boolean runHostTest=tru
               echo "Running full test suite..."
               ./TensileTests ${markSkipExtendedTest} --gtest_output=xml:tensile-tests.xml --gtest_color=yes
               FAILED_TESTS=$(grep -oP 'testcase name="\K[^"]+(?=".*?status="run"[^>]*?result="failed")?' tensile-tests.xml)
-              if [ -z "$FAILED_TESTS" ]; then
+              if [ -z "\$FAILED_TESTS" ]; then
                   echo "All tests passed."
               else
                 echo "Rerunning failed tests with debug info..."
-                for test in $FAILED_TESTS; do
-                    echo "... $test"
+                for test in \$FAILED_TESTS; do
+                    echo "... \$test"
                     TENSILE_DC=0x8040 ./TensileTests  ${markSkipExtendedTest} --gtest_output=xml:tensile-tests.xml --gtest_color=yes
                 done
               fi
