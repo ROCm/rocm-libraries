@@ -188,7 +188,6 @@ def verify_global_reads_not_too_early_single_code_path(
         waitIndex = 0
         for syncIndex, precede in zip(vmfmaIndices, preceding):
             if closedLowerBound <= syncIndex and syncIndex < openUpperBound:
-                print(precede)
                 count = precede[LRX]
                 outstandings.append(count)
                 if waveCompleteIndex is None and count == 0:
@@ -371,6 +370,23 @@ def duplicate_list_items(input_list: list, repeat_count: int, step:int=0) -> lis
         duplicate_list_items([1, 2, 3], 3, 1) => [1,2,3, 2,3,4, 3,4,5]
     """
     return [item + step * j for item in input_list for j in range(repeat_count)]
+
+def count_items(input_list: list[int], sv:int|None = None, ev:int|None = None):
+    """
+    Count how many items in the list are between start value `sv` (inclusive) and end value `ev` (exclusive)
+
+    Example:
+        count_items([1,2,3,4,5], sv=2, ev=5) => 3 (2,3,4)
+        count_items([1,2,3,4,5], sv=3)        => 3 (3,4,5)
+        count_items([1,2,3,4,5], ev=4)        => 3 (1,2,3)
+    """
+    count = 0
+    sv = sv if sv is not None else input_list[0]
+    ev = ev if ev is not None else input_list[-1]
+    for item in input_list:
+        if sv <= item < ev:
+            count += 1
+    return count
 
 class ValidatorInstruction(ABC):
     """
@@ -2384,6 +2400,42 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         lwsb   = [95]
 
         gr_inc_step = 1
+    
+    elif isNT(kernel) and useLDSTr and TLDS == 0:
+        lra0   = [0,1,3,5,7, 9,10,12,14,16, 18,19] # 12 loads
+        lrb0   = [21,23,25,27,28, 30,32,34,36,37, 39,41,43,45,46, 48,50,52,54,55] # 20 loads
+        # need two LRB1 items because a single LRB read gets only half of the data needed for MFMA
+        # note, max dscnt value is 15, so in this case 19 will be maxed at 15, thus we will wait more than needed :(
+        syncs.add(-1, dscnt=len(lrb0)-2, comment="wait for all LRA1 and two items from LRB1 before starting the sub-iteration")
+
+        i = 5 # next LRB1 is needed at index 6, so insert wait at 5
+        syncs.add(i, dscnt=count_items(lra0,ev=i), comment="wait for the rest of LRB1 to complete") 
+        grinca = [0,1,2,3,4,5,6,7,8]
+        grincb = [9,10,12,13,14,15,16,17,18]
+
+        i = 26
+        syncs.add(i, dscnt=count_items(lrb0,ev=i), barrier=True, comment="wait for all LRA0 to complete before GRA start")
+        gra    = [28,30,32,36,39,42] # one index for two instructions
+
+        lrsa   = [57]
+        lrsb   = [58]
+
+        # This wait serves dual purpose
+        syncs.add(59, dscnt=len(lrb0)-2, vlcnt=len(gra), barrier=True,
+                  comment="wait for the first LRB0 to complete to start 2nd batch of MFMAs and also make GRs from the previous iteration is done before LRA1 starts")
+        lra1   = [61,62,63,64,65, 66,67,69,71,73, 75,76] # 12 loads
+
+        i = 65 # next LRB0 is needed at index 66, so insert wait at 65
+        syncs.add(i, dscnt=count_items(lra1,ev=i), barrier=True, 
+                  comment="wait for the rest of LRB0 to complete across all waves before GRB start") 
+        grb    = [66,70,75,79,84, 88,93,97,102,106] # one index for two instructions
+        num_gr = len(gra) + len(grb)
+
+        lwsa   = [68]
+        lwsb   = [77]
+        lrb1   = [78,80,82,84,86,88,90,92,94,96,98,100,102,104,106,108,110,112,114,116] # 20 loads
+
+        gr_inc_step = 1
     else:
         return False, None
 
@@ -2407,6 +2459,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    
     return True, opt1
 
 def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
