@@ -24,17 +24,12 @@
  *
  *******************************************************************************/
 #include "get_handle.hpp"
-#include "random.hpp"
-#include <verify.hpp>
-#include <miopen/miopen.h>
-#include <miopen/datatype.hpp>
-#include <miopen/kernel_build_params.hpp>
-#include <gtest/gtest.h>
-
-#include <tensor_util.hpp>
-
 #include "perf_helper.hpp"
-#include <miopen/float_equal.hpp>
+
+#include <miopen/datatype.hpp>
+#include <verify.hpp>
+
+#include <gtest/gtest.h>
 
 #define MAX_TENSOR_ELEM 17
 #define PERF_ENABLE 0
@@ -52,7 +47,7 @@ template <typename T>
 std::vector<TensorsConfig> TensorsConfigs()
 {
     std::vector<TensorsConfig> configs;
-    auto insertTestCase = [&configs](size_t& N, size_t& C, size_t& H, size_t& W) {
+    auto insertTestCase = [&configs](size_t N, size_t C, size_t H, size_t W) {
         configs.push_back(
             {{N, C, H, W}, {C * H * W, H * W, W, 1}, {N, C, H, W}, {C * H * W, H * W, W, 1}});
         configs.push_back(
@@ -281,7 +276,6 @@ protected:
 
     void runCPU()
     {
-
         std::vector<T> A = tensA.data;
         std::vector<T> B = tensB.data;
         std::vector<T> C = tensC.data;
@@ -359,10 +353,10 @@ protected:
             beta,
             bitmap,
             work_per_wg,
-            static_cast<int64_t>(0),
-            static_cast<int64_t>(0),
-            static_cast<int64_t>(0),
-            static_cast<int>(num_wg_orig));
+            static_cast<long>(0),
+            static_cast<long>(0),
+            static_cast<long>(0),
+            num_wg_orig);
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
 
@@ -395,10 +389,10 @@ protected:
                         beta,
                         bitmap,
                         work_per_wg,
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        static_cast<int>(num_wg_orig));
+                        static_cast<long>(0),
+                        static_cast<long>(0),
+                        static_cast<long>(0),
+                        num_wg_orig);
         }
     }
 
@@ -442,10 +436,10 @@ protected:
             beta,
             bitmap,
             work_per_wg,
-            static_cast<int64_t>(0),
-            static_cast<int64_t>(0),
-            static_cast<int64_t>(0),
-            static_cast<int>(num_wg_orig));
+            static_cast<long>(0),
+            static_cast<long>(0),
+            static_cast<long>(0),
+            num_wg_orig);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
 
@@ -478,10 +472,10 @@ protected:
                         beta,
                         bitmap,
                         work_per_wg,
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        static_cast<int>(num_wg_orig));
+                        static_cast<long>(0),
+                        static_cast<long>(0),
+                        static_cast<long>(0),
+                        num_wg_orig);
         }
     }
 
