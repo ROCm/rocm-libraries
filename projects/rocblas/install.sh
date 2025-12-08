@@ -102,7 +102,7 @@ install_aocl_from_source( )
       pushd .
       mkdir -p ${build_dir}/deps
       cd ${build_dir}/deps
-      git clone -b AOCL-5.1-GA https://github.com/amd/aocl.git
+      git clone --quiet -b AOCL-5.1-GA https://github.com/amd/aocl.git
       cd aocl
       CXX=${cxx} CC=${cc} ${cmake_executable} -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON  -DENABLE_ILP64=ON  -DENABLE_AOCL_BLAS=ON -DENABLE_AOCL_UTILS=ON -DENABLE_AOCL_LAPACK=OFF -DENABLE_MULTITHREADING=ON -DOpenMP_libomp_LIBRARY="" -DCMAKE_INSTALL_PREFIX=$PWD/install_package
       elevate_if_not_root ${cmake_executable} --build build --config release -j --target install
