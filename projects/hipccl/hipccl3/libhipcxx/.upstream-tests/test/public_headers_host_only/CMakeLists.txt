@@ -55,12 +55,13 @@ function(libcudacxx_add_std_header_test header)
   # Create the default target for that file
   set(headertest_std_${header_name} verify_${header_name})
   add_library(headertest_std_${header_name} SHARED "${headertest_src}.cpp")
+  set_source_files_properties(${headertest_src}.cpp PROPERTIES LANGUAGE HIP)
+
   target_include_directories(headertest_std_${header_name} PRIVATE "${libhipcxx_SOURCE_DIR}/include")
   target_compile_options(headertest_std_${header_name} PRIVATE ${headertest_warning_levels_host})
   target_compile_definitions(headertest_std_${header_name} PRIVATE CCCL_ENABLE_ASSERTIONS)
   target_compile_definitions(headertest_std_${header_name} PRIVATE CCCL_IGNORE_DEPRECATED_CPP_DIALECT)
   target_compile_definitions(headertest_std_${header_name} PRIVATE CCCL_ENABLE_OPTIONAL_REF)
-  set_source_files_properties(headertest_std_${header_name} PROPERTIES LANGUAGE HIP)
 
   # We want to ensure that we can build headers within <cuda/> with a host compiler but we need cuda_runtime_api.h
   if ("NVHPC" STREQUAL "${CMAKE_CXX_COMPILER_ID}")
