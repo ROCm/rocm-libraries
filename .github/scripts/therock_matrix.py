@@ -147,7 +147,7 @@ def collect_projects_to_run(subtrees):
             project_map_data["cmake_options"] += ["-DTHEROCK_ENABLE_ALL=OFF"]
 
             cmake_flag_options = " ".join(project_map_data["cmake_options"])
-            project_to_test_options = ",".join(project_map_data["project_to_test_options"])
+            project_to_test_options = ",".join(project_map_data["project_to_test"])
             project_map_data["cmake_options"] = cmake_flag_options
             project_map_data["project_to_test"] = project_to_test_options
             project_to_run.append(project_map_data)
