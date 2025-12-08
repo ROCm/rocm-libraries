@@ -34,6 +34,7 @@ def create_base_kernel():
         "WaveSeparateGlobalReadA": 0,
         "WaveSeparateGlobalReadB": 0,
         "Use64bShadowLimit" : 1,
+        "UnrollLoopSwapGlobalReadOrder" : 0,
         "MatrixInstruction": [],
         "MIWaveGroup": [],
         "LDSTrInst": False,
