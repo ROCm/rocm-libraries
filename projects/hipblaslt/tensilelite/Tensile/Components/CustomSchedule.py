@@ -20,6 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from math import floor
 from itertools import chain
 from dataclasses import dataclass, field
 from rocisa.code import KernelBody, Label, Macro, Module, RegSet, SrdUpperValue, \
@@ -388,6 +389,9 @@ class ValidatorInstruction(ABC):
     """
     Abstract class with no method just for type hinting purposes.
     """
+    name: str
+    issued_at: float
+
     @abstractmethod
     def validate(self) -> str | None:
         ...
@@ -395,9 +399,9 @@ class ValidatorInstruction(ABC):
 @dataclass
 class LocalRead(ValidatorInstruction):
     name: str
-    issued_at: int
-    needed_by: int
     num_vmfma: int
+    issued_at: int | float
+    needed_by: int
     guaranteed_by: int | float = float('inf')
 
     def validate(self) -> str | None:
@@ -410,26 +414,80 @@ class LocalRead(ValidatorInstruction):
         # Modulo for LRs that finish in next iteration.
         needed_by = self.needed_by % self.num_vmfma
         if guaranteed_by == float('inf'):
-            message = f"{self.name} at index {self.issued_at} is not valid. " + \
+            message = f"{self.name} at index {floor(self.issued_at)} is not valid. " + \
                         "There are no guarantees on when it will be done."
         else:
-            if isinstance(guaranteed_by, float):
-                # Special case to handle idx=-1 which is written as numVMFMA - 0.5
+            if self.num_vmfma - 1 + 0.5 <= guaranteed_by < self.num_vmfma:
+                # Special case to handle idx=-1 which is in the range of [numVMFMA + 0.5, numVMFMA)
                 guaranteed_by = -1
             else:
-                guaranteed_by %= self.num_vmfma
-            message = f"{self.name} at index {self.issued_at} is not valid. " + \
+                guaranteed_by = floor(guaranteed_by) % self.num_vmfma
+            message = f"{self.name} at index {floor(self.issued_at)} is not valid. " + \
                         f"Needed before index {needed_by}, but only guaranteed at index {guaranteed_by}."
         return message
 
+@dataclass
+class GlobalRead(ValidatorInstruction):
+    name: str
+    num_vmfma: int
+    issued_at: int | float
+    swap_global_read_order: bool
+    needed_by: float = float('inf')
+    guaranteed_by: int | float = float('inf')
+    barriered_at: list[int | float] = field(default_factory=list)
+
+    def validate(self) -> str | None:
+        if self.issued_at < self.guaranteed_by < self.needed_by:
+            if any(self.guaranteed_by < barriered_at < self.needed_by for barriered_at in self.barriered_at):
+                    return None
+        
+        issued_at = floor(self.issued_at) % self.num_vmfma
+        needed_by = floor(self.needed_by) % self.num_vmfma
+
+        name = self._name()
+
+        # 1. No SWait
+        if self.guaranteed_by == float('inf'):
+            return f"{name} at index {issued_at} is not valid. There are no guarantees on when it will be done."
+        
+        # NOTE: Must do it after the check above to guard against infinity.
+        guaranteed_by = floor(self.guaranteed_by) % self.num_vmfma
+
+        # 2. No Barrier
+        if len(self.barriered_at) == 0:
+            return f"{name} at index {issued_at} is not valid. There is no SBarrier acting on it."
+        
+        # 3. Guaranteed after needed
+        if self.guaranteed_by > self.needed_by:
+            return f"{name} at index {issued_at} is not valid. It is guaranteed by the SWait @ idx={guaranteed_by} which is after the first corresponding LR1 @ idx={needed_by}. Order must be GR -> SWait -> SBarrier -> LR1."
+
+        # 4. No Barrier between SWait and LR1
+        if not any(self.guaranteed_by < barriered_at < self.needed_by for barriered_at in self.barriered_at):
+            return f"{name} at index {issued_at} is not valid. No SBarrier between SWait @ idx={guaranteed_by} and LR1 @ idx={needed_by}. Order must be GR -> SWait -> SBarrier -> LR1."
+
+        # TODO: Did we miss a case and will we ever end up here?
+        return f"{name} at index {issued_at} is not valid. issued @ idx={issued_at}, guaranteed @ idx={guaranteed_by}, barriered @ idx={[floor(i) for i in self.barriered_at]}, needed @ idx={needed_by} is not valid."
+
+    def _name(self) -> str:
+        name = self.name
+        if not self.swap_global_read_order:
+            return name
+        
+        if name.startswith("GRA"):
+            return name + " (Swapped, loading B)"
+        elif name.startswith("GRB"):
+            return name + " (Swapped, loading A)"
+        else:
+            raise ValueError(f"Unexpected global read name: {name}")
 
 @dataclass
 class SWait(ValidatorInstruction):
-    issued_at: int
+    issued_at: int | float
     dscnt: int
     vlcnt: int
     vscnt: int
     comment: str
+    name: str = "SWaitCnt"
 
     def _is_valid(self) -> bool:
         return self.dscnt >= -1 and self.vlcnt >= -1 and self.vscnt >= -1 and self.issued_at >= -1
@@ -437,7 +495,80 @@ class SWait(ValidatorInstruction):
     def validate(self) -> str | None:
         if self._is_valid():
             return None
-        return f"SWait at index {self.issued_at} is invalid: dscnt={self.dscnt}, vlcnt={self.vlcnt}, vscnt={self.vscnt}, issued_at={self.issued_at}."
+        return f"SWait at index {floor(self.issued_at)} is invalid: dscnt={self.dscnt}, vlcnt={self.vlcnt}, vscnt={self.vscnt}, issued_at={floor(self.issued_at)}."
+
+@dataclass
+class Barrier(ValidatorInstruction):
+    issued_at: int | float
+    comment: str
+    name: str = "SBarrier"
+
+    def validate(self) -> str | None:
+        return f"Barrier at index {floor(self.issued_at)} is not valid. Must be >= -1." if self.issued_at < -1 else None
+
+class Timeline:
+    def __init__(self, num_vmfma: int):
+        # NOTE: num_vmfma + 1 to account for special idx=-1.
+        #       idx=-1 is special case that occurs BEFORE the first VMFMA but AFTER the last VMFMA.
+        #       Instructions at idx=-1 happen after all instructions at idx=num_vmfma-1 and BEFORE all instructions (including the VMFMA) at idx=0.
+        self._instructions_at_index = [[] for _ in range(num_vmfma+1)]
+        self._timeline = []
+        # Don't use defaultdict so we can error out if accessing a key that doesn't exist.
+        self._instructions_for_name: dict[str, list[tuple[int, ValidatorInstruction]]] = defaultdict(list)
+
+    def __iter__(self):
+        return iter(self._timeline)
+    
+    def __len__(self):
+        return len(self._timeline)
+
+    def __getitem__(self, index: int) -> ValidatorInstruction:
+        return self._timeline[index]
+    
+    def insert(self, vmfma_index: int, instruction: ValidatorInstruction) -> None:
+        """
+        Add an instruction to the timeline at a given VMFMA index.
+        """
+        self._instructions_at_index[vmfma_index+1].append(instruction)
+        
+        # If we've already linearized the timeline, we need to do so again now that we've added a new instruction.
+        if self._timeline:
+            self.linearize_timeline()
+
+    def get_instructions_for_name(self, name: str) -> list[tuple[int, ValidatorInstruction]]:
+        """
+        Return the instructions scheduled with a given name (e.g. "GRA").
+        """
+        return self._instructions_for_name[name]
+    
+    def get_instructions_at_index(self, index: int) -> list[ValidatorInstruction]:
+        """
+        Return the instructions scheduled at a given VMFMA index.
+        """
+        return self._instructions_at_index[index+1]
+
+    def linearize_timeline(self) -> None:
+        """
+        Generate the linear timeline and the lookup table for instructions by name.
+        """
+        self._timeline = []
+        self._instructions_for_name = defaultdict(list)
+        i = 0
+        for instructions in self._instructions_at_index:
+            for instruction in instructions:
+                self._timeline.append(instruction)
+                self._instructions_for_name[instruction.name].append((i, instruction))
+                i += 1
+
+    def validate(self) -> str | None:
+        """
+        Validate the timeline by calling the validate method of each instruction.
+        """
+        for instruction in self:
+            message = instruction.validate()
+            if message is not None:
+                return message
+        return None
 
 def schedule_get(name: str, code_path: int, schedule_info: 'ScheduleInfo') -> list[list[int]]:
     """
@@ -503,22 +634,28 @@ def lr_needed_by_mfma(is_lra: bool, lr_idx: int, offset: int, schedule_info: 'Sc
         return index_lrb_needed_by_mfma(lr_idx, offset)
 
 
-def create_timeline(instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution') -> list[list[ValidatorInstruction]]:
+def create_timeline(instruction_names_to_add: list[str], code_path: int, schedule_info: 'ScheduleInfo', kernel: 'Solution') -> Timeline:
     """
     Create a timeline from the provided schedule_info which contains only the instructions inside `instruction_names_to_add`.
     Organized as a list of lists indexed by vmfma_index + 1.
 
     The +1 is required in order to handle the special case of idx=-1, which is at timeline[0].
     idx=-1 is special case that occurs BEFORE the first VMFMA but AFTER the last VMFMA.
-    """
-    # NOTE: numMfma + 1 to account for special idx=-1.
-    #       idx=-1 is special case that occurs BEFORE the first VMFMA but AFTER the last VMFMA.
-    #       Instructions at idx=-1 happen after all instructions at idx=numVMFMA-1 and BEFORE all instructions (including the VMFMA) at idx=0.
-    timeline = [[] for _ in range(schedule_info.numMfma+1)]
 
+    Args:
+        instruction_names_to_add:   The list of instruction names to add to the timeline.
+        code_path:                  The code path to create a timeline out of.
+        schedule_info:              The schedule information to add to the timeline.
+        kernel:                     The kernel to add to the timeline. 
+    """
     num_vmfma = schedule_info.numMfma
     halfway_point = num_vmfma // 2
 
+    direct_to_lds = kernel["DirectToLds"]
+    swap_global_read_order = kernel["SwapGlobalReadOrder"]
+
+    timeline = Timeline(num_vmfma)
+    
     # NOTE: Relative ordering of instructions must be preserved.
     #       Order dictates the order in which instructions are scheduled if they are scheduled at the same vmfmaindex.
     for name in schedule_info.optSchedule.keys():
@@ -528,11 +665,15 @@ def create_timeline(instruction_names_to_add: list[str], code_path: int, schedul
         if name == "SYNC":
             for idx_sync, (idx_vmfma, sync) in enumerate(zip(schedule_get(name, code_path, schedule_info), schedule_info.syncCode)):
                 assert idx_vmfma >= -1, f"Code path {code_path}: SWaitCnt at index {idx_sync} is not valid. Must be >= -1."
-                if not isinstance(sync, SWaitCnt):
-                    continue
-
-                swait = SWait(issued_at=idx_vmfma, dscnt=sync.dscnt, vlcnt=sync.vlcnt, vscnt=sync.vscnt, comment=sync.comment)
-                timeline[idx_vmfma+1].append(swait)
+                
+                if isinstance(sync, SWaitCnt):
+                    sync_instruction = SWait(issued_at=idx_vmfma, dscnt=sync.dscnt, vlcnt=sync.vlcnt, vscnt=sync.vscnt, comment=sync.comment)
+                elif isinstance(sync, SBarrier):
+                    sync_instruction = Barrier(issued_at=idx_vmfma, comment=sync.comment)
+                else:
+                    raise ValueError(f"Unexpected sync instruction type: {type(sync)}")
+                
+                timeline.insert(idx_vmfma, sync_instruction)
         elif name.startswith("LRA") or name.startswith("LRB"):
             offset = halfway_point if "0" in name else num_vmfma
             is_lra = name.startswith("LRA")
@@ -540,44 +681,191 @@ def create_timeline(instruction_names_to_add: list[str], code_path: int, schedul
                 assert idx_vmfma >= -1, f"Code path {code_path}: LocalRead {name} at index {idx_LR} is not valid. Must be >= -1."
 
                 needed_by = lr_needed_by_mfma(is_lra, idx_LR, offset, schedule_info, kernel)
-                local_read = LocalRead(name=name, issued_at=idx_vmfma, needed_by=needed_by, num_vmfma=num_vmfma)
-                timeline[idx_vmfma+1].append(local_read)
+                local_read = LocalRead(name=name, num_vmfma=num_vmfma, issued_at=idx_vmfma, needed_by=needed_by)
+                timeline.insert(idx_vmfma, local_read)
+        elif name.startswith("GRA") or name.startswith("GRB"):
+            global_reads = schedule_get(name, code_path, schedule_info)
+            assert not direct_to_lds or len(global_reads) % 2 == 0, f"Code path {code_path}: {name} has an odd number of indices. Must be even if DirectToLds is True."
+            
+            for idx_GR, idx_vmfma in enumerate(global_reads):
+                assert idx_vmfma >= -1, f"Code path {code_path}: GlobalRead {name} at index {idx_GR} is not valid. Must be >= -1."
+
+                # If using DirectToLds, only every other index (starting at index=1) is an actual GR, the others are increments to a pointer.
+                if direct_to_lds and idx_GR % 2 == 0:
+                    continue
+
+                global_read = GlobalRead(name=name, num_vmfma=num_vmfma, issued_at=idx_vmfma, swap_global_read_order=swap_global_read_order)
+                timeline.insert(idx_vmfma, global_read)
         else:
             raise NotImplementedError(f"Instruction {name} not implemented")
+    
+    # Resolve issued_at index to a sub-index resolution
+    # E.g. if issuing [GRA, SWaitCnt, SBarrier, LRA1] at index 5, the issued_at indices for each would be [5, 5.25, 5.5, 5.75].
+    # I.e. vmfma_index + i/len(instructions @ vmfma_index) 
+    # NOTE: Because idx=-1 is special and occurs AFTER the insturctions scheduled at idx=numVMFMA-1 but BEFORE the VMFMA at indx=0, we need to adjust the index so that the instructions at idx=(numVMFMA-1) have [0, 0.5) and the instructions at idx=0 have [0.5, 1).
+    for i_vmfma in range(-1, num_vmfma):
+        instructions = timeline.get_instructions_at_index(i_vmfma)
+        for i_instruction, instruction in enumerate(instructions):
+            divisor = len(instructions)
+            if i_vmfma == 0:
+                divisor *= 2
+                instruction.issued_at += 0.5
+            if i_vmfma == num_vmfma - 1:
+                divisor *= 2
+            instruction.issued_at += i_instruction / divisor
 
+    timeline.linearize_timeline()
     return timeline
 
-def apply_swaits(timeline: list[list[ValidatorInstruction]], num_vmfma: int) -> None:
+def apply_barriers(timeline: Timeline, num_vmfma: int) -> None:
     """
-    Apply the effect of SWaitCnts to the timeline by updating the guaranteed_by field of LocalReads.
+    Apply the effect of SBarriers to the timeline by updating the barriered_at field of GlobalReads.
     Timeline is modified in place.
     """
     num_instructions = len(timeline)
-    # Mapping between linear index and swait at that index
-    swaits: dict[int, SWait] = {i: swait for i, swait in enumerate(timeline) if isinstance(swait, SWait)}
+    for i_barrier, barrier in timeline.get_instructions_for_name("SBarrier"):
+        for _pass in range(2):
+            for i_gr in chain(range(i_barrier-1, -1, -1), range(num_instructions-1, i_barrier, -1)):
+                instruction = timeline[i_gr]
+                if not isinstance(instruction, GlobalRead):
+                    continue
+                new_barriered_at = barrier.issued_at + _pass * num_vmfma
+                if i_gr > i_barrier:
+                    # GlobalReads which finish during the next iteration.
+                    new_barriered_at += num_vmfma
+                instruction.barriered_at.append(new_barriered_at)
 
-    for i_swait, swait in swaits.items():
-        num_left_in_flight = swait.dscnt
-        if num_left_in_flight == -1:
-            continue # -1 is special value to indicate doing nothing.
+def apply_swaits(timeline: Timeline, num_vmfma: int) -> None:
+    """
+    Apply the effect of SWaitCnts to the timeline by updating the guaranteed_by field of LocalReads and GlobalReads.
+    Timeline is modified in place.
+    """
+    def apply_wait_to_read(ReadClazz: ValidatorInstruction, i_swait: int, issued_at: int, num_left_in_flight: int, num_passes: int) -> None:
+        num_instructions = len(timeline)
 
-        for i_lr in chain(range(i_swait-1, -1, -1), range(num_instructions-1, i_swait, -1)):
-            local_read = timeline[i_lr]
-            if not isinstance(local_read, LocalRead):
-                continue  # Only LRs are supported at the moment.
-            if num_left_in_flight > 0:
-                num_left_in_flight -= 1
-                continue
+        for _pass in range(num_passes):
+            for i_read in chain(range(i_swait-1, -1, -1), range(num_instructions-1, i_swait, -1)):
+                instruction = timeline[i_read]
+                if not isinstance(instruction, ReadClazz):
+                    continue
 
-            new_guaranteed_by = swait.issued_at
-            if i_lr > i_swait:
-                # LRs which finish during the next iteration.
-                new_guaranteed_by += num_vmfma
-            if swait.issued_at == -1:
-                # Need a number between (numVMFMA-1) and numVMFMA, resort to floats.
-                new_guaranteed_by += 0.5
-            local_read.guaranteed_by = min(local_read.guaranteed_by, new_guaranteed_by)
+                if num_left_in_flight > 0:
+                    num_left_in_flight -= 1
+                    continue
 
+                new_guaranteed_by = issued_at + _pass * num_vmfma
+                if i_read > i_swait:  # LRs which finish during the next iteration.
+                    new_guaranteed_by += num_vmfma
+                if issued_at == -1:  # Need a number between (numVMFMA-1) and numVMFMA, resort to floats.
+                    new_guaranteed_by += 0.5
+                instruction.guaranteed_by = min(instruction.guaranteed_by, new_guaranteed_by)
+
+    for i_swait, swait in timeline.get_instructions_for_name("SWaitCnt"):
+        if swait.dscnt != -1:
+            apply_wait_to_read(LocalRead, i_swait, swait.issued_at, swait.dscnt, 1)
+        if swait.vlcnt != -1:   
+            apply_wait_to_read(GlobalRead, i_swait, swait.issued_at, swait.vlcnt, 2)
+@dataclass
+class GRIncData:
+    """
+    Data structure representing GRInc-related information.
+    """
+    name: list[int]
+    intervals: list[tuple[int, int]]
+    insts: list[int]
+
+def verify_scc_overlap(scheduleInfo, context: Dict = {}):
+    """
+    Ensure we don't overlap scalar instructions modifying SCC.
+    This can happen:
+        - between GRIncA and GRIncB
+        - between GRInc and GR when DLT is activated
+        - between GRInc and LWS
+        
+    By default, GRInc instructions can be split into 3 distinct intervals where we shouldn't touch SCC
+      - s_cmp_eq_u32, s_cselect_b32,s_cselect_b32 (3)
+      - s_add_u32, s_addc_u32 (2)
+      - s_sub_u32, s_subb_u32 (2)
+      - s_cmp_eq_u32, s_cselect_b32 (2)
+    With ShadowLimit disabled (`Use64bShadowLimit`):
+      - s_cmp_eq_u32, s_cselect_b32,s_cselect_b32 (3)
+      - s_add_u32, s_addc_u32 (2)
+      - s_sub_u32  (2)
+    
+        This function checks no other scalar instructions is inside the above intervals.
+    """
+    kernel = context["kernel"]
+    DTL = kernel["DirectToLds"]
+    ShadowLimit = kernel["Use64bShadowLimit"]
+    
+    intervalSize = [3,2,2,2] if ShadowLimit else [3,2,1] # Values explained above
+    numElements = sum(intervalSize)
+    
+    # Gets intervals from GRInc indices based on the above `intervalSize` value
+    def getIntervals(indices):
+        output = []
+        current_start = 0
+        for size in intervalSize:
+            current_end = current_start + size
+            min_val = indices[current_start]
+            max_val = indices[current_end - 1]
+            output.append([min_val, max_val])
+            current_start = current_end
+        return output
+
+    # Checks value is in [interval[0],interval[1]]. 
+    # if lhsGt : ]interval[0],interval[1]] else  [interval[0],interval[1][
+    def inInterval(value : int, interval : list[int], lhsGt : bool):
+        if lhsGt:
+            return value>interval[0] and value<=interval[1]
+        else:
+            return value>=interval[0] and value<interval[1]
+
+    def getDeclarationIndex(name):
+        return list(scheduleInfo.optSchedule).index(name)
+
+    def verify(scheduleInfo: 'ScheduleInfo', codePath: int) -> tuple[bool, str]:
+        GRIncNames = ["GRIncA", "GRIncB"]
+        names = ["LWSA", "LWSB"]
+        # We only care about GRA/B when DTL is activated (m0 usage)
+        if DTL:
+            names += ["GRA", "GRB"]
+
+        def verifyIndices(grIncData : GRIncData, name : str, indices : list[int]) -> tuple[bool, str]:
+            dclIndex = getDeclarationIndex(name)
+            dclIndexGrInc = getDeclarationIndex(grIncData.name)
+            for v in indices:
+                for interval in grIncData.intervals:
+                    if inInterval(v,interval, dclIndex<dclIndexGrInc):
+                        return False, f"{name} at index {v} can't be between {grIncData.name} {interval[0]}-{interval[1]} due to SCC usage."
+
+        GRIncs = []
+        for GRIncName in GRIncNames:
+            GRInc = schedule_get(GRIncName, codePath, scheduleInfo)
+            assert numElements==len(GRInc), f"{GRIncName} expected size if {numElements}, given {len(GRInc)}."
+            GRIncs.append(GRIncData(name = GRIncName, insts = GRInc, intervals = getIntervals(GRInc)))
+
+        # First check GRIncA&B together
+        errorMessage = verifyIndices(GRIncs[0],GRIncs[1].name, GRIncs[1].insts)
+        if errorMessage:
+            return errorMessage
+
+        # Then, check GR and LW on all GRIncs
+        for grIncData in GRIncs:
+            for name in names:
+                insts = schedule_get(name, codePath, scheduleInfo)
+                # In case of GRA/GRB, just take m0 updates indices 
+                if name.startswith("GR"):
+                    insts = insts[0::2]
+                errorMessage = verifyIndices(grIncData, name, insts)
+                if errorMessage:
+                    return errorMessage
+   
+    for codePath in range(scheduleInfo.numCodePaths):
+            errorMessage = verify(scheduleInfo, codePath)
+            if errorMessage:
+                return False, f"Code path {codePath}: {errorMessage}"
+    return True, ""
 
 def verify_lrs_complete_before_vmfma(schedule_info: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     """
@@ -596,11 +884,68 @@ def verify_lrs_complete_before_vmfma(schedule_info: 'ScheduleInfo', context: dic
                     return None
 
         timeline = create_timeline(relevant_names, code_path, schedule_info, context["kernel"])
-        timeline = [instruction for instructions in timeline for instruction in instructions]
 
         apply_swaits(timeline, schedule_info.numMfma)
+        return timeline.validate()
+    
+    for code_path in range(schedule_info.numCodePaths):
+        error_message = verify(schedule_info, code_path)
+        if error_message:
+            return False, f"Code path {code_path}: {error_message}"
+    return True, ""
+
+def verify_grs_complete_before_lr1s(schedule_info: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
+    """
+    Ensure that the GlobalReads issued in the previous iteration are guaranteed to be complete before the first LRA/LRB1 of this iteration.
+    This hazard features inter-wave communication, so a barrier is needed
+    """
+    def verify(schedule_info: 'ScheduleInfo', code_path: int) -> str | None:
+        if len(schedule_info.mfmaReorder) != 0:
+            printWarning("Do not currently support mfmaReorder in CMS validation, cannot guarantee that LR1s will be correct.")
+            return None
+        
+        available_keys = schedule_info.optSchedule.keys()
+        if "LRA1" not in available_keys and "LRA3" in available_keys:
+            printWarning("LRA3 is present in schedule, but LRA1 is not. This is not yet supported in CMS validation")
+            return None
+        if "LRB1" not in available_keys and "LRB3" in available_keys:
+            printWarning("LRB3 is present in schedule, but LRB1 is not. This is not yet supported in CMS validation")
+            return None
+
+        relevant_names = ["GRA", "GRB", "LRA1", "LRB1", "SYNC"]
+        timeline = create_timeline(relevant_names, code_path, schedule_info, context["kernel"])
+
+        apply_swaits(timeline, schedule_info.numMfma)
+        apply_barriers(timeline, schedule_info.numMfma)
+
+        _, first_LRA1 = timeline.get_instructions_for_name("LRA1")[0]
+        _, first_LRB1 = timeline.get_instructions_for_name("LRB1")[0]
+        # The GRAs we are interested in were issued in the previous iteration, 
+        # so we need to add the number of VMFMAs to the needed_by to account for us being in the next iteration.
+        GRAs_target_idx = first_LRA1.issued_at + schedule_info.numMfma
+        GRBs_target_idx = first_LRB1.issued_at + schedule_info.numMfma
+        # If the global read order is swapped, we need to swap the target indices since GRAs actually load B and GRBs actually load A.
+        if context["kernel"]["SwapGlobalReadOrder"]:
+            GRAs_target_idx, GRBs_target_idx = GRBs_target_idx, GRAs_target_idx
+
+        GRAs: list[tuple[int, GlobalRead]] = timeline.get_instructions_for_name("GRA")
+        if len(GRAs) == 0:
+            return "No GRAs in schedule."
+        GRBs: list[tuple[int, GlobalRead]] = timeline.get_instructions_for_name("GRB")
+        if len(GRBs) == 0:
+            return "No GRBs in schedule."
+        for _, gra in GRAs:
+            gra.needed_by = GRAs_target_idx
+        for _, grb in GRBs:
+            grb.needed_by = GRBs_target_idx
 
         for instruction in timeline:
+            if isinstance(instruction, LocalRead):
+                # TODO: Remove this one passes are combined
+                # Do not validate LocalReads.
+                # We don't load and place all of them, so the dscnts will be incorrect.
+                # They are validated in a seperate pass.
+                continue
             error_message = instruction.validate()
             if error_message:
                 return error_message
@@ -696,12 +1041,15 @@ class ScheduleInfo:
         self.__skipValidation__ = False
 
         # The set of validation rules to run inside `isValid`.
-        self.rules: List[Callable[[ScheduleInfo, dict], [bool, str]]] = []
-
-        self.rules.append(verify_ascending_order)
-        self.rules.append(verify_correct_number_of_instructions)
-        self.rules.append(verify_global_reads_not_too_early)
-        self.rules.append(verify_lrs_complete_before_vmfma)
+        self.rules: list[Callable[[ScheduleInfo, dict], [bool, str]]] = [
+            verify_correct_number_of_instructions,
+            verify_ascending_order,
+            verify_lrs_complete_before_vmfma,
+            verify_global_reads_not_too_early,
+            # NOTE: Must run after verify_lrs_complete_before_vmfma to ensure that the position of the LR1s is valid.
+            verify_grs_complete_before_lr1s,
+            verify_scc_overlap
+        ]
 
     def disableValidation(self):
         self.__skipValidation__ = True
@@ -1054,7 +1402,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
         optSchedule = {
             'SYNC'    : [[12,13, 47,48,49,50,51, 52,53, 56,56, 95]],
             'GRIncB' : [[0,1,2,3,4,5,6,7,8]],
-            'GRIncA' : [[9,10,11,12,13,14,15,16,17]],
+            'GRIncA' : [[42,42,43,43,44,44,45,45,46]],
             'LRB0'   : [[0,0,1,1,2,2,6,8],
                         [3,3,4,4,5,5,7,9]],
             # These local reads have BC
@@ -1131,7 +1479,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
         kernel["UsePLRPack"] = True
 
         optSchedule = {
-            'SYNC'  : [[25, 25, 46, 46, 55, 55]],
+            'SYNC'  : [[-1, 25, 25, 46, 46, 55, 55, 72, 72]],
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
             'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
             'LRA0'  : [[0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12, 14, 14, 16, 16, 18, 18, 20, 20, 22, 22],
@@ -1157,9 +1505,12 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
             'LCC'   : [[95, 95]],
         }
 
-        syncCode = [SWaitCnt(dscnt=15, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete") ,
+        syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 to complete") ,
+                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0 to complete") ,
                     SBarrier(comment="") ,
-                    SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete") ,
+                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB0 to complete") ,
+                    SBarrier(comment="") ,
+                    SWaitCnt(dscnt=-1, vlcnt=14+4, vscnt=-1, comment="Wait for global reads to complete") ,
                     SBarrier(comment="") ,
                     SWaitCnt(dscnt=-1, vlcnt=14, vscnt=-1, comment="Wait for global reads to complete") ,
                     SBarrier(comment="") ,
@@ -1170,12 +1521,11 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
 
     numMfma = 96
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.disableValidation()  # TODO: Remove after schedule is fixed
     return True, opt1
 
 def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
-
+    numMfma = 96
     optSchedule = dict()
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
@@ -1220,6 +1570,9 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
             }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+        # TODO : GRA at index 10 can't be between GRIncB 9-11 due to SCC usage
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+        opt1.disableValidation()
     elif isNT(kernel) and useLDSTr and TLDS == 0:
         kernel["SwapGlobalReadOrder"] = True
         #index and code pair
@@ -1257,6 +1610,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                 'LCC' : [[95, 95]],}
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isNN(kernel) and useLDSTr and TLDS == 1:
         kernel["SwapGlobalReadOrder"] = True
         #index and code pair
@@ -1296,11 +1650,10 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
                 }
         syncCode = syncTable[1::2]
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
-
-    numMfma = 96
-    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    
     return True, opt1
 
 def _get_schedule_256x256x128_8bit(kernel, useLDSTr, TLDS):
@@ -1493,7 +1846,7 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
 
 def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
-
+    numMfma = 80
     optSchedule = dict()
     syncCode = []
 
@@ -1503,7 +1856,7 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
 
             'SYNC'   : [[-1, 4, 13,13, 38,39, 42,43, 70,70]],
             'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
-            'GRIncB' : [[9,11,12,13,14,15,16,17,18]],
+            'GRIncB' : [[29,30,31,32,33,34,35,36,37]],
 
             'LRA0'   : [[0,2,3,4,5]],  ## -2 is place holder
 
@@ -1542,6 +1895,9 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment=""),
                    ]
         nglshift = nllshift = 13 # vmcnt shift for ngl and nll
+        #TODO . GRA at index 11 can't be between GRIncB 9-12 due to SCC usage
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+        opt1.disableValidation()
     elif isNN(kernel) and useLDSTr and TLDS==1:
         kernel["SwapGlobalReadOrder"] = True
         optSchedule = {
@@ -1579,7 +1935,8 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=-1, vlcnt=(13+10-13), vscnt=-1, comment="Wait for previous GRA to complete"),
                     SBarrier(comment="")]
         nglshift = nllshift = 13
-
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+        opt1.disableValidation()  # TODO: RE-enable after fixing https://github.com/ROCm/rocm-libraries/issues/3181
     elif isNT(kernel) and useLDSTr and TLDS==0:
         optSchedule = {
             'SYNC': [[-1,17,17,57,57]],
@@ -1606,18 +1963,19 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
             SBarrier(comment="")
         ]
         nglshift = nllshift = 13
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
 
-
-    numMfma = 80
-    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    
     return True, opt1
 
 def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
-    if isNN(kernel) and useLDSTr and TLDS==1:
+    numMfma = 80
+    # Temp disable this for now.
+    if isNN(kernel) and useLDSTr and TLDS==1 and False:
         kernel["SwapGlobalReadOrder"] = True
         optSchedule = {
             'SYNC'   : [[-1,
@@ -1654,6 +2012,9 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=-1, vlcnt=(13+10-13), vscnt=-1, comment="Wait for previous GRA to complete"),
                     SBarrier(comment="")]
         nglshift = nllshift = 13
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
+        #TODO. GRA at index 11 can't be between GRIncB 10-13 due to SCC usage.
+        opt1.disableValidation()
     elif isNT(kernel) and useLDSTr and TLDS==0:
         nglshift = nllshift = 0
         kernel["SwapGlobalReadOrder"] = True
@@ -1681,11 +2042,10 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
             SBarrier(comment="")
         ]
         nglshift = nllshift = 13
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
 
-    numMfma = 80
-    opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
 def _get_schedule_256x240x64_16bit(kernel, useLDSTr, TLDS):
@@ -1784,6 +2144,7 @@ def _get_schedule_256x240x64_16bit(kernel, useLDSTr, TLDS):
 
     numMfma = 120  # Must match actual MFMA count for 256x240x64 tile
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    opt1.disableValidation()
     return True, opt1
 
 def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
@@ -1810,8 +2171,8 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
         }
 
         syncCode = [
-            SBarrier(comment="wavefront sync at loop start"),
-            SWaitCnt(dscnt=12, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LR/LW"),
+            SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LRB1-4"),
+            SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prior iteration LRB1-remaining"),
             SWaitCnt(dscnt=2, vlcnt=-1, vscnt=-1, comment="wait for LRA0 to complete before GRA DirectToLds"),
             SBarrier(comment="barrier after LRA0, before GRA starts"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRB0 to complete before GRB DirectToLds"),
@@ -1896,7 +2257,6 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
 
     numMfma = 104
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.disableValidation()  # TODO: Fix and re-enable
     return True, opt1
 
 def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
@@ -2171,7 +2531,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
         # Note: A/B Global read orders are swapped
         # i.e. GRA contains GR for B
         optSchedule = {
-            'SYNC'  : [[-1, 17, 17, 49, 49, 59, 59]],
+            'SYNC'  : [[-1, 7, 17, 17, 49, 49, 59, 59]],
             'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
             'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
             'LRB0'  : [[0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10],
@@ -2195,6 +2555,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
 
         syncCode = [
             SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for prior local read. Relax a bit to dscnt=4 to reduce latency") ,
+            SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="Wait for remaining LRA1.") ,
             SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for all LRB0 prior to  LRA0*3") ,
             SBarrier(comment="") ,
             SWaitCnt(dscnt=0,  vlcnt=-1, vscnt=-1, comment="Wait for prior local read") ,
@@ -2208,7 +2569,6 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
 
     numMfma = 120
     opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    opt1.disableValidation()  # TODO: Remove after landing fix
     return True, opt1
 
 def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):

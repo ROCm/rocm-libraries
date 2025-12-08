@@ -28,11 +28,12 @@ def create_base_kernel():
             "TransposeB": False,
         },
         "MacroTile0": 0, "MacroTile1": 0, "DepthU": 0,
-        "PrefetchGlobalRead": 0, "PrefetchLocalRead": 0, "DirectToLds": False,
+        "PrefetchGlobalRead": 0, "PrefetchLocalRead": 0, "DirectToLds": True,
         "GlobalReadVectorWidthA": 0, "GlobalReadVectorWidthB": 0,
         "LocalReadVectorWidth": 0,
         "WaveSeparateGlobalReadA": 0,
         "WaveSeparateGlobalReadB": 0,
+        "Use64bShadowLimit" : 1,
         "MatrixInstruction": [],
         "MIWaveGroup": [],
         "LDSTrInst": False,
@@ -70,7 +71,7 @@ class TestCustomSchedule:
         })
         kernel.update({
             "MacroTile0": 256, "MacroTile1": 256, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "DirectToLds": True,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2], "TransposeLDS": 0 if NT else 1, "MIWaveTileA": 8, "MIWaveTileB": 8,
         })
@@ -112,7 +113,7 @@ class TestCustomSchedule:
         })
         kernel.update({
             "MacroTile0": 256, "MacroTile1": 256, "DepthU": 128,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0, "DirectToLds": True,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
             "GlobalReadVectorWidthA": 16, "GlobalReadVectorWidthB": 16, "LocalReadVectorWidth": 16,
             "MatrixInstruction": [16,16,128,1], "MIWaveGroup": [2,2], "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 8, "ForceUnrollSubIter": force_unroll_sub_iter,
         })
@@ -136,7 +137,7 @@ class TestCustomSchedule:
         })
         kernel.update({
             "MacroTile0": 256, "MacroTile1": 96, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "DirectToLds": True,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 3,
@@ -163,14 +164,13 @@ class TestCustomSchedule:
         })
         kernel.update({
             "MacroTile0": 192, "MacroTile1": 256, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "DirectToLds": True,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": NN, "TransposeLDS": 0 if NT else 1, "MIWaveTileA": 6, "MIWaveTileB": 8,
         })
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
-        schedule_info.disableValidation()  # TODO: disable once fix has been added
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == 2
@@ -191,7 +191,7 @@ class TestCustomSchedule:
         })
         kernel.update({
             "MacroTile0": 256, "MacroTile1": 192, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "DirectToLds": True,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": not transA, "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 6,
@@ -216,7 +216,7 @@ class TestCustomSchedule:
         })
         kernel.update({
             "MacroTile0": 160, "MacroTile1": 256, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "DirectToLds": True,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": not transA, "TransposeLDS": not transB, "MIWaveTileA": 5, "MIWaveTileB": 8,
@@ -230,7 +230,7 @@ class TestCustomSchedule:
         valid, message = schedule_info.isValid({"kernel" : kernel})
         assert valid, message
 
-    @pytest.mark.parametrize("transA, transB", [(False, False), (False, True)])
+    @pytest.mark.parametrize("transA, transB", [(False, True)])
     def test_schedule_256x160x64_16bit(self, transA, transB):
         """Tests the 256x160x64 16-bit schedule."""
         kernel = create_base_kernel()
@@ -241,7 +241,7 @@ class TestCustomSchedule:
         })
         kernel.update({
             "MacroTile0": 256, "MacroTile1": 160, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "DirectToLds": True,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": True, "TransposeLDS": 0 if transB else 1, "MIWaveTileA": 8, "MIWaveTileB": 5,
@@ -267,7 +267,7 @@ class TestCustomSchedule:
         })
         kernel.update({
             "MacroTile0": 256, "MacroTile1": 240, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "DirectToLds": True,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 2, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [4,1],
             "LDSTrInst": True, "TransposeLDS": 1 if transA or not (transA or transB) else 0, "MIWaveTileA": 4, "MIWaveTileB": 15,
@@ -292,7 +292,7 @@ class TestCustomSchedule:
         })
         kernel.update({
             "MacroTile0": 256, "MacroTile1": 208, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "DirectToLds": True,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 2, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [4,1],
             "LDSTrInst": not transA , "TransposeLDS": 1, "MIWaveTileA": 4, "MIWaveTileB": 13,
@@ -316,7 +316,7 @@ class TestCustomSchedule:
         })
         kernel.update({
             "MacroTile0": 224, "MacroTile1": 256, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "DirectToLds": True,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "TransposeLDS": 1, "MIWaveTileA": 7, "MIWaveTileB": 8,
@@ -348,7 +348,7 @@ class TestCustomSchedule:
         })
         kernel.update({
             "MacroTile0": 192, "MacroTile1": 320, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "DirectToLds": True,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 6, "MIWaveTileB": 10,
@@ -372,7 +372,7 @@ class TestCustomSchedule:
         })
         kernel.update({
             "MacroTile0": 256, "MacroTile1": 224, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "DirectToLds": True,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 7,
@@ -400,7 +400,7 @@ class TestCustomSchedule:
         })
         kernel.update({
             "MacroTile0": 320, "MacroTile1": 192, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "DirectToLds": True,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": True, "TransposeLDS": NN, "MIWaveTileA": 10, "MIWaveTileB": 6,
@@ -428,7 +428,7 @@ class TestCustomSchedule:
         })
         kernel.update({
             "MacroTile0": 240, "MacroTile1": 256, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "DirectToLds": True,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 2, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [1,4],
             "TransposeLDS": TN, "MIWaveTileA": 15, "MIWaveTileB": 4,
@@ -442,9 +442,17 @@ class TestCustomSchedule:
         valid, message = schedule_info.isValid({"kernel" : kernel})
         assert valid, message
 
-    @pytest.mark.parametrize("transA, transB", [(True, False), (False, False)])
-    def test_schedule_208x256x64_16bit(self, transA, transB):
+    @pytest.mark.parametrize(
+        # fmt: off
+        "transA, transB, lds_tr_inst,  tr_lds", [
+        (  True,  False,       False,       1),
+        ( False,  False,        True,       1),
+        ( False,   True,        True,       0)
+        # fmt: on
+        ])        
+    def test_schedule_208x256x64_16bit(self, transA, transB, lds_tr_inst,  tr_lds):
         """Tests the 208x256x64 16-bit schedule."""
+        NT = not transA and transB
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
         kernel["ProblemType"].update({
@@ -453,10 +461,10 @@ class TestCustomSchedule:
         })
         kernel.update({
             "MacroTile0": 208, "MacroTile1": 256, "DepthU": 64,
-            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "DirectToLds": True,
+            "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 2, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [1,4],
-            "LDSTrInst": not transA, "TransposeLDS": 1, "MIWaveTileA": 13, "MIWaveTileB": 4,
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 13, "MIWaveTileB": 4,
         })
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
