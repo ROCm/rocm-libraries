@@ -25,13 +25,10 @@ add_executable(
 
 target_compile_options(public_hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 target_link_libraries(
-    public_hipdnn_backend_tests
-    GTest::gtest  # No gtest_main - we provide our own main.cpp
-    Threads::Threads
-    hipdnn_sdk
-    hipdnn_backend
-    hip::host
+    public_hipdnn_backend_tests GTest::gtest # No gtest_main - we provide our own main.cpp
+    Threads::Threads hipdnn_sdk hipdnn_backend hip::host
 )
+
 
 target_include_directories(public_hipdnn_backend_tests PRIVATE ${HIPDNN_TEST_INCLUDE_DIRS})
 
