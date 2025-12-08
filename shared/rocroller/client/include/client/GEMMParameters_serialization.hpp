@@ -261,8 +261,8 @@ namespace rocRoller::Serialization
 
             iot::mapRequired(io, "types", params.types);
 
-            iot::mapRequired(io, "loadLDSScale_A", params.loadLDSScaleA);
-            iot::mapRequired(io, "loadLDSScale_B", params.loadLDSScaleB);
+            iot::mapRequired(io, "loadScale_A", params.loadPathAScale);
+            iot::mapRequired(io, "loadScale_B", params.loadPathBScale);
             iot::mapRequired(io, "swizzleScale", params.swizzleScale);
             iot::mapRequired(io, "swizzleTileSize", params.swizzleTileSize);
             iot::mapRequired(io, "prefetchScale", params.prefetchScale);
