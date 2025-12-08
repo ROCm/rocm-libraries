@@ -27,28 +27,41 @@ template <typename DataType, typename IntermediateType>
 class BatchnormBackward : public IntegrationGraphVerificationHarness<DataType, BatchnormTestCase>
 {
 protected:
-    std::unordered_map<graph::BatchnormBackwardAttributes::InputNames, int64_t> _inputTensorIds;
-
-    void initializeBundle([[maybe_unused]] const graph::Graph& graph,
+    void initializeBundle(const graph::Graph& graph,
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
-        bundle.tensors.at(_inputTensorIds.at(graph::BatchnormBackwardAttributes::InputNames::X))
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-
-        bundle.tensors.at(_inputTensorIds.at(graph::BatchnormBackwardAttributes::InputNames::DY))
-            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
-
-        bundle.tensors
-            .at(_inputTensorIds.at(graph::BatchnormBackwardAttributes::InputNames::SCALE))
-            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
-
-        bundle.tensors.at(_inputTensorIds.at(graph::BatchnormBackwardAttributes::InputNames::MEAN))
-            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
-
-        bundle.tensors
-            .at(_inputTensorIds.at(graph::BatchnormBackwardAttributes::InputNames::INV_VARIANCE))
-            ->fillTensorWithRandomValues(1.9f, 2.0f, seed);
+        graph.visit([&](const graph::INode& node) {
+            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
+            {
+                const auto& name = tensorAttr->get_name();
+                const auto uid = tensorAttr->get_uid();
+                if(name == "x")
+                {
+                    bundle.tensors.at(uid)->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
+                }
+                else if(name == "dy")
+                {
+                    bundle.tensors.at(uid)->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
+                }
+                else if(name == "scale")
+                {
+                    bundle.tensors.at(uid)->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
+                }
+                else if(name == "mean")
+                {
+                    bundle.tensors.at(uid)->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
+                }
+                else if(name == "inv_variance")
+                {
+                    bundle.tensors.at(uid)->fillTensorWithRandomValues(1.9f, 2.0f, seed);
+                }
+                else
+                {
+                    throw std::runtime_error("Unknown input tensor name: " + name);
+                }
+            }
+        });
     }
 
     void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
@@ -68,33 +81,23 @@ protected:
         auto xAttr = graph::makeTensorAttributes(
             "x", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
-        _inputTensorIds.insert(
-            {graph::BatchnormBackwardAttributes::InputNames::X, xTensorAttr->get_uid()});
 
         auto dyAttr = graph::makeTensorAttributes(
             "dy", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
-        _inputTensorIds.insert(
-            {graph::BatchnormBackwardAttributes::InputNames::DY, dyTensorAttr->get_uid()});
 
         auto scaleAttr = graph::makeTensorAttributes(
             "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
-        _inputTensorIds.insert(
-            {graph::BatchnormBackwardAttributes::InputNames::SCALE, scaleTensorAttr->get_uid()});
 
         auto meanAttr = graph::makeTensorAttributes(
             "mean", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
-        _inputTensorIds.insert(
-            {graph::BatchnormBackwardAttributes::InputNames::MEAN, meanTensorAttr->get_uid()});
 
         auto invVarianceAttr = graph::makeTensorAttributes(
             "inv_variance", intermediateDataType, derivedDims, generateStrides(derivedDims));
         auto invVarianceTensorAttr
             = std::make_shared<graph::TensorAttributes>(std::move(invVarianceAttr));
-        _inputTensorIds.insert({graph::BatchnormBackwardAttributes::InputNames::INV_VARIANCE,
-                                invVarianceTensorAttr->get_uid()});
 
         graph::BatchnormBackwardAttributes bnAttrs;
         bnAttrs.set_name("batchnorm_backward");
