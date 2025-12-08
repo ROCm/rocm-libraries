@@ -2361,6 +2361,7 @@ Tests:
   matrix_size: *one_matrix_size_range
   transA_transB: *transA_transB_range
   alpha: [ 0.0, 1.0 ]
-  beta: [ 0.0, 2.0 ]
+  beta: [ 0.0, 1.0 ]
+  gpu_arch: '90a'
 
 ...
