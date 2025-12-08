@@ -4,12 +4,10 @@
 #include <miopen/buffer_info.hpp>
 #include <miopen/conv/invokers/impl_gemm_dynamic.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
-#include <miopen/algorithm.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/tensor_ops.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
 #include <miopen/batched_transpose_sol.hpp>
-#include <boost/any.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
 
 namespace miopen {

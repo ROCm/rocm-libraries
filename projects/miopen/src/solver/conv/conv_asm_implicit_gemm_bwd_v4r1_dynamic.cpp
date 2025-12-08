@@ -173,7 +173,7 @@ bool ConvAsmImplicitGemmV4R1DynamicBwd::IsApplicable(const ExecutionContext& ctx
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
+    if(target.isXnackEnabled())
         return false;
 
     std::string kernel_name;
