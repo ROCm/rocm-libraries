@@ -214,7 +214,7 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
         optSchedule["LRA1"] = [[4, 5]]
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (LRA1 finishes too late), but passed. {message}"
-        assert message == "Code path 0: LRA1 at index 5 is not valid. Needed before index 1, but only guaranteed at index 1."
+        assert message == "Code path 0: LRA1 at index 5 is not valid. Needed before index 1 (of next iteration), but only guaranteed at index 1."
 
     def test_more_LRs(self):
         """
@@ -309,7 +309,7 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
         optSchedule["SYNC"][0][0] = 8
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (LRB0 not finished before being needed), but passed. {message}"
-        assert message == "Code path 0: LRB1 at index 19 is not valid. Needed before index 8, but only guaranteed at index 8."
+        assert message == "Code path 0: LRB1 at index 19 is not valid. Needed before index 8 (of next iteration), but only guaranteed at index 8."
 
     def test_handling_instruction_order(self):
         """
