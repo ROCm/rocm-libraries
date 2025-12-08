@@ -5,24 +5,33 @@
 # programs are available in your system PATH.
 #
 # If the path does *not* contain those programs, the ROCM_CMAKE_PATH CMake variable can be set to
-# the ROCM root folder to specify where CMake should look for the toolchains. E.g.: * Linux: cmake
-# --preset release -DROCM_CMAKE_PATH="/opt/rocm" * Windows: cmake --preset release
-# -DROCM_CMAKE_PATH="C:/AMD/ROCm/7.0"
+# the ROCM root folder to specify where CMake should look for the toolchains. E.g.:
+#
+# * Linux: cmake --preset release -DROCM_CMAKE_PATH="/opt/rocm"
+# * Windows: cmake --preset release -DROCM_CMAKE_PATH="C:/AMD/ROCm/7.0"
 #
 # When ROCM_CMAKE_PATH is provided, the path will be updated to include the following folders during
-# the toolchain discovery: * $ROCM_CMAKE_PATH/bin * $ROCM_CMAKE_PATH/lib/llvm/bin
+# the toolchain discovery:
+#
+# * $ROCM_CMAKE_PATH/bin
+# * $ROCM_CMAKE_PATH/lib/llvm/bin
 #
 # The above folders must be present on your system so that the toolchain system inspection can
-# locate the following files: * $ROCM_CMAKE_PATH/bin/hipconfig *
-# $ROCM_CMAKE_PATH/lib/llvm/bin/clang++
+# locate the following files:
+#
+# * $ROCM_CMAKE_PATH/bin/hipconfig
+# * $ROCM_CMAKE_PATH/lib/llvm/bin/clang++
 #
 # ** To skip automatic detection** and force cmake to use hard-coded compiler names from a ROCm
 # install, set ROCM_PATH instead of ROCM_CMAKE_PATH.
 #
 # DO NOT SET ROCM_PATH IN YOUR ENVIRONMENT. Setting ROCM_PATH in the environment will cause the
-# compiler check to fail. Instead, use the -D option to cmake. E.g.: * Linux: cmake --preset release
-# -DROCM_PATH="/opt/rocm" * Windows: cmake --preset release -DROCM_PATH="C:/AMD/ROCm/7.0" The CXX
-# and HIP compilers will be set as $ROCM_PATH/lib/llvm/bin/clang++.
+# compiler check to fail. Instead, use the -D option to cmake. E.g.:
+#
+# * Linux: cmake --preset release -DROCM_PATH="/opt/rocm"
+# * Windows: cmake --preset release -DROCM_PATH="C:/AMD/ROCm/7.0"
+#
+# The CXX and HIP compilers will be set as $ROCM_PATH/lib/llvm/bin/clang++.
 
 # Platform-specific compiler configuration
 if(WIN32)
