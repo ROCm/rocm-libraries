@@ -81,19 +81,19 @@ endif()
 
 # Windows-specific post-build copy for shared libraries
 if(WIN32 AND (HIPSPARSE_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS))
+    # Copy the DLL to clients/staging
     add_custom_command(
         TARGET hipsparse POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-            "${PROJECT_BINARY_DIR}/staging/$<TARGET_FILE_NAME:hipsparse>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:hipsparse>"
             "${PROJECT_BINARY_DIR}/clients/staging/$<TARGET_FILE_NAME:hipsparse>"
     )
-    # Copy PDB file for Debug builds
-    if(CMAKE_BUILD_TYPE MATCHES "Debug")
-        add_custom_command(
-            TARGET hipsparse POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy
-                "${PROJECT_BINARY_DIR}/staging/hipsparse.pdb"
-                "${PROJECT_BINARY_DIR}/clients/staging/hipsparse.pdb"
-        )
-    endif()
+    
+    # Copy PDB file for Debug builds (only when it exists)
+    add_custom_command(
+        TARGET hipsparse POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E $<IF:$<CONFIG:Debug>,copy_if_different,true>
+            "$<$<CONFIG:Debug>:$<TARGET_PDB_FILE:hipsparse>>"
+            "$<$<CONFIG:Debug>:${PROJECT_BINARY_DIR}/clients/staging/$<TARGET_PDB_FILE_NAME:hipsparse>>"
+    )
 endif()
