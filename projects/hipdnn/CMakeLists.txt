@@ -34,7 +34,7 @@ endif()
 
 if(NOT WIN32)
     # Only set if not already specified by user
-    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_PATH)
         set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix" FORCE)
     endif()
     message(STATUS "Setting CMAKE_INSTALL_PREFIX to ${CMAKE_INSTALL_PREFIX}")
@@ -113,14 +113,6 @@ option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL
                                                  "Add paths to linker search and installed rpath"
 )
-
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-     ${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}/cmake/hip ${HIP_DIR}/cmake
-)
-
-# NOTE: Workaround until llvm & hip cmake modules fixes symlink logic in their config files; remove
-# when fixed. Added to prevent issues with not finding hip cmake.
-list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
 include(cmake/Dependencies.cmake)
 include(cmake/CheckToolVersion.cmake)

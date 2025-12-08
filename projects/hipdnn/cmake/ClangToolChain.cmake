@@ -170,12 +170,12 @@ if(DEFINED ROCM_PATH)
 
     # In case the toolchain is not in the system path, add the ROCm folder to the CMAKE_PREFIX_PATH
     # so that find_package(hip) works. TODO: check if ROCM_PATH is already in system path before
-    # adding to CMAKE_MODULE_PATH.
+    # adding to CMAKE_PREFIX_PATH.
     if(NOT "${ROCM_PATH}" IN_LIST CMAKE_PREFIX_PATH)
         list(PREPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
         message(STATUS "Added ${ROCM_PATH} to CMAKE_PREFIX_PATH for finding HIP package")
     else()
-        message(STATUS "ROCM_PATH already in CMAKE_PREFIX_PATH or CMAKE_MODULE_PATH")
+        message(STATUS "ROCM_PATH already in CMAKE_PREFIX_PATH")
     endif()
 endif()
 
