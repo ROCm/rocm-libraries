@@ -395,10 +395,8 @@ bool mloPoolingForwardRunHostAndVerify(PoolingConfig poolConf,
 
     bool match = true;
     Tcheck_ MAX_VAL(3.402823466e+38);
-    Tgpu_ G_MAX_VAL =
-        (sizeof(Tgpu_) == 4 || sizeof(Tgpu_) == 8 || std::is_same<Tgpu_, bfloat16>::value)
-            ? static_cast<Tgpu_>(3.402823466e+38)
-            : static_cast<Tgpu_>(65504);
+    Tgpu_ G_MAX_VAL = std::is_same<Tgpu_, float16>::value ? static_cast<Tgpu_>(65504)
+                                                          : static_cast<Tgpu_>(3.402823466e+38);
 
     for(int b = 0; b < bot_dims_strides.n_batchs && match; b++)
     {
