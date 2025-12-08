@@ -283,7 +283,7 @@ def mulMIoutAlphaToArch(kernel, startVgprAlphaTmp):
         # tmp2 = a.imag * b.real
         cimod.add(VMulF32(dst=vgpr(vtmp2), src0=sgpr("Alpha+1"), src1=vgpr("ValuC+%u"%srcIdx), comment=""))
         # c.real = a.real * b.real - a.imag * b.imag = tmp1 - a.imag * b.imag
-        cimod.add(VFmaF32(dst=vgpr(Holder(name="ValuC")), src0=sgpr("Alpha+1"), src1=vgpr("ValuC+%u"%(srcIdx+accImOffset)), src2=vgpr(vtmp1)))
+        cimod.add(VFmaF32(dst=vgpr(Holder(name="ValuC")), src0=sgpr("Alpha+1"), src1=vgpr("ValuC+%u"%(srcIdx+accImOffset)).getMinus(), src2=vgpr(vtmp1)))
         # c.imag = a.real * b.imag + a.imag * b.real = a.real * b.imag + tmp2
         cimod.add(VFmaF32(dst=vgpr(Holder(name="ValuC+1")), src0=sgpr("Alpha+0"), src1=vgpr("ValuC+%u"%(srcIdx+accImOffset)), src2=vgpr(vtmp2)))
         itemList[destIdx] = cimod
@@ -298,7 +298,7 @@ def mulMIoutAlphaToArch(kernel, startVgprAlphaTmp):
       # tmp2 = a.imag * b.real
       cimod.add(VMulF64(dst=vgpr(vtmp2,2), src0=sgpr("Alpha+2",2), src1=vgpr("ValuC+%u"%srcIdx,2)))
       # c.real = a.real * b.real - a.imag * b.imag = tmp1 - a.imag * b.imag
-      cimod.add(VFmaF64(dst=vgpr(Holder(name="ValuC"),2), src0=sgpr("Alpha+2",2), src1=vgpr("ValuC+%u"%(srcIdx+accImOffset),2), src2=vgpr(vtmp1,2)))
+      cimod.add(VFmaF64(dst=vgpr(Holder(name="ValuC"),2), src0=sgpr("Alpha+2",2), src1=vgpr("ValuC+%u"%(srcIdx+accImOffset),2).getMinus(), src2=vgpr(vtmp1,2)))
       # c.imag = a.real * b.imag + a.imag * b.real = a.real * b.imag + tmp2
       cimod.add(VFmaF64(dst=vgpr(Holder(name="ValuC+2"),2), src0=sgpr("Alpha+0",2), src1=vgpr("ValuC+%u"%(srcIdx+accImOffset),2), src2=vgpr(vtmp2,2)))
       itemList[destIdx] = cimod

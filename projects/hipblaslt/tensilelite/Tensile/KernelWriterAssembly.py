@@ -7240,7 +7240,10 @@ class KernelWriterAssembly(KernelWriter):
               module.add(SMovB32(dst=sgpr(tmpSgpr+1), src=hex(0x3ff00000), comment="msb of real part of 1.0"))
               module.add(SCmpEQU64(src0=sgpr("Alpha",2), src1=sgpr(tmpSgpr,2), comment="Alpha.real == 1.0 ?"))
               if placeHolder == None:
-                module.add(SCBranchSCC0(labelName=skipOptNLL.getLabelName(), comment="branch if alpha.real != 1"))
+                if isLongBranch:
+                  module.add(self.longBranchScc0(skipOptNLL, posNeg=1, tmpSgprInfo=tmpSgprInfo, comment="branch if alpha != 1"))
+                else:
+                  module.add(SCBranchSCC0(labelName=skipOptNLL.getLabelName(), comment="branch if alpha != 1"))
               else:
                 skipOptNLLModule = Module("skipOptNLL_placeholder")
                 skipOptNLLModule.addComment1("branch if alpha.real != 1")
