@@ -105,7 +105,6 @@ struct verify_fwd_batchnorm_spatial_activ
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>, tensor<U>, tensor<U>> cpu() const
     {
-
         auto bout = x;
         std::fill(bout.begin(), bout.end(), 0.);
         auto aout = x;
@@ -205,7 +204,6 @@ struct verify_fwd_batchnorm_spatial_activ
 
     void fail(int badtensor) const
     {
-
         std::cout << "Forward Train Spatial Batch Normalization + Activation: " << std::endl;
         std::cout << "Input tensor: " << x.desc.ToString() << std::endl;
 
@@ -384,7 +382,6 @@ struct verify_bwd_batchnorm_spatial_activ
 
     void fail(int badtensor) const
     {
-
         std::cout << "Backward Train Spatial Batch Normalization + Activation: " << std::endl;
         std::cout << "Input x tensor: " << x.desc.ToString() << std::endl;
         std::cout << "Input y tensor: " << y.desc.ToString() << std::endl;
@@ -545,7 +542,6 @@ struct verify_fwd_batchnorm_peract_activ
 
     void fail(int badtensor) const
     {
-
         std::cout << "Forward Train Per Activation Batch Normalization + Activation: " << std::endl;
         std::cout << "Input tensor: " << x.desc.ToString() << std::endl;
 
@@ -623,7 +619,6 @@ struct verify_bwd_batchnorm_peract_activ
 
     std::tuple<tensor<T>, tensor<U>, tensor<U>> cpu() const
     {
-
         auto dx = tensor<T>{input_n, input_c, input_h, input_w};
         std::fill(dx.begin(), dx.end(), 0.);
 
@@ -719,7 +714,6 @@ struct verify_bwd_batchnorm_peract_activ
 
     void fail(int badtensor) const
     {
-
         std::cout << "Backward Train Per Activation Batch Normalization + Activation: "
                   << std::endl;
         std::cout << "Input x tensor: " << x.desc.ToString() << std::endl;
@@ -761,7 +755,7 @@ struct na_fusion_driver : test_driver
     {
         this->batch_factor = 4;
 
-        add(batchnormMode, "batch-norm-mode", generate_data({/*0, */ 1}));
+        add(batchnormMode, "batch-norm-mode", generate_data({0, 1}));
         add(input,
             "input",
             (batchnormMode == 1) ? get_bn_spatial_input_tensor(tensor_elem_gen_integer{max_value})
@@ -772,7 +766,7 @@ struct na_fusion_driver : test_driver
         add(amode,
             "amode",
             generate_data(
-                {"MIOPENACTIVATIONRELU" /*, "MIOPENACTIVATIONLOGISTIC", "MIOPENACTIVATIONABS"*/}));
+                {"MIOPENACTIVATIONRELU", "MIOPENACTIVATIONLOGISTIC", "MIOPENACTIVATIONABS"}));
     }
 
     void run()
@@ -804,8 +798,9 @@ struct na_fusion_driver : test_driver
 
         std::size_t input_n, input_c, input_h, input_w;
         std::tie(input_n, input_c, input_h, input_w) = miopen::tien<4>(input.desc.GetLengths());
-        this->tolerance                              = 80 * double(input.desc.GetElementSize());
-        ptr_activdesc                                = GetManagedActivDesc();
+        this->tolerance = std::min(80 * double(input.desc.GetElementSize()),
+                                   1280 * sqrt(double(input.desc.GetElementSize())));
+        ptr_activdesc   = GetManagedActivDesc();
         miopenSetActivationDescriptor(ptr_activdesc.get(), activ_mode, alpha, beta, gamma);
         auto&& handle = get_handle();
 
@@ -820,7 +815,6 @@ struct na_fusion_driver : test_driver
         std::size_t ssn, ssc, ssh, ssw;
         if(batchnormMode == 1)
         {
-
             bnmode = miopenBNSpatial;
 
             miopen::TensorDescriptor derivedBnDesc{};
@@ -880,7 +874,6 @@ struct na_fusion_driver : test_driver
         }
         else if(batchnormMode == 0)
         {
-
             bnmode = miopenBNPerActivation;
             miopen::TensorDescriptor derivedBnDesc{};
             miopen::DeriveBNTensorDescriptor(derivedBnDesc, input.desc, bnmode);

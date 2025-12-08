@@ -4,13 +4,12 @@
 #ifndef MIOPEN_GUARD_MLOPEN_FUSION_PLAN_HPP
 #define MIOPEN_GUARD_MLOPEN_FUSION_PLAN_HPP
 
-#include <miopen/config.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
 #include <miopen/fusion.hpp>
 #include <miopen/search_options.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 namespace miopen {
 
