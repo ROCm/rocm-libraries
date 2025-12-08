@@ -478,7 +478,7 @@ class TestCustomSchedule:
 
     @pytest.mark.parametrize("transA, transB", [(True, False)])
     def test_schedule_128x224x64_16bit(self, transA, transB):
-        """Tests the 240x256x64 16-bit schedule."""
+        """Tests the 128x224x64 16-bit schedule."""
         NT = not transA and transB
         TN = transA and not transB
         kernel = create_base_kernel()
