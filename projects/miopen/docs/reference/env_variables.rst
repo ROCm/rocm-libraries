@@ -97,6 +97,11 @@ and :doc:`Performance database <../conceptual/perfdb>`.
         | "SEARCH_DB_UPDATE" or 4: Combination of DB_UPDATE and SEARCH
         | "DB_CLEAN" or 5: Remove optimized values from User PerfDb
 
+    * - | ``MIOPEN_SEARCH_CUTOFF``
+        | Allows speculative early termination of suboptimal searches.
+      - | 1: Enable
+        | 0 or unset: Disable
+
     * - | ``MIOPEN_DEBUG_DISABLE_FIND_DB``
         | Disables FindDb functionality.
       - | 1: Disable FindDb
