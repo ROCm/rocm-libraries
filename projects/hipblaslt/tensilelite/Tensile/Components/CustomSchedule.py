@@ -206,7 +206,7 @@ def verify_global_reads_not_too_earlySingleCodePath(
 
         if waveCompleteIndex is None:
             if context.get("kernel", {}).get("SwapGlobalReadOrder", False):
-                GRX == "GRB" if GRX is "GRA" else "GRA"
+                GRX = "GRB" if GRX is "GRA" else "GRA"
 
             return False, (
                 f"Failed to verify that all local reads for {operand} ({LRX}) are complete "
@@ -1385,7 +1385,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
         optSchedule = {
             'SYNC'    : [[12,13, 47,48,49,50,51, 52,53, 56,56, 95]],
             'GRIncB' : [[0,1,2,3,4,5,6,7,8]],
-            'GRIncA' : [[9,10,11,12,13,14,15,16,17]],
+            'GRIncA' : [[42,42,43,43,44,44,45,45,46]],
             'LRB0'   : [[0,0,1,1,2,2,6,8],
                         [3,3,4,4,5,5,7,9]],
             # These local reads have BC
