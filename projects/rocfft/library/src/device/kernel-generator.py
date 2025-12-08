@@ -338,7 +338,7 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
             # get first pp kernel
             f_pp_1 = pp_functions[counter_f_pp_1]
 
-            # PPFMKey entry needs two kernels with same length and precision, but different pp_current_dim
+            # PPFMKey entry needs two kernels with same length, precision, and arch, but different pp_current_dim
             counter_f_pp_2 = counter_f_pp_1 + 1
             if counter_f_pp_2 >= len(pp_functions):
                 break
@@ -346,14 +346,16 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
             while counter_f_pp_2 < len(pp_functions):
                 f_pp_2 = pp_functions[counter_f_pp_2]
                 if (f_pp_1.meta.length == f_pp_2.meta.length
-                        and f_pp_1.meta.precision == f_pp_2.meta.precision
+                        and f_pp_1.meta.precision == f_pp_2.meta.precision and
+                        f_pp_1.meta.gcn_arch_name == f_pp_2.meta.gcn_arch_name
                         and f_pp_1.meta.pp_current_dim !=
                         f_pp_2.meta.pp_current_dim):
                     break
                 if (f_pp_1.meta.length != f_pp_2.meta.length or
                     (f_pp_1.meta.length == f_pp_2.meta.length
-                     and f_pp_1.meta.precision != f_pp_2.meta.precision)):
-                    # we hit a new kernel with different length/precision
+                     and f_pp_1.meta.precision != f_pp_2.meta.precision and
+                     f_pp_1.meta.gcn_arch_name != f_pp_2.meta.gcn_arch_name)):
+                    # we hit a new kernel with different length/precision/arch
                     # start next iteration looking for the next pair
                     counter_f_pp_1 = counter_f_pp_2
                     skip_to_next_iter = True
@@ -376,14 +378,14 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
             length = f_pp_1.meta.length
             precision = f_pp_1.meta.precision
             scheme = f_pp_1.meta.scheme
+            arch_name = f_pp_1.meta.gcn_arch_name
             key = Call(name='PPFMKey',
                        arguments=ArgumentList(
                            length[0], length[1], length[2],
                            precisions[precision], scheme,
                            'pp_kernel_1.get_kernel_config()',
                            'pp_kernel_2.get_kernel_config()',
-                           ''.join(['"', f_pp_1.meta.gcn_arch_name,
-                                    '"']))).inline()
+                           ''.join(['"', arch_name, '"']))).inline()
             piece_contents[curr_file] += function_map.insert_pp(
                 key, var_pp_kernel_1, var_pp_kernel_2, 'std::get<1>(def_keys)',
                 'std::get<1>(function_maps)', f_pp_1.meta.lds_size_bytes)
