@@ -211,7 +211,9 @@ class TestNameValidator:
                         current_suite = line[:-1]
                     elif line and current_suite:
                         test_case = line.strip()
-                        test_names.append(f"{current_suite}.{test_case.split("#")[0].strip()}")
+                        test_names.append(
+                            f"{current_suite}.{test_case.split("  # ")[0].strip()}"
+                        )
 
             except subprocess.TimeoutExpired:
                 print(f"Warning: Timeout running {executable}", file=sys.stderr)
