@@ -51,21 +51,17 @@
 
 #include <../test/cpu_bias.hpp>
 #include <../test/cpu_conv.hpp>
-#include <../test/serialize.hpp>
 #include <../test/tensor_holder.hpp>
 #include <../test/verify.hpp>
 
-#include <boost/optional.hpp>
-#include <boost/optional/optional_io.hpp>
 #include <boost/range/adaptors.hpp>
 
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
-#include <float.h>
 #include <fstream>
 #include <memory>
-#include <numeric>
+#include <optional>
 #include <sstream>
 #include <type_traits>
 #include <vector>
@@ -350,7 +346,7 @@ private:
 
     InputFlags inflags;
 
-    boost::optional<uint64_t> immediate_solution;
+    std::optional<uint64_t> immediate_solution;
 
     GpumemTensor<Tgpu> in;
     GpumemVector<Tgpu> din;

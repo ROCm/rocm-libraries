@@ -12,9 +12,6 @@ coverage:
       hipCUB:
         flags: [hipCUB]
         target: 80%
-      hipRAND:
-        flags: [hipRAND]
-        target: 80%
       hipSPARSE:
         flags: [hipSPARSE]
         target: 80%
@@ -26,6 +23,9 @@ coverage:
         target: 80%
       rocRAND:
         flags: [rocRAND]
+        target: 80%
+      hipRAND:
+        flags: [hipRAND]
         target: 80%
       rocRoller:
         flags: [rocRoller]

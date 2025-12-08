@@ -64,13 +64,14 @@ namespace rocRoller
                                                                rocRoller::NUMWGS);
 
                     m_scratchTag = command->allocateTag();
+                    command->addOperation(rocRoller::Operations::Scratch(
+                        m_scratchTag, Operations::ScratchPolicy::None));
                     command->allocateArgument(
                         VariableType(DataType::UInt32, PointerType::PointerGlobal),
                         m_scratchTag,
                         ArgumentType::Value,
                         DataDirection::ReadWrite,
                         rocRoller::SCRATCH);
-
                     return command;
                 }
 

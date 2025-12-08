@@ -55,8 +55,7 @@ protected:
 auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
 {
     return testing::ValuesIn(filesInDirectoryWithExtReturnEmptyPathOnThrow(
-        utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data"
-            / subDirectory,
+        utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data" / subDirectory,
         ".json"));
 }
 }
