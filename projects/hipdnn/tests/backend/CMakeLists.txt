@@ -29,7 +29,6 @@ target_link_libraries(
     Threads::Threads hipdnn_sdk hipdnn_backend hip::host
 )
 
-
 target_include_directories(public_hipdnn_backend_tests PRIVATE ${HIPDNN_TEST_INCLUDE_DIRS})
 
 target_compile_definitions(
