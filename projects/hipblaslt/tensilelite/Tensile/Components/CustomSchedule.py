@@ -2587,39 +2587,6 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
         numMfma = 120
         nglshift = nllshift = len(optSchedule["GRA"][0])/2 + len(optSchedule["GRB"][0])/2
         opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    elif isNN(kernel) and useLDSTr and TLDS==1:
-        optSchedule = {
-            'SYNC': [[-1,
-                      26,26,
-                      59,59
-                    ]],
-            'LRA0': [[0,2,2,3,3,4,4,5,5,6,6,7,7,9,9,11,11,13,13,15,15,17,17,19,19,21,21,23,23,24],
-                     [0,2,2,3,3,4,4,5,5,6,6,7,7,8,8,10,10,12,12,14,14,16,16,18,18,20,20,22,22,25]],
-            'LRB0': [[26,27,28,29]],
-            'GRA': [[26,26,27,27,29,29,31,31,33,33,35,35,37,37,39,39,41,41,42,42,44,44,46,46,48,48,50,50,52,52,54,54,56,56,58,58,59,59,61,61,63,63,65,65,67,67,69,69,71,71,73,73,75,75,76,76,78,78,80,80]],
-            'GRB': [[82,82,84,84,86,86,88,88,90,90,92,92,93,93,96,96],
-                    [83,83,85,85,87,87,89,89,91,91,94,94,99,99,103,103]],
-            'LRA1': [[59,59,61,61,63,63,65,65,67,67,69,69,71,71,73,73,75,75,76,76,78,78,80,80,82,82,84,84, 86,86]],
-            'LRB1': [[88,90,92,94]],
-            'LRSA': [[58]],
-            'LRSB': [[58]],
-            'LWSA': [[95]],
-            'LWSB': [[95]],
-            'GRIncA': [[1,1,1,17,17,17,18,18,18]],
-            'GRIncB': [[19,19,19,20,20,20,21,21,21]],
-            'LCC': [[119,119]],
-        }
-
-        syncCode = [
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=3 newLW=0 newLR=3 for iteration == 0"),
-            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
-            SBarrier(comment=""),
-            SWaitCnt(dscnt=0, vlcnt=18, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
-            SBarrier(comment=""),
-        ]
-        numMfma = 120
-        nglshift = nllshift = len(optSchedule["GRA"][0])/2 + len(optSchedule["GRB"][0])/2
-        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
     return True, opt1
