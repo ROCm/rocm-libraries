@@ -25,7 +25,7 @@
 import unittest
 from rocisa.instruction import SWaitCnt
 
-from Tensile.Components.CustomSchedule import verify_lrs_complete_before_vmfma
+from Tensile.Components.CustomSchedule import verify_lrs_and_grs
 from test_CustomSchedule import create_base_kernel, ScheduleInfo
 
 class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
@@ -49,17 +49,17 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
         ]
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
         optSchedule["LRA0"] = [[1, 6]]
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (LRA0 issued after halfway point), but passed."
         assert message == "Code path 0: LRA0 at index 6 is not valid. Needed before index 5, but only guaranteed at index 3."
 
         optSchedule["LRA0"] = [[1, 2]]
         optSchedule["LRB0"] = [[3, 6]]
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (LRB0 issued after halfway point), but passed."
         assert message == "Code path 0: LRB0 at index 3 is not valid. Needed before index 4, but only guaranteed at index 3."
 
@@ -80,12 +80,12 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
         ]
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation 1/2 but did not. {message}"
 
         # Changing barrier from 0 to 1 for LRA1 should still pass
         syncCode[0].dscnt = 1
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation 2/2 but did not. {message}"
 
     def test_complex_LR0(self):
@@ -104,7 +104,7 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
         ]
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
     def test_simple_LR1(self):
@@ -125,7 +125,7 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
         ]
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
     def test_pre_loop_SWaitCnt(self):
@@ -146,7 +146,7 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
         ]
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
     def test_pre_loop_LR(self):
@@ -164,7 +164,7 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="")
         ]
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
     def test_simple_LR1_never_guaranteed(self):
@@ -183,7 +183,7 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
         ]
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (LRA1 never guaranteed), but passed. {message}"
         assert message == "Code path 0: LRA1 at index 4 is not valid. Needed before index 0, but only guaranteed at index 1."
 
@@ -206,12 +206,12 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
             SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="2/2 LRA1 and 1/2 LRB1"),
         ]
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
         # Failing case: LRA1 finishes too late
         optSchedule["LRA1"] = [[4, 5]]
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (LRA1 finishes too late), but passed. {message}"
         assert message == "Code path 0: LRA1 at index 5 is not valid. Needed before index 1, but only guaranteed at index 1."
 
@@ -238,7 +238,7 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="2/4 LRA1 and 2/4 LRB1"),
         ]
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
     def test_more_LRs_failure(self):
@@ -260,27 +260,27 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
         
         # Failure case 1: Don't wait for any LRA0
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (incorrectly wait for only LRB0), but passed. {message}"
         assert message == "Code path 0: LRA0 at index 1 is not valid. Needed before index 4, but only guaranteed at index 4."
 
         # Failure case 2: Wait for only 1/4 LRA0 (need at least 2/4 LRA0) to do VMFMA 4.
         syncCode[0].dscnt = 3
         syncCode[0].comment = "Wait for LRB0 and 1/4 LRA0"
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (incorrectly wait for only 1/4 LRA0), but passed. {message}"
         assert message == "Code path 0: LRA0 at index 1 is not valid. Needed before index 4, but only guaranteed at index 4."
 
         # Passing case: Correctly SWaitCnt for 2/4 LRA0 (i.e. 1/2 As) in time for VMFMA 4.
         syncCode[0].dscnt = 2
         syncCode[0].comment = "Wait for LRB0 and 2/4 LRA0"
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
         # Failing case: Disable SWaitCnt at 4 should leave last A unguaranteed.
         syncCode[1].dscnt = -1
         syncCode[1].comment = "Do nothing"
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (SwaitCnt at 4 does nothing, last 2 LRA0s never guaranteed to finish), but passed. {message}"
         assert message == "Code path 0: LRA0 at index 1 is not valid. There are no guarantees on when it will be done."
     
@@ -308,12 +308,12 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
             SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment="LRA1 and 1/2 LRB1"),
         ]
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
         # Failure case
         optSchedule["SYNC"][0][0] = 8
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (LRB0 not finished before being needed), but passed. {message}"
         assert message == "Code path 0: LRB1 at index 19 is not valid. Needed before index 8, but only guaranteed at index 8."
 
@@ -338,7 +338,7 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
             "LRB1": [[7]],
         }
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (LRA0 not finished before being needed), but passed. {message}"
         assert message == "Code path 0: LRA0 at index 3 is not valid. Needed before index 4, but only guaranteed at index 7."
 
@@ -352,7 +352,7 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
             "LRB1": [[7]],
         }
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (LRA1 not finished before being needed), but passed. {message}"
         assert message == "Code path 0: LRA1 at index 7 is not valid. Needed before index 0, but only guaranteed at index 3."
 
@@ -365,5 +365,5 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
             "SYNC": [[3, 7]],
         }
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_lrs_complete_before_vmfma(sched, {"kernel": self.kernel})
+        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
