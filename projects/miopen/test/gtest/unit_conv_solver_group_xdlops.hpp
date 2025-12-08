@@ -22,7 +22,7 @@ struct GroupXdlopsNumericData
     bool deterministic = false;
 };
 
-template <typename datatype>
+template <miopenDataType_t datatype>
 ConvTestCase GetConvTestForGroupXdlops(miopenTensorLayout_t layout,
                                        GroupXdlopsNumericData&& conv_numeric_data)
 {
@@ -53,7 +53,7 @@ public:
         std::tie(params, layout, conv_numeric_data) = GetParam();
 
         ConvTestCase conv_config =
-            GetConvTestForGroupXdlops(datatype, layout, std::move(conv_numeric_data));
+            GetConvTestForGroupXdlops<datatype>(layout, std::move(conv_numeric_data));
 
         this->RunTestImpl(
             solver, params, direction, conv_config, miopenConvolutionAlgoImplicitGEMM);
