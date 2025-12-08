@@ -72,9 +72,6 @@ namespace rocRoller
                     auto tileTag = graph.mapper.get<MacroTile>(loadTag);
                     if(scaleTileForMultiply.contains(tileTag))
                     {
-                        // TODO: skip the swizzle pass for scale loaded via LDS.
-                        if(isOperation<LoadLDSTile>(graph.control.getElement(loadTag)))
-                            return std::map<int, std::pair<int, int>>();
                         scaleLoads[loadTag] = {scaleTileForMultiply[tileTag], tileTag};
                     }
                 }
@@ -352,14 +349,13 @@ namespace rocRoller
                 auto ldsTag = graph.mapper.get<LDS>(tag);
                 AssertFatal(ldsTag != -1, "LDS coordinate associated with LoadLDSTile not found");
 
-                // copy lds
                 auto lds = graph.coordinates.addElement(graph.coordinates.getElement(ldsTag));
+
                 graph.coordinates.addElement(View(), {lds}, {ldsTag});
                 if(arg == NaryArgument::LHS_SCALE)
                     graph.coordinates.addElement(Tile(), {lds}, {iMac0, iMac1});
                 if(arg == NaryArgument::RHS_SCALE)
                     graph.coordinates.addElement(Tile(), {lds}, {iMac1, iMac0});
-                connections.push_back(DC<LDS>(lds));
             }
 
             auto waveTile    = WaveTile(macTile);
@@ -749,27 +745,86 @@ namespace rocRoller
                 return;
 
             auto sampleLoad = mergeables.begin()->first;
+
             auto [loadConnections, exchangeConnections, unrollReindexMap]
                 = addSwizzleLoadCT(graph, context, sampleLoad, arg);
 
             std::map<int, int> tileExchangeMap;
 
-            for(auto const load : mergeables)
+            // Mapping from original LDS coordinate tags to new LDS coordinate tags.
+            //
+            // The new LDS coordinates will be:
+            //
+            // 1. Connected to the new LDS coordinate created by
+            //    addSwizzleLoadCT by a Duplicate edge.
+            //
+            //    This means that, when computing indexes, the LDS
+            //    coordinate created by addSwizzleLoadCT will be used.
+            //
+            // 2. Connected to the original LDS coordinates by a View
+            //    edge.
+            //
+            //    This means that they will use the correct LDS
+            //    allocation when loading.
+            //
+            std::map<int, int> newLDSTags;
+
+            int originalLDSTag = -1;
+
+            auto maybeSampleLoadLDSTile = graph.control.get<LoadLDSTile>(sampleLoad);
+            if(maybeSampleLoadLDSTile)
             {
+                originalLDSTag = graph.mapper.get<LDS>(sampleLoad);
+
+                // A View edge was added by `addSwizzleLoadCT`.  To
+                // get the new LDS tag we can follow the View edge.
+                //
+                // There may be multiple View edges if this LDS tag
+                // was also used by a previous loop.  We want the most
+                // recently added one (highest node ID).
+                auto viewInputs
+                    = graph.coordinates.getInputNodeIndices(originalLDSTag, CT::isEdge<View>)
+                          .to<std::vector>();
+
+                AssertFatal(!viewInputs.empty(),
+                            "Expected at least one View edge into originalLDSTag from "
+                            "addSwizzleLoadCT",
+                            ShowValue(originalLDSTag));
+                // Use the most recently added View edge (highest node ID)
+                auto newLDSTag = *std::max_element(viewInputs.begin(), viewInputs.end());
+                newLDSTags[originalLDSTag] = newLDSTag;
+            }
+
+            for(auto const [load, redundantLoads] : mergeables)
+            {
+                auto maybeLoadLDSTile = graph.control.get<LoadLDSTile>(load);
+                if(maybeLoadLDSTile)
+                {
+                    auto ldsTag = graph.mapper.get<LDS>(load);
+                    if(not newLDSTags.contains(ldsTag))
+                    {
+                        auto newLDSTag = graph.coordinates.addElement(LDS());
+                        graph.coordinates.addElement(
+                            Duplicate(), {newLDSTag}, {newLDSTags[originalLDSTag]});
+                        graph.coordinates.addElement(View(), {newLDSTag}, {ldsTag});
+                        newLDSTags[ldsTag] = newLDSTag;
+                    }
+                    graph.mapper.connect<LDS>(load, newLDSTags[ldsTag]);
+                }
+
                 // add coordinate connections for LoadTiled
                 for(auto const& dc : loadConnections)
                 {
-                    graph.mapper.connect(load.first, dc.coordinate, dc.connectionSpec);
+                    graph.mapper.connect(load, dc.coordinate, dc.connectionSpec);
                 }
 
                 // make a copy of MacroTile for separate register tagging
-                if(load.first != sampleLoad)
-                    duplicateMacroTile(graph, load.first);
+                if(load != sampleLoad)
+                    duplicateMacroTile(graph, load);
 
                 // add exchange node after load
-                auto exchange
-                    = graph.control.addElement(Exchange(getVariableType(graph, load.first)));
-                auto topOp = getTopSetCoordinate(graph, load.first);
+                auto exchange = graph.control.addElement(Exchange(getVariableType(graph, load)));
+                auto topOp    = getTopSetCoordinate(graph, load);
                 graph.control.addElement(Sequence(), {topOp}, {exchange});
 
                 // add coordinate connections for Exchange
@@ -781,7 +836,7 @@ namespace rocRoller
                 // Since the load tile size (e.g. 64x4, 64x8, 64x12, 64x16) can be
                 // greater than equal to the exchange tile size (64x4),
                 // add index edge to point to the register allocation (subset).
-                auto tileTag = graph.mapper.get<MacroTile>(load.first);
+                auto tileTag = graph.mapper.get<MacroTile>(load);
                 auto tile    = graph.coordinates.getNode<MacroTile>(tileTag);
                 AssertFatal(tile.miTileSizes.size() == 4, ShowValue(tile.miTileSizes.size()));
 
@@ -807,22 +862,21 @@ namespace rocRoller
                 int index = 0;
 
                 graph.coordinates.addElement(
-                    createNode(index++), {scaleLoads.at(load.first).second}, {destMacTileTag});
+                    createNode(index++), {scaleLoads.at(load).second}, {destMacTileTag});
 
-                tileExchangeMap[scaleLoads.at(load.first).second] = exchange;
+                tileExchangeMap[scaleLoads.at(load).second] = exchange;
 
                 // merge the loads
-                for(auto const merge : load.second)
+                for(auto const [mergeOp, mergeTile] : redundantLoads)
                 {
-                    auto mergeTopOp = getTopSetCoordinate(graph, merge.first);
+                    auto mergeTopOp = getTopSetCoordinate(graph, mergeOp);
                     auto ordering   = graph.control.compareNodes(
                         rocRoller::UseCacheIfAvailable, topOp, mergeTopOp);
                     AssertFatal(ordering == NodeOrdering::LeftFirst);
                     auto replaceOp = graph.control.addElement(NOP());
-                    if(merge.second > 0)
+                    if(mergeTile > 0)
                     {
-                        exchange = graph.control.addElement(
-                            Exchange(getVariableType(graph, load.first)));
+                        exchange = graph.control.addElement(Exchange(getVariableType(graph, load)));
                         graph.control.addElement(Sequence(), {replaceOp}, {exchange});
 
                         // add coordinate connections for Exchange
@@ -836,7 +890,7 @@ namespace rocRoller
                         // add index edge to point to the register allocation (subset).
                         exchangeTileTag = graph.coordinates.addElement(tile);
                         graph.coordinates.addElement(
-                            Index(merge.second), {exchangeTileTag}, {tileTag});
+                            Index(mergeTile), {exchangeTileTag}, {tileTag});
                         graph.mapper.connect<MacroTile>(exchange, exchangeTileTag);
 
                         destMacTileTag = context->kernelOptions()->scaleSkipPermlane
@@ -851,48 +905,43 @@ namespace rocRoller
                     purgeNodeAndChildren(graph, mergeTopOp);
 
                     graph.coordinates.addElement(
-                        createNode(index++), {scaleLoads.at(merge.first).second}, {destMacTileTag});
+                        createNode(index++), {scaleLoads.at(mergeOp).second}, {destMacTileTag});
 
-                    tileExchangeMap[scaleLoads.at(merge.first).second] = exchange;
+                    tileExchangeMap[scaleLoads.at(mergeOp).second] = exchange;
                 }
 
-                // Reindex the SetCoordinate chain value and its Unroll coordinate connection
-                auto tag                = load.first;
-                auto remainingReindexes = unrollReindexMap;
-                while(not remainingReindexes.empty())
+                // Update the SetCoordinate value and its Unroll coordinate connection
+                auto maybeSetCoordinate = findContainingOperation<SetCoordinate>(load, graph);
+                while(maybeSetCoordinate.has_value())
                 {
-                    auto maybeSetCoordinate = findContainingOperation<SetCoordinate>(tag, graph);
-                    if(not maybeSetCoordinate)
-                    {
-                        std::string missingUnrolls = "{";
-                        for(auto const [unroll, _] : remainingReindexes)
-                            missingUnrolls + std::to_string(unroll) + " ";
-
-                        AssertFatal(maybeSetCoordinate,
-                                    "Cannot reindex, SetCoordinate not found for unroll(s):",
-                                    ShowValue(tag),
-                                    ShowValue(missingUnrolls));
-                    }
-                    tag = maybeSetCoordinate.value();
+                    auto tag = maybeSetCoordinate.value();
 
                     auto unroll = graph.mapper.get<Unroll>(tag);
-                    AssertFatal(unroll > 0,
-                                "SetCoordinate is not connected to the Unroll dimension",
-                                ShowValue(tag),
-                                ShowValue(unroll));
 
-                    auto newOp
-                        = SetCoordinate(Expression::literal(loadUnrollMap[load.first][unroll]));
+                    // Skip SetCoordinates that aren't connected to an Unroll dimension
+                    // (e.g., outer scope SetCoordinates)
+                    if(unroll <= 0)
+                    {
+                        maybeSetCoordinate = findContainingOperation<SetCoordinate>(tag, graph);
+                        continue;
+                    }
+
+                    // Skip unrolls that aren't in our unroll reindex map
+                    if(!unrollReindexMap.contains(unroll))
+                    {
+                        maybeSetCoordinate = findContainingOperation<SetCoordinate>(tag, graph);
+                        continue;
+                    }
+
+                    auto newValue = loadUnrollMap[load][unroll];
+                    auto newOp    = SetCoordinate(Expression::literal(newValue));
                     graph.control.setElement(tag, newOp);
 
                     auto newUnroll = unrollReindexMap.at(unroll);
                     graph.mapper.disconnect<Unroll>(tag, unroll);
                     graph.mapper.connect<Unroll>(tag, newUnroll);
 
-                    AssertFatal(remainingReindexes.contains(unroll),
-                                "Expected unroll to be in remaining reindexes: ",
-                                ShowValue(unroll));
-                    remainingReindexes.erase(unroll);
+                    maybeSetCoordinate = findContainingOperation<SetCoordinate>(tag, graph);
                 }
             }
 
