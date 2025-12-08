@@ -39,7 +39,9 @@
 #include <ostream>
 
 #if defined(__HIP_PLATFORM_NVIDIA__)
-#include <cuda_bf16.h>
+    #include <cuda_bf16.h>
+#else
+    #include <rocprim/type_traits.hpp>
 #endif
 
 #ifdef __GNUC__
@@ -263,35 +265,22 @@ inline std::ostream& operator<<(std::ostream &out, const bfloat16_t &x)
 
 #if defined(__HIP_PLATFORM_NVIDIA__)
 
-    /// Insert formatted \p __nv_bfloat16 into the output stream
-    inline std::ostream& operator<<(std::ostream &out, const __nv_bfloat16 &x)
-    {
-        return out << bfloat16_t(x);
-    }
+/// Insert formatted \p __nv_bfloat16 into the output stream
+inline std::ostream& operator<<(std::ostream& out, const __nv_bfloat16& x)
+{
+    return out << bfloat16_t(x);
+}
 
 #endif
-
-
-
 
 /******************************************************************************
  * Traits overloads
  ******************************************************************************/
 
-#if defined(__HIP_PLATFORM_NVIDIA__)
-_CCCL_SUPPRESS_DEPRECATED_PUSH
-#else
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-#endif
 template<>
 struct hipcub::NumericTraits<bfloat16_t>
-    : hipcub::BaseTraits<hipcub::FLOATING_POINT, unsigned short, bfloat16_t>
+    : hipcub::BaseTraits<hipcub::FLOATING_POINT, true, unsigned short, bfloat16_t>
 {};
-#if defined(__HIP_PLATFORM_NVIDIA__)
-_CCCL_SUPPRESS_DEPRECATED_POP
-#else
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-#endif
 
 #ifdef __GNUC__
 #pragma GCC diagnostic pop

@@ -524,18 +524,21 @@ enum Category
     FLOATING_POINT
 };
 
-/**
- * \brief Basic type traits
- */
-template<Category _CATEGORY, typename _UnsignedBits, typename T>
-struct BaseTraits
-{};
+namespace detail
+{
+struct is_primitive_impl;
 
-/**
- * Basic type traits (unsigned primitive specialization)
- */
+template<Category _CATEGORY, bool _PRIMITIVE, typename _UnsignedBits, typename T>
+struct BaseTraits
+{
+private:
+    friend struct is_primitive_impl;
+
+    static constexpr bool is_primitive = _PRIMITIVE;
+};
+
 template<typename _UnsignedBits, typename T>
-struct BaseTraits<hipcub::UNSIGNED_INTEGER, _UnsignedBits, T>
+struct BaseTraits<UNSIGNED_INTEGER, true, _UnsignedBits, T>
 {
 
     using UnsignedBits                       = _UnsignedBits;
@@ -554,6 +557,8 @@ struct BaseTraits<hipcub::UNSIGNED_INTEGER, _UnsignedBits, T>
         return key;
     }
 
+    //! deprecated [Since 5.0]
+    HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::max()")
     static HIPCUB_HOST_DEVICE __forceinline__ T Max()
     {
         UnsignedBits retval_bits = MAX_KEY;
@@ -562,6 +567,8 @@ struct BaseTraits<hipcub::UNSIGNED_INTEGER, _UnsignedBits, T>
         return retval;
     }
 
+    //! deprecated [Since 5.0]
+    HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::lowest()")
     static HIPCUB_HOST_DEVICE __forceinline__ T Lowest()
     {
         UnsignedBits retval_bits = LOWEST_KEY;
@@ -569,13 +576,15 @@ struct BaseTraits<hipcub::UNSIGNED_INTEGER, _UnsignedBits, T>
         memcpy(&retval, &retval_bits, sizeof(T));
         return retval;
     }
+
+private:
+    friend struct is_primitive_impl;
+
+    static constexpr bool is_primitive = true;
 };
 
-/**
- * Basic type traits (signed primitive specialization)
- */
 template<typename _UnsignedBits, typename T>
-struct BaseTraits<SIGNED_INTEGER, _UnsignedBits, T>
+struct BaseTraits<SIGNED_INTEGER, true, _UnsignedBits, T>
 {
     using UnsignedBits = _UnsignedBits;
 
@@ -595,24 +604,30 @@ struct BaseTraits<SIGNED_INTEGER, _UnsignedBits, T>
         return key ^ HIGH_BIT;
     };
 
+    //! deprecated [Since 5.0]
+    HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::max()")
     static HIPCUB_HOST_DEVICE __forceinline__ T Max()
     {
         UnsignedBits retval = MAX_KEY;
         return reinterpret_cast<T&>(retval);
     }
 
+    //! deprecated [Since 5.0]
+    HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::lowest()")
     static HIPCUB_HOST_DEVICE __forceinline__ T Lowest()
     {
         UnsignedBits retval = LOWEST_KEY;
         return reinterpret_cast<T&>(retval);
     }
+
+private:
+    friend struct is_primitive_impl;
+
+    static constexpr bool is_primitive = true;
 };
 
-/**
- * Basic type traits (fp primitive specialization)
- */
 template<typename _UnsignedBits, typename T>
-struct BaseTraits<hipcub::FLOATING_POINT, _UnsignedBits, T>
+struct BaseTraits<FLOATING_POINT, true, _UnsignedBits, T>
 {
     using UnsignedBits = _UnsignedBits;
 
@@ -634,71 +649,91 @@ struct BaseTraits<hipcub::FLOATING_POINT, _UnsignedBits, T>
         return key ^ mask;
     };
 
+    //! deprecated [Since 5.0]
+    HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::max()")
     static HIPCUB_HOST_DEVICE __forceinline__
     T Max()
     {
         return _HIPCUB_STD::numeric_limits<T>::max();
     }
 
+    //! deprecated [Since 5.0]
+    HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::lowest()")
     static HIPCUB_HOST_DEVICE __forceinline__
     T Lowest()
     {
         return _HIPCUB_STD::numeric_limits<T>::lowest();
     }
-};
 
-/**
- * \brief Numeric type traits
- */
+private:
+    friend struct is_primitive_impl;
+
+    static constexpr bool is_primitive = true;
+};
+} // namespace detail
+
+//! Use this class as base when specializing \ref NumericTraits for primitive signed/unsigned integers or floating-point
+//! types.
+template<Category _CATEGORY, bool _PRIMITIVE, typename _UnsignedBits, typename T>
+using BaseTraits = detail::BaseTraits<_CATEGORY, _PRIMITIVE, _UnsignedBits, T>;
+
+//! Numeric type traits for radix sort key operations, decoupled lookback and tuning. You can specialize this template
+//! for your own types if:
+//! * There is an unsigned integral type of equal size
+//! * The size of the type is smaller than 64bits
+//! * The arithmetic throughput of the type is similar to other built-in types of the same size
+//! For other types, if you want to use them with radix sort, please use the decomposer interface of the radix sort.
+
 template<typename T>
-struct NumericTraits : BaseTraits<NOT_A_NUMBER, T, T>
+struct NumericTraits : BaseTraits<NOT_A_NUMBER, false, T, T>
 {};
 
 template<>
-struct NumericTraits<NullType> : BaseTraits<NOT_A_NUMBER, NullType, NullType>
+struct NumericTraits<NullType> : BaseTraits<NOT_A_NUMBER, false, NullType, NullType>
 {};
 
 template<>
 struct NumericTraits<char>
     : BaseTraits<(_HIPCUB_STD::numeric_limits<char>::is_signed) ? SIGNED_INTEGER : UNSIGNED_INTEGER,
+                 true,
                  unsigned char,
                  char>
 {};
 template<>
-struct NumericTraits<signed char> : BaseTraits<SIGNED_INTEGER, unsigned char, signed char>
+struct NumericTraits<signed char> : BaseTraits<SIGNED_INTEGER, true, unsigned char, signed char>
 {};
 template<>
-struct NumericTraits<short> : BaseTraits<SIGNED_INTEGER, unsigned short, short>
+struct NumericTraits<short> : BaseTraits<SIGNED_INTEGER, true, unsigned short, short>
 {};
 template<>
-struct NumericTraits<int> : BaseTraits<SIGNED_INTEGER, unsigned int, int>
+struct NumericTraits<int> : BaseTraits<SIGNED_INTEGER, true, unsigned int, int>
 {};
 template<>
-struct NumericTraits<long> : BaseTraits<SIGNED_INTEGER, unsigned long, long>
+struct NumericTraits<long> : BaseTraits<SIGNED_INTEGER, true, unsigned long, long>
 {};
 template<>
-struct NumericTraits<long long> : BaseTraits<SIGNED_INTEGER, unsigned long long, long long>
+struct NumericTraits<long long> : BaseTraits<SIGNED_INTEGER, true, unsigned long long, long long>
 {};
 
 template<>
 struct NumericTraits<unsigned char>
-    : BaseTraits<hipcub::UNSIGNED_INTEGER, unsigned char, unsigned char>
+    : BaseTraits<hipcub::UNSIGNED_INTEGER, true, unsigned char, unsigned char>
 {};
 template<>
 struct NumericTraits<unsigned short>
-    : BaseTraits<hipcub::UNSIGNED_INTEGER, unsigned short, unsigned short>
+    : BaseTraits<hipcub::UNSIGNED_INTEGER, true, unsigned short, unsigned short>
 {};
 template<>
 struct NumericTraits<unsigned int>
-    : BaseTraits<hipcub::UNSIGNED_INTEGER, unsigned int, unsigned int>
+    : BaseTraits<hipcub::UNSIGNED_INTEGER, true, unsigned int, unsigned int>
 {};
 template<>
 struct NumericTraits<unsigned long>
-    : BaseTraits<hipcub::UNSIGNED_INTEGER, unsigned long, unsigned long>
+    : BaseTraits<hipcub::UNSIGNED_INTEGER, true, unsigned long, unsigned long>
 {};
 template<>
 struct NumericTraits<unsigned long long>
-    : BaseTraits<hipcub::UNSIGNED_INTEGER, unsigned long long, unsigned long long>
+    : BaseTraits<hipcub::UNSIGNED_INTEGER, true, unsigned long long, unsigned long long>
 {};
 
     #if _CCCL_HAS_INT128()
@@ -723,11 +758,15 @@ struct NumericTraits<__uint128_t>
         return key;
     }
 
+    //! deprecated [Since 5.0]
+    HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::max()")
     static __host__ __device__ __forceinline__ T Max()
     {
         return MAX_KEY;
     }
 
+    //! deprecated [Since 5.0]
+    HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::lowest()")
     static __host__ __device__ __forceinline__ T Lowest()
     {
         return LOWEST_KEY;
@@ -756,53 +795,86 @@ struct NumericTraits<__int128_t>
         return key ^ HIGH_BIT;
     };
 
+    //! deprecated [Since 5.0]
+    HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::max()")
     static __host__ __device__ __forceinline__ T Max()
     {
         UnsignedBits retval = MAX_KEY;
         return reinterpret_cast<T&>(retval);
     }
 
+    //! deprecated [Since 5.0]
+    HIPCUB_DEPRECATED_BECAUSE("Use hip::std::numeric_limits<T>::lowest()")
     static __host__ __device__ __forceinline__ T Lowest()
     {
         UnsignedBits retval = LOWEST_KEY;
         return reinterpret_cast<T&>(retval);
     }
+
+private:
+    friend struct detail::is_primitive_impl;
+
+    static constexpr bool is_primitive = false;
 };
     #endif
 
 template<>
-struct NumericTraits<float> : BaseTraits<hipcub::FLOATING_POINT, unsigned int, float>
+struct NumericTraits<float> : BaseTraits<hipcub::FLOATING_POINT, true, unsigned int, float>
 {};
 template<>
-struct NumericTraits<double> : BaseTraits<hipcub::FLOATING_POINT, unsigned long long, double>
+struct NumericTraits<double> : BaseTraits<hipcub::FLOATING_POINT, true, unsigned long long, double>
 {};
 template<>
-struct NumericTraits<__half> : BaseTraits<hipcub::FLOATING_POINT, unsigned short, __half>
-{};
+struct NumericTraits<__half> : BaseTraits<hipcub::FLOATING_POINT, true, unsigned short, __half>
+{
+    using UnsignedBits = unsigned short;
+};
 template<>
 struct NumericTraits<hip_bfloat16>
-    : BaseTraits<hipcub::FLOATING_POINT, unsigned short, hip_bfloat16>
-{};
+    : BaseTraits<hipcub::FLOATING_POINT, true, unsigned short, hip_bfloat16>
+{
+    using UnsignedBits = unsigned short;
+};
 
 template<>
 struct NumericTraits<bool>
-    : BaseTraits<hipcub::UNSIGNED_INTEGER, typename UnitWord<bool>::VolatileWord, bool>
-{};
-
-/**
- * \brief Type traits
- */
-template<typename T>
-struct Traits : NumericTraits<typename std::remove_cv<T>::type>
+    : BaseTraits<hipcub::UNSIGNED_INTEGER, true, typename UnitWord<bool>::VolatileWord, bool>
 {};
 
 namespace detail
 {
-// __uint128_t and __int128_t are not primitive
+template<typename T>
+struct Traits : NumericTraits<typename std::remove_cv<T>::type>
+{};
+
+} // namespace detail
+
+//! \brief Query type traits for radix sort key operations, decoupled lookback and tunings. To add support for your own
+//! primitive types please specialize \ref NumericTraits.
+template<typename T>
+using Traits = detail::Traits<T>;
+
+namespace detail
+{
+// we cannot befriend is_primitive on GCC < 11, since it's a template (bug)
+struct is_primitive_impl
+{
+    // must be a struct instead of an alias, so the access of Traits<T>::is_primitive happens in the context of this class
+    template<typename T>
+    struct is_primitive : _HIPCUB_STD::bool_constant<Traits<T>::is_primitive>
+    {};
+};
+// This trait serves two purposes:
+// 1. It is used for tunings to detect whether we have a build-in arithmetic type for which we can expect certain
+// arithmetic throughput. E.g.: we expect all primitive types of the same size to show roughly similar performance.
+// 2. Decoupled lookback uses this trait to determine whether there is a machine word twice the size of T which can be
+// loaded/stored with a single instruction.
+// TODO(bgruber): for 2. we should probably just check whether sizeof(T) * 2 <= sizeof(int128) (or 256-bit on SM100)
+// Users must be able to hook into both scenarios with their custom types, so this trait must depend on cub::Traits
 
 HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
 template<typename T>
-struct is_primitive : ::std::bool_constant<Traits<T>::PRIMITIVE>
+struct is_primitive : is_primitive_impl::is_primitive<T>
 {};
 
 template<typename T>

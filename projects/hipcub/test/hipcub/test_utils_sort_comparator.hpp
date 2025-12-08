@@ -48,8 +48,10 @@ template<unsigned int StartBit,
          std::enable_if_t<std::is_integral<Key>::value, int> = 0>
 Key to_bits(const Key key)
 {
-    static constexpr Key radix_mask_upper
-        = EndBit == 8 * sizeof(Key) ? ~Key(0) : static_cast<Key>((Key(1) << EndBit) - 1);
+    using Bits                             = typename hipcub::Traits<Key>::UnsignedBits;
+    static constexpr Key radix_mask_upper  = EndBit == 8 * sizeof(Key)
+                                                 ? static_cast<Key>(~Bits(0))
+                                                 : static_cast<Key>((Bits(1) << EndBit) - 1);
     static constexpr Key radix_mask_bottom = static_cast<Key>((Key(1) << StartBit) - 1);
     static constexpr Key radix_mask        = radix_mask_upper ^ radix_mask_bottom;
 
