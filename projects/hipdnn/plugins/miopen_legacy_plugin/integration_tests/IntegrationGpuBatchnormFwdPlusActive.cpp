@@ -46,7 +46,7 @@ protected:
         int64_t uid = 1;
 
         auto xAttr = graph::makeTensorAttributes(
-            "x", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
+            "x", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         xAttr.set_uid(uid++);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 

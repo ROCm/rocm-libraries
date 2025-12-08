@@ -70,14 +70,14 @@ protected:
         int64_t uid = 1;
 
         auto xAttr = graph::makeTensorAttributes(
-            "x", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
+            "x", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         xAttr.set_uid(uid++);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
         _inputTensorIds.insert(
             {graph::BatchnormBackwardAttributes::InputNames::X, xTensorAttr->get_uid()});
 
         auto dyAttr = graph::makeTensorAttributes(
-            "dy", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
+            "dy", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         dyAttr.set_uid(uid++);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
         _inputTensorIds.insert(

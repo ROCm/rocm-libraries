@@ -83,8 +83,8 @@ protected:
         auto derivedDims = getDerivedShape(dims);
 
         // Create input tensor attributes
-        auto xAttr = graph::makeTensorAttributes(
-            "X", inputDataType, dims, generateStrides(dims, layout.strideOrder));
+        auto xAttr
+            = graph::makeTensorAttributes("X", dims, generateStrides(dims, layout.strideOrder));
         xAttr.set_uid(BatchnormFwdTrainingTensorIds::X_UID);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 

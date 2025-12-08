@@ -44,12 +44,12 @@ protected:
         int64_t uid = 1;
 
         auto dyAttr = graph::makeTensorAttributes(
-            "dy", dataType, testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder));
+            "dy", testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder));
         dyAttr.set_uid(uid++);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
         auto wAttr = graph::makeTensorAttributes(
-            "w", dataType, testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder));
+            "w", testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder));
         wAttr.set_uid(uid++);
         auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 

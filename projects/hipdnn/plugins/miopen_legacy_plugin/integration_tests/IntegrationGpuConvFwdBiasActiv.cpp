@@ -40,19 +40,13 @@ protected:
 
         int64_t uid = 1;
 
-        auto xAttr
-            = graph::makeTensorAttributes("x",
-                                          dataType,
-                                          convTestCase.xDims,
-                                          generateStrides(convTestCase.xDims, layout.strideOrder));
+        auto xAttr = graph::makeTensorAttributes(
+            "x", convTestCase.xDims, generateStrides(convTestCase.xDims, layout.strideOrder));
         xAttr.set_uid(uid++);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
-        auto wAttr
-            = graph::makeTensorAttributes("w",
-                                          dataType,
-                                          convTestCase.wDims,
-                                          generateStrides(convTestCase.wDims, layout.strideOrder));
+        auto wAttr = graph::makeTensorAttributes(
+            "w", convTestCase.wDims, generateStrides(convTestCase.wDims, layout.strideOrder));
         wAttr.set_uid(uid++);
         auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
@@ -64,7 +58,6 @@ protected:
         convAttrs.set_dilation(convTestCase.convDilation);
 
         auto yConvTensorAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
-        yConvTensorAttr->set_data_type(dataType);
         yConvTensorAttr->set_uid(uid++);
 
         std::shared_ptr<graph::TensorAttributes> yBiasTensorAttr;
@@ -73,7 +66,7 @@ protected:
             const auto biasDims = getDerivedShape(convTestCase.yDims);
 
             auto biasAttr = graph::makeTensorAttributes(
-                "bias", dataType, biasDims, generateStrides(biasDims, layout.strideOrder));
+                "bias", biasDims, generateStrides(biasDims, layout.strideOrder));
             biasAttr.set_uid(uid++);
             auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
@@ -82,7 +75,6 @@ protected:
             biasAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
 
             yBiasTensorAttr = graphObj.pointwise(yConvTensorAttr, biasTensorAttr, biasAttrs);
-            yBiasTensorAttr->set_data_type(dataType);
             yBiasTensorAttr->set_uid(uid++);
         }
 

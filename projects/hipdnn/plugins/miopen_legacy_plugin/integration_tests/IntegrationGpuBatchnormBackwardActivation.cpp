@@ -82,8 +82,8 @@ protected:
             .set_compute_data_type(fe::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xAttr = graph::makeTensorAttributes(
-            "x", dataType, dims, generateStrides(dims, layout.strideOrder));
+        auto xAttr
+            = graph::makeTensorAttributes("x", dims, generateStrides(dims, layout.strideOrder));
         xAttr.set_uid(BatchnormActivationTensorIds::X_UID);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
@@ -133,8 +133,8 @@ protected:
 
         bnY->set_uid(BatchnormActivationTensorIds::BN_Y_UID);
 
-        auto dyAttr = graph::makeTensorAttributes(
-            "dy", dataType, dims, generateStrides(dims, layout.strideOrder));
+        auto dyAttr
+            = graph::makeTensorAttributes("dy", dims, generateStrides(dims, layout.strideOrder));
         dyAttr.set_uid(BatchnormActivationTensorIds::DY_UID);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
