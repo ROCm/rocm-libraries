@@ -140,6 +140,92 @@ function(find_libaocl)
   endforeach()
 endfunction()
 
+# Search for bundled BLIS libraries built by install.sh
+# Sets BLAS_LIBRARY, BLIS_INCLUDE_DIR, and WARN_NOT_ILP64_PREFERRED in parent scope
+function(find_bundled_blis)
+  if (EXISTS "${BUILD_DIR}/deps/amd-blis/lib/ILP64/libblis-mt.a") # 4.0 and 4.1.0
+    set(BLAS_LIBRARY "${BUILD_DIR}/deps/amd-blis/lib/ILP64/libblis-mt.a" PARENT_SCOPE)
+    set(BLIS_INCLUDE_DIR "${BUILD_DIR}/deps/amd-blis/include/ILP64" PARENT_SCOPE)
+    set(WARN_NOT_ILP64_PREFERRED true PARENT_SCOPE)
+    message(STATUS "Found bundled amd-blis: ${BUILD_DIR}/deps/amd-blis")
+  elseif (EXISTS "${BUILD_DIR}/deps/blis/lib/libblis.a")
+    set(BLAS_LIBRARY "${BUILD_DIR}/deps/blis/lib/libblis.a" PARENT_SCOPE)
+    set(BLIS_INCLUDE_DIR "${BUILD_DIR}/deps/blis/include/blis" PARENT_SCOPE)
+    set(WARN_NOT_ILP64_PREFERRED true PARENT_SCOPE)
+    message(STATUS "Found bundled blis: ${BUILD_DIR}/deps/blis")
+  elseif (EXISTS "/usr/local/lib/libblis.a")
+    set(BLAS_LIBRARY "/usr/local/lib/libblis.a" PARENT_SCOPE)
+    set(BLIS_INCLUDE_DIR "/usr/local/include/blis" PARENT_SCOPE)
+    message(STATUS "Found system blis: /usr/local/lib/libblis.a")
+  endif()
+endfunction()
+
+# Search for system cblas via pkg-config
+# Sets BLAS_LIBRARY and BLIS_INCLUDE_DIR in parent scope, or errors if not found
+function(find_system_cblas)
+  find_package(PkgConfig)
+  if (NOT PKG_CONFIG_FOUND)
+    message(FATAL_ERROR "Could not find libaocl/libblis and pkg-config is not available")
+  endif()
+  
+  pkg_search_module(PKGBLAS cblas)
+  if (PKGBLAS_FOUND)
+    set(BLAS_LIBRARY "${PKGBLAS_LIBRARIES}" PARENT_SCOPE)
+    set(BLIS_INCLUDE_DIR "${PKGBLAS_INCLUDE_DIRS}" PARENT_SCOPE)
+    message(STATUS "Found cblas via pkg-config")
+  else()
+    message(FATAL_ERROR "Could not find libaocl/libblis and pkg-config cannot find any other implementation of cblas")
+  endif()
+endfunction()
+
+# Main BLAS library search orchestrator
+# Tries in order: AOCL unified -> AOCL-BLIS (gcc) -> AOCL-BLIS (aocc) -> bundled BLIS -> pkg-config cblas
+# Sets BLAS_LIBRARY, BLIS_INCLUDE_DIR, and WARN_NOT_ILP64_PREFERRED in parent scope
+function(setup_blas_library)
+  set(BLAS_LIBRARY "" PARENT_SCOPE)
+  set(BLIS_INCLUDE_DIR "" PARENT_SCOPE)
+  set(WARN_NOT_ILP64_PREFERRED false PARENT_SCOPE)
+  
+  # 1. Try AOCL unified library (libaocl)
+  find_libaocl()
+  if (BLAS_LIBRARY)
+    set(BLAS_LIBRARY "${BLAS_LIBRARY}" PARENT_SCOPE)
+    set(BLIS_INCLUDE_DIR "${BLIS_INCLUDE_DIR}" PARENT_SCOPE)
+    return()
+  endif()
+  
+  # 2. Try AOCL-BLIS with GCC (preferred, ILP64)
+  find_libblis(gcc)
+  if (BLAS_LIBRARY)
+    set(BLAS_LIBRARY "${BLAS_LIBRARY}" PARENT_SCOPE)
+    set(BLIS_INCLUDE_DIR "${BLIS_INCLUDE_DIR}" PARENT_SCOPE)
+    return()
+  endif()
+  
+  # 3. Try AOCL-BLIS with AOCC
+  find_libblis(aocc)
+  if (BLAS_LIBRARY)
+    set(BLAS_LIBRARY "${BLAS_LIBRARY}" PARENT_SCOPE)
+    set(BLIS_INCLUDE_DIR "${BLIS_INCLUDE_DIR}" PARENT_SCOPE)
+    set(WARN_NOT_ILP64_PREFERRED true PARENT_SCOPE)
+    return()
+  endif()
+  
+  # 4. Try bundled builds or system BLIS
+  find_bundled_blis()
+  if (BLAS_LIBRARY)
+    set(BLAS_LIBRARY "${BLAS_LIBRARY}" PARENT_SCOPE)
+    set(BLIS_INCLUDE_DIR "${BLIS_INCLUDE_DIR}" PARENT_SCOPE)
+    set(WARN_NOT_ILP64_PREFERRED "${WARN_NOT_ILP64_PREFERRED}" PARENT_SCOPE)
+    return()
+  endif()
+  
+  # 5. Last resort: try pkg-config cblas
+  find_system_cblas()
+  set(BLAS_LIBRARY "${BLAS_LIBRARY}" PARENT_SCOPE)
+  set(BLIS_INCLUDE_DIR "${BLIS_INCLUDE_DIR}" PARENT_SCOPE)
+endfunction()
+
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
 if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
@@ -236,55 +322,7 @@ endif( )
 if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   if ( NOT WIN32 )
     if (LINK_BLIS)
-      # --- unified AOCL takes precedence if present ---
-      set(BLAS_LIBRARY)
-      set(BLIS_INCLUDE_DIR)
-      set(WARN_NOT_ILP64_PREFERRED false)
-
-      find_libaocl()
-      if (BLAS_LIBRARY)
-        # Using libaocl.* as the reference BLAS/cblas provider
-        # If include dir wasn’t deduced, still proceed (cblas headers may come from system or target);
-        # tests that need BLIS-only interfaces will check BLIS_INCLUDE_DIR below.
-      else()
-        # --- fallback to AOCL-BLIS via cleaner upstream helper ---
-        find_libblis(gcc)
-        if (NOT BLAS_LIBRARY)
-          find_libblis(aocc)
-          # Found via AOCC typically ILP64 but keep the warning behaviour consistent
-          set(WARN_NOT_ILP64_PREFERRED true)
-        endif()
-
-        # --- finally, fall back to bundled builds or system blis, then pkg-config cblas ---
-        if (NOT BLAS_LIBRARY)
-          set(WARN_NOT_ILP64_PREFERRED false) # reset warning, not found via installed aocc
-          if (EXISTS "${BUILD_DIR}/deps/amd-blis/lib/ILP64/libblis-mt.a") # 4.0 and 4.1.0
-            set(BLAS_LIBRARY "${BUILD_DIR}/deps/amd-blis/lib/ILP64/libblis-mt.a")
-            set(BLIS_INCLUDE_DIR "${BUILD_DIR}/deps/amd-blis/include/ILP64")
-            set(WARN_NOT_ILP64_PREFERRED true)
-          elseif (EXISTS "${BUILD_DIR}/deps/blis/lib/libblis.a")
-            set(BLAS_LIBRARY "${BUILD_DIR}/deps/blis/lib/libblis.a")
-            set(BLIS_INCLUDE_DIR "${BUILD_DIR}/deps/blis/include/blis")
-            set(WARN_NOT_ILP64_PREFERRED true)
-          elseif (EXISTS "/usr/local/lib/libblis.a")
-            set(BLAS_LIBRARY "/usr/local/lib/libblis.a")
-            set(BLIS_INCLUDE_DIR "/usr/local/include/blis")
-          else()
-            find_package(PkgConfig)
-            if (NOT PKG_CONFIG_FOUND)
-              message(FATAL_ERROR "Could not find libaocl/libblis and pkg-config is not available")
-            else()
-              pkg_search_module(PKGBLAS cblas)
-              if (PKGBLAS_FOUND)
-                set(BLAS_LIBRARY "${PKGBLAS_LIBRARIES}")
-                set(BLIS_INCLUDE_DIR "${PKGBLAS_INCLUDE_DIRS}")
-              else()
-                message(FATAL_ERROR "Could not find libaocl/libblis and pkg-config cannot find any other implementation of cblas")
-              endif()
-            endif()
-          endif()
-        endif()
-      endif()
+      setup_blas_library()
     else()
       find_package( BLAS REQUIRED )
       set( BLAS_LIBRARY "${BLAS_LIBRARIES}" )
