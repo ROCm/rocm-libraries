@@ -429,6 +429,8 @@ def kernel_name(ns):
     if hasattr(ns, 'lds_size_bytes'):
         postfix += f'_lds{ns.lds_size_bytes}'
 
+    postfix += f'_{ns.gcn_arch_name}'
+
     return f'rocfft_len{length}{postfix}'
 
 
