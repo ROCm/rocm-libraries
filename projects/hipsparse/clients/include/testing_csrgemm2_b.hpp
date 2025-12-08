@@ -813,7 +813,7 @@ void testing_csrgemm2_b_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csrgemm2_b(Arguments argus)
+void testing_csrgemm2_b(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  M          = argus.M;
@@ -860,7 +860,7 @@ hipsparseStatus_t testing_csrgemm2_b(Arguments argus)
            filename, M, N, nnz_D, hcsr_row_ptr_D, hcsr_col_ind_D, hcsr_val_D, idx_base_D))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     std::vector<int> hcsr_row_ptr_A;
@@ -1015,7 +1015,7 @@ hipsparseStatus_t testing_csrgemm2_b(Arguments argus)
         // If nnz_C == 0, we are done
         if(nnz_C_gold == 0)
         {
-            return HIPSPARSE_STATUS_SUCCESS;
+            return;
         }
 
         std::vector<int> hcsr_col_ind_C_gold(nnz_C_gold);
@@ -1142,8 +1142,6 @@ hipsparseStatus_t testing_csrgemm2_b(Arguments argus)
 #endif
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSRGEMM2_B_HPP

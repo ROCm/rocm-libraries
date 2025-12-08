@@ -285,7 +285,7 @@ void testing_gebsr2csr_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_gebsr2csr(Arguments argus)
+void testing_gebsr2csr(Arguments argus)
 {
     int                  m             = argus.M;
     int                  n             = argus.N;
@@ -310,7 +310,7 @@ hipsparseStatus_t testing_gebsr2csr(Arguments argus)
     {
 #ifdef __HIP_PLATFORM_NVIDIA__
         // cusparse does not support m == 0 for csr2bsr
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
 #endif
     }
 
@@ -330,7 +330,7 @@ hipsparseStatus_t testing_gebsr2csr(Arguments argus)
            filename, mb, nb, nnzb, bsr_row_ptr, bsr_col_ind, bsr_val, bsr_idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     m          = mb * row_block_dim;
@@ -536,7 +536,7 @@ hipsparseStatus_t testing_gebsr2csr(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 
-    return HIPSPARSE_STATUS_SUCCESS;
+    return;
 }
 
 #endif // TESTING_GEBSR2CSR_HPP

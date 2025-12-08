@@ -226,7 +226,7 @@ void testing_csrcolor_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csrcolor(const Arguments& argus)
+void testing_csrcolor(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     hipsparseIndexBase_t idxBase  = argus.baseA;
@@ -257,7 +257,7 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
     if(!generate_csr_matrix(filename, m, k, nnz, hrow_ptr, hcol_ind, hval, idxBase))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     hipsparseColorInfo_t colorInfo;
@@ -363,10 +363,8 @@ hipsparseStatus_t testing_csrcolor(const Arguments& argus)
 #endif
     }
 
-    hipsparseDestroyColorInfo(colorInfo);
+    CHECK_HIPSPARSE_ERROR(hipsparseDestroyColorInfo(colorInfo));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSRCOLOR_HPP

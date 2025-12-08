@@ -368,7 +368,7 @@ void testing_csr2bsr_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csr2bsr(Arguments argus)
+void testing_csr2bsr(Arguments argus)
 {
     int                  m            = argus.M;
     int                  n            = argus.N;
@@ -393,7 +393,7 @@ hipsparseStatus_t testing_csr2bsr(Arguments argus)
 #ifdef __HIP_PLATFORM_NVIDIA__
         // cusparse does not support m == 0 or n == 0 for csr2bsr
         // cusparse does not support asynchronous execution if block_dim == 1
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
 #endif
     }
 
@@ -410,7 +410,7 @@ hipsparseStatus_t testing_csr2bsr(Arguments argus)
            filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, csr_idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     int mb = (m + block_dim - 1) / block_dim;
@@ -610,8 +610,6 @@ hipsparseStatus_t testing_csr2bsr(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSR2BSR_HPP

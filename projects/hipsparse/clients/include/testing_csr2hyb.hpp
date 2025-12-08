@@ -119,7 +119,7 @@ void testing_csr2hyb_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csr2hyb(Arguments argus)
+void testing_csr2hyb(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                     m              = argus.M;
@@ -153,12 +153,12 @@ hipsparseStatus_t testing_csr2hyb(Arguments argus)
     if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     if(m == 0 || n == 0)
     {
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 
     // Allocate memory on the device
@@ -206,7 +206,7 @@ hipsparseStatus_t testing_csr2hyb(Arguments argus)
             verify_hipsparse_status_invalid_value(
                 status, "Error: user_ell_width < 0 || user_ell_width > max_ell_width");
 
-            return HIPSPARSE_STATUS_SUCCESS;
+            return;
         }
     }
 
@@ -235,7 +235,7 @@ hipsparseStatus_t testing_csr2hyb(Arguments argus)
                                        part);
 
             verify_hipsparse_status_invalid_value(status, "ell_max_width > width_limit");
-            return HIPSPARSE_STATUS_SUCCESS;
+            return;
         }
     }
 
@@ -428,8 +428,6 @@ hipsparseStatus_t testing_csr2hyb(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSR2HYB_HPP

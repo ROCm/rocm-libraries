@@ -78,7 +78,7 @@ void testing_axpyi_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_axpyi(const Arguments& argus)
+void testing_axpyi(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  N        = argus.N;
@@ -198,8 +198,6 @@ hipsparseStatus_t testing_axpyi(const Arguments& argus)
     }
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_AXPYI_HPP

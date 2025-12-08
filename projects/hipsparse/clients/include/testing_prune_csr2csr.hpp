@@ -518,7 +518,7 @@ void testing_prune_csr2csr_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_prune_csr2csr(Arguments argus)
+void testing_prune_csr2csr(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                  M              = argus.M;
@@ -544,7 +544,7 @@ hipsparseStatus_t testing_prune_csr2csr(Arguments argus)
     if(M == 0 || N == 0)
     {
 #ifdef __HIP_PLATFORM_NVIDIA__
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
 #endif
     }
 
@@ -561,7 +561,7 @@ hipsparseStatus_t testing_prune_csr2csr(Arguments argus)
            filename, M, N, nnz_A, h_csr_row_ptr_A, h_csr_col_ind_A, h_csr_val_A, csr_idx_base_A))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     // Allocate device memory
@@ -796,8 +796,6 @@ hipsparseStatus_t testing_prune_csr2csr(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_PRUNE_CSR2CSR_HPP

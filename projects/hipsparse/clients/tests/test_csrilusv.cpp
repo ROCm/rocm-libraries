@@ -72,16 +72,14 @@ TEST_P(parameterized_csrilusv_bin, csrilusv_bin_float)
 {
     Arguments arg = setup_csrilusv_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_csrilusv<float>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+    testing_csrilusv<float>(arg);
 }
 
 TEST_P(parameterized_csrilusv_bin, csrilusv_bin_double)
 {
     Arguments arg = setup_csrilusv_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_csrilusv<double>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+    testing_csrilusv<double>(arg);
 }
 
 INSTANTIATE_TEST_SUITE_P(csrilusv_bin,

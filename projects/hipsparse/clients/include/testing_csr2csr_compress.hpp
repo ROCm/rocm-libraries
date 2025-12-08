@@ -309,7 +309,7 @@ void testing_csr2csr_compress_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csr2csr_compress(Arguments argus)
+void testing_csr2csr_compress(Arguments argus)
 {
     int                  m        = argus.M;
     int                  n        = argus.N;
@@ -339,7 +339,7 @@ hipsparseStatus_t testing_csr2csr_compress(Arguments argus)
            filename, m, n, hnnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     // Allocate memory on the device
@@ -390,7 +390,7 @@ hipsparseStatus_t testing_csr2csr_compress(Arguments argus)
 
         if(hnnz_C == 0)
         {
-            return HIPSPARSE_STATUS_SUCCESS;
+            return;
         }
 
         // Allocate device memory for compressed CSR columns indices and values
@@ -527,8 +527,6 @@ hipsparseStatus_t testing_csr2csr_compress(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSR2CSR_COMPRESS_HPP

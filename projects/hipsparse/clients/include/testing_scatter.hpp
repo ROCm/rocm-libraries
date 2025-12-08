@@ -82,7 +82,7 @@ void testing_scatter_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_scatter(Arguments argus)
+void testing_scatter(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     I size = argus.N;
@@ -187,8 +187,6 @@ hipsparseStatus_t testing_scatter(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpVec(x));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SCATTER_HPP
