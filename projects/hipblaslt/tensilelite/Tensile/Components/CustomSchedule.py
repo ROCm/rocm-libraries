@@ -2861,6 +2861,9 @@ def hasCustomSchedule(kernel):
         return False, None
     if not kernel["ISA"] == IsaVersion(9,5,0):
         return False, None
+    # Currently ULSGRO not checked for in CMS, disabled for now
+    if kernel["UnrollLoopSwapGlobalReadOrder"]:
+        return False, None
 
     is16bit = kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16()
     is8bit = kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()
