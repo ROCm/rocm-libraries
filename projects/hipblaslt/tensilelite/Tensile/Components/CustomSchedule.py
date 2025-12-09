@@ -508,10 +508,11 @@ class Barrier(ValidatorInstruction):
 
 class Timeline:
     def __init__(self, num_vmfma: int):
+        self.num_vmfma = num_vmfma
         # NOTE: num_vmfma + 1 to account for special idx=-1.
         #       idx=-1 is special case that occurs BEFORE the first VMFMA but AFTER the last VMFMA.
         #       Instructions at idx=-1 happen after all instructions at idx=num_vmfma-1 and BEFORE all instructions (including the VMFMA) at idx=0.
-        self._instructions_at_index = [[] for _ in range(num_vmfma+1)]
+        self._instructions_at_index = [[] for _ in range(self.num_vmfma+1)]
         self._timeline = []
         # Don't use defaultdict so we can error out if accessing a key that doesn't exist.
         self._instructions_for_name: dict[str, list[tuple[int, ValidatorInstruction]]] = defaultdict(list)
@@ -707,7 +708,7 @@ def create_timeline(instruction_names_to_add: list[str], code_path: int, schedul
         instructions = timeline.get_instructions_at_index(i_vmfma)
         for i_instruction, instruction in enumerate(instructions):
             divisor = len(instructions)
-            if i_vmfma == 0:
+            if i_vmfma == -1:
                 divisor *= 2
                 instruction.issued_at += 0.5
             if i_vmfma == num_vmfma - 1:
@@ -717,7 +718,7 @@ def create_timeline(instruction_names_to_add: list[str], code_path: int, schedul
     timeline.linearize_timeline()
     return timeline
 
-def apply_barriers(timeline: Timeline, num_vmfma: int) -> None:
+def apply_barriers(timeline: Timeline) -> None:
     """
     Apply the effect of SBarriers to the timeline by updating the barriered_at field of GlobalReads.
     Timeline is modified in place.
@@ -729,13 +730,13 @@ def apply_barriers(timeline: Timeline, num_vmfma: int) -> None:
                 instruction = timeline[i_gr]
                 if not isinstance(instruction, GlobalRead):
                     continue
-                new_barriered_at = barrier.issued_at + _pass * num_vmfma
+                new_barriered_at = barrier.issued_at + _pass * timeline.num_vmfma
                 if i_gr > i_barrier:
                     # GlobalReads which finish during the next iteration.
-                    new_barriered_at += num_vmfma
+                    new_barriered_at += timeline.num_vmfma
                 instruction.barriered_at.append(new_barriered_at)
 
-def apply_swaits(timeline: Timeline, num_vmfma: int) -> None:
+def apply_swaits(timeline: Timeline) -> None:
     """
     Apply the effect of SWaitCnts to the timeline by updating the guaranteed_by field of LocalReads and GlobalReads.
     Timeline is modified in place.
@@ -753,11 +754,9 @@ def apply_swaits(timeline: Timeline, num_vmfma: int) -> None:
                     num_left_in_flight -= 1
                     continue
 
-                new_guaranteed_by = issued_at + _pass * num_vmfma
+                new_guaranteed_by = issued_at + _pass * timeline.num_vmfma
                 if i_read > i_swait:  # LRs which finish during the next iteration.
-                    new_guaranteed_by += num_vmfma
-                if issued_at == -1:  # Need a number between (numVMFMA-1) and numVMFMA, resort to floats.
-                    new_guaranteed_by += 0.5
+                    new_guaranteed_by += timeline.num_vmfma
                 instruction.guaranteed_by = min(instruction.guaranteed_by, new_guaranteed_by)
 
     for i_swait, swait in timeline.get_instructions_for_name("SWaitCnt"):
@@ -765,6 +764,42 @@ def apply_swaits(timeline: Timeline, num_vmfma: int) -> None:
             apply_wait_to_read(LocalRead, i_swait, swait.issued_at, swait.dscnt, 1)
         if swait.vlcnt != -1:
             apply_wait_to_read(GlobalRead, i_swait, swait.issued_at, swait.vlcnt, 2)
+
+def calculate_grs_needed_by_lr1s(timeline: Timeline, swap_global_read_order: bool) -> None:
+    """
+    Calculate the needed_by field of GlobalReads based on the LRA1/LRB1 instructions.
+    If GRA or GRB is missing, this function will NOT error out.
+    If either GRA or GRB is present, the corresponding LR1 instruction must be present.
+    """
+    # If the global read order is swapped, we need to swap the target indices since GRAs actually load B and GRBs actually load A.
+    target_name_a, target_name_b = "LRA1", "LRB1"
+    if swap_global_read_order:
+        target_name_a, target_name_b = target_name_b, target_name_a
+
+    # NOTE: For testing purposes we may ommit GRAs or LRA1s to improve readability.
+    #       Another validator pass will ensure that they are present if they are needed.
+    gras = timeline.get_instructions_for_name("GRA")
+    if gras:
+        if len(timeline.get_instructions_for_name(target_name_a)) == 0:
+            raise ValueError(f"No {target_name_a} instructions found in schedule.")
+        _, LR_target_a = timeline.get_instructions_for_name(target_name_a)[0]
+        # GRs are issued 1 iteration ahead of the LR1s, account for by += num_vmfma
+        GRAs_target_idx = LR_target_a.issued_at + timeline.num_vmfma
+
+        for _, gra in gras:
+            gra.needed_by = GRAs_target_idx
+
+    grbs = timeline.get_instructions_for_name("GRB")
+    if grbs:
+        if len(timeline.get_instructions_for_name(target_name_b)) == 0:
+            raise ValueError(f"No {target_name_b} instructions found in schedule.")
+        _, LR_target_b = timeline.get_instructions_for_name(target_name_b)[0]
+        # GRs are issued 1 iteration ahead of the LR1s, account for by += num_vmfma
+        GRBs_target_idx = LR_target_b.issued_at + timeline.num_vmfma
+
+        for _, grb in grbs:
+            grb.needed_by = GRBs_target_idx
+
 @dataclass
 class GRIncData:
     """
@@ -897,37 +932,11 @@ def verify_gr_inc_order(scheduleInfo, context: Dict = {}):
     
     return True, ""
 
-def verify_lrs_complete_before_vmfma(schedule_info: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
+def verify_lrs_and_grs(schedule_info: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     """
-    Ensure that the A and B data needed for VMFA at index=i is guaranteed to be in the registers before index=i.
-    """
-    def verify(schedule_info: 'ScheduleInfo', code_path: int) -> tuple[bool, str]:
-        if len(schedule_info.mfmaReorder) != 0:
-            printWarning("Do not currently support mfmaReorder in CMS validation.")
-            return None
-
-        relevant_names = ["LRA0", "LRB0", "LRA1", "LRB1", "SYNC"]
-        for name in schedule_info.optSchedule.keys():
-            if name.startswith("LRA") or name.startswith("LRB"):
-                if name not in relevant_names:
-                    printWarning(f"LocalRead {name} not implemented in CMS validation.")
-                    return None
-
-        timeline = create_timeline(relevant_names, code_path, schedule_info, context["kernel"])
-
-        apply_swaits(timeline, schedule_info.numMfma)
-        return timeline.validate()
-
-    for code_path in range(schedule_info.numCodePaths):
-        error_message = verify(schedule_info, code_path)
-        if error_message:
-            return False, f"Code path {code_path}: {error_message}"
-    return True, ""
-
-def verify_grs_complete_before_lr1s(schedule_info: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
-    """
-    Ensure that the GlobalReads issued in the previous iteration are guaranteed to be complete before the first LRA/LRB1 of this iteration.
-    This hazard features inter-wave communication, so a barrier is needed
+    Ensure several properties are valid of LRs and GRs:
+    1. The GlobalReads issued in the previous iteration are guaranteed to be complete before the first corresponding LRA1/LRB1 of this iteration.
+    2. The LR1s and LR0s are guaranteed to be complete before the first VMFMA that uses their data.
     """
     def verify(schedule_info: 'ScheduleInfo', code_path: int) -> str | None:
         if len(schedule_info.mfmaReorder) != 0:
@@ -942,44 +951,15 @@ def verify_grs_complete_before_lr1s(schedule_info: 'ScheduleInfo', context: dict
             printWarning("LRB3 is present in schedule, but LRB1 is not. This is not yet supported in CMS validation")
             return None
 
-        relevant_names = ["GRA", "GRB", "LRA1", "LRB1", "SYNC"]
+        relevant_names = ["GRA", "GRB", "LRA0", "LRB0", "LRA1", "LRB1", "SYNC"]
         timeline = create_timeline(relevant_names, code_path, schedule_info, context["kernel"])
 
-        apply_swaits(timeline, schedule_info.numMfma)
-        apply_barriers(timeline, schedule_info.numMfma)
+        apply_swaits(timeline)
+        apply_barriers(timeline)
 
-        _, first_LRA1 = timeline.get_instructions_for_name("LRA1")[0]
-        _, first_LRB1 = timeline.get_instructions_for_name("LRB1")[0]
-        # The GRAs we are interested in were issued in the previous iteration,
-        # so we need to add the number of VMFMAs to the needed_by to account for us being in the next iteration.
-        GRAs_target_idx = first_LRA1.issued_at + schedule_info.numMfma
-        GRBs_target_idx = first_LRB1.issued_at + schedule_info.numMfma
-        # If the global read order is swapped, we need to swap the target indices since GRAs actually load B and GRBs actually load A.
-        if context["kernel"]["SwapGlobalReadOrder"]:
-            GRAs_target_idx, GRBs_target_idx = GRBs_target_idx, GRAs_target_idx
+        calculate_grs_needed_by_lr1s(timeline, context["kernel"]["SwapGlobalReadOrder"])
 
-        GRAs: list[tuple[int, GlobalRead]] = timeline.get_instructions_for_name("GRA")
-        if len(GRAs) == 0:
-            return "No GRAs in schedule."
-        GRBs: list[tuple[int, GlobalRead]] = timeline.get_instructions_for_name("GRB")
-        if len(GRBs) == 0:
-            return "No GRBs in schedule."
-        for _, gra in GRAs:
-            gra.needed_by = GRAs_target_idx
-        for _, grb in GRBs:
-            grb.needed_by = GRBs_target_idx
-
-        for instruction in timeline:
-            if isinstance(instruction, LocalRead):
-                # TODO: Remove this one passes are combined
-                # Do not validate LocalReads.
-                # We don't load and place all of them, so the dscnts will be incorrect.
-                # They are validated in a seperate pass.
-                continue
-            error_message = instruction.validate()
-            if error_message:
-                return error_message
-        return None
+        return timeline.validate()
 
     for code_path in range(schedule_info.numCodePaths):
         error_message = verify(schedule_info, code_path)
@@ -1074,10 +1054,8 @@ class ScheduleInfo:
         self.rules: list[Callable[[ScheduleInfo, dict], [bool, str]]] = [
             verify_correct_number_of_instructions,
             verify_ascending_order,
-            verify_lrs_complete_before_vmfma,
             verify_global_reads_not_too_early,
-            # NOTE: Must run after verify_lrs_complete_before_vmfma to ensure that the position of the LR1s is valid.
-            verify_grs_complete_before_lr1s,
+            verify_lrs_and_grs,
             verify_scc_overlap,
             verify_gr_inc_order
         ]
