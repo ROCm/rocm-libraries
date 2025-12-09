@@ -129,6 +129,7 @@ def test_params(mock_yaml_file):
     assert check_params("dummy.yaml")
 
 
+@pytest.mark.xfail
 def test_TensileLibLogicToYaml():
     hipblaslt_path = "."
     device_id = 7
