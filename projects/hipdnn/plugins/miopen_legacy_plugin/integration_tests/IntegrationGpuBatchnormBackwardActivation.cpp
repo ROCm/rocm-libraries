@@ -31,12 +31,7 @@ struct BatchnormActivationTensorIds
     static constexpr int64_t BIAS_UID = 3;
     static constexpr int64_t MEAN_UID = 4;
     static constexpr int64_t INV_VARIANCE_UID = 5;
-    static constexpr int64_t BN_Y_UID = 6;
-    static constexpr int64_t DY_UID = 7;
-    static constexpr int64_t DX_DRELU_UID = 8;
-    static constexpr int64_t DX_OUT_UID = 9;
-    static constexpr int64_t DSCALE_OUT_UID = 10;
-    static constexpr int64_t DBIAS_OUT_UID = 11;
+    static constexpr int64_t DY_UID = 6;
 };
 
 template <typename DataType>
@@ -134,7 +129,6 @@ protected:
         bnY->set_name("BN_Y");
         bnY->set_dim(dims);
         bnY->set_stride(generateStrides(dims, layout.strideOrder));
-        bnY->set_uid(BatchnormActivationTensorIds::BN_Y_UID);
 
         auto dyAttr = graph::makeTensorAttributes(
             "dy", dataType, dims, generateStrides(dims, layout.strideOrder));
@@ -174,7 +168,6 @@ protected:
         dxDrelu->set_name("DX_drelu");
         dxDrelu->set_dim(dims);
         dxDrelu->set_stride(generateStrides(dims, layout.strideOrder));
-        dxDrelu->set_uid(BatchnormActivationTensorIds::DX_DRELU_UID);
 
         graph::BatchnormBackwardAttributes bnBwdAttrs;
         bnBwdAttrs.set_name("batchnorm_backward");
@@ -190,7 +183,6 @@ protected:
         dxOut->set_data_type(dataType);
         dxOut->set_stride(generateStrides(dims, layout.strideOrder));
         dxOut->set_output(true);
-        dxOut->set_uid(BatchnormActivationTensorIds::DX_OUT_UID);
 
         auto& dscaleOut = bnBwdOuts[1];
         dscaleOut->set_name("dscale");
@@ -198,7 +190,6 @@ protected:
         dscaleOut->set_dim(channelDims);
         dscaleOut->set_stride(generateStrides(channelDims, layout.strideOrder));
         dscaleOut->set_output(true);
-        dscaleOut->set_uid(BatchnormActivationTensorIds::DSCALE_OUT_UID);
 
         auto& dbiasOut = bnBwdOuts[2];
         dbiasOut->set_name("dbias");
@@ -206,7 +197,6 @@ protected:
         dbiasOut->set_dim(channelDims);
         dbiasOut->set_stride(generateStrides(channelDims, layout.strideOrder));
         dbiasOut->set_output(true);
-        dbiasOut->set_uid(BatchnormActivationTensorIds::DBIAS_OUT_UID);
 
         auto intermediateTolerance = batchnorm::getToleranceBackward<float>();
 

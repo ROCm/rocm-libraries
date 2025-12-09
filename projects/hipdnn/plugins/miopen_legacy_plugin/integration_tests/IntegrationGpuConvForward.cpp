@@ -38,18 +38,14 @@ protected:
         graphObj.set_name("ConvolutionForwardTest");
         graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-        int64_t uid = 1;
-
         auto dataType = getDataTypeEnumFromType<DataType>();
 
         auto xAttr = graph::makeTensorAttributes(
             "x", dataType, testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder));
-        xAttr.set_uid(uid++);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto wAttr = graph::makeTensorAttributes(
             "w", dataType, testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder));
-        wAttr.set_uid(uid++);
         auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
         graph::ConvFpropAttributes convAttrs;
@@ -61,10 +57,6 @@ protected:
 
         auto yAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
 
-        if(!yAttr->has_uid())
-        {
-            yAttr->set_uid(uid++);
-        }
         yAttr->set_output(true);
         yAttr->set_data_type(dataType);
         yAttr->set_dim(testCase.yDims);
