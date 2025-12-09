@@ -39,9 +39,9 @@
             "W": 2
         },
         "solver": {
-            "ConvDirectNaiveConvBwd": 0,
-            "ConvDirectNaiveConvFwd": 1,
-            "ConvDirectNaiveConvWrw": 2,
+            "ConvDirectNaiveConvBwd_DEACTIVATE": 0,
+            "ConvDirectNaiveConvFwd_DEACTIVATE": 1,
+            "ConvDirectNaiveConvWrw_DEACTIVATE": 2,
             "ConvHipImplicitGemm3DGroupBwdXdlops": 3,
             "ConvHipImplicitGemm3DGroupFwdXdlops": 4,
             "ConvHipImplicitGemm3DGroupWrwXdlops": 5,
