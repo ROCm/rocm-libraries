@@ -609,6 +609,12 @@ namespace rocRoller
                         {
                             co_yield moveTileDirect2LDS<Dir>(
                                 info, bytesPerMove, (i == 0 && r == 0), info.rowOffsetReg);
+                            if(info.m > 1)
+                            {
+                                co_yield generate(info.rowOffsetReg,
+                                                  info.rowOffsetReg->expression()
+                                                      + info.rowStrideReg->expression());
+                            }
                         }
                         else
                         {
