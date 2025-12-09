@@ -228,6 +228,7 @@ void testing_csrcolor_bad_arg(void)
 template <typename T>
 hipsparseStatus_t testing_csrcolor()
 {
+    std::cout << "testing_csrcolor" << std::endl;
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     // Determine absolute path of test matrix
     // Matrices are stored at the same path in matrices directory
@@ -237,19 +238,23 @@ hipsparseStatus_t testing_csrcolor()
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
 
+    std::cout << "AAAA" << std::endl;
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
 
+    std::cout << "BBBB" << std::endl;
     // Host structures
     std::vector<int>     hrow_ptr;
     std::vector<int>     hcol_ind;
     std::vector<T>       hval;
     hipsparseIndexBase_t idx_base = HIPSPARSE_INDEX_BASE_ZERO;
 
+    std::cout << "CCCC" << std::endl;
     // Initial Data on CPU
     srand(12345ULL);
     floating_data_t<T> fractionToColor = make_DataType<floating_data_t<T>>(1.0);
 
+    std::cout << "DDDD" << std::endl;
     int m;
     int k;
     int nnz;
@@ -259,9 +264,14 @@ hipsparseStatus_t testing_csrcolor()
         return HIPSPARSE_STATUS_INTERNAL_ERROR;
     }
 
-    hipsparseColorInfo_t colorInfo;
-    hipsparseCreateColorInfo(&colorInfo);
+    std::cout << "m: " << m << " k: " << k << " nnz: " << nnz << std::endl;
 
+    std::cout << "EEEE" << std::endl;
+
+    hipsparseColorInfo_t colorInfo;
+    CHECK_HIPSPARSE_ERROR(hipsparseCreateColorInfo(&colorInfo));
+
+    std::cout << "FFFF" << std::endl;
     // allocate memory on device
     auto drow_ptr_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * (m + 1)), device_free};
     auto dcol_ind_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * nnz), device_free};
@@ -275,12 +285,14 @@ hipsparseStatus_t testing_csrcolor()
     int* dcoloring   = (int*)dcoloring_managed.get();
     int* dreordering = (int*)dreordering_managed.get();
 
+    std::cout << "GGGG" << std::endl;
     // copy data from CPU to device
     CHECK_HIP_ERROR(
         hipMemcpy(drow_ptr, hrow_ptr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dcol_ind, hcol_ind.data(), sizeof(int) * nnz, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dval, hval.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
 
+    std::cout << "HHHH" << std::endl;
     int ncolors;
 
     CHECK_HIPSPARSE_ERROR(hipsparseXcsrcolor(handle,
@@ -295,10 +307,14 @@ hipsparseStatus_t testing_csrcolor()
                                              dcoloring,
                                              dreordering,
                                              colorInfo));
+    std::cout << "IIII" << std::endl;
+    CHECK_HIP_ERROR(hipDeviceSynchronize());
 
-    hipsparseDestroyColorInfo(colorInfo);
+    std::cout << "ncolors: " << ncolors << std::endl;
+    CHECK_HIPSPARSE_ERROR(hipsparseDestroyColorInfo(colorInfo));
 #endif
 
+    std::cout << "JJJJ" << std::endl;
     return HIPSPARSE_STATUS_SUCCESS;
 }
 
