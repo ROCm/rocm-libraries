@@ -87,7 +87,7 @@ template<typename SampleIteratorT, typename LevelT>
 HIPCUB_HOST_DEVICE
 HIPCUB_FORCEINLINE hipError_t check_overflow(LevelT lower_level, LevelT upper_level, int num_levels)
 {
-    using sample_type      = typename std::iterator_traits<SampleIteratorT>::value_type;
+    using sample_type      = it_value_t<SampleIteratorT>;
     using common_type      = typename hipcub::common_type<LevelT, sample_type>::type;
     static_assert(std::is_convertible<common_type, int>::value,
                   "The common type of `LevelT` and `SampleT` must be "

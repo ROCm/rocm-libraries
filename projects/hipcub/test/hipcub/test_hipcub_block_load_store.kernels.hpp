@@ -148,15 +148,15 @@ __launch_bounds__(BlockSize) __global__
     };
 
     // The input value type
-    using InputT = typename std::iterator_traits<InputIteratorT>::value_type;
+    using InputT = hipcub::detail::it_value_t<InputIteratorT>;
 
     // The output value type
     using OutputT = typename std::conditional<
-        (std::is_same_v<typename std::iterator_traits<OutputIteratorT>::value_type,
+        (std::is_same_v<hipcub::detail::it_value_t<OutputIteratorT>,
                         void>), // OutputT =  (if output iterator's value type is void) ?
-        typename std::iterator_traits<InputIteratorT>::value_type, // ... then the input iterator's
+        hipcub::detail::it_value_t<InputIteratorT>, // ... then the input iterator's
         // value type,
-        typename std::iterator_traits<OutputIteratorT>::value_type>::
+        hipcub::detail::it_value_t<OutputIteratorT>>::
         type; // ... else the output iterator's value type
 
     // Threadblock load/store abstraction types

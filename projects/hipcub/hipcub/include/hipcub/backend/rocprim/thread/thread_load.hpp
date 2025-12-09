@@ -77,10 +77,10 @@ HIPCUB_FORCEINLINE T ThreadLoadVolatilePointer(T* ptr, Fundamental /* is_fundame
 
 template<int MODIFIER, typename InputIteratorT>
 HIPCUB_DEVICE
-HIPCUB_FORCEINLINE typename std::iterator_traits<InputIteratorT>::value_type
-    ThreadLoad(InputIteratorT itr,
-               detail::int_constant_t<MODIFIER> /*modifier*/,
-               ::std::false_type /*is_pointer*/)
+HIPCUB_FORCEINLINE detail::it_value_t<InputIteratorT>
+                   ThreadLoad(InputIteratorT itr,
+                              detail::int_constant_t<MODIFIER> /*modifier*/,
+                              ::std::false_type /*is_pointer*/)
 {
     return rocprim::thread_load<rocprim::cache_load_modifier(MODIFIER)>(itr);
 }
@@ -96,8 +96,7 @@ HIPCUB_FORCEINLINE T ThreadLoad(T* ptr,
 
 template<CacheLoadModifier MODIFIER = LOAD_DEFAULT, typename InputIteratorT>
 HIPCUB_DEVICE
-HIPCUB_FORCEINLINE
-    typename std::iterator_traits<InputIteratorT>::value_type ThreadLoad(InputIteratorT itr)
+HIPCUB_FORCEINLINE detail::it_value_t<InputIteratorT> ThreadLoad(InputIteratorT itr)
 {
     return ThreadLoad(itr,
                       detail::int_constant_t<MODIFIER>(),

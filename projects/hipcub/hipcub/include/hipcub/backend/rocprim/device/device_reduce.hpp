@@ -230,9 +230,9 @@ public:
                                                   NumItemsT       num_items,
                                                   hipStream_t     stream = 0)
     {
-        using InputT  = typename std::iterator_traits<InputIteratorT>::value_type;
-        using OutputT = typename std::iterator_traits<OutputIteratorT>::value_type;
-        using InitT   = hipcub::detail::non_void_value_t<OutputT, InputT>;
+        using InputT  = detail::it_value_t<InputIteratorT>;
+        using OutputT = detail::it_value_t<OutputIteratorT>;
+        using InitT   = detail::non_void_value_t<OutputT, InputT>;
         return Reduce(d_temp_storage,
                       temp_storage_bytes,
                       d_in,
@@ -265,7 +265,7 @@ public:
                                                   NumItemsT       num_items,
                                                   hipStream_t     stream = 0)
     {
-        using T = typename std::iterator_traits<InputIteratorT>::value_type;
+        using T = detail::it_value_t<InputIteratorT>;
         return Reduce(d_temp_storage,
                       temp_storage_bytes,
                       d_in,
@@ -303,8 +303,8 @@ public:
                                                      hipStream_t     stream = 0)
     {
         using OffsetT      = NumItemsT;
-        using T            = typename std::iterator_traits<InputIteratorT>::value_type;
-        using O            = typename std::iterator_traits<OutputIteratorT>::value_type;
+        using T            = detail::it_value_t<InputIteratorT>;
+        using O            = detail::it_value_t<OutputIteratorT>;
         using OutputTupleT = hipcub::detail::non_void_value_t<O, KeyValuePair<OffsetT, T>>;
 
         using OutputValueT = typename OutputTupleT::Value;
@@ -382,7 +382,7 @@ public:
                                                   NumItemsT       num_items,
                                                   hipStream_t     stream = 0)
     {
-        using T = typename std::iterator_traits<InputIteratorT>::value_type;
+        using T = detail::it_value_t<InputIteratorT>;
         return Reduce(d_temp_storage,
                       temp_storage_bytes,
                       d_in,
@@ -420,9 +420,9 @@ public:
                                                      hipStream_t     stream = 0)
     {
         using OffsetT      = NumItemsT;
-        using T            = typename std::iterator_traits<InputIteratorT>::value_type;
-        using O            = typename std::iterator_traits<OutputIteratorT>::value_type;
-        using OutputTupleT = hipcub::detail::non_void_value_t<O, KeyValuePair<OffsetT, T>>;
+        using T            = detail::it_value_t<InputIteratorT>;
+        using O            = detail::it_value_t<OutputIteratorT>;
+        using OutputTupleT = detail::non_void_value_t<O, KeyValuePair<OffsetT, T>>;
 
         using OutputValueT = typename OutputTupleT::Value;
         using IteratorT    = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
@@ -547,8 +547,7 @@ public:
                     NumItemsT                 num_items,
                     hipStream_t               stream = 0)
     {
-        using key_compare_op
-            = ::rocprim::equal_to<typename std::iterator_traits<KeysInputIteratorT>::value_type>;
+        using key_compare_op = ::rocprim::equal_to<detail::it_value_t<KeysInputIteratorT>>;
         return ::rocprim::reduce_by_key(d_temp_storage,
                                         temp_storage_bytes,
                                         d_keys_in,

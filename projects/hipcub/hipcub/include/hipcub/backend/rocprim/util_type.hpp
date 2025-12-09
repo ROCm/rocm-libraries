@@ -43,6 +43,7 @@
 #include <hip/hip_vector_types.h>
 
 #include _HIPCUB_STD_INCLUDE(limits)
+#include _HIPCUB_STD_INCLUDE(iterator)
 
 #include <type_traits>
 
@@ -93,6 +94,30 @@ struct PowerOfTwo
 
 namespace detail
 {
+
+// the following iterator helpers are not named iter_value_t etc, like the C++20 facilities, because they are defined in
+// terms of C++17 iterator_traits and not the new C++20 indirectly_readable trait etc. This allows them to detect nested
+// value_type, difference_type and reference aliases, which the new C+20 traits do not consider (they only consider
+// specializations of iterator_traits). Also, a value_type of void remains supported (needed by some output iterators).
+
+template<typename It>
+using it_value_t = typename _HIPCUB_STD::iterator_traits<It>::value_type;
+
+template<typename It>
+using it_reference_t = typename _HIPCUB_STD::iterator_traits<It>::reference;
+
+template<typename It>
+using it_difference_t = typename _HIPCUB_STD::iterator_traits<It>::difference_type;
+
+template<typename It>
+using it_pointer_t = typename _HIPCUB_STD::iterator_traits<It>::pointer;
+
+// use this whenever you need to lazily evaluate a trait. E.g., as an alternative in replace_if_use_default.
+template<template<typename...> typename Trait, typename... Args>
+struct lazy_trait
+{
+    using type = Trait<Args...>;
+};
 
 template<int N, int CURRENT_VAL = N, int COUNT = 0>
 struct Log2Impl

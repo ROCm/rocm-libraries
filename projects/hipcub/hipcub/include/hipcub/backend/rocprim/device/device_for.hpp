@@ -117,11 +117,10 @@ struct DeviceFor
                          OpT                   op,
                          hipStream_t           stream = 0)
         -> std::enable_if_t<!std::is_assignable<decltype(*std::declval<RandomAccessIteratorT>()),
-                                                typename std::iterator_traits<
-                                                    RandomAccessIteratorT>::value_type>::value,
+                                                detail::it_value_t<RandomAccessIteratorT>>::value,
                             hipError_t>
     {
-        using T              = typename std::iterator_traits<RandomAccessIteratorT>::value_type;
+        using T = detail::it_value_t<RandomAccessIteratorT>;
 
         detail::bulk::OpWrapper<T, OpT> wrapper_op = {op};
 
@@ -137,14 +136,15 @@ struct DeviceFor
 
     template<class RandomAccessIteratorT, class OffsetT, class OpT>
     HIPCUB_RUNTIME_FUNCTION
-    static auto
-        ForEachN(RandomAccessIteratorT first, OffsetT num_items, OpT op, hipStream_t stream = 0)
-            -> std::enable_if_t<std::is_assignable<decltype(*std::declval<RandomAccessIteratorT>()),
-                                                   typename std::iterator_traits<
-                                                       RandomAccessIteratorT>::value_type>::value,
-                                hipError_t>
+    static auto ForEachN(RandomAccessIteratorT first,
+                         OffsetT               num_items,
+                         OpT                   op,
+                         hipStream_t           stream = 0)
+        -> std::enable_if_t<std::is_assignable<decltype(*std::declval<RandomAccessIteratorT>()),
+                                               detail::it_value_t<RandomAccessIteratorT>>::value,
+                            hipError_t>
     {
-        using T = typename std::iterator_traits<RandomAccessIteratorT>::value_type;
+        using T = detail::it_value_t<RandomAccessIteratorT>;
 
         detail::bulk::OpWrapper<T, OpT> wrapper_op = {op};
 
@@ -207,7 +207,7 @@ HIPCUB_RUNTIME_FUNCTION
                               OpT                   op,
                               hipStream_t           stream = 0)
     {
-        using offset_t = typename std::iterator_traits<RandomAccessIteratorT>::difference_type;
+        using offset_t           = detail::it_difference_t<RandomAccessIteratorT>;
         const offset_t num_items = static_cast<offset_t>(std::distance(first, last));
 
         return ForEachN(first, num_items, op, stream);

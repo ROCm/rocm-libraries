@@ -230,7 +230,7 @@ public:
                                    NumItemsT       num_items,
                                    hipStream_t     stream = 0)
     {
-        using T = typename std::iterator_traits<InputIteratorT>::value_type;
+        using T = detail::it_value_t<InputIteratorT>;
         return ExclusiveScan(d_temp_storage,
                              temp_storage_bytes,
                              d_in,
@@ -504,7 +504,7 @@ public:
                                         EqualityOpT           equality_op = EqualityOpT(),
                                         hipStream_t           stream      = 0)
     {
-        using in_value_type = typename std::iterator_traits<ValuesInputIteratorT>::value_type;
+        using in_value_type = detail::it_value_t<ValuesInputIteratorT>;
 
         return ExclusiveScanByKey(d_temp_storage,
                                   temp_storage_bytes,
@@ -689,8 +689,7 @@ public:
                                          EqualityOpT           equality_op = EqualityOpT(),
                                          hipStream_t           stream      = 0)
     {
-        using acc_t = ::rocprim::
-            accumulator_t<ScanOpT, typename std::iterator_traits<ValuesInputIteratorT>::value_type>;
+        using acc_t = ::rocprim::accumulator_t<ScanOpT, detail::it_value_t<ValuesInputIteratorT>>;
 
         return ::rocprim::inclusive_scan_by_key<::rocprim::default_config,
                                                 KeysInputIteratorT,
