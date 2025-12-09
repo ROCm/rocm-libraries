@@ -234,31 +234,7 @@ namespace rocRoller::KernelGraph
         {
             auto arguments = kernel->resetArguments();
 
-            auto neverReferencedArguments = argTracer.neverReferencedArguments();
-
-            auto manualNeverReferencedArguments = std::set<std::string>{};
-
-            manualNeverReferencedArguments.insert("Tensor_7_size_0");
-            manualNeverReferencedArguments.insert("Tensor_7_size_1");
-            manualNeverReferencedArguments.insert("Tensor_7_size_2");
-            manualNeverReferencedArguments.insert("Tensor_7_size_3");
-            manualNeverReferencedArguments.insert("Tensor_8_size_0");
-            manualNeverReferencedArguments.insert("Tensor_8_size_1");
-            manualNeverReferencedArguments.insert("Tensor_8_size_2");
-            manualNeverReferencedArguments.insert("Tensor_8_size_3");
-
-            for(auto arg : arguments)
-            {
-                // If name starts with something in the manual list
-                for(auto const& manualArg : manualNeverReferencedArguments)
-                {
-                    if(arg.name.find(manualArg) != std::string::npos)
-                    {
-                        neverReferencedArguments.insert(arg.name);
-                        Log::warn("MANUALLY REMOVING KERNEL ARGUMENT {}", arg.name);
-                    }
-                }
-            }
+            auto const& neverReferencedArguments = argTracer.neverReferencedArguments();
 
             auto referencedArgs = arguments | std::views::filter([&](auto const& arg) {
                                       return !neverReferencedArguments.contains(arg.name);
