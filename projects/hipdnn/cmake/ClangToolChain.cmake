@@ -103,7 +103,7 @@ endif()
 set(CMAKE_CXX_COMPILER_NAMES clang++)
 set(CMAKE_C_COMPILER_NAMES clang)
 
-# Warn if ROCM_PATH is set in environment (can interfere with toolcain discovery).
+# Warn if ROCM_PATH is set in environment (can interfere with toolchain discovery).
 if(DEFINED ENV{ROCM_PATH})
     message(
         WARNING "\nROCM_PATH is set in the environment and may interfere with toolchain detection. "
@@ -176,6 +176,22 @@ if(DEFINED ROCM_PATH)
         message(STATUS "Added ${ROCM_PATH} to CMAKE_PREFIX_PATH for finding HIP package")
     else()
         message(STATUS "ROCM_PATH already in CMAKE_PREFIX_PATH")
+    endif()
+endif()
+
+if(NOT DEFINED _ROCM_CLANG_TOOLCHAIN_FIRST_RUN)
+    # Validate that a compatible generator is being used
+    if(CMAKE_GENERATOR)
+        string(TOLOWER "${CMAKE_GENERATOR}" _generator_lower)
+        if(NOT (_generator_lower MATCHES "ninja" OR _generator_lower MATCHES "makefile"))
+            message(
+                FATAL_ERROR
+                    "\nIncompatible generator detected: '${CMAKE_GENERATOR}'\n"
+                    "The ROCm Clang toolchain requires Ninja or Makefile generators.\n"
+                    "Use \"cmake -G <generator>\" to select a compatible generator.\n"
+            )
+        endif()
+        unset(_generator_lower)
     endif()
 endif()
 
