@@ -56,10 +56,10 @@ namespace rocRoller
                 for(auto const multiplyTag : filter(graph.control.isElemType<Multiply>(),
                                                     graph.control.depthFirstVisit(loopBodyTag)))
                 {
-                    auto [scaleMacTag, scaleMac] = graph.getDimension<MacroTile>(
-                        multiplyTag, Connections::typeArgument<MacroTile>(arg));
-
-                    scaleTileForMultiply[scaleMacTag] = multiplyTag;
+                    auto scaleMacTag
+                        = graph.mapper.get(multiplyTag, Connections::typeArgument<MacroTile>(arg));
+                    if(scaleMacTag != -1)
+                        scaleTileForMultiply[scaleMacTag] = multiplyTag;
                 }
 
                 auto isLoad = [&](int tag) {
