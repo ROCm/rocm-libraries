@@ -4,7 +4,6 @@
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
-enable_language(HIP)
 
 add_executable(
     miopen_legacy_plugin_tests

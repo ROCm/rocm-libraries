@@ -24,9 +24,8 @@ function(verifyAmdRocmCompiler COMPILER_PATH COMPILER_NAME)
     endif()
 endfunction()
 
-# Verify that we're using AMD/ROCm compilers for C++ and HIP compilation.
+# Verify that we're using AMD/ROCm compiler.
 verifyamdrocmcompiler(${CMAKE_CXX_COMPILER} "C++")
-verifyamdrocmcompiler(${CMAKE_HIP_COMPILER} "HIP")
 
 if(ENABLE_CLANG_FORMAT)
     include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
