@@ -493,8 +493,8 @@ rocblas_trsv_device(rocblas_int    n,
                     rocblas_stride offset_x,
                     int64_t        incx,
                     rocblas_stride stride_x,
-                    rocblas_int*   w_completed_sec,
-                    rocblas_int    batch_count)
+                    rocblas_int* volatile w_completed_sec,
+                    rocblas_int batch_count)
 {
     // If we need to start at the bottom and work upwards (backwards substitution)
     constexpr bool backwards_sub = (!LOWER && !TRANS) || (LOWER && TRANS);
@@ -666,16 +666,10 @@ rocblas_trsv_device(rocblas_int    n,
             {
                 // Wait until the previous column is done. Use global memory to
                 // update when ready.
-                if(col_done < block_iter)
-                {
-                    while(w_completed_sec[batch] < block_iter)
-                        __threadfence();
-                    col_done = w_completed_sec[batch];
-                }
+                while(w_completed_sec[batch] < block_iter)
+                    ;
             }
 
-            // Few intermittent failures without this. Needed to wait for updated x values, I guess?
-            __threadfence();
             __syncthreads();
 
             // Store x val (of previous block) into shared memory
@@ -782,8 +776,6 @@ rocblas_trsv_device(rocblas_int    n,
         __syncthreads(); // for windows instability
         if(tid == 0)
             w_completed_sec[batch]++;
-
-        __threadfence();
 
 #if DEVICE_GRID_YZ_16BIT
     }
