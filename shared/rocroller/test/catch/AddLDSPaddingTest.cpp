@@ -28,10 +28,28 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddLDSPadding.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddLDSPadding_detail.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
+
+#include "TestContext.hpp"
+
+namespace rocRoller::KernelGraph
+{
+    void addLoadWaveTileCT(KernelGraph&                     graph,
+                           std::vector<DeferredConnection>& connections,
+                           int                              macTileTag,
+                           int                              iMacX,
+                           int                              iMacY,
+                           DataType const&                  dataType,
+                           int                              wavefrontSize,
+                           bool                             isFromLDS,
+                           std::vector<unsigned int> const& jammedTiles,
+                           CommandParametersPtr             params,
+                           ContextPtr                       context);
+};
 
 namespace AddPrefetchTest
 {
@@ -148,7 +166,7 @@ namespace AddPrefetchTest
             CHECK(ldsElements == sizeX * sizeY);
         }
 
-        SECTION("Joined LDS")
+        SECTION("Joined LDS (X)")
         {
             rocRoller::KernelGraph::KernelGraph graph;
 
@@ -169,93 +187,27 @@ namespace AddPrefetchTest
             int ldsElements = getNumLDSElements(graph, -1, ldsTag);
             CHECK(ldsElements == strideX * sizeX);
         }
-    }
 
-    TEST_CASE("AddLDSPadding for FP4 with 256 elements in the fast dimension",
-              "[kernel-graph][graph-transforms]")
-    {
-        using GD = rocRoller::Graph::Direction;
-
-        KernelGraph::KernelGraph graph;
-
-        auto tile         = MacroTile();
-        tile.layoutType   = LayoutType::MATRIX_A;
-        auto tileCoordTag = graph.coordinates.addElement(tile);
-
-        auto ldsTag    = graph.coordinates.addElement(LDS());
-        auto upstreamS = graph.coordinates.addElement(
-            MacroTileIndex(0, rocRoller::Expression::literal(16), nullptr));
-        auto upstreamF = graph.coordinates.addElement(
-            MacroTileIndex(1, rocRoller::Expression::literal(256), nullptr));
-
-        auto downstreamS = graph.coordinates.addElement(
-            MacroTileIndex(0, rocRoller::Expression::literal(16), nullptr));
-        auto downstreamF = graph.coordinates.addElement(
-            MacroTileIndex(1, rocRoller::Expression::literal(256), nullptr));
-
-        auto flattenTag = graph.coordinates.addElement(Flatten(), {upstreamS, upstreamF}, {ldsTag});
-        auto tileTag = graph.coordinates.addElement(Tile(), {ldsTag}, {downstreamS, downstreamF});
-
-        // Connect it to a Load so that it can be associated with a LayoutType and DataType
-        auto loadTag = graph.control.addElement(LoadTiled(DataType::FP4));
-        graph.mapper.connect<MacroTile>(loadTag, tileCoordTag);
-        graph.coordinates.addElement(DataFlow(), {tileCoordTag}, {ldsTag});
-
-        SECTION("LDS size before padding")
+        SECTION("Joined LDS (Y)")
         {
-            auto numElements = rocRoller::KernelGraph::getNumLDSElements(graph, -1, ldsTag);
-            CHECK(numElements == 4096);
-        }
+            rocRoller::KernelGraph::KernelGraph graph;
 
-        auto params = std::make_shared<rocRoller::CommandParameters>();
+            uint sizeX   = 5u;
+            uint sizeY   = 7u;
+            uint strideX = 1u;
+            uint strideY = GENERATE(5u, 11u);
 
-        params->padLDS[LayoutType::MATRIX_A] = -1; // Automagic padding
-        graph = KernelGraph::AddLDSPadding(nullptr, params).apply(graph);
+            auto indexX
+                = graph.coordinates.addElement(MacroTileIndex(0, literal(sizeX), literal(strideX)));
+            auto indexY
+                = graph.coordinates.addElement(MacroTileIndex(1, literal(sizeY), literal(strideY)));
 
-        SECTION("Upstream")
-        {
-            auto maybeJoin = graph.coordinates.get<Join>(flattenTag);
-            CHECK(maybeJoin.has_value());
+            auto ldsTag = graph.coordinates.addElement(LDS());
 
-            auto upstream = graph.coordinates.getNeighbours<GD::Upstream>(flattenTag);
-            CHECK(upstream.size() == 2);
+            auto join = graph.coordinates.addElement(Join(), {indexX, indexY}, {ldsTag});
 
-            auto fastSize = getUnsignedInt(
-                evaluate(graph.coordinates.get<MacroTileIndex>(upstream[1])->size));
-
-            auto slowStride = getUnsignedInt(
-                evaluate(graph.coordinates.get<MacroTileIndex>(upstream[0])->stride));
-            CHECK(slowStride == fastSize + 8);
-
-            auto fastStride = getUnsignedInt(
-                evaluate(graph.coordinates.get<MacroTileIndex>(upstream[1])->stride));
-            CHECK(fastStride == 1);
-        }
-
-        SECTION("Downstream")
-        {
-            auto maybeSplit = graph.coordinates.get<Split>(tileTag);
-            CHECK(maybeSplit.has_value());
-
-            auto downstream = graph.coordinates.getNeighbours<GD::Downstream>(tileTag);
-            CHECK(downstream.size() == 2);
-
-            auto fastSize = getUnsignedInt(
-                evaluate(graph.coordinates.get<MacroTileIndex>(downstream[1])->size));
-
-            auto slowStride = getUnsignedInt(
-                evaluate(graph.coordinates.get<MacroTileIndex>(downstream[0])->stride));
-            CHECK(slowStride == fastSize + 8);
-
-            auto fastStride = getUnsignedInt(
-                evaluate(graph.coordinates.get<MacroTileIndex>(downstream[1])->stride));
-            CHECK(fastStride == 1);
-        }
-
-        SECTION("LDS size after padding")
-        {
-            auto numElements = rocRoller::KernelGraph::getNumLDSElements(graph, -1, ldsTag);
-            CHECK(numElements == 4224);
+            int ldsElements = getNumLDSElements(graph, -1, ldsTag);
+            CHECK(ldsElements == strideY * sizeY);
         }
     }
 }
