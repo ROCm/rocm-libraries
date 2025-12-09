@@ -182,7 +182,7 @@ endif()
 # disable warning about 'amdgpu-waves-per-eu'
 add_compile_options(-Wno-pass-failed)
 
-find_package( composable_kernel 1.0.0 REQUIRED PATHS $ENV{CK_DIR}/lib/cmake /opt/rocm /opt/rocm/ck COMPONENTS device_contraction_operations device_reduction_operations device_other_operations)
+find_package(composable_kernel 1.0.0 REQUIRED COMPONENTS device_contraction_operations device_reduction_operations device_other_operations)
 rocm_package_add_dependencies("composable_kernel >= 1.0.0" COMPONENT tests)
 
 # Configure library build
@@ -210,27 +210,27 @@ endif()
 set ( VERSION_STRING "2.2.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
-# configure a header file to pass the CMake version settings to the source
+# Configure a header file to pass the CMake version settings to the source
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/hiptensor-version.h.in"
                "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/hiptensor-version.h" )
 
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/hiptensorConfigVersion.cmake"
-    VERSION "${VERSION_STRING}"
-    COMPATIBILITY AnyNewerVersion
+# Define package dependencies for export
+set(PACKAGE_DEPENDS
+    PACKAGE hip
+    PACKAGE composable_kernel
 )
 
-configure_package_config_file(${CMAKE_CURRENT_SOURCE_DIR}/Config.cmake.in
-     "${CMAKE_CURRENT_BINARY_DIR}/hiptensorConfig.cmake"
-     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hiptensor
-     NO_CHECK_REQUIRED_COMPONENTS_MACRO
+set(PACKAGE_STATIC_DEPENDS
+    PACKAGE Threads
 )
 
-rocm_install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/hiptensorConfig.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/hiptensorConfigVersion.cmake"
-    "cmake/Functions/hiptensorSupportedArchitectures.cmake"
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hiptensor
+# Export targets using ROCm automation
+rocm_export_targets(
+    TARGETS hiptensor
+    DEPENDS
+        ${PACKAGE_DEPENDS}
+    STATIC_DEPENDS
+        ${PACKAGE_STATIC_DEPENDS}
 )
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
