@@ -228,8 +228,8 @@ public:
 
         if((mean == nullptr) != (invVariance == nullptr))
         {
-            throw std::runtime_error(
-                "Batchnorm backward requires both mean and invVariance to be provided, or neither.");
+            throw std::runtime_error("Batchnorm backward requires both mean and invVariance to be "
+                                     "provided, or neither.");
         }
 
         int64_t elementsPerChannel = calculateElementsPerChannel(x.dims());

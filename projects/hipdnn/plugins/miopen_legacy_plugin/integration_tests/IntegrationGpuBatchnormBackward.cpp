@@ -49,12 +49,10 @@ protected:
 
         if(!CalcStats)
         {
-            bundle.tensors
-                .at(BatchnormBwdTensorIds::MEAN_UID)
+            bundle.tensors.at(BatchnormBwdTensorIds::MEAN_UID)
                 ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
 
-            bundle.tensors
-                .at(BatchnormBwdTensorIds::INV_VARIANCE_UID)
+            bundle.tensors.at(BatchnormBwdTensorIds::INV_VARIANCE_UID)
                 ->fillTensorWithRandomValues(1.9f, 2.0f, seed);
         }
     }

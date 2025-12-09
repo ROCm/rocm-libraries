@@ -56,16 +56,25 @@ struct BatchnormBwdSignatureKey
         auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
         auto dxTensorAttr = tensorMap.at(nodeAttributes->dx_tensor_uid());
 
-        const hipdnn_sdk::data_objects::TensorAttributes* meanTensorAttr = nullptr;
-        if(nodeAttributes->mean_tensor_uid().has_value())
+        if(nodeAttributes->mean_tensor_uid().has_value()
+           && nodeAttributes->inv_variance_tensor_uid().has_value())
         {
-            meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
-        }
+            auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
+            auto invVarianceTensorAttr
+                = tensorMap.at(nodeAttributes->inv_variance_tensor_uid().value());
 
-        const hipdnn_sdk::data_objects::TensorAttributes* invVarianceTensorAttr = nullptr;
-        if(nodeAttributes->inv_variance_tensor_uid().has_value())
+            if(meanTensorAttr->data_type() != invVarianceTensorAttr->data_type())
+            {
+                throw std::runtime_error(
+                    "BatchnormBwdSignatureKey requires mean and inv_variance tensors "
+                    "to have the same data type");
+            }
+
+            meanVarianceDataType = meanTensorAttr->data_type();
+        }
+        else
         {
-            invVarianceTensorAttr = tensorMap.at(nodeAttributes->inv_variance_tensor_uid().value());
+            meanVarianceDataType = scaleBiasDataType;
         }
 
         if(dyTensorAttr == nullptr || xTensorAttr == nullptr || scaleTensorAttr == nullptr
@@ -78,19 +87,6 @@ struct BatchnormBwdSignatureKey
         dyDataType = dyTensorAttr->data_type();
         xDataType = xTensorAttr->data_type();
         scaleBiasDataType = scaleTensorAttr->data_type();
-
-        if(meanTensorAttr != nullptr)
-        {
-            meanVarianceDataType = meanTensorAttr->data_type();
-        }
-        else if(invVarianceTensorAttr != nullptr)
-        {
-            meanVarianceDataType = invVarianceTensorAttr->data_type();
-        }
-        else
-        {
-            meanVarianceDataType = scaleBiasDataType;
-        }
 
         computeDataType = node.compute_data_type();
         outputDataType = dxTensorAttr->data_type();
