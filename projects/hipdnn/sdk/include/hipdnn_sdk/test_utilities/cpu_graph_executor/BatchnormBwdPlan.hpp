@@ -47,6 +47,25 @@ struct BatchnormBwdParams
         }
     }
 
+    BatchnormBwdParams(const hipdnn_sdk::data_objects::TensorAttributes& dyAttributes,
+                       const hipdnn_sdk::data_objects::TensorAttributes& xAttributes,
+                       const hipdnn_sdk::data_objects::TensorAttributes& meanAttributes,
+                       const hipdnn_sdk::data_objects::TensorAttributes& invVarianceAttributes,
+                       const hipdnn_sdk::data_objects::TensorAttributes& scaleAttributes,
+                       const hipdnn_sdk::data_objects::TensorAttributes& dxAttributes,
+                       const hipdnn_sdk::data_objects::TensorAttributes& dscaleAttributes,
+                       const hipdnn_sdk::data_objects::TensorAttributes& dbiasAttributes)
+        : dyTensor(unpackTensorAttributes(dyAttributes))
+        , xTensor(unpackTensorAttributes(xAttributes))
+        , scaleTensor(unpackTensorAttributes(scaleAttributes))
+        , dxTensor(unpackTensorAttributes(dxAttributes))
+        , dscaleTensor(unpackTensorAttributes(dscaleAttributes))
+        , dbiasTensor(unpackTensorAttributes(dbiasAttributes))
+        , meanTensor(unpackTensorAttributes(meanAttributes))
+        , invVarianceTensor(unpackTensorAttributes(invVarianceAttributes))
+    {
+    }
+
     hipdnn_sdk::data_objects::TensorAttributesT dyTensor;
     hipdnn_sdk::data_objects::TensorAttributesT xTensor;
     hipdnn_sdk::data_objects::TensorAttributesT scaleTensor;

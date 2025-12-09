@@ -341,6 +341,30 @@ public:
         dbias.memory().markHostModified();
     }
 
+    // Backwards compatible overload for old function signature
+    template <class DyDataType,
+              class XDataType,
+              class ScaleBiasDataType,
+              class MeanVarianceDataType = ScaleBiasDataType,
+              class DxDataType = XDataType,
+              class ComputeDataType = MeanVarianceDataType>
+    static void backward(const utilities::TensorBase<DyDataType>& dy,
+                         const utilities::TensorBase<XDataType>& x,
+                         const utilities::TensorBase<MeanVarianceDataType>& mean,
+                         const utilities::TensorBase<MeanVarianceDataType>& invVariance,
+                         const utilities::TensorBase<ScaleBiasDataType>& scale,
+                         utilities::TensorBase<DxDataType>& dx,
+                         utilities::TensorBase<ScaleBiasDataType>& dscale,
+                         utilities::TensorBase<ScaleBiasDataType>& dbias)
+    {
+        backward<DyDataType,
+                 XDataType,
+                 ScaleBiasDataType,
+                 MeanVarianceDataType,
+                 DxDataType,
+                 ComputeDataType>(dy, x, scale, dx, dscale, dbias, mean, invVariance);
+    }
+
 private:
     static int64_t calculateElementsPerChannel(const std::vector<int64_t>& dims)
     {
