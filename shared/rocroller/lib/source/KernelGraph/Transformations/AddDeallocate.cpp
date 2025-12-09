@@ -236,21 +236,8 @@ namespace rocRoller::KernelGraph
 
             auto neverReferencedArguments = argTracer.neverReferencedArguments();
 
-            // [rr/info] SIZE argument Tensor_4_size_0_20
-            // [rr/info] SIZE argument Tensor_4_size_1_22
-            // [rr/info] SIZE argument Tensor_4_size_2_24
-            // [rr/info] SIZE argument Tensor_4_size_3_25
-            // [rr/info] SIZE argument Tensor_7_size_0_26
-            // [rr/info] SIZE argument Tensor_7_size_1_27
-            // [rr/info] SIZE argument Tensor_7_size_2_28
-            // [rr/info] SIZE argument Tensor_7_size_3_30
-
             auto manualNeverReferencedArguments = std::set<std::string>{};
 
-            manualNeverReferencedArguments.insert("Tensor_4_size_0");
-            manualNeverReferencedArguments.insert("Tensor_4_size_1");
-            manualNeverReferencedArguments.insert("Tensor_4_size_2");
-            manualNeverReferencedArguments.insert("Tensor_4_size_3");
             manualNeverReferencedArguments.insert("Tensor_7_size_0");
             manualNeverReferencedArguments.insert("Tensor_7_size_1");
             manualNeverReferencedArguments.insert("Tensor_7_size_2");
