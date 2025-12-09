@@ -68,6 +68,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForGraphWithUnsup
 {
     MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
+    // nodeWrappers is only used in an all_of check which will pass when it's empty
     std::vector<std::unique_ptr<INodeWrapper>> nodeWrappers;
     EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodeWrappers));
 
@@ -82,6 +83,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForUnsupportedAtt
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
     EXPECT_CALL(mockGraph, hasOnlySupportedAttributes(::testing::_))
         .WillOnce(::testing::Return(false));
+    // nodeWrappers is only used in an all_of check which will pass when it's empty
     std::vector<std::unique_ptr<INodeWrapper>> nodeWrappers;
     EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodeWrappers));
 
@@ -406,6 +408,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForFourNodeGraph)
 {
     MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
+    // nodeWrappers is only used in an all_of check which will pass when it's empty
     std::vector<std::unique_ptr<INodeWrapper>> nodeWrappers;
     EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodeWrappers));
 
