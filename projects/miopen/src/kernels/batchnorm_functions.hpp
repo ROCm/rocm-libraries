@@ -265,13 +265,13 @@ running_stash(const FpPrecType_C* __restrict prevResultRunningMean,
 
     const auto pvt_newRunMean =
         miopen::fma(static_cast<FpAccumType_C>(-expAvgFactor),
-                    static_cast<FpAccumType_C>(pvt_runMean),
+                    pvt_runMean,                              // already FpAccumType_C
                     static_cast<FpAccumType_C>(pvt_runMean)); // tmp = oldRunMean
 
-    nextResultRunningMean[channel] = static_cast<FpPrecType_C>(
-        miopen::fma(static_cast<FpAccumType_C>(mean),
-                    static_cast<FpAccumType_C>(expAvgFactor),
-                    static_cast<FpAccumType_C>(pvt_newRunMean))); // newMean*factor + tmp
+    nextResultRunningMean[channel] = static_cast<FpPrecType_C>(miopen::fma(
+        static_cast<FpAccumType_C>(mean),
+        static_cast<FpAccumType_C>(expAvgFactor),
+        pvt_newRunMean)); // newMean*factor + tmp; pvt_newRunMean is already FpAccumType_C
 
     const FpAccumType_C adjust = static_cast<FpAccumType_C>(
         (config::nhw == 1)

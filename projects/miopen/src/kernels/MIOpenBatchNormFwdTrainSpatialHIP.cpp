@@ -1029,8 +1029,8 @@ extern "C" __global__ void __launch_bounds__(
     miopen::batchnorm::MIOpenBNFwdTrainSpatialHIPVar2{}.Norm(in, out, scale, bias, alpha, beta);
 }
 
-extern "C" __global__ void __launch_bounds__(
-    mio_bn_config::launch_dim.grp0* mio_bn_config::launch_dim.grp1* mio_bn_config::launch_dim.grp2)
+extern "C" __global__ void
+__launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     MIOpenBatchNormFwdTrainSpatialHIPFinalMeanVariance(
         mio_bn_config::fp_type* __restrict__ meanvarbuff,
         mio_bn_config::fp_prec_type INHW
