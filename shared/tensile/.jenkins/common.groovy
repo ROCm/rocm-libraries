@@ -126,7 +126,7 @@ def runTestCommand(platform, project, jobName, testMark, boolean runHostTest=tru
               pushd build
               echo "Running full test suite..."
               ./TensileTests ${markSkipExtendedTest} --gtest_output=xml:tensile-tests.xml --gtest_color=yes
-              FAILED_TESTS=\\\$(grep -oP 'testcase name="\\K[^"]+(?=".*?status="run"[^>]*?result="failed")?' tensile-tests.xml)
+              FAILED_TESTS=\$\(grep -oP 'testcase name="\\K[^"]+(?=".*?status="run"[^>]*?result="failed")?' tensile-tests.xml\)
               if [ -z "\$FAILED_TESTS" ]; then
                   echo "All tests passed."
               else
