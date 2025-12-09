@@ -50,7 +50,8 @@ struct ProblemDescriptionTag
 {
 };
 
-struct ProblemDescription : ProblemDescriptionTag
+struct ProblemDescription : ProblemDescriptionBase,
+                            ProblemDescriptionTag
 #if MIOPEN_ENABLE_SQLITE
     ,
                             SQLiteSerializable<ProblemDescription>
@@ -109,7 +110,7 @@ struct ProblemDescription : ProblemDescriptionTag
         return save_index;
     }
 
-    NetworkConfig MakeNetworkConfig() const;
+    NetworkConfig MakeNetworkConfig() const override;
 
     template <class Self>
     static void Visit(Self&& self, std::function<void(int64_t, std::string)> f)
