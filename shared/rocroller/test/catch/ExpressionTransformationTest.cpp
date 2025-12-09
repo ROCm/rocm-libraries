@@ -605,10 +605,10 @@ TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
 
     SECTION("nested convert")
     {
-        // Int32(r64 + Int64(r32 * r32)) -> Int32(Int32(r64), Int64(r32 * r32))
+        // Int32(r64 + Int64(r32 * r32)) -> Int32(Int32(r64) + Int32(r32 * r32))
         CHECK_THAT(
             convertPropagation(convert(Int32, r64[0] + convert(Int64, r32[1] * r32[2]))),
-            IdenticalTo(convert(Int32, convert(Int32, r64[0]) + convert(Int64, r32[1] * r32[2]))));
+            IdenticalTo(convert(Int32, convert(Int32, r64[0]) + convert(Int32, r32[1] * r32[2]))));
 
         // Do not propagate existing converts to larger types
         // Int32(r64 + Int64(r64 * r64)) -> Int32(Int32(r64) + Int64(r64 * r64))
