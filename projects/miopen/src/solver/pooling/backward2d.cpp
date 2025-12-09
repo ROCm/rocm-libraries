@@ -32,6 +32,7 @@
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/mlo_internal.hpp>
 #include <miopen/target_properties.hpp>
+#include <miopen/solver/implicitgemm_util.hpp>
 
 namespace miopen {
 
@@ -56,7 +57,9 @@ struct kernel_params
     std::size_t grp_tile0;
     std::size_t grp_tile1;
 
-    kernel_params(const miopen::pooling::ProblemDescription& problem)
+    kernel_params(const miopen::pooling::ProblemDescription& problem,
+                  const std::optional<PerformanceConfigPooling2d<OperationType::Backward>>& config =
+                      std::nullopt)
     {
         const auto& pd = problem.GetPooling();
 
@@ -68,34 +71,44 @@ struct kernel_params
         std::tie(batch_sz, n_inputs, in_height, in_width) =
             miopen::tien<4>(problem.GetXDesc().GetLengths(), 1);
 
-        out_pix_tile0 = 1;
-        out_pix_tile1 = 1;
-        if(pd.GetMode() == miopenPoolingMax)
+        if(config)
         {
-            out_pix_tile0 = in_width > 8 && in_width <= 24 ? 4 : 1;
-            out_pix_tile1 = in_width <= 24 ? 1 : (in_width > 64 && in_width <= 96 ? 4 : 8);
+            out_pix_tile0 = config->out_pix_tile0;
+            out_pix_tile1 = config->out_pix_tile1;
+            grp_tile0     = config->local_size0;
+            grp_tile1     = config->local_size1;
         }
-
-        grp_tile0 = 8;
-        grp_tile1 = 8;
-        if(pd.GetMode() == miopenPoolingMax)
+        else
         {
-            grp_tile0 = in_width <= 8     ? 8  //
-                        : in_width <= 16  ? 4  //
-                        : in_width <= 24  ? 8  //
-                        : in_width <= 32  ? 32 //
-                        : in_width <= 64  ? 8  //
-                        : in_width <= 96  ? 16 //
-                        : in_width <= 128 ? 16
-                                          : 32;
-            grp_tile1 = in_width <= 8     ? 8  //
-                        : in_width <= 16  ? 16 //
-                        : in_width <= 24  ? 8  //
-                        : in_width <= 32  ? 4  //
-                        : in_width <= 64  ? 8  //
-                        : in_width <= 96  ? 4  //
-                        : in_width <= 128 ? 16
-                                          : 4;
+            out_pix_tile0 = 1;
+            out_pix_tile1 = 1;
+            if(pd.GetMode() == miopenPoolingMax)
+            {
+                out_pix_tile0 = in_width > 8 && in_width <= 24 ? 4 : 1;
+                out_pix_tile1 = in_width <= 24 ? 1 : (in_width > 64 && in_width <= 96 ? 4 : 8);
+            }
+
+            grp_tile0 = 8;
+            grp_tile1 = 8;
+            if(pd.GetMode() == miopenPoolingMax)
+            {
+                grp_tile0 = in_width <= 8     ? 8  //
+                            : in_width <= 16  ? 4  //
+                            : in_width <= 24  ? 8  //
+                            : in_width <= 32  ? 32 //
+                            : in_width <= 64  ? 8  //
+                            : in_width <= 96  ? 16 //
+                            : in_width <= 128 ? 16
+                                              : 32;
+                grp_tile1 = in_width <= 8     ? 8  //
+                            : in_width <= 16  ? 16 //
+                            : in_width <= 24  ? 8  //
+                            : in_width <= 32  ? 4  //
+                            : in_width <= 64  ? 8  //
+                            : in_width <= 96  ? 4  //
+                            : in_width <= 128 ? 16
+                                              : 4;
+            }
         }
     }
 };
@@ -124,14 +137,25 @@ std::size_t sizeof_local_memory(const miopen::pooling::ProblemDescription& probl
     const kernel_params kp(problem);
 
     // aliases to ease programming
-    const auto& MLO_POOLING_KERNEL_SZ0      = kp.kernel_size_w;
-    const auto& MLO_POOLING_KERNEL_SZ1      = kp.kernel_size_h;
-    const auto& MLO_POOLBWD_N_HORIZ_OUT_PIX = kp.out_pix_tile0;
-    const auto& MLO_POOLBWD_N_VERT_OUT_PIX  = kp.out_pix_tile1;
-    const auto& MLO_POOLING_STRIDE0         = kp.kernel_stride_w;
-    const auto& MLO_POOLING_STRIDE1         = kp.kernel_stride_h;
-    const auto& MLO_POOLBWD_GROUP_SZ0       = kp.grp_tile0;
-    const auto& MLO_POOLBWD_GROUP_SZ1       = kp.grp_tile1;
+    const auto& MLO_POOLING_KERNEL_SZ0 = kp.kernel_size_w;
+    const auto& MLO_POOLING_KERNEL_SZ1 = kp.kernel_size_h;
+    const auto& MLO_POOLING_STRIDE0    = kp.kernel_stride_w;
+    const auto& MLO_POOLING_STRIDE1    = kp.kernel_stride_h;
+    // safer estimates of memory with max values of tunable parameters
+    assert(kp.out_pix_tile0 <=
+           PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile0);
+    const auto& MLO_POOLBWD_N_HORIZ_OUT_PIX =
+        PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile0;
+    assert(kp.out_pix_tile1 <=
+           PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile1);
+    const auto& MLO_POOLBWD_N_VERT_OUT_PIX =
+        PerformanceConfigPooling2d<OperationType::Backward>::max_out_pix_tile1;
+    assert(kp.grp_tile0 <= PerformanceConfigPooling2d<OperationType::Backward>::max_local_size0);
+    const auto& MLO_POOLBWD_GROUP_SZ0 =
+        PerformanceConfigPooling2d<OperationType::Backward>::max_local_size0;
+    assert(kp.grp_tile1 <= PerformanceConfigPooling2d<OperationType::Backward>::max_local_size1);
+    const auto& MLO_POOLBWD_GROUP_SZ1 =
+        PerformanceConfigPooling2d<OperationType::Backward>::max_local_size1;
 
     const auto MLO_POOLBWD_LCL_DATA_WIDTH =
         (static_cast<std::size_t>(MLO_POOLBWD_GROUP_SZ0) * MLO_POOLBWD_N_HORIZ_OUT_PIX +
@@ -187,13 +211,14 @@ bool PoolingBackward2d::IsApplicable(const ExecutionContext&,
            sizeof_local_memory(problem) <= TargetProperties::GetMaxLocalMemorySize();
 }
 
-ConvSolution
-PoolingBackward2d::GetSolution(const ExecutionContext&,
-                               const miopen::pooling::ProblemDescription& problem) const
+ConvSolution PoolingBackward2d::GetSolutionImpl(
+    const ExecutionContext&,
+    const miopen::pooling::ProblemDescription& problem,
+    const std::optional<PerformanceConfigPooling2d<OperationType::Backward>>& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
-    const kernel_params kp(problem);
+    const kernel_params kp(problem, config);
 
     {
         auto kernel = KernelInfo{};
@@ -305,6 +330,22 @@ PoolingBackward2d::GetWorkspaceSize(const ExecutionContext&,
     if(problem.GetPooling().GetMode() != miopenPoolingMax)
         return 0;
     return problem.GetYDesc().GetElementSize() * get_data_size(problem.GetPooling().GetIndexType());
+}
+
+bool PoolingBackward2d::IsValidPerformanceConfig(
+    const ExecutionContext& context,
+    const miopen::pooling::ProblemDescription& problem,
+    const PerformanceConfigPooling2d<OperationType::Backward>& config) const
+{
+    return config.IsValid(context, problem);
+}
+
+PerformanceConfigPooling2d<OperationType::Backward> PoolingBackward2d::GetDefaultPerformanceConfig(
+    const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
+{
+    PerformanceConfigPooling2d<OperationType::Backward> config;
+    config.HeuristicInit(problem);
+    return config;
 }
 
 } // namespace pooling

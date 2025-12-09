@@ -31,6 +31,7 @@
 #include <miopen/pooling.hpp>
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/mlo_internal.hpp>
+#include <miopen/solver/implicitgemm_util.hpp>
 
 namespace miopen {
 
@@ -51,7 +52,9 @@ struct kernel_params
     int out_pix_tile0;
     int out_pix_tile1;
 
-    kernel_params(const miopen::pooling::ProblemDescription& p)
+    kernel_params(const miopen::pooling::ProblemDescription& p,
+                  const std::optional<PerformanceConfigPooling2d<OperationType::Forward>>& config =
+                      std::nullopt)
     {
         const auto& pd  = p.GetPooling();
         const auto& yd  = p.GetYDesc();
@@ -62,11 +65,18 @@ struct kernel_params
         out_height      = yd.GetLengths()[2];
         out_width       = yd.GetLengths()[3];
         out_pix_tile0   = 1;
-        out_pix_tile1   = out_height <= 8    ? 1 //
-                          : out_height <= 32 ? 4 //
-                                             : 8;
-        if(out_height > 16 && out_height % 32 > 16)
-            out_pix_tile1 = std::min(16, std::max(1, prePow2(out_pix_tile1 * kernel_stride_h)));
+        if(config)
+        {
+            out_pix_tile1 = config->out_pix_tile1;
+        }
+        else
+        {
+            out_pix_tile1 = out_height <= 8    ? 1 //
+                            : out_height <= 32 ? 4 //
+                                               : 8;
+            if(out_height > 16 && out_height % 32 > 16)
+                out_pix_tile1 = std::min(16, std::max(1, prePow2(out_pix_tile1 * kernel_stride_h)));
+        }
     }
 };
 
@@ -112,7 +122,11 @@ std::size_t sizeof_private_memory(const miopen::pooling::ProblemDescription& pro
     const auto& MLO_POOLING_KERNEL_SZ0      = kp.kernel_size_w;
     const auto& MLO_POOLING_STRIDE0         = kp.kernel_stride_w;
     const auto& MLO_POOLING_N_HORIZ_OUT_PIX = kp.out_pix_tile0;
-    const auto& MLO_POOLING_N_VERT_OUT_PIX  = kp.out_pix_tile1;
+    // safer estimate of memory with max_out_pix_tile1
+    assert(kp.out_pix_tile1 <=
+           PerformanceConfigPooling2d<OperationType::Forward>::max_out_pix_tile1);
+    const auto& MLO_POOLING_N_VERT_OUT_PIX =
+        PerformanceConfigPooling2d<OperationType::Forward>::max_out_pix_tile1;
 
     const auto MLO_BOT_DATA_SZ0 =
         (static_cast<std::size_t>(MLO_POOLING_N_HORIZ_OUT_PIX) - 1) * MLO_POOLING_STRIDE0 +
@@ -150,8 +164,10 @@ bool PoolingForward2d::IsApplicable(const ExecutionContext& context,
                TargetProperties::GetMaxWaveScratchSize() / context.GetStream().GetWavefrontWidth();
 }
 
-ConvSolution PoolingForward2d::GetSolution(const ExecutionContext&,
-                                           const miopen::pooling::ProblemDescription& problem) const
+ConvSolution PoolingForward2d::GetSolutionImpl(
+    const ExecutionContext&,
+    const miopen::pooling::ProblemDescription& problem,
+    const std::optional<PerformanceConfigPooling2d<OperationType::Forward>>& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
@@ -161,7 +177,7 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext&,
         kernel.kernel_file = "MIOpenPooling.cpp";
         kernel.kernel_name = "mloPoolingG";
 
-        const kernel_params kp(problem);
+        const kernel_params kp(problem, config);
 
         int batch_sz, n_outputs;
         std::tie(batch_sz, n_outputs, std::ignore, std::ignore) =
@@ -170,12 +186,21 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext&,
         const auto& pool_d   = problem.GetPooling();
         const auto wsp_index = pool_d.GetWorkspaceIndexMode();
 
-        int grp_tile0 = kp.out_width <= 8 ? 8 : (kp.out_width % 32 <= 16 ? 16 : 32);
-        int grp_tile1 = kp.out_height <= 8    ? 8
+        int grp_tile0, grp_tile1;
+        if(config)
+        {
+            grp_tile0 = config->local_size0;
+            grp_tile1 = config->local_size1;
+        }
+        else
+        {
+            grp_tile0 = kp.out_width <= 8 ? 8 : (kp.out_width % 32 <= 16 ? 16 : 32);
+            grp_tile1 = kp.out_height <= 8    ? 8
                         : kp.out_height < 16  ? 16
                         : kp.out_height <= 32 ? 32
                         : kp.out_height <= 64 ? 64
                                               : 128;
+        }
         grp_tile1 /= kp.out_pix_tile1;
         while(grp_tile0 * grp_tile1 > 256 && grp_tile0 > 1)
             grp_tile0 >>= 1;
@@ -261,6 +286,22 @@ PoolingForward2d::GetWorkspaceSize(const ExecutionContext&,
     if(problem.GetPooling().GetMode() != miopenPoolingMax)
         return 0;
     return problem.GetYDesc().GetElementSize() * get_data_size(problem.GetPooling().GetIndexType());
+}
+
+bool PoolingForward2d::IsValidPerformanceConfig(
+    const ExecutionContext& context,
+    const miopen::pooling::ProblemDescription& problem,
+    const PerformanceConfigPooling2d<OperationType::Forward>& config) const
+{
+    return config.IsValid(context, problem);
+}
+
+PerformanceConfigPooling2d<OperationType::Forward> PoolingForward2d::GetDefaultPerformanceConfig(
+    const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
+{
+    PerformanceConfigPooling2d<OperationType::Forward> config;
+    config.HeuristicInit(problem);
+    return config;
 }
 
 } // namespace pooling
