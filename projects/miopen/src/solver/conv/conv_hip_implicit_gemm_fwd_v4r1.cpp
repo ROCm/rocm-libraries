@@ -123,6 +123,8 @@ bool ConvHipImplicitGemmV4R1WrW::IsApplicable(const ExecutionContext& ctx,
         return false;
     if(!problem.IsLayoutDefault())
         return false;
+    if(problem.HasNonPackedTensors())
+        return false;
     if(name == "gfx90a" && problem.IsGfx90aFp16altRequired())
         return false;
     if(problem.IsTensorsCasted())
