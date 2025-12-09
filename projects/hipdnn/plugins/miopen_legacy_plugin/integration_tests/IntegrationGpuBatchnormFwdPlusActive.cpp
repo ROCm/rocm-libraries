@@ -77,7 +77,6 @@ protected:
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         graph::BatchnormInferenceAttributes bnAttrs;
-        bnAttrs.set_name("batchnorm_inference");
 
         auto yTensorAttr = graphObj.batchnorm_inference(xTensorAttr,
                                                         meanTensorAttr,

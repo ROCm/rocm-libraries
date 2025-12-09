@@ -117,7 +117,6 @@ protected:
 
         // BN_Y = batchnorm_inference(X, mean, inv_variance, scale, bias)
         graph::BatchnormInferenceAttributes bnInfAttrs;
-        bnInfAttrs.set_name("batchnorm_inference");
 
         auto bnY = graphObj.batchnorm_inference(xTensorAttr,
                                                 meanTensorAttr,
@@ -133,7 +132,6 @@ protected:
 
         // DX_dactiv = pointwise(DY, BN_Y, activation_mode)
         graph::PointwiseAttributes activBwdAttrs;
-        activBwdAttrs.set_name("activation_bwd");
         activBwdAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
         if(activTestCase.reluLowerClip.has_value())
         {
@@ -163,7 +161,6 @@ protected:
         auto dxDrelu = graphObj.pointwise(bnY, dyTensorAttr, activBwdAttrs);
 
         graph::BatchnormBackwardAttributes bnBwdAttrs;
-        bnBwdAttrs.set_name("batchnorm_backward");
         bnBwdAttrs.set_saved_mean_and_inv_variance(meanTensorAttr, invVarianceTensorAttr);
 
         // [DX, dscale, dbias] = batchnorm_backward(DX_drelu, X, scale, saved_mean_inv_var)

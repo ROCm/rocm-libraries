@@ -50,7 +50,6 @@ protected:
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
         graph::ConvWgradAttributes convAttrs;
-        convAttrs.set_name("convolution_backward_weights");
         convAttrs.set_pre_padding(testCase.convPrePadding);
         convAttrs.set_post_padding(testCase.convPostPadding);
         convAttrs.set_stride(testCase.convStride);

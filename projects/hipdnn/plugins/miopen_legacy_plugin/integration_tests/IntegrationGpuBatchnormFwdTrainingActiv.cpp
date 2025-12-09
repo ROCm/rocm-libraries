@@ -137,7 +137,6 @@ protected:
 
         // Create batchnorm attributes
         graph::BatchnormAttributes bnAttrs;
-        bnAttrs.set_name("batchnorm_training");
 
         if(prevRunningMeanTensorAttr && prevRunningVarianceTensorAttr && momentumTensorAttr)
         {

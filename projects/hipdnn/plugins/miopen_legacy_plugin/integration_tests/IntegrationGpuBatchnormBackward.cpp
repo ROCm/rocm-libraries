@@ -95,7 +95,6 @@ protected:
             = std::make_shared<graph::TensorAttributes>(std::move(invVarianceAttr));
 
         graph::BatchnormBackwardAttributes bnAttrs;
-        bnAttrs.set_name("batchnorm_backward");
         bnAttrs.set_saved_mean_and_inv_variance(meanTensorAttr, invVarianceTensorAttr);
 
         auto outputTensorsAttr

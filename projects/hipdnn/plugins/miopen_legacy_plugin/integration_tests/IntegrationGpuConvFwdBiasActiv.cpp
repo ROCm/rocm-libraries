@@ -47,7 +47,6 @@ protected:
         auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
         graph::ConvFpropAttributes convAttrs;
-        convAttrs.set_name("convolution_forward");
         convAttrs.set_pre_padding(convTestCase.convPrePadding);
         convAttrs.set_post_padding(convTestCase.convPostPadding);
         convAttrs.set_stride(convTestCase.convStride);
@@ -65,14 +64,12 @@ protected:
             auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
             graph::PointwiseAttributes biasAttrs;
-            biasAttrs.set_name("bias");
             biasAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
 
             yBiasTensorAttr = graphObj.pointwise(yConvTensorAttr, biasTensorAttr, biasAttrs);
         }
 
         graph::PointwiseAttributes activAttrs;
-        activAttrs.set_name("activation_forward");
         activAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
         if(activTestCase.reluLowerClip.has_value())
         {

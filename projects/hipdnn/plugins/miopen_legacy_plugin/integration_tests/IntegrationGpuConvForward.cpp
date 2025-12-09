@@ -50,7 +50,6 @@ protected:
         auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
         graph::ConvFpropAttributes convAttrs;
-        convAttrs.set_name("convolution_forward");
         convAttrs.set_pre_padding(testCase.convPrePadding);
         convAttrs.set_post_padding(testCase.convPostPadding);
         convAttrs.set_stride(testCase.convStride);
