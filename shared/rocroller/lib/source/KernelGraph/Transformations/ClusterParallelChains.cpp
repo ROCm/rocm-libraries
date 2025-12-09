@@ -516,6 +516,21 @@ namespace rocRoller
             return identifyParallelChains(graph, {std::move(multiplyChains), std::move(ldsChains)});
         }
 
+        vec3 identifyParallelMultiplyD2LDSAndLDSChains(KernelGraph const& graph)
+        {
+            auto multiplyChains = findMultiplyChains(graph);
+            auto ldsChains      = findLoadLDSChains(graph);
+            auto d2Chains = findD2LDSChains(graph);
+            // auto loadChains     = findLoadTiledChains(graph);
+
+            Log::debug("Multiply chains: \n{}", showChains(multiplyChains));
+            Log::debug("LDS chains: \n{}", showChains(ldsChains));
+            Log::debug("D2LDS chains: \n{}", showChains(d2Chains));
+            // Log::debug("LoadTiled chains: \n{}", showChains(loadChains));
+
+            return identifyParallelChains(graph, {std::move(multiplyChains), std::move(ldsChains), std::move(d2Chains)});
+        }
+
         vec3 identifyParallelMultiplyAndLoadStoreChains(KernelGraph const& graph)
         {
             auto multiplyChains  = findMultiplyChains(graph);
