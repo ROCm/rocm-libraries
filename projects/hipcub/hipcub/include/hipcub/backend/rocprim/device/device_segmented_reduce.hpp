@@ -87,7 +87,7 @@ inline hipError_t launch_segmented_arg_minmax(::rocprim::detail::target current_
         const unsigned int segment_id = ::rocprim::detail::block_id<0>();
 
         // Large indices need bigger offset type than unsigned int
-        using offset_type = typename std::iterator_traits<OffsetIterator>::value_type;
+        using offset_type = it_value_t<OffsetIterator>;
 
         const offset_type begin_offset = begin_offsets[segment_id];
         const offset_type end_offset   = end_offsets[segment_id];
@@ -134,7 +134,7 @@ inline hipError_t segmented_arg_minmax(void*          temporary_storage,
                                        InitValueType  empty_value,
                                        hipStream_t    stream)
 {
-    using input_type  = typename std::iterator_traits<InputIterator>::value_type;
+    using input_type  = detail::it_value_t<InputIterator>;
     using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 
     using selector = ::rocprim::detail::segmented_reduce_config_selector<result_type>;
@@ -255,7 +255,7 @@ struct DeviceSegmentedReduce
                           OffsetIteratorT      d_end_offsets,
                           hipStream_t          stream = 0)
     {
-        using input_type = typename std::iterator_traits<InputIteratorT>::value_type;
+        using input_type = detail::it_value_t<InputIteratorT>;
 
         return Reduce(d_temp_storage,
                       temp_storage_bytes,
@@ -303,7 +303,7 @@ struct DeviceSegmentedReduce
                           OffsetIteratorT      d_end_offsets,
                           hipStream_t          stream = 0)
     {
-        using input_type = typename std::iterator_traits<InputIteratorT>::value_type;
+        using input_type = detail::it_value_t<InputIteratorT>;
 
         return Reduce(d_temp_storage,
                       temp_storage_bytes,
@@ -352,8 +352,8 @@ struct DeviceSegmentedReduce
                              hipStream_t          stream = 0)
     {
         using OffsetT      = int;
-        using T            = typename std::iterator_traits<InputIteratorT>::value_type;
-        using O            = typename std::iterator_traits<OutputIteratorT>::value_type;
+        using T            = hipcub::detail::it_value_t<InputIteratorT>;
+        using O            = hipcub::detail::it_value_t<OutputIteratorT>;
         using OutputTupleT =
             typename std::conditional<std::is_same_v<O, void>, KeyValuePair<OffsetT, T>, O>::type;
 
@@ -415,7 +415,7 @@ struct DeviceSegmentedReduce
                           OffsetIteratorT      d_end_offsets,
                           hipStream_t          stream = 0)
     {
-        using input_type = typename std::iterator_traits<InputIteratorT>::value_type;
+        using input_type = detail::it_value_t<InputIteratorT>;
 
         return Reduce(d_temp_storage,
                       temp_storage_bytes,
@@ -464,8 +464,8 @@ struct DeviceSegmentedReduce
                              hipStream_t          stream = 0)
     {
         using OffsetT      = int;
-        using T            = typename std::iterator_traits<InputIteratorT>::value_type;
-        using O            = typename std::iterator_traits<OutputIteratorT>::value_type;
+        using T            = hipcub::detail::it_value_t<InputIteratorT>;
+        using O            = hipcub::detail::it_value_t<OutputIteratorT>;
         using OutputTupleT =
             typename std::conditional<std::is_same_v<O, void>, KeyValuePair<OffsetT, T>, O>::type;
 

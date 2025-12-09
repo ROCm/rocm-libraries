@@ -116,12 +116,12 @@ inline T get_random_value(T min, T max)
 // Can't use std::prefix_sum for inclusive/exclusive scan, because
 // it does not handle short[] -> int(int a, int b) { a + b; } -> int[]
 // they way we expect. That's because sum in std::prefix_sum's implementation
-// is of type typename std::iterator_traits<InputIt>::value_type (short)
+// is of type ::hipcub::detail::it_value_t<InputIt> (short)
 template<class InputIt, class OutputIt, class BinaryOperation>
 OutputIt host_inclusive_scan(InputIt first, InputIt last, OutputIt d_first, BinaryOperation op)
 {
-    using input_type  = typename std::iterator_traits<InputIt>::value_type;
-    using output_type = typename std::iterator_traits<OutputIt>::value_type;
+    using input_type  = ::hipcub::detail::it_value_t<InputIt>;
+    using output_type = ::hipcub::detail::it_value_t<OutputIt>;
     using result_type =
         typename std::conditional<std::is_void<output_type>::value, input_type, output_type>::type;
 
@@ -143,8 +143,8 @@ template<class InputIt, class T, class OutputIt, class BinaryOperation>
 OutputIt host_exclusive_scan(
     InputIt first, InputIt last, T initial_value, OutputIt d_first, BinaryOperation op)
 {
-    using input_type  = typename std::iterator_traits<InputIt>::value_type;
-    using output_type = typename std::iterator_traits<OutputIt>::value_type;
+    using input_type  = ::hipcub::detail::it_value_t<InputIt>;
+    using output_type = ::hipcub::detail::it_value_t<OutputIt>;
     using result_type =
         typename std::conditional<std::is_void<output_type>::value, input_type, output_type>::type;
 
@@ -177,8 +177,8 @@ OutputIt host_exclusive_scan_by_key(InputIt         first,
                                     BinaryOperation op,
                                     KeyCompare      key_compare_op)
 {
-    using input_type  = typename std::iterator_traits<InputIt>::value_type;
-    using output_type = typename std::iterator_traits<OutputIt>::value_type;
+    using input_type  = ::hipcub::detail::it_value_t<InputIt>;
+    using output_type = ::hipcub::detail::it_value_t<OutputIt>;
     using result_type =
         typename std::conditional<std::is_void<output_type>::value, input_type, output_type>::type;
 
@@ -419,9 +419,6 @@ inline constexpr bool is_power_of_two(const T x)
     return (x > 0) && ((x & (x - 1)) == 0);
 }
 
-template<typename Iterator>
-using it_value_t = typename std::iterator_traits<Iterator>::value_type;
-
 using engine_type = std::default_random_engine;
 
 // generate_random_data_n() generates only part of sequence and replicates it,
@@ -429,9 +426,10 @@ using engine_type = std::default_random_engine;
 template<class OutputIter, class U, class V, class Generator>
 inline auto generate_random_data_n(
     OutputIter it, size_t size, U min, V max, Generator& gen, size_t max_random_size = 1024 * 1024)
-    -> typename std::enable_if_t<std::is_integral<it_value_t<OutputIter>>::value, OutputIter>
+    -> typename std::enable_if_t<std::is_integral<::hipcub::detail::it_value_t<OutputIter>>::value,
+                                 OutputIter>
 {
-    using T = it_value_t<OutputIter>;
+    using T = ::hipcub::detail::it_value_t<OutputIter>;
 
     using dis_type = typename std::conditional<(sizeof(T) == 1), short, T>::type;
     std::uniform_int_distribution<dis_type> distribution((T)min, (T)max);
@@ -452,9 +450,10 @@ inline auto generate_random_data_n(OutputIterator it,
                                    V              max,
                                    Generator&     gen,
                                    size_t         max_random_size = 1024 * 1024)
-    -> std::enable_if_t<std::is_floating_point<it_value_t<OutputIterator>>::value, OutputIterator>
+    -> std::enable_if_t<std::is_floating_point<::hipcub::detail::it_value_t<OutputIterator>>::value,
+                        OutputIterator>
 {
-    using T = typename std::iterator_traits<OutputIterator>::value_type;
+    using T = ::hipcub::detail::it_value_t<OutputIterator>;
 
     std::uniform_real_distribution<T> distribution((T)min, (T)max);
     std::generate_n(it,

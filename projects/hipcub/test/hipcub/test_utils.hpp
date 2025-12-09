@@ -167,7 +167,7 @@ OutputIt host_inclusive_scan_impl(
 template<class InputIt, class OutputIt, class BinaryOperation>
 OutputIt host_inclusive_scan(InputIt first, InputIt last, OutputIt d_first, BinaryOperation op)
 {
-    using acc_type = typename std::iterator_traits<InputIt>::value_type;
+    using acc_type = ::hipcub::detail::it_value_t<InputIt>;
     return host_inclusive_scan_impl(first, last, d_first, op, acc_type{});
 }
 
@@ -182,11 +182,10 @@ template<
     class InputIt,
     class OutputIt,
     class T,
-    std::enable_if_t<
-        std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::bfloat16>
-            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::half>
-            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, float>,
-        bool>
+    std::enable_if_t<std::is_same_v<hipcub::detail::it_value_t<InputIt>, test_utils::bfloat16>
+                         || std::is_same_v<hipcub::detail::it_value_t<InputIt>, test_utils::half>
+                         || std::is_same_v<hipcub::detail::it_value_t<InputIt>, float>,
+                     bool>
     = true>
 OutputIt host_inclusive_scan(InputIt first, InputIt last, OutputIt d_first, test_utils::plus)
 {
@@ -199,11 +198,10 @@ template<
     class OutputIt,
     class InitType,
     class T,
-    std::enable_if_t<
-        std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::bfloat16>
-            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::half>
-            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, float>,
-        bool>
+    std::enable_if_t<std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::bfloat16>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::half>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, float>,
+                     bool>
     = true>
 OutputIt host_inclusive_scan_init(
     InputIt first, InputIt last, OutputIt d_first, InitType init_value, test_utils::plus)
@@ -240,7 +238,7 @@ template<class InputIt, class T, class OutputIt, class BinaryOperation>
 OutputIt host_exclusive_scan(
     InputIt first, InputIt last, T initial_value, OutputIt d_first, BinaryOperation op)
 {
-    using acc_type = typename std::iterator_traits<InputIt>::value_type;
+    using acc_type = ::hipcub::detail::it_value_t<InputIt>;
     return host_exclusive_scan_impl(first, last, initial_value, d_first, op, acc_type{});
 }
 
@@ -249,11 +247,10 @@ template<
     class T,
     class OutputIt,
     class U,
-    std::enable_if_t<
-        std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::bfloat16>
-            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::half>
-            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, float>,
-        bool>
+    std::enable_if_t<std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::bfloat16>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::half>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, float>,
+                     bool>
     = true>
 OutputIt host_exclusive_scan(
     InputIt first, InputIt last, T initial_value, OutputIt d_first, test_utils::plus)
@@ -318,7 +315,7 @@ OutputIt host_exclusive_scan_by_key(InputIt         first,
                                     BinaryOperation op,
                                     KeyCompare      key_compare_op)
 {
-    using acc_type = typename std::iterator_traits<InputIt>::value_type;
+    using acc_type = ::hipcub::detail::it_value_t<InputIt>;
     return host_exclusive_scan_by_key_impl(first,
                                            last,
                                            k_first,
@@ -336,11 +333,10 @@ template<
     class OutputIt,
     class U,
     class KeyCompare,
-    std::enable_if_t<
-        std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::bfloat16>
-            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::half>
-            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, float>,
-        bool>
+    std::enable_if_t<std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::bfloat16>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::half>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, float>,
+                     bool>
     = true>
 OutputIt host_exclusive_scan_by_key(InputIt  first,
                                     InputIt  last,
@@ -403,7 +399,7 @@ OutputIt host_inclusive_scan_by_key(InputIt         first,
                                     BinaryOperation op,
                                     KeyCompare      key_compare_op)
 {
-    using acc_type = typename std::iterator_traits<InputIt>::value_type;
+    using acc_type = ::hipcub::detail::it_value_t<InputIt>;
     return host_inclusive_scan_by_key_impl(first,
                                            last,
                                            k_first,
@@ -419,11 +415,10 @@ template<
     class OutputIt,
     class U,
     class KeyCompare,
-    std::enable_if_t<
-        std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::bfloat16>
-            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, test_utils::half>
-            || std::is_same_v<typename std::iterator_traits<InputIt>::value_type, float>,
-        bool>
+    std::enable_if_t<std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::bfloat16>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, test_utils::half>
+                         || std::is_same_v<::hipcub::detail::it_value_t<InputIt>, float>,
+                     bool>
     = true>
 OutputIt host_inclusive_scan_by_key(InputIt  first,
                                     InputIt  last,
