@@ -31,5 +31,8 @@ if(EXISTS ${ROCM_LLVM_BIN_DIR})
 
     message(STATUS "Using ROCm Clang compilers from ${ROCM_LLVM_BIN_DIR}")
 else()
-    message(FATAL_ERROR "The directory ${ROCM_LLVM_BIN_DIR} does not exist. Cannot auto select clang compilers.")
+    message(
+        FATAL_ERROR
+            "The directory ${ROCM_LLVM_BIN_DIR} does not exist. Cannot auto select clang compilers."
+    )
 endif()

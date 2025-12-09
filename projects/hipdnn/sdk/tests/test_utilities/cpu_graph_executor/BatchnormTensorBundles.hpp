@@ -40,7 +40,8 @@ struct BatchnormTrainTensorBundle
 {
     BatchnormTrainTensorBundle(const std::vector<int64_t>& dims,
                                unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
-                               const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW,
+                               const hipdnn_sdk::utilities::TensorLayout& layout
+                               = hipdnn_sdk::utilities::TensorLayout::NCHW,
                                bool useOptionalTensors = false)
         : derivedDims(hipdnn_sdk::utilities::getDerivedShape(dims))
         , xTensor(dims, layout)
@@ -66,26 +67,30 @@ struct BatchnormTrainTensorBundle
         invVarianceTensor.fillWithRandomValues(
             static_cast<MeanVarianceDataType>(1.9f), static_cast<MeanVarianceDataType>(2.0f), seed);
 
-        epsilonTensor.fillWithValue(
-            static_cast<MeanVarianceDataType>(static_cast<float>(hipdnn_sdk::utilities::BATCHNORM_DEFAULT_EPSILON)));
+        epsilonTensor.fillWithValue(static_cast<MeanVarianceDataType>(
+            static_cast<float>(hipdnn_sdk::utilities::BATCHNORM_DEFAULT_EPSILON)));
 
         if(useOptionalTensors)
         {
             momentumTensor = hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>({1});
             momentumTensor->fillWithValue(static_cast<MeanVarianceDataType>(0.1f));
 
-            prevRunningMeanTensor = hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>(derivedDims);
+            prevRunningMeanTensor
+                = hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>(derivedDims);
             prevRunningMeanTensor->fillWithRandomValues(static_cast<MeanVarianceDataType>(-0.1f),
                                                         static_cast<MeanVarianceDataType>(0.1f),
                                                         seed);
 
-            prevRunningVarianceTensor = hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>(derivedDims);
+            prevRunningVarianceTensor
+                = hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>(derivedDims);
             prevRunningVarianceTensor->fillWithRandomValues(static_cast<MeanVarianceDataType>(1.9f),
                                                             static_cast<MeanVarianceDataType>(2.0f),
                                                             seed);
 
-            nextRunningMeanTensor = hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>(derivedDims);
-            nextRunningVarianceTensor = hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>(derivedDims);
+            nextRunningMeanTensor
+                = hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>(derivedDims);
+            nextRunningVarianceTensor
+                = hipdnn_sdk::utilities::Tensor<MeanVarianceDataType>(derivedDims);
         }
     }
 
@@ -169,7 +174,8 @@ struct BatchnormBwdTensorBundle
 {
     BatchnormBwdTensorBundle(const std::vector<int64_t>& dims,
                              unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
-                             const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW)
+                             const hipdnn_sdk::utilities::TensorLayout& layout
+                             = hipdnn_sdk::utilities::TensorLayout::NCHW)
         : derivedDims(hipdnn_sdk::utilities::getDerivedShape(dims))
         , xTensor(dims, layout)
         , dyTensor(dims, layout)

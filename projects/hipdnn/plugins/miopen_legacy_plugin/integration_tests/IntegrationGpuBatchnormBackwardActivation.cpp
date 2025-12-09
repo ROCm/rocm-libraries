@@ -15,9 +15,6 @@
 #include "../tests/common/BatchnormCommon.hpp"
 #include "IntegrationGraphVerificationHarness.hpp"
 
-// Skipping slow running tests on Windows to prevent inconsistent timeout issues
-#define WORKAROUND_ALMIOPEN_509 1
-
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
@@ -69,10 +66,6 @@ protected:
 
     void runGraphTest([[maybe_unused]] DataType tolerance, const TensorLayout& layout) override
     {
-#if WORKAROUND_ALMIOPEN_509
-        SKIP_IF_WINDOWS();
-#endif
-
         namespace fe = hipdnn_frontend;
 
         const auto& [bnTestCase, activTestCase] = this->GetParam();

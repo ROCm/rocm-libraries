@@ -13,7 +13,8 @@ find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 enable_language(HIP)
 
-add_executable(hipdnn_sdk_tests
+add_executable(
+    hipdnn_sdk_tests
     main.cpp
     plugin/TestPluginDataTypeHelpers.cpp
     plugin/TestPluginException.cpp
@@ -74,7 +75,8 @@ add_executable(hipdnn_sdk_tests
 )
 
 target_compile_options(hipdnn_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
-target_link_libraries(hipdnn_sdk_tests 
+target_link_libraries(
+    hipdnn_sdk_tests
     GTest::gtest
     GTest::gmock
     Threads::Threads

@@ -16,6 +16,8 @@
 #include <hipdnn_sdk/test_utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 #include <hipdnn_sdk/utilities/Workspace.hpp>
 
+#include <functional>
+
 namespace miopen_legacy_plugin::test_utilities
 {
 
@@ -82,9 +84,16 @@ protected:
         executeCpuGraph(graph, cpuBundle);
 
         ASSERT_GE(outputTensorIds.size(), 1)
-            << "At least one output tensor id must be specified for validation.";
+            << "At least one output tensor id must be specified for "
+               "validation.";
 
         HIPDNN_LOG_INFO("Validating {} output tensors", outputTensorIds);
+
+        // Lazily register validators after graph execution since tensor Ids and types may be inferred during graph finalization
+        for(const auto& registerValidator : _deferredValidators)
+        {
+            registerValidator();
+        }
 
         for(const auto& tensorId : outputTensorIds)
         {
@@ -119,20 +128,26 @@ protected:
                            float absoluteTolerance,
                            float relativeTolerance)
     {
-        _tensorIdToValidatorMap.insert(
-            {attr->get_uid(),
-             hipdnn_sdk::test_utilities::createAllCloseValidator(
-                 toSdkType(attr->get_data_type()), absoluteTolerance, relativeTolerance)});
-        _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
+        // Since the graph can infer properties + Ids, we defer validator registration until right before validation in verifyGraph
+        _deferredValidators.emplace_back([=]() {
+            _tensorIdToValidatorMap.insert(
+                {attr->get_uid(),
+                 hipdnn_sdk::test_utilities::createAllCloseValidator(
+                     toSdkType(attr->get_data_type()), absoluteTolerance, relativeTolerance)});
+            _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
+        });
     }
 
     void registerRmsValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
                               float rmsThreshold)
     {
-        _tensorIdToValidatorMap.insert({attr->get_uid(),
-                                        hipdnn_sdk::test_utilities::createRmsValidator(
-                                            toSdkType(attr->get_data_type()), rmsThreshold)});
-        _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
+        // Since the graph can infer properties + Ids, we defer validator registration until right before validation in verifyGraph
+        _deferredValidators.emplace_back([=]() {
+            _tensorIdToValidatorMap.insert({attr->get_uid(),
+                                            hipdnn_sdk::test_utilities::createRmsValidator(
+                                                toSdkType(attr->get_data_type()), rmsThreshold)});
+            _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
+        });
     }
 
     virtual void generateBundles(hipdnn_frontend::graph::Graph& graph,
@@ -233,6 +248,7 @@ private:
     std::unordered_map<int64_t, std::string> _tensorIdToNameMap;
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_sdk::test_utilities::IReferenceValidation>>
         _tensorIdToValidatorMap;
+    std::vector<std::function<void()>> _deferredValidators;
 };
 
 // NOLINTEND (portability-template-virtual-member-function)

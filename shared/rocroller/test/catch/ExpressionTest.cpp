@@ -321,6 +321,58 @@ namespace ExpressionTest
          s_bfe_u32 s0, v7, 1048576 //    expr.offset = 0
          )";
 
+        {
+            auto rb = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt64, 1);
+            rb->setName("rb");
+            rb->allocateNow();
+
+            auto b = rb->expression();
+
+            auto expr10 = bfe(DataType::UInt32, a, 0, 32); // redundant full register
+            auto expr11
+                = bfe(DataType::UInt32, b, 0, 32); // full register from Uint64 (2 registers)
+            auto expr12
+                = bfe(DataType::UInt32, b, 32, 32); // full register from Uint64 (2 registers)
+            auto expr13 = bfe(DataType::UInt64, b, 0, 64); // redundant full register from UInt64
+            auto expr14 = bfe(DataType::Int32, b, 0, 32); // full register from Uint64 (2 registers)
+
+            auto dest10 = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt32, 1);
+            auto dest11 = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt32, 1);
+            auto dest12 = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt32, 1);
+            auto dest13 = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt64, 1);
+            auto dest14 = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::Int32, 1);
+
+            context.get()->schedule(Expression::generate(dest10, expr10, context.get()));
+            context.get()->schedule(Expression::generate(dest11, expr11, context.get()));
+            context.get()->schedule(Expression::generate(dest12, expr12, context.get()));
+            context.get()->schedule(Expression::generate(dest13, expr13, context.get()));
+            context.get()->schedule(Expression::generate(dest14, expr14, context.get()));
+        }
+
+        expected += R"(
+            // expr10 - full register extraction should optimize away
+            v_mov_b32 v7, v0
+
+            // expr11 - extracting first register from UInt64 to UInt32
+            v_mov_b32 v12, v10
+
+            // expr12 - extracting second register from UInt64 to UInt32
+            v_mov_b32 v13, v11
+
+            // expr13 - full register extraction from UInt64 to UInt64
+            v_mov_b32 v14, v10
+            v_mov_b32 v15, v11
+
+            // expr14 - extracting first register from UInt64 to Int32
+            v_mov_b32 v16, v10
+        )";
+
         CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
     }
 
@@ -2291,6 +2343,45 @@ namespace ExpressionTest
 
             CHECK(std::get<uint32_t>(evaluate(expr)) == 0x00ff0000u);
         }
+
+        SECTION("Evaluation 5 - UInt32 source to Raw32 destination")
+        {
+            auto const srcOffset = 8u;
+            auto const dstOffset = 4u;
+            auto const width     = 12u;
+            auto       src       = literal(0x00abcd00u);
+            auto       dst       = literal(Raw32(0xffff0000u));
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<Raw32>(evaluate(expr)).value == 0xffffbcd0u);
+        }
+
+        SECTION("Evaluation 6 - UInt64 source to Raw32 destination")
+        {
+            auto const srcOffset = 16u;
+            auto const dstOffset = 8u;
+            auto const width     = 16u;
+            auto       src       = literal(0x123456789abcdef0ull, DataType::UInt64);
+            auto       dst       = literal(Raw32(0x000000ffu));
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<Raw32>(evaluate(splitBitfieldCombine(expr))).value == 0x009abcffu);
+        }
+
+        SECTION("Evaluation 7 - UInt32 to Raw32 full width")
+        {
+            auto const srcOffset = 0u;
+            auto const dstOffset = 0u;
+            auto const width     = 32u;
+            auto       src       = literal(0xdeadbeefu);
+            auto       dst       = literal(Raw32(0u));
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<Raw32>(evaluate(expr)).value == 0xdeadbeefu);
+        }
     }
 
     TEST_CASE("Expression evaluate BitfieldExtract", "[expression]")
@@ -2353,6 +2444,135 @@ namespace ExpressionTest
 
             CHECK(std::get<uint32_t>(evaluate(expr1)) == 1u);
             CHECK(std::get<int32_t>(evaluate(expr2)) == -1);
+        }
+
+        SECTION("Evaluation 6 - UInt64 to UInt32 truncation")
+        {
+            auto const offset = 0u;
+            auto const width  = 32u;
+            auto       src    = literal(0x123456789abcdef0ull, DataType::UInt64);
+
+            auto expr = bfe(DataType::UInt32, src, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x9abcdef0u);
+        }
+
+        SECTION("Evaluation 7 - UInt64 to Raw32 truncation")
+        {
+            auto const offset = 0u;
+            auto const width  = 32u;
+            auto       src    = literal(0xfedcba9876543210ull, DataType::UInt64);
+
+            auto expr = bfe(DataType::Raw32, src, offset, width);
+
+            CHECK(std::get<Raw32>(evaluate(expr)).value == 0x76543210u);
+        }
+
+        SECTION("Evaluation 8 - Int64 to Int32 truncation with sign extension")
+        {
+            auto const offset = 0u;
+            auto const width  = 32u;
+            auto       src    = literal(-1ll, DataType::Int64);
+
+            auto expr = bfe(DataType::Int32, src, offset, width);
+
+            CHECK(std::get<int32_t>(evaluate(expr)) == -1);
+        }
+    }
+
+    TEST_CASE("Expression evaluate reinterpret", "[expression]")
+    {
+        using namespace Expression;
+
+        SECTION("Int32 to UInt32")
+        {
+            int32_t value  = -1;
+            auto    result = reinterpret(CommandArgumentValue(value), DataType::UInt32);
+            CHECK(std::get<uint32_t>(result) == 0xFFFFFFFFu);
+        }
+
+        SECTION("UInt32 to Int32")
+        {
+            uint32_t value  = 0xFFFFFFFFu;
+            auto     result = reinterpret(CommandArgumentValue(value), DataType::Int32);
+            CHECK(std::get<int32_t>(result) == -1);
+        }
+
+        SECTION("Int32 to Raw32")
+        {
+            int32_t value  = -1;
+            auto    result = reinterpret(CommandArgumentValue(value), DataType::Raw32);
+            CHECK(std::get<Raw32>(result).value == 0xFFFFFFFFu);
+        }
+
+        SECTION("Raw32 to UInt32")
+        {
+            Raw32 value(0xDEADBEEFu);
+            auto  result = reinterpret(CommandArgumentValue(value), DataType::UInt32);
+            CHECK(std::get<uint32_t>(result) == 0xDEADBEEFu);
+        }
+
+        SECTION("Raw32 to Int32")
+        {
+            Raw32 value(0x80000000u);
+            auto  result = reinterpret(CommandArgumentValue(value), DataType::Int32);
+            CHECK(std::get<int32_t>(result) == static_cast<int32_t>(0x80000000));
+        }
+
+        SECTION("UInt32 to Raw32")
+        {
+            uint32_t value  = 0x12345678u;
+            auto     result = reinterpret(CommandArgumentValue(value), DataType::Raw32);
+            CHECK(std::get<Raw32>(result).value == 0x12345678u);
+        }
+
+        SECTION("Int64 to UInt64")
+        {
+            int64_t value  = -1LL;
+            auto    result = reinterpret(CommandArgumentValue(value), DataType::UInt64);
+            CHECK(std::get<uint64_t>(result) == 0xFFFFFFFFFFFFFFFFull);
+        }
+
+        SECTION("UInt64 to Int64")
+        {
+            uint64_t value  = 0x8000000000000000ull;
+            auto     result = reinterpret(CommandArgumentValue(value), DataType::Int64);
+            CHECK(std::get<int64_t>(result) == static_cast<int64_t>(0x8000000000000000ull));
+        }
+
+        SECTION("Float to UInt32")
+        {
+            float value  = 1.0f;
+            auto  result = reinterpret(CommandArgumentValue(value), DataType::UInt32);
+            // 1.0f in IEEE 754
+            CHECK(std::get<uint32_t>(result) == 0x3F800000u);
+        }
+
+        SECTION("UInt32 to Float")
+        {
+            uint32_t value  = 0x40000000u; // 2.0f in IEEE 754
+            auto     result = reinterpret(CommandArgumentValue(value), DataType::Float);
+            CHECK(std::get<float>(result) == 2.0f);
+        }
+
+        SECTION("Double to UInt64")
+        {
+            double value  = 1.0;
+            auto   result = reinterpret(CommandArgumentValue(value), DataType::UInt64);
+            // 1.0 in IEEE 754 double
+            CHECK(std::get<uint64_t>(result) == 0x3FF0000000000000ull);
+        }
+
+        SECTION("Invalid reinterpret - different sizes")
+        {
+            int32_t value = 42;
+            CHECK_THROWS_AS(reinterpret(CommandArgumentValue(value), DataType::Int64), FatalError);
+        }
+
+        SECTION("Invalid reinterpret - unsupported type")
+        {
+            int32_t value = 42;
+            CHECK_THROWS_AS(reinterpret(CommandArgumentValue(value), DataType::None), FatalError);
         }
     }
 

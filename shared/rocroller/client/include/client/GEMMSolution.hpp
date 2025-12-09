@@ -71,7 +71,7 @@ namespace rocRoller
                                           SolutionParameters const& solutionParams)
                 {
                     auto commandKernel = std::make_shared<CommandKernel>(
-                        command, solutionParams.generateKernelName());
+                        command, solutionParams.generateKernelName().shortName);
                     commandKernel->setContext(m_context);
                     commandKernel->setCommandParameters(
                         this->makeCommandParameters(command, solutionParams));

@@ -96,8 +96,8 @@ void testing_syrk_ex_bad_arg(const Arguments& arg)
         rocblas_init_matrix(
             hC, arg, rocblas_client_beta_sets_nan, rocblas_client_symmetric_matrix, false, true);
 
-        dA.transfer_from(hA);
-        dC.transfer_from(hC);
+        CHECK_HIP_ERROR(dA.transfer_from(hA));
+        CHECK_HIP_ERROR(dC.transfer_from(hC));
 
         // clang-format off
 

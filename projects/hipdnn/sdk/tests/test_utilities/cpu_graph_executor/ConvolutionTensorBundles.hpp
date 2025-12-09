@@ -19,7 +19,8 @@ struct ConvolutionFwdTensorBundle
                                const std::vector<int64_t>& wDims,
                                const std::vector<int64_t>& yDims,
                                unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
-                               const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW)
+                               const hipdnn_sdk::utilities::TensorLayout& layout
+                               = hipdnn_sdk::utilities::TensorLayout::NCHW)
         : xTensor(xDims, layout)
         , wTensor(wDims, layout)
         , yTensor(yDims, layout)
@@ -54,7 +55,8 @@ struct ConvolutionBwdTensorBundle
                                const std::vector<int64_t>& wDims,
                                const std::vector<int64_t>& dyDims,
                                unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
-                               const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW)
+                               const hipdnn_sdk::utilities::TensorLayout& layout
+                               = hipdnn_sdk::utilities::TensorLayout::NCHW)
         : dxTensor(dxDims, layout)
         , wTensor(wDims, layout)
         , dyTensor(dyDims, layout)
@@ -93,7 +95,8 @@ struct ConvolutionWrwTensorBundle
                                const std::vector<int64_t>& dwDims,
                                const std::vector<int64_t>& dyDims,
                                unsigned int seed = hipdnn_sdk::test_utilities::getGlobalTestSeed(),
-                               const hipdnn_sdk::utilities::TensorLayout& layout = hipdnn_sdk::utilities::TensorLayout::NCHW)
+                               const hipdnn_sdk::utilities::TensorLayout& layout
+                               = hipdnn_sdk::utilities::TensorLayout::NCHW)
         : xTensor(xDims, layout)
         , dwTensor(dwDims, layout)
         , dyTensor(dyDims, layout)

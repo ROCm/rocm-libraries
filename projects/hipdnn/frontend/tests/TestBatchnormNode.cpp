@@ -267,3 +267,57 @@ TEST(TestBatchnormNode, GatherHipdnnTensors)
     EXPECT_TRUE(allTensors.find(peerStat2) != allTensors.end());
     EXPECT_EQ(allTensors.size(), 7);
 }
+
+// ============================================================================
+// Spatial Dimension Validation Tests
+// ============================================================================
+
+TEST(TestBatchnormNode, PreValidateNodeRejectsInvalidSpatialDimensions)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({1, 256, 1, 1}); // Invalid: N*H*W = 1*1*1 = 1
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 256, 1, 1}); // Spatial mode
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_TRUE(error.get_message().find("N * spatial_dimensions must be > 1")
+                != std::string::npos);
+}
+
+TEST(TestBatchnormNode, PreValidateNodeAcceptsValidSpatialDimensions)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 3, 2, 2}); // Valid: N*H*W = 2*2*2 = 8
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 3, 1, 1}); // Spatial mode
+    batchnormAttributes.set_scale(scaleTensor);
+
+    batchnormAttributes.set_bias(std::make_shared<TensorAttributes>());
+    batchnormAttributes.set_epsilon(std::make_shared<TensorAttributes>());
+
+    GraphAttributes graphAttributes;
+    BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK);
+}
