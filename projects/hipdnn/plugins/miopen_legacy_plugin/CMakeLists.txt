@@ -132,8 +132,8 @@ if(WIN32)
 
     set(SPDLOG_TARGET "")
 
-    # on TheRock vs Windows standalone builds we see different target names for spdlog
-    # find the one that exists and modify that one. 
+    # on TheRock vs Windows standalone builds we see different target names for spdlog find the one
+    # that exists and modify that one.
     if(TARGET spdlog::spdlog_header_only)
         set(SPDLOG_TARGET "spdlog::spdlog_header_only")
     elseif(TARGET spdlog_header_only)
@@ -141,10 +141,10 @@ if(WIN32)
     else()
         message(STATUS "spdlog target not found. Skipping spdlog configuration.")
     endif()
-    
+
     if(SPDLOG_TARGET)
         message(STATUS "Found spdlog target: ${SPDLOG_TARGET}")
-        
+
         # Can't modify properties of an alias target
         get_property(aliased_target_name TARGET ${SPDLOG_TARGET} PROPERTY ALIASED_TARGET)
         if(NOT aliased_target_name)

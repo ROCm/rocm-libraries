@@ -15,12 +15,11 @@ find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 find_package(hipdnn_frontend CONFIG REQUIRED)
 
-
 # Helper function to add a hipDNN sample executable NAME: The name of the executable target SOURCE:
 # The source file for the sample
 function(add_hipdnn_sample NAME SOURCE)
-add_executable(${NAME} ${SOURCE})
-target_link_libraries(${NAME} PRIVATE hip::host hipdnn_frontend)
+    add_executable(${NAME} ${SOURCE})
+    target_link_libraries(${NAME} PRIVATE hip::host hipdnn_frontend)
 endfunction()
 
 # Temporarily disabled bn_inference due to https://github.com/ROCm/rocm-libraries/issues/2459
@@ -43,8 +42,8 @@ if(WIN32)
 
     set(SPDLOG_TARGET "")
 
-    # on TheRock vs Windows standalone builds we see different target names for spdlog
-    # find the one that exists and modify that one. 
+    # on TheRock vs Windows standalone builds we see different target names for spdlog find the one
+    # that exists and modify that one.
     if(TARGET spdlog::spdlog_header_only)
         set(SPDLOG_TARGET "spdlog::spdlog_header_only")
     elseif(TARGET spdlog_header_only)
@@ -52,10 +51,10 @@ if(WIN32)
     else()
         message(STATUS "spdlog target not found. Skipping spdlog configuration.")
     endif()
-    
+
     if(SPDLOG_TARGET)
         message(STATUS "Found spdlog target: ${SPDLOG_TARGET}")
-        
+
         # Can't modify properties of an alias target
         get_property(aliased_target_name TARGET ${SPDLOG_TARGET} PROPERTY ALIASED_TARGET)
         if(NOT aliased_target_name)
