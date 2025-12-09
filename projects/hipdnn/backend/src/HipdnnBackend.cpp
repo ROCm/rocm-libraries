@@ -272,7 +272,7 @@ HIPDNN_BACKEND_EXPORT void hipdnnGetLastErrorString(char* message, size_t maxSiz
         hipdnn_sdk::utilities::copyMaxSizeWithNullTerminator(
             message, hipdnn_backend::LastErrorManager::getLastError(), maxSize);
 
-        // Clear the error after retrieval to match cudnn behavior
+        // Clear the error after retrieval
         hipdnn_backend::LastErrorManager::clearLastError();
 
         LOG_API_SUCCESS(apiName, "set_error_message={:p}", static_cast<void*>(message));
