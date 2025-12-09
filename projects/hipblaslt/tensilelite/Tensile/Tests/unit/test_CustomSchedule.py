@@ -238,7 +238,7 @@ class TestCustomSchedule:
         valid, message = schedule_info.isValid({"kernel" : kernel})
         assert valid, message
 
-    @pytest.mark.parametrize("transA, transB", [(False, True)])
+    @pytest.mark.parametrize("transA, transB", [(False, False), (False, True)])
     def test_schedule_256x160x64_16bit(self, transA, transB):
         """Tests the 256x160x64 16-bit schedule."""
         kernel = create_base_kernel()

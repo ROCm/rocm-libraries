@@ -1931,9 +1931,7 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment=""),
                    ]
         nglshift = nllshift = 13 # vmcnt shift for ngl and nll
-        #TODO . GRA at index 11 can't be between GRIncB 9-12 due to SCC usage
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-        opt1.disableValidation()
     elif isNN(kernel) and useLDSTr and TLDS==1:
         kernel["SwapGlobalReadOrder"] = True
         optSchedule = {
@@ -1944,8 +1942,8 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
             61, 61  # wait GRA.
             ]],
             # Addr. update (be done before GRA/GRB).
-            'GRIncA' : [[0,0,1,1,2,2,3,3,4]],
-            'GRIncB' : [[5,6,7,8,9,10,11,12,13]],
+            'GRIncA' : [[5,6,7,8,9,10,11,12,13]],
+            'GRIncB' : [[0,0,1,1,2,2,3,3,4]],
             # Current iteration.
             'LRA0'   : [[8,9,10,11,12,13,14,15,16,17]],
             'LRB0'   : [[0,1,2,3,4,5,6,7]],
@@ -1964,15 +1962,14 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
         syncCode = [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 LRB1"),
                     SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="Wait for LRB0"),
                     SBarrier(comment=""),
-                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for previous GRB to complete"),
+                    SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRA0"),
                     SBarrier(comment=""),
-                    SWaitCnt(dscnt=-1, vlcnt=(13+8-5), vscnt=-1, comment="Wait for previous GRB to complete"),
+                    SWaitCnt(dscnt=-1, vlcnt=13, vscnt=-1, comment="Wait for previous GRA(B) to complete"),
                     SBarrier(comment=""),
-                    SWaitCnt(dscnt=-1, vlcnt=(13+10-13), vscnt=-1, comment="Wait for previous GRA to complete"),
+                    SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="Wait for previous GRB(A) to complete"),
                     SBarrier(comment="")]
         nglshift = nllshift = 13
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-        opt1.disableValidation()  # TODO: RE-enable after fixing https://github.com/ROCm/rocm-libraries/issues/3181
     elif isNT(kernel) and useLDSTr and TLDS==0:
         optSchedule = {
             'SYNC': [[-1,17,17,57,57]],
@@ -2010,8 +2007,7 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     numMfma = 80
-    # Temp disable this for now.
-    if isNN(kernel) and useLDSTr and TLDS==1 and False:
+    if isNN(kernel) and useLDSTr and TLDS==1:
         kernel["SwapGlobalReadOrder"] = True
         optSchedule = {
             'SYNC'   : [[-1,
@@ -2021,14 +2017,14 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
             61, 61 # Wait previous GR.
             ]],
             # Addr. update (be done before GRA/GRB).
-            'GRIncA' : [[0,1,2,3,4,5,6,7,8]],
-            'GRIncB' : [[9,10,10,10,13,14,15,16,17]],
+            'GRIncA' : [[21,21,21,22,22,22,23,23,23]],
+            'GRIncB' : [[0,1,2,3,4,5,6,7,8]],
             # Current iteration.
             'LRA0'   : [[5,5,7,7,9,9,11,11,13,13,15,15,17,18,19,20]],
             'LRB0'   : [[0,0,1,2,3]],
             # Buffer loads.
             'GRB'    : [[30,30, 33,33, 36,36, 52,52, 56,56, 60,61, 76,77, 78,78]],
-            'GRA'    : [[11,12, 16,16, 20,20, 23,25, 26, 28]],
+            'GRA'    : [[11,12, 16,16, 20,20, 25,25, 26, 28]],
             # Prefetch next iteration.
             'LRA1'   : [[62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77]],
             'LRB1'   : [[41,42,43,44,45]],
@@ -2049,8 +2045,6 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
                     SBarrier(comment="")]
         nglshift = nllshift = 13
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
-        #TODO. GRA at index 11 can't be between GRIncB 10-13 due to SCC usage.
-        opt1.disableValidation()
     elif isNT(kernel) and useLDSTr and TLDS==0:
         nglshift = nllshift = 0
         kernel["SwapGlobalReadOrder"] = True
