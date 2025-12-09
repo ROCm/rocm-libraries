@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include "compare_helper.hpp"
 #include "get_handle.hpp"
 #include "tensor_holder.hpp"
 #include "verify.hpp"
@@ -1129,66 +1130,6 @@ struct verify_backward_bn_spatial_use_saved
     }
 };
 
-template <typename T>
-constexpr bool
-    is_floating_point_tensor = (std::is_same_v<typename T::value_type, half_float::half> ||
-                                std::is_floating_point_v<typename T::value_type>);
-
-template <class... Ts>
-constexpr bool any_float_tensors()
-{
-    return (is_floating_point_tensor<Ts> || ...);
-}
-
-template <class LeftTuple, class RightTuple, std::size_t... I>
-bool CompareFloatTensorTuples(LeftTuple const& left,
-                              RightTuple const& right,
-                              double tolerance,
-                              std::index_sequence<I...>)
-{
-    return ((miopen::rms_range(std::get<I>(left).data, std::get<I>(right).data) <
-             (std::numeric_limits<
-                  typename std::decay_t<decltype(std::get<I>(left).data)>::value_type>::epsilon() *
-              tolerance)) &&
-            ...);
-}
-
-template <class... CpuT, class... GpuT>
-std::enable_if_t<!(any_float_tensors<CpuT...>() || any_float_tensors<GpuT...>()), bool>
-Compare(std::tuple<CpuT...> const& cpu_result, std::tuple<GpuT...> const& gpu_result, double)
-{
-    return cpu_result == gpu_result;
-}
-
-template <class... CpuT, class... GpuT>
-std::enable_if_t<(any_float_tensors<CpuT...>() || any_float_tensors<GpuT...>()), bool> Compare(
-    std::tuple<CpuT...> const& cpu_result, std::tuple<GpuT...> const& gpu_result, double tolerance)
-{
-    return CompareFloatTensorTuples(
-        cpu_result, gpu_result, tolerance, std::index_sequence_for<CpuT...>{});
-}
-
-template <typename T>
-bool Compare(tensor<T> cpu_result, tensor<T> gpu_result, double tolerance)
-{
-    double threshold = std::numeric_limits<T>::epsilon() * tolerance;
-    return (miopen::rms_range(cpu_result.data, gpu_result.data) < threshold);
-}
-
-template <class VerifyT>
-auto CompareResults(VerifyT&& verifier, double tolerance = 0.0)
-    -> std::pair<decltype(verifier.cpu()), decltype(verifier.gpu())>
-{
-    const auto cpu_result = verifier.cpu();
-    const auto gpu_result = verifier.gpu();
-    if(!Compare(cpu_result, gpu_result, tolerance))
-    {
-        verifier.fail();
-    }
-
-    return std::make_pair(cpu_result, gpu_result);
-}
-
 using TestCase = std::vector<int>;
 
 auto NameGenerator(const ::testing::TestParamInfo<TestCase>& info)
@@ -1259,22 +1200,22 @@ public:
         // train
         if constexpr(MIO_BN_SP_TEST_DEBUG == 1)
             std::cout << "Running forward train spatial with R and S set." << std::endl;
-        auto outpair = CompareResults(
+        auto outpair = test_helpers::CompareResults(
             verify_forward_train_bn_spatial<T, PREC_TYPE>{input, scale, shift}, tolerance);
         // returns:  std::make_tuple(out,runMean,runVar,saveMean,saveInvVar);
 
         // inference recalc
         if constexpr(MIO_BN_SP_TEST_DEBUG == 1)
             std::cout << "Running forward inference spatial recalc." << std::endl;
-        // this->tolerance = 80;
+        // tolerance = 80;
         // Debug values
         // std::fill(input.begin(), input.end(), 1);
         // std::fill(scale.begin(), scale.end(), 1);
         // std::fill(shift.begin(), shift.end(), 1);
 
-        tolerance = 80 * input.desc.GetElementSize(); // TODO: maybe part of CompareResults?
+        tolerance = 80 * input.desc.GetElementSize();
 
-        CompareResults(verify_forward_infer_bn_spatial_recalc<T, PREC_TYPE>{input, scale, shift},
+        test_helpers::CompareResults(verify_forward_infer_bn_spatial_recalc<T, PREC_TYPE>{input, scale, shift},
                        tolerance);
 
         // inference use estimated running values
@@ -1282,7 +1223,7 @@ public:
         auto estVar  = std::get<2>(outpair.second);
         if constexpr(MIO_BN_SP_TEST_DEBUG == 1)
             std::cout << "Running forward inference spatial with R set." << std::endl;
-        CompareResults(
+        test_helpers::CompareResults(
             verify_forward_infer_bn_spatial_use_est<T, PREC_TYPE>{
                 input, scale, shift, estMean, estVar},
             tolerance);
@@ -1304,7 +1245,7 @@ public:
         }
         if constexpr(MIO_BN_SP_TEST_DEBUG == 2)
         {
-            auto debugvals = CompareResults(
+            auto debugvals = test_helpers::CompareResults(
                 verify_backward_bn_spatial_recalc<T, PREC_TYPE>{input, dy_input, scale}, tolerance);
             auto gpuout = std::get<0>(debugvals.second);
             auto cpuout = std::get<0>(debugvals.first);
@@ -1361,7 +1302,7 @@ public:
             if constexpr(MIO_BN_SP_TEST_DEBUG == 1)
                 std::cout << "Running back propagation spatial recalc." << std::endl;
             tolerance = 80 * input.desc.GetElementSize();
-            CompareResults(verify_backward_bn_spatial_recalc<T, PREC_TYPE>{input, dy_input, scale},
+            test_helpers::CompareResults(verify_backward_bn_spatial_recalc<T, PREC_TYPE>{input, dy_input, scale},
                            tolerance);
         }
 
@@ -1371,7 +1312,7 @@ public:
 
         if constexpr(MIO_BN_SP_TEST_DEBUG == 3)
         {
-            auto debugvals = CompareResults(
+            auto debugvals = test_helpers::CompareResults(
                 verify_backward_bn_spatial_use_saved<T, PREC_TYPE>{
                     input, dy_input, scale, savedMean, savedInvVar},
                 tolerance);
@@ -1429,7 +1370,7 @@ public:
         {
             if constexpr(MIO_BN_SP_TEST_DEBUG == 1)
                 std::cout << "Running back propagation spatial with S set." << std::endl;
-            CompareResults(
+            test_helpers::CompareResults(
                 verify_backward_bn_spatial_use_saved<T, PREC_TYPE>{
                     input, dy_input, scale, savedMean, savedInvVar},
                 tolerance);
