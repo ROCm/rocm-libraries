@@ -456,14 +456,13 @@ namespace rocRoller
                     bufferReg->setName(concatenate("Buffer", buffer));
                     if(bufferReg->allocationState() == Register::AllocationState::Unallocated)
                     {
-                        Register::ValuePtr basePointer;
-                        auto               bufferExpr = bufferReg->expression();
-                        co_yield m_context->argLoader()->getValue(user->argumentName, basePointer);
-                        ExpressionPtr base = basePointer->expression();
+                        Register::ValuePtr        basePointer;
+                        auto                      bufferExpr = bufferReg->expression();
+                        Expression::ExpressionPtr base       = Expression::fromKernelArgument(
+                            m_context->kernel()->findArgument(user->argumentName));
                         if(user->offset)
-                        {
                             base = base + user->offset;
-                        }
+
                         bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, base);
                         bufferExpr = BufferDescriptor::SetOptions(
                             bufferExpr, BufferDescriptor::GetDefaultOptions(m_context));
