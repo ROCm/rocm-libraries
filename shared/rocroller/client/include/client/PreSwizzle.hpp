@@ -82,7 +82,7 @@ namespace rocRoller::Client
             size_t nSIMDIndexBlock = nVGPRIndex;
             size_t nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
 
-            AssertFatal(nVGPRIndex * nVGPRBlock, nSIMDBlock == tileK);
+            AssertFatal(nVGPRIndex * nVGPRBlock * nSIMDBlock == tileK);
             AssertFatal(nLanesPerSIMD * nSIMDIndexIndex * nSIMDIndexBlock == tileMN);
 
             srcSizes = {nVGPRIndex,
@@ -141,7 +141,7 @@ namespace rocRoller::Client
             size_t nSIMDIndexBlock = nVGPRIndex;
             size_t nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
 
-            AssertFatal(nVGPRIndex * nVGPRBlock, nSIMDBlock == tileK);
+            AssertFatal(nVGPRIndex * nVGPRBlock * nSIMDBlock == tileK);
             AssertFatal(nLanesPerSIMD * nSIMDIndexIndex * nSIMDIndexBlock == tileMN);
 
             srcSizes = {nVGPRIndex,
