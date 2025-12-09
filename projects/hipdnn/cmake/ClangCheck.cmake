@@ -12,13 +12,14 @@ function(verifyAmdRocmCompiler COMPILER_PATH COMPILER_NAME)
        AND (VERSION_OUTPUT MATCHES "ROCm" OR VERSION_OUTPUT MATCHES "AMD" OR COMPILER_PATH MATCHES
                                                                              "rocm")
     )
-        message(STATUS "✓ Confirmed AMD/ROCm ${COMPILER_NAME} compiler")
+        message(STATUS "✓ Confirmed AMD/ROCm type ${COMPILER_NAME} compiler")
     else()
+        string(REGEX REPLACE "[\r\n]+" "\n  " VERSION_OUTPUT "${VERSION_OUTPUT}")
         message(
-            FATAL_ERROR
-                "${COMPILER_NAME} compiler is not the AMD/ROCm version!\n"
-                "  Compiler: ${COMPILER_PATH}\n" "  Version output: ${VERSION_OUTPUT}\n"
-                "  Expected: AMD/ROCm clang compiler"
+            WARNING "\n"
+                    "Unable to confirm AMD/ROCm type ${COMPILER_NAME} compiler: ${COMPILER_PATH}\n"
+                    "Expected to find \"AMD\" or \"ROCm\" in the compiler version.\n"
+                    "Actual compiler version reported:\n  ${VERSION_OUTPUT}\n"
         )
     endif()
 endfunction()
