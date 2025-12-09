@@ -88,8 +88,10 @@ __forceinline__ __device__ void reduce_kernel(FloatAccum (&lcl_mem)[SizeLclData]
 }
 
 template <typename FloatAccu, unsigned int SizeLclData>
-__forceinline__ __device__ void
-regLDSreduce(FloatAccu* value, FloatAccu (&data)[SizeLclData], unsigned int localID, FloatAccu scale)
+__forceinline__ __device__ void regLDSreduce(FloatAccu* value,
+                                             FloatAccu (&data)[SizeLclData],
+                                             unsigned int localID,
+                                             FloatAccu scale)
 {
     data[localID] = *value;
     __syncthreads();
