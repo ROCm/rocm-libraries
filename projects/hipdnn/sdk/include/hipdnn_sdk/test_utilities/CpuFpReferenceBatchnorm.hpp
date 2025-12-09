@@ -283,8 +283,7 @@ public:
 
             auto channelScale = utilities::staticCast<ComputeDataType>(scale.getHostValue(0, cidx));
 
-            // Calculate dot product for (x - mean) * channelInvVariance * dy and ∑ dy for this
-            // channel
+            // Calculate dot product for (x - mean) * channelInvVariance * dy and ∑ dy for this channel
             auto dotProduct = utilities::staticCast<ComputeDataType>(0.0);
             auto sumDy = utilities::staticCast<ComputeDataType>(0.0);
 
