@@ -109,10 +109,10 @@ void testing_gemm_strided_batched_ex_bad_arg(const Arguments& arg)
 
     if constexpr(is_complex<Tex>)
     {
-        h_alpha = Ts(1, 0);
-        h_beta  = Ts(2, 0);
-        h_one   = Ts(1, 0);
-        h_zero  = Ts(0, 0);
+        h_alpha = {1.0, 0.0};
+        h_beta  = {2.0, 0.0};
+        h_one   = {1.0, 0.0};
+        h_zero  = {0.0, 0.0};
     }
     else
     {
