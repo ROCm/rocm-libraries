@@ -38,18 +38,14 @@ protected:
         graphObj.set_name("ConvolutionBackwardWeightTest");
         graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-        int64_t uid = 1;
-
         auto dataType = getDataTypeEnumFromType<DataType>();
 
         auto xAttr = graph::makeTensorAttributes(
             "x", dataType, testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder));
-        xAttr.set_uid(uid++);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto dyAttr = graph::makeTensorAttributes(
             "dy", dataType, testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder));
-        dyAttr.set_uid(uid++);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
         graph::ConvWgradAttributes convAttrs;
@@ -61,10 +57,6 @@ protected:
 
         auto dwTensorAttr = graphObj.conv_wgrad(dyTensorAttr, xTensorAttr, convAttrs);
 
-        if(!dwTensorAttr->has_uid())
-        {
-            dwTensorAttr->set_uid(uid++);
-        }
         dwTensorAttr->set_dim(testCase.wDims);
         dwTensorAttr->set_stride(generateStrides(testCase.wDims, layout.strideOrder));
         dwTensorAttr->set_output(true);
