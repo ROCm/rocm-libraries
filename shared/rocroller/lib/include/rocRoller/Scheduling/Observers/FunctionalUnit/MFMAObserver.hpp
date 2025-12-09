@@ -101,5 +101,58 @@ namespace rocRoller
 
         static_assert(CObserverConst<MFMAObserver>);
 
+        class ToastObserver
+        {
+        public:
+            ToastObserver();
+            ToastObserver(ContextPtr ctx);
+
+            InstructionStatus peek(Instruction const& inst) const;
+
+            void modify(Instruction& inst) const;
+
+            void observe(Instruction const& inst);
+
+            constexpr static bool required(GPUArchitectureTarget const& target)
+            {
+                return true;
+            }
+
+            // DisallowedCycles getDisallowedCycles(Instruction const& inst) const;
+
+            // static bool isTargetedInstruction(Instruction const& inst);
+
+            std::string state() const;
+
+        private:
+            struct Category
+            {
+                std::string                             name;
+                std::function<bool(std::string const&)> pred;
+
+                int   expectedCount = 0;
+                float expectedRatio = 0;
+                int   headStart     = 0;
+            };
+
+            std::vector<Category> m_cats;
+
+            std::map<std::string, int> m_seenCats;
+            int                        m_totalTargetedInsts = 0;
+
+            bool m_active = false;
+
+            std::optional<Category> instCat(Instruction const& inst) const;
+
+            // int m_programCycle = 0;
+
+            // std::map<int, EnumBitset<CoexecCategory>> m_disallowedOps;
+
+            // std::vector<Register::RegisterId> m_aOperands;
+            // std::vector<Register::RegisterId> m_bOperands;
+
+            // std::weak_ptr<Context> m_context;
+        };
+
     }
 }
