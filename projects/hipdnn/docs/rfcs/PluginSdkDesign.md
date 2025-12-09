@@ -174,13 +174,22 @@ This class represents a ready-to-execute plan that can take device data and then
     - `size_t getWorkspaceSize(handle)` - Returns the workspace required for this plan.
     - `void execute(handle, buffers, workspace)` - Executes the plan as built by the IPlanBuilder that created it.
 
-    
+
 ## 5. Key Design Decisions
 - Opt-in glue code via macros
 - A single-instanced container
 - Stateless classes for thread safety
+- Use of wrappers and glue code to hide the details of the C api and provide a cleaner C++ interface for plugin writing.
 
 ## 6. Risks
+- **Plugin API Breaking Changes**: If the C-API interface needs to evolve during implementation, existing plugins may require updates, creating compatibility issues
+- **Thread Safety Complexity**: While the design aims for stateless classes, ensuring thread safety across multiple plugin invocations and shared containers introduces potential race conditions and debugging challenges
+- **Performance Overhead**: The additional abstraction layers (container → manager → engine → plan builder → plan) may introduce latency compared to direct C-API implementations
+- **Adoption Risk**: Plugin developers may choose to bypass the SDK framework and implement directly against the C-API, reducing the value of this abstraction layer
+- **Memory Management**: Shared/weak pointer lifecycle management across plugin boundaries and multiple threads could lead to memory leaks or premature destruction
+- **Testing Coverage**: The complexity of multi-threaded, multi-plugin scenarios makes comprehensive testing challenging, potentially missing edge cases
+- **Migration Complexity**: Moving existing MIOpen plugin to the new architecture risks introducing regressions while maintaining backward compatibility
+- **Ecosystem Fragmentation**: Having both SDK and Plugin SDK may confuse developers about which components to use for different scenarios
 
 ## 7. Execution Plan
 - Create blank plugin_sdk
