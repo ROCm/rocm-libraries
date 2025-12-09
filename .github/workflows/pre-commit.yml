@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # 0 fetches all commit history for --from-ref/--to-ref to function
 
       - uses: actions/setup-python@v5
         with:
@@ -22,7 +22,6 @@ jobs:
       - name: Detect project changes
         id: changes
         env:
-          # Space-separated list of projects with optional dependencies
           # Add project names here (one per line) to enable conditional dependency installation
           PROJECTS_WITH_OPTIONAL_DEPS: >-
             hipdnn
@@ -38,16 +37,10 @@ jobs:
             fi
           done
 
-      # Project-specific dependency installations below
-      # To add a new project:
+      # To install optional deps for a project:
       # 1. Add project name to PROJECTS_WITH_OPTIONAL_DEPS above
-      # 2. Copy the template below and customize for your project
-
-      # Example template for adding another project:
-      # - name: Install <project-name> dependencies
-      #   if: steps.changes.outputs.<project-name>_changed == 'true'
-      #   run: |
-      #     # Install project-specific dependencies here
+      # 2. Like the example below, add an install step conditional on:
+      #    - steps.changes.outputs.<project-name>_changed == 'true'
 
       - name: Install hipDNN dependencies
         if: steps.changes.outputs.hipdnn_changed == 'true'
