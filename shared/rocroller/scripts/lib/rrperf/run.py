@@ -37,6 +37,7 @@ from typing import Dict, Tuple
 
 import pandas as pd
 import rrperf
+import rrperf.dump_csv
 import yaml
 
 
@@ -205,6 +206,11 @@ def get_args(parser: argparse.ArgumentParser):
         "--l2",
         action="store_true",
         help="Collect L2 performance counters (TCC_HIT and TCC_MISS).",
+    parser.add_argument(
+        "--dump_csv",
+        help="Dump benchmark CSV with included headers.",
+        action="store_true",
+        default=False,
     )
 
 
@@ -213,7 +219,7 @@ def run(args):
     run_cli(**args.__dict__)
 
 
-def run_cli(
+def run_cli(  # noqa: C901
     token: str = None,
     suite: str = None,
     submit: bool = False,
@@ -235,7 +241,10 @@ def run_cli(
         rrperf.rocm_control.pin_clocks(rocm_smi)
 
     if suite is None and token is None:
-        suite = "all_gfx120X" if rrperf.utils.rocm_gfx().startswith("gfx120") else "all"
+        if rrperf.utils.rocm_gfx().startswith("gfx120"):
+            suite = "all_gfx120X"
+        else:
+            suite = "all"
 
     generator = rrperf.utils.empty()
     if suite is not None:
@@ -278,5 +287,8 @@ def run_cli(
         ptsdir.mkdir(parents=True)
         # XXX if running single token, suite might be None
         submit_directory(suite, rundir, ptsdir)
+
+    if kwargs.get("dump_csv", False):
+        rrperf.dump_csv.dump_csv(suite, rundir)
 
     return result, rundir

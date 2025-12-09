@@ -38,21 +38,21 @@ namespace rocRoller
 
         std::vector<ExpressionTransformType> FastArithmetic::getTransforms() const
         {
-            std::vector<ExpressionTransformType> transforms
-                = {splitBitfieldCombine,
-                   lowerBitfieldCombine,
-                   convertPropagation,
-                   [this](auto e) { return fastDivision(e, m_context); },
-                   simplify,
-                   lowerExponential,
-                   fastMultiplication,
-                   lowerUnsignedArithmeticShiftR,
-                   fuseAssociative,
-                   combineShifts,
-                   fuseTernary,
-                   [this](auto e) { return launchTimeSubExpressions(e, m_context); },
-                   convertPropagation,
-                   simplify};
+            std::vector<ExpressionTransformType> transforms = {
+                splitBitfieldCombine,
+                lowerBitfieldCombine,
+                [this](auto e) { return fastDivision(e, m_context); },
+                convertPropagation, // go after fastDivision as it might change data types of denominator and numerator
+                simplify,
+                lowerExponential,
+                fastMultiplication,
+                lowerUnsignedArithmeticShiftR,
+                fuseAssociative,
+                combineShifts,
+                fuseTernary,
+                [this](auto e) { return launchTimeSubExpressions(e, m_context); },
+                convertPropagation,
+                simplify};
 
             return transforms;
         }
