@@ -574,6 +574,20 @@ namespace rocRoller
             auto forLoopCoord = getForLoopCoords(forLoop, graph).first;
             auto unrollCoord  = findUnrollNeighbour(graph, forLoopCoord).value();
 
+            auto getUserOrder = [](KernelGraph const& graph, int forLoop) -> std::vector<int> {
+                return {1, 3, 2, 4};
+            };
+            auto userOrder = getUserOrder(graph, forLoop);
+
+            Log::debug("User order for ForLoop {}: {}", forLoop, userOrder);
+            auto sortByUser = [&](auto& container, auto getter) {
+                std::sort(container.begin(), container.end(), [&](const auto& a, const auto& b) {
+                    auto itA = std::find(userOrder.begin(), userOrder.end(), getter(a));
+                    auto itB = std::find(userOrder.begin(), userOrder.end(), getter(b));
+                    return itA < itB;
+                });
+            };
+
             //
             // Delete connecting edges
             //
@@ -591,6 +605,7 @@ namespace rocRoller
             {
                 for(auto [target, info] : m_info[forLoop][u])
                     loadsByUnroll[u].push_back(info);
+                // sortByUser(loadsByUnroll[u], [](const auto& info) { return info.user; });
             }
 
             AssertFatal(loadsByUnroll.size() == numUnroll);
@@ -671,6 +686,7 @@ namespace rocRoller
                     int dchain = duplicate ? duplicateChain(graph, {chain}) : chain;
                     prefetchChain.push_back(dchain);
                 }
+                sortByUser(prefetchChain, [](const auto& val) { return val; });
 
                 AssertFatal(!prefetchChain.empty());
 
