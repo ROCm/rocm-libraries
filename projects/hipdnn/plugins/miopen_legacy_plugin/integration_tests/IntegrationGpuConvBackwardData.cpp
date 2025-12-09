@@ -58,6 +58,11 @@ protected:
         auto dxTensorAttr = graphObj.conv_dgrad(dyTensorAttr, wTensorAttr, convAttrs);
         dxTensorAttr->set_output(true);
 
+        // Set these explicitly since grouped convs cannot infer tensor shape.
+        // Infer behavior will assume groups == 1, but some cases have groups > 1.
+        dxTensorAttr->set_dim(testCase.xDims);
+        dxTensorAttr->set_stride(generateStrides(testCase.xDims, layout.strideOrder));
+
         this->registerValidator(dxTensorAttr, tolerance);
         this->verifyGraph(graphObj, testCase.seed);
     }

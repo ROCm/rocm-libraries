@@ -87,7 +87,6 @@ protected:
         yTensorAttr->set_data_type(dataType);
 
         graph::PointwiseAttributes pointwiseAttrs;
-        pointwiseAttrs.set_name("activation");
         pointwiseAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activeCase.mode));
         if(activeCase.reluLowerClip.has_value())
         {

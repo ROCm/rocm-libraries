@@ -157,7 +157,6 @@ protected:
 
         // Add activation node with parameters from test case
         graph::PointwiseAttributes activAttrs;
-        activAttrs.set_name("activation");
         activAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
 
         // Set activation-specific parameters
