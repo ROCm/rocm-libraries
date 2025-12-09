@@ -80,6 +80,13 @@ namespace TensileLite
             Count
         };
 
+        static int getThreadLocalRandInt()
+        {
+            thread_local std::mt19937          generator(std::random_device{}());
+            std::uniform_int_distribution<int> distribution;
+            return distribution(generator);
+        }
+
         static bool IsProblemDependent(InitMode const& mode)
         {
             return mode == InitMode::SerialIdx || mode == InitMode::SerialDim0
@@ -1069,7 +1076,7 @@ namespace TensileLite
         template <>
         inline float DataInitialization::getValue<float, InitMode::Random>()
         {
-            return static_cast<float>((rand() % 201) - 100);
+            return static_cast<float>((getThreadLocalRandInt() % 201) - 100);
         }
 
         template <>
@@ -1139,7 +1146,7 @@ namespace TensileLite
         template <>
         inline double DataInitialization::getValue<double, InitMode::Random>()
         {
-            return static_cast<double>((rand() % 2001) - 1000);
+            return static_cast<double>((getThreadLocalRandInt() % 2001) - 1000);
         }
 
         template <>
@@ -1381,7 +1388,7 @@ namespace TensileLite
         template <>
         inline int32_t DataInitialization::getValue<int32_t, InitMode::Random>()
         {
-            return rand() % 7 - 3;
+            return getThreadLocalRandInt() % 7 - 3;
         }
 
         template <>
@@ -1444,10 +1451,10 @@ namespace TensileLite
         template <>
         inline Int8x4 DataInitialization::getValue<Int8x4, InitMode::Random>()
         {
-            return Int8x4{static_cast<int8_t>((rand() % 7) - 3),
-                          static_cast<int8_t>((rand() % 7) - 3),
-                          static_cast<int8_t>((rand() % 7) - 3),
-                          static_cast<int8_t>((rand() % 7) - 3)};
+            return Int8x4{static_cast<int8_t>((getThreadLocalRandInt() % 7) - 3),
+                          static_cast<int8_t>((getThreadLocalRandInt() % 7) - 3),
+                          static_cast<int8_t>((getThreadLocalRandInt() % 7) - 3),
+                          static_cast<int8_t>((getThreadLocalRandInt() % 7) - 3)};
         }
 
         template <>
@@ -1541,7 +1548,7 @@ namespace TensileLite
         template <>
         inline Half DataInitialization::getValue<Half, InitMode::Random>()
         {
-            return static_cast<Half>((rand() % 7) - 3);
+            return static_cast<Half>((getThreadLocalRandInt() % 7) - 3);
         }
 
         template <>
@@ -1608,7 +1615,7 @@ namespace TensileLite
         template <>
         inline BFloat16 DataInitialization::getValue<BFloat16, InitMode::Random>()
         {
-            return static_cast<BFloat16>((rand() % 7) - 3);
+            return static_cast<BFloat16>((getThreadLocalRandInt() % 7) - 3);
         }
 
         template <>
@@ -1716,7 +1723,7 @@ namespace TensileLite
         template <>
         inline Float8 DataInitialization::getValue<Float8, InitMode::Random>()
         {
-            return static_cast<Float8>((float)((rand() % 7) - 3));
+            return static_cast<Float8>((float)((getThreadLocalRandInt() % 7) - 3));
         }
 
         template <>
@@ -1783,7 +1790,7 @@ namespace TensileLite
         template <>
         inline BFloat8 DataInitialization::getValue<BFloat8, InitMode::Random>()
         {
-            return static_cast<BFloat8>((float)((rand() % 7) - 3));
+            return static_cast<BFloat8>((float)((getThreadLocalRandInt() % 7) - 3));
         }
 
         template <>
@@ -1927,7 +1934,7 @@ namespace TensileLite
         template <>
         inline Float8_fnuz DataInitialization::getValue<Float8_fnuz, InitMode::Random>()
         {
-            return static_cast<Float8_fnuz>((float)((rand() % 7) - 3));
+            return static_cast<Float8_fnuz>((float)((getThreadLocalRandInt() % 7) - 3));
         }
 
         template <>
@@ -1994,7 +2001,7 @@ namespace TensileLite
         template <>
         inline BFloat8_fnuz DataInitialization::getValue<BFloat8_fnuz, InitMode::Random>()
         {
-            return static_cast<BFloat8_fnuz>((float)((rand() % 7) - 3));
+            return static_cast<BFloat8_fnuz>((float)((getThreadLocalRandInt() % 7) - 3));
         }
 
         template <>
@@ -2092,7 +2099,7 @@ namespace TensileLite
         template <>
         inline int8_t DataInitialization::getValue<int8_t, InitMode::Random>()
         {
-            return static_cast<int8_t>((rand() % 7) - 3);
+            return static_cast<int8_t>((getThreadLocalRandInt() % 7) - 3);
         }
 
         template <>
@@ -2609,14 +2616,14 @@ namespace TensileLite
         inline T getValueWithUpperLowerBoundFP(double upper = 1.0, double lower = -1.0)
         {
             return static_cast<T>(lower
-                                  + static_cast<double>(rand())
+                                  + static_cast<double>(getThreadLocalRandInt())
                                         / static_cast<double>(RAND_MAX / (upper - lower)));
         }
 
         template <typename T>
         inline T getValueWithUpperLowerBoundInteger(int upper = 128, int lower = -128)
         {
-            return static_cast<T>(lower + rand() % (upper - lower + 1));
+            return static_cast<T>(lower + getThreadLocalRandInt() % (upper - lower + 1));
         }
 
         template <>
