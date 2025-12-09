@@ -1059,9 +1059,18 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
                    CS_3D_PP)))
         return false;
 
+    // Batch size cut-off for enabling partial-pass 3D kernels may vary
+    // by GPU architecture and precision
+    std::size_t cutOffBatch = 5;
+    if(nodeData.precision == rocfft_precision_single)
+    {
+        if(get_curr_gcn_arch_name() == "gfx1201" || get_curr_gcn_arch_name() == "gfx950")
+            cutOffBatch = 25;
+    }
+
     // Partial pass is currently restricted to large enough batch sizes,
     // unite stride, interleaved FFTs.
-    bool batchCondition = (nodeData.batch >= 5);
+    bool batchCondition = (nodeData.batch >= cutOffBatch);
 
     size_t checkDist     = product(nodeData.length.begin(), nodeData.length.end());
     bool   distCondition = (nodeData.iDist == checkDist && nodeData.oDist == checkDist);
