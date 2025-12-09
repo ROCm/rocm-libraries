@@ -206,6 +206,7 @@ def get_args(parser: argparse.ArgumentParser):
         "--l2",
         action="store_true",
         help="Collect L2 performance counters (TCC_HIT and TCC_MISS).",
+    )
     parser.add_argument(
         "--dump_csv",
         help="Dump benchmark CSV with included headers.",
