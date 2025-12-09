@@ -46,6 +46,7 @@ using ProblemDescription = miopen::conv::ProblemDescription;
 
 bool GemmFwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
+
 #if MIOPEN_USE_GEMM
     if(!problem.AllTensorsDimsFitIntoInt())
         return false;
@@ -96,6 +97,10 @@ bool GemmFwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
         MIOPEN_LOG_I2("GEMM not applicable for F8 on this GPU architecture");
         return false;
     }
+
+    if(problem.HasNonPackedTensors())
+        return false;
+
     return problem.IsDirectionForward() && problem.IsLayoutDefault() &&
            !(gemm::IsAnyBufferBf16(xDesc, yDesc, wDesc) && !gemm::IsBf16Supported) &&
            !(gemm::IsAnyBufferFp16(xDesc, yDesc, wDesc) && !gemm::IsFp16Supported);
