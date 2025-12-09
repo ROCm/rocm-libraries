@@ -41,16 +41,12 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        int64_t uid = 1;
-
         auto dyAttr = graph::makeTensorAttributes(
             "dy", testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder));
-        dyAttr.set_uid(uid++);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
         auto wAttr = graph::makeTensorAttributes(
             "w", testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder));
-        wAttr.set_uid(uid++);
         auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
         graph::ConvDgradAttributes convAttrs;
@@ -61,11 +57,6 @@ protected:
         convAttrs.set_dilation(testCase.convDilation);
 
         auto dxTensorAttr = graphObj.conv_dgrad(dyTensorAttr, wTensorAttr, convAttrs);
-
-        if(!dxTensorAttr->has_uid())
-        {
-            dxTensorAttr->set_uid(uid++);
-        }
         dxTensorAttr->set_output(true);
 
         this->registerValidator(dxTensorAttr, tolerance);

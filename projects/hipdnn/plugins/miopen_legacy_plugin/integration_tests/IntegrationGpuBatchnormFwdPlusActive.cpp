@@ -43,11 +43,8 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        int64_t uid = 1;
-
         auto xAttr = graph::makeTensorAttributes(
             "x", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
-        xAttr.set_uid(uid++);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto meanAttr
@@ -55,7 +52,6 @@ protected:
                                           intermediateDataType,
                                           derivedDims,
                                           generateStrides(derivedDims, layout.strideOrder));
-        meanAttr.set_uid(uid++);
         auto meanTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(meanAttr));
 
         auto invVarianceAttr
@@ -63,7 +59,6 @@ protected:
                                           intermediateDataType,
                                           derivedDims,
                                           generateStrides(derivedDims, layout.strideOrder));
-        invVarianceAttr.set_uid(uid++);
         auto invVarianceTensorAttr
             = std::make_shared<graph::TensorAttributes>(std::move(invVarianceAttr));
 
@@ -72,7 +67,6 @@ protected:
                                           intermediateDataType,
                                           derivedDims,
                                           generateStrides(derivedDims, layout.strideOrder));
-        scaleAttr.set_uid(uid++);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
         auto biasAttr
@@ -80,7 +74,6 @@ protected:
                                           intermediateDataType,
                                           derivedDims,
                                           generateStrides(derivedDims, layout.strideOrder));
-        biasAttr.set_uid(uid++);
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         graph::BatchnormInferenceAttributes bnAttrs;

@@ -41,16 +41,12 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        int64_t uid = 1;
-
         auto xAttr = graph::makeTensorAttributes(
             "x", testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder));
-        xAttr.set_uid(uid++);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto dyAttr = graph::makeTensorAttributes(
             "dy", testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder));
-        dyAttr.set_uid(uid++);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
         graph::ConvWgradAttributes convAttrs;
@@ -61,11 +57,6 @@ protected:
         convAttrs.set_dilation(testCase.convDilation);
 
         auto dwTensorAttr = graphObj.conv_wgrad(dyTensorAttr, xTensorAttr, convAttrs);
-
-        if(!dwTensorAttr->has_uid())
-        {
-            dwTensorAttr->set_uid(uid++);
-        }
         dwTensorAttr->set_output(true);
 
         // Set these explicitly since grouped convs cannot infer tensor shape.

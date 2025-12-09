@@ -31,6 +31,7 @@
 
 miopenStatus_t miopenSetTuningPolicy(miopenHandle_t handle, miopenTuningPolicy_t newValue)
 {
+    MIOPEN_LOG_FUNCTION(handle, newValue);
     return miopen::try_([&] {
         if(newValue < miopenTuningPolicyNone || newValue > miopenTuningPolicyDbClean)
             MIOPEN_THROW(miopenStatusBadParm,
@@ -44,6 +45,7 @@ miopenStatus_t miopenSetTuningPolicy(miopenHandle_t handle, miopenTuningPolicy_t
 
 miopenStatus_t miopenGetTuningPolicy(miopenHandle_t handle, miopenTuningPolicy_t* value)
 {
+    MIOPEN_LOG_FUNCTION(handle, value);
     return miopen::try_([&] {
         if(value == nullptr)
             MIOPEN_THROW(miopenStatusBadParm, "miopenGetTuningPolicy called with null");

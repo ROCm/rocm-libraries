@@ -38,16 +38,12 @@ protected:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        int64_t uid = 1;
-
         auto xAttr = graph::makeTensorAttributes(
             "x", convTestCase.xDims, generateStrides(convTestCase.xDims, layout.strideOrder));
-        xAttr.set_uid(uid++);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto wAttr = graph::makeTensorAttributes(
             "w", convTestCase.wDims, generateStrides(convTestCase.wDims, layout.strideOrder));
-        wAttr.set_uid(uid++);
         auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
         graph::ConvFpropAttributes convAttrs;
@@ -58,7 +54,6 @@ protected:
         convAttrs.set_dilation(convTestCase.convDilation);
 
         auto yConvTensorAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
-        yConvTensorAttr->set_uid(uid++);
 
         std::shared_ptr<graph::TensorAttributes> yBiasTensorAttr;
         if(doBias)
@@ -67,7 +62,6 @@ protected:
 
             auto biasAttr = graph::makeTensorAttributes(
                 "bias", biasDims, generateStrides(biasDims, layout.strideOrder));
-            biasAttr.set_uid(uid++);
             auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
             graph::PointwiseAttributes biasAttrs;
@@ -75,7 +69,6 @@ protected:
             biasAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
 
             yBiasTensorAttr = graphObj.pointwise(yConvTensorAttr, biasTensorAttr, biasAttrs);
-            yBiasTensorAttr->set_uid(uid++);
         }
 
         graph::PointwiseAttributes activAttrs;
@@ -109,7 +102,6 @@ protected:
         auto yTensorAttr
             = graphObj.pointwise(doBias ? yBiasTensorAttr : yConvTensorAttr, activAttrs);
         yTensorAttr->set_output(true);
-        yTensorAttr->set_uid(uid);
 
         this->registerValidator(yTensorAttr, tolerance);
 

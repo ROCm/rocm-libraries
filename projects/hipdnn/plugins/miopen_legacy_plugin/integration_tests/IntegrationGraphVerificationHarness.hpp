@@ -74,6 +74,8 @@ protected:
 
         auto result = graph.validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        result = graph.build_operation_graph(_handle);
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);
 
@@ -185,10 +187,7 @@ private:
                          hipdnn_frontend::graph::Graph& graph,
                          hipdnn_sdk::test_utilities::GraphTensorBundle& bundle)
     {
-        auto result = graph.build_operation_graph(handle);
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-
-        result = graph.create_execution_plans();
+        auto result = graph.create_execution_plans();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         result = graph.check_support();
