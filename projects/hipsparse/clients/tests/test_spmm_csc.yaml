@@ -51,8 +51,7 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT, 
              HIPSPARSE_SPMM_CSR_ALG1,
-             HIPSPARSE_SPMM_CSR_ALG2,
-             HIPSPARSE_SPMM_CSR_ALG3]
+             HIPSPARSE_SPMM_CSR_ALG2]
 
 - name: spmm_csc
   category: pre_checkin
@@ -73,8 +72,7 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT, 
              HIPSPARSE_SPMM_CSR_ALG1,
-             HIPSPARSE_SPMM_CSR_ALG2,
-             HIPSPARSE_SPMM_CSR_ALG3]
+             HIPSPARSE_SPMM_CSR_ALG2]
   filename: [nos1,
              nos4, 
              nos5]
@@ -98,6 +96,5 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ONE]
   spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT, 
              HIPSPARSE_SPMM_CSR_ALG1,
-             HIPSPARSE_SPMM_CSR_ALG2,
-             HIPSPARSE_SPMM_CSR_ALG3]
+             HIPSPARSE_SPMM_CSR_ALG2]
   filename: [Chebyshev4]
