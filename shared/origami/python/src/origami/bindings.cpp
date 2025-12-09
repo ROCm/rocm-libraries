@@ -1,28 +1,27 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+////////////////////////////////////////////////////////////////////////////////
+//
+// MIT License
+//
+// Copyright 2025 AMD ROCm(TM) Software
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+// ies of the Software, and to permit persons to whom the Software is furnished
+// to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+// PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+// FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+// COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+// IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+// CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+//
+////////////////////////////////////////////////////////////////////////////////
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/map.h>
@@ -39,13 +38,15 @@
 #include "origami/types.hpp"
 
 using hardware_t = origami::hardware_t;
-namespace nb     = nanobind;
-using namespace nb::literals;
 
 NB_MODULE(origami, m) {
   nanobind::enum_<hardware_t::architecture_t>(m, "architecture_t")
+      .value("gfx90a", hardware_t::architecture_t::gfx90a)
       .value("gfx942", hardware_t::architecture_t::gfx942)
       .value("gfx950", hardware_t::architecture_t::gfx950)
+      .value("gfx1201", hardware_t::architecture_t::gfx1201)
+      .value("gfx1100", hardware_t::architecture_t::gfx1100)
+      .value("gfx1151", hardware_t::architecture_t::gfx1151)
       .export_values();
 
   nanobind::enum_<origami::data_type_t>(m, "data_type_t")
@@ -58,6 +59,7 @@ NB_MODULE(origami, m) {
       .value("Int32", origami::data_type_t::Int32)
       .value("BFloat16", origami::data_type_t::BFloat16)
       .value("Int8", origami::data_type_t::Int8)
+      .value("Int4", origami::data_type_t::Int4)
       .value("Int64", origami::data_type_t::Int64)
       .value("XFloat32", origami::data_type_t::XFloat32)
       .value("Float8_fnuz", origami::data_type_t::Float8_fnuz)
@@ -77,7 +79,6 @@ NB_MODULE(origami, m) {
   nanobind::enum_<origami::transpose_t>(m, "transpose_t")
       .value("T", origami::transpose_t::T)
       .value("N", origami::transpose_t::N)
-      // Optional: usually you don't expose Count, but you can if you want
       // .value("Count", origami::transpose_t::Count)
       .export_values();
 
@@ -94,8 +95,10 @@ NB_MODULE(origami, m) {
       .export_values();
 
   nanobind::enum_<origami::reduction_t>(m, "reduction_t")
-      .value("tree", origami::reduction_t::tree)
-      .value("parallel", origami::reduction_t::parallel)
+      .value("Spinlock", origami::reduction_t::spinlock)
+      .value("Tree", origami::reduction_t::tree)
+      .value("Parallel", origami::reduction_t::parallel)
+      .value("Atomic", origami::reduction_t::atomic)
       .export_values();
 
   m.def("int_to_reduction_t", &origami::int_to_reduction_t, "Convert int to reduction_t.");
@@ -119,32 +122,16 @@ NB_MODULE(origami, m) {
       .def("get_metrics", &origami::logger_t::get_metrics, "Get all metrics as a map")
       .def("empty", &origami::logger_t::empty, "Check if logger has any metrics")
       // Overloads for templated log() method
-      .def(
-          "log",
-          [](origami::logger_t& self, const std::string& key, int value) { self.log(key, value); },
-          "Log an integer value")
-      .def(
-          "log",
-          [](origami::logger_t& self, const std::string& key, double value) {
-            self.log(key, value);
-          },
-          "Log a double value")
-      .def(
-          "log",
-          [](origami::logger_t& self, const std::string& key, const std::string& value) {
-            self.log(key, value);
-          },
-          "Log a string value")
-      .def(
-          "log",
-          [](origami::logger_t& self, const std::string& key, bool value) { self.log(key, value); },
-          "Log a boolean value")
-      .def(
-          "log",
-          [](origami::logger_t& self, const std::string& key, size_t value) {
-            self.log(key, value);
-          },
-          "Log a size_t value");
+      .def("log", [](origami::logger_t& self, const std::string& key, int value) { self.log(key, value); },
+           "Log an integer value")
+      .def("log", [](origami::logger_t& self, const std::string& key, double value) { self.log(key, value); },
+           "Log a double value")
+      .def("log", [](origami::logger_t& self, const std::string& key, const std::string& value) { self.log(key, value); },
+           "Log a string value")
+      .def("log", [](origami::logger_t& self, const std::string& key, bool value) { self.log(key, value); },
+           "Log a boolean value")
+      .def("log", [](origami::logger_t& self, const std::string& key, size_t value) { self.log(key, value); },
+           "Log a size_t value");
 
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())
@@ -179,16 +166,16 @@ NB_MODULE(origami, m) {
 
   nanobind::class_<hardware_t>(m, "hardware_t")
       .def(nanobind::init<hardware_t::architecture_t,
-                          size_t,
-                          size_t,
-                          size_t,
-                          double,
-                          double,
-                          double,
-                          size_t,
-                          double,
-                          size_t,
-                          std::tuple<double, double, double>>())
+                          size_t,  // N_CU
+                          size_t,  // lds_capacity
+                          size_t,  // NUM_XCD
+                          double,  // mem1_perf_ratio
+                          double,  // mem2_perf_ratio
+                          double,  // mem3_perf_ratio
+                          size_t,  // L2_capacity
+                          double,  // compute_clock_ghz
+                          size_t,  // parallel_mi_cu
+                          std::tuple<double, double, double>>())  // mem_bw_per_wg_coefficients
       .def("print", &hardware_t::print)
       .def_rw("N_CU", &hardware_t::N_CU)
       .def_rw("lds_capacity", &hardware_t::lds_capacity)
@@ -216,64 +203,23 @@ NB_MODULE(origami, m) {
 
   m.def("select_config",
         &origami::select_config,
-        "problem"_a,
-        "hardware"_a,
-        "configs"_a,
         "Select best configuration based on problem and hardware");
   m.def("select_grid_size",
         &origami::streamk::select_grid_size,
-        "problem"_a,
-        "hardware"_a,
-        "config"_a,
-        "algorithm"_a,
-        "max_cus"_a = 0,
         "Select best grid size for the given configuration");
   m.def("select_workgroup_mapping",
         &origami::select_workgroup_mapping,
-        "problem"_a,
-        "hardware"_a,
-        "config"_a,
-        "skGrid"_a,
-
         "Select best workgroup mapping");
-  m.def("rank_configs",
-        &origami::rank_configs,
-        "problem"_a,
-        "hardware"_a,
-        "configs"_a,
-        "Rank configurations by performance");
+  m.def("rank_configs", &origami::rank_configs, "Rank configurations by performance");
   m.def("select_config_mnk",
         &origami::select_config_mnk,
-        "M"_a,
-        "N"_a,
-        "K"_a,
-        "hardware"_a,
-        "configs"_a,
-
         "Select best configuration for M,N,K dimensions");
-  m.def("select_topk_configs",
-        &origami::select_topk_configs,
-        "problem"_a,
-        "hardware"_a,
-        "configs"_a,
-        "topk"_a,
-
-        "Select topk configurations");
-  m.def("compute_perf_gflops",
-        &origami::compute_perf_gflops,
-        "hardware"_a,
-        "problem"_a,
-        "latency"_a,
-
-        "Compute performance in GFLOPS");
+  m.def("select_topk_configs", &origami::select_topk_configs, "Select topk configurations");
+  m.def("compute_perf_gflops", &origami::compute_perf_gflops, "Compute performance in GFLOPS");
 
   // StreamK functions
   m.def("select_reduction",
         &origami::streamk::select_reduction,
-        "problem"_a,
-        "hardware"_a,
-        "config"_a,
-        "algorithm"_a,
         "Select best StreamK reduction strategy");
 
   // GEMM functions
@@ -282,9 +228,42 @@ NB_MODULE(origami, m) {
                                const origami::hardware_t&,
                                const origami::config_t&,
                                size_t max_cus)>(&origami::compute_total_latency),
-        "problem"_a,
-        "hardware"_a,
-        "config"_a,
-        "max_cus"_a,
         "Compute total latency");
+  m.def("compute_number_matrix_instructions",
+        &origami::compute_number_matrix_instructions,
+        "Compute the number of matrix instructions required");
+  m.def("compute_mt_compute_latency",
+        &origami::compute_mt_compute_latency,
+        "Compute the latency to process a single macro-tile");
+  m.def("check_lds_capacity",
+        &origami::check_lds_capacity,
+        "Check if MT fits in LDS");
+  m.def("compute_A_loads",
+        &origami::compute_A_loads,
+        "Compute the amount of data loaded from A");
+  m.def("compute_B_loads",
+        &origami::compute_B_loads,
+        "Compute the amount of data loaded from B");
+  m.def("estimate_l2_hit",
+        &origami::estimate_l2_hit,
+        "Estimate L2 hit rate");
+  m.def("estimate_mall_hit",
+        &origami::estimate_mall_hit,
+        "Estimate MALL hit rate");
+  m.def("compute_memory_latency",
+        &origami::compute_memory_latency,
+        "Compute memory latency per macro tile");
+  m.def("compute_tile_latency",
+        &origami::compute_tile_latency,
+        "Compute latency to compute a K-complete tile");
+  m.def("compute_timestep_latency",
+        &origami::compute_timestep_latency,
+        "Compute latency per K-complete MT wave");
+
+  // StreamK functions
+  m.def("compute_number_of_output_tiles",
+        &origami::streamk::compute_number_of_output_tiles,
+        "Compute number of output tiles");
+
 }
+

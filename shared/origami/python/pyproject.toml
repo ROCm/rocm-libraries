@@ -1,0 +1,66 @@
+[build-system]
+requires = [
+    "scikit-build-core>=0.5",
+    "nanobind>=2.0.0"
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "origami"
+version = "0.1.0"
+description = "Analytical GEMM Solution Selection"
+readme = "../README.md"
+requires-python = ">=3.7"
+license = {text = "MIT"}
+authors = [
+    {name = "Advanced Micro Devices, Inc."}
+]
+dependencies = [
+    "nanobind>=2.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[tool.scikit-build]
+wheel.packages = ["src/origami"]
+cmake.version = ">=3.15"
+build.verbose = true
+cmake.args = [
+    "-DCMAKE_BUILD_TYPE=Release",
+    "-G", "Ninja",
+]
+sdist.exclude = [
+    "../../*",
+    "../*",
+    "*.md",
+    "*.sh",
+    "tests/*",
+    "build/*",
+    "*.egg-info/*",
+]
+wheel.exclude = [
+    "../../*",
+    "../*",
+    "*.md",
+    "*.sh",
+    "tests/*",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests that require hardware",
+]
+addopts = [
+    "-ra",
+    "--strict-markers",
+]
+

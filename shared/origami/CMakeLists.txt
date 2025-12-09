@@ -109,24 +109,52 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     if(ORIGAMI_ENABLE_PYTHON)
         find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 
-        add_test(NAME origami_python_test COMMAND "${Python3_EXECUTABLE}" "origami_test.py"
-                 WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python"
+        # Check if pytest is available, install if not
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} -m pytest --version
+            OUTPUT_QUIET
+            ERROR_QUIET
+            RESULT_VARIABLE pytest_available
         )
 
-        add_test(NAME origami_python_grid_test COMMAND "${Python3_EXECUTABLE}"
-                                                       "origami_grid_test.py"
-                 WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python"
+        if(pytest_available)
+            # Try to install pytest
+            execute_process(
+                COMMAND ${Python3_EXECUTABLE} -m pip install pytest pytest-cov
+                OUTPUT_QUIET
+                ERROR_QUIET
+                RESULT_VARIABLE pytest_install_result
+            )
+        endif()
+
+        # Run pytest tests
+        add_test(
+            NAME origami_python_tests
+            COMMAND ${Python3_EXECUTABLE} -m pytest tests/ -v
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/python
         )
 
         set_tests_properties(
-            origami_python_test origami_python_grid_test
+            origami_python_tests
             PROPERTIES
                 ENVIRONMENT
                 "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python:${CMAKE_CURRENT_SOURCE_DIR}/python:$ENV{PYTHONPATH}"
+                DEPENDS origami_python
+        )
+
+        # Optionally run tests excluding slow ones
+        add_test(
+            NAME origami_python_tests_fast
+            COMMAND ${Python3_EXECUTABLE} -m pytest tests/ -v -m "not slow"
+            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/python
         )
 
         set_tests_properties(
-            origami_python_test origami_python_grid_test PROPERTIES DEPENDS origami_python
+            origami_python_tests_fast
+            PROPERTIES
+                ENVIRONMENT
+                "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python:${CMAKE_CURRENT_SOURCE_DIR}/python:$ENV{PYTHONPATH}"
+                DEPENDS origami_python
         )
     endif()
 endif()
