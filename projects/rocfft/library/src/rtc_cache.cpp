@@ -18,6 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include "../../shared/concurrency.h"
 #include "../../shared/environment.h"
 
 #include "library_path.h"
@@ -27,11 +28,13 @@
 #include "rtc_subprocess.h"
 #include "sqlite3.h"
 
+#include <atomic>
 #include <chrono>
 #include <hip/hip_version.h>
 #include <hip/hiprtc.h>
 #include <mutex>
 #include <optional>
+#include <thread>
 
 namespace fs = std::filesystem;
 
@@ -44,6 +47,44 @@ static const char* default_cache_filename = "rocfft_kernel_cache.db";
 // delegate to a subprocess.  But we should at least do one
 // in-process instead of making everything go to subprocess.
 static std::mutex compile_lock;
+
+// Limit concurrent subprocesses based on available CPU cores.
+// This prevents oversubscription when running under job managers
+// (SLURM, mpiexec) that pin processes to specific CPU sets.
+static std::atomic<unsigned int> active_subprocesses{0};
+static unsigned int              max_subprocesses = 0;
+
+// Get max subprocess count (cached, initialized on first use)
+static unsigned int get_max_subprocesses()
+{
+    if(max_subprocesses == 0)
+    {
+        max_subprocesses = rocfft_concurrency();
+
+        // allow override via environment variable for testing/debugging
+        auto env_limit = rocfft_getenv("ROCFFT_RTC_MAX_SUBPROCESSES");
+        if(!env_limit.empty())
+        {
+            try
+            {
+                unsigned int user_limit = std::stoul(env_limit);
+                if(user_limit > 0)
+                    max_subprocesses = user_limit;
+            }
+            catch(...)
+            {
+                // use default
+            }
+        }
+
+        if(LOG_RTC_ENABLED())
+        {
+            (*LogSingleton::GetInstance().GetRTCOS())
+                << "// Max concurrent RTC subprocesses: " << max_subprocesses << std::endl;
+        }
+    }
+    return max_subprocesses;
+}
 
 // Get paths to system RTC cache, in decreasing order of preference.
 static std::vector<fs::path> rtccache_db_sys_paths()
@@ -473,14 +514,24 @@ static std::vector<char> cached_compile_impl(const std::string&          kernel_
     {
     case RTCProcessType::FORCE_OUT_PROCESS:
     {
-        compile_begin = std::chrono::steady_clock::now();
         try
         {
-            code = compile_subprocess(kernel_src, gpu_arch);
+            // wait if too many subprocesses are active
+            unsigned int max_procs = get_max_subprocesses();
+            while(active_subprocesses >= max_procs)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+
+            ++active_subprocesses;
+            compile_begin = std::chrono::steady_clock::now();
+            code          = compile_subprocess(kernel_src, gpu_arch);
+            --active_subprocesses;
             break;
         }
         catch(std::exception&)
         {
+            --active_subprocesses;
             // if subprocess had a problem, ignore it and
             // fall through to forced-in-process compile
         }
@@ -505,19 +556,42 @@ static std::vector<char> cached_compile_impl(const std::string&          kernel_
         else
         {
             // couldn't acquire lock, so try instead in a subprocess
-            try
+            unsigned int max_procs = get_max_subprocesses();
+
+            // if only 1 CPU is available, better to wait for in-process
+            // compilation rather than spawn a subprocess that will compete
+            // for the same CPU
+            if(max_procs == 1)
             {
-                compile_begin = std::chrono::steady_clock::now();
-                code          = compile_subprocess(kernel_src, gpu_arch);
-            }
-            catch(std::exception&)
-            {
-                // subprocess still didn't work, re-acquire lock
-                // and fall back to in-process if something went
-                // wrong
                 std::lock_guard<std::mutex> lck(compile_lock);
                 compile_begin = std::chrono::steady_clock::now();
                 code          = compile_inprocess(kernel_src, gpu_arch);
+            }
+            else
+            {
+                try
+                {
+                    // wait if too many subprocesses are active
+                    while(active_subprocesses >= max_procs)
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    }
+
+                    ++active_subprocesses;
+                    compile_begin = std::chrono::steady_clock::now();
+                    code          = compile_subprocess(kernel_src, gpu_arch);
+                    --active_subprocesses;
+                }
+                catch(std::exception&)
+                {
+                    --active_subprocesses;
+                    // subprocess still didn't work, re-acquire lock
+                    // and fall back to in-process if something went
+                    // wrong
+                    std::lock_guard<std::mutex> lck(compile_lock);
+                    compile_begin = std::chrono::steady_clock::now();
+                    code          = compile_inprocess(kernel_src, gpu_arch);
+                }
             }
         }
     }
