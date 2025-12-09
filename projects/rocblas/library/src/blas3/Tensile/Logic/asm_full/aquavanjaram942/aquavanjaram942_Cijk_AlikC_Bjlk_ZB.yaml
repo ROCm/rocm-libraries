@@ -2262,7 +2262,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 7
-    SolutionNameMin: Cijk_Alik_Bjlk_ZB_MT16x16x128_MI16x16x4x1_SN_1LDSB1_DTVB1_GSU15_GSUAMB_LBSPPA2048_LPA2_NLCA1_NLCB1_PLR9_TT1_16_WG16_4_4
+    SolutionNameMin: Cijk_AlikC_Bjlk_ZB_MT16x16x128_MI16x16x4x1_SN_1LDSB1_DTVB1_GSU15_GSUAMB_LBSPPA2048_LPA2_NLCA1_NLCB1_PLR9_TT1_16_WG16_4_4
     SourceSwap: 1
     StaggerU: 0
     StaggerUMapping: 0
