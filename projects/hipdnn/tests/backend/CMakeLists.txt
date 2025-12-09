@@ -5,8 +5,10 @@ include(GoogleTest)
 find_package(hip REQUIRED)
 find_package(Threads REQUIRED)
 
+# Main integration test executable WITH HipErrorHandler
 add_executable(
     public_hipdnn_backend_tests
+    main.cpp
     IntegrationBackendDescriptor.cpp
     IntegrationBackendExecuteApi.cpp
     IntegrationEngineApi.cpp
