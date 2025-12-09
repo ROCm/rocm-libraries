@@ -31,8 +31,7 @@
 #include <miopen/solver_id.hpp>
 #include <miopen/miopen.h>
 
-#include <boost/optional.hpp>
-
+#include <optional>
 #include <ostream>
 
 namespace miopen {
@@ -106,7 +105,7 @@ public:
     MIOPEN_INTERNALS_EXPORT friend std::ostream& operator<<(std::ostream&, const FindEnforce&);
 };
 
-MIOPEN_INTERNALS_EXPORT boost::optional<std::vector<solver::Id>> GetEnvFindOnlySolver();
+MIOPEN_INTERNALS_EXPORT std::optional<std::vector<solver::Id>> GetEnvFindOnlySolver();
 
 class MIOPEN_INTERNALS_EXPORT FindMode
 {
