@@ -62,6 +62,12 @@ struct BatchnormBwdSignatureKey
             meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
         }
 
+        const hipdnn_sdk::data_objects::TensorAttributes* invVarianceTensorAttr = nullptr;
+        if(nodeAttributes->inv_variance_tensor_uid().has_value())
+        {
+            invVarianceTensorAttr = tensorMap.at(nodeAttributes->inv_variance_tensor_uid().value());
+        }
+
         if(dyTensorAttr == nullptr || xTensorAttr == nullptr || scaleTensorAttr == nullptr
            || dxTensorAttr == nullptr)
         {
@@ -76,6 +82,10 @@ struct BatchnormBwdSignatureKey
         if(meanTensorAttr != nullptr)
         {
             meanVarianceDataType = meanTensorAttr->data_type();
+        }
+        else if(invVarianceTensorAttr != nullptr)
+        {
+            meanVarianceDataType = invVarianceTensorAttr->data_type();
         }
         else
         {

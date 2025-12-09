@@ -258,29 +258,21 @@ public:
                     });
 
                 ComputeDataType calculatedMean = meanAccum / nhwF;
+
+                channelMean
+                    = (mean != nullptr)
+                          ? utilities::staticCast<ComputeDataType>(mean->getHostValue(0, cidx))
+                          : calculatedMean;
+
                 ComputeDataType calculatedVariance
-                    = (varianceAccum / nhwF) - (calculatedMean * calculatedMean);
+                    = (varianceAccum / nhwF) - (channelMean * channelMean);
 
-                if(mean != nullptr)
-                {
-                    channelMean
-                        = utilities::staticCast<ComputeDataType>(mean->getHostValue(0, cidx));
-                }
-                else
-                {
-                    channelMean = calculatedMean;
-                }
-
-                if(invVariance != nullptr)
-                {
-                    channelInvVariance = utilities::staticCast<ComputeDataType>(
-                        invVariance->getHostValue(0, cidx));
-                }
-                else
-                {
-                    channelInvVariance = utilities::staticCast<ComputeDataType>(1.0)
-                                         / sqrtInternal(calculatedVariance + epsilonCompute);
-                }
+                channelInvVariance = (invVariance != nullptr)
+                                         ? utilities::staticCast<ComputeDataType>(
+                                               invVariance->getHostValue(0, cidx))
+                                         : utilities::staticCast<ComputeDataType>(
+                                               utilities::staticCast<ComputeDataType>(1.0)
+                                               / sqrtInternal(calculatedVariance + epsilonCompute));
             }
             else
             {

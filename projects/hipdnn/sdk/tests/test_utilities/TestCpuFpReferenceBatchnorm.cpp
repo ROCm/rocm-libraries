@@ -862,6 +862,133 @@ TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithoutSavedStatsLargeEps
     EXPECT_NEAR(dxTensor.getHostValue(0, 0, 0, 0), 0.0f, tolerance);
 }
 
+TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithMeanOnly)
+{
+    // Test with mean provided but invVariance missing
+    // Provide a wrong mean to verify it is being used
+    const std::vector<int64_t> dims = {1, 1, 2, 2};
+
+    Tensor<float> xTensor(dims);
+    Tensor<float> dyTensor(dims);
+    Tensor<float> dxTensor(dims);
+    Tensor<float> scaleTensor({1, 1});
+    Tensor<float> dscaleTensor({1, 1});
+    Tensor<float> dbiasTensor({1, 1});
+    Tensor<float> meanTensor({1, 1});
+
+    // x = [1, 2, 3, 4]
+    xTensor.setHostValue(1.0f, 0, 0, 0, 0);
+    xTensor.setHostValue(2.0f, 0, 0, 0, 1);
+    xTensor.setHostValue(3.0f, 0, 0, 1, 0);
+    xTensor.setHostValue(4.0f, 0, 0, 1, 1);
+
+    // dy = [0.1, 0.2, 0.3, 0.4]
+    dyTensor.setHostValue(0.1f, 0, 0, 0, 0);
+    dyTensor.setHostValue(0.2f, 0, 0, 0, 1);
+    dyTensor.setHostValue(0.3f, 0, 0, 1, 0);
+    dyTensor.setHostValue(0.4f, 0, 0, 1, 1);
+
+    scaleTensor.setHostValue(1.0f, 0, 0);
+    
+    // Provide wrong mean = 0.0
+    meanTensor.setHostValue(0.0f, 0, 0);
+
+    // 1. Variance Calculation:
+    //    The code uses the provided mean (0.0) in the formula: E[x^2] - mean^2
+    //    E[x^2] = (1+4+9+16)/4 = 7.5
+    //    variance = 7.5 - 0.0^2 = 7.5
+    //    inv_variance = 1 / sqrt(7.5 + 1e-5) ≈ 0.36514837
+    
+    // 2. dx Calculation:
+    //    Formula: dx = scale * inv_variance * (dy - mean(dy) - x_hat * mean(dy * x_hat))
+    //    
+    //    x_hat = (x - mean) * inv_variance
+    //    Using mean=0.0: x_hat = x * 0.36514837
+    //    x_hat = [0.365148, 0.730296, 1.095444, 1.460592]
+    //    
+    //    dy * x_hat = [0.036515, 0.146059, 0.328633, 0.584237]
+    //    mean(dy * x_hat) = 0.273861
+    //
+    //    Term (x_hat * mean(dy * x_hat)):
+    //    For x=1: 0.365148 * 0.273861 = 0.1
+    //
+    //    Final dx[0]:
+    //    dx[0] = 1.0 * 0.365148 * (0.1 - 0.25 - 0.1)
+    //          = 0.365148 * (-0.25)
+    //          = -0.091287
+    //    For other elements, dx will be the same due to symmetry.
+    
+    CpuFpReferenceBatchnorm::backward<float, float, float, float, float, float>(
+        dyTensor, xTensor, scaleTensor, dxTensor, dscaleTensor, dbiasTensor, &meanTensor, nullptr);
+
+    auto tolerance = 1e-4f;
+    EXPECT_NEAR(dxTensor.getHostValue(0, 0, 0, 0), -0.091287f, tolerance);
+    EXPECT_NEAR(dxTensor.getHostValue(0, 0, 0, 1), -0.091287f, tolerance);
+    EXPECT_NEAR(dxTensor.getHostValue(0, 0, 1, 0), -0.091287f, tolerance);
+    EXPECT_NEAR(dxTensor.getHostValue(0, 0, 1, 1), -0.091287f, tolerance);
+}
+
+TEST(TestCpuFpReferenceBatchnormFp32, BatchnormBackwardWithInvVarianceOnly)
+{
+    // Test with invVariance provided but mean missing
+    // Provide a wrong invVariance to verify it is being used
+    const std::vector<int64_t> dims = {1, 1, 2, 2};
+
+    Tensor<float> xTensor(dims);
+    Tensor<float> dyTensor(dims);
+    Tensor<float> dxTensor(dims);
+    Tensor<float> scaleTensor({1, 1});
+    Tensor<float> dscaleTensor({1, 1});
+    Tensor<float> dbiasTensor({1, 1});
+    Tensor<float> invVarianceTensor({1, 1});
+
+    // x = [1, 2, 3, 4]
+    xTensor.setHostValue(1.0f, 0, 0, 0, 0);
+    xTensor.setHostValue(2.0f, 0, 0, 0, 1);
+    xTensor.setHostValue(3.0f, 0, 0, 1, 0);
+    xTensor.setHostValue(4.0f, 0, 0, 1, 1);
+
+    // dy = [0.1, 0.2, 0.3, 0.4]
+    dyTensor.setHostValue(0.1f, 0, 0, 0, 0);
+    dyTensor.setHostValue(0.2f, 0, 0, 0, 1);
+    dyTensor.setHostValue(0.3f, 0, 0, 1, 0);
+    dyTensor.setHostValue(0.4f, 0, 0, 1, 1);
+
+    scaleTensor.setHostValue(1.0f, 0, 0);
+    
+    // Provide incorrect invVariance = 1.0
+    invVarianceTensor.setHostValue(1.0f, 0, 0);
+
+    // dx Calculation:
+    // Formula: dx = scale * inv_variance * (dy - mean(dy) - x_hat * mean(dy * x_hat))
+    //
+    // 1. Inputs:
+    //    mean = 2.5
+    //    inv_variance = 1.0 (provided)
+    //
+    // 2. Intermediates:
+    //    x_hat = (x - mean) * inv_variance = [-1.5, -0.5, 0.5, 1.5]
+    //    mean(dy) = 0.25
+    //    mean(dy * x_hat) = mean([-0.15, -0.1, 0.15, 0.6]) = 0.125
+    //
+    // 3. Final dx values (scale=1.0):
+    //    dx = 1.0 * (dy - 0.25 - x_hat * 0.125)
+    //    dx[0] = 0.1 - 0.25 - (-1.5 * 0.125) = 0.0375
+    //    dx[1] = 0.2 - 0.25 - (-0.5 * 0.125) = 0.0125
+    //    dx[2] = 0.3 - 0.25 - ( 0.5 * 0.125) = -0.0125
+    //    dx[3] = 0.4 - 0.25 - ( 1.5 * 0.125) = -0.0375
+
+
+    CpuFpReferenceBatchnorm::backward<float, float, float, float, float, float>(
+        dyTensor, xTensor, scaleTensor, dxTensor, dscaleTensor, dbiasTensor, nullptr, &invVarianceTensor);
+
+    auto tolerance = 1e-5f;
+    EXPECT_NEAR(dxTensor.getHostValue(0, 0, 0, 0), 0.0375f, tolerance);
+    EXPECT_NEAR(dxTensor.getHostValue(0, 0, 0, 1), 0.0125f, tolerance);
+    EXPECT_NEAR(dxTensor.getHostValue(0, 0, 1, 0), -0.0125f, tolerance);
+    EXPECT_NEAR(dxTensor.getHostValue(0, 0, 1, 1), -0.0375f, tolerance);
+}
+
 TEST(TestCpuFpReferenceBatchnormFp32, BatchnormFwdTrainingNchwBasic)
 {
     Tensor<float> inputTensor({2, 3, 4, 4});
