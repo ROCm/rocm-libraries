@@ -22,7 +22,7 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse_csrilu0_kernel_hash.hpp"
+#include "rocsparse_csrilu0_hash_kernel.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -49,8 +49,8 @@ namespace rocsparse
                                                   double               boost_tol,
                                                   T                    boost_val)
     {
-        int lid = hipThreadIdx_x & (WFSIZE - 1);
-        int wid = hipThreadIdx_x / WFSIZE;
+      const auto lid = hipThreadIdx_x & (WFSIZE - 1);
+      const auto wid = hipThreadIdx_x / WFSIZE;
 
         __shared__ J stable[BLOCKSIZE * HASH];
         __shared__ I sdata[BLOCKSIZE * HASH];
@@ -257,138 +257,144 @@ namespace rocsparse
               typename I,
               typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrilu0_strided_batched_kernel_hash(J m,
-                                             const I* __restrict__ csr_row_ptr,
-                                             const J* __restrict__ csr_col_ind,
-                                             T* __restrict__ csr_val,
-                                             int64_t csr_val_stride,
-                                             const I* __restrict__ csr_diag_ind,
-                                             int32_t* __restrict__ done,
-                                             int64_t done_stride,
-                                             const J* __restrict__ map,
-                                             J* __restrict__ zero_pivot,
-                                             int64_t zero_pivot_stride,
-                                             J* __restrict__ singular_pivot,
-                                             int64_t              singular_pivot_stride,
-                                             double               tol,
-                                             rocsparse_index_base idx_base,
-                                             int                  enable_boost,
-                                             size_t               size_boost_tol,
-                                             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float,
-                                                                                 boost_tol_32),
-                                             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double,
-                                                                                 boost_tol_64),
-                                             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
-                                             bool is_host_mode)
+    void csrilu0_hash_kernel(J m,
+			     const I* __restrict__ csr_row_ptr,
+			     const J* __restrict__ csr_col_ind,
+			     T* __restrict__ csr_val,
+			     int64_t csr_val_stride,
+			     const I* __restrict__ csr_diag_ind,
+			     int32_t* __restrict__ done,
+			     int64_t done_stride,
+			     const J* __restrict__ map,
+			     J* __restrict__ zero_pivot,
+			     int64_t zero_pivot_stride,
+			     J* __restrict__ singular_pivot,
+			     int64_t              singular_pivot_stride,
+			     double               tol,
+			     rocsparse_index_base idx_base,
+			     int                  enable_boost,
+			     size_t               size_boost_tol,
+			     ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float,
+								 boost_tol_32),
+			     ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double,
+								 boost_tol_64),
+			     ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, boost_val),
+			     bool is_host_mode)
     {
-        const auto i = hipBlockIdx_y;
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_32);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_64);
-        ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_val);
-        const double boost_tol = (size_boost_tol == sizeof(double)) ? boost_tol_64 : boost_tol_32;
-        rocsparse::csrilu0_hash_device<BLOCKSIZE, WFSIZE, HASH>(m,
-                                                                csr_row_ptr,
-                                                                csr_col_ind,
-                                                                csr_val + i * csr_val_stride,
-                                                                csr_diag_ind,
-                                                                done + i * done_stride,
-                                                                map,
-                                                                zero_pivot + i * zero_pivot_stride,
-                                                                singular_pivot
-                                                                    + i * singular_pivot_stride,
-                                                                tol,
-                                                                idx_base,
+      const auto i = hipBlockIdx_y;
+      ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_32);
+      ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_tol_64);
+      ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(enable_boost, boost_val);
+      const double boost_tol = (size_boost_tol == sizeof(double)) ? boost_tol_64 : boost_tol_32;
+      rocsparse::csrilu0_hash_device<BLOCKSIZE, WFSIZE, HASH>(m,
+							      csr_row_ptr,
+							      csr_col_ind,
+							      csr_val + i * csr_val_stride,
+							      csr_diag_ind,
+							      done + i * done_stride,
+							      map,
+							      zero_pivot + i * zero_pivot_stride,
+							      singular_pivot
+							      + i * singular_pivot_stride,
+							      tol,
+							      idx_base,
                                                                 enable_boost,
-                                                                boost_tol,
-                                                                boost_val);
+							      boost_tol,
+							      boost_val);
     }
 
-    template <uint32_t BLOCKSIZE,
+
+  template <uint32_t BLOCKSIZE,
               uint32_t WFSIZE,
               uint32_t HASH,
               typename T,
               typename I,
               typename J>
-    rocsparse_status
-        csrilu0_strided_batched_launch_kernel_hash(rocsparse_handle handle,
-                                                   int64_t          batch_count,
-                                                   int64_t          m,
-                                                   const void* __restrict__ csr_row_ptr,
-                                                   const void* __restrict__ csr_col_ind,
-                                                   void* __restrict__ csr_val,
-                                                   int64_t csr_val_stride,
-                                                   const void* __restrict__ csr_diag_ind,
-                                                   int32_t* __restrict__ done,
-                                                   int64_t done_stride,
-                                                   const void* __restrict__ map,
-                                                   void* __restrict__ zero_pivot,
-                                                   int64_t zero_pivot_stride,
-                                                   void* __restrict__ singular_pivot,
-                                                   int64_t              singular_pivot_stride,
-                                                   double               tol,
-                                                   rocsparse_index_base idx_base,
-                                                   int                  boost_enable,
-                                                   size_t               boost_tol_size,
-                                                   const void*          boost_tol,
-                                                   const void*          boost_val_)
-    {
-        dim3         csrilu0_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1, batch_count);
-        dim3         csrilu0_threads(BLOCKSIZE);
-        const T*     boost_val = reinterpret_cast<const T*>(boost_val_);
-        const float* boost_tol_32
-            = reinterpret_cast<const float*>((boost_enable) ? boost_tol : nullptr);
-        const double* boost_tol_64
-            = reinterpret_cast<const double*>((boost_enable) ? boost_tol : nullptr);
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrilu0_strided_batched_kernel_hash<BLOCKSIZE, WFSIZE, HASH>),
-            csrilu0_blocks,
-            csrilu0_threads,
-            0,
-            handle->stream,
-            static_cast<J>(m),
-            reinterpret_cast<const I*>(csr_row_ptr),
-            reinterpret_cast<const J*>(csr_col_ind),
-            reinterpret_cast<T*>(csr_val),
-            csr_val_stride,
-            reinterpret_cast<const I*>(csr_diag_ind),
-            done,
-            done_stride,
-            reinterpret_cast<const J*>(map),
-            reinterpret_cast<J*>(zero_pivot),
-            zero_pivot_stride,
-            reinterpret_cast<J*>(singular_pivot),
-            singular_pivot_stride,
-            tol,
-            idx_base,
-            boost_enable,
-            boost_tol_size,
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
-            handle->pointer_mode == rocsparse_pointer_mode_host);
+  static rocsparse_status
+  csrilu0_hash_kernel_launch(rocsparse_handle         handle,
+			     rocsparse_csrilu0_info   csrilu0_info,
+			     rocsparse_spmat_descr    A,
+			     int32_t                  boost_enable,
+			     size_t                   boost_tol_size,
+			     const void*__restrict__  gboost_tol,
+			     const void*__restrict__  gboost_val,
+			     size_t                   buffer_size,
+			     void*__restrict__        buffer)
+  {
 
-        return rocsparse_status_success;
-    }
+    auto trm_info = csrilu0_info->get(rocsparse_operation_none,
+				      rocsparse_fill_mode_lower);
+    
+    // done array
+    int32_t*__restrict__ done_array = reinterpret_cast<int32_t*__restrict__>(reinterpret_cast<char*__restrict__>(buffer)+256);
+    
+    // Initialize buffers
+    RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array,
+				       0,
+				       sizeof(int32_t) * A->rows * A->batch_count,
+				       handle->stream)); 
+    const int64_t done_array_stride = A->rows;
+    
+    
+    const T*__restrict__     boost_val = reinterpret_cast<const T*__restrict__>(gboost_val);   
+    const float*__restrict__ boost_tol_32
+      = reinterpret_cast<const float*__restrict__>((boost_enable) ? gboost_tol : nullptr);
+    const double*__restrict__ boost_tol_64
+      = reinterpret_cast<const double*__restrict__>((boost_enable) ? gboost_tol : nullptr);
+    
+    dim3         csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1, A->batch_count);
+    dim3         csrilu0_threads(BLOCKSIZE);
+    
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrilu0_hash_kernel<BLOCKSIZE, WFSIZE, HASH>),
+				       csrilu0_blocks,
+				       csrilu0_threads,
+				       0,
+				       handle->stream,
+				       static_cast<J>(A->rows),
+				       reinterpret_cast<const I*__restrict__>(A->const_row_data),
+				       reinterpret_cast<const J*__restrict__>(A->const_col_data),
+				       reinterpret_cast<T*__restrict__>(A->val_data),
+				       A->batch_stride,
+				       reinterpret_cast<const I*__restrict__>(trm_info->get_diag_ind()),
+				       done_array,
+				       done_array_stride,
+				       reinterpret_cast<const J*__restrict__>(trm_info->get_row_map()),
+				       reinterpret_cast<J*__restrict__>(csrilu0_info->get_zero_pivot()),
+				       csrilu0_info->get_zero_pivot_stride(),
+				       reinterpret_cast<J*__restrict__>(csrilu0_info->get_singular_pivot()),
+				       csrilu0_info->get_singular_pivot_stride(),
+				       csrilu0_info->get_singular_tol(),
+				       A->descr->base,
+				       boost_enable,
+				       boost_tol_size,
+				       ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
+				       ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
+				       ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
+				       handle->pointer_mode == rocsparse_pointer_mode_host);
+    
 
-    template <uint32_t BLOCKSIZE,
+    return rocsparse_status_success;
+  }
+
+  template <uint32_t BLOCKSIZE,
               uint32_t WF_SIZE,
               uint32_t HASH,
               typename T,
               typename I,
               typename... P>
-    static launch_csrilu0_kernel_hash_t find_csrilu0_kernel_hash_j(const rocsparse_indextype j,
+    static csrilu0_hash_kernel_launch_t transform_j_type(const rocsparse_indextype j,
                                                                    P... p)
     {
         return //
             (j == rocsparse_indextype_i32) //
-                ? csrilu0_strided_batched_launch_kernel_hash<BLOCKSIZE,
+                ? csrilu0_hash_kernel_launch<BLOCKSIZE,
                                                              WF_SIZE,
                                                              HASH,
                                                              T,
                                                              I,
                                                              int32_t>
                 : (j == rocsparse_indextype_i64) //
-                      ? csrilu0_strided_batched_launch_kernel_hash<BLOCKSIZE,
+                      ? csrilu0_hash_kernel_launch<BLOCKSIZE,
                                                                    WF_SIZE,
                                                                    HASH,
                                                                    T,
@@ -398,92 +404,90 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t HASH, typename T, typename... P>
-    static launch_csrilu0_kernel_hash_t find_csrilu0_kernel_hash_i(const rocsparse_indextype i,
-                                                                   P... p)
+    static csrilu0_hash_kernel_launch_t transform_i_type(const rocsparse_indextype i,
+							 P... p)
     {
         return //
             (i == rocsparse_indextype_i32) //
-                ? rocsparse::find_csrilu0_kernel_hash_j<BLOCKSIZE, WF_SIZE, HASH, T, int32_t>(
+                ? rocsparse::transform_j_type<BLOCKSIZE, WF_SIZE, HASH, T, int32_t>(
                     p...) //
                 : (i == rocsparse_indextype_i64) //
-                      ? rocsparse::find_csrilu0_kernel_hash_j<BLOCKSIZE, WF_SIZE, HASH, T, int64_t>(
+                      ? rocsparse::transform_j_type<BLOCKSIZE, WF_SIZE, HASH, T, int64_t>(
                           p...) //
                       : nullptr;
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, uint32_t HASH, typename... P>
-    static launch_csrilu0_kernel_hash_t find_csrilu0_kernel_hash_t(const rocsparse_datatype i,
-                                                                   P... p)
+    static csrilu0_hash_kernel_launch_t transform_t_type(const rocsparse_datatype i,
+							 P... p)
     {
         return //
             (i == rocsparse_datatype_f32_r) //
-                ? rocsparse::find_csrilu0_kernel_hash_i<BLOCKSIZE, WF_SIZE, HASH, float>(p...) //
+                ? rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, HASH, float>(p...) //
                 : (i == rocsparse_datatype_f32_c) //
-                      ? rocsparse::find_csrilu0_kernel_hash_i<BLOCKSIZE,
+                      ? rocsparse::transform_i_type<BLOCKSIZE,
                                                               WF_SIZE,
                                                               HASH,
                                                               rocsparse_float_complex>(p...) //
                       : (i == rocsparse_datatype_f64_c) //
-                            ? rocsparse::find_csrilu0_kernel_hash_i<BLOCKSIZE,
+                            ? rocsparse::transform_i_type<BLOCKSIZE,
                                                                     WF_SIZE,
                                                                     HASH,
                                                                     rocsparse_double_complex>(
                                 p...) //
                             : (i == rocsparse_datatype_f64_r) //
                                   ? rocsparse::
-                                      find_csrilu0_kernel_hash_i<BLOCKSIZE, WF_SIZE, HASH, double>(
+                                      transform_i_type<BLOCKSIZE, WF_SIZE, HASH, double>(
                                           p...) //
                                   : nullptr;
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename... P>
-    static launch_csrilu0_kernel_hash_t find_csrilu0_kernel_hash_mxnnz(const int32_t max_nnz,
+    static csrilu0_hash_kernel_launch_t transform_mxnnz(const int32_t max_nnz,
                                                                        P... p)
     {
         return //
             (max_nnz < WF_SIZE) //
-                ? rocsparse::find_csrilu0_kernel_hash_t<BLOCKSIZE, WF_SIZE, 1>(p...) //
+                ? rocsparse::transform_t_type<BLOCKSIZE, WF_SIZE, 1>(p...) //
                 : (max_nnz < WF_SIZE * 2) //
-                      ? rocsparse::find_csrilu0_kernel_hash_t<BLOCKSIZE, WF_SIZE, 2>(p...) //
+                      ? rocsparse::transform_t_type<BLOCKSIZE, WF_SIZE, 2>(p...) //
                       : (max_nnz < WF_SIZE * 4) //
-                            ? rocsparse::find_csrilu0_kernel_hash_t<BLOCKSIZE, WF_SIZE, 4>(p...) //
+                            ? rocsparse::transform_t_type<BLOCKSIZE, WF_SIZE, 4>(p...) //
                             : (max_nnz < WF_SIZE * 8) //
-                                  ? rocsparse::find_csrilu0_kernel_hash_t<BLOCKSIZE, WF_SIZE, 8>(
+                                  ? rocsparse::transform_t_type<BLOCKSIZE, WF_SIZE, 8>(
                                       p...) //
                                   : (max_nnz < WF_SIZE * 16) //
-                                        ? rocsparse::find_csrilu0_kernel_hash_t<BLOCKSIZE,
+                                        ? rocsparse::transform_t_type<BLOCKSIZE,
                                                                                 WF_SIZE,
                                                                                 16>(p...) //
                                         : nullptr;
     }
 
     template <uint32_t BLOCKSIZE, typename... P>
-    static launch_csrilu0_kernel_hash_t find_csrilu0_kernel_hash_wf(const int32_t i, P... p)
+    static csrilu0_hash_kernel_launch_t transform_wf(const int32_t i, P... p)
     {
         return //
             (i == 32) //
-                ? rocsparse::find_csrilu0_kernel_hash_mxnnz<BLOCKSIZE, 32>(p...) //
+                ? rocsparse::transform_mxnnz<BLOCKSIZE, 32>(p...) //
                 : (i == 64) //
-                      ? rocsparse::find_csrilu0_kernel_hash_mxnnz<BLOCKSIZE, 64>(p...) //
+                      ? rocsparse::transform_mxnnz<BLOCKSIZE, 64>(p...) //
                       : nullptr;
     }
 
 }
 
-rocsparse::launch_csrilu0_kernel_hash_t
-    rocsparse::find_launch_csrilu0_kernel_hash(const uint32_t            blocksize,
-                                               const uint32_t            wfsize,
-                                               const uint32_t            max_nnz,
-                                               const rocsparse_datatype  t_type,
-                                               const rocsparse_indextype i_type,
-                                               const rocsparse_indextype j_type)
-{
-    if(blocksize == 256)
-    {
-        return rocsparse::find_csrilu0_kernel_hash_wf<256>(wfsize, max_nnz, t_type, i_type, j_type);
-    }
-    else
-    {
-        return nullptr;
-    }
+rocsparse::csrilu0_hash_kernel_launch_t
+rocsparse::find_csrilu0_hash_kernel_launch(rocsparse_handle handle,
+					   rocsparse_csrilu0_info csrilu0_info,
+					   rocsparse_const_spmat_descr A)
+{  
+  auto trm_info = csrilu0_info->get(rocsparse_operation_none,
+				    rocsparse_fill_mode_lower);
+  
+  return rocsparse::transform_wf<256>(handle->wavefront_size,
+				      trm_info->get_max_nnz(),
+				      A->data_type,
+				      A->row_type,
+				      A->col_type);
 }
+

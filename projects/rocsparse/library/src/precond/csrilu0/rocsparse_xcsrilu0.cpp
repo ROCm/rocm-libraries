@@ -28,16 +28,16 @@
 
 namespace rocsparse
 {
-    static rocsparse_status xcsrilu0_solve_checkarg(rocsparse_handle          handle, //0
-                                                    int64_t                   m, //1
-                                                    int64_t                   nnz, //2
-                                                    const rocsparse_mat_descr descr, //3
-                                                    void*                     csr_val, //4
-                                                    const void*               csr_row_ptr, //5
-                                                    const void*               csr_col_ind, //6
-                                                    rocsparse_mat_info        info, //7
-                                                    rocsparse_solve_policy    policy, //8
-                                                    void*                     temp_buffer) //9
+    static rocsparse_status xcsrilu0_checkarg(rocsparse_handle          handle, //0
+                                              int64_t                   m, //1
+                                              int64_t                   nnz, //2
+                                              const rocsparse_mat_descr descr, //3
+                                              void*                     csr_val, //4
+                                              const void*               csr_row_ptr, //5
+                                              const void*               csr_col_ind, //6
+                                              rocsparse_mat_info        info, //7
+                                              rocsparse_solve_policy    policy, //8
+                                              void*                     temp_buffer) //9
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -66,24 +66,23 @@ namespace rocsparse
     }
 
     template <typename T>
-    static rocsparse_status xcsrilu0_solve(rocsparse_handle          handle,
-                                           rocsparse_int             m,
-                                           rocsparse_int             nnz,
-                                           const rocsparse_mat_descr descr,
-                                           T*                        csr_val,
-                                           const rocsparse_int*      csr_row_ptr,
-                                           const rocsparse_int*      csr_col_ind,
-                                           rocsparse_mat_info        info,
-                                           rocsparse_solve_policy    policy,
-                                           void*                     temp_buffer)
+    static rocsparse_status xcsrilu0(rocsparse_handle          handle,
+                                     rocsparse_int             m,
+                                     rocsparse_int             nnz,
+                                     const rocsparse_mat_descr descr,
+                                     T*                        csr_val,
+                                     const rocsparse_int*      csr_row_ptr,
+                                     const rocsparse_int*      csr_col_ind,
+                                     rocsparse_mat_info        info,
+                                     rocsparse_solve_policy    policy,
+                                     void*                     temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::xcsrilu0_solve_checkarg(
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::xcsrilu0_checkarg(
             handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer));
 
-        rocsparse_csrilu0_info csrilu0_info
-            = (info != nullptr) ? info->get_csrilu0_info() : nullptr;
+        auto csrilu0_info = (info != nullptr) ? info->get_csrilu0_info() : nullptr;
 
         _rocsparse_spmat_descr csr(rocsparse_format_csr,
                                    true,
@@ -106,15 +105,17 @@ namespace rocsparse
                                    descr->base,
                                    descr,
                                    info);
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_solve(handle,
-                                                           &csr,
-                                                           policy,
-                                                           csrilu0_info,
-                                                           info->boost_enable,
-                                                           info->boost_tol_size,
-                                                           info->boost_tol,
-                                                           info->boost_val,
-                                                           temp_buffer));
+
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0(handle,
+                                                     &csr,
+                                                     policy,
+                                                     csrilu0_info,
+                                                     info->boost_enable,
+                                                     info->boost_tol_size,
+                                                     info->boost_tol,
+                                                     info->boost_val,
+                                                     std::numeric_limits<size_t>::max(),
+                                                     temp_buffer));
         return rocsparse_status_success;
     }
 }
@@ -134,7 +135,7 @@ namespace rocsparse
     {                                                                                              \
         ROCSPARSE_ROUTINE_TRACE;                                                                   \
                                                                                                    \
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::xcsrilu0_solve<T>(                                    \
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::xcsrilu0<T>(                                          \
             handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer)); \
         return rocsparse_status_success;                                                           \
     }                                                                                              \

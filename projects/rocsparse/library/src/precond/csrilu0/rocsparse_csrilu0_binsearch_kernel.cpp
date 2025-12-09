@@ -22,7 +22,7 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse_csrilu0_kernel_binsearch.hpp"
+#include "rocsparse_csrilu0_binsearch_kernel.hpp"
 #include "rocsparse_common.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -46,7 +46,6 @@ namespace rocsparse
     {
         const auto lid = hipThreadIdx_x & (WFSIZE - 1);
         const auto wid = hipThreadIdx_x / WFSIZE;
-
         const auto idx = hipBlockIdx_x * BLOCKSIZE / WFSIZE + wid;
 
         // Do not run out of bounds
@@ -194,7 +193,7 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrilu0_strided_batched_kernel_binsearch(J m,
+    void csrilu0_binsearch_kernel(J m,
                                                   const I* __restrict__ csr_row_ptr,
                                                   const J* __restrict__ csr_col_ind,
                                                   T* __restrict__ csr_val,
@@ -242,64 +241,66 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename T, typename I, typename J>
     rocsparse_status
-        csrilu0_strided_batched_kernel_binsearch_launch(rocsparse_handle handle,
-                                                        int64_t          batch_count,
-                                                        int64_t          m,
-                                                        const void* __restrict__ csr_row_ptr,
-                                                        const void* __restrict__ csr_col_ind,
-                                                        void* __restrict__ csr_val,
-                                                        int64_t csr_val_stride,
-                                                        const void* __restrict__ csr_diag_ind,
-                                                        int32_t* __restrict__ done,
-                                                        int64_t done_stride,
-                                                        const void* __restrict__ map,
-                                                        void* __restrict__ zero_pivot,
-                                                        int64_t zero_pivot_stride,
-                                                        void* __restrict__ singular_pivot,
-                                                        int64_t              singular_pivot_stride,
-                                                        double               tol,
-                                                        rocsparse_index_base idx_base,
-                                                        int                  boost_enable,
-                                                        size_t               boost_tol_size,
-                                                        const void*          boost_tol,
-                                                        const void*          boost_val_)
+    csrilu0_binsearch_kernel_launch(rocsparse_handle         handle,
+				    rocsparse_csrilu0_info   csrilu0_info,
+				    rocsparse_spmat_descr    A,
+				    int32_t                  boost_enable,
+				    size_t                   boost_tol_size,
+				    const void*__restrict__  gboost_tol,
+				    const void*__restrict__  gboost_val,
+				    size_t                   buffer_size,
+				    void*__restrict__        buffer)
     {
-        dim3         csrilu0_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1, batch_count);
-        dim3         csrilu0_threads(BLOCKSIZE);
-        const T*     boost_val = reinterpret_cast<const T*>(boost_val_);
-        const float* boost_tol_32
-            = reinterpret_cast<const float*>((boost_enable) ? boost_tol : nullptr);
-        const double* boost_tol_64
-            = reinterpret_cast<const double*>((boost_enable) ? boost_tol : nullptr);
 
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::
-                 csrilu0_strided_batched_kernel_binsearch<BLOCKSIZE, WFSIZE, SLEEP, T, I, J>),
-            csrilu0_blocks,
-            csrilu0_threads,
-            0,
-            handle->stream,
-            static_cast<J>(m),
-            reinterpret_cast<const I*>(csr_row_ptr),
-            reinterpret_cast<const J*>(csr_col_ind),
-            reinterpret_cast<T*>(csr_val),
-            csr_val_stride,
-            reinterpret_cast<const I*>(csr_diag_ind),
-            done,
-            done_stride,
-            reinterpret_cast<const J*>(map),
-            reinterpret_cast<J*>(zero_pivot),
-            zero_pivot_stride,
-            reinterpret_cast<J*>(singular_pivot),
-            singular_pivot_stride,
-            tol,
-            idx_base,
-            boost_enable,
-            boost_tol_size,
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
-            handle->pointer_mode == rocsparse_pointer_mode_host);
+      auto trm_info = csrilu0_info->get(rocsparse_operation_none,
+					rocsparse_fill_mode_lower);
+      
+      int32_t*__restrict__ done_array = reinterpret_cast<int32_t*__restrict__>(reinterpret_cast<char*__restrict__>(buffer) + 256);
+      
+      // Initialize buffers
+      RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array,
+					 0,
+					 sizeof(int32_t) * A->rows * A->batch_count,
+					 handle->stream)); 
+      const int64_t done_array_stride = A->rows;
+      
+      
+      const T*__restrict__     boost_val = reinterpret_cast<const T*__restrict__>(gboost_val);   
+      const float*__restrict__ boost_tol_32
+	= reinterpret_cast<const float*__restrict__>((boost_enable) ? gboost_tol : nullptr);
+      const double*__restrict__ boost_tol_64
+	= reinterpret_cast<const double*__restrict__>((boost_enable) ? gboost_tol : nullptr);
+      
+      dim3         csrilu0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1, A->batch_count);
+      dim3         csrilu0_threads(BLOCKSIZE);
+      
+      RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::csrilu0_binsearch_kernel<BLOCKSIZE, WFSIZE, SLEEP, T, I, J>),
+					 csrilu0_blocks,
+					 csrilu0_threads,
+					 0,
+					 handle->stream,
+					 static_cast<J>(A->rows),
+					 reinterpret_cast<const I*__restrict__>(A->const_row_data),
+					 reinterpret_cast<const J*__restrict__>(A->const_col_data),
+					 reinterpret_cast<T*__restrict__>(A->val_data),
+					 A->batch_stride,
+					 reinterpret_cast<const I*__restrict__>(trm_info->get_diag_ind()),
+					 done_array,
+					 done_array_stride,
+					 reinterpret_cast<const J*__restrict__>(trm_info->get_row_map()),
+					 reinterpret_cast<J*__restrict__>(csrilu0_info->get_zero_pivot()),
+					 csrilu0_info->get_zero_pivot_stride(),
+					 reinterpret_cast<J*__restrict__>(csrilu0_info->get_singular_pivot()),
+					 csrilu0_info->get_singular_pivot_stride(),
+					 csrilu0_info->get_singular_tol(),
+					 A->descr->base,
+					 boost_enable,
+					 boost_tol_size,
+					 ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_32),
+					 ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_tol_64),
+					 ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, boost_val),
+					 handle->pointer_mode == rocsparse_pointer_mode_host);
+
         return rocsparse_status_success;
     }
 
@@ -309,18 +310,18 @@ namespace rocsparse
               typename T,
               typename I,
               typename... P>
-    static launch_csrilu0_kernel_binsearch_t find_csrilu0_kernel_binsearch_j(rocsparse_indextype j,
+    static csrilu0_binsearch_kernel_launch_t transform_j_type(rocsparse_indextype j,
                                                                              P... p)
     {
         return (j == rocsparse_indextype_i32)
-                   ? rocsparse::csrilu0_strided_batched_kernel_binsearch_launch<BLOCKSIZE,
+                   ? rocsparse::csrilu0_binsearch_kernel_launch<BLOCKSIZE,
                                                                                 WF_SIZE,
                                                                                 SLEEP,
                                                                                 T,
                                                                                 I,
                                                                                 int32_t>
                : (j == rocsparse_indextype_i64)
-                   ? rocsparse::csrilu0_strided_batched_kernel_binsearch_launch<BLOCKSIZE,
+                   ? rocsparse::csrilu0_binsearch_kernel_launch<BLOCKSIZE,
                                                                                 WF_SIZE,
                                                                                 SLEEP,
                                                                                 T,
@@ -330,67 +331,68 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename T, typename... P>
-    static launch_csrilu0_kernel_binsearch_t find_csrilu0_kernel_binsearch_i(rocsparse_indextype i,
+    static csrilu0_binsearch_kernel_launch_t transform_i_type(rocsparse_indextype i,
                                                                              P... p)
     {
         return (i == rocsparse_indextype_i32) ? rocsparse::
-                       find_csrilu0_kernel_binsearch_j<BLOCKSIZE, WF_SIZE, SLEEP, T, int32_t>(p...)
+                       transform_j_type<BLOCKSIZE, WF_SIZE, SLEEP, T, int32_t>(p...)
                : (i == rocsparse_indextype_i64) ? rocsparse::
-                       find_csrilu0_kernel_binsearch_j<BLOCKSIZE, WF_SIZE, SLEEP, T, int64_t>(p...)
+                       transform_j_type<BLOCKSIZE, WF_SIZE, SLEEP, T, int64_t>(p...)
                                                 : nullptr;
     }
 
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename... P>
-    static launch_csrilu0_kernel_binsearch_t
-        find_launch_csrilu0_kernel_binsearch_t(rocsparse_datatype i, P... p)
+    static csrilu0_binsearch_kernel_launch_t
+    transform_t_type(rocsparse_datatype i, P... p)
     {
-        return (i == rocsparse_datatype_f32_r)
-                   ? rocsparse::find_csrilu0_kernel_binsearch_i<BLOCKSIZE, WF_SIZE, SLEEP, float>(
-                       p...)
-               : (i == rocsparse_datatype_f32_c)
-                   ? rocsparse::find_csrilu0_kernel_binsearch_i<BLOCKSIZE,
-                                                                WF_SIZE,
-                                                                SLEEP,
-                                                                rocsparse_float_complex>(p...)
-               : (i == rocsparse_datatype_f64_c)
-                   ? rocsparse::find_csrilu0_kernel_binsearch_i<BLOCKSIZE,
-                                                                WF_SIZE,
-                                                                SLEEP,
-                                                                rocsparse_double_complex>(p...)
-               : (i == rocsparse_datatype_f64_r)
-                   ? rocsparse::find_csrilu0_kernel_binsearch_i<BLOCKSIZE, WF_SIZE, SLEEP, double>(
-                       p...)
-                   : nullptr;
+      return (i == rocsparse_datatype_f32_r)
+	? rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, float>(p...)
+	: (i == rocsparse_datatype_f32_c)
+	? rocsparse::transform_i_type<BLOCKSIZE,
+				      WF_SIZE,
+				      SLEEP,
+				      rocsparse_float_complex>(p...)
+	: (i == rocsparse_datatype_f64_c)
+	? rocsparse::transform_i_type<BLOCKSIZE,
+				      WF_SIZE,
+				      SLEEP,
+				      rocsparse_double_complex>(p...)
+	: (i == rocsparse_datatype_f64_r)
+	? rocsparse::transform_i_type<BLOCKSIZE, WF_SIZE, SLEEP, double>(p...)
+	: nullptr;
     }
-
+  
 }
 
-rocsparse::launch_csrilu0_kernel_binsearch_t
-    rocsparse::find_launch_csrilu0_kernel_binsearch(uint32_t            blocksize,
-                                                    uint32_t            wfsize,
-                                                    bool                sleep,
-                                                    rocsparse_datatype  t_type,
-                                                    rocsparse_indextype i_type,
-                                                    rocsparse_indextype j_type)
-{
-    if(blocksize == 256 && (wfsize == 32) && (sleep == false))
+rocsparse::csrilu0_binsearch_kernel_launch_t
+rocsparse::find_csrilu0_binsearch_kernel_launch(rocsparse_handle handle,
+						rocsparse_csrilu0_info csrilu0_info,
+						rocsparse_const_spmat_descr A)
+{  
+  const bool sleep
+    = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908 && //
+       handle->asic_rev < 2);
+  
+  if( (handle->wavefront_size == 32) && (sleep == false))
     {
-        return rocsparse::find_launch_csrilu0_kernel_binsearch_t<256, 32, false>(
-            t_type, i_type, j_type);
+      return rocsparse::transform_t_type<256, 32, false>(A->data_type,
+							 A->row_type,
+							 A->col_type);
+    }    
+  else if((handle->wavefront_size == 64) && (sleep == false))
+    {
+      return rocsparse::transform_t_type<256, 64, false>(A->data_type,
+							 A->row_type,
+							 A->col_type);
     }
-
-    else if(blocksize == 256 && (wfsize == 64) && (sleep == false))
+  else if((handle->wavefront_size == 64) && (sleep == true))
     {
-        return rocsparse::find_launch_csrilu0_kernel_binsearch_t<256, 64, false>(
-            t_type, i_type, j_type);
+      return rocsparse::transform_t_type<256, 64, true>(A->data_type,
+							A->row_type,
+							A->col_type);
     }
-    else if(blocksize == 256 && (wfsize == 64) && (sleep == true))
+  else
     {
-        return rocsparse::find_launch_csrilu0_kernel_binsearch_t<256, 64, true>(
-            t_type, i_type, j_type);
-    }
-    else
-    {
-        return nullptr;
+      return nullptr;
     }
 }

@@ -24,39 +24,23 @@
 #pragma once
 
 #include "rocsparse-types.h"
+#include "rocsparse_csrilu0_info.hpp"
 
 namespace rocsparse
 {
 
-    typedef rocsparse_status (*launch_csrilu0_kernel_binsearch_t)(
-        rocsparse_handle handle,
-        int64_t          batch_count,
-        int64_t          m,
-        const void* __restrict__ csr_row_ptr,
-        const void* __restrict__ csr_col_ind,
-        void* __restrict__ csr_val,
-        int64_t csr_val_stride,
-        const void* __restrict__ csr_diag_ind,
-        int32_t* __restrict__ done,
-        int64_t done_stride,
-        const void* __restrict__ map,
-        void* __restrict__ zero_pivot,
-        int64_t zero_pivot_stride,
-        void* __restrict__ singular_pivot,
-        int64_t              singular_pivot_stride,
-        double               tol,
-        rocsparse_index_base idx_base,
-        int                  enable_boost,
-        size_t               size_boost_tol,
-        const void*          boost_tol,
-        const void*          boost_val_);
+    typedef rocsparse_status (*csrilu0_hash_kernel_launch_t)(rocsparse_handle         handle,
+							     rocsparse_csrilu0_info   csrilu0_info,
+							     rocsparse_spmat_descr    A,
+							     int32_t                  boost_enable,
+							     size_t                   boost_tol_size,
+							     const void*__restrict__  boost_tol,
+							     const void*__restrict__  boost_val,
+							     size_t                   buffer_size,
+							     void*__restrict__        buffer);
 
-    launch_csrilu0_kernel_binsearch_t
-        find_launch_csrilu0_kernel_binsearch(uint32_t            blocksize_,
-                                             uint32_t            wfsize_,
-                                             bool                sleep_,
-                                             rocsparse_datatype  t_type,
-                                             rocsparse_indextype i_type,
-                                             rocsparse_indextype j_type);
-
+    csrilu0_hash_kernel_launch_t find_csrilu0_hash_kernel_launch(rocsparse_handle       handle,
+								 rocsparse_csrilu0_info csrilu0_info,
+								 rocsparse_const_spmat_descr    A);
+  
 }

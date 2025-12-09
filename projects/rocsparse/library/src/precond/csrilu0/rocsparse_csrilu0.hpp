@@ -43,13 +43,14 @@ namespace rocsparse
                                                rocsparse_const_spmat_descr A,
                                                size_t*                     buffer_size);
 
-    rocsparse_status csrilu0_solve(rocsparse_handle       handle,
-                                   rocsparse_spmat_descr  A,
-                                   rocsparse_solve_policy policy,
-                                   rocsparse_csrilu0_info csrilu0_info,
-                                   int                    enable_boost,
-                                   size_t                 size_boost_tol,
-                                   const void*            boost_tol,
-                                   const void*            boost_val,
-                                   void*                  temp_buffer);
+    rocsparse_status csrilu0(rocsparse_handle       handle,
+                             rocsparse_spmat_descr  A,
+                             rocsparse_solve_policy policy,
+                             rocsparse_csrilu0_info csrilu0_info,
+                             int32_t                boost_enable,
+                             size_t                 boost_tol_size,
+                             const void*            boost_tol,
+                             const void*            boost_val,
+                             size_t                 buffer_size,
+                             void*                  buffer);
 }

@@ -23,81 +23,73 @@
  * ************************************************************************ */
 
 #include "rocsparse_csrilu0_kernel_launch.hpp"
-#include "rocsparse_csrilu0_kernel_binsearch.hpp"
-#include "rocsparse_csrilu0_kernel_hash.hpp"
+#include "rocsparse_csrilu0_binsearch_kernel.hpp"
+#include "rocsparse_csrilu0_hash_kernel.hpp"
 #include "rocsparse_utility.hpp"
-rocsparse_status
-    rocsparse::csrilu0_strided_batched_kernel_launch(rocsparse_handle    handle,
-                                                     int64_t             batch_count,
-                                                     int64_t             m,
-                                                     rocsparse_indextype csr_ptr_row_indextype,
-                                                     const void* __restrict__ csr_row_ptr,
-                                                     rocsparse_indextype csr_col_ind_indextype,
-                                                     const void* __restrict__ csr_col_ind,
-                                                     rocsparse_datatype csr_val_datatype,
-                                                     void* __restrict__ csr_val,
-                                                     int64_t csr_val_stride,
-                                                     const void* __restrict__ csr_diag_ind,
-                                                     int32_t* __restrict__ done,
-                                                     int64_t done_stride,
-                                                     const void* __restrict__ map,
-                                                     void* __restrict__ zero_pivot,
-                                                     int64_t zero_pivot_stride,
-                                                     void* __restrict__ singular_pivot,
-                                                     int64_t              singular_pivot_stride,
-                                                     double               tol,
-                                                     rocsparse_index_base idx_base,
-                                                     int                  enable_boost,
-                                                     size_t               size_boost_tol,
-                                                     const void*          boost_tol,
-                                                     const void*          boost_val,
-                                                     int64_t              max_nnz)
+
+rocsparse_status rocsparse::csrilu0_kernel_launch(rocsparse_handle       handle, // 0
+                                                  rocsparse_csrilu0_info csrilu0_info, // 1
+                                                  rocsparse_spmat_descr  A, // 2
+                                                  int32_t                boost_enable, // 3
+                                                  size_t                 boost_tol_size, // 4
+                                                  const void* __restrict__ boost_tol, // 5
+                                                  const void* __restrict__ boost_val, // 6
+                                                  size_t buffer_size, // 7
+                                                  void* __restrict__ buffer) // 8
 {
+
+    ROCSPARSE_ROUTINE_TRACE;
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, csrilu0_info);
+    ROCSPARSE_CHECKARG_POINTER(2, A);
+
+    if(A->rows == 0 || A->batch_count == 0)
+    {
+        return rocsparse_status_success;
+    }
+
+    ROCSPARSE_CHECKARG_ARRAY(8, buffer_size, buffer);
+
+    ROCSPARSE_CHECKARG(2, A, (A->descr == nullptr), rocsparse_status_invalid_pointer);
+
+    ROCSPARSE_CHECKARG(
+        2, A, (A->descr->type != rocsparse_matrix_type_general), rocsparse_status_not_implemented);
+
+    ROCSPARSE_CHECKARG(2,
+                       A,
+                       (A->descr->storage_mode != rocsparse_storage_mode_sorted),
+                       rocsparse_status_requires_sorted_storage);
+
+    auto trm_info = csrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+
+    // Max nnz per row
+    const int64_t max_nnz = trm_info->get_max_nnz();
+
     const bool sleep
         = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908 && //
            handle->asic_rev < 2);
 
-    auto launch_kernel = (sleep || ((handle->wavefront_size == 32) && (max_nnz >= 512))
-                          || ((handle->wavefront_size == 64) && (max_nnz >= 1024)))
-                             ? rocsparse::find_launch_csrilu0_kernel_binsearch(
-                                 256,
-                                 (sleep) ? 64 : handle->wavefront_size,
-                                 sleep,
-                                 csr_val_datatype,
-                                 csr_ptr_row_indextype,
-                                 csr_col_ind_indextype)
-                             : rocsparse::find_launch_csrilu0_kernel_hash(256,
-                                                                          handle->wavefront_size,
-                                                                          max_nnz,
-                                                                          csr_val_datatype,
-                                                                          csr_ptr_row_indextype,
-                                                                          csr_col_ind_indextype);
+    auto launch_kernel
+        = (sleep || //
+           ((handle->wavefront_size == 32) && (max_nnz >= 512)) || //
+           ((handle->wavefront_size == 64) && (max_nnz >= 1024)))
+              ? rocsparse::find_csrilu0_binsearch_kernel_launch(handle, csrilu0_info, A)
+              : rocsparse::find_csrilu0_hash_kernel_launch(handle, csrilu0_info, A);
 
     if(launch_kernel == nullptr)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_arch_mismatch);
+        RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_arch_mismatch,
+                                               "csrilu0 kernel not found");
     }
 
     RETURN_IF_ROCSPARSE_ERROR(launch_kernel(handle,
-                                            batch_count,
-                                            m,
-                                            csr_row_ptr,
-                                            csr_col_ind,
-                                            csr_val,
-                                            csr_val_stride,
-                                            csr_diag_ind,
-                                            done,
-                                            done_stride,
-                                            map,
-                                            zero_pivot,
-                                            zero_pivot_stride,
-                                            singular_pivot,
-                                            singular_pivot_stride,
-                                            tol,
-                                            idx_base,
-                                            enable_boost,
-                                            size_boost_tol,
+                                            csrilu0_info,
+                                            A,
+                                            boost_enable,
+                                            boost_tol_size,
                                             boost_tol,
-                                            boost_val));
+                                            boost_val,
+                                            buffer_size,
+                                            buffer));
     return rocsparse_status_success;
 }

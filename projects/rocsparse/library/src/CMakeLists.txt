@@ -534,8 +534,8 @@ set(rocsparse_source
   src/precond/csrilu0/rocsparse_csrilu0_get_tolerance.cpp
   src/precond/csrilu0/rocsparse_csrilu0_set_tolerance.cpp
   src/precond/csrilu0/rocsparse_csrilu0_kernel_launch.cpp
-  src/precond/csrilu0/rocsparse_csrilu0_kernel_hash.cpp
-  src/precond/csrilu0/rocsparse_csrilu0_kernel_binsearch.cpp
+  src/precond/csrilu0/rocsparse_csrilu0_hash_kernel.cpp
+  src/precond/csrilu0/rocsparse_csrilu0_binsearch_kernel.cpp
   src/precond/csrilu0/rocsparse_csrilu0_singular_pivot.cpp
   src/precond/csrilu0/rocsparse_csrilu0_zero_pivot.cpp
   src/precond/csrilu0/rocsparse_xcsrilu0.cpp
