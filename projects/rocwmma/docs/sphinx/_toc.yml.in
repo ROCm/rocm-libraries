@@ -21,7 +21,7 @@ subtrees:
 
 - caption: Examples
   entries:
-  - url: https://github.com/ROCm/rocWMMA/tree/develop/samples
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocwmma/samples
     title: Samples
 
 - caption: API reference

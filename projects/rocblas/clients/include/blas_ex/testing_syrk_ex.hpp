@@ -372,8 +372,8 @@ void testing_syrk_ex(const Arguments& arg)
                     // reference is computed on floats
                     double tol = rocblas_handle(handle)->getArchMajor() == 11
                                      ? sum_error_tolerance_for_gfx11<Tex, Ti, To>
-                                     : sum_error_tolerance<Ti>;
-                    tol *= K * 4;
+                                     : 4 * sum_error_tolerance<Ti>;
+                    tol = tol * K + 2 * sum_error_tolerance<To>; // add To conversion rounding error
                     near_check_general<To, To_hpa>(N, N, ldc, hC_gold, hC, tol);
                 }
                 else

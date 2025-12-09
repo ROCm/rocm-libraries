@@ -172,11 +172,13 @@ unique_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, Outp
     {
       return result = __unique::unique(policy, first, last, result, binary_pred);
     }
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, BinaryPred binary_pred)
     {
       return result = thrust::unique_copy(cvt_to_seq(derived_cast(policy)), first, last, result, binary_pred);
     }
+#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, last, result, binary_pred);
@@ -205,11 +207,13 @@ unique(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last, Binar
     {
       return hip_rocprim::unique_copy(policy, first, last, first, binary_pred);
     }
+#  if !__THRUST_HAS_HIPRT__
     THRUST_DEVICE static ForwardIt
     seq(execution_policy<Derived>& policy, ForwardIt first, ForwardIt last, BinaryPred binary_pred)
     {
       return thrust::unique(cvt_to_seq(derived_cast(policy)), first, last, binary_pred);
     }
+#  endif
   };
 #  if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, last, binary_pred);

@@ -30,6 +30,7 @@ message(STATUS "CMake version: ${CMAKE_VERSION}")
 if(NOT WIN32)
   if(CMAKE_GENERATOR STREQUAL "Ninja")
     message(STATUS "The CMake generator is Ninja.")
+    set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
   else()
     message(WARNING "The CMake generator is not Ninja. Ninja is preferred over Make.")
   endif()
@@ -87,7 +88,7 @@ include(ROCMCheckTargetIds)
 include(ROCMClients)
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "2.1.0" )
+set ( VERSION_STRING "2.2.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # configure a header file to pass the CMake version settings to the source

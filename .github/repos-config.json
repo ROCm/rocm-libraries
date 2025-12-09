@@ -127,6 +127,15 @@
       "monorepo_source_of_truth": true
     },
     {
+      "name": "hiptensor",
+      "url": "ROCm/hiptensor",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "monorepo_source_of_truth": true
+    },
+    {
       "name": "rocblas",
       "url": "ROCm/rocBLAS",
       "branch": "develop",

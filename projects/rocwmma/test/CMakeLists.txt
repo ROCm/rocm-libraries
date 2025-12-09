@@ -110,7 +110,8 @@ function(add_rocwmma_test TEST_TARGET TEST_SOURCE)
   target_link_libraries(${TEST_TARGET} rocwmma GTest::gtest)
   target_link_libraries(${TEST_TARGET} OpenMP::OpenMP_CXX "-L${HIP_CLANG_ROOT}/lib")
   if(UNIX)
-    target_link_libraries(${TEST_TARGET} "-Wl,-rpath='\$$ORIGIN/../llvm/lib'" "-fno-rtlib-add-rpath")
+    set_target_properties(${TEST_TARGET} PROPERTIES INSTALL_RPATH "\$ORIGIN/../llvm/lib")
+    target_link_libraries(${TEST_TARGET} "-fno-rtlib-add-rpath")
   endif()
   target_include_directories(${TEST_TARGET} PRIVATE
                              ${CMAKE_CURRENT_SOURCE_DIR}
