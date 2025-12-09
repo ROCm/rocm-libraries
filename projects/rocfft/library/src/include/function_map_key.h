@@ -312,9 +312,9 @@ struct FMKeyBase
     ComputeScheme    scheme;
 };
 
-// length, precision, scheme are theose fundemantal information of a kernel;
-// SBRC_TRANS is also neccessary for SBRC or SBRC_3D, but for non-SBRC, it is just NONE
-// And the newly added KernerlConfig is the key to supporting the "multi-configurations".
+// length, precision, scheme are those fundamental information of a kernel;
+// SBRC_TRANS is also necessary for SBRC or SBRC_3D, but for non-SBRC, it is just NONE
+// And the newly added KernelConfig is the key to supporting the "multi-configurations".
 // KernelConfig denotes what parameters we can alter to "generate and tune" a kernel
 //
 // NB:

@@ -213,7 +213,7 @@ class function_pool
 
     const FMKey& get_actual_key(const FMKey& key) const
     {
-        // - for keys that we are querying with no/empty kernel-config, actually we are refering to
+        // - for keys that we are querying with no/empty kernel-config, actually we are referring to
         //   the default kernel-configs in kernel-generator.py. So get the actual keys to look-up
         //   the pool.
         // - if not in the def_key_pool, then we simply use itself (for dynamically added kernel)
