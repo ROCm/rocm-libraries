@@ -2439,8 +2439,8 @@ TEST(TestConvolutionNode, PreValidateNodeWithDroppedPixels)
 {
     ConvFpropAttributes convAttributes;
 
-    // Index (0, 1, 2) & (2, 3, 4) are the two 3x3 kernels applied with stride 2 on 6x6 input
-    // 5th is dropped / unused due to stride
+    // For each spatial dim Index (0, 1, 2) & (2, 3, 4) are the two 3x3 kernels
+    // applied with stride 2 on 6x6 dx 5th is dropped / unused due to stride
     auto xTensor = std::make_shared<TensorAttributes>();
     xTensor->set_dim({1, 3, 6, 6});
     xTensor->set_stride({108, 36, 6, 1});

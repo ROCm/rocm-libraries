@@ -1311,8 +1311,8 @@ TEST(TestConvolutionDgradNode, PreValidateNodeWithDroppedPixels)
 {
     ConvDgradAttributes convAttributes;
 
-    // Index (0, 1, 2) & (2, 3, 4) are the two 3x3 kernels applied with stride 2 on 6x6 dx
-    // 5th is dropped / unused due to stride
+    // For each spatial dim Index (0, 1, 2) & (2, 3, 4) are the two 3x3 kernels
+    // applied with stride 2 on 6x6 dx 5th is dropped / unused due to stride
     auto dyTensor = std::make_shared<TensorAttributes>();
     dyTensor->set_dim({1, 64, 2, 2}); // Output 2x2
     dyTensor->set_stride({256, 4, 2, 1});
