@@ -27,13 +27,14 @@
 #ifndef MIOPEN_GUARD_MLOPEN_LOAD_FILE_HPP
 #define MIOPEN_GUARD_MLOPEN_LOAD_FILE_HPP
 
+#include <miopen/config.hpp>
 #include <miopen/filesystem.hpp>
 #include <string>
 #include <vector>
 
 namespace miopen {
 
-std::vector<char> LoadFile(const fs::path& path);
+MIOPEN_INTERNALS_EXPORT std::vector<char> LoadFile(const fs::path& path);
 
 } // namespace miopen
 

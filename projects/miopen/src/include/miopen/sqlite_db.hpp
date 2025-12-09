@@ -174,8 +174,8 @@ public:
         MIOPEN_INTERNALS_NO_EXPORT Statement();
         ~Statement();
         MIOPEN_INTERNALS_NO_EXPORT Statement(Statement&&) noexcept;
-        MIOPEN_INTERNALS_NO_EXPORT Statement& operator=(Statement&&) noexcept;
-        MIOPEN_INTERNALS_NO_EXPORT Statement& operator=(const Statement&) = delete;
+        Statement& operator=(Statement&&) noexcept;
+        Statement& operator=(const Statement&) = delete;
         int Step(const SQLite& sql);
         std::string ColumnText(int idx);
         std::vector<char> ColumnBlob(int idx);

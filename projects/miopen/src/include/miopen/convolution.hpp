@@ -200,8 +200,9 @@ struct ConvolutionDescriptor : miopenConvolutionDescriptor
                            const TensorDescriptor& wDesc,
                            miopenDataType_t yType = miopenFloat) const;
 
-    bool IsWinograd3x3SupportedAndFast(const miopen::ExecutionContext& ctx,
-                                       const conv::ProblemDescription& problem) const;
+    MIOPEN_INTERNALS_EXPORT bool
+    IsWinograd3x3SupportedAndFast(const miopen::ExecutionContext& ctx,
+                                  const conv::ProblemDescription& problem) const;
 
     MIOPEN_INTERNALS_EXPORT std::size_t
     GetWorkSpaceSize(ExecutionContext ctx, const conv::ProblemDescription& problem) const;

@@ -80,7 +80,7 @@ struct Id
     MIOPEN_INTERNALS_EXPORT std::string ToString() const;
     MIOPEN_INTERNALS_EXPORT AnySolver GetSolver() const;
     const SolverBase* GetSolverBase() const;
-    std::string GetAlgo(conv::Direction dir) const;
+    MIOPEN_INTERNALS_EXPORT std::string GetAlgo(conv::Direction dir) const;
     MIOPEN_INTERNALS_EXPORT miopenConvAlgorithm_t GetAlgo() const;
     Primitive GetPrimitive() const;
 

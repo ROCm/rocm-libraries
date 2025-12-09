@@ -267,9 +267,9 @@ struct TensorDescriptor : miopenTensorDescriptor
 
     // For vectorized layouts storage_layout must be without the ending 'c'
     // \todo make private
-    bool IsPossibleLayout(const std::string& storage_layout,
-                          const std::string& layout,
-                          LayoutValidationMode validationMode) const;
+    MIOPEN_INTERNALS_EXPORT bool IsPossibleLayout(const std::string& storage_layout,
+                                                  const std::string& layout,
+                                                  LayoutValidationMode validationMode) const;
     // Layout could be NCHW, NHWC, NCDHW, NDHWC, NCHWc, ...
     MIOPEN_INTERNALS_EXPORT bool IsPossibleLayout4D5D(const std::string& layout,
                                                       LayoutValidationMode validationMode) const;
