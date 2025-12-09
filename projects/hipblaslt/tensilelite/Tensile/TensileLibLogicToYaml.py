@@ -281,7 +281,10 @@ def formLibraryLogic(scheduleName, deviceNames, architectureName):
 
 def writeToTensileYamlFile(tensileYamlFile, tensileYamlData):
     try:
-        os.makedirs(os.path.dirname(tensileYamlFile), exist_ok=True)
+        fileDir = os.path.dirname(tensileYamlFile)
+        if fileDir:
+            os.makedirs(fileDir, exist_ok=True)
+
         with open(tensileYamlFile, "w") as f:
             yaml.dump(
                 tensileYamlData,
@@ -299,6 +302,8 @@ def writeToTensileYamlFile(tensileYamlFile, tensileYamlData):
                 tensileYamlFile
             ),
         )
+    
+    return tensileYamlFile
 
 
 def TensileLibLogicToYaml(logicFilePath, solutionIndex, tensileYamlFile, skipMI):
@@ -306,8 +311,6 @@ def TensileLibLogicToYaml(logicFilePath, solutionIndex, tensileYamlFile, skipMI)
     tPrint(1, HR)
     tPrint(1, "#")
     tPrint(1, "#  TensileLibLogicToYaml Library v{}".format(__version__))
-
-    tensileYamlFile = re.sub(".yaml", f"_{solutionIndex}.yaml", tensileYamlFile)
 
     tPrint(1, "#  Library Logic: {}".format(logicFilePath))
     tPrint(1, "#  Solution Index: {}".format(solutionIndex))
@@ -319,6 +322,8 @@ def TensileLibLogicToYaml(logicFilePath, solutionIndex, tensileYamlFile, skipMI)
         raise RuntimeError(
             "Yaml file data is empty, read yaml file :{} failed".format(logicFilePath)
         )
+    if solutionIndex == "":
+        raise RuntimeError("At least one solution idx should be provided")
 
     # reads library logic file. AllSolutionStates=>has solution data for all solution index
     fields = LibraryIO.rawLibraryLogic(libYaml)
@@ -374,7 +379,13 @@ def TensileLibLogicToYaml(logicFilePath, solutionIndex, tensileYamlFile, skipMI)
     tensileYamlFileData["LibraryLogic"] = problemSizeData
 
     # Write the Formed Yaml data into the Yaml File
-    writeToTensileYamlFile(tensileYamlFile, tensileYamlFileData)
+    outputYamlFile = writeToTensileYamlFile(tensileYamlFile, tensileYamlFileData)
+
+    if tensileYamlFile == outputYamlFile:
+        return tensileYamlFile
+    else:
+        return None
+    
 
 
 def parseArgs():
@@ -428,5 +439,13 @@ def parseArgs():
 def main():
     args = parseArgs()
     ids = [int(x.strip()) for x in args.indices.split(",")]
+    tensileYamlFiles = []
     for id in ids:
-        TensileLibLogicToYaml(args.input, int(id), args.output, args.skipMI)
+        if len(ids) == 1:
+            tensileYamlFile = args.output
+        else:
+            tensileYamlFile = re.sub(".yaml", f"_{int(id)}.yaml", args.output)
+        TensileLibLogicToYaml(args.input, int(id), tensileYamlFile, args.skipMI)
+        tensileYamlFiles.append(tensileYamlFile)
+    tPrint(1, f"Tensile Files generated: {tensileYamlFiles}")
+

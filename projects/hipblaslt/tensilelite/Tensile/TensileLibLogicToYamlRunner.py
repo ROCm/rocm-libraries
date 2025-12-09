@@ -31,27 +31,12 @@ from Tensile import TensileLibLogicToYaml
 from Tensile import LibraryIO
 from Tensile import Tensile
 
+
 # generate config yaml from library
-def generateConfigLib(configYaml, libName, solutionIndex):
-    sys.argv = [
-        "",
-        "--input",
-        f"{libName}",
-        "--indices",
-        f"{solutionIndex}",
-        "--output",
-        f"{configYaml}",
-    ]
-
-    TensileLibLogicToYaml.main()
-
-
-def buildTensile(tensilelitePath, clientPath, buildDir):
-    if not os.path.isfile(clientPath):
-        print("Building tensilelite client...")
-        subprocess.call(
-            ["invoke", "build-client", "--build-dir", buildDir], cwd=tensilelitePath
-        )
+def generateConfigLib(libName, solutionIndex, configYaml):
+    TensileLibLogicToYaml.TensileLibLogicToYaml(
+        libName, solutionIndex, configYaml, False
+    )
 
 
 def generateLiblogic(clientPath, workDir, configYaml):
@@ -67,14 +52,12 @@ def generateLiblogic(clientPath, workDir, configYaml):
 
     Tensile.main()
 
+
 def main(tensileClient, workspace, libName, solutionIndex):
 
     # generate config yaml from library
     configYaml = os.path.join(workspace, "config.yaml")
-    generateConfigLib(configYaml, libName, solutionIndex)
-
-    # update output the output filename with the index
-    configYaml = os.path.join(workspace, f"config_{solutionIndex}.yaml")
+    generateConfigLib(libName, solutionIndex, configYaml)
 
     # call Tensile to generate liblogic
     workDir = os.path.join(workspace, "WDirDevice")
@@ -83,7 +66,7 @@ def main(tensileClient, workspace, libName, solutionIndex):
     # create a library from the new library logic
     newLiblogicPath = Path(os.path.join(workDir, "3_LibraryLogic"))
     newLiblogicName = next(newLiblogicPath.glob("*.yaml"))
-    
+
     libYaml = LibraryIO.readYAML(libName)
 
     newLibYaml = LibraryIO.readYAML(newLiblogicName)
