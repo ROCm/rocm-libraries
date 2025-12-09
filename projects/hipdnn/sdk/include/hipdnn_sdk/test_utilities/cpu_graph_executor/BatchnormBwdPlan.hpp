@@ -37,12 +37,9 @@ struct BatchnormBwdParams
         , dscaleTensor(unpackTensorAttributes(dscaleAttributes))
         , dbiasTensor(unpackTensorAttributes(dbiasAttributes))
     {
-        if(meanAttributes != nullptr)
+        if(meanAttributes != nullptr && invVarianceAttributes != nullptr)
         {
             meanTensor = unpackTensorAttributes(*meanAttributes);
-        }
-        if(invVarianceAttributes != nullptr)
-        {
             invVarianceTensor = unpackTensorAttributes(*invVarianceAttributes);
         }
     }
@@ -111,15 +108,12 @@ public:
             _params.dbiasTensor, variantPack.at(_params.dbiasTensor.uid));
 
         std::unique_ptr<utilities::TensorBase<MeanVarianceDataType>> shallowMeanTensor;
-        if(_params.meanTensor.has_value())
+        std::unique_ptr<utilities::TensorBase<MeanVarianceDataType>> shallowInvVarianceTensor;
+        if(_params.meanTensor.has_value() && _params.invVarianceTensor.has_value())
         {
             shallowMeanTensor = createShallowTensor<MeanVarianceDataType>(
                 _params.meanTensor.value(), variantPack.at(_params.meanTensor.value().uid));
-        }
 
-        std::unique_ptr<utilities::TensorBase<MeanVarianceDataType>> shallowInvVarianceTensor;
-        if(_params.invVarianceTensor.has_value())
-        {
             shallowInvVarianceTensor = createShallowTensor<MeanVarianceDataType>(
                 _params.invVarianceTensor.value(),
                 variantPack.at(_params.invVarianceTensor.value().uid));
@@ -219,14 +213,13 @@ public:
         const auto& tensorMap = graph.getTensorMap();
 
         const hipdnn_sdk::data_objects::TensorAttributes* meanAttr = nullptr;
-        if(nodeAttributes->mean_tensor_uid().has_value())
+        const hipdnn_sdk::data_objects::TensorAttributes* invVarAttr = nullptr;
+
+        bool hasMean = nodeAttributes->mean_tensor_uid().has_value();
+        bool hasInvVariance = nodeAttributes->inv_variance_tensor_uid().has_value();
+        if(hasMean && hasInvVariance)
         {
             meanAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
-        }
-
-        const hipdnn_sdk::data_objects::TensorAttributes* invVarAttr = nullptr;
-        if(nodeAttributes->inv_variance_tensor_uid().has_value())
-        {
             invVarAttr = tensorMap.at(nodeAttributes->inv_variance_tensor_uid().value());
         }
 
