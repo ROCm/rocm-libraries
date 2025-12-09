@@ -370,6 +370,13 @@ class hardware_t {
          }}};
   // clang-format on
 
+  /**
+   * @brief Map of main loop efficiency values by architecture and CMS kernel configuration.
+   *
+   */
+  static const std::unordered_map<architecture_t, std::unordered_map<CMS_kernel, double>>
+      CMS_MAP;
+
   architecture_t arch;  ///< GPU architecture type
   size_t N_CU;          ///< Number of Compute Units
   size_t lds_capacity;  ///< Capacity of Local Data Share (LDS) in bytes
@@ -476,6 +483,24 @@ class hardware_t {
    * @return size_t Instruction latency in cycles, or 0 if not found
    */
   size_t get_mi_latency(size_t MI_M, size_t MI_N, size_t MI_K, data_type_t mi_input_type) const;
+
+  /**
+   * @brief Get main loop efficiency for a given kernel configuration.
+   *
+   * @param transA Whether matrix A is transposed
+   * @param transB Whether matrix B is transposed
+   * @param MT_M Macro tile M dimension
+   * @param MT_N Macro tile N dimension
+   * @param MT_K Macro tile K dimension
+   * @param mi_input_type Input data type for the matrix instruction
+   * @return double Main loop efficiency value (1.0 if not found)
+   */
+  double get_adjusted_main_loop_efficiency(transpose_t transA,
+                                           transpose_t transB,
+                                           size_t MT_M,
+                                           size_t MT_N,
+                                           size_t MT_K,
+                                           data_type_t mi_input_type) const;
 
  private:
   /**
