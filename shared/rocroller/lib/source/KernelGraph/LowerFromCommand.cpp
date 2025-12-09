@@ -775,6 +775,11 @@ namespace rocRoller
 
             void operator()(Operations::SubTileTranspose const& t) {}
 
+            void operator()(Operations::Scratch const& t)
+            {
+                rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::Scratch");
+            }
+
             void operator()(Operations::Literal const& literal)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::Literal");

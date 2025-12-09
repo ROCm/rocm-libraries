@@ -36,7 +36,6 @@
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/solver/gemm_common.hpp>
 
-#include <boost/any.hpp>
 #include <boost/range/adaptors.hpp>
 
 namespace miopen {
@@ -90,6 +89,9 @@ bool GemmBwdBase::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
         MIOPEN_LOG_I2("GEMM not applicable for F8 on this GPU architecture");
         return false;
     }
+    if(problem.HasNonPackedTensors())
+        return false;
+
     return problem.IsDirectionBackwardData() && problem.IsLayoutDefault() &&
            !(gemm::IsAnyBufferBf16(dxDesc, dyDesc, wDesc) && !gemm::IsBf16Supported) &&
            !(gemm::IsAnyBufferFp16(dxDesc, dyDesc, wDesc) && !gemm::IsFp16Supported);

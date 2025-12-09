@@ -38,9 +38,7 @@
 #include <miopen/sequences.hpp>
 #include <miopen/stringutils.hpp>
 
-#include <boost/any.hpp>
-#include <boost/optional.hpp>
-
+#include <optional>
 #include <tuple>
 
 // ConvBinWinoRxS<2,3> is intended to handle group convolutions, but
@@ -672,7 +670,7 @@ static bool IsApplicableBase(const ExecutionContext& ctx, const ProblemDescripti
         return false;
 
     const auto& target = ctx.GetStream().GetTargetProperties();
-    if(target.Xnack() && *target.Xnack())
+    if(target.isXnackEnabled())
         return false;
 
     const auto name = ctx.GetStream().GetDeviceName();
@@ -779,7 +777,7 @@ bool ConvBinWinoRxS<Winodata, Winofilter>::IsApplicable(const ExecutionContext& 
 }
 
 template <int Winodata, int Winofilter>
-static inline boost::optional<PerformanceConfigConvBinWinogradRxS>
+static inline std::optional<PerformanceConfigConvBinWinogradRxS>
 GetPerfConfFromEnv(const ExecutionContext& ctx)
 {
     PerformanceConfigConvBinWinogradRxS fromEnv;
@@ -803,7 +801,7 @@ GetPerfConfFromEnv(const ExecutionContext& ctx)
     if(!fromEnv.Deserialize(s) || !fromEnv.IsValid(ctx))
     {
         MIOPEN_LOG_E(env_name << "Tuning config: Bad value or invalid format: `" << s << '\'');
-        return boost::none;
+        return {};
     }
 
     MIOPEN_LOG_I("Overridden from env: " << fromEnv.ToString());

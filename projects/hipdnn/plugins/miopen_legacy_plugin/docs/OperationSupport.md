@@ -16,6 +16,7 @@ The following table lists all operations currently supported in hipDNN:
 | Batchnorm Training + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph³⁴ |
 | Convolution Dgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
+| Convolution Forward + (Bias) + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph²³ |
 | Convolution Wgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
 
 ¹ See Batchnorm Operations note below
@@ -32,7 +33,10 @@ The following table lists all operations currently supported in hipDNN:
 > **Convolution Operations:** Currently, only cross-correlation convolutions are supported. True mathematical convolution (with kernel flipping) is not yet implemented. In practice, cross-correlation is the standard operation used in modern deep learning frameworks.
 
 > [!NOTE]
-> **Fused Operations:** The Batchnorm Inference + Activation Backward operation is a fused graph pattern that combines three operations: (1) Batchnorm Inference, (2) Activation Backward (DReLU), and (3) Batchnorm Backward.
+> **Fused Operations:** Fused graph patterns combine multiple operations:
+> - **Batchnorm Inference + DReLU + Backward:** Combines batchnorm inference, activation backward (DReLU), and batchnorm backward
+> - **Batchnorm Training + Activation:** Combines batchnorm training with forward activation
+> - **Convolution Forward + (Bias) + Activation:** Combines convolution forward, optional bias addition, and forward activation
 
 > [!NOTE]
 > **Activation Functions:** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips).

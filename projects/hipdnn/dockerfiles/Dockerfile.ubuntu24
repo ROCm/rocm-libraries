@@ -198,6 +198,7 @@ COPY --from=install_therock /opt/rocm /opt/rocm
 RUN apt-get update && apt-get install -y \
     clang-format-18 \
     clang-tidy-20 \
+    clang-tools-20 \
     llvm-20 \
     && rm -rf /var/lib/apt/lists/*
 
