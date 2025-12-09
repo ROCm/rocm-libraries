@@ -37,10 +37,11 @@ if(HIPSPARSE_ENABLE_CUDA)
     target_compile_definitions(hipsparse PRIVATE __HIP_PLATFORM_NVIDIA__)
     target_include_directories(hipsparse PRIVATE
         $<BUILD_INTERFACE:${CUDAToolkit_INCLUDE_DIRS}>
-        $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}>
     )
+    target_link_libraries(hipsparse PRIVATE hip::host)
 elseif(HIPSPARSE_ENABLE_HIP)
     target_compile_definitions(hipsparse PRIVATE __HIP_PLATFORM_AMD__)
+    target_link_libraries(hipsparse PRIVATE hip::host)
 endif()
 
 add_subdirectory(include)
