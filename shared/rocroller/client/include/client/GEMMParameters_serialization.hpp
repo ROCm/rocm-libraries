@@ -130,7 +130,7 @@ namespace rocRoller::Serialization
 
             iot::mapRequired(io, "scalePreTileA", params.scalePretileA);
             iot::mapRequired(io, "scalePreTileB", params.scalePretileB);
-	}
+        }
 
         static void mapping(IO& io, Client::GEMMClient::TypeParameters& params, EmptyContext& ctx)
         {

@@ -1265,8 +1265,8 @@ def fp4_target_d2lds_mi32x32x64_pf4x1_pretile():
     for gemm in fp4_target_d2lds_mi32x32x64_pf4x1():
         gemm.prefetchScale = False
         gemm.pretileScale = True
-        gemm.loadScale_A="BufferToLDS",
-        gemm.loadScale_B="BufferToLDS",
+        gemm.loadScale_A = "BufferToLDS"
+        gemm.loadScale_B = "BufferToLDS"
         gemm.swizzleTileSize = MKNLTuple(64, 4, 64, 4)
         gemm.types.scaleSkipPermlane = True
         yield gemm
