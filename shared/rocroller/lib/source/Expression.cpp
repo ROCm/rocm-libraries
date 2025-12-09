@@ -140,6 +140,12 @@ namespace rocRoller
                 return offset && width && call(a.arg, b.arg);
             }
 
+            bool operator()(Convert const& a, Convert const& b)
+            {
+                bool destinationType = (a.destinationType == b.destinationType);
+                return destinationType && call(a.arg, b.arg);
+            }
+
             bool operator()(CommandArgumentPtr const& a, CommandArgumentPtr const& b)
             {
                 // Need to be careful not to invoke the overloaded operators, we want to compare
@@ -336,6 +342,12 @@ namespace rocRoller
                 bool width  = (a.width == b.width);
 
                 return call(a.arg, b.arg) && offset && width;
+            }
+
+            bool operator()(Convert const& a, Convert const& b)
+            {
+                bool destinationType = (a.destinationType == b.destinationType);
+                return destinationType && call(a.arg, b.arg);
             }
 
             bool operator()(AssemblyKernelArgumentPtr const& a, AssemblyKernelArgumentPtr const& b)
