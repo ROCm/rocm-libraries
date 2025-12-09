@@ -40,9 +40,9 @@
             "W": 2
         },
         "solver": {
-            "ConvDirectNaiveConvBwd": 0,
-            "ConvDirectNaiveConvFwd": 1,
-            "ConvDirectNaiveConvWrw": 2,
+            "ConvDirectNaiveConvBwd_DEACTIVATED": 0,
+            "ConvDirectNaiveConvFwd_DEACTIVATED": 1,
+            "ConvDirectNaiveConvWrw_DEACTIVATED": 2,
             "ConvHipImplicitGemm3DGroupBwdXdlops": 3,
             "ConvHipImplicitGemm3DGroupFwdXdlops": 4,
             "ConvHipImplicitGemm3DGroupWrwXdlops": 5,
