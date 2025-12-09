@@ -1254,22 +1254,10 @@ def fp4_target_d2lds_mi32x32x64_st32x8_pf4x1():
             scaleBlockSize=32,
         ),
         swizzleTileSize=MKNLTuple(32, 8, 32, 8),
-        pretileScale=False,
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
     )
-
-
-def fp4_target_d2lds_mi32x32x64_pf4x1_pretile():
-    for gemm in fp4_target_d2lds_mi32x32x64_pf4x1():
-        gemm.prefetchScale = False
-        gemm.pretileScale = True
-        gemm.loadScale_A = "BufferToLDS"
-        gemm.loadScale_B = "BufferToLDS"
-        gemm.swizzleTileSize = MKNLTuple(64, 4, 64, 4)
-        gemm.types.scaleSkipPermlane = True
-        yield gemm
 
 
 def fp4_target_d2lds_mi32x32x64_pf4x1_wgm():
@@ -1451,6 +1439,17 @@ def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
         numWarmUp=1000,
         numInner=1000,
     )
+
+
+def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pretile():
+    for gemm in fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
+        gemm.prefetchScale = False
+        gemm.pretileScale = True
+        gemm.loadScale_A = "BufferToLDS"
+        gemm.loadScale_B = "BufferToLDS"
+        gemm.swizzleTileSize = MKNLTuple(64, 4, 64, 4)
+        gemm.types.scaleSkipPermlane = True
+        yield gemm
 
 
 def fp4_target_mxd2lds_mi16x16x128_st32x8_pf2x1():
@@ -1705,6 +1704,7 @@ def fp4_kernels():
     yield from fp4_16x16x128_scale_options()
     yield from fp4_32x32x64_scale_options()
     yield from fp4_d2lds_wgts256x256x256()
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pretile()
 
 
 def fp4_target_sweep_wgms():
