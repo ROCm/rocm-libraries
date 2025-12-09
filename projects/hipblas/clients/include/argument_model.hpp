@@ -41,14 +41,6 @@ bool ArgumentModel_get_log_function_name();
 void ArgumentModel_set_log_datatype(bool d);
 bool ArgumentModel_get_log_datatype();
 
-// Define ostream overload for __half
-inline std::ostream& operator<<(std::ostream& os, const hipblasHalf& h)
-{
-    // Convert to float before printing
-    os << half_to_float(h);
-    return os;
-}
-
 // ArgumentModel template has a variadic list of argument enums
 template <hipblas_argument... Args>
 class ArgumentModel

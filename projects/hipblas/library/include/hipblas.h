@@ -24179,19 +24179,7 @@ HIPBLAS_EXPORT hipblasStatus_t
         op( A ) = A, and A is n by k if transA == HIPBLAS_OP_N
         op( A ) = A^T and A is k by n if transA == HIPBLAS_OP_T
 
-
-    - Supported types are determined by the backend. See cuBLAS documentation for cuBLAS backend.
-      For rocBLAS backend, conversion from hipblasComputeType_t to rocblas_datatype_t happens within hipBLAS.
-      Supported types are as follows:
-
-      |   aType    |   cType    |     computeType     |
-      | ---------- | ---------- | ------------------- |
-      | HIP_R_16F  | HIP_R_16F  | HIPBLAS_COMPUTE_32F |
-      | HIP_R_16F  | HIP_R_32F  | HIPBLAS_COMPUTE_32F |
-      | HIP_R_16BF | HIP_R_16BF | HIPBLAS_COMPUTE_32F |
-      | HIP_R_16BF | HIP_R_32F  | HIPBLAS_COMPUTE_32F |
-      | HIP_R_32F  | HIP_R_32F  | HIPBLAS_COMPUTE_64F |
-      | HIP_R_32F  | HIP_R_64F  | HIPBLAS_COMPUTE_64F |
+        - Supported types are determined by the backend. See rocBLAS/cuBLAS documentation.
 
     @param[in]
     handle    [hipblasHandle_t]
@@ -24238,7 +24226,7 @@ HIPBLAS_EXPORT hipblasStatus_t
               specifies the leading dimension of C.
     @param[in]
     computeType
-    [hipblasComputeType_t]
+    [hipDataType]
               specifies the datatype of computation.
 
     ********************************************************************/
