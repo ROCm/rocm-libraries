@@ -223,11 +223,16 @@ By default, most projects are excluded from pre-commit checks in [`.pre-commit-c
     > This is only needed if you are adding custom pre-commit hooks that rely on external tools, and they can't be installed by the hook itself.
 
     *   Edit [`.github/workflows/pre-commit.yml`](.github/workflows/pre-commit.yml).
-    *   Add your project name to the `PROJECTS_WITH_OPTIONAL_DEPS` environment variable in the "Get changed files" step.
+    *   Add your project name to the `PROJECTS_WITH_OPTIONAL_DEPS` environment variable in the "Detect project changes" step (add it on a new line):
+        ```yaml
+        PROJECTS_WITH_OPTIONAL_DEPS: >-
+          hipdnn
+          your-project
+        ```
     *   Add a new step to install dependencies, conditional on your project changing:
         ```yaml
         - name: Install <your-project> dependencies
-          if: steps.changed-files.outputs.<your-project>_changed == 'true'
+          if: steps.changes.outputs.<your-project>_changed == 'true'
           run: |
             # Install dependencies here
         ```
