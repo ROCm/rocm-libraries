@@ -185,14 +185,18 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dscale_tensor_uid(), ScaleBiasDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dbias_tensor_uid(), ScaleBiasDataTypeEnum);
 
-        if(nodeAttributes->mean_tensor_uid().has_value())
+        bool hasMean = nodeAttributes->mean_tensor_uid().has_value();
+        bool hasInvVariance = nodeAttributes->inv_variance_tensor_uid().has_value();
+        if(hasMean != hasInvVariance)
+        {
+            return false;
+        }
+
+        if(hasMean)
         {
             CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid().value());
             CHECK_TENSOR_TYPE(
                 tensorMap, nodeAttributes->mean_tensor_uid().value(), MeanVarianceDataTypeEnum);
-        }
-        if(nodeAttributes->inv_variance_tensor_uid().has_value())
-        {
             CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid().value());
             CHECK_TENSOR_TYPE(tensorMap,
                               nodeAttributes->inv_variance_tensor_uid().value(),

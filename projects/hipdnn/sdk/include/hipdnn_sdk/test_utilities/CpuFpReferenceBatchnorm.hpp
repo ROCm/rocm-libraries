@@ -226,6 +226,12 @@ public:
                 "Batchnorm backward requires at least 2D tensor (batch and channel).");
         }
 
+        if((mean == nullptr) != (invVariance == nullptr))
+        {
+            throw std::runtime_error(
+                "Batchnorm backward requires both mean and invVariance to be provided, or neither.");
+        }
+
         int64_t elementsPerChannel = calculateElementsPerChannel(x.dims());
         auto nhwF = utilities::staticCast<ComputeDataType>(elementsPerChannel);
         auto epsilonCompute = utilities::staticCast<ComputeDataType>(epsilon);
