@@ -423,8 +423,17 @@ class TestCustomSchedule:
         valid, message = schedule_info.isValid({"kernel" : kernel})
         assert valid, message
 
-    @pytest.mark.parametrize("transA, transB", [(True, False), (False, True)])
-    def test_schedule_240x256x64_16bit(self, transA, transB):
+    @pytest.mark.parametrize(
+        # fmt: off
+        "transA, transB, lds_tr_inst,  tr_lds", [
+        (  True,  False,       False,       1),
+        ( False,   True,        True,       0),
+        (  True,  False,        True,       1),
+        ( False,   True,       False,       0),
+        ( False,  False,        True,       1)
+        # fmt: on
+        ])  
+    def test_schedule_240x256x64_16bit(self, transA, transB, lds_tr_inst,  tr_lds):
         """Tests the 240x256x64 16-bit schedule."""
         NT = not transA and transB
         TN = transA and not transB
@@ -439,13 +448,13 @@ class TestCustomSchedule:
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "GlobalReadVectorWidthA": 2, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [1,4],
-            "TransposeLDS": TN, "MIWaveTileA": 15, "MIWaveTileB": 4,
+            "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 15, "MIWaveTileB": 4,
         })
 
         has_schedule, schedule_info = hasCustomSchedule(kernel)
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
-        assert schedule_info.numCodePaths == (2 if TN else 1)
+        assert schedule_info.numCodePaths == (1 if NT else 2)
         assert schedule_info.numMfma == 120
         valid, message = schedule_info.isValid({"kernel" : kernel})
         assert valid, message
