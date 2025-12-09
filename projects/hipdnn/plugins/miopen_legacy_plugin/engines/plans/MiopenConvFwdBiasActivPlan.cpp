@@ -77,8 +77,8 @@ ConvFwdBiasActivParams::ConvFwdBiasActivParams(
             "(relu_upper_clip and relu_lower_clip set)");
     }
 
-    HIPDNN_PREPEND_TO_EXCEPTION(_activParams = mapPointwiseModeToMiopenActivation(activAttr),
-                                "ConvFwdBiasActivParams: ");
+    HIPDNN_PREPEND_MESSAGE_ON_THROW(_activParams = mapPointwiseModeToMiopenActivation(activAttr),
+                                    "ConvFwdBiasActivParams: ");
 }
 
 const MiopenTensor& ConvFwdBiasActivParams::x() const

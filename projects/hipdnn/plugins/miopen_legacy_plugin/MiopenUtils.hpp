@@ -35,7 +35,7 @@
         }                                                                               \
     } while(0)
 
-#define HIPDNN_PREPEND_TO_EXCEPTION(statement, message)                               \
+#define HIPDNN_PREPEND_MESSAGE_ON_THROW(statement, message)                           \
     do                                                                                \
     {                                                                                 \
         try                                                                           \

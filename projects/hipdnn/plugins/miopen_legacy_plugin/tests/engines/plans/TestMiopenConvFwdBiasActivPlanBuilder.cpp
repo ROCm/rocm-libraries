@@ -448,7 +448,6 @@ std::vector<ConvolutionBiasActivationTestParam> testParams()
               validConvTestCase4d(),
               TensorLayout::NCHW,
               validActivTestCase(),
-
               hipdnn_frontend::DataType::FLOAT,
               {{TypeKey::ACTIV_COMPUTE, DataType::BFLOAT16},
                {TypeKey::BIAS_COMPUTE, DataType::BFLOAT16}},

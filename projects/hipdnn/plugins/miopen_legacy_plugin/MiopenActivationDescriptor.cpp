@@ -15,8 +15,8 @@ MiopenActivationDescriptor::MiopenActivationDescriptor(
     using namespace miopen_utils;
 
     ActivationParams params;
-    HIPDNN_PREPEND_TO_EXCEPTION(params = mapPointwiseModeToMiopenActivation(pointwiseAttrs),
-                                "MiopenActivationDescriptor: ");
+    HIPDNN_PREPEND_MESSAGE_ON_THROW(params = mapPointwiseModeToMiopenActivation(pointwiseAttrs),
+                                    "MiopenActivationDescriptor: ");
 
     THROW_ON_MIOPEN_FAILURE(miopenCreateActivationDescriptor(&_descriptor));
     THROW_ON_MIOPEN_FAILURE(miopenSetActivationDescriptor(

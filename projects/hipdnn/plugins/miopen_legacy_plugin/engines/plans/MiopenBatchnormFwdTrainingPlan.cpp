@@ -98,9 +98,9 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     }
 
     // Get activation parameters
-    HIPDNN_PREPEND_TO_EXCEPTION(_optActivation
-                                = mapPointwiseModeToMiopenActivation(pointwiseAttributes),
-                                "BatchnormFwdTrainingParams: ");
+    HIPDNN_PREPEND_MESSAGE_ON_THROW(_optActivation
+                                    = mapPointwiseModeToMiopenActivation(pointwiseAttributes),
+                                    "BatchnormFwdTrainingParams: ");
 
     // Save mean and inv_variance are optional (controlled by MIO_SAVE_MEAN_VARIANCE)
     if(attributes.mean_tensor_uid().has_value())

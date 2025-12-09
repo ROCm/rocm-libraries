@@ -59,7 +59,7 @@ std::enable_if_t<std::is_arithmetic_v<T>, std::string> // Restrict template to n
     return result + "]";
 }
 
-// Converts a vector of objects to an ostream "[1, 2, 3...]".
+// Converts a vector of objects to an ostream "[A, B, C...]".
 template <typename T>
 inline void vecToStream(std::ostream& os, const std::vector<T>& vec)
 {
@@ -76,7 +76,7 @@ inline void vecToStream(std::ostream& os, const std::vector<T>& vec)
     os << "]";
 }
 
-// Converts a vector of numbers to a string "[1, 2, 3...]".
+// Converts a vector of objects to a string "[A, B, C...]".
 template <typename T>
 std::enable_if_t<!std::is_arithmetic_v<T>, std::string> vecToString(const std::vector<T>& vec)
 {
