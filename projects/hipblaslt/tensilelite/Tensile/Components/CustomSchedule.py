@@ -196,9 +196,6 @@ def verify_global_reads_not_too_early_single_code_path(
             waitIndex += 1
 
         if waveCompleteIndex is None:
-            if context.get("kernel", {}).get("SwapGlobalReadOrder", False):
-                GRX == "GRB" if GRX is "GRA" else "GRA"
-
             return False, (
                 f"Failed to verify that all local reads for {operand} ({LRX}) are complete "
                 f"before the first global read for {operand} is issued. "
