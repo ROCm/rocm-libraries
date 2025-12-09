@@ -19,6 +19,7 @@ def create_base_kernel():
     kernel = {
         "UseCustomMainLoopSchedule": True,
         "EnableMatrixInstruction": True,
+        "UnrollLoopSwapGlobalReadOrder": False,
         "ISA": IsaVersion(9,5,0),
         "ProblemType": {
             "DataType": _mock_dtype(),
