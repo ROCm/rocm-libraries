@@ -36,7 +36,6 @@
 #include <miopen/tensorOp/solvers.hpp>
 #include <miopen/find_solution.hpp>
 #include <miopen/visit_float.hpp>
-#include <miopen/util.hpp>
 
 #include <boost/range/combine.hpp>
 
@@ -45,6 +44,7 @@
 #include <algorithm>
 #include <cassert>
 #include <numeric>
+#include <optional>
 #include <string>
 
 namespace miopen {
@@ -94,7 +94,7 @@ std::optional<miopenTensorLayout_t> GetDefaultLayout(unsigned num_dims)
     {
     case 4: return miopenTensorNCHW;
     case 5: return miopenTensorNCDHW;
-    default: return std::nullopt;
+    default: return {};
     }
 }
 
