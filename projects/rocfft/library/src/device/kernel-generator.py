@@ -352,10 +352,10 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
                         and f_pp_1.meta.pp_current_dim !=
                         f_pp_2.meta.pp_current_dim):
                     break
-                if (f_pp_1.meta.length != f_pp_2.meta.length or
-                    (f_pp_1.meta.length == f_pp_2.meta.length
-                     and f_pp_1.meta.precision != f_pp_2.meta.precision and
-                     f_pp_1.meta.gcn_arch_name != f_pp_2.meta.gcn_arch_name)):
+                if (f_pp_1.meta.length != f_pp_2.meta.length or (
+                        f_pp_1.meta.length == f_pp_2.meta.length and
+                    (f_pp_1.meta.precision != f_pp_2.meta.precision or
+                     f_pp_1.meta.gcn_arch_name != f_pp_2.meta.gcn_arch_name))):
                     # we hit a new kernel with different length/precision/arch
                     # start next iteration looking for the next pair
                     counter_f_pp_1 = counter_f_pp_2
