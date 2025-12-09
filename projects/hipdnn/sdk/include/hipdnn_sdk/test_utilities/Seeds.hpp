@@ -18,7 +18,7 @@ inline unsigned int getGlobalTestSeed()
     // This ensures consistent test runs unless randomness is explicitly desired.
     constexpr unsigned int DEFAULT_SEED = 1;
 
-    auto seedStr = hipdnn_sdk::utilities::getEnv("HIPDNN_GLOBAL_TEST_SEED");
+    auto seedStr = utilities::getEnv("HIPDNN_GLOBAL_TEST_SEED");
 
     if(seedStr.empty())
     {

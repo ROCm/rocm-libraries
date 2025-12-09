@@ -8,9 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 // Any class extending Attributes must have an inputs & outputs map.
 // The map needs to have TensorAttributes as the value.
@@ -83,5 +81,4 @@ public:
         return {};
     }
 };
-}
-}
+} // namespace hipdnn_frontend::graph

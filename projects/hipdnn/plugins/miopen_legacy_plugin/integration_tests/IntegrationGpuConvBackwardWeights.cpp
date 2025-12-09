@@ -16,6 +16,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
 using namespace hipdnn_sdk::test_utilities;
+using namespace miopen_legacy_plugin::test_utilities;
 using namespace test_conv_common;
 
 namespace
@@ -27,6 +28,9 @@ class ConvBackwardWeights : public IntegrationGraphVerificationHarness<DataType,
 protected:
     void runGraphTest(DataType tolerance, const TensorLayout& layout = TensorLayout::NCHW) override
     {
+        // Skipping until CK is working on Windows
+        SKIP_IF_WINDOWS();
+
         const ConvTestCase& testCase = this->GetParam();
 
         hipdnn_frontend::graph::Graph graphObj;

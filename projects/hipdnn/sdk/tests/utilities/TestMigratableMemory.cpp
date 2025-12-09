@@ -114,6 +114,7 @@ TEST(TestMigratableMemory, Resize)
 
 TEST(TestMigratableMemory, MigrateToDevice)
 {
+    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     MigratableMemory<float> memory(10);
@@ -132,6 +133,7 @@ TEST(TestMigratableMemory, MigrateToDevice)
 
 TEST(TestMigratableMemory, MigrateToDeviceNonDefaultStream)
 {
+    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     hipStream_t stream;
@@ -158,6 +160,7 @@ TEST(TestMigratableMemory, MigrateToDeviceNonDefaultStream)
 
 TEST(TestMigratableMemory, MigrateToDeviceAsyncNonDefaultStream)
 {
+    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     hipStream_t stream;
@@ -184,6 +187,7 @@ TEST(TestMigratableMemory, MigrateToDeviceAsyncNonDefaultStream)
 
 TEST(TestMigratableMemory, MigrateToHost)
 {
+    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     MigratableMemory<float> memory(10);
@@ -211,6 +215,7 @@ TEST(TestMigratableMemory, MigrateToHost)
 
 TEST(TestMigratableMemory, MigrateToHostNonDefaultStream)
 {
+    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     hipStream_t stream;
@@ -249,6 +254,7 @@ TEST(TestMigratableMemory, MigrateToHostNonDefaultStream)
 
 TEST(TestMigratableMemory, MigrateToHostAsyncNonDefaultStream)
 {
+    SKIP_IF_WINDOWS();
     SKIP_IF_NO_DEVICES();
 
     hipStream_t stream;

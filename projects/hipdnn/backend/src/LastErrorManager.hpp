@@ -5,6 +5,7 @@
 
 #include "HipdnnBackendLimits.h"
 #include "HipdnnStatus.h"
+#include <string>
 #include <thread>
 
 namespace hipdnn_backend

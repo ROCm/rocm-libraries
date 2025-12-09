@@ -10,6 +10,7 @@
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_sdk/plugin/PluginException.hpp>
 #include <hipdnn_sdk/plugin/PluginFlatbufferTypeHelpers.hpp>
+#include <hipdnn_sdk/utilities/FlatbufferUtils.hpp>
 #include <miopen/miopen.h>
 
 #include "MiopenTensor.hpp"
@@ -34,10 +35,7 @@
         }                                                                               \
     } while(0)
 
-namespace miopen_legacy_plugin
-{
-
-namespace miopen_utils
+namespace miopen_legacy_plugin::miopen_utils
 {
 
 struct ActivationParams
@@ -67,6 +65,7 @@ MiopenTensor createTensor(
 
 size_t getSpatialDimCount(const hipdnn_sdk::data_objects::TensorAttributes& attr);
 
-}
+using hipdnn_sdk::utilities::extractDoubleFromTensorValue;
+using hipdnn_sdk::utilities::extractValueFromTensorValue;
 
-}
+} // namespace miopen_legacy_plugin::miopen_utils

@@ -325,7 +325,7 @@ namespace origami
             size_t          mi_m,
             size_t          mi_n,
             size_t          mi_k,
-            size_t          workgroup_mapping,
+            int             workgroup_mapping,
             size_t          workspace_size_per_elem_c,
             int             occupancy,
             const hardware_t& analytical_hardware,

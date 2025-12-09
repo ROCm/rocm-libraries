@@ -29,7 +29,7 @@
 #include <set>
 #include <vector>
 
-#include <origami/utils.hpp>
+#include <Tensile/UtilsOrigami.hpp>
 
 namespace TensileLite
 {
@@ -164,13 +164,13 @@ namespace TensileLite
                 = problem.b().elementBytes() * 8;
             size_t elementSizeC_bits
                 = problem.c().elementBytes() * 8;
-            const origami::hardware_t& analaytical_hardware = *(pAMDGPU->analyticalHardware);
+            const origami::hardware_t& analytical_hardware = *(pAMDGPU->analyticalHardware);
             if(origami::hardware_t::is_debug_enabled())
             {
-                analaytical_hardware.print();
+                analytical_hardware.print();
             }
-            int defaultWGM = std::ceil(std::sqrt(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
-            origami::data_type_t miDataType = static_cast<origami::data_type_t>(problem.computeInputType());
+            int defaultWGM = std::ceil(std::sqrt(analytical_hardware.N_CU / analytical_hardware.NUM_XCD));
+            origami::data_type_t miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
             if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
                 miDataType = origami::data_type_t::XFloat32;
             auto selected_tiles = origami::select_best_macro_tile_size(

@@ -434,7 +434,9 @@ rocblaslt_status
     }
     catch(const std::exception& e)
     {
-        std::cerr << e.what() << '\n';
+        std::cerr << "Error building the following kernel:" << std::endl;
+        std::cerr << params->toString() << std::endl;
+        std::cerr << e.what() << std::endl;
         return rocblaslt_status_not_implemented;
     }
 

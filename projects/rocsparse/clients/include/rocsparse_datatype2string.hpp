@@ -304,6 +304,8 @@ constexpr auto rocsparse_format2string(rocsparse_format format)
         return "ell";
     case rocsparse_format_bell:
         return "bell";
+    case rocsparse_format_sell:
+        return "sell";
     }
     return "invalid";
 }
@@ -367,6 +369,8 @@ constexpr auto rocsparse_spmvalg2string(rocsparse_spmv_alg alg)
         return "csrlrb";
     case rocsparse_spmv_alg_csr_nnzsplit:
         return "csrnnzsplit";
+    case rocsparse_spmv_alg_sell:
+        return "sell";
     }
     return "invalid";
 }

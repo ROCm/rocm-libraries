@@ -39,6 +39,20 @@ if(NOT ROCmCMakeBuildTools_FOUND)
     GIT_TAG        rocm-6.4.4
     ${SOURCE_SUBDIR_ARG}
   )
+  FetchContent_GetProperties(rocm-cmake)
+  if(NOT rocm-cmake_POPULATED)
+    # rocm-cmake 0.12.0 and higher needs to built from source
+    FetchContent_Populate(rocm-cmake)
+    message("Populated: ${rocm-cmake_SOURCE_DIR}")
+    execute_process(
+      WORKING_DIRECTORY ${rocm-cmake_SOURCE_DIR}
+      COMMAND ${CMAKE_COMMAND} ${rocm-cmake_SOURCE_DIR} -DCMAKE_INSTALL_PREFIX=.
+    )
+    execute_process(
+      WORKING_DIRECTORY ${rocm-cmake_SOURCE_DIR}
+      COMMAND ${CMAKE_COMMAND} --build ${rocm-cmake_SOURCE_DIR} --target install
+    )
+  endif()
   FetchContent_MakeAvailable(rocm-cmake)
   find_package(ROCmCMakeBuildTools CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
 else()

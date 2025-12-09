@@ -23,124 +23,99 @@
  * ************************************************************************ */
 
 #include "rocsparse_coosv.hpp"
-#include "rocsparse_enum_utils.hpp"
+#include "rocsparse_csrsv.hpp"
 #include "rocsparse_utility.hpp"
-#include <map>
-#include <sstream>
 
-namespace rocsparse
+rocsparse_status rocsparse::coosv_analysis(rocsparse_handle            handle, // 0
+                                           rocsparse_operation         trans, // 1
+                                           rocsparse_const_spmat_descr A, // 2
+                                           rocsparse_analysis_policy   analysis, // 3
+                                           rocsparse_solve_policy      solve, // 4
+                                           rocsparse_csrsv_info*       p_csrsv_info, // 5
+                                           void*                       buffer) // 6
 {
-    typedef rocsparse_status (*coosv_analysis_t)(rocsparse_handle          handle,
-                                                 rocsparse_operation       trans,
-                                                 int64_t                   m,
-                                                 int64_t                   nnz,
-                                                 const rocsparse_mat_descr descr,
-                                                 const void*               coo_val,
-                                                 const void*               coo_row_ind,
-                                                 const void*               coo_col_ind,
-                                                 rocsparse_mat_info        info,
-                                                 rocsparse_analysis_policy analysis,
-                                                 rocsparse_solve_policy    solve,
-                                                 rocsparse_csrsv_info*     p_csrsv_info,
-                                                 void*                     temp_buffer);
+    ROCSPARSE_ROUTINE_TRACE;
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_ENUM(1, trans);
+    ROCSPARSE_CHECKARG_POINTER(2, A);
+    ROCSPARSE_CHECKARG_ENUM(3, analysis);
+    ROCSPARSE_CHECKARG_ENUM(4, solve);
+    ROCSPARSE_CHECKARG_POINTER(5, p_csrsv_info);
+    ROCSPARSE_CHECKARG_ARRAY(6, (A->rows > 0 && A->batch_count > 0), buffer);
 
-    using coosv_analysis_tuple = std::tuple<rocsparse_indextype, rocsparse_datatype>;
-
-#define COOSV_ANALYSIS_CONFIG(I_, T_)                                                 \
-    {                                                                                 \
-        coosv_analysis_tuple(I_, T_),                                                 \
-            coosv_analysis_template<typename rocsparse::indextype_traits<I_>::type_t, \
-                                    typename rocsparse::datatype_traits<T_>::type_t>  \
-    }
-
-    static const std::map<coosv_analysis_tuple, coosv_analysis_t> s_coosv_analysis_dispatch{
-        {COOSV_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f32_r),
-         COOSV_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f64_r),
-         COOSV_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f32_c),
-         COOSV_ANALYSIS_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f64_c),
-         COOSV_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f32_r),
-         COOSV_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f64_r),
-         COOSV_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f32_c),
-         COOSV_ANALYSIS_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f64_c)}};
-
-    static rocsparse_status coosv_analysis_find(coosv_analysis_t*   function_,
-                                                rocsparse_indextype i_type_,
-                                                rocsparse_datatype  t_type_)
+    // Quick return if possible
+    if(A->rows == 0 || A->batch_count == 0)
     {
-        const auto& it = rocsparse::s_coosv_analysis_dispatch.find(
-            rocsparse::coosv_analysis_tuple(i_type_, t_type_));
-
-        if(it != rocsparse::s_coosv_analysis_dispatch.end())
-        {
-            function_[0] = it->second;
-        }
-        // LCOV_EXCL_START
-        else
-        {
-#ifndef NDEBUG
-            std::cout << "invalid precision configuration: "
-                      << "i_type: " << rocsparse::enum_utils::to_string(i_type_) << std::endl
-                      << ", t_type: " << rocsparse::enum_utils::to_string(t_type_) << std::endl;
-
-            std::cout << "available configuration are: " << std::endl;
-            for(const auto& p : rocsparse::s_coosv_analysis_dispatch)
-            {
-                const auto& t      = p.first;
-                const auto  i_type = std::get<0>(t);
-                const auto  t_type = std::get<1>(t);
-                std::cout << std::endl
-                          << std::endl
-                          << "i_type: " << rocsparse::enum_utils::to_string(i_type) << std::endl
-                          << ", t_type: " << rocsparse::enum_utils::to_string(t_type) << std::endl;
-            }
-#endif
-
-            std::stringstream sstr;
-            sstr << "invalid precision configuration: "
-                 << "i_type: " << rocsparse::enum_utils::to_string(i_type_)
-                 << ", t_type: " << rocsparse::enum_utils::to_string(t_type_);
-
-            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
-                                                   sstr.str().c_str());
-        }
-        // LCOV_EXCL_STOP
-
         return rocsparse_status_success;
     }
-}
+    rocsparse_mat_descr descr = A->descr;
+    rocsparse_mat_info  info  = A->info;
+    // Check matrix type
+    ROCSPARSE_CHECKARG(5,
+                       descr,
+                       (descr->type != rocsparse_matrix_type_general
+                        && descr->type != rocsparse_matrix_type_triangular),
+                       rocsparse_status_not_implemented);
+    // Check matrix sorting mode
+    ROCSPARSE_CHECKARG(5,
+                       descr,
+                       (descr->storage_mode != rocsparse_storage_mode_sorted),
+                       rocsparse_status_requires_sorted_storage);
 
-rocsparse_status rocsparse::coosv_analysis(rocsparse_handle          handle,
-                                           rocsparse_operation       trans,
-                                           int64_t                   m,
-                                           int64_t                   nnz,
-                                           const rocsparse_mat_descr descr,
-                                           rocsparse_datatype        coo_val_datatype,
-                                           const void*               coo_val,
-                                           rocsparse_indextype       coo_row_ind_indextype,
-                                           const void*               coo_row_ind,
-                                           rocsparse_indextype       coo_col_ind_indextype,
-                                           const void*               coo_col_ind,
-                                           rocsparse_mat_info        info,
-                                           rocsparse_analysis_policy analysis,
-                                           rocsparse_solve_policy    solve,
-                                           rocsparse_csrsv_info*     p_csrsv_info,
-                                           void*                     temp_buffer)
-{
-    rocsparse::coosv_analysis_t f;
+    // All must be null (zero matrix) or none null
+    const bool                use_32 = A->nnz < std::numeric_limits<int32_t>::max();
+    const rocsparse_indextype indextype
+        = use_32 ? rocsparse_indextype_i32 : rocsparse_indextype_i64;
+
+    // Buffer
+    rocsparse::sorted_coo2csr_info_t* sorted_coo2csr_info = info->get_sorted_coo2csr_info();
+    if(sorted_coo2csr_info == nullptr)
+    {
+        sorted_coo2csr_info
+            = new rocsparse::sorted_coo2csr_info_t(A->rows, indextype, handle->stream);
+
+        //
+        // Assign it first, because if an error occurs in calculate below, then we won't have a memory leak.
+        //
+        info->set_sorted_coo2csr_info(sorted_coo2csr_info);
+        RETURN_IF_ROCSPARSE_ERROR(
+            sorted_coo2csr_info->calculate(handle, A->nnz, A->row_data, A->row_type, descr->base));
+    }
+
+    const rocsparse_indextype csr_row_ptr_indextype
+        = (use_32) ? rocsparse_indextype_i32 : rocsparse_indextype_i64;
+    const void*   csr_row_ptr        = sorted_coo2csr_info->get_row_ptr();
+    const int64_t csr_row_ptr_stride = (A->offsets_batch_stride == 0) ? 0 : (A->rows + 1);
+
+    _rocsparse_spmat_descr csr(rocsparse_format_csr,
+                               A->analysed,
+                               A->batch_count,
+                               A->rows,
+                               A->cols,
+                               A->nnz,
+
+                               A->data_type,
+                               A->const_val_data,
+                               A->val_data,
+                               A->batch_stride,
+
+                               //
+                               csr_row_ptr_indextype,
+                               csr_row_ptr,
+                               nullptr,
+                               csr_row_ptr_stride,
+
+                               A->col_type,
+                               A->const_col_data,
+                               A->col_data,
+                               A->columns_values_batch_stride,
+
+                               A->idx_base,
+                               A->descr,
+                               A->info);
+
     RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::coosv_analysis_find(&f, coo_row_ind_indextype, coo_val_datatype));
-    RETURN_IF_ROCSPARSE_ERROR(f(handle,
-                                trans,
-                                m,
-                                nnz,
-                                descr,
-                                coo_val,
-                                coo_row_ind,
-                                coo_col_ind,
-                                info,
-                                analysis,
-                                solve,
-                                p_csrsv_info,
-                                temp_buffer));
+        (rocsparse::csrsv_analysis(handle, trans, &csr, analysis, solve, p_csrsv_info, buffer)));
+
     return rocsparse_status_success;
 }

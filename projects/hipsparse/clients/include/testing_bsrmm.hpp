@@ -42,7 +42,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_bsrmm_bad_arg(void)
+void testing_bsrmm_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int                  mb        = 100;
@@ -53,8 +53,8 @@ void testing_bsrmm_bad_arg(void)
     int                  ldb       = 100;
     int                  ldc       = 100;
     int                  safe_size = 100;
-    T                    alpha     = 0.6;
-    T                    beta      = 0.2;
+    T                    alpha     = make_DataType<T>(0.6);
+    T                    beta      = make_DataType<T>(0.2);
     hipsparseDirection_t dirA      = HIPSPARSE_DIRECTION_ROW;
     hipsparseOperation_t transA    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
     hipsparseOperation_t transB    = HIPSPARSE_OPERATION_NON_TRANSPOSE;
@@ -404,7 +404,7 @@ void testing_bsrmm_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_bsrmm(Arguments argus)
+hipsparseStatus_t testing_bsrmm(const Arguments& argus)
 {
     int                  m         = argus.M;
     int                  n         = argus.N;

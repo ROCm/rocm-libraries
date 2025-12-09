@@ -67,6 +67,7 @@
 .amdgpu_metadata
 ---
 custom.config:
+  ISA: [9, 0, 10]
   ProblemType:
     OperationType: GEMM
     DataType: s

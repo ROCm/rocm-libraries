@@ -6,11 +6,13 @@
 #include <hipdnn_sdk/logging/LoggingUtils.hpp>
 #include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_sdk/utilities/StringUtil.hpp>
 #include <spdlog/details/log_msg.h>
 #include <spdlog/pattern_formatter.h>
 
 using namespace hipdnn_sdk::logging;
 using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_sdk::utilities;
 
 TEST(TestLoggingUtils, IsValidLogLevelWithValidLevels)
 {
@@ -86,7 +88,8 @@ TEST(TestLoggingUtils, ComponentFormatterPassThrough)
 
     // Should pass through without formatting (just the message)
     std::string result(buf.data(), buf.size());
-    EXPECT_EQ(result, "Test message\n");
+    result = removeNewlines(result);
+    EXPECT_EQ(result, "Test message");
 }
 
 TEST(TestLoggingUtils, ComponentFormatterStandard)

@@ -441,17 +441,17 @@ auto rocblas_syrk_ex_dispatch(const Arguments& arg)
             return TEST<rocblas_bfloat16, float, float>{}(arg);
         }
     }
-    // else if(Ti != Tex && (Ti == rocblas_datatype_f32_r && Tex == rocblas_datatype_f64_r))
-    // {
-    //     if(To == rocblas_datatype_f32_r && To == Ti && Tex == rocblas_datatype_f64_r)
-    //     {
-    //         return TEST<float, float, double>{}(arg);
-    //     }
-    //     else if(To == Tex && Tex == rocblas_datatype_f64_r)
-    //     {
-    //         return TEST<float, double, double>{}(arg);
-    //     }
-    // }
+    else if(Ti != Tex && (Ti == rocblas_datatype_f32_r && Tex == rocblas_datatype_f64_r))
+    {
+        if(To == rocblas_datatype_f32_r && To == Ti && Tex == rocblas_datatype_f64_r)
+        {
+            return TEST<float, float, double>{}(arg);
+        }
+        else if(To == Tex && Tex == rocblas_datatype_f64_r)
+        {
+            return TEST<float, double, double>{}(arg);
+        }
+    }
     // covers s, d, c, z precisions
     // else
     // {

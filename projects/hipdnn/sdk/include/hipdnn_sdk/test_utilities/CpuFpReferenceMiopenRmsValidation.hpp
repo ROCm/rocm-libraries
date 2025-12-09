@@ -14,12 +14,8 @@
 #include <hipdnn_sdk/test_utilities/ReferenceValidationInterface.hpp>
 #include <hipdnn_sdk/utilities/TensorView.hpp>
 
-namespace hipdnn_sdk
+namespace hipdnn_sdk::test_utilities
 {
-namespace test_utilities
-{
-
-using namespace hipdnn_sdk::utilities;
 
 // CPU validator that uses MIOpen RMS calculation for comparing tensor likes.
 // Can be used to replicate MIOpen's RMS tolerance checks in unit tests.
@@ -41,7 +37,7 @@ public:
 
     ~CpuFpReferenceMiopenRmsValidation() override = default;
 
-    bool allClose(ITensor& reference, ITensor& implementation) const override
+    bool allClose(utilities::ITensor& reference, utilities::ITensor& implementation) const override
     {
         if(reference.elementCount() != implementation.elementCount()
            || reference.dims() != implementation.dims())
@@ -58,8 +54,8 @@ public:
         std::atomic<double> maxRefMagnitude(0.0);
         std::atomic<double> maxImplMagnitude(0.0);
 
-        TensorView<T> refView(reference);
-        TensorView<T> implView(implementation);
+        utilities::TensorView<T> refView(reference);
+        utilities::TensorView<T> implView(implementation);
 
         auto validateFunc = [&](const std::vector<int64_t>& indices) {
             T refValueT = refView.getHostValue(indices);
@@ -127,5 +123,25 @@ private:
     double _relativeTolerance;
 };
 
-} // namespace test_utilities
-} // namespace hipdnn_sdk
+inline std::unique_ptr<hipdnn_sdk::test_utilities::IReferenceValidation>
+    createRmsValidator(data_objects::DataType dataType, float relativeTolerance)
+{
+    switch(dataType)
+    {
+    case data_objects::DataType::FLOAT:
+        return std::make_unique<CpuFpReferenceMiopenRmsValidation<float>>(relativeTolerance);
+    case data_objects::DataType::HALF:
+        return std::make_unique<CpuFpReferenceMiopenRmsValidation<half>>(
+            static_cast<half>(relativeTolerance));
+    case data_objects::DataType::BFLOAT16:
+        return std::make_unique<CpuFpReferenceMiopenRmsValidation<hip_bfloat16>>(
+            static_cast<hip_bfloat16>(relativeTolerance));
+    case data_objects::DataType::DOUBLE:
+        return std::make_unique<CpuFpReferenceMiopenRmsValidation<double>>(
+            static_cast<double>(relativeTolerance));
+    default:
+        throw std::runtime_error("Unsupported data type for RMS validator");
+    }
+}
+
+} // namespace hipdnn_sdk::test_utilities

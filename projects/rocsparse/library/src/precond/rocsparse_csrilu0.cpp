@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "internal/precond/rocsparse_csrilu0.h"
+#include "../level2/rocsparse_csrsv_deprecated_template.hpp"
 #include "csrilu0_device.h"
 #include "rocsparse_csrilu0.hpp"
 

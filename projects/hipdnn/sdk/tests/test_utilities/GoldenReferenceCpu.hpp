@@ -18,8 +18,8 @@ namespace hipdnn_sdk::test_utilities
 class TestGoldenReferenceCpu : public ::testing::TestWithParam<std::filesystem::path>
 {
 protected:
-    GraphAndTensorMap _graphAndTensors;
-    std::unordered_map<int64_t, std::unique_ptr<ITensor>> _referenceOutputTensors;
+    utilities::GraphAndTensorMap _graphAndTensors;
+    std::unordered_map<int64_t, std::unique_ptr<utilities::ITensor>> _referenceOutputTensors;
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     void SetUp() override
@@ -33,12 +33,14 @@ protected:
             GTEST_SKIP();
         }
 
-        _graphAndTensors = loadGraphAndTensors(path);
+        _graphAndTensors = utilities::loadGraphAndTensors(path);
         _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
     }
 
     void goldenReferenceTestSuite(float absoluteTolerance, float relativeTolerance)
     {
+        SKIP_IF_WINDOWS();
+
         auto tensorMap = _graphAndTensors.hostBufferMap();
         EXPECT_EQ(tensorMap.size(), 6);
 
@@ -53,8 +55,7 @@ protected:
 auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
 {
     return testing::ValuesIn(filesInDirectoryWithExtReturnEmptyPathOnThrow(
-        hipdnn_sdk::utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data"
-            / subDirectory,
+        utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data" / subDirectory,
         ".json"));
 }
 }

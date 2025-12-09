@@ -72,7 +72,7 @@ The following table lists the kernel parameters:
   * - ``KernelLanguage``
     - Decides if the kernels should be written in the source code (HIP) or assembly (gfx803, gfx900, ...).
 
-For the exhaustive list of solution parameters and their defaults, see `Common.py <https://github.com/ROCm/Tensile/blob/develop/Tensile/Common.py>`_.
+For the exhaustive list of solution parameters and their defaults, see `Common.py <https://github.com/ROCm/rocm-libraries/blob/develop/shared/tensile/Tensile/Common.py>`_.
 
 GPU kernel dimensions
 ======================

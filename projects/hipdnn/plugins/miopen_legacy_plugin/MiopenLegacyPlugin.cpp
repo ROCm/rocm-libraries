@@ -18,6 +18,7 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenContainer.hpp"
 #include "MiopenHandleFactory.hpp"
+#include "MiopenLegacyPlugin.hpp"
 
 static const char* pluginName = "miopen_legacy_plugin";
 static const char* pluginVersion = "1.0.0";
@@ -37,7 +38,7 @@ std::weak_ptr<MiopenContainer> miopenContainerLifecyclePtr;
 
 extern "C" {
 
-hipdnnPluginStatus_t hipdnnPluginGetName(const char** name)
+hipdnnPluginStatus_t hipdnnPluginGetNameImpl(const char** name)
 {
     LOG_API_ENTRY("name_ptr={:p}", static_cast<void*>(name));
 
@@ -50,7 +51,7 @@ hipdnnPluginStatus_t hipdnnPluginGetName(const char** name)
     });
 }
 
-hipdnnPluginStatus_t hipdnnPluginGetVersion(const char** version)
+hipdnnPluginStatus_t hipdnnPluginGetVersionImpl(const char** version)
 {
     LOG_API_ENTRY("versionPtr={:p}", static_cast<void*>(version));
 
@@ -63,7 +64,7 @@ hipdnnPluginStatus_t hipdnnPluginGetVersion(const char** version)
     });
 }
 
-hipdnnPluginStatus_t hipdnnPluginGetType(hipdnnPluginType_t* type)
+hipdnnPluginStatus_t hipdnnPluginGetTypeImpl(hipdnnPluginType_t* type)
 {
     LOG_API_ENTRY("typePtr={:p}", static_cast<void*>(type));
 
@@ -76,7 +77,7 @@ hipdnnPluginStatus_t hipdnnPluginGetType(hipdnnPluginType_t* type)
     });
 }
 
-void hipdnnPluginGetLastErrorString(const char** errorStr)
+void hipdnnPluginGetLastErrorStringImpl(const char** errorStr)
 {
     LOG_API_ENTRY("errorStrPtr={:p}", static_cast<void*>(errorStr));
 
@@ -90,7 +91,7 @@ void hipdnnPluginGetLastErrorString(const char** errorStr)
 }
 
 // Once plugins are loaded via plugin manager then logging will work for them
-hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback)
+hipdnnPluginStatus_t hipdnnPluginSetLoggingCallbackImpl(hipdnnCallback_t callback)
 {
     return hipdnn_plugin::tryCatch([&, apiName = __func__]() {
         throwIfNull(callback);
@@ -99,8 +100,9 @@ hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback)
     });
 }
 
-hipdnnPluginStatus_t
-    hipdnnEnginePluginGetAllEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t* numEngines)
+hipdnnPluginStatus_t hipdnnEnginePluginGetAllEngineIdsImpl(int64_t* engineIds,
+                                                           uint32_t maxEngines,
+                                                           uint32_t* numEngines)
 {
     LOG_API_ENTRY("engineIds={:p}, maxEngines={}, numEngines={:p}",
                   static_cast<void*>(engineIds),
@@ -150,7 +152,7 @@ hipdnnPluginStatus_t
     });
 }
 
-hipdnnPluginStatus_t hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t* handle)
+hipdnnPluginStatus_t hipdnnEnginePluginCreateImpl(hipdnnEnginePluginHandle_t* handle)
 {
     LOG_API_ENTRY("handle_ptr={:p}", static_cast<void*>(handle));
 
@@ -188,7 +190,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t* handle
     });
 }
 
-hipdnnPluginStatus_t hipdnnEnginePluginDestroy(hipdnnEnginePluginHandle_t handle)
+hipdnnPluginStatus_t hipdnnEnginePluginDestroyImpl(hipdnnEnginePluginHandle_t handle)
 {
     LOG_API_ENTRY("handle={:p}", static_cast<void*>(handle));
 
@@ -203,8 +205,8 @@ hipdnnPluginStatus_t hipdnnEnginePluginDestroy(hipdnnEnginePluginHandle_t handle
     });
 }
 
-hipdnnPluginStatus_t hipdnnEnginePluginSetStream(hipdnnEnginePluginHandle_t handle,
-                                                 hipStream_t stream)
+hipdnnPluginStatus_t hipdnnEnginePluginSetStreamImpl(hipdnnEnginePluginHandle_t handle,
+                                                     hipStream_t stream)
 {
     LOG_API_ENTRY(
         "handle={:p}, stream_id={:p}", static_cast<void*>(handle), static_cast<void*>(stream));
@@ -219,11 +221,11 @@ hipdnnPluginStatus_t hipdnnEnginePluginSetStream(hipdnnEnginePluginHandle_t hand
 }
 
 hipdnnPluginStatus_t
-    hipdnnEnginePluginGetApplicableEngineIds(hipdnnEnginePluginHandle_t handle,
-                                             const hipdnnPluginConstData_t* opGraph,
-                                             int64_t* engineIds,
-                                             uint32_t maxEngines,
-                                             uint32_t* numEngines)
+    hipdnnEnginePluginGetApplicableEngineIdsImpl(hipdnnEnginePluginHandle_t handle,
+                                                 const hipdnnPluginConstData_t* opGraph,
+                                                 int64_t* engineIds,
+                                                 uint32_t maxEngines,
+                                                 uint32_t* numEngines)
 {
     LOG_API_ENTRY("handle={:p}, opGraph={:p}, engineIds={:p}, maxEngines={}, numEngines={:p}",
                   static_cast<void*>(handle),
@@ -267,10 +269,10 @@ hipdnnPluginStatus_t
     });
 }
 
-hipdnnPluginStatus_t hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle_t handle,
-                                                        int64_t engineId,
-                                                        const hipdnnPluginConstData_t* opGraph,
-                                                        hipdnnPluginConstData_t* engineDetails)
+hipdnnPluginStatus_t hipdnnEnginePluginGetEngineDetailsImpl(hipdnnEnginePluginHandle_t handle,
+                                                            int64_t engineId,
+                                                            const hipdnnPluginConstData_t* opGraph,
+                                                            hipdnnPluginConstData_t* engineDetails)
 {
     LOG_API_ENTRY("handle={:p}, engineId={}, opGraph={:p}, engineDetails={:p}",
                   static_cast<void*>(handle),
@@ -292,8 +294,9 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle
     });
 }
 
-hipdnnPluginStatus_t hipdnnEnginePluginDestroyEngineDetails(hipdnnEnginePluginHandle_t handle,
-                                                            hipdnnPluginConstData_t* engineDetails)
+hipdnnPluginStatus_t
+    hipdnnEnginePluginDestroyEngineDetailsImpl(hipdnnEnginePluginHandle_t handle,
+                                               hipdnnPluginConstData_t* engineDetails)
 {
     LOG_API_ENTRY("handle={:p}, engineDetails={}",
                   static_cast<void*>(handle),
@@ -310,10 +313,11 @@ hipdnnPluginStatus_t hipdnnEnginePluginDestroyEngineDetails(hipdnnEnginePluginHa
     });
 }
 
-hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSize(hipdnnEnginePluginHandle_t handle,
-                                                        const hipdnnPluginConstData_t* engineConfig,
-                                                        const hipdnnPluginConstData_t* opGraph,
-                                                        size_t* workspaceSize)
+hipdnnPluginStatus_t
+    hipdnnEnginePluginGetWorkspaceSizeImpl(hipdnnEnginePluginHandle_t handle,
+                                           const hipdnnPluginConstData_t* engineConfig,
+                                           const hipdnnPluginConstData_t* opGraph,
+                                           size_t* workspaceSize)
 {
     LOG_API_ENTRY("handle={:p}, engineConfig={:p}, opGraph={:p}, workspaceSize={:p}",
                   static_cast<void*>(handle),
@@ -338,11 +342,11 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSize(hipdnnEnginePluginHandle
     });
 }
 
-hipdnnPluginStatus_t
-    hipdnnEnginePluginCreateExecutionContext(hipdnnEnginePluginHandle_t handle,
-                                             const hipdnnPluginConstData_t* engineConfig,
-                                             const hipdnnPluginConstData_t* opGraph,
-                                             hipdnnEnginePluginExecutionContext_t* executionContext)
+hipdnnPluginStatus_t hipdnnEnginePluginCreateExecutionContextImpl(
+    hipdnnEnginePluginHandle_t handle,
+    const hipdnnPluginConstData_t* engineConfig,
+    const hipdnnPluginConstData_t* opGraph,
+    hipdnnEnginePluginExecutionContext_t* executionContext)
 {
     LOG_API_ENTRY("handle={:p}, engineConfig={:p}, opGraph={:p}, executionContext={:p}",
                   static_cast<void*>(handle),
@@ -381,9 +385,8 @@ hipdnnPluginStatus_t
     });
 }
 
-hipdnnPluginStatus_t
-    hipdnnEnginePluginDestroyExecutionContext(hipdnnEnginePluginHandle_t handle,
-                                              hipdnnEnginePluginExecutionContext_t executionContext)
+hipdnnPluginStatus_t hipdnnEnginePluginDestroyExecutionContextImpl(
+    hipdnnEnginePluginHandle_t handle, hipdnnEnginePluginExecutionContext_t executionContext)
 {
     LOG_API_ENTRY("handle={:p}, executionContext={:p}",
                   static_cast<void*>(handle),
@@ -399,7 +402,7 @@ hipdnnPluginStatus_t
     });
 }
 
-hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
+hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSizeFromExecutionContextImpl(
     hipdnnEnginePluginHandle_t handle,
     hipdnnEnginePluginExecutionContext_t executionContext,
     size_t* workspaceSize)
@@ -421,11 +424,11 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
 }
 
 hipdnnPluginStatus_t
-    hipdnnEnginePluginExecuteOpGraph(hipdnnEnginePluginHandle_t handle,
-                                     hipdnnEnginePluginExecutionContext_t executionContext,
-                                     void* workspace,
-                                     const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                     uint32_t numDeviceBuffers)
+    hipdnnEnginePluginExecuteOpGraphImpl(hipdnnEnginePluginHandle_t handle,
+                                         hipdnnEnginePluginExecutionContext_t executionContext,
+                                         void* workspace,
+                                         const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                         uint32_t numDeviceBuffers)
 {
     LOG_API_ENTRY("handle={:p}, executionContext={:p}, workspace={:p}, deviceBuffers={:p}, "
                   "numDeviceBuffers={}",

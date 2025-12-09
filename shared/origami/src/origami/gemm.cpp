@@ -932,7 +932,7 @@ namespace origami
                                 data_type_t       mi_datatype,
                                 size_t            mx_block_size,
                                 int               WGM,
-                                size_t            occupancy,
+                                int               occupancy,
                                 size_t            numActiveCUs,
                                 size_t            splittingFactor)
     {
@@ -1000,8 +1000,8 @@ namespace origami
         int grid_m         = static_cast<int>(safe_ceil_div(M, MT_M));
         int grid_n         = static_cast<int>(safe_ceil_div(N, MT_N));
         int real_occupancy = std::min(occupancy,
-                                      safe_ceil_div(grid_m * grid_n * batch * splittingFactor,
-                                                    hardware.N_CU)); // Number of WGs per CU.
+                                      static_cast<int>(safe_ceil_div(grid_m * grid_n * batch * splittingFactor,
+                                                       hardware.N_CU))); // Number of WGs per CU.
         L_prologue         = L_prologue * pow(0.95, real_occupancy); // Factor chosen empirically
         L_epilogue         = L_epilogue * pow(0.95, real_occupancy); // Factor chosen empirically
         // 4') K-split reductions are globally coherent, we need to write and read split-1 MT_M*MT_N
@@ -1147,7 +1147,7 @@ namespace origami
                                 data_type_t       mi_datatype,
                                 size_t            mx_block_size,
                                 int               WGM,
-                                size_t            occupancy,
+                                int               occupancy,
                                 size_t            numActiveCUs,
                                 size_t            splittingFactor)
     {
@@ -1199,9 +1199,9 @@ namespace origami
                                  data_type_t       mi_datatype,
                                  size_t            mx_block_size,
                                  int               WGM,
-                                 size_t            non_temporal_a,
-                                 size_t            non_temporal_b,
-                                 size_t            occupancy,
+                                 int               non_temporal_a,
+                                 int               non_temporal_b,
+                                 int               occupancy,
                                  size_t            split,
                                  size_t            max_cus)
     {
@@ -1291,6 +1291,7 @@ namespace origami
 
         // 1-1) WGM
         WGM = std::max(WGM, 1); // WGM can't be less than one.
+        occupancy = std::max(occupancy, 1); // occupancy can't be less than one.
 
         // 1-2) Find CU occupancy
         auto [numWGs, numActiveCUs, numWaves, splittingFactor]

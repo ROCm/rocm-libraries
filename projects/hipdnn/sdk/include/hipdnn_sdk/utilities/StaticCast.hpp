@@ -1,10 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#pragma once
+
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_fp16.h>
-
-#pragma once
 
 namespace hipdnn_sdk::utilities
 {
@@ -15,7 +15,7 @@ template <class T>
 struct CastTo
 {
     template <class S>
-    T from(S value)
+    static T from(S value)
     {
         return static_cast<T>(value);
     }
@@ -25,37 +25,32 @@ template <>
 struct CastTo<hip_bfloat16>
 {
     template <class T>
-    hip_bfloat16 from(T value)
+    static hip_bfloat16 from(T value)
     {
         return static_cast<hip_bfloat16>(value);
     }
 
-    template <>
-    hip_bfloat16 from<double>(double value)
+    static hip_bfloat16 from(double value)
     {
         return static_cast<hip_bfloat16>(static_cast<float>(value));
     }
 
-    template <>
-    hip_bfloat16 from<int>(int value)
+    static hip_bfloat16 from(int value)
     {
         return static_cast<hip_bfloat16>(static_cast<float>(value));
     }
 
-    template <>
-    hip_bfloat16 from<unsigned int>(unsigned int value)
+    static hip_bfloat16 from(unsigned int value)
     {
         return static_cast<hip_bfloat16>(static_cast<float>(value));
     }
 
-    template <>
-    hip_bfloat16 from<long>(long value)
+    static hip_bfloat16 from(int64_t value)
     {
         return static_cast<hip_bfloat16>(static_cast<float>(value));
     }
 
-    template <>
-    hip_bfloat16 from<unsigned long>(unsigned long value)
+    static hip_bfloat16 from(uint64_t value)
     {
         return static_cast<hip_bfloat16>(static_cast<float>(value));
     }
@@ -65,41 +60,38 @@ template <>
 struct CastTo<half>
 {
     template <class T>
-    half from(T value)
+    static half from(T value)
     {
         return static_cast<half>(value);
     }
 
-    template <>
-    half from<int>(int value)
+    static half from(int value)
     {
         return static_cast<half>(static_cast<float>(value));
     }
 
-    template <>
-    half from<unsigned int>(unsigned int value)
+    static half from(unsigned int value)
     {
         return static_cast<half>(static_cast<float>(value));
     }
 
-    template <>
-    half from<long>(long value)
+    static half from(int64_t value)
     {
         return static_cast<half>(static_cast<float>(value));
     }
 
-    template <>
-    half from<unsigned long>(unsigned long value)
+    static half from(uint64_t value)
     {
         return static_cast<half>(static_cast<float>(value));
     }
 };
 
-}
+} // namespace detail
 
 template <class S, class T>
 S staticCast(T value)
 {
-    return detail::CastTo<S>{}.from(value);
+    return detail::CastTo<S>::from(value);
 }
-}
+
+} // namespace hipdnn_sdk::utilities

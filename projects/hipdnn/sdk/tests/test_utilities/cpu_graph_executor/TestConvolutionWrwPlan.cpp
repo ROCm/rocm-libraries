@@ -61,19 +61,19 @@ TEST_F(TestConvolutionWrwPlan, ExecutePlan)
     params.prePadding = padding;
     params.postPadding = padding;
 
-    ConvolutionWrwPlan<float, float> patient(std::move(params));
+    ConvolutionWrwPlan<float, float, float, float> patient(std::move(params));
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[1] = planTensorBundle.xTensor.memory().hostData();
     variantPack[2] = planTensorBundle.dwTensor.memory().hostData();
     variantPack[3] = planTensorBundle.dyTensor.memory().hostData();
 
-    CpuFpReferenceConvolutionImpl<float, float>::convBwdWeight(directTensorBundle.xTensor,
-                                                               directTensorBundle.dwTensor,
-                                                               directTensorBundle.dyTensor,
-                                                               strides,
-                                                               dilation,
-                                                               padding);
+    CpuFpReferenceConvolution::wgrad<float, float, float, float>(directTensorBundle.xTensor,
+                                                                 directTensorBundle.dwTensor,
+                                                                 directTensorBundle.dyTensor,
+                                                                 strides,
+                                                                 dilation,
+                                                                 padding);
 
     patient.execute(variantPack);
 
@@ -99,11 +99,13 @@ TEST(TestConvolutionWrwPlanBuilder, PlanConstruction)
 
     auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    ConvolutionWrwPlanBuilder<DataType::FLOAT, DataType::FLOAT> patient;
+    ConvolutionWrwPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        patient;
 
     auto builtPlan = patient.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
-    bool result = dynamic_cast<ConvolutionWrwPlan<float, float>*>(builtPlan.get()) != nullptr;
+    bool result
+        = dynamic_cast<ConvolutionWrwPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -122,12 +124,14 @@ TEST(TestConvolutionWrwPlanBuilder, IsApplicable)
 
     auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    ConvolutionWrwPlanBuilder<DataType::FLOAT, DataType::FLOAT> floatPlanBuilder;
+    ConvolutionWrwPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+        floatPlanBuilder;
 
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
     auto tensorMapCopy = graphWrap.getTensorMap();
     tensorMapCopy.erase(2);
-    ConvolutionWrwPlanBuilder<DataType::FLOAT, DataType::HALF> badTypesPlanBuilder;
+    ConvolutionWrwPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::HALF, DataType::FLOAT>
+        badTypesPlanBuilder;
     EXPECT_FALSE(badTypesPlanBuilder.isApplicable(graphWrap.getNode(0), tensorMapCopy));
 }

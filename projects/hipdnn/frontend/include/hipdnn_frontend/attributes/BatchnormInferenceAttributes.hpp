@@ -8,9 +8,7 @@
 #include <memory>
 #include <unordered_map>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class BatchnormInferenceAttributes : public Attributes<BatchnormInferenceAttributes>
 {
@@ -189,5 +187,4 @@ private:
     }
 };
 typedef BatchnormInferenceAttributes Batchnorm_inference_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

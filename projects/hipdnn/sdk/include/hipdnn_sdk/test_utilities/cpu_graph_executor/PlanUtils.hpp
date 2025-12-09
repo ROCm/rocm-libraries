@@ -26,7 +26,7 @@
 #define CHECK_OPTIONAL_TENSOR_EXISTS(tensor_map, optional_tensor_uid) \
     do                                                                \
     {                                                                 \
-        if(!(optional_tensor_uid) || *(optional_tensor_uid) == 0)     \
+        if(!optional_tensor_uid.has_value())                          \
         {                                                             \
             return false;                                             \
         }                                                             \

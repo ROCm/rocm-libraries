@@ -14,7 +14,7 @@
 
 using namespace hipdnn_sdk::test_utilities;
 using namespace hipdnn_sdk::utilities;
-using namespace helpers;
+using namespace hipdnn_sdk::helpers;
 
 TEST(TestCpuFpReferenceMiopenRmsValidation, NegativeToleranceThrows)
 {

@@ -8,15 +8,9 @@
 ********************************************************************
 Device memory allocation in rocBLAS
 ********************************************************************
-rocBLAS uses per-handle device memory allocation to manage temporary memory efficiently. Each handle maintains its own memory and executes kernels sequentially in a single stream, allowing memory reuse across kernels.
 
-There are two memory allocation schemes:
-
-*  **rocBLAS_managed(default)**:  By default, rocBLAS internally manages memory, allocating more if needed. Allocated memory persists with the handle for reuse.
-
-*  **user_owned**: Users allocate memory and provide it to rocBLAS via ``rocblas_set_workspace``.
-
-``rocBLAS_managed`` is the default scheme. This scheme uses ``hipMallocAsync`` and ``hipFreeAsync`` (stream-order allocation) to allocate and free memory in stream order, avoiding global synchronization. This enables seamless stream switching without needing ``hipStreamSynchronize()``.
+For temporary device memory, rocBLAS uses a per-handle memory allocation with out-of-band management.
+For more information, see the device memory allocation section of the :ref:programmers-guide.
 
 The following computational functions use temporary device memory.
 
@@ -117,10 +111,27 @@ The following computational functions use temporary device memory.
 | - rocblas_Xtrtri_strided_batched               |                                                      |
 +------------------------------------------------+------------------------------------------------------+
 
+.. _rocblas_device_memory_size:
+
+Environment variable for preallocating memory
+=============================================
+
+The environment variable ``ROCBLAS_DEVICE_MEMORY_SIZE`` is used to set how much memory to preallocate:
+
+*  If it is greater than 0, it sets the default handle device memory size to the specified size (in bytes).
+*  If it is equal to 0 or unset, it lets rocBLAS manage the device memory. It uses a default size, like 32MiB or 128MiB, and expands it when necessary.
+
 Memory allocation functions
 ==============================================
 
 rocBLAS includes functions for manually setting the memory size and determining the memory requirements.
+
+Functions for manually setting the memory size
+----------------------------------------------
+
+*  ``rocblas_set_device_memory_size``
+*  ``rocblas_get_device_memory_size``
+*  ``rocblas_is_user_managing_device_memory``
 
 Function for setting a user-owned workspace
 ----------------------------------------------
@@ -139,11 +150,32 @@ See the API section for information about these functions.
 rocBLAS function return values for insufficient device memory
 =============================================================
 
-If the user manually allocates (user-owned scheme) using ``rocblas_set_workspace(rocblas_handle handle, void* addr, size_t size)``, that size is used as the limit and no resizing or synchronizing ever occurs.
+If the user preallocates or manually allocates, that size is used as the limit and no resizing or synchronizing ever occurs.
 The following two function return values indicate insufficient memory:
 
 *  ``rocblas_status == rocblas_status_memory_error`` : indicates there is insufficient device memory for a rocBLAS function.
 *  ``rocblas_status == rocblas_status_perf_degraded`` : indicates that a slower algorithm was used because of insufficient device memory for the optimal algorithm.
+
+.. _stream order alloc:
+
+Stream-ordered memory allocation
+========================================
+
+Stream-ordered device memory allocation is added to rocBLAS. The asynchronous allocators
+``hipMallocAsync()`` and ``hipFreeAsync()`` are used to allow allocation and deallocation to happen in stream order.
+
+This is a non-default beta option that can be enabled by setting the environment variable ``ROCBLAS_STREAM_ORDER_ALLOC``.
+
+To check whether the device supports stream-order allocation, call ``hipDeviceGetAttribute()`` with the
+device attribute ``hipDeviceAttributeMemoryPoolsSupported``.
+
+Enabling stream-ordered memory allocation
+----------------------------------------------
+
+On supported platforms, the environment variable ``ROCBLAS_STREAM_ORDER_ALLOC`` is used to enable stream-ordered memory allocation.
+
+*  If it is greater than 0 (``> 0``), it sets the allocation to be stream-ordered and uses ``hipMallocAsync/hipFreeAsync`` to manage device memory.
+*  If it is equal to zero (``= 0``) or unset, it uses ``hipMalloc`` and ``hipFree`` to manage device memory.
 
 Switching streams without synchronization
 ----------------------------------------------

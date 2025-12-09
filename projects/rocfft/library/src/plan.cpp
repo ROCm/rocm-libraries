@@ -1734,9 +1734,9 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
                                                        int                   local_comm_rank,
                                                        rocfft_location_t     location,
                                                        rocfft_transform_type transformType,
-                                                       const LoadOps&        loadOps,
-                                                       const StoreOps&       storeOps,
-                                                       bool                  partOfMultiPlan)
+                                                       const std::optional<LoadOps>&  loadOps,
+                                                       const std::optional<StoreOps>& storeOps,
+                                                       bool partOfMultiPlan)
 {
     rocfft_scoped_device dev(location.device);
 
@@ -1747,21 +1747,43 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
         execPlan.deviceProp = rootPlanData.deviceProp;
         execPlan.rootPlan   = NodeFactory::CreateExplicitNode(rootPlanData, nullptr);
 
-        // TODO: some solutions require the problems to be unit_stride, otherwise the
-        //   scheme-tree may not be applicable. In this case, we can't apply the solutions.
-        //   Currently, it happens on Real3DEven with REAL_2D_SINGLE kernels. This needs to
-        //   be detected.
-
         // If we are doing tuning initialzing now, we shouldn't apply any solution,
         // since we are trying enumerating solutions now
         if(TuningBenchmarker::GetSingleton().IsInitializingTuning() == false)
         {
-            execPlan.rootScheme = ApplySolution(execPlan);
-            if(execPlan.rootScheme)
+            // Solutions do not consider strides.  Even-length real
+            // transforms need special consideration, since the
+            // even-length optimization is only valid for stride-1 on
+            // the fastest dimension.  So only apply a solution if
+            // we're not doing even-length real, or if fastest dim
+            // stride is 1.
+            const auto& realLength     = transformType == rocfft_transform_type_real_forward
+                                             ? execPlan.rootPlan->length
+                                             : execPlan.rootPlan->outputLength;
+            const bool  evenLengthReal = (transformType == rocfft_transform_type_real_forward
+                                         || transformType == rocfft_transform_type_real_inverse)
+                                        && realLength.front() % 2 == 0;
+            const bool stride1 = execPlan.rootPlan->inStride.front() == 1
+                                 && execPlan.rootPlan->outStride.front() == 1;
+            if(evenLengthReal && !stride1)
             {
-                execPlan.rootPlan = nullptr;
-                execPlan.rootPlan = NodeFactory::CreateExplicitNode(
-                    rootPlanData, nullptr, execPlan.rootScheme->curScheme);
+                if(LOG_TRACE_ENABLED())
+                {
+                    (*LogSingleton::GetInstance().GetTraceOS())
+                        << "transform is even-length real but not stride-1, not applying solution "
+                           "map"
+                        << std::endl;
+                }
+            }
+            else
+            {
+                execPlan.rootScheme = ApplySolution(execPlan);
+                if(execPlan.rootScheme)
+                {
+                    execPlan.rootPlan = nullptr;
+                    execPlan.rootPlan = NodeFactory::CreateExplicitNode(
+                        rootPlanData, nullptr, execPlan.rootScheme->curScheme);
+                }
             }
         }
 
@@ -1774,9 +1796,9 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
         execPlan.rootPlan->outStrideUnit = BufferIsUnitStride(execPlan, OB_USER_OUT);
 
         // set load/store ops on the root plan
-        if(loadOps.enabled())
+        if(loadOps)
             execPlan.rootPlan->loadOps = loadOps;
-        if(storeOps.enabled())
+        if(storeOps)
             execPlan.rootPlan->storeOps = storeOps;
 
         // only allocate kernels, twiddles, etc if plan will run on this rank
@@ -1836,16 +1858,16 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
 // new item will begin execution.
 //
 // NOTE: lengths and stride include batch dimension
-static size_t C2CBrickOneDimension(rocfft_plan_t&             plan,
-                                   size_t                     dimIdx,
-                                   rocfft_location_t          location,
-                                   const std::vector<size_t>& lengths,
-                                   const std::vector<size_t>& stride,
-                                   BufferPtr                  input,
-                                   BufferPtr                  output,
-                                   const LoadOps&             loadOps,
-                                   const StoreOps&            storeOps,
-                                   const std::vector<size_t>& antecedents)
+static size_t C2CBrickOneDimension(rocfft_plan_t&                 plan,
+                                   size_t                         dimIdx,
+                                   rocfft_location_t              location,
+                                   const std::vector<size_t>&     lengths,
+                                   const std::vector<size_t>&     stride,
+                                   BufferPtr                      input,
+                                   BufferPtr                      output,
+                                   const std::optional<LoadOps>&  loadOps,
+                                   const std::optional<StoreOps>& storeOps,
+                                   const std::vector<size_t>&     antecedents)
 {
     auto transformLengths = lengths;
     auto transformStride  = stride;
@@ -1890,14 +1912,14 @@ static size_t C2CBrickOneDimension(rocfft_plan_t&             plan,
     return plan.AddMultiPlanItem(std::move(singlePlan), antecedents);
 }
 
-void rocfft_plan_t::C2CField(const rocfft_field_t&      field,
-                             const std::vector<size_t>& fftDims,
-                             std::vector<BufferPtr>&    input,
-                             std::vector<BufferPtr>&    output,
-                             const LoadOps*             loadOps,
-                             const StoreOps*            storeOps,
-                             const std::vector<size_t>& inputAntecedents,
-                             std::vector<size_t>&       outputItems)
+void rocfft_plan_t::C2CField(const rocfft_field_t&          field,
+                             const std::vector<size_t>&     fftDims,
+                             std::vector<BufferPtr>&        input,
+                             std::vector<BufferPtr>&        output,
+                             const std::optional<LoadOps>&  loadOps,
+                             const std::optional<StoreOps>& storeOps,
+                             const std::vector<size_t>&     inputAntecedents,
+                             std::vector<size_t>&           outputItems)
 {
     outputItems.resize(field.bricks.size());
 
@@ -1915,6 +1937,12 @@ void rocfft_plan_t::C2CField(const rocfft_field_t&      field,
 
         for(auto dimIdx : fftDims)
         {
+            // apply load ops to first dimension we transform and store ops to the last
+            std::optional<LoadOps> appliedLoadOps
+                = dimIdx == fftDims.front() ? loadOps : std::nullopt;
+            std::optional<StoreOps> appliedStoreOps
+                = dimIdx == fftDims.back() ? storeOps : std::nullopt;
+
             auto transformItem              = C2CBrickOneDimension(*this,
                                                       dimIdx,
                                                       inBrick.location,
@@ -1922,8 +1950,8 @@ void rocfft_plan_t::C2CField(const rocfft_field_t&      field,
                                                       inBrick.stride,
                                                       fftInput,
                                                       output[i],
-                                                      loadOps ? *loadOps : LoadOps{},
-                                                      storeOps ? *storeOps : StoreOps{},
+                                                      appliedLoadOps,
+                                                      appliedStoreOps,
                                                       antecedents);
             multiPlan[transformItem]->group = "fft_dim_" + std::to_string(dimIdx);
             multiPlan[transformItem]->description
@@ -2692,8 +2720,8 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
              contiguousInputDims,
              inputBufs,
              inputFFTBufs,
-             &desc.loadOps,
-             nullptr,
+             desc.loadOps,
+             std::nullopt,
              {},
              inputFFTItems);
 
@@ -2837,8 +2865,8 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
                      {static_cast<size_t>(pencil_axis)},
                      writeToUserOutput ? outputBufs : currentBufs,
                      writeToUserOutput ? outputBufs : currentBufs,
-                     nullptr,
-                     writeToUserOutput ? &desc.storeOps : nullptr,
+                     std::nullopt,
+                     writeToUserOutput ? std::optional<StoreOps>{desc.storeOps} : std::nullopt,
                      currentAntecedents,
                      fftItems);
             fft_done[pencil_axis] = 1;
@@ -2885,13 +2913,15 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
             // now dimIdx dimension is contiguous on all bricks
             midFFTItems.clear();
             // first transform needs to apply load operations
-            const auto loadOps = dimIdx == nonContiguousDims.front() ? &desc.loadOps : nullptr;
+            const std::optional<LoadOps> loadOps = dimIdx == nonContiguousDims.front()
+                                                       ? std::optional<LoadOps>{desc.loadOps}
+                                                       : std::nullopt;
             C2CField(transposedField,
                      {dimIdx},
                      transposeOutputBufs,
                      transposeOutputBufs,
                      loadOps,
-                     nullptr,
+                     std::nullopt,
                      transposeItems,
                      midFFTItems);
 
@@ -2920,8 +2950,8 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
                  contiguousOutputDims,
                  outputBufs,
                  outputBufs,
-                 nullptr,
-                 &desc.storeOps,
+                 std::nullopt,
+                 desc.storeOps,
                  finalTransposeItems,
                  finalFFTItems);
     }
@@ -4371,8 +4401,10 @@ void TreeNode::Print(rocfft_ostream& os, const int indent) const
 
     os << indentStr << "Direct_to_from_Reg: " << PrintDirectToFromRegMode(dir2regMode);
     os << "\n";
-    loadOps.print(os, indentStr);
-    storeOps.print(os, indentStr);
+    if(loadOps)
+        loadOps->print(os, indentStr);
+    if(storeOps)
+        storeOps->print(os, indentStr);
 
     os << indentStr << PrintOperatingBuffer(obIn) << " -> " << PrintOperatingBuffer(obOut) << "\n";
     os << indentStr << PrintOperatingBufferCode(obIn) << " -> " << PrintOperatingBufferCode(obOut)
@@ -4934,7 +4966,7 @@ void ProcessNode(ExecPlan& execPlan)
     size_t chirpSize        = 0;
     execPlan.rootPlan->DetermineBufferMemory(tmpBufSize, cmplxForRealSize, blueSize, chirpSize);
 
-    if(execPlan.rootPlan->loadOps.enabled())
+    if(execPlan.rootPlan->loadOps && execPlan.rootPlan->loadOps->enabled())
     {
         // Load ops happen on first node that reads input
         auto load_node = std::find_if(
@@ -4944,7 +4976,7 @@ void ProcessNode(ExecPlan& execPlan)
         (*load_node)->loadOps = execPlan.rootPlan->loadOps;
     }
 
-    if(execPlan.rootPlan->storeOps.enabled())
+    if(execPlan.rootPlan->storeOps && execPlan.rootPlan->storeOps->enabled())
     {
         // Store ops happen on last node of the plan that writes
         // output

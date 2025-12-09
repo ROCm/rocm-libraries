@@ -41,7 +41,8 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-void testing_spmm_batched_csr_bad_arg(void)
+template <typename I, typename J, typename T>
+void testing_spmm_batched_csr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int32_t              m         = 100;
@@ -407,31 +408,31 @@ hipsparseStatus_t testing_spmm_batched_csr(Arguments argus)
             hipMemcpy(hC_2.data(), dC_2, sizeof(T) * batch_count_C * nnz_C, hipMemcpyDeviceToHost));
 
         // CPU
-        host_csrmm_batched(A_m,
-                           n,
-                           A_n,
-                           batch_count_A,
-                           (I)offsets_batch_stride_A,
-                           (I)columns_values_batch_stride_A,
-                           transA,
-                           transB,
-                           h_alpha,
-                           hcsr_row_ptr.data(),
-                           hcsr_col_ind.data(),
-                           hcsr_val.data(),
-                           hB.data(),
-                           (J)ldb,
-                           batch_count_B,
-                           (I)batch_stride_B,
-                           orderB,
-                           h_beta,
-                           hC_gold.data(),
-                           (J)ldc,
-                           batch_count_C,
-                           (I)batch_stride_C,
-                           orderC,
-                           idx_base,
-                           false);
+        host_csrmm_batched<T, I, J>(A_m,
+                                    n,
+                                    A_n,
+                                    batch_count_A,
+                                    offsets_batch_stride_A,
+                                    columns_values_batch_stride_A,
+                                    transA,
+                                    transB,
+                                    h_alpha,
+                                    hcsr_row_ptr.data(),
+                                    hcsr_col_ind.data(),
+                                    hcsr_val.data(),
+                                    hB.data(),
+                                    ldb,
+                                    batch_count_B,
+                                    batch_stride_B,
+                                    orderB,
+                                    h_beta,
+                                    hC_gold.data(),
+                                    ldc,
+                                    batch_count_C,
+                                    batch_stride_C,
+                                    orderC,
+                                    idx_base,
+                                    false);
 
         unit_check_near(1, batch_count_C * nnz_C, 1, hC_gold.data(), hC_1.data());
         unit_check_near(1, batch_count_C * nnz_C, 1, hC_gold.data(), hC_2.data());

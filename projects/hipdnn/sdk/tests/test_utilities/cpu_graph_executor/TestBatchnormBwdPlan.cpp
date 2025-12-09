@@ -55,7 +55,7 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
     initTensorValues(params.dscaleTensor, DataType::FLOAT, planTensorBundle.dscaleTensor, 7);
     initTensorValues(params.dbiasTensor, DataType::FLOAT, planTensorBundle.dbiasTensor, 8);
 
-    BatchnormBwdPlan<float, float, float, float> bwdPlan(std::move(params));
+    BatchnormBwdPlan<float, float, float, float, float, float> bwdPlan(std::move(params));
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[1] = planTensorBundle.dyTensor.memory().hostData();
@@ -67,15 +67,14 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
     variantPack[7] = planTensorBundle.dscaleTensor.memory().hostData();
     variantPack[8] = planTensorBundle.dbiasTensor.memory().hostData();
 
-    CpuFpReferenceBatchnormImpl<float, float, float, float>::batchnormBwd(
-        directTensorBundle.dyTensor,
-        directTensorBundle.xTensor,
-        directTensorBundle.meanTensor,
-        directTensorBundle.invVarianceTensor,
-        directTensorBundle.scaleTensor,
-        directTensorBundle.dxTensor,
-        directTensorBundle.dscaleTensor,
-        directTensorBundle.dbiasTensor);
+    CpuFpReferenceBatchnorm::backward(directTensorBundle.dyTensor,
+                                      directTensorBundle.xTensor,
+                                      directTensorBundle.meanTensor,
+                                      directTensorBundle.invVarianceTensor,
+                                      directTensorBundle.scaleTensor,
+                                      directTensorBundle.dxTensor,
+                                      directTensorBundle.dscaleTensor,
+                                      directTensorBundle.dbiasTensor);
 
     bwdPlan.execute(variantPack);
 
@@ -103,13 +102,19 @@ TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
 
     auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    BatchnormBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    BatchnormBwdPlanBuilder<DataType::FLOAT,
+                            DataType::FLOAT,
+                            DataType::FLOAT,
+                            DataType::FLOAT,
+                            DataType::FLOAT,
+                            DataType::FLOAT>
         bwdPlanBuilder;
 
     auto builtPlan = bwdPlanBuilder.buildNodePlan(graphWrap, graphWrap.getNode(0));
 
     bool result
-        = dynamic_cast<BatchnormBwdPlan<float, float, float, float>*>(builtPlan.get()) != nullptr;
+        = dynamic_cast<BatchnormBwdPlan<float, float, float, float, float, float>*>(builtPlan.get())
+          != nullptr;
     EXPECT_TRUE(result);
 }
 
@@ -126,12 +131,22 @@ TEST(TestBatchnormBwdPlanBuilder, IsApplicable)
 
     auto graphWrap = hipdnn_plugin::GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
 
-    BatchnormBwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
+    BatchnormBwdPlanBuilder<DataType::FLOAT,
+                            DataType::FLOAT,
+                            DataType::FLOAT,
+                            DataType::FLOAT,
+                            DataType::FLOAT,
+                            DataType::FLOAT>
         floatPlanBuilder;
 
     EXPECT_TRUE(floatPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 
-    BatchnormBwdPlanBuilder<DataType::FLOAT, DataType::HALF, DataType::FLOAT, DataType::FLOAT>
+    BatchnormBwdPlanBuilder<DataType::FLOAT,
+                            DataType::HALF,
+                            DataType::FLOAT,
+                            DataType::FLOAT,
+                            DataType::FLOAT,
+                            DataType::FLOAT>
         badTypesPlanBuilder;
     EXPECT_FALSE(badTypesPlanBuilder.isApplicable(graphWrap.getNode(0), graphWrap.getTensorMap()));
 

@@ -61,6 +61,47 @@ typedef struct fftw_plan_s* fftw_plan;
  */
 typedef struct fftwf_plan_s* fftwf_plan;
 
+typedef struct
+{
+    int n;
+    int is;
+    int os;
+} hipfftw_iodim;
+typedef struct
+{
+    ptrdiff_t n;
+    ptrdiff_t is;
+    ptrdiff_t os;
+} hipfftw_iodim64;
+
+/**
+ * @brief Structure type describing lengths (or batch sizes) and input/output
+ * strides (or distances) along a dimension for generalized data layouts.
+ * Structure members are:
+ * - ``n`` length (or batch size);
+ * - ``is`` input stride (or distance);
+ * - ``os`` output stride (or distance).
+ *
+ * All the above members are of type ``int``.
+ */
+typedef hipfftw_iodim fftw_iodim;
+
+/**
+ * @brief This type is strictly equivalent to ``fftw_iodim``.
+ */
+typedef hipfftw_iodim fftwf_iodim;
+
+/**
+ * @brief This structure type is the equivalent of ``fftw_iodim`` using
+ * ``ptrdiff_t`` for members' type instead of ``int``.
+ */
+typedef hipfftw_iodim64 fftw_iodim64;
+
+/**
+ * @brief This type is strictly equivalent to ``fftw_iodim64``.
+ */
+typedef hipfftw_iodim64 fftwf_iodim64;
+
 /**
  * @brief Flag value allowing hipFFTW to compute (possibly many) FFTs at plan creation
  * to find the optimal configuration, using the input and output data buffers set at plan
@@ -372,6 +413,312 @@ HIPFFT_EXPORT fftw_plan
  */
 HIPFFT_EXPORT fftwf_plan
     fftwf_plan_dft_c2r(int rank, const int* n, fftwf_complex* in, float* out, unsigned flags);
+
+// Advanced plans
+/**
+ * @brief Creates an advanced plan for a multidimensional, double-precision, complex discrete Fourier transform
+ * of lengths ``n[0] x n[1] x ... x n[rank-1]`` and batch size ``howmany``.
+ * 
+ * @param[in] rank strictly positive rank of the transform;
+ * @param[in] n array of strictly positive lengths of the transform (must be of size ``rank``);
+ * @param[in] howmany strictly positive batch size;
+ * @param[in] in pointer to the input buffer for the transform;
+ * @param[in] inembed array of strictly positive input-embedding lengths (must be of size ``rank``). Default input-embedding is considered if set to ``NULL``;
+ * @param[in] istride strictly positive elementary stride in input data (along the last dimension);
+ * @param[in] idist strictly positive distance between consecutive input data sequences in the batch;
+ * @param[in] out pointer to the output buffer for the transform;
+ * @param[in] onembed array of strictly positive output-embedding lengths (must be of size ``rank``). Default output-embedding is considered if set to ``NULL``;
+ * @param[in] ostride strictly positive elementary stride in output data (along the last dimension);
+ * @param[in] odist strictly positive distance between consecutive output data sequences in the batch;
+ * @param[in] sign exponent sign defining the desired complex transform (``FFTW_FORWARD`` or ``FFTW_BACKWARD``);
+ * @param[in] flags bitwise OR (``|``) combination of zero or more constant flag values.
+ * @return a valid double-precision hipFFTW plan ready for execution upon success (``nullptr`` otherwise).
+ */
+HIPFFT_EXPORT fftw_plan fftw_plan_many_dft(int           rank,
+                                           const int*    n,
+                                           int           howmany,
+                                           fftw_complex* in,
+                                           const int*    inembed,
+                                           int           istride,
+                                           int           idist,
+                                           fftw_complex* out,
+                                           const int*    onembed,
+                                           int           ostride,
+                                           int           odist,
+                                           int           sign,
+                                           unsigned      flags);
+/**
+ * @brief Single-precision equivalent of \ref fftw_plan_many_dft.
+ */
+HIPFFT_EXPORT fftwf_plan fftwf_plan_many_dft(int            rank,
+                                             const int*     n,
+                                             int            howmany,
+                                             fftwf_complex* in,
+                                             const int*     inembed,
+                                             int            istride,
+                                             int            idist,
+                                             fftwf_complex* out,
+                                             const int*     onembed,
+                                             int            ostride,
+                                             int            odist,
+                                             int            sign,
+                                             unsigned       flags);
+/**
+ * @brief Creates an advanced plan for a multidimensional, double-precision, real forward discrete Fourier
+ * transform of lengths ``n[0] x n[1] x ... x n[rank-1]`` and batch size ``howmany``.
+ * 
+ * @param[in] rank strictly positive rank of the transform;
+ * @param[in] n array of strictly positive lengths of the transform (must be of size ``rank``);
+ * @param[in] howmany strictly positive batch size;
+ * @param[in] in pointer to the input buffer for the transform;
+ * @param[in] inembed array of strictly positive input-embedding lengths (must be of size ``rank``). Default input-embedding is considered if set to ``NULL``;
+ * @param[in] istride strictly positive elementary stride in input data (along the last dimension);
+ * @param[in] idist strictly positive distance between consecutive input data sequences in the batch;
+ * @param[in] out pointer to the output buffer for the transform;
+ * @param[in] onembed array of strictly positive output-embedding lengths (must be of size ``rank``). Default output-embedding is considered if set to ``NULL``;
+ * @param[in] ostride strictly positive elementary stride in output data (along the last dimension);
+ * @param[in] odist strictly positive distance between consecutive output data sequences in the batch;
+ * @param[in] flags bitwise OR (``|``) combination of zero or more constant flag values.
+ * @return a valid double-precision hipFFTW plan ready for execution upon success (``nullptr`` otherwise).
+ */
+HIPFFT_EXPORT fftw_plan fftw_plan_many_dft_r2c(int           rank,
+                                               const int*    n,
+                                               int           howmany,
+                                               double*       in,
+                                               const int*    inembed,
+                                               int           istride,
+                                               int           idist,
+                                               fftw_complex* out,
+                                               const int*    onembed,
+                                               int           ostride,
+                                               int           odist,
+                                               unsigned      flags);
+/**
+ * @brief Single-precision equivalent of \ref fftw_plan_many_dft_r2c.
+ */
+HIPFFT_EXPORT fftwf_plan fftwf_plan_many_dft_r2c(int            rank,
+                                                 const int*     n,
+                                                 int            howmany,
+                                                 float*         in,
+                                                 const int*     inembed,
+                                                 int            istride,
+                                                 int            idist,
+                                                 fftwf_complex* out,
+                                                 const int*     onembed,
+                                                 int            ostride,
+                                                 int            odist,
+                                                 unsigned       flags);
+/**
+ * @brief Creates an advanced plan for a multidimensional, double-precision, real backward (inverse)
+ * discrete Fourier transform of lengths ``n[0] x n[1] x ... x n[rank-1]`` and batch size ``howmany``.
+ * 
+ * @param[in] rank strictly positive rank of the transform;
+ * @param[in] n array of strictly positive lengths of the transform (must be of size ``rank``);
+ * @param[in] howmany strictly positive batch size;
+ * @param[in] in pointer to the input buffer for the transform;
+ * @param[in] inembed array of strictly positive input-embedding lengths (must be of size ``rank``). Default input-embedding is considered if set to ``NULL``;
+ * @param[in] istride strictly positive elementary stride in input data (along the last dimension);
+ * @param[in] idist strictly positive distance between consecutive input data sequences in the batch;
+ * @param[in] out pointer to the output buffer for the transform;
+ * @param[in] onembed array of strictly positive output-embedding lengths (must be of size ``rank``). Default output-embedding is considered if set to ``NULL``;
+ * @param[in] ostride strictly positive elementary stride in output data (along the last dimension);
+ * @param[in] odist strictly positive distance between consecutive output data sequences in the batch;
+ * @param[in] flags bitwise OR (``|``) combination of zero or more constant flag values.
+ * @return a valid double-precision hipFFTW plan ready for execution upon success (``nullptr`` otherwise).
+ */
+HIPFFT_EXPORT fftw_plan fftw_plan_many_dft_c2r(int           rank,
+                                               const int*    n,
+                                               int           howmany,
+                                               fftw_complex* in,
+                                               const int*    inembed,
+                                               int           istride,
+                                               int           idist,
+                                               double*       out,
+                                               const int*    onembed,
+                                               int           ostride,
+                                               int           odist,
+                                               unsigned      flags);
+/**
+ * @brief Single-precision equivalent of \ref fftw_plan_many_dft_c2r.
+ */
+HIPFFT_EXPORT fftwf_plan fftwf_plan_many_dft_c2r(int            rank,
+                                                 const int*     n,
+                                                 int            howmany,
+                                                 fftwf_complex* in,
+                                                 const int*     inembed,
+                                                 int            istride,
+                                                 int            idist,
+                                                 float*         out,
+                                                 const int*     onembed,
+                                                 int            ostride,
+                                                 int            odist,
+                                                 unsigned       flags);
+// guru plans
+/**
+ * @brief Creates an arbitrary plan for a multidimensional, double-precision, complex
+ * discrete Fourier transform of lengths ``dims[0].n x dims[1].n x ... x dims[rank-1].n``
+ * and batch sizes ``howmany_dims[0].n x howmany_dims[1].n x ... x howmany_dims[howmany_rank-1].n``.
+ * 
+ * @param[in] rank strictly positive rank of the transform;
+ * @param[in] dims array of ``rank`` ``fftw_iodim`` values;
+ * @param[in] howmany_rank strictly positive rank of the transform's batch sizes;
+ * @param[in] howmany_dims array of ``howmany_rank`` ``fftw_iodim`` values;
+ * @param[in] in pointer to the input buffer for the transform;
+ * @param[in] out pointer to the output buffer for the transform;
+ * @param[in] sign exponent sign defining the desired complex transform (``FFTW_FORWARD`` or ``FFTW_BACKWARD``);
+ * @param[in] flags bitwise OR (``|``) combination of zero or more constant flag values.
+ * @return a valid double-precision hipFFTW plan ready for execution upon success (``nullptr`` otherwise).
+ */
+HIPFFT_EXPORT fftw_plan fftw_plan_guru_dft(int               rank,
+                                           const fftw_iodim* dims,
+                                           int               howmany_rank,
+                                           const fftw_iodim* howmany_dims,
+                                           fftw_complex*     in,
+                                           fftw_complex*     out,
+                                           int               sign,
+                                           unsigned          flags);
+/**
+ * @brief Single-precision equivalent of \ref fftw_plan_guru_dft.
+ */
+HIPFFT_EXPORT fftwf_plan fftwf_plan_guru_dft(int                rank,
+                                             const fftwf_iodim* dims,
+                                             int                howmany_rank,
+                                             const fftwf_iodim* howmany_dims,
+                                             fftwf_complex*     in,
+                                             fftwf_complex*     out,
+                                             int                sign,
+                                             unsigned           flags);
+/**
+ * @brief Creates an arbitrary plan for a multidimensional, double-precision, real forward
+ * discrete Fourier transform of lengths ``dims[0].n x dims[1].n x ... x dims[rank-1].n``
+ * and batch sizes ``howmany_dims[0].n x howmany_dims[1].n x ... x howmany_dims[howmany_rank-1].n``.
+ * 
+ * @param[in] rank strictly positive rank of the transform;
+ * @param[in] dims array of ``rank`` ``fftw_iodim`` values;
+ * @param[in] howmany_rank strictly positive rank of the transform's batch sizes;
+ * @param[in] howmany_dims array of ``howmany_rank`` ``fftw_iodim`` values;
+ * @param[in] in pointer to the input buffer for the transform;
+ * @param[in] out pointer to the output buffer for the transform;
+ * @param[in] flags bitwise OR (``|``) combination of zero or more constant flag values.
+ * @return a valid double-precision hipFFTW plan ready for execution upon success (``nullptr`` otherwise).
+ */
+HIPFFT_EXPORT fftw_plan fftw_plan_guru_dft_r2c(int               rank,
+                                               const fftw_iodim* dims,
+                                               int               howmany_rank,
+                                               const fftw_iodim* howmany_dims,
+                                               double*           in,
+                                               fftw_complex*     out,
+                                               unsigned          flags);
+/**
+ * @brief Single-precision equivalent of \ref fftw_plan_guru_dft_r2c.
+ */
+HIPFFT_EXPORT fftwf_plan fftwf_plan_guru_dft_r2c(int                rank,
+                                                 const fftwf_iodim* dims,
+                                                 int                howmany_rank,
+                                                 const fftwf_iodim* howmany_dims,
+                                                 float*             in,
+                                                 fftwf_complex*     out,
+                                                 unsigned           flags);
+/**
+ * @brief Creates an arbitrary plan for a multidimensional, double-precision, real backward
+ * (inverse) discrete Fourier transform of lengths ``dims[0].n x dims[1].n x ... x dims[rank-1].n``
+ * and batch sizes ``howmany_dims[0].n x howmany_dims[1].n x ... x howmany_dims[howmany_rank-1].n``.
+ * 
+ * @param[in] rank strictly positive rank of the transform;
+ * @param[in] dims array of ``rank`` ``fftw_iodim`` values;
+ * @param[in] howmany_rank strictly positive rank of the transform's batch sizes;
+ * @param[in] howmany_dims array of ``howmany_rank`` ``fftw_iodim`` values;
+ * @param[in] in pointer to the input buffer for the transform;
+ * @param[in] out pointer to the output buffer for the transform;
+ * @param[in] flags bitwise OR (``|``) combination of zero or more constant flag values.
+ * @return a valid double-precision hipFFTW plan ready for execution upon success (``nullptr`` otherwise).
+ */
+HIPFFT_EXPORT fftw_plan fftw_plan_guru_dft_c2r(int               rank,
+                                               const fftw_iodim* dims,
+                                               int               howmany_rank,
+                                               const fftw_iodim* howmany_dims,
+                                               fftw_complex*     in,
+                                               double*           out,
+                                               unsigned          flags);
+/**
+ * @brief Single-precision equivalent of \ref fftw_plan_guru_dft_c2r.
+ */
+HIPFFT_EXPORT fftwf_plan fftwf_plan_guru_dft_c2r(int                rank,
+                                                 const fftwf_iodim* dims,
+                                                 int                howmany_rank,
+                                                 const fftwf_iodim* howmany_dims,
+                                                 fftwf_complex*     in,
+                                                 float*             out,
+                                                 unsigned           flags);
+// guru64 plans
+/**
+ * @brief Equivalent of \ref fftw_plan_guru_dft using layout-describing values of type
+ * ``fftw_iodim64`` instead of ``fftw_iodim``.
+ */
+HIPFFT_EXPORT fftw_plan fftw_plan_guru64_dft(int                 rank,
+                                             const fftw_iodim64* dims,
+                                             int                 howmany_rank,
+                                             const fftw_iodim64* howmany_dims,
+                                             fftw_complex*       in,
+                                             fftw_complex*       out,
+                                             int                 sign,
+                                             unsigned            flags);
+/**
+ * @brief Equivalent of \ref fftwf_plan_guru_dft using layout-describing values of type
+ * ``fftwf_iodim64`` instead of ``fftwf_iodim``.
+ */
+HIPFFT_EXPORT fftwf_plan fftwf_plan_guru64_dft(int                  rank,
+                                               const fftwf_iodim64* dims,
+                                               int                  howmany_rank,
+                                               const fftwf_iodim64* howmany_dims,
+                                               fftwf_complex*       in,
+                                               fftwf_complex*       out,
+                                               int                  sign,
+                                               unsigned             flags);
+/**
+ * @brief Equivalent of \ref fftw_plan_guru_dft_r2c using layout-describing values of type
+ * ``fftw_iodim64`` instead of ``fftw_iodim``.
+ */
+HIPFFT_EXPORT fftw_plan fftw_plan_guru64_dft_r2c(int                 rank,
+                                                 const fftw_iodim64* dims,
+                                                 int                 howmany_rank,
+                                                 const fftw_iodim64* howmany_dims,
+                                                 double*             in,
+                                                 fftw_complex*       out,
+                                                 unsigned            flags);
+/**
+ * @brief Equivalent of \ref fftwf_plan_guru_dft_r2c using layout-describing values of type
+ * ``fftwf_iodim64`` instead of ``fftwf_iodim``.
+ */
+HIPFFT_EXPORT fftwf_plan fftwf_plan_guru64_dft_r2c(int                  rank,
+                                                   const fftwf_iodim64* dims,
+                                                   int                  howmany_rank,
+                                                   const fftwf_iodim64* howmany_dims,
+                                                   float*               in,
+                                                   fftwf_complex*       out,
+                                                   unsigned             flags);
+/**
+ * @brief Equivalent of \ref fftw_plan_guru_dft_c2r using layout-describing values of type
+ * ``fftw_iodim64`` instead of ``fftw_iodim``.
+ */
+HIPFFT_EXPORT fftw_plan fftw_plan_guru64_dft_c2r(int                 rank,
+                                                 const fftw_iodim64* dims,
+                                                 int                 howmany_rank,
+                                                 const fftw_iodim64* howmany_dims,
+                                                 fftw_complex*       in,
+                                                 double*             out,
+                                                 unsigned            flags);
+/**
+ * @brief Equivalent of \ref fftwf_plan_guru_dft_c2r using layout-describing values of type
+ * ``fftwf_iodim64`` instead of ``fftwf_iodim``.
+ */
+HIPFFT_EXPORT fftwf_plan fftwf_plan_guru64_dft_c2r(int                  rank,
+                                                   const fftwf_iodim64* dims,
+                                                   int                  howmany_rank,
+                                                   const fftwf_iodim64* howmany_dims,
+                                                   fftwf_complex*       in,
+                                                   float*               out,
+                                                   unsigned             flags);
 
 // Plan execution
 /**

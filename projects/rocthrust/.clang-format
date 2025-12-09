@@ -227,3 +227,8 @@ StatementMacros: [
 ]
 TabWidth: 2
 UseTab: Never
+WhitespaceSensitiveMacros: [
+  'THRUST_HAS_INCLUDE',
+  '_THRUST_LIBCXX_INCLUDE',
+  '_THRUST_STD_INCLUDE'
+]

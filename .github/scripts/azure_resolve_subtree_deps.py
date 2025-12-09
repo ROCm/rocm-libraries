@@ -86,7 +86,8 @@ def main(argv=None) -> None:
         "projects/hipsolver": {"projects/rocsolver", "projects/rocsparse"},
         "projects/hipsparse": {"projects/rocsparse"},
         "projects/hipsparselt": {"projects/hipsparse"},
-        "projects/miopen": {"projects/rocrand", "projects/hipblas"}
+        "projects/miopen": {"projects/rocrand", "projects/hipblas"},
+        "projects/hiptensor": {}
     }
     # Azure pipeline IDs for each project, to be populated as projects are enabled
     definition_ids = {
@@ -110,6 +111,7 @@ def main(argv=None) -> None:
         "projects/miopen": 320,
         "shared/origami": 364,
         "projects/rocwmma": 370,
+        "projects/hiptensor": 374,
     }
 
     args = parse_arguments(argv)

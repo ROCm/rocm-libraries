@@ -89,7 +89,7 @@ void MiopenEngine::initializeExecutionContext(
 
 void MiopenEngine::addPlanBuilder(std::unique_ptr<IPlanBuilder> planBuilder)
 {
-    _planBuilders.insert(std::move(planBuilder));
+    _planBuilders.push_back(std::move(planBuilder));
 }
 
 }

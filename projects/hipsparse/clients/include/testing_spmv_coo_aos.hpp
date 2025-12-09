@@ -39,7 +39,8 @@
 
 using namespace hipsparse_test;
 
-void testing_spmv_coo_aos_bad_arg(void)
+template <typename I, typename T>
+void testing_spmv_coo_aos_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION > 10010 && CUDART_VERSION < 12000) \
     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1 && CUDART_VERSION < 12000))
@@ -156,7 +157,7 @@ hipsparseStatus_t testing_spmv_coo_aos(Arguments argus)
     T                    h_beta   = make_DataType<T>(argus.beta);
     hipsparseOperation_t transA   = argus.transA;
     hipsparseIndexBase_t idx_base = argus.baseA;
-    hipsparseSpMVAlg_t   alg      = static_cast<hipsparseSpMVAlg_t>(argus.spmv_alg);
+    hipsparseSpMVAlg_t   alg      = argus.spmv_alg;
     std::string          filename = argus.filename;
 
     // Index and data type

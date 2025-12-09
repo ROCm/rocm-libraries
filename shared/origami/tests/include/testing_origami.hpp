@@ -505,7 +505,7 @@ void BestGridSize(const origami::hardware_t& hardware,
                   size_t                     element_size_out,
                   size_t                     mx_block_size,
                   double                     H_L2,
-                  size_t                     WGM,
+                  int                        WGM,
                   size_t                     biggest_allowable_split,
                   size_t                     max_cus,
                   const std::optional<int>   expected_gt)
@@ -556,7 +556,7 @@ void BestMacroTileSize(const origami::hardware_t& hardware,
                                  size_t, // MI_M
                                  size_t, // MI_N
                                  size_t, // MI_K
-                                 size_t, // Occupancy
+                                 int, // Occupancy
                                  int, // wgm
                                  size_t, // non_temporal_a
                                  size_t // non_temporal_b

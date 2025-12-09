@@ -36,6 +36,9 @@ tags
 # Editors
 .vscode
 
+# CMake formatting configuration (local)
+.cmake-format.yaml
+
 # Cline
 .cline*
 
@@ -65,6 +68,12 @@ docs/doxygen/xml
 .idea/
 cmake-build*/
 build*/
+
+# LSP configuration
+.clangd
+
+# User-defined CMake presets
+CMakeUserPresets.json
 
 # Python virtualenv
 .venv/

@@ -164,7 +164,7 @@ namespace origami
                                 data_type_t       mi_datatype,
                                 size_t            mx_block_size,
                                 int               WGM,
-                                size_t            occupancy,
+                                int               occupancy,
                                 size_t            numActiveCUs,
                                 size_t            splittingFactor);
 
@@ -189,7 +189,7 @@ namespace origami
                                 data_type_t       mi_datatype,
                                 size_t            mx_block_size,
                                 int               WGM,
-                                size_t            occupancy,
+                                int               occupancy,
                                 size_t            numActiveCUs,
                                 size_t            splittingFactor);
 
@@ -214,9 +214,9 @@ namespace origami
                                  data_type_t       mi_datatype,
                                  size_t            mx_block_size,
                                  int               WGM,
-                                 size_t            non_temporal_a = 0,
-                                 size_t            non_temporal_b = 0,
-                                 size_t            occupancy      = 1,
+                                 int               non_temporal_a = 0,
+                                 int               non_temporal_b = 0,
+                                 int               occupancy      = 1,
                                  size_t            split          = 0,
                                  size_t            max_cus        = 0);
 

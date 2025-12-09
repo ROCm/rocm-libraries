@@ -35,6 +35,7 @@
 #include "../../shared/device_properties.h"
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
+#include "callback_map.h"
 #include "compute_scheme.h"
 #include "enum_printer.h"
 #include "function_map_key.h"
@@ -431,8 +432,8 @@ public:
     size_t                      allowedOutBuf;
     std::set<rocfft_array_type> allowedOutArrayTypes;
 
-    LoadOps  loadOps;
-    StoreOps storeOps;
+    std::optional<LoadOps>  loadOps;
+    std::optional<StoreOps> storeOps;
 
 public:
     // Disallow copy constructor:
@@ -1040,11 +1041,12 @@ struct MultiPlanItem
     // object's event is allocated and recorded on the stream when
     // the last piece of work is queued, so callers can wait on that
     // event to know when the work is complete.
-    virtual void ExecuteAsync(const rocfft_plan     plan,
-                              void*                 in_buffer[],
-                              void*                 out_buffer[],
-                              rocfft_execution_info info,
-                              size_t                multiPlanIdx)
+    virtual void ExecuteAsync(const rocfft_plan                       plan,
+                              void*                                   in_buffer[],
+                              void*                                   out_buffer[],
+                              rocfft_execution_info                   info,
+                              size_t                                  multiPlanIdx,
+                              const std::map<int, device_callback_t>& callbacks)
         = 0;
 
     // wait for async operations to finish
@@ -1139,7 +1141,8 @@ struct CommPointToPoint : public MultiPlanItem
                       void*                 in_buffer[],
                       void*                 out_buffer[],
                       rocfft_execution_info info,
-                      size_t                multiPlanIdx) override;
+                      size_t                multiPlanIdx,
+                      const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1236,7 +1239,8 @@ struct CommScatter : public MultiPlanItem
                       void*                 in_buffer[],
                       void*                 out_buffer[],
                       rocfft_execution_info info,
-                      size_t                multiPlanIdx) override;
+                      size_t                multiPlanIdx,
+                      const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1340,7 +1344,8 @@ struct CommGather : public MultiPlanItem
                       void*                 in_buffer[],
                       void*                 out_buffer[],
                       rocfft_execution_info info,
-                      size_t                multiPlanIdx) override;
+                      size_t                multiPlanIdx,
+                      const std::map<int, device_callback_t>&) override;
     void Wait() override;
 
     void Print(rocfft_ostream& os, const int indent) const override;
@@ -1439,7 +1444,8 @@ struct CommAllToAll : public MultiPlanItem
                       void*                 in_buffer[],
                       void*                 out_buffer[],
                       rocfft_execution_info info,
-                      size_t                multiPlanIdx) override;
+                      size_t                multiPlanIdx,
+                      const std::map<int, device_callback_t>&) override;
 
     void Wait() override;
 
@@ -1512,11 +1518,12 @@ struct ExecPlan : public MultiPlanItem
     BufferPtr inputPtr;
     BufferPtr outputPtr;
 
-    void ExecuteAsync(const rocfft_plan     plan,
-                      void*                 in_buffer[],
-                      void*                 out_buffer[],
-                      rocfft_execution_info info,
-                      size_t                multiPlanIdx) override;
+    void ExecuteAsync(const rocfft_plan                       plan,
+                      void*                                   in_buffer[],
+                      void*                                   out_buffer[],
+                      rocfft_execution_info                   info,
+                      size_t                                  multiPlanIdx,
+                      const std::map<int, device_callback_t>& callbacks) override;
 
     void Wait() override;
 

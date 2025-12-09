@@ -26,6 +26,9 @@ add_executable(rocroller-tests)
 
 if(ROCROLLER_ENABLE_CATCH AND (ROCROLLER_BUILD_TESTING OR BUILD_TESTING))
     add_executable(rocroller-tests-catch)
+    if(ROCROLLER_ENABLE_ROCPROF_ANALYZER)
+        add_executable(rocroller-tests-rocprofiler)
+    endif()
     # When detecting tests gtest and catch test discovery modules run
     # something like:
     # execute_process(COMMAND ${_TEST_EXECUTOR} "${_TEST_EXECUTABLE}" --gtest_list_tests ${filter})
@@ -43,6 +46,13 @@ if(ROCROLLER_ENABLE_CATCH AND (ROCROLLER_BUILD_TESTING OR BUILD_TESTING))
             PROPERTIES
                 CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
         )
+        if(ROCROLLER_ENABLE_ROCPROF_ANALYZER)
+            rocroller_target_configure_sanitizers(rocroller-tests-rocprofiler PRIVATE)
+            set_target_properties(rocroller-tests-rocprofiler
+                PROPERTIES
+                    CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
+            )
+        endif()
     endif()
 endif()
 
@@ -109,6 +119,9 @@ endif()
 
 if(ROCROLLER_ENABLE_CATCH)
     add_subdirectory(catch)
+    if(ROCROLLER_ENABLE_ROCPROF_ANALYZER)
+        add_subdirectory(rocprofiler)
+    endif()
 endif()
 add_subdirectory(common)
 add_subdirectory(standalone)
@@ -176,6 +189,21 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
                        "ENVIRONMENT" "${asan_opts}"
             SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
         )
+        if(ROCROLLER_ENABLE_ROCPROF_ANALYZER)
+            catch_discover_tests(
+                rocroller-tests-rocprofiler
+                REPORTER JUnit
+                OUTPUT_DIR ${TEST_REPORT_DIR}
+                OUTPUT_SUFFIX ".xml"
+                DISCOVERY_MODE PRE_TEST
+                EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
+                PROPERTIES "LABELS" "ROCPROFILER"
+                           "LABELS" "CATCH"
+                           "LABELS" "GPU"
+                           "ENVIRONMENT" "${asan_opts}"
+                SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
+            )
+        endif()
     endif()
 
     if(NOT ROCROLLER_ENABLE_SLOW_TESTS)
@@ -226,4 +254,9 @@ if(ROCROLLER_ENABLE_COVERAGE OR BUILD_CODE_COVERAGE)
 
     target_compile_options(rocroller-tests-catch PRIVATE -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(rocroller-tests-catch PRIVATE -fprofile-instr-generate)
+
+    if(ROCROLLER_ENABLE_ROCPROF_ANALYZER)
+        target_compile_options(rocroller-tests-rocprofiler PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+        target_link_options(rocroller-tests-rocprofiler PRIVATE -fprofile-instr-generate)
+    endif()
 endif()

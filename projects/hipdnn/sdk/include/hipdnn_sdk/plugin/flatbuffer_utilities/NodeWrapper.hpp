@@ -22,6 +22,7 @@ public:
     virtual const void* attributes() const = 0;
     virtual hipdnn_sdk::data_objects::NodeAttributes attributesType() const = 0;
     virtual const std::type_info& attributesClassType() const = 0;
+    virtual std::string name() const = 0;
     virtual hipdnn_sdk::data_objects::DataType computeDataType() const = 0;
 
     template <typename T>
@@ -96,6 +97,12 @@ public:
             throw hipdnn_plugin::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                        "Node attributes type is not recognized");
         }
+    }
+
+    std::string name() const override
+    {
+        const auto& n = node();
+        return n.name() != nullptr ? n.name()->str() : "";
     }
 
     hipdnn_sdk::data_objects::DataType computeDataType() const override

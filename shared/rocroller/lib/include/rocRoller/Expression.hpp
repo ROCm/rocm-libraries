@@ -263,9 +263,9 @@ namespace rocRoller
 
         struct BitfieldCombine : Binary
         {
-            unsigned srcOffset = 0u;
-            unsigned dstOffset = 0u;
-            unsigned width     = 0u;
+            uint32_t srcOffset = 0u;
+            uint32_t dstOffset = 0u;
+            uint32_t width     = 0u;
 
             // if srcIsZero sets to true, that means bits outside [srcOffset:srcOffset+width-1] are 0
             std::optional<bool> srcIsZero = std::nullopt;
@@ -679,11 +679,13 @@ namespace rocRoller
         ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint8_t offset, uint8_t width);
         ExpressionPtr bfe(ExpressionPtr a, uint8_t offset, uint8_t width);
 
-        ExpressionPtr bfc(ExpressionPtr src,
-                          ExpressionPtr dst,
-                          unsigned      srcOffset,
-                          unsigned      dstOffset,
-                          unsigned      width);
+        ExpressionPtr bfc(ExpressionPtr       src,
+                          ExpressionPtr       dst,
+                          uint32_t            srcOffset,
+                          uint32_t            dstOffset,
+                          uint32_t            width,
+                          std::optional<bool> srcIsZero = std::nullopt,
+                          std::optional<bool> dstIsZero = std::nullopt);
 
         ExpressionPtr concat(const std::vector<ExpressionPtr>& ops, VariableType v);
 
@@ -936,6 +938,19 @@ namespace rocRoller
          */
         CommandArgumentValue evaluate(ExpressionPtr const& expr, RuntimeArguments const& args);
         CommandArgumentValue evaluate(Expression const& expr, RuntimeArguments const& args);
+
+        /**
+         * Reinterpret cast a value to a target DataType.
+         *
+         * @tparam FromType The input value type
+         * @param value The value to reinterpret
+         * @param targetDataType The target DataType to cast to
+         * @return CommandArgumentValue containing the reinterpreted value
+         */
+        template <CCommandArgumentValue FromType, int Idx = 0>
+        CommandArgumentValue reinterpret(FromType const& value, DataType targetDataType);
+        CommandArgumentValue reinterpret(CommandArgumentValue const& value,
+                                         DataType                    targetDataType);
 
         /**
          * Splits an expression and returns its operands in a tuple.

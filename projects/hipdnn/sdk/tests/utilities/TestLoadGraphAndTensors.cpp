@@ -5,6 +5,7 @@
 
 #include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
 #include <hipdnn_sdk/test_utilities/ScopedExecute.hpp>
+#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/LoadGraphAndTensors.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 
@@ -57,6 +58,8 @@ TEST(TestFillTensorFromFile, Valid)
 
 TEST(TestLoadGraphAndTensors, Valid)
 {
+    SKIP_IF_NO_DEVICES();
+
     std::filesystem::path filepath
         = utilities::getCurrentExecutableDirectory()
           / "../lib/hipdnn_reference_data/BatchnormFwdInference/nchw/fp32/Small.json";

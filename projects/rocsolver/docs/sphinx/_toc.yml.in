@@ -7,6 +7,11 @@ subtrees:
   - file: installation/installlinux
     title: Installation guide
 
+- caption: Conceptual
+  entries:
+  - file: conceptual/intro-rocsolver
+    title: Introduction to rocSOLVER
+
 - caption: How to
   entries:
   - file: howto/using
@@ -17,9 +22,6 @@ subtrees:
     title: Use multi-level logging
   - file: howto/clients
     title: Run rocSOLVER clients
-  - file: howto/contribute
-    title: Contribute to rocSOLVER
-
 
 - caption: Examples
   entries:
@@ -28,32 +30,31 @@ subtrees:
 
 - caption: API reference
   entries:
-  - file: reference/index.rst
-    subtrees:
-    - entries:
-      - file: reference/intro.rst
-        title: rocSOLVER API introduction
-      - file: reference/types.rst
-        title: rocSOLVER types
-      - file: reference/precision.rst
-        title: rocSOLVER precision support
-      - file: reference/env_variables.rst
-        title: rocSOLVER environment variables
-      - file: reference/auxiliary.rst
-        title: LAPACK auxiliary functions
-      - file: reference/lapack.rst
-        title: LAPACK functions
-      - file: reference/lapacklike.rst
-        title: LAPACK-like functions
-      - file: reference/refact.rst
-        title: Refactorization and direct solvers
-      - file: reference/helpers.rst
-        title: Library and logging functions
-      - file: reference/tuning.rst
-        title: rocSOLVER performance tuning
-      - file: reference/deprecated.rst
-        title: Deprecated components
+  - file: reference/intro.rst
+    title: rocSOLVER API summary
+  - file: reference/types.rst
+    title: rocSOLVER types
+  - file: reference/precision.rst
+    title: rocSOLVER precision support
+  - file: reference/env_variables.rst
+    title: rocSOLVER environment variables
+  - file: reference/auxiliary.rst
+    title: LAPACK auxiliary functions
+  - file: reference/lapack.rst
+    title: LAPACK functions
+  - file: reference/lapacklike.rst
+    title: LAPACK-like functions
+  - file: reference/refact.rst
+    title: Refactorization and direct solvers
+  - file: reference/helpers.rst
+    title: Library and logging functions
+  - file: reference/tuning.rst
+    title: rocSOLVER performance tuning
+  - file: reference/deprecated.rst
+    title: Deprecated components
 
 - caption: About
   entries:
   - file: license.rst
+  - file: contribute
+    title: Contribute to rocSOLVER

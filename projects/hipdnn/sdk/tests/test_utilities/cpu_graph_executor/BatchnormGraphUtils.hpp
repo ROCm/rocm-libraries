@@ -8,10 +8,6 @@
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 
-using namespace hipdnn_sdk::test_utilities;
-using namespace hipdnn_sdk::data_objects;
-using namespace hipdnn_sdk::utilities;
-
 namespace hipdnn_sdk_test_utils
 {
 
@@ -50,9 +46,10 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
     auto epsilonTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilonTensor->set_uid(uid++)
         .set_name("EpsilonTensor")
-        .set_data_type(hipdnn_frontend::fromSdkType(meanVarianceDataType))
+        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
         .set_dim({1})
-        .set_stride({1});
+        .set_stride({1})
+        .set_value(hipdnn_sdk::utilities::BATCHNORM_DEFAULT_EPSILON);
 
     hipdnn_frontend::graph::BatchnormAttributes bnAttrs;
     bnAttrs.set_name("batchnorm_fwd_train");
@@ -67,13 +64,14 @@ static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
 
     if(useOptionalTensors)
     {
-        auto momentumAttr = hipdnn_frontend::graph::makeTensorAttributes(
-            "momentum",
-            hipdnn_frontend::fromSdkType(meanVarianceDataType),
-            tensorBundle.momentumTensor.value());
-        momentumAttr.set_uid(uid++);
-        momentumTensorAttr
-            = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(std::move(momentumAttr));
+        auto momentumTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+        momentumTensor->set_uid(uid++)
+            .set_name("MomentumTensor")
+            .set_data_type(hipdnn_frontend::DataType::DOUBLE)
+            .set_dim({1})
+            .set_stride({1})
+            .set_value(0.1);
+        momentumTensorAttr = momentumTensor;
 
         auto prevRunningMeanAttr = hipdnn_frontend::graph::makeTensorAttributes(
             "prev_running_mean",
@@ -161,16 +159,16 @@ inline std::shared_ptr<hipdnn_frontend::graph::Graph>
                                     hipdnn_sdk::data_objects::DataType meanVarianceDataType,
                                     hipdnn_sdk::data_objects::DataType computeDataType,
                                     const std::vector<int64_t>& dims,
-                                    const TensorLayout& layout,
+                                    const hipdnn_sdk::utilities::TensorLayout& layout,
                                     bool isOutputVirtual = false)
 {
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("BatchnormFwdInferenceTest");
 
-    auto strides = generateStrides(dims, layout.strideOrder);
+    auto strides = hipdnn_sdk::utilities::generateStrides(dims, layout.strideOrder);
 
-    auto derivedDims = getDerivedShape(dims);
-    auto derivedStrides = generateStrides(derivedDims);
+    auto derivedDims = hipdnn_sdk::utilities::getDerivedShape(dims);
+    auto derivedStrides = hipdnn_sdk::utilities::generateStrides(derivedDims);
 
     int64_t uid = 1;
     auto xAttr = hipdnn_frontend::graph::makeTensorAttributes(

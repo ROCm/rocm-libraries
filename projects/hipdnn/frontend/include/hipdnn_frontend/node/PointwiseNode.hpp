@@ -18,9 +18,9 @@ class PointwiseNode : public BaseNode<PointwiseNode>
 public:
     PointwiseAttributes attributes;
 
-    PointwiseNode(PointwiseAttributes&& batchnormAttrs, const GraphAttributes& graphAttrs)
+    PointwiseNode(PointwiseAttributes&& pointwiseAttributes, const GraphAttributes& graphAttrs)
         : BaseNode(graphAttrs)
-        , attributes(std::move(batchnormAttrs))
+        , attributes(std::move(pointwiseAttributes))
     {
     }
 
