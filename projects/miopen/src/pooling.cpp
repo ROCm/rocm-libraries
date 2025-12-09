@@ -36,11 +36,23 @@
 #include <miopen/subbuffers.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_layout.hpp>
+#include "miopen/pooling/problem_description.hpp"
 
 #include <cassert>
 #include <cmath>
 
 namespace miopen {
+
+namespace pooling {
+
+miopen::PerformanceDb GetDb(const miopen::ExecutionContext& context,
+                            const miopen::pooling::ProblemDescriptionTag&)
+{
+    return {
+        DbKinds::PerfDb, context.GetPerfDbPath("pooling"), context.GetUserPerfDbPath("pooling")};
+}
+
+} // namespace pooling
 
 template <class T, class U>
 T iciel_div(T x, U y)
