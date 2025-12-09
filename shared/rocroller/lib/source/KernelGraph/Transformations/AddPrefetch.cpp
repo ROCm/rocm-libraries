@@ -197,6 +197,25 @@ namespace rocRoller
                         if(fl->loopName != rocRoller::KLOOP)
                             continue;
 
+                        // Prefetching requires LDS for double-buffering. Check if there are
+                        // any StoreLDSTile operations in the loop body. Without LDS stores,
+                        // prefetching doesn't make sense (e.g., BufferToVGPR load path).
+                        auto isBodyPredicate = kgraph.control.isElemType<Body>();
+                        auto isStoreLDSTile  = kgraph.control.isElemType<StoreLDSTile>();
+                        auto bodyEdges
+                            = filter(isBodyPredicate,
+                                     kgraph.control.getNeighbours<GD::Downstream>(*maybeForLoop))
+                                  .to<std::vector>();
+                        auto storeLDSTileNodes
+                            = kgraph.control.findNodes(bodyEdges, isStoreLDSTile, GD::Downstream);
+                        if(storeLDSTileNodes.empty())
+                        {
+                            Log::debug("KernelGraph::AddPrefetch(): ForLoop {} has no LDS stores, "
+                                       "skipping prefetch",
+                                       *maybeForLoop);
+                            continue;
+                        }
+
                         auto forLoopCoord     = getForLoopCoords(*maybeForLoop, kgraph).first;
                         auto maybeUnrollCoord = findUnrollNeighbour(kgraph, forLoopCoord);
                         if(forLoopCoordinates.contains(forLoopCoord)

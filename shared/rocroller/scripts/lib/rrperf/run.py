@@ -37,6 +37,7 @@ from typing import Dict, Tuple
 
 import pandas as pd
 import rrperf
+import rrperf.dump_csv
 import yaml
 
 
@@ -65,6 +66,7 @@ def run_problems(
     work_dir: Path,
     env: Dict[str, str],
     id_filter: list[str],
+    l2: bool,
 ) -> bool:
 
     SOLUTION_NOT_SUPPORTED_ON_ARCH = 3
@@ -86,12 +88,22 @@ def run_problems(
         yaml = (work_dir / f"{problem.group}-{i:06d}.yaml").resolve()
         problem.set_output(yaml)
         cmd = problem.command()
-        scmd = " ".join(cmd)
         log = yaml.with_suffix(".log")
         rr_env = {k: str(v) for k, v in env.items() if k.startswith("ROC")}
         rr_env_str = " ".join([f"{k}={v}" for k, v in rr_env.items()])
 
+        if l2:
+            counters = str(yaml.resolve().parent / yaml.stem)
+            cmd = [
+                "rocprofv3",
+                "--pmc=TCC_HIT,TCC_MISS",
+                "--output-file=" + counters,
+                "--output-format=json",
+                "--",
+            ] + cmd
+
         with log.open("w") as f:
+            scmd = " ".join(cmd)
             print(f"# env: {rr_env_str}", file=f, flush=True)
             print(f"# command: {scmd}", file=f, flush=True)
             print(f"# token: {repr(problem)}", file=f, flush=True)
@@ -190,6 +202,17 @@ def get_args(parser: argparse.ArgumentParser):
         action="store_true",
         help="Pin clocks before launching benchmark clients.",
     )
+    parser.add_argument(
+        "--l2",
+        action="store_true",
+        help="Collect L2 performance counters (TCC_HIT and TCC_MISS).",
+    )
+    parser.add_argument(
+        "--dump_csv",
+        help="Dump benchmark CSV with included headers.",
+        action="store_true",
+        default=False,
+    )
 
 
 def run(args):
@@ -197,7 +220,7 @@ def run(args):
     run_cli(**args.__dict__)
 
 
-def run_cli(
+def run_cli(  # noqa: C901
     token: str = None,
     suite: str = None,
     submit: bool = False,
@@ -207,6 +230,7 @@ def run_cli(
     rocm_smi: str = "rocm-smi",
     pin_clocks: bool = False,
     recast: bool = False,
+    l2: bool = False,
     **kwargs,
 ) -> Tuple[bool, Path]:
     """Run benchmarks!
@@ -218,7 +242,10 @@ def run_cli(
         rrperf.rocm_control.pin_clocks(rocm_smi)
 
     if suite is None and token is None:
-        suite = "all_gfx120X" if rrperf.utils.rocm_gfx().startswith("gfx120") else "all"
+        if rrperf.utils.rocm_gfx().startswith("gfx120"):
+            suite = "all_gfx120X"
+        else:
+            suite = "all"
 
     generator = rrperf.utils.empty()
     if suite is not None:
@@ -254,12 +281,15 @@ def run_cli(
     timestamp = rundir / "timestamp.txt"
     timestamp.write_text(str(datetime.datetime.now().timestamp()) + "\n")
 
-    result = run_problems(generator, build_dir, rundir, env, id_filter)
+    result = run_problems(generator, build_dir, rundir, env, id_filter, l2)
 
     if submit:
         ptsdir = rundir / "rocRoller"
         ptsdir.mkdir(parents=True)
         # XXX if running single token, suite might be None
         submit_directory(suite, rundir, ptsdir)
+
+    if kwargs.get("dump_csv", False):
+        rrperf.dump_csv.dump_csv(suite, rundir)
 
     return result, rundir
