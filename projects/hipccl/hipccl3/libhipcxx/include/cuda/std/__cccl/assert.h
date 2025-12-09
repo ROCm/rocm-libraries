@@ -157,7 +157,7 @@ _CCCL_HOST_DEVICE
 #    define _CCCL_ASSERT(expression, message) ((void) 0)
 #  endif
 #elif _CCCL_HAS_CUDA_COMPILER()
-#  ifdef __CUDA_ARCH__
+#  if defined(__CUDA_ARCH__) or defined(__HIP_DEVICE_COMPILE__)
 #    define _CCCL_VERIFY(expression, message) _CCCL_ASSERT_IMPL_DEVICE(expression, message)
 #    define _CCCL_ASSERT(expression, message) _CCCL_ASSERT_DEVICE(expression, message)
 #  else // ^^^ __CUDA_ARCH__ ^^^ / vvv !__CUDA_ARCH__ vvv
