@@ -49,6 +49,17 @@ namespace GEMMTests
     {
     };
 
+    // Params are: A & B type, K tile size, (transA, transB), loadPathA, loadPathB
+    class StreamKGEMMF8F6F4TestGPU
+        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
+                                                   int,
+                                                   std::pair<std::string, std::string>,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath,
+                                                   rocRoller::StreamKMode>>
+    {
+    };
+
     // Params are: A type, B type, K tile size, (transA, transB)
     class MixedGEMMF8F6F4TestGPU
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
@@ -619,6 +630,83 @@ namespace GEMMTests
         EXPECT_GE(countSubstring(generatedCode, "buffer_load_dwordx2 "), 6);
     }
 
+    TEST_P(StreamKGEMMF8F6F4TestGPU, GPU_BasicStreamKGEMM)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        auto [typeAB, MFMAK, transOp, loadPathA, loadPathB, mode] = std::get<1>(GetParam());
+        const auto expectedLoadPath = SolutionParams::LoadPath::BufferToLDS;
+        AssertFatal(loadPathA == expectedLoadPath,
+                    fmt::format("Expected load path {} for A but got {}\n",
+                                toString(expectedLoadPath),
+                                toString(loadPathA)));
+        AssertFatal(loadPathB == expectedLoadPath,
+                    fmt::format("Expected load path {} for B but got {}\n",
+                                toString(expectedLoadPath),
+                                toString(loadPathB)));
+
+        int waveM = (MFMAK == 128) ? 16 : 32;
+        int waveN = (MFMAK == 128) ? 16 : 32;
+        int waveK = MFMAK;
+
+        auto problem = GEMMProblemF8F6F4{waveM, waveN, waveK};
+
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        problem.numWGs = deviceProperties.multiProcessorCount;
+
+        problem.macM = 128;
+        problem.macN = 128;
+        problem.macK = 256;
+
+        problem.m = problem.macM * 4;
+        problem.n = problem.macN * problem.numWGs / 2 + problem.macN * 2;
+
+        ASSERT_GE(problem.m * problem.n / problem.macM / problem.macN, problem.numWGs);
+        std::cout << problem.m * problem.n / problem.macM / problem.macN << std::endl;
+        std::cout << problem.numWGs << std::endl;
+        std::cout << mode << std::endl;
+
+        problem.streamK = mode;
+        problem.k       = problem.macK * 8;
+
+        std::tie(problem.transA, problem.transB) = transOp;
+
+        problem.loadPathA = loadPathA;
+        problem.loadPathB = loadPathB;
+
+        uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
+
+        std::string modifiers{"cbsz:0b000 blgp:0b000"};
+
+        switch(typeAB)
+        {
+        case DataType::FP8:
+            basicGEMM<FP8, FP8, float>(problem);
+            break;
+        case DataType::BF8:
+            basicGEMM<BF8, BF8, float>(problem);
+            modifiers = "cbsz:0b001 blgp:0b001";
+            break;
+        case DataType::FP6:
+            basicGEMM<FP6, FP6, float>(problem);
+            modifiers = "cbsz:0b010 blgp:0b010";
+            break;
+        case DataType::BF6:
+            basicGEMM<BF6, BF6, float>(problem);
+            modifiers = "cbsz:0b011 blgp:0b011";
+            break;
+        case DataType::FP4:
+            basicGEMM<FP4, FP4, float>(problem);
+            modifiers = "cbsz:0b100 blgp:0b100";
+            break;
+        default:
+            Throw<FatalError>(
+                fmt::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                            toString(typeAB)));
+        }
+    }
+
     TEST_P(MixedGEMMF8F6F4TestGPU, GPU_MixedBasicGEMMF8F6F4)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
@@ -737,6 +825,28 @@ namespace GEMMTests
                                                  std::pair<std::string, std::string>("T", "T")),
                                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR),
                                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR))));
+
+    INSTANTIATE_TEST_SUITE_P(
+        StreamKGEMMF8F6F4Test,
+        StreamKGEMMF8F6F4TestGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(
+                ::testing::Values(rocRoller::DataType::FP8,
+                                  rocRoller::DataType::BF8,
+                                  rocRoller::DataType::FP6,
+                                  rocRoller::DataType::BF6,
+                                  rocRoller::DataType::FP4),
+                ::testing::Values(64, 128),
+                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                  std::pair<std::string, std::string>("N", "T"),
+                                  std::pair<std::string, std::string>("T", "N"),
+                                  std::pair<std::string, std::string>("T", "T")),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDS),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDS),
+                ::testing::Values(rocRoller::StreamKMode::Standard,
+                                  rocRoller::StreamKMode::TwoTile,
+                                  rocRoller::StreamKMode::TwoTileDPFirst)))); // StreamKMode
 
     INSTANTIATE_TEST_SUITE_P(
         MixedGEMMTest,
