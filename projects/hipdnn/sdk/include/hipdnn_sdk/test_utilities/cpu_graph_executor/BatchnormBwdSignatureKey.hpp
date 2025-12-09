@@ -56,6 +56,19 @@ struct BatchnormBwdSignatureKey
         auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
         auto dxTensorAttr = tensorMap.at(nodeAttributes->dx_tensor_uid());
 
+        if(dyTensorAttr == nullptr || xTensorAttr == nullptr || scaleTensorAttr == nullptr
+           || dxTensorAttr == nullptr)
+        {
+            throw std::runtime_error("One or more tensor attributes could not be found in the map, "
+                                     "failed to construct key");
+        }
+
+        dyDataType = dyTensorAttr->data_type();
+        xDataType = xTensorAttr->data_type();
+        scaleBiasDataType = scaleTensorAttr->data_type();
+        computeDataType = node.compute_data_type();
+        outputDataType = dxTensorAttr->data_type();
+
         if(nodeAttributes->mean_tensor_uid().has_value()
            && nodeAttributes->inv_variance_tensor_uid().has_value())
         {
@@ -76,20 +89,6 @@ struct BatchnormBwdSignatureKey
         {
             meanVarianceDataType = scaleBiasDataType;
         }
-
-        if(dyTensorAttr == nullptr || xTensorAttr == nullptr || scaleTensorAttr == nullptr
-           || dxTensorAttr == nullptr)
-        {
-            throw std::runtime_error("One or more tensor attributes could not be found in the map, "
-                                     "failed to construct key");
-        }
-
-        dyDataType = dyTensorAttr->data_type();
-        xDataType = xTensorAttr->data_type();
-        scaleBiasDataType = scaleTensorAttr->data_type();
-
-        computeDataType = node.compute_data_type();
-        outputDataType = dxTensorAttr->data_type();
     }
 
     std::size_t operator()(const BatchnormBwdSignatureKey& k) const noexcept

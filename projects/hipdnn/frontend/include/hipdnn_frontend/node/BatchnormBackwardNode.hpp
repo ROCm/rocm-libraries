@@ -62,8 +62,9 @@ public:
         bool hasInvVariance = (attributes.get_inv_variance() != nullptr);
         if(hasMean != hasInvVariance)
         {
-            return {ErrorCode::INVALID_VALUE,
-                    "BatchnormBackwardNode requires both mean and inv_variance to be set, or neither"};
+            return {
+                ErrorCode::INVALID_VALUE,
+                "BatchnormBackwardNode requires both mean and inv_variance to be set, or neither"};
         }
 
         // Validate backward spatial dimension constraints
