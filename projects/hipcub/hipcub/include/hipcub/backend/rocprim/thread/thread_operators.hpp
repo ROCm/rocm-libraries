@@ -570,16 +570,16 @@ using accumulator_t = ::rocprim::accumulator_t<Invokable, InputT, InitT>;
 //
 // /// The output value type
 // using OutputT =
-//     typename If<(Equals<typename std::iterator_traits<OutputIteratorT>::value_type,
+//     typename If<(Equals<it_value_t<OutputIteratorT>,
 //                         void>::VALUE),           // OutputT =  (if output iterator's value type is void) ?
-//                 typename std::iterator_traits<
-//                     InputIteratorT>::value_type, // ... then the input iterator's value type,
-//                 typename std::iterator_traits<OutputIteratorT>::value_type>::
+//                 it_value_t<
+//                     InputIteratorT>,             // ... then the input iterator's value type,
+//                 it_value_t<OutputIteratorT>>::
 //         Type;                                    // ... else the output iterator's value type
 //
 // rocPRIM (as well as Thrust) uses result type of BinaryFunction instead (if not void):
 //
-// using input_type = typename std::iterator_traits<InputIterator>::value_type;
+// using input_type = detail::it_value_t<InputIteratorT>;
 // using result_type = ::rocprim::accumulator_t<BinaryFunction, input_type>;
 //
 // For short -> float using Sum()
@@ -594,8 +594,8 @@ template<
 >
 struct convert_result_type_wrapper
 {
-    using input_type  = typename std::iterator_traits<InputIteratorT>::value_type;
-    using output_type = typename std::iterator_traits<OutputIteratorT>::value_type;
+    using input_type  = detail::it_value_t<InputIteratorT>;
+    using output_type = it_value_t<OutputIteratorT>;
     using result_type = non_void_value_t<output_type, input_type>;
 
     convert_result_type_wrapper(BinaryFunction op) : op(op) {}
@@ -636,7 +636,7 @@ convert_result_type(BinaryFunction op)
 template<class BinaryFunction, class InputIteratorT, class InitT>
 struct convert_binary_result_type_wrapper
 {
-    using input_type  = typename std::iterator_traits<InputIteratorT>::value_type;
+    using input_type  = detail::it_value_t<InputIteratorT>;
     using init_type   = InitT;
     using accum_type  = accumulator_t<BinaryFunction, input_type, init_type>;
 

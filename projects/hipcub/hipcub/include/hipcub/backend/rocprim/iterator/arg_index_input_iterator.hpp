@@ -32,6 +32,8 @@
 
 #include "../../../config.hpp"
 
+#include "../util_type.hpp"
+
 #include "iterator_category.hpp"
 #include "iterator_wrapper.hpp"
 
@@ -45,7 +47,7 @@ BEGIN_HIPCUB_NAMESPACE
 
 template<class InputIterator,
          class Difference     = std::ptrdiff_t,
-         class InputValueType = typename std::iterator_traits<InputIterator>::value_type>
+         class InputValueType = detail::it_value_t<InputIterator>>
 class ArgIndexInputIterator
     : public detail::IteratorWrapper<
           rocprim::arg_index_iterator<InputIterator, Difference, InputValueType>,
