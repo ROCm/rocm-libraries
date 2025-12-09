@@ -843,23 +843,52 @@ namespace rocRoller
             if(standalone)
                 msg << "digraph {" << std::endl;
 
+            // std::map<int, std::pair<int, int>> calmEdges;
+            std::unordered_set<int> calmEdges;
+            std::string             calmEdgeConnections;
+
+            auto ts = [](auto const& x){ return toString(x); };
+
             for(auto const& pair : m_elements)
             {
-                msg << '"' << prefix << pair.first << '"' << "[label=\"";
+                bool        include   = true;
+                std::string label     = fmt::format("{}({})", std::visit(ts, pair.second), pair.first);
+                std::string shapePart = "";
+                // msg << '"' << prefix << pair.first << '"' << "[label=\"";
                 if(getElementType(pair.second) == ElementType::Node)
                 {
-                    auto x = std::get<Node>(pair.second);
-                    msg << toString(x) << "(" << pair.first << ")\"";
+                    // auto x = std::get<Node>(pair.second);
+                    // msg << toString(x) << "(" << pair.first << ")\"";
                 }
                 else
                 {
-                    auto x = std::get<Edge>(pair.second);
-                    msg << toString(x) << "(" << pair.first << ")\",shape=box";
+                    auto loc = getLocation(pair.first);
+                    // auto x   = std::get<Edge>(pair.second);
+                    if(loc.incoming.size() == 1 && loc.outgoing.size() == 1)
+                    {
+                        calmEdges.insert(pair.first);
+                        calmEdgeConnections
+                            += fmt::format("\"{0}{1}\" -> \"{0}{2}\" [label=\"{3}\"];\n",
+                                           prefix,
+                                           loc.incoming[0],
+                                           loc.outgoing[0],
+                                           label);
+                        include = false;
+                    }
+                    else
+                    {
+                        shapePart = ",shape=box";
+                        // msg << toString(x) << "(" << pair.first << ")\",shape=box";
+                    }
                 }
-                msg << "];" << std::endl;
+                // msg << "];" << std::endl;
+                if(include)
+                    msg << fmt::format(
+                        "\"{0}{1}\" [label=\"{2}\"{3}];\n", prefix, pair.first, label, shapePart);
             }
 
-            msg << m_incidence.toDOTSection(prefix);
+            msg << m_incidence.toDOTSection(prefix, calmEdges);
+            msg << calmEdgeConnections;
 
             // Enforce left-to-right ordering for elements connected to an edge.
             for(auto const& pair : m_elements)

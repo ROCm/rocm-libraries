@@ -94,16 +94,22 @@ namespace rocRoller::Graph
         return 0;
     }
 
-    std::string HypergraphIncidenceContainer::toDOTSection(std::string const& prefix) const
+    std::string
+        HypergraphIncidenceContainer::toDOTSection(std::string const&             prefix,
+                                                   std::unordered_set<int> const& omit) const
     {
         std::ostringstream s;
 
         for(auto const& connections : m_incidenceBySrc)
         {
             int src = connections.first;
+            if(omit.contains(src))
+                continue;
+
             for(int dst : connections.second)
             {
-                s << '"' << prefix << src << "\" -> \"" << prefix << dst << '"' << std::endl;
+                if(!omit.contains(dst))
+                    s << '"' << prefix << src << "\" -> \"" << prefix << dst << '"' << std::endl;
             }
         }
 
