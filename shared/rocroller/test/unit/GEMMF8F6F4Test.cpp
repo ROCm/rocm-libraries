@@ -58,15 +58,15 @@ namespace GEMMTests
     {
     };
 
-    // Params are: A type, B type, K tile size, Load A scale though LDS, Load B scale through LDS, (transA, transB)
+    // Params are: A type, B type, K tile size, Load A scale path, Load B scale path, (transA, transB)
     class ScaledMixedGEMMF8F6F4TestGPU
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
                                                    rocRoller::DataType,
                                                    int,
                                                    rocRoller::Operations::ScaleMode,
                                                    rocRoller::Operations::ScaleMode,
-                                                   bool,
-                                                   bool,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath,
                                                    std::pair<std::string, std::string>>>
     {
     };
@@ -296,10 +296,10 @@ namespace GEMMTests
         problem.scaleTypeA = DataType::E8M0;
         problem.scaleTypeB = DataType::E8M0;
 
-        problem.loadPathA     = loadPathA;
-        problem.loadPathB     = loadPathB;
-        problem.loadLDSScaleA = true;
-        problem.loadLDSScaleB = true;
+        problem.loadPathA      = loadPathA;
+        problem.loadPathB      = loadPathB;
+        problem.loadScalePathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        problem.loadScalePathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
         problem.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
@@ -457,10 +457,10 @@ namespace GEMMTests
         gemm.n    = 3 * gemm.macN;
         gemm.k    = 4 * gemm.macK;
 
-        gemm.loadPathA     = loadPathA;
-        gemm.loadPathB     = loadPathB;
-        gemm.loadLDSScaleA = true;
-        gemm.loadLDSScaleB = true;
+        gemm.loadPathA      = loadPathA;
+        gemm.loadPathB      = loadPathB;
+        gemm.loadScalePathA = SolutionParams::LoadPath::BufferToLDSViaVGPR;
+        gemm.loadScalePathB = SolutionParams::LoadPath::BufferToLDSViaVGPR;
 
         gemm.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
@@ -563,10 +563,10 @@ namespace GEMMTests
         gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
         gemm.workgroupSizeY = 4;
 
-        gemm.loadPathA     = loadPathA;
-        gemm.loadPathB     = loadPathB;
-        gemm.loadLDSScaleA = false;
-        gemm.loadLDSScaleB = false;
+        gemm.loadPathA      = loadPathA;
+        gemm.loadPathB      = loadPathB;
+        gemm.loadScalePathA = SolutionParams::LoadPath::BufferToVGPR;
+        gemm.loadScalePathB = SolutionParams::LoadPath::BufferToVGPR;
 
         gemm.unrollK           = 2;
         gemm.prefetch          = true;
@@ -676,7 +676,7 @@ namespace GEMMTests
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
 
-        auto [typeA, typeB, MFMAK, scaleAMode, scaleBMode, loadLDSScaleA, loadLDSScaleB, transOp]
+        auto [typeA, typeB, MFMAK, scaleAMode, scaleBMode, loadScalePathA, loadScalePathB, transOp]
             = std::get<1>(GetParam());
 
         int waveM = (MFMAK == 128) ? 16 : 32;
@@ -697,17 +697,17 @@ namespace GEMMTests
         problem.scaleTypeA = DataType::E8M0;
         problem.scaleTypeB = DataType::E8M0;
 
-        problem.loadLDSScaleA = loadLDSScaleA;
-        problem.loadLDSScaleB = loadLDSScaleB;
+        problem.loadScalePathA = loadScalePathA;
+        problem.loadScalePathB = loadScalePathB;
 
-        if(loadLDSScaleA
+        if(loadScalePathA != SolutionParams::LoadPath::BufferToVGPR
            && (scaleAMode == rocRoller::Operations::ScaleMode::None
                || scaleAMode == rocRoller::Operations::ScaleMode::SingleScale))
-            GTEST_SKIP() << "Meaningless combination of LoadLDSScaleA and ScaleA";
-        if(loadLDSScaleB
+            GTEST_SKIP() << "Meaningless combination of loadScalePathA and ScaleA";
+        if(loadScalePathB != SolutionParams::LoadPath::BufferToVGPR
            && (scaleBMode == rocRoller::Operations::ScaleMode::None
                || scaleBMode == rocRoller::Operations::ScaleMode::SingleScale))
-            GTEST_SKIP() << "Meaningless combination of LoadLDSScaleB and ScaleB";
+            GTEST_SKIP() << "Meaningless combination of loadScalePathB and ScaleB";
 
         if(scaleAMode == rocRoller::Operations::ScaleMode::Separate
            || scaleBMode == rocRoller::Operations::ScaleMode::Separate)
@@ -779,8 +779,10 @@ namespace GEMMTests
                                                  rocRoller::Operations::ScaleMode::Separate),
                                ::testing::Values(rocRoller::Operations::ScaleMode::SingleScale,
                                                  rocRoller::Operations::ScaleMode::Separate),
-                               ::testing::Values(false, true),
-                               ::testing::Values(false, true),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                                 SolutionParams::LoadPath::BufferToLDSViaVGPR),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToVGPR,
+                                                 SolutionParams::LoadPath::BufferToLDSViaVGPR),
                                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
                                                  std::pair<std::string, std::string>("N", "T"),
                                                  std::pair<std::string, std::string>("T", "N"),

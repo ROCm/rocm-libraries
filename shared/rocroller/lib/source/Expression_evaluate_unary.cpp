@@ -181,12 +181,14 @@ namespace rocRoller::Expression::EvaluateDetail
     };
 
     template <CCommandArgumentValue FromType, int Idx = 0>
-    CommandArgumentValue reinterpretTruncate(FromType const& value, DataType targetDataType)
+    CommandArgumentValue reinterpretTruncateValue(FromType const& value,
+                                                  DataType        targetDataType,
+                                                  std::endian     endianness = std::endian::native)
     {
         constexpr auto IdxType = static_cast<DataType>(Idx);
 
         AssertFatal(
-            std::endian::native == std::endian::little || std::endian::native == std::endian::big,
+            endianness == std::endian::little || endianness == std::endian::big,
             "Unsupported or mixed endianness: only pure little- or big-endian are supported.");
 
         if constexpr(IdxType == DataType::None || IdxType == DataType::Count)
@@ -227,7 +229,7 @@ namespace rocRoller::Expression::EvaluateDetail
                         std::array<std::byte, sizeof(ToType)> dst_bytes{};
                         dst_bytes.fill(std::byte{0});
 
-                        if constexpr(std::endian::native == std::endian::little)
+                        if(endianness == std::endian::little)
                         {
                             // Keep least-significant bytes: at low addresses.
                             std::copy_n(src_bytes.data(), N, dst_bytes.data());
@@ -253,9 +255,22 @@ namespace rocRoller::Expression::EvaluateDetail
             }
             else
             {
-                return reinterpretTruncate<FromType, Idx + 1>(value, targetDataType);
+                return reinterpretTruncateValue<FromType, Idx + 1>(
+                    value, targetDataType, endianness);
             }
         }
+    }
+
+    CommandArgumentValue reinterpretTruncateValue(CommandArgumentValue const& value,
+                                                  DataType                    targetDataType,
+                                                  std::endian                 endianness)
+    {
+        return std::visit(
+            [targetDataType, endianness](auto const& val) -> CommandArgumentValue {
+                using FromType = std::decay_t<decltype(val)>;
+                return reinterpretTruncateValue<FromType>(val, targetDataType, endianness);
+            },
+            value);
     }
 
     template <>
@@ -304,7 +319,7 @@ namespace rocRoller::Expression::EvaluateDetail
                                     expr.width,
                                     DataTypeInfo::Get(expr.outputDataType).elementBits));
 
-            return reinterpretTruncate(static_cast<ARG>(result), expr.outputDataType);
+            return reinterpretTruncateValue(static_cast<ARG>(result), expr.outputDataType);
         }
 
         CommandArgumentValue operator()(Raw32 const& arg) const
