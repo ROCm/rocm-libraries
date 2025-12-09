@@ -24,13 +24,14 @@
  *
  *******************************************************************************/
 
-// #include <random>
+#include <random>
 #include <cmath>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
 #include <tuple>
 #include <vector>
+#include <algorithm>
 
 #include <gtest/gtest.h>
 
@@ -204,108 +205,53 @@ double getStdDev(const std::vector<double>& data)
     return std::sqrt(sum / data.size());
 }
 
-// Take two vectors of data along with their expected mean and standard deviation,
-// create a histogram for each array in the bounds [mean - hist_radius, mean + hist_radius] with a specified number of bins,
-// and calculate the average percent difference between the two histograms within the given number of standard deviations
-double compareHistogram(const std::vector<double>& data1,
-                        const std::vector<double>& data2,
-                        const double               mean,
-                        const double               std_dev,
-                        const double               hist_radius,
-                        const uint64_t             num_bins,
-                        const uint64_t             num_std_devs)
-{
-    std::map<double, uint64_t> histogram1;
-    std::map<double, uint64_t> histogram2;
+// class to represent a Empirical Distribution Function (EDF) of some distribution
+class EDF{
+    private:
+        std::vector<double> dis;
+        double n;
 
-    if(num_bins == 0)
-        throw std::runtime_error("compareHistogram: num_bins cannot equal zero");
-    double bin_width = static_cast<double>(hist_radius * 2) / static_cast<double>(num_bins);
-    double first_bin = mean - hist_radius;
-    double last_bin  = mean + hist_radius - bin_width;
-    for(double bin = first_bin; bin <= last_bin; bin += bin_width)
-    {
-        histogram1[bin] = 0;
-        histogram2[bin] = 0;
-    }
-
-    // Make copies of both vectors and sort them in preparation for populating histograms
-    std::vector<double> data1_copy = data1;
-    std::sort(data1_copy.begin(), data1_copy.end());
-    std::vector<double> data2_copy = data2;
-    std::sort(data2_copy.begin(), data2_copy.end());
-
-    // Populate histograms
-    double current_bin = first_bin;
-    for(const double val : data1_copy)
-    {
-        if(std::isnan(val) || std::isinf(val) || val < first_bin || val >= last_bin + bin_width)
-        {
-            continue;
+    public:
+        EDF(const std::vector<double> & x){
+            dis = x;
+            std::sort(dis.begin(), dis.end());
+            n = static_cast<double>(dis.size());
         }
 
-        while(!(val >= current_bin && val < current_bin + bin_width))
-        {
-            current_bin += bin_width;
+        double operator()(double x) const{
+            auto it = std::upper_bound(dis.begin(), dis.end(), x);
+            double pos = static_cast<double>(it - dis.begin());
+            return pos / n;
         }
+};
 
-        histogram1[current_bin]++;
+// Perform Two-Sample Kolmogorov-Smirnov Test
+bool ks_test_2(const std::vector<double> & expected, const std::vector<double> & actual, double alpha = 0.1){
+    EDF aEDF(expected);
+    EDF eEDF(actual);
+
+    double n = static_cast<double>(expected.size());
+    double m = static_cast<double>(actual.size());
+
+    // Calculate the statistical value: the maximum difference between the two EDF functions.
+    // For continuous distributions, we check at all data points from both samples.
+    double d = 0.0;
+    
+    // Check at all points from the expected sample
+    for(const auto& x : expected) {
+        d = std::max(d, std::abs(aEDF(x) - eEDF(x)));
     }
-    current_bin = first_bin;
-    for(const double val : data2_copy)
-    {
-        if(std::isnan(val) || std::isinf(val) || val < first_bin || val >= last_bin + bin_width)
-        {
-            continue;
-        }
-
-        while(!(val >= current_bin && val < current_bin + bin_width))
-        {
-            current_bin += bin_width;
-        }
-
-        histogram2[current_bin]++;
-    }
-
-    // Calculate the average percent difference between the two histograms
-    // within the given number of standard deviations
-    double   sum_percent_diff  = 0.0;
-    uint64_t num_percent_diffs = 0;
-    for(auto const& [bin, val1] : histogram1)
-    {
-        // We only care about diffs within the given number of standard deviations
-        const double lower_bound = mean - (std_dev * num_std_devs);
-        const double upper_bound = mean + (std_dev * num_std_devs);
-        if(bin >= lower_bound && bin + bin_width <= upper_bound)
-        {
-            const uint64_t val2 = histogram2[bin];
-
-            uint64_t diff = std::max(val1, val2) - std::min(val1, val2);
-
-            // To avoid division by zero - if the denominator (val1 + val2) is zero,
-            // both val1 and val2 must themselves be zero because they are both unsigned,
-            // meaning that the percent difference is zero
-            double percent_diff;
-            if(val1 + val2 == 0)
-            {
-                percent_diff = 0.0;
-            }
-            else
-            {
-                percent_diff = 200 * (static_cast<double>(diff) / static_cast<double>(val1 + val2));
-            }
-
-            sum_percent_diff += percent_diff;
-            num_percent_diffs++;
-        }
+    
+    // Check at all points from the actual sample
+    for(const auto& x : actual) {
+        d = std::max(d, std::abs(aEDF(x) - eEDF(x)));
     }
 
-    if(num_percent_diffs == 0)
-    {
-        return std::numeric_limits<double>::quiet_NaN();
-    }
+    // calculating the critical value
+    double c_alpha = std::sqrt(-std::log(alpha / 2) * 0.5);
+    double cv = std::sqrt((n + m) / ( n * m)) * c_alpha;
 
-    return sum_percent_diff / num_percent_diffs;
+    return d <= cv; // <= because we reject if d > cv
 }
 
 template <typename DataType>
@@ -924,6 +870,96 @@ class DataGeneratorNormalFromFloatDistributionTest
 public:
     void testForDataType()
     {
+        // Validate the KS test implementation with hardcoded test cases
+        std::cout << "\n=== Validating KS Test Implementation ===\n";
+        
+        // Test case 1: Two identical collections should pass
+        {
+            std::vector<double> identical1 = {0.1, 0.3, 0.5, 0.7, 0.9, 0.2, 0.4, 0.6, 0.8};
+            std::vector<double> identical2 = {0.1, 0.3, 0.5, 0.7, 0.9, 0.2, 0.4, 0.6, 0.8};
+            bool result = ks_test_2(identical1, identical2);
+            std::cout << "Test 1 - Two identical collections: " << (result ? "PASS" : "FAIL") 
+                      << " (Expected: PASS)\n";
+        }
+        
+        // Test case 2: Two collections from same distribution should pass
+        {
+            std::random_device rd{};
+            std::mt19937 gen{42};  // Fixed seed for reproducibility
+            std::normal_distribution<> dist{0.0, 1.0};
+            
+            std::vector<double> sample1(1000);
+            std::vector<double> sample2(1000);
+            for(int i = 0; i < 1000; i++) {
+                sample1[i] = dist(gen);
+                sample2[i] = dist(gen);
+            }
+            
+            bool result = ks_test_2(sample1, sample2);
+            std::cout << "Test 2 - Two samples from same normal distribution: " 
+                      << (result ? "PASS" : "FAIL") << " (Expected: PASS)\n";
+        }
+        
+        // Test case 3: Collections from different distributions should fail
+        {
+            std::random_device rd{};
+            std::mt19937 gen{42};  // Fixed seed
+            std::normal_distribution<> normal_dist{0.0, 1.0};
+            std::uniform_real_distribution<> uniform_dist{-3.0, 3.0};
+            
+            std::vector<double> normal_sample(1000);
+            std::vector<double> uniform_sample(1000);
+            for(int i = 0; i < 1000; i++) {
+                normal_sample[i] = normal_dist(gen);
+                uniform_sample[i] = uniform_dist(gen);
+            }
+            
+            bool result = ks_test_2(normal_sample, uniform_sample);
+            std::cout << "Test 3 - Normal vs Uniform distribution: " 
+                      << (result ? "PASS" : "FAIL") << " (Expected: FAIL)\n";
+        }
+        
+        // Test case 4: Different means should fail
+        {
+            std::random_device rd{};
+            std::mt19937 gen{42};  // Fixed seed
+            std::normal_distribution<> dist1{0.0, 1.0};
+            std::normal_distribution<> dist2{2.0, 1.0};  // Different mean
+            
+            std::vector<double> sample1(1000);
+            std::vector<double> sample2(1000);
+            for(int i = 0; i < 1000; i++) {
+                sample1[i] = dist1(gen);
+                sample2[i] = dist2(gen);
+            }
+            
+            bool result = ks_test_2(sample1, sample2);
+            std::cout << "Test 4 - Normal(0,1) vs Normal(2,1): " 
+                      << (result ? "PASS" : "FAIL") << " (Expected: FAIL)\n";
+        }
+        
+        // Test case 5: Different standard deviations should fail
+        {
+            std::random_device rd{};
+            std::mt19937 gen{42};  // Fixed seed
+            std::normal_distribution<> dist1{0.0, 1.0};
+            std::normal_distribution<> dist2{0.0, 2.0};  // Different std dev
+            
+            std::vector<double> sample1(1000);
+            std::vector<double> sample2(1000);
+            for(int i = 0; i < 1000; i++) {
+                sample1[i] = dist1(gen);
+                sample2[i] = dist2(gen);
+            }
+            
+            bool result = ks_test_2(sample1, sample2);
+            std::cout << "Test 5 - Normal(0,1) vs Normal(0,2): " 
+                      << (result ? "PASS" : "FAIL") << " (Expected: FAIL)\n";
+        }
+        
+        std::cout << "=== End of KS Test Validation ===\n\n";
+        
+        // Original test code starts here
         DataGeneratorOptions opts;
         vector<index_t>      size, stride;
 
@@ -972,16 +1008,9 @@ public:
             ref_data[i]      = toDouble<DataType>(tScale, buffer.data(), 0, i);
         }
 
-        // Collect both arrays into histograms and compare them
-        const double   hist_radius  = 6;
-        const uint64_t num_bins     = 10000;
-        const uint64_t num_std_devs = 3;
-        const auto     avg_percent_diff
-            = compareHistogram(data, ref_data, mean, std_dev, hist_radius, num_bins, num_std_devs);
-
-        // Expect that average percent difference between actual and reference histogram
-        // within three standard deviations is less than 5%
-        EXPECT_LE(avg_percent_diff, 5);
+        // Use Kolmogorov-Smirnov test to verify distributions are the same
+        const bool ks_result = ks_test_2(ref_data, data);
+        EXPECT_TRUE(ks_result);
     }
 };
 
