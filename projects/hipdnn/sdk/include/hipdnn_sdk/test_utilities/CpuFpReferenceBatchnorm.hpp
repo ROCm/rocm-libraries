@@ -227,7 +227,6 @@ public:
         }
 
         int64_t elementsPerChannel = calculateElementsPerChannel(x.dims());
-        //Cant cast directly from int64 to half or bloat16 so cast to float first.
         auto nhwF = utilities::staticCast<ComputeDataType>(elementsPerChannel);
         auto epsilonCompute = utilities::staticCast<ComputeDataType>(epsilon);
 
@@ -241,6 +240,7 @@ public:
             ComputeDataType channelMean;
             ComputeDataType channelInvVariance;
 
+            // Compute mean and invVariance if either are not provided
             if(mean == nullptr || invVariance == nullptr)
             {
                 auto meanAccum = utilities::staticCast<ComputeDataType>(0.0);
@@ -257,22 +257,13 @@ public:
                         varianceAccum = varianceAccum + (inVal * inVal);
                     });
 
-                ComputeDataType calculatedMean = meanAccum / nhwF;
-
-                channelMean
-                    = (mean != nullptr)
-                          ? utilities::staticCast<ComputeDataType>(mean->getHostValue(0, cidx))
-                          : calculatedMean;
+                channelMean = meanAccum / nhwF;
 
                 ComputeDataType calculatedVariance
                     = (varianceAccum / nhwF) - (channelMean * channelMean);
 
-                channelInvVariance = (invVariance != nullptr)
-                                         ? utilities::staticCast<ComputeDataType>(
-                                               invVariance->getHostValue(0, cidx))
-                                         : utilities::staticCast<ComputeDataType>(
-                                               utilities::staticCast<ComputeDataType>(1.0)
-                                               / sqrtInternal(calculatedVariance + epsilonCompute));
+                ComputeDataType denominator = sqrtInternal(calculatedVariance + epsilonCompute);
+                channelInvVariance = utilities::staticCast<ComputeDataType>(1.0) / denominator;
             }
             else
             {

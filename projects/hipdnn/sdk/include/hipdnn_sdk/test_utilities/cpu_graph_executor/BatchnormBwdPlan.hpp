@@ -125,15 +125,14 @@ public:
                 variantPack.at(_params.invVarianceTensor.value().uid));
         }
 
-        CpuFpReferenceBatchnorm::backward(
-            *shallowDyTensor,
-            *shallowXTensor,
-            *shallowScaleTensor,
-            *shallowDxTensor,
-            *shallowDscaleTensor,
-            *shallowDbiasTensor,
-            shallowMeanTensor != nullptr ? shallowMeanTensor.get() : nullptr,
-            shallowInvVarianceTensor != nullptr ? shallowInvVarianceTensor.get() : nullptr);
+        CpuFpReferenceBatchnorm::backward(*shallowDyTensor,
+                                          *shallowXTensor,
+                                          *shallowScaleTensor,
+                                          *shallowDxTensor,
+                                          *shallowDscaleTensor,
+                                          *shallowDbiasTensor,
+                                          shallowMeanTensor.get(),
+                                          shallowInvVarianceTensor.get());
     }
 
 private:
