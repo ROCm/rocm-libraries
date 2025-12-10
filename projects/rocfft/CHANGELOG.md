@@ -3,7 +3,7 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
-## rocFFT 1.0.36 (unreleased)
+## rocFFT 1.0.36 for ROCm 7.2.0
 
 ### Optimized
 
@@ -14,7 +14,7 @@ Documentation for rocFFT is available at
 
 * Fixed potential division by zero when constructing plans using dimensions of length 1.
 * Fixed result scaling on multi-device transforms.
-* Fixed callbacks on single-process multi-GPU transforms.
+* Fixed callbacks on multi-device transforms.
 
 ## rocFFT 1.0.35 for ROCM 7.1.0
 
