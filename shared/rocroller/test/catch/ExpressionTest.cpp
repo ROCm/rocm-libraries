@@ -29,6 +29,7 @@
 
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/Expression_evaluate_detail.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -2573,6 +2574,73 @@ namespace ExpressionTest
         {
             int32_t value = 42;
             CHECK_THROWS_AS(reinterpret(CommandArgumentValue(value), DataType::None), FatalError);
+        }
+    }
+
+    TEST_CASE("Expression evaluate reinterpretTruncateValue with endianness", "[expression]")
+    {
+        auto swapEndian = [](auto value) -> decltype(value) {
+            using T                = decltype(value);
+            constexpr size_t N     = sizeof(T);
+            auto             bytes = std::bit_cast<std::array<std::byte, N>>(value);
+            std::reverse(bytes.begin(), bytes.end());
+            return std::bit_cast<T>(bytes);
+        };
+
+        constexpr bool isLittleEndian = std::endian::native == std::endian::little;
+        constexpr bool isBigEndian    = std::endian::native == std::endian::big;
+
+        SECTION("Round-trip: Native to opposite endianness and back - UInt64 to UInt32")
+        {
+            uint64_t originalValue = 15ull;
+
+            if constexpr(isLittleEndian)
+            {
+                // System is LE: convert to BE, truncate, convert back
+                uint64_t valueAsBE = swapEndian(originalValue);
+
+                auto resultBE = Expression::EvaluateDetail::reinterpretTruncateValue(
+                    valueAsBE, DataType::UInt32, std::endian::big);
+                uint32_t truncatedBE = std::get<uint32_t>(resultBE);
+
+                uint32_t truncatedLE = swapEndian(truncatedBE);
+
+                CHECK(truncatedLE == 15u);
+            }
+            else if constexpr(isBigEndian)
+            {
+                // System is BE: convert to LE, truncate, convert back
+                uint64_t valueAsLE = swapEndian(originalValue);
+
+                auto resultLE = Expression::EvaluateDetail::reinterpretTruncateValue(
+                    valueAsLE, DataType::UInt32, std::endian::little);
+                uint32_t truncatedLE = std::get<uint32_t>(resultLE);
+
+                uint32_t truncatedBE = swapEndian(truncatedLE);
+
+                CHECK(truncatedBE == 15u);
+            }
+        }
+
+        SECTION("Native endianness - UInt64 to UInt32")
+        {
+            uint64_t originalValue = 15ull;
+            auto     result        = Expression::EvaluateDetail::reinterpretTruncateValue(
+                originalValue, DataType::UInt32, std::endian::native);
+            CHECK(std::get<uint32_t>(result) == 15u);
+        }
+
+        SECTION("Same-size reinterpret - endianness independent (no truncation)")
+        {
+            int value = 0x00000FFF;
+
+            auto resultLE = Expression::EvaluateDetail::reinterpretTruncateValue(
+                value, DataType::UInt32, std::endian::little);
+            auto resultBE = Expression::EvaluateDetail::reinterpretTruncateValue(
+                value, DataType::UInt32, std::endian::big);
+
+            CHECK(std::get<uint32_t>(resultLE) == 0x00000FFFu);
+            CHECK(std::get<uint32_t>(resultBE) == 0x00000FFFu);
         }
     }
 

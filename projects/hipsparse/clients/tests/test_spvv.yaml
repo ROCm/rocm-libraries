@@ -36,8 +36,18 @@ Tests:
   category: pre_checkin
   function: spvv
   indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
+  precision: *single_double_precisions
   N: [50, 750, 2135]
   nnz: [5, 45]
-  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: spvv
+  category: pre_checkin
+  function: spvv
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex
+  N: [50, 750, 2135]
+  nnz: [5, 45]
+  transA: [HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]

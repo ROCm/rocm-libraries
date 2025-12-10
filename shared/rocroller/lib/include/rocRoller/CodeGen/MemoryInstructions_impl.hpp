@@ -40,16 +40,15 @@ namespace rocRoller
     {
     }
 
-    inline Generator<Instruction>
-        MemoryInstructions::load(MemoryKind                        kind,
-                                 Register::ValuePtr                dest,
-                                 Register::ValuePtr                addr,
-                                 Register::ValuePtr                offset,
-                                 int                               numBytes,
-                                 std::string const                 comment,
-                                 bool                              high,
-                                 std::shared_ptr<BufferDescriptor> bufDesc,
-                                 BufferInstructionOptions          buffOpts)
+    inline Generator<Instruction> MemoryInstructions::load(MemoryKind               kind,
+                                                           Register::ValuePtr       dest,
+                                                           Register::ValuePtr       addr,
+                                                           Register::ValuePtr       offset,
+                                                           int                      numBytes,
+                                                           std::string const        comment,
+                                                           bool                     high,
+                                                           Register::ValuePtr       bufDesc,
+                                                           BufferInstructionOptions buffOpts)
     {
         auto               context   = m_context.lock();
         int                offsetVal = 0;
@@ -109,16 +108,15 @@ namespace rocRoller
         }
     }
 
-    inline Generator<Instruction>
-        MemoryInstructions::store(MemoryKind                        kind,
-                                  Register::ValuePtr                addr,
-                                  Register::ValuePtr                data,
-                                  Register::ValuePtr                offset,
-                                  int                               numBytes,
-                                  std::string const                 comment,
-                                  bool                              high,
-                                  std::shared_ptr<BufferDescriptor> bufDesc,
-                                  BufferInstructionOptions          buffOpts)
+    inline Generator<Instruction> MemoryInstructions::store(MemoryKind               kind,
+                                                            Register::ValuePtr       addr,
+                                                            Register::ValuePtr       data,
+                                                            Register::ValuePtr       offset,
+                                                            int                      numBytes,
+                                                            std::string const        comment,
+                                                            bool                     high,
+                                                            Register::ValuePtr       bufDesc,
+                                                            BufferInstructionOptions buffOpts)
     {
         auto               context   = m_context.lock();
         int                offsetVal = 0;
@@ -170,16 +168,15 @@ namespace rocRoller
     }
 
     template <MemoryInstructions::MemoryDirection Dir>
-    inline Generator<Instruction>
-        MemoryInstructions::moveData(MemoryKind                        kind,
-                                     Register::ValuePtr                addr,
-                                     Register::ValuePtr                data,
-                                     Register::ValuePtr                offset,
-                                     int                               numBytes,
-                                     std::string const                 comment,
-                                     bool                              high,
-                                     std::shared_ptr<BufferDescriptor> buffDesc,
-                                     BufferInstructionOptions          buffOpts)
+    inline Generator<Instruction> MemoryInstructions::moveData(MemoryKind               kind,
+                                                               Register::ValuePtr       addr,
+                                                               Register::ValuePtr       data,
+                                                               Register::ValuePtr       offset,
+                                                               int                      numBytes,
+                                                               std::string const        comment,
+                                                               bool                     high,
+                                                               Register::ValuePtr       buffDesc,
+                                                               BufferInstructionOptions buffOpts)
     {
         if constexpr(Dir == MemoryDirection::Load)
             co_yield load(kind, data, addr, offset, numBytes, comment, high, buffDesc, buffOpts);
@@ -587,14 +584,13 @@ namespace rocRoller
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }
 
-    inline Generator<Instruction>
-        MemoryInstructions::loadBuffer(Register::ValuePtr                dest,
-                                       Register::ValuePtr                addr,
-                                       int                               offset,
-                                       std::shared_ptr<BufferDescriptor> buffDesc,
-                                       BufferInstructionOptions          buffOpts,
-                                       int                               numBytes,
-                                       bool                              high)
+    inline Generator<Instruction> MemoryInstructions::loadBuffer(Register::ValuePtr       dest,
+                                                                 Register::ValuePtr       addr,
+                                                                 int                      offset,
+                                                                 Register::ValuePtr       buffDesc,
+                                                                 BufferInstructionOptions buffOpts,
+                                                                 int                      numBytes,
+                                                                 bool                     high)
     {
         AssertFatal(dest != nullptr);
         AssertFatal(addr != nullptr);
@@ -634,7 +630,7 @@ namespace rocRoller
         {
             lds += "lds";
         }
-        auto sgprSrd = buffDesc->allRegisters();
+        auto sgprSrd = buffDesc;
 
         if(numBytes < m_wordSize)
         {
@@ -695,11 +691,11 @@ namespace rocRoller
     }
 
     inline Generator<Instruction>
-        MemoryInstructions::bufferLoad2LDS(Register::ValuePtr                data,
-                                           std::shared_ptr<BufferDescriptor> buffDesc,
-                                           BufferInstructionOptions          buffOpts,
-                                           int                               numBytes,
-                                           Register::ValuePtr                soffset)
+        MemoryInstructions::bufferLoad2LDS(Register::ValuePtr       data,
+                                           Register::ValuePtr       buffDesc,
+                                           BufferInstructionOptions buffOpts,
+                                           int                      numBytes,
+                                           Register::ValuePtr       soffset)
     {
         AssertFatal(data != nullptr);
         AssertFatal(buffOpts.lds);
@@ -730,7 +726,7 @@ namespace rocRoller
             slc += "slc";
         }
 
-        auto sgprSrd = buffDesc->allRegisters();
+        auto sgprSrd = buffDesc;
 
         std::string opEnd = "";
         if(numBytes == 1)
@@ -772,14 +768,13 @@ namespace rocRoller
                 ctx->targetArchitecture(), "DEBUG: Wait after direct buffer load to lds"));
     }
 
-    inline Generator<Instruction>
-        MemoryInstructions::storeBuffer(Register::ValuePtr                data,
-                                        Register::ValuePtr                addr,
-                                        int                               offset,
-                                        std::shared_ptr<BufferDescriptor> buffDesc,
-                                        BufferInstructionOptions          buffOpts,
-                                        int                               numBytes,
-                                        bool                              high)
+    inline Generator<Instruction> MemoryInstructions::storeBuffer(Register::ValuePtr       data,
+                                                                  Register::ValuePtr       addr,
+                                                                  int                      offset,
+                                                                  Register::ValuePtr       buffDesc,
+                                                                  BufferInstructionOptions buffOpts,
+                                                                  int                      numBytes,
+                                                                  bool                     high)
     {
         AssertFatal(addr != nullptr);
         AssertFatal(data != nullptr);
@@ -817,7 +812,7 @@ namespace rocRoller
         {
             lds += "lds";
         }
-        auto sgprSrd = buffDesc->allRegisters();
+        auto sgprSrd = buffDesc;
 
         // TODO Use UInt32 offset register for StoreTiled operations
         // that use an offset modifier.

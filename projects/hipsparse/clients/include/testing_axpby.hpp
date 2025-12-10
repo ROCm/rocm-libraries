@@ -90,7 +90,7 @@ void testing_axpby_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_axpby(Arguments argus)
+void testing_axpby(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     I size = argus.N;
@@ -216,8 +216,6 @@ hipsparseStatus_t testing_axpby(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_AXPBY_HPP
