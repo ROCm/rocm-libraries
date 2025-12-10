@@ -167,6 +167,8 @@ struct Arguments
     char skip_hardware[32];
 
     uint32_t req_memory;
+    uint32_t host_memory_gb;
+    uint32_t device_memory_gb;
 
     // Validate input format.
     // rocsparse_gentest.py is expected to conform to this format.
@@ -314,6 +316,8 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(hardware);
         ROCSPARSE_FORMAT_CHECK(skip_hardware);
         ROCSPARSE_FORMAT_CHECK(req_memory);
+        ROCSPARSE_FORMAT_CHECK(host_memory_gb);
+        ROCSPARSE_FORMAT_CHECK(device_memory_gb);
     }
 
     template <typename T>

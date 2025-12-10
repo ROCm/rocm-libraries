@@ -24,6 +24,7 @@
 #pragma once
 
 #include "rocsparse_data.hpp"
+#include "rocsparse_memory_check.hpp"
 #include "rocsparse_reproducibility.hpp"
 #include "rocsparse_reproducibility_test_label.hpp"
 #include "rocsparse_test.hpp"
@@ -293,8 +294,14 @@ using test_dispatch_t = rocsparse_test_dispatch<rocsparse_test_traits<ROUTINE>::
     /**/                                                                                       \
     /**/ TEST_P(ROUTINE, CATEGORY)                                                             \
     /**/ {                                                                                     \
+        /**/ const Arguments& param = GetParam();                                              \
+        /**/ if(!rocsparse_memory_check::should_run_test(param.host_memory_gb,                 \
+                                                         param.device_memory_gb))              \
+        /**/ {                                                                                 \
+            /**/ GTEST_SKIP() << "Skipping test due to insufficient memory";                   \
+        /**/ }                                                                                 \
         /**/ test_dispatch_t<rocsparse_test_enum::ROUTINE>::template dispatch<ROUTINE##_call>( \
-            GetParam());                                                                       \
+            param);                                                                            \
     /**/ }                                                                                     \
     /**/                                                                                       \
     /**/ INSTANTIATE_TEST_CATEGORIES(ROUTINE)
