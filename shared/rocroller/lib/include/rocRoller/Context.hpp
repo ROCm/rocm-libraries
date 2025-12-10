@@ -28,7 +28,6 @@
 
 #include <fstream>
 #include <iostream>
-#include <map>
 #include <memory>
 #include <ranges>
 #include <string>
@@ -129,6 +128,16 @@ namespace rocRoller
         void setKernel(AssemblyKernelPtr);
 
         /**
+         * @brief Allocate scratch space for the specified scratch policy.
+         *
+         * @param policy The scratch policy to allocate for
+         * @param size Number of bytes requested
+         * @return Expression::ExpressionPtr The offset before this allocation
+         */
+        Expression::ExpressionPtr allocateScratch(Operations::ScratchPolicy policy,
+                                                  Expression::ExpressionPtr size);
+
+        /**
          * @brief Returns an expression representing how much scratch space is required (in bytes)
          *        for the specified scratch policy.
          *
@@ -136,14 +145,6 @@ namespace rocRoller
          * @return Expression::ExpressionPtr
          */
         Expression::ExpressionPtr getScratchAmount(Operations::ScratchPolicy policy) const;
-
-        /**
-         * @brief Allocate more scratch space for the specified scratch policy.
-         *
-         * @param policy The scratch policy to allocate for
-         * @param size Number of bytes requested
-         */
-        void allocateScratch(Operations::ScratchPolicy policy, Expression::ExpressionPtr size);
 
         /**
          * @brief Get register scope manager.
@@ -180,7 +181,8 @@ namespace rocRoller
         std::shared_ptr<MemoryInstructions>                            m_mem;
         LabelAllocatorPtr                                              m_labelAllocator;
         std::shared_ptr<LDSAllocator>                                  m_ldsAllocator;
-        std::map<Operations::ScratchPolicy, Expression::ExpressionPtr> m_scratchAllocators;
+        std::array<Expression::ExpressionPtr, static_cast<size_t>(Operations::ScratchPolicy::Count)>
+            m_scratchSizes;
         std::shared_ptr<CopyGenerator>                                 m_copier;
         std::shared_ptr<BranchGenerator>                               m_brancher;
         std::shared_ptr<CrashKernelGenerator>                          m_crasher;

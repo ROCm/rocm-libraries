@@ -824,13 +824,12 @@ namespace rocRoller
                                  Operations::ScratchPolicy policy,
                                  ContextPtr                context)
         {
-            auto currentOffset = context->getScratchAmount(policy);
-            auto newCoordinate = CT::User(size, currentOffset, getScratchName(policy));
             // TODO Audit bytes/bits
             // Can we move size inside the CeilDivide?
-            context->allocateScratch(
+            auto currentOffset = context->allocateScratch(
                 policy,
                 size * Expression::literal(CeilDivide(DataTypeInfo::Get(varType).elementBits, 8u)));
+            auto newCoordinate = CT::User(size, currentOffset, getScratchName(policy));
 
             return newCoordinate;
         }

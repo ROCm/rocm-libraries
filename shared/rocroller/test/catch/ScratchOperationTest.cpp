@@ -239,7 +239,7 @@ namespace ScratchOperationTest
 
         SECTION("Context initializes all policies to zero")
         {
-            for(int i = 0; i < static_cast<int>(ScratchPolicy::Count); ++i)
+            for(size_t i = 0; i < static_cast<size_t>(ScratchPolicy::Count); ++i)
             {
                 auto policy = static_cast<ScratchPolicy>(i);
                 auto amount = context->getScratchAmount(policy);
@@ -248,24 +248,34 @@ namespace ScratchOperationTest
             }
         }
 
-        SECTION("allocateScratch accumulates size per policy")
+        SECTION("allocateScratch returns offset before allocation and accumulates size")
         {
             auto size1 = rocRoller::Expression::literal(100u);
             auto size2 = rocRoller::Expression::literal(200u);
 
-            context->allocateScratch(ScratchPolicy::None, size1);
-            context->allocateScratch(ScratchPolicy::None, size2);
+            auto offset1 = context->allocateScratch(ScratchPolicy::None, size1);
+            auto offset2 = context->allocateScratch(ScratchPolicy::None, size2);
 
+            // First allocation should return offset 0
+            CHECK(rocRoller::getUnsignedInt(rocRoller::Expression::evaluate(offset1)) == 0);
+            // Second allocation should return offset 100 (after first allocation)
+            CHECK(rocRoller::getUnsignedInt(rocRoller::Expression::evaluate(offset2)) == 100);
+
+            // Total should now be 300
             auto amount = context->getScratchAmount(ScratchPolicy::None);
             auto value  = rocRoller::Expression::evaluate(amount);
             CHECK(rocRoller::getUnsignedInt(value) == 300);
         }
 
-        SECTION("getScratchAmount returns correct amount per policy")
+        SECTION("allocateScratch returns correct offset per policy")
         {
-            auto size = rocRoller::Expression::literal(500u);
-            context->allocateScratch(ScratchPolicy::ZeroedBeforeAndAfter, size);
+            auto size   = rocRoller::Expression::literal(500u);
+            auto offset = context->allocateScratch(ScratchPolicy::ZeroedBeforeAndAfter, size);
 
+            // First allocation should return offset 0
+            CHECK(rocRoller::getUnsignedInt(rocRoller::Expression::evaluate(offset)) == 0);
+
+            // Query total should now be 500
             auto amount = context->getScratchAmount(ScratchPolicy::ZeroedBeforeAndAfter);
             auto value  = rocRoller::Expression::evaluate(amount);
             CHECK(rocRoller::getUnsignedInt(value) == 500);
@@ -307,7 +317,7 @@ namespace ScratchOperationTest
         SECTION("All policies have unique names")
         {
             std::set<std::string> names;
-            for(int i = 0; i < static_cast<int>(ScratchPolicy::Count); ++i)
+            for(size_t i = 0; i < static_cast<size_t>(ScratchPolicy::Count); ++i)
             {
                 auto policy = static_cast<ScratchPolicy>(i);
                 auto name   = rocRoller::getScratchName(policy);
