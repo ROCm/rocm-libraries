@@ -52,20 +52,20 @@ ROCBLAS_DEPRECATED_MSG(
     \brief <b> BLAS BETA API </b>
 
     \details
-    gemm_ex_get_solutions gets the indices for all the solutions that can solve a corresponding
-    call to gemm_ex. Which solution is used by gemm_ex is controlled by the solution_index
+    The gemm_ex_get_solutions function gets the indices for all the solutions that can solve a corresponding
+    call to gemm_ex. The solution that is used by gemm_ex is controlled by the ``solution_index``
     parameter.
 
-    All parameters correspond to gemm_ex except for list_array and list_size, which are used as
-    input and output for getting the solution indices. If list_array is NULL, list_size is an
-    output and will be filled with the number of solutions that can solve the GEMM. If list_array
-    is not NULL, then it must be pointing to an array with at least list_size elements and will
+    All parameters correspond to gemm_ex except for ``list_array`` and ``list_size``, which are used as
+    input and output for getting the solution indices. If ``list_array`` is NULL, ``list_size`` is an
+    output and will be filled with the number of solutions that can solve the GEMM. If ``list_array``
+    is not NULL, then it must be pointing to an array with at least ``list_size`` elements and will
     be filled with the solution indices that can solve the GEMM: the number of elements filled is
-    min(list_size, # of solutions).
+    ``min(list_size, # of solutions)``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     transA    [rocblas_operation]
               specifies the form of op( A ).
@@ -117,7 +117,7 @@ ROCBLAS_DEPRECATED_MSG(
     @param[out]
     d         [void *]
               device pointer storing matrix D.
-              If d and c pointers are to the same matrix then d_type must equal c_type and ldd must equal ldc
+              If d and c pointers are to the same matrix, then d_type must equal c_type and ldd must equal ldc
               or the respective invalid status will be returned.
     @param[in]
     d_type    [rocblas_datatype]
@@ -137,11 +137,11 @@ ROCBLAS_DEPRECATED_MSG(
               optional gemm flags.
     @param[out]
     list_array [rocblas_int *]
-               output array for solution indices or NULL if getting number of solutions
+               output array for solution indices or NULL if getting the number of solutions.
     @param[in,out]
     list_size  [rocblas_int *]
                size of list_array if getting solution indices or output with number of solutions
-               if list_array is NULL
+               if list_array is NULL.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_gemm_ex_get_solutions(rocblas_handle    handle,
@@ -178,18 +178,18 @@ ROCBLAS_DEPRECATED_MSG("rocblas_gemm_ex_get_solutions_by_type is a beta feature 
     \brief <b> BLAS BETA API </b>
 
     \details
-    rocblas_gemm_ex_get_solutions_by_type gets the indices for all the solutions that match the
-    given types for gemm_ex. Which solution is used by gemm_ex is controlled by the
-    solution_index parameter.
+    The rocblas_gemm_ex_get_solutions_by_type function gets the indices for all the solutions that match the
+    given types for gemm_ex. The solution that is used by gemm_ex is controlled by the
+    ``solution_index`` parameter.
 
-    If list_array is NULL, list_size is an output and will be filled with the number of solutions
-    that can solve the GEMM. If list_array is not NULL, then it must be pointing to an array with
-    at least list_size elements and will be filled with the solution indices that can solve the
-    GEMM: the number of elements filled is min(list_size, # of solutions).
+    If ``list_array`` is NULL, ``list_size`` is an output and will be filled with the number of solutions
+    that can solve the GEMM. If ``list_array`` is not NULL, then it must be pointing to an array with
+    at least ``list_size`` elements and will be filled with the solution indices that can solve the
+    GEMM: the number of elements filled is ``min(list_size, # of solutions)``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     input_type
               [rocblas_datatype]
@@ -207,11 +207,11 @@ ROCBLAS_DEPRECATED_MSG("rocblas_gemm_ex_get_solutions_by_type is a beta feature 
               optional gemm flags.
     @param[out]
     list_array [rocblas_int *]
-               output array for solution indices or NULL if getting number of solutions
+               output array for solution indices or NULL if getting the number of solutions.
     @param[in,out]
     list_size  [rocblas_int *]
                size of list_array if getting solution indices or output with number of solutions
-               if list_array is NULL
+               if list_array is NULL.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_gemm_ex_get_solutions_by_type(rocblas_handle   handle,
@@ -231,20 +231,20 @@ ROCBLAS_DEPRECATED_MSG(
     \brief <b> BLAS BETA API </b>
 
     \details
-    rocblas_gemm_batched_ex_get_solutions gets the indices for all the solutions that can solve a
-    corresponding call to gemm_batched_ex. Which solution is used by gemm_batched_ex is
-    controlled by the solution_index parameter.
+    The rocblas_gemm_batched_ex_get_solutions function gets the indices for all the solutions that can solve a
+    corresponding call to gemm_batched_ex. The solution that is used by gemm_batched_ex is
+    controlled by the ``solution_index`` parameter.
 
-    All parameters correspond to gemm_batched_ex except for list_array and list_size, which are
-    used as input and output for getting the solution indices. If list_array is NULL, list_size is
+    All parameters correspond to gemm_batched_ex except for ``list_array`` and ``list_size``, which are
+    used as input and output for getting the solution indices. If ``list_array`` is NULL, ``list_size`` is
     an output and will be filled with the number of solutions that can solve the GEMM. If
-    list_array is not NULL, then it must be pointing to an array with at least list_size elements
+    ``list_array`` is not NULL, then it must be pointing to an array with at least ``list_size`` elements
     and will be filled with the solution indices that can solve the GEMM: the number of elements
-    filled is min(list_size, # of solutions).
+    filled is ``min(list_size, # of solutions)``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     transA    [rocblas_operation]
               specifies the form of op( A ).
@@ -296,7 +296,7 @@ ROCBLAS_DEPRECATED_MSG(
     @param[out]
     d         [void *]
               device array of device pointers to each matrix D_i.
-              If d and c are the same array of matrix pointers then d_type must equal c_type and ldd must equal ldc
+              If d and c are the same array of matrix pointers, then d_type must equal c_type and ldd must equal ldc
               or the respective invalid status will be returned.
     @param[in]
     d_type    [rocblas_datatype]
@@ -320,11 +320,11 @@ ROCBLAS_DEPRECATED_MSG(
               optional gemm flags.
     @param[out]
     list_array [rocblas_int *]
-               output array for solution indices or NULL if getting number of solutions
+               output array for solution indices or NULL if getting the number of solutions.
     @param[in,out]
     list_size  [rocblas_int *]
                size of list_array if getting solution indices or output with number of solutions
-               if list_array is NULL
+               if list_array is NULL.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status rocblas_gemm_batched_ex_get_solutions(rocblas_handle    handle,
@@ -362,18 +362,18 @@ ROCBLAS_DEPRECATED_MSG("rocblas_gemm_batched_ex_get_solutions_by_type is a beta 
     \brief <b> BLAS BETA API </b>
 
     \details
-    rocblas_gemm_batched_ex_get_solutions_by_type gets the indices for all the solutions that
-    match the given types for gemm_batched_ex. Which solution is used by gemm_ex is controlled
-    by the solution_index parameter.
+    The rocblas_gemm_batched_ex_get_solutions_by_type function gets the indices for all the solutions that
+    match the given types for gemm_batched_ex. The solution that is used by gemm_ex is controlled
+    by the ``solution_index`` parameter.
 
-    If list_array is NULL, list_size is an output and will be filled with the number of solutions
-    that can solve the GEMM. If list_array is not NULL, then it must be pointing to an array with
-    at least list_size elements and will be filled with the solution indices that can solve the
-    GEMM: the number of elements filled is min(list_size, # of solutions).
+    If ``list_array`` is NULL, ``list_size`` is an output and will be filled with the number of solutions
+    that can solve the GEMM. If ``list_array`` is not NULL, then it must be pointing to an array with
+    at least ``list_size`` elements and will be filled with the solution indices that can solve the
+    GEMM: the number of elements filled is ``min(list_size, # of solutions)``.
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     input_type
               [rocblas_datatype]
@@ -391,11 +391,11 @@ ROCBLAS_DEPRECATED_MSG("rocblas_gemm_batched_ex_get_solutions_by_type is a beta 
               optional gemm flags.
     @param[out]
     list_array [rocblas_int *]
-               output array for solution indices or NULL if getting number of solutions
+               output array for solution indices or NULL if getting the number of solutions.
     @param[in,out]
     list_size  [rocblas_int *]
                size of list_array if getting solution indices or output with number of solutions
-               if list_array is NULL
+               if list_array is NULL.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status
@@ -416,20 +416,20 @@ ROCBLAS_DEPRECATED_MSG(
     \brief <b> BLAS BETA API </b>
 
     \details
-    gemm_strided_batched_ex_get_solutions gets the indices for all the solutions that can solve a
-    corresponding call to gemm_strided_batched_ex. Which solution is used by
-    gemm_strided_batched_ex is controlled by the solution_index parameter.
+    The gemm_strided_batched_ex_get_solutions function gets the indices for all the solutions that can solve a
+    corresponding call to gemm_strided_batched_ex. The solution that is used by
+    gemm_strided_batched_ex is controlled by the ``solution_index`` parameter.
 
-    All parameters correspond to gemm_strided_batched_ex except for list_array and list_size,
-    which are used as input and output for getting the solution indices. If list_array is NULL,
-    list_size is an output and will be filled with the number of solutions that can solve the
-    GEMM. If list_array is not NULL, then it must be pointing to an array with at least list_size
+    All parameters correspond to gemm_strided_batched_ex except for ``list_array`` and ``list_size``,
+    which are used as input and output for getting the solution indices. If ``list_array`` is NULL,
+    ``list_size`` is an output and will be filled with the number of solutions that can solve the
+    GEMM. If ``list_array`` is not NULL, then it must be pointing to an array with at least ``list_size``
     elements and will be filled with the solution indices that can solve the GEMM: the number of
-    elements filled is min(list_size, # of solutions).
+    elements filled is ``min(list_size, # of solutions).``
 
     @param[in]
     handle    [rocblas_handle]
-              handle to the rocblas library context queue.
+              handle to the rocBLAS library context queue.
     @param[in]
     transA    [rocblas_operation]
               specifies the form of op( A ).
@@ -490,7 +490,7 @@ ROCBLAS_DEPRECATED_MSG(
     @param[out]
     d         [void *]
               device pointer storing each matrix D_i.
-              If d and c pointers are to the same matrix then d_type must equal c_type and ldd must equal ldc
+              If d and c pointers are to the same matrix, then d_type must equal c_type and ldd must equal ldc
               and stride_d must equal stride_c or the respective invalid status will be returned.
     @param[in]
     d_type    [rocblas_datatype]
@@ -517,11 +517,11 @@ ROCBLAS_DEPRECATED_MSG(
               optional gemm flags.
     @param[out]
     list_array [rocblas_int *]
-               output array for solution indices or NULL if getting number of solutions
+               output array for solution indices or NULL if getting number of solutions.
     @param[in,out]
     list_size  [rocblas_int *]
                size of list_array if getting solution indices or output with number of solutions
-               if list_array is NULL
+               if list_array is NULL.
 
     ********************************************************************/
 ROCBLAS_EXPORT rocblas_status
