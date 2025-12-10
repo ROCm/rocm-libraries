@@ -23,10 +23,6 @@ Documentation for hipFFT is available at
   * fftw_execute_dft_c2r
   * fftwf_execute_dft_c2r
 
-### Resolved issues
-
-* Fixed a case where hipFFTW could throw a C++ exception to callers.
-
 ## hipFFT 1.0.21 for ROCm 7.1.0
 
 ### Added
