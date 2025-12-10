@@ -234,8 +234,8 @@ struct ConvolutionDescriptor : miopenConvolutionDescriptor
                                                     Data_t workSpace,
                                                     std::size_t workSpaceSize) const;
 
-    std::size_t GetSolutionCount(const ExecutionContext& ctx,
-                                 const conv::ProblemDescription& problem) const;
+    MIOPEN_INTERNALS_EXPORT std::size_t
+    GetSolutionCount(const ExecutionContext& ctx, const conv::ProblemDescription& problem) const;
 
     MIOPEN_INTERNALS_EXPORT std::vector<miopenConvSolution_t>
     GetSolutions(const ExecutionContext& ctx,
@@ -244,26 +244,27 @@ struct ConvolutionDescriptor : miopenConvolutionDescriptor
                  FallbackPath* fallbackPathTaken,
                  const AnyInvokeParams* invokeParams = nullptr) const;
 
-    void CompileSolution(const ExecutionContext& ctx,
-                         const conv::ProblemDescription& problem,
-                         solver::Id solver_id) const;
+    MIOPEN_INTERNALS_EXPORT void CompileSolution(const ExecutionContext& ctx,
+                                                 const conv::ProblemDescription& problem,
+                                                 solver::Id solver_id) const;
 
-    std::size_t GetForwardSolutionWorkspaceSize(const Handle& handle,
-                                                const TensorDescriptor& wDesc,
-                                                const TensorDescriptor& xDesc,
-                                                const TensorDescriptor& yDesc,
-                                                solver::Id solver_id) const;
+    MIOPEN_INTERNALS_EXPORT std::size_t
+    GetForwardSolutionWorkspaceSize(const Handle& handle,
+                                    const TensorDescriptor& wDesc,
+                                    const TensorDescriptor& xDesc,
+                                    const TensorDescriptor& yDesc,
+                                    solver::Id solver_id) const;
 
-    void ConvolutionForwardImmediate(const Handle& handle,
-                                     const TensorDescriptor& wDesc,
-                                     ConstData_t w,
-                                     const TensorDescriptor& xDesc,
-                                     ConstData_t x,
-                                     const TensorDescriptor& yDesc,
-                                     Data_t y,
-                                     Data_t workSpace,
-                                     std::size_t workSpaceSize,
-                                     solver::Id solver_id) const;
+    MIOPEN_INTERNALS_EXPORT void ConvolutionForwardImmediate(const Handle& handle,
+                                                             const TensorDescriptor& wDesc,
+                                                             ConstData_t w,
+                                                             const TensorDescriptor& xDesc,
+                                                             ConstData_t x,
+                                                             const TensorDescriptor& yDesc,
+                                                             Data_t y,
+                                                             Data_t workSpace,
+                                                             std::size_t workSpaceSize,
+                                                             solver::Id solver_id) const;
 
     MIOPEN_INTERNALS_EXPORT void FindConvBwdDataAlgorithm(const Handle& handle,
                                                           const TensorDescriptor& dyDesc,
@@ -292,39 +293,40 @@ struct ConvolutionDescriptor : miopenConvolutionDescriptor
                                                          Data_t workSpace,
                                                          std::size_t workSpaceSize) const;
 
-    std::size_t GetBackwardSolutionWorkspaceSize(const Handle& handle,
-                                                 const TensorDescriptor& dyDesc,
-                                                 const TensorDescriptor& wDesc,
-                                                 const TensorDescriptor& dxDesc,
-                                                 solver::Id solver_id) const;
+    MIOPEN_INTERNALS_EXPORT std::size_t
+    GetBackwardSolutionWorkspaceSize(const Handle& handle,
+                                     const TensorDescriptor& dyDesc,
+                                     const TensorDescriptor& wDesc,
+                                     const TensorDescriptor& dxDesc,
+                                     solver::Id solver_id) const;
 
-    void ConvolutionBackwardImmediate(const Handle& handle,
-                                      const TensorDescriptor& dyDesc,
-                                      ConstData_t dy,
-                                      const TensorDescriptor& wDesc,
-                                      ConstData_t w,
-                                      const TensorDescriptor& dxDesc,
-                                      Data_t dx,
-                                      Data_t workSpace,
-                                      std::size_t workSpaceSize,
-                                      solver::Id solver_id) const;
+    MIOPEN_INTERNALS_EXPORT void ConvolutionBackwardImmediate(const Handle& handle,
+                                                              const TensorDescriptor& dyDesc,
+                                                              ConstData_t dy,
+                                                              const TensorDescriptor& wDesc,
+                                                              ConstData_t w,
+                                                              const TensorDescriptor& dxDesc,
+                                                              Data_t dx,
+                                                              Data_t workSpace,
+                                                              std::size_t workSpaceSize,
+                                                              solver::Id solver_id) const;
 
-    std::size_t GetWrwSolutionWorkspaceSize(const Handle& handle,
-                                            const TensorDescriptor& dyDesc,
-                                            const TensorDescriptor& xDesc,
-                                            const TensorDescriptor& dwDesc,
-                                            solver::Id solver_id) const;
+    MIOPEN_INTERNALS_EXPORT std::size_t GetWrwSolutionWorkspaceSize(const Handle& handle,
+                                                                    const TensorDescriptor& dyDesc,
+                                                                    const TensorDescriptor& xDesc,
+                                                                    const TensorDescriptor& dwDesc,
+                                                                    solver::Id solver_id) const;
 
-    void ConvolutionWrwImmediate(const Handle& handle,
-                                 const TensorDescriptor& dyDesc,
-                                 ConstData_t dy,
-                                 const TensorDescriptor& xDesc,
-                                 ConstData_t x,
-                                 const TensorDescriptor& dwDesc,
-                                 Data_t dw,
-                                 Data_t workSpace,
-                                 std::size_t workSpaceSize,
-                                 solver::Id solver_id) const;
+    MIOPEN_INTERNALS_EXPORT void ConvolutionWrwImmediate(const Handle& handle,
+                                                         const TensorDescriptor& dyDesc,
+                                                         ConstData_t dy,
+                                                         const TensorDescriptor& xDesc,
+                                                         ConstData_t x,
+                                                         const TensorDescriptor& dwDesc,
+                                                         Data_t dw,
+                                                         Data_t workSpace,
+                                                         std::size_t workSpaceSize,
+                                                         solver::Id solver_id) const;
 
     MIOPEN_INTERNALS_EXPORT void FindConvBwdWeightsAlgorithm(const Handle& handle,
                                                              const TensorDescriptor& dyDesc,
@@ -382,13 +384,13 @@ private:
     void ValidateTensors(const ConvTensors& conv_tensors) const;
 };
 
-void ConvolutionBackwardBias(const Handle& handle,
-                             const void* alpha,
-                             const TensorDescriptor& dyDesc,
-                             ConstData_t dy,
-                             const void* beta,
-                             const TensorDescriptor& dbDesc,
-                             Data_t db);
+MIOPEN_INTERNALS_EXPORT void ConvolutionBackwardBias(const Handle& handle,
+                                                     const void* alpha,
+                                                     const TensorDescriptor& dyDesc,
+                                                     ConstData_t dy,
+                                                     const void* beta,
+                                                     const TensorDescriptor& dbDesc,
+                                                     Data_t db);
 
 MIOPEN_INTERNALS_EXPORT Invoker LoadOrPrepareInvoker(const ExecutionContext& ctx,
                                                      const conv::ProblemDescription& problem,

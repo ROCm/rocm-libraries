@@ -286,7 +286,7 @@ public:
         access_mutex.unlock_shared();
     }
 
-    static LockFile& Get(const fs::path& file);
+    MIOPEN_INTERNALS_EXPORT static LockFile& Get(const fs::path& file);
 
     template <class TDuration>
     bool try_lock_for(TDuration duration)

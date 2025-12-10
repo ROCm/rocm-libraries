@@ -171,9 +171,9 @@ public:
         Statement(const SQLite& sql,
                   const std::string& query,
                   const std::vector<std::string>& vals);
-        MIOPEN_INTERNALS_NO_EXPORT Statement();
+        Statement();
         ~Statement();
-        MIOPEN_INTERNALS_NO_EXPORT Statement(Statement&&) noexcept;
+        Statement(Statement&&) noexcept;
         Statement& operator=(Statement&&) noexcept;
         Statement& operator=(const Statement&) = delete;
         int Step(const SQLite& sql);
@@ -187,14 +187,14 @@ public:
     };
 
     using result_type = std::vector<std::unordered_map<std::string, std::string>>;
-    SQLite();
+    MIOPEN_INTERNALS_EXPORT SQLite();
     MIOPEN_INTERNALS_EXPORT SQLite(const fs::path& filename_, bool is_system);
     MIOPEN_INTERNALS_EXPORT ~SQLite();
     SQLite(SQLite&&) noexcept;
-    SQLite& operator=(SQLite&&) noexcept;
+    MIOPEN_INTERNALS_EXPORT SQLite& operator=(SQLite&&) noexcept;
     SQLite& operator=(const SQLite&) = delete;
-    bool Valid() const;
-    result_type Exec(const std::string& query) const;
+    MIOPEN_INTERNALS_EXPORT bool Valid() const;
+    MIOPEN_INTERNALS_EXPORT result_type Exec(const std::string& query) const;
     int Changes() const;
     int Retry(std::function<int()>) const;
     static int Retry(std::function<int()> f, fs::path filename);

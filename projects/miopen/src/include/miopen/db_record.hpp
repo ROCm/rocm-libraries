@@ -26,6 +26,7 @@
 #ifndef GUARD_MIOPEN_DB_RECORD_HPP_
 #define GUARD_MIOPEN_DB_RECORD_HPP_
 
+#include <miopen/config.hpp>
 #include <miopen/logger.hpp>
 
 #include <cassert>
@@ -232,7 +233,7 @@ public:
     /// E.g. this = {ID1:VALUE1}
     ///      that = {ID1:VALUE3, ID2:VALUE2}
     ///      this.Merge(that) = {ID1:VALUE1, ID2:VALUE2}
-    void Merge(const DbRecord& that);
+    MIOPEN_INTERNALS_EXPORT void Merge(const DbRecord& that);
 
     /// Obtains VALUES from an object of class T and sets it in record (in association with ID,
     /// under the current KEY).

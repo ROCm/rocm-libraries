@@ -26,6 +26,7 @@
 #ifndef MIOPEN_GUARD_MLOPEN_READONLYRAMDB_HPP
 #define MIOPEN_GUARD_MLOPEN_READONLYRAMDB_HPP
 
+#include <miopen/config.hpp>
 #include <miopen/db_record.hpp>
 #include <miopen/filesystem.hpp>
 
@@ -37,7 +38,7 @@
 namespace miopen {
 
 namespace debug {
-bool& rordb_embed_fs_override();
+MIOPEN_INTERNALS_EXPORT bool& rordb_embed_fs_override();
 } // namespace debug
 
 class ReadonlyRamDb

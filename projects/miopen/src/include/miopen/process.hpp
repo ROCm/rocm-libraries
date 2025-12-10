@@ -38,22 +38,21 @@ namespace miopen {
 struct ProcessImpl;
 using ProcessEnvironmentMap = std::map<std::string, std::string>;
 
-struct Process
+struct MIOPEN_INTERNALS_EXPORT Process
 {
-    MIOPEN_INTERNALS_EXPORT Process(const fs::path& cmd);
-    MIOPEN_INTERNALS_EXPORT ~Process() noexcept;
+    Process(const fs::path& cmd);
+    ~Process() noexcept;
 
-    MIOPEN_INTERNALS_EXPORT int
-    operator()(std::string_view args                                       = "",
-               const fs::path& cwd                                         = "",
-               std::ostream* out                                           = nullptr,
-               const ProcessEnvironmentMap& additionalEnvironmentVariables = {});
+    int operator()(std::string_view args                                       = "",
+                   const fs::path& cwd                                         = "",
+                   std::ostream* out                                           = nullptr,
+                   const ProcessEnvironmentMap& additionalEnvironmentVariables = {});
 
 private:
     std::unique_ptr<ProcessImpl> impl;
 };
 
-struct ProcessAsync
+struct MIOPEN_INTERNALS_EXPORT ProcessAsync
 {
     ProcessAsync(const fs::path& cmd,
                  std::string_view args                                       = "",

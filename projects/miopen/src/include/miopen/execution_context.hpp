@@ -304,6 +304,6 @@ struct [[deprecated]] ConvolutionContext : ExecutionContext
 {
 };
 
-bool IsHipKernelsEnabled();
+MIOPEN_INTERNALS_EXPORT bool IsHipKernelsEnabled();
 
 } // namespace miopen

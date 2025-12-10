@@ -25,6 +25,7 @@
  *******************************************************************************/
 #pragma once
 
+#include <miopen/config.hpp>
 #include <miopen/db.hpp>
 #include <miopen/db_record.hpp>
 
@@ -56,7 +57,7 @@ public:
     {
     }
 
-    RamDb(DbKinds db_kind_, const fs::path& path, bool is_system = false);
+    MIOPEN_INTERNALS_EXPORT RamDb(DbKinds db_kind_, const fs::path& path, bool is_system = false);
 
     RamDb(const RamDb&) = delete;
     RamDb(RamDb&&)      = delete;
@@ -96,7 +97,7 @@ public:
 
     MIOPEN_INTERNALS_EXPORT bool StoreRecord(const DbRecord& record);
     MIOPEN_INTERNALS_EXPORT bool UpdateRecord(DbRecord& record);
-    bool RemoveRecord(const std::string& key);
+    MIOPEN_INTERNALS_EXPORT bool RemoveRecord(const std::string& key);
     MIOPEN_INTERNALS_EXPORT bool Remove(const std::string& key, const std::string& id);
 
     template <class T>
