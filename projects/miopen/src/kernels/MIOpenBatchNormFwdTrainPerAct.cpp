@@ -112,7 +112,7 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
         out += MIO_BN_GRP1;
 
         const auto getInput = [&](unsigned int i) {
-            return static_cast<fp_prec_type>(in_ptr[nstr * i + threadIdx.y]);
+            return miopen::batchnorm::cast<fp_prec_type>(in_ptr[nstr * i + threadIdx.y]);
         };
 
         for(unsigned int n = 0; n < MIO_BN_N; n++)
@@ -155,12 +155,10 @@ extern "C" __global__ __launch_bounds__(BLOCK_SIZE) void MIOpenBatchNormFwdTrain
 
         for(unsigned int n = 0; n < MIO_BN_N; n++)
         {
-            const fp_prec_type x = getInput(n);
-            fp_prec_type inhat   = (x - mean) * invVariance;
-
-            // fma(a,b,c) = a*b + c (HIP provides float/double overloads)
+            const fp_prec_type x            = getInput(n);
+            fp_prec_type inhat              = (x - mean) * invVariance;
             const fp_prec_type y_prec       = fma(pvt_scale, inhat, pvt_bias);
-            out_ptr[nstr * n + threadIdx.y] = static_cast<fp_type>(y_prec);
+            out_ptr[nstr * n + threadIdx.y] = miopen::batchnorm::cast<fp_type>(y_prec);
         }
     }
 }
