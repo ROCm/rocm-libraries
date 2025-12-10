@@ -77,8 +77,8 @@ protected:
             .set_compute_data_type(fe::DataType::FLOAT)
             .set_io_data_type(dataType);
 
-        auto xAttr = graph::makeTensorAttributes(
-            "x", dataType, dims, generateStrides(dims, layout.strideOrder));
+        auto xAttr
+            = graph::makeTensorAttributes("x", dims, generateStrides(dims, layout.strideOrder));
         xAttr.set_uid(BatchnormActivationTensorIds::X_UID);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
@@ -117,7 +117,6 @@ protected:
 
         // BN_Y = batchnorm_inference(X, mean, inv_variance, scale, bias)
         graph::BatchnormInferenceAttributes bnInfAttrs;
-        bnInfAttrs.set_name("batchnorm_inference");
 
         auto bnY = graphObj.batchnorm_inference(xTensorAttr,
                                                 meanTensorAttr,
@@ -126,18 +125,13 @@ protected:
                                                 biasTensorAttr,
                                                 bnInfAttrs);
 
-        bnY->set_name("BN_Y");
-        bnY->set_dim(dims);
-        bnY->set_stride(generateStrides(dims, layout.strideOrder));
-
-        auto dyAttr = graph::makeTensorAttributes(
-            "dy", dataType, dims, generateStrides(dims, layout.strideOrder));
+        auto dyAttr
+            = graph::makeTensorAttributes("dy", dims, generateStrides(dims, layout.strideOrder));
         dyAttr.set_uid(BatchnormActivationTensorIds::DY_UID);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
         // DX_dactiv = pointwise(DY, BN_Y, activation_mode)
         graph::PointwiseAttributes activBwdAttrs;
-        activBwdAttrs.set_name("activation_bwd");
         activBwdAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
         if(activTestCase.reluLowerClip.has_value())
         {
@@ -165,12 +159,8 @@ protected:
         }
 
         auto dxDrelu = graphObj.pointwise(bnY, dyTensorAttr, activBwdAttrs);
-        dxDrelu->set_name("DX_drelu");
-        dxDrelu->set_dim(dims);
-        dxDrelu->set_stride(generateStrides(dims, layout.strideOrder));
 
         graph::BatchnormBackwardAttributes bnBwdAttrs;
-        bnBwdAttrs.set_name("batchnorm_backward");
         bnBwdAttrs.set_saved_mean_and_inv_variance(meanTensorAttr, invVarianceTensorAttr);
 
         // [DX, dscale, dbias] = batchnorm_backward(DX_drelu, X, scale, saved_mean_inv_var)
@@ -178,24 +168,14 @@ protected:
             = graphObj.batchnorm_backward(dxDrelu, xTensorAttr, scaleTensorAttr, bnBwdAttrs);
 
         auto& dxOut = bnBwdOuts[0];
-        dxOut->set_name("dx");
-        dxOut->set_dim(dims);
-        dxOut->set_data_type(dataType);
-        dxOut->set_stride(generateStrides(dims, layout.strideOrder));
         dxOut->set_output(true);
 
         auto& dscaleOut = bnBwdOuts[1];
-        dscaleOut->set_name("dscale");
         dscaleOut->set_data_type(intermediateDataType);
-        dscaleOut->set_dim(channelDims);
-        dscaleOut->set_stride(generateStrides(channelDims, layout.strideOrder));
         dscaleOut->set_output(true);
 
         auto& dbiasOut = bnBwdOuts[2];
-        dbiasOut->set_name("dbias");
         dbiasOut->set_data_type(intermediateDataType);
-        dbiasOut->set_dim(channelDims);
-        dbiasOut->set_stride(generateStrides(channelDims, layout.strideOrder));
         dbiasOut->set_output(true);
 
         auto intermediateTolerance = batchnorm::getToleranceBackward<float>();

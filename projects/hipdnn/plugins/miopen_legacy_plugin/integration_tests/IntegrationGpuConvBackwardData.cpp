@@ -34,33 +34,34 @@ protected:
         const ConvTestCase& testCase = this->GetParam();
 
         hipdnn_frontend::graph::Graph graphObj;
-
         graphObj.set_name("ConvolutionBackwardDataTest");
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
         auto dataType = getDataTypeEnumFromType<DataType>();
+        graphObj.set_intermediate_data_type(dataType)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(dataType);
 
         auto dyAttr = graph::makeTensorAttributes(
-            "dy", dataType, testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder));
+            "dy", testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder));
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
         auto wAttr = graph::makeTensorAttributes(
-            "w", dataType, testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder));
+            "w", testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder));
         auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
         graph::ConvDgradAttributes convAttrs;
-        convAttrs.set_name("convolution_backward_data");
         convAttrs.set_pre_padding(testCase.convPrePadding);
         convAttrs.set_post_padding(testCase.convPostPadding);
         convAttrs.set_stride(testCase.convStride);
         convAttrs.set_dilation(testCase.convDilation);
 
         auto dxTensorAttr = graphObj.conv_dgrad(dyTensorAttr, wTensorAttr, convAttrs);
+        dxTensorAttr->set_output(true);
 
+        // Set these explicitly since grouped convs cannot infer tensor shape.
+        // Infer behavior will assume groups == 1, but some cases have groups > 1.
         dxTensorAttr->set_dim(testCase.xDims);
         dxTensorAttr->set_stride(generateStrides(testCase.xDims, layout.strideOrder));
-        dxTensorAttr->set_output(true);
-        dxTensorAttr->set_data_type(dataType);
 
         this->registerValidator(dxTensorAttr, tolerance);
         this->verifyGraph(graphObj, testCase.seed);

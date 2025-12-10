@@ -34,33 +34,34 @@ protected:
         const ConvTestCase& testCase = this->GetParam();
 
         hipdnn_frontend::graph::Graph graphObj;
-
         graphObj.set_name("ConvolutionBackwardWeightTest");
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
         auto dataType = getDataTypeEnumFromType<DataType>();
+        graphObj.set_intermediate_data_type(dataType)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(dataType);
 
         auto xAttr = graph::makeTensorAttributes(
-            "x", dataType, testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder));
+            "x", testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto dyAttr = graph::makeTensorAttributes(
-            "dy", dataType, testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder));
+            "dy", testCase.yDims, generateStrides(testCase.yDims, layout.strideOrder));
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
         graph::ConvWgradAttributes convAttrs;
-        convAttrs.set_name("convolution_backward_weights");
         convAttrs.set_pre_padding(testCase.convPrePadding);
         convAttrs.set_post_padding(testCase.convPostPadding);
         convAttrs.set_stride(testCase.convStride);
         convAttrs.set_dilation(testCase.convDilation);
 
         auto dwTensorAttr = graphObj.conv_wgrad(dyTensorAttr, xTensorAttr, convAttrs);
+        dwTensorAttr->set_output(true);
 
+        // Set these explicitly since grouped convs cannot infer tensor shape.
+        // Infer behavior will assume groups == 1, but some cases have groups > 1.
         dwTensorAttr->set_dim(testCase.wDims);
         dwTensorAttr->set_stride(generateStrides(testCase.wDims, layout.strideOrder));
-        dwTensorAttr->set_output(true);
-        dwTensorAttr->set_data_type(dataType);
 
         this->registerValidator(dwTensorAttr, tolerance);
         this->verifyGraph(graphObj, testCase.seed);

@@ -68,21 +68,23 @@ protected:
     {
         const auto& [bnTestCase, activTestCase] = this->GetParam();
 
-        auto inputDataType = getDataTypeEnumFromType<InputType>();
-        auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
-
         HIPDNN_LOG_INFO("Test is using {} for its random seed", bnTestCase.seed);
 
         hipdnn_frontend::graph::Graph graphObj;
         graphObj.set_name("BatchnormFwdTrainingActivTest");
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+        auto inputDataType = getDataTypeEnumFromType<InputType>();
+        auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
+        graphObj.set_intermediate_data_type(intermediateDataType)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(inputDataType);
 
         auto dims = bnTestCase.dims;
         auto derivedDims = getDerivedShape(dims);
 
         // Create input tensor attributes
-        auto xAttr = graph::makeTensorAttributes(
-            "X", inputDataType, dims, generateStrides(dims, layout.strideOrder));
+        auto xAttr
+            = graph::makeTensorAttributes("X", dims, generateStrides(dims, layout.strideOrder));
         xAttr.set_uid(BatchnormFwdTrainingActivTensorIds::X_UID);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
@@ -135,7 +137,6 @@ protected:
 
         // Create batchnorm attributes
         graph::BatchnormAttributes bnAttrs;
-        bnAttrs.set_name("batchnorm_training");
 
         if(prevRunningMeanTensorAttr && prevRunningVarianceTensorAttr && momentumTensorAttr)
         {
@@ -152,15 +153,10 @@ protected:
               nextRunningVarianceTensorAttr]
             = graphObj.batchnorm(xTensorAttr, scaleTensorAttr, biasTensorAttr, bnAttrs);
 
-        // Set BN output tensor as virtual (intermediate between BN and activation)
-        yBnTensorAttr->set_is_virtual(true); // VIRTUAL - fusion key point
         yBnTensorAttr->set_data_type(inputDataType);
-        yBnTensorAttr->set_dim(dims);
-        yBnTensorAttr->set_stride(generateStrides(dims, layout.strideOrder));
 
         // Add activation node with parameters from test case
         graph::PointwiseAttributes activAttrs;
-        activAttrs.set_name("activation");
         activAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
 
         // Set activation-specific parameters
@@ -193,25 +189,18 @@ protected:
 
         // Set final activation output tensor
         yActivTensorAttr->set_output(true);
-        yActivTensorAttr->set_data_type(inputDataType);
-        yActivTensorAttr->set_dim(dims);
-        yActivTensorAttr->set_stride(generateStrides(dims, layout.strideOrder));
 
         // Configure batch statistics outputs
         if(meanTensorAttr)
         {
             meanTensorAttr->set_output(true);
             meanTensorAttr->set_data_type(intermediateDataType);
-            meanTensorAttr->set_dim(derivedDims);
-            meanTensorAttr->set_stride(generateStrides(derivedDims));
         }
 
         if(invVarianceTensorAttr)
         {
             invVarianceTensorAttr->set_output(true);
             invVarianceTensorAttr->set_data_type(intermediateDataType);
-            invVarianceTensorAttr->set_dim(derivedDims);
-            invVarianceTensorAttr->set_stride(generateStrides(derivedDims));
         }
 
         // Configure running statistics outputs if they exist
@@ -222,8 +211,6 @@ protected:
             nextRunningMeanTensorAttr->set_name("next_running_mean");
             nextRunningMeanTensorAttr->set_output(true);
             nextRunningMeanTensorAttr->set_data_type(intermediateDataType);
-            nextRunningMeanTensorAttr->set_dim(derivedDims);
-            nextRunningMeanTensorAttr->set_stride(generateStrides(derivedDims));
         }
 
         if(nextRunningVarianceTensorAttr)
@@ -233,8 +220,6 @@ protected:
             nextRunningVarianceTensorAttr->set_name("next_running_variance");
             nextRunningVarianceTensorAttr->set_output(true);
             nextRunningVarianceTensorAttr->set_data_type(intermediateDataType);
-            nextRunningVarianceTensorAttr->set_dim(derivedDims);
-            nextRunningVarianceTensorAttr->set_stride(generateStrides(derivedDims));
         }
 
         // Register validators for all output tensors

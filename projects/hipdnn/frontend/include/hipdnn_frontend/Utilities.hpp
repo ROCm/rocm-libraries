@@ -85,6 +85,13 @@ inline TensorAttributes makeTensorAttributes(const std::string& name,
         strides);
 }
 
+inline TensorAttributes makeTensorAttributes(const std::string& name,
+                                             const std::vector<int64_t>& dims,
+                                             const std::vector<int64_t>& strides)
+{
+    return TensorAttributes().set_name(name).set_dim(dims).set_stride(strides);
+}
+
 inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
     createTensorFromAttribute(const TensorAttributes& attribute)
 {

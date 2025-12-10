@@ -1857,3 +1857,16 @@ size_t PrePostKernelNode::GetTwiddleTableLengthLimit()
     // The kernel only uses 1/4th of the real length twiddle table
     return DivRoundingUp<size_t>(GetTwiddleTableLength(), 4);
 }
+
+std::vector<size_t> PrePostKernelNode::CollapsibleDims()
+{
+    // regular non-transposing kernel can collapse everything but the
+    // fastest dimension where the real-complex processing happens
+    if(scheme != CS_KERNEL_R_TO_CMPLX_TRANSPOSE && scheme != CS_KERNEL_TRANSPOSE_CMPLX_TO_R)
+    {
+        std::vector<size_t> ret(length.size() - 1);
+        std::iota(ret.begin(), ret.end(), 1);
+        return ret;
+    }
+    return {};
+}

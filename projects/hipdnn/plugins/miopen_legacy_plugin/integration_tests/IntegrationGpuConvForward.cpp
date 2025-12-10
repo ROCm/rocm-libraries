@@ -34,22 +34,22 @@ protected:
         const ConvTestCase& testCase = this->GetParam();
 
         hipdnn_frontend::graph::Graph graphObj;
-
         graphObj.set_name("ConvolutionForwardTest");
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
         auto dataType = getDataTypeEnumFromType<DataType>();
+        graphObj.set_intermediate_data_type(dataType)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(dataType);
 
         auto xAttr = graph::makeTensorAttributes(
-            "x", dataType, testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder));
+            "x", testCase.xDims, generateStrides(testCase.xDims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto wAttr = graph::makeTensorAttributes(
-            "w", dataType, testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder));
+            "w", testCase.wDims, generateStrides(testCase.wDims, layout.strideOrder));
         auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
         graph::ConvFpropAttributes convAttrs;
-        convAttrs.set_name("convolution_forward");
         convAttrs.set_pre_padding(testCase.convPrePadding);
         convAttrs.set_post_padding(testCase.convPostPadding);
         convAttrs.set_stride(testCase.convStride);
@@ -58,9 +58,6 @@ protected:
         auto yAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
 
         yAttr->set_output(true);
-        yAttr->set_data_type(dataType);
-        yAttr->set_dim(testCase.yDims);
-        yAttr->set_stride(generateStrides(testCase.yDims, layout.strideOrder));
 
         this->registerValidator(yAttr, tolerance);
 
