@@ -59,6 +59,9 @@ include: test_gtsv2_strided_batch.yaml
 include: test_gtsv_interleaved_batch.yaml
 include: test_gpsv_interleaved_batch.yaml
 
+# reorder
+include: test_csrcolor.yaml
+
 # conversion
 include: test_bsr2csr.yaml
 include: test_coo2csr.yaml
