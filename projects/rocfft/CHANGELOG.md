@@ -17,6 +17,7 @@ Documentation for rocFFT is available at
 * Fixed callbacks on multi-device transforms.
 * Fixed potential issue with data generation for multidimensional transforms in rocfft-tests and rocfft-bench.
 * Fixed issue that sometimes blocked complex-to-complex FFT plan creation when using noncontiguous strides in multiple dimensions.
+* Fixed issue that sometimes blocked complex-to-real FFT plan creation when using noncontiguous strides in multiple dimensions.
 * Fixed issue that sometimes blocked complex-to-real FFT plan creation when using noncontiguous strides with small lengths on the two fastest dimensions.
 * Fixed potential launch failure of data generation kernels in test and benchmark programs.
 * Fixed incorrect results on some strided real-complex FFTs on gfx90a.
