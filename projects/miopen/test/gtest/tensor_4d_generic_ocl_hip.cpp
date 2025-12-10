@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,18 +23,12 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "get_handle.hpp"
-#include "random.hpp"
-#include <verify.hpp>
-#include <miopen/miopen.h>
 #include <miopen/datatype.hpp>
-#include <miopen/kernel_build_params.hpp>
 #include <gtest/gtest.h>
 
-#include <tensor_util.hpp>
-
+#include "get_handle.hpp"
+#include "verify.hpp"
 #include "perf_helper.hpp"
-#include <miopen/float_equal.hpp>
 
 #define MAX_TENSOR_ELEM 17
 #define PERF_ENABLE 0
@@ -52,7 +46,7 @@ template <typename T>
 std::vector<TensorsConfig> TensorsConfigs()
 {
     std::vector<TensorsConfig> configs;
-    auto insertTestCase = [&configs](size_t& N, size_t& C, size_t& H, size_t& W) {
+    auto insertTestCase = [&configs](size_t N, size_t C, size_t H, size_t W) {
         configs.push_back(
             {{N, C, H, W}, {C * H * W, H * W, W, 1}, {N, C, H, W}, {C * H * W, H * W, W, 1}});
         configs.push_back(
@@ -89,31 +83,31 @@ std::vector<TensorsConfig> TensorsConfigs()
 
     if constexpr(PERF_ENABLE)
     {
-
         const auto& handle = get_handle();
+        auto deviceDevice = handle.GetDeviceName();
         size_t maxTotalSize;
 
         // Generate all NCHW tensors that are limited by L3 cache size
         // or 2xL2 cache size when L3 is not available
-        if(miopen::StartsWith(handle.GetDeviceName(), "gfx90a") ||
-           miopen::StartsWith(handle.GetDeviceName(), "gfx908"))
+        if(miopen::StartsWith(deviceName, "gfx90a") ||
+           miopen::StartsWith(deviceName, "gfx908"))
         {
             maxTotalSize = 16; // twice the 8MB L2
         }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx803"))
+        else if(miopen::StartsWith(deviceName, "gfx803"))
         {
             maxTotalSize = 4; // twice the 2MB L2
         }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx900") ||
-                miopen::StartsWith(handle.GetDeviceName(), "gfx906"))
+        else if(miopen::StartsWith(deviceName, "gfx900") ||
+                miopen::StartsWith(deviceName, "gfx906"))
         {
             maxTotalSize = 8; // twice the 4MB L2
         }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx942"))
+        else if(miopen::StartsWith(deviceName, "gfx942"))
         {
             maxTotalSize = 256; // 256MB L3
         }
-        else if(miopen::StartsWith(handle.GetDeviceName(), "gfx103"))
+        else if(miopen::StartsWith(deviceName, "gfx103"))
         {
             maxTotalSize = 128; // 128MB L3
         }
@@ -262,14 +256,6 @@ protected:
             }
         }
 
-        // if(std::accumulate(tensorsConfig.blens.begin(),
-        //                    tensorsConfig.blens.end(),
-        //                    4,
-        //                    std::multiplies<std::size_t>()) == 1)
-        // {
-        //     bitmap = 4;
-        // }
-
         num_wg_orig = num_wg;
         max_num_wg  = 4096;
         num_wg      = num_wg > max_num_wg ? max_num_wg : num_wg;
@@ -289,7 +275,6 @@ protected:
 
     void runCPU()
     {
-
         std::vector<T> A = tensA.data;
         std::vector<T> B = tensB.data;
         std::vector<T> C = tensC.data;
@@ -342,10 +327,10 @@ protected:
         std::string program_name       = "MIOpenTensorKernels.cl";
         std::string network_config_ocl = network_config + "-ocl";
 
-        handle.AddKernel("Op4dTensorGeneric",
+        handle.AddKernel(kernel_name,
                          network_config_ocl,
                          program_name,
-                         "Op4dTensorGeneric",
+                         kernel_name,
                          vld,
                          vgd,
                          params)(tensA_dev.get(),
@@ -371,19 +356,18 @@ protected:
                                  beta,
                                  bitmap,
                                  work_per_wg,
-                                 static_cast<int64_t>(0),
-                                 static_cast<int64_t>(0),
-                                 static_cast<int64_t>(0),
-                                 static_cast<int>(num_wg_orig));
+                                 static_cast<long>(0),
+                                 static_cast<long>(0),
+                                 static_cast<long>(0),
+                                 num_wg_orig);
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
 
         if constexpr(PERF_ENABLE)
         {
             ph.perfTest(handle,
-                        "Op4dTensorGeneric",
+                        kernel_name,
                         network_config_ocl,
-                        false,
                         tensA_dev.get(),
                         static_cast<int>(tensorsConfig.acstrides[0]),
                         static_cast<int>(tensorsConfig.acstrides[1]),
@@ -407,10 +391,10 @@ protected:
                         beta,
                         bitmap,
                         work_per_wg,
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        static_cast<int>(num_wg_orig));
+                        static_cast<long>(0),
+                        static_cast<long>(0),
+                        static_cast<long>(0),
+                        num_wg_orig);
         }
     }
 
@@ -429,10 +413,10 @@ protected:
         std::string program_name       = "MIOpenTensorKernelsHip.cpp";
         std::string network_config_hip = network_config + "-hip";
 
-        handle.AddKernel("Op4dTensorGeneric",
+        handle.AddKernel(kernel_name,
                          network_config_hip,
                          program_name,
-                         "Op4dTensorGeneric",
+                         kernel_name,
                          vld,
                          vgd,
                          params)(tensA_dev.get(),
@@ -458,19 +442,18 @@ protected:
                                  beta,
                                  bitmap,
                                  work_per_wg,
-                                 static_cast<int64_t>(0),
-                                 static_cast<int64_t>(0),
-                                 static_cast<int64_t>(0),
-                                 static_cast<int>(num_wg_orig));
+                                 static_cast<long>(0),
+                                 static_cast<long>(0),
+                                 static_cast<long>(0),
+                                 num_wg_orig);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
 
         if constexpr(PERF_ENABLE)
         {
             ph.perfTest(handle,
-                        "Op4dTensorGeneric",
+                        kernel_name,
                         network_config_hip,
-                        false,
                         tensA_dev.get(),
                         static_cast<int>(tensorsConfig.acstrides[0]),
                         static_cast<int>(tensorsConfig.acstrides[1]),
@@ -494,10 +477,10 @@ protected:
                         beta,
                         bitmap,
                         work_per_wg,
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        static_cast<int64_t>(0),
-                        static_cast<int>(num_wg_orig));
+                        static_cast<long>(0),
+                        static_cast<long>(0),
+                        static_cast<long>(0),
+                        num_wg_orig);
         }
     }
 
@@ -510,7 +493,7 @@ protected:
     void verifyCPU()
     {
         auto error = miopen::rms_range(tensC_hip, tensC_cpu);
-        EXPECT_TRUE(error == 0) << "GPU outputs do not match each other. Error: " << error;
+        EXPECT_TRUE(error == 0) << "GPU outputs do not match CPU results. Error: " << error;
     }
 
     void TearDown() override
@@ -537,10 +520,11 @@ protected:
             stats += "_alpha0_" + std::to_string(alpha0) + "_alpha1_" + std::to_string(alpha1) +
                      "_beta_" + std::to_string(beta) + "_" + miopen::GetDataType(data_type);
 
-            ph.writeStatsToCSV("tensor_4d.csv", stats);
+            ph.writeStatsToCSV("tensor_4d_generic.csv", stats);
         }
     }
 
+    const std::string kernel_name{"Op4dTensorGeneric"};
     std::string network_config{};
     std::string params{};
     std::vector<size_t> vld, vgd;
