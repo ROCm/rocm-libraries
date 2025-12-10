@@ -300,10 +300,12 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                 if(i > 0)
                 {
                     samples.push_back(handle.GetKernelTime());
-                    if(i == 1 && using_search_cutoff && samples.front() > 1.0f && samples.front() > skip_time)
+                    if(i == 1 && using_search_cutoff && samples.front() > 1.0f &&
+                       samples.front() > skip_time)
                     {
-                        MIOPEN_LOG_I("Skipping (Slow) Solver: " << algorithm_name.ToString() << ":"
-                                                                << sol.solver_id << " " << samples.front() << " > " << skip_time);
+                        MIOPEN_LOG_I("Skipping (Slow) Solver: "
+                                     << algorithm_name.ToString() << ":" << sol.solver_id << " "
+                                     << samples.front() << " > " << skip_time);
                         break;
                     }
                 }
