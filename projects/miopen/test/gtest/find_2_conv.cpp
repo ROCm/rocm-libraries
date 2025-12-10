@@ -16,7 +16,7 @@
 
 #include <vector>
 
-namespace find_2_conv {
+namespace {
 
 struct Find2ConvTest : test_driver
 {
@@ -342,10 +342,6 @@ private:
     }
 };
 
-class GPU_Find2Conv_FP32 : public testing::Test
-{
-};
-
 void RunFind2ConvTests()
 {
     Find2ConvTest test;
@@ -359,7 +355,6 @@ void RunFind2ConvTests()
         data_args.push_back(&arg);
     }
 
-    prng::reset_seed();
     test.iteration = 0;
     try
     {
@@ -377,20 +372,23 @@ void RunFind2ConvTests()
 
 bool IsTestSupportedForDevice(const miopen::Handle& handle) { return true; }
 
-} // namespace find_2_conv
-using namespace find_2_conv;
+} // namespace
 
-TEST_F(GPU_Find2Conv_FP32, FloatTest_find_2_conv)
+class GPU_Find2Conv_FP32 : public testing::TestWithParam<int>
 {
-    const auto& handle = get_handle();
-    if(IsTestSupportedForDevice(handle))
+    void SetUp() override
     {
+        prng::reset_seed();
+        const auto& handle = get_handle();
+        if(!IsTestSupportedForDevice(handle))
+        {
+            GTEST_SKIP();
+        }
         // Set up environment variables
         lib_env::update(MIOPEN_LOG_LEVEL, 2);
-        RunFind2ConvTests();
     }
-    else
-    {
-        GTEST_SKIP();
-    }
-}
+};
+
+TEST_P(GPU_Find2Conv_FP32, FloatTest_find_2_conv) { RunFind2ConvTests(); }
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Find2Conv_FP32, testing::ValuesIn({0}));
