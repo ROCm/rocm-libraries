@@ -777,7 +777,7 @@ void testing_csrgeam2(Arguments argus)
     {
 #ifdef __HIP_PLATFORM_NVIDIA__
         // cusparse does not support mixed index bases nor does it properly handle m == 0 or n == 0
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
 #endif
     }
 
