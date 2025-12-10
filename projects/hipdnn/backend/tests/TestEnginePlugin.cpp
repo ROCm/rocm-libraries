@@ -8,8 +8,8 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "TestPluginConstants.hpp"
 #include "plugin/EnginePlugin.hpp"

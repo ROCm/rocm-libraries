@@ -370,7 +370,7 @@ void testing_prune_dense2csr_by_percentage_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_prune_dense2csr_by_percentage(Arguments argus)
+void testing_prune_dense2csr_by_percentage(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
     int                  M          = argus.M;
@@ -394,7 +394,7 @@ hipsparseStatus_t testing_prune_dense2csr_by_percentage(Arguments argus)
     if(M == 0 || N == 0)
     {
 #ifdef __HIP_PLATFORM_NVIDIA__
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
 #endif
     }
 
@@ -613,8 +613,6 @@ hipsparseStatus_t testing_prune_dense2csr_by_percentage(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_PRUNE_DENSE2CSR_BY_PERCENTAGE_HPP

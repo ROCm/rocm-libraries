@@ -108,48 +108,42 @@ TEST_P(parameterized_csrgemm2_a, csrgemm2_a_float)
 {
     Arguments arg = setup_csrgemm2_a_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_csrgemm2_a<float>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+    testing_csrgemm2_a<float>(arg);
 }
 
 TEST_P(parameterized_csrgemm2_a, csrgemm2_a_double)
 {
     Arguments arg = setup_csrgemm2_a_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_csrgemm2_a<double>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+    testing_csrgemm2_a<double>(arg);
 }
 
 TEST_P(parameterized_csrgemm2_a, csrgemm2_a_float_complex)
 {
     Arguments arg = setup_csrgemm2_a_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_csrgemm2_a<hipComplex>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+    testing_csrgemm2_a<hipComplex>(arg);
 }
 
 TEST_P(parameterized_csrgemm2_a, csrgemm2_a_double_complex)
 {
     Arguments arg = setup_csrgemm2_a_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_csrgemm2_a<hipDoubleComplex>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+    testing_csrgemm2_a<hipDoubleComplex>(arg);
 }
 
 TEST_P(parameterized_csrgemm2_a_bin, csrgemm2_a_bin_float)
 {
     Arguments arg = setup_csrgemm2_a_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_csrgemm2_a<float>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+    testing_csrgemm2_a<float>(arg);
 }
 
 TEST_P(parameterized_csrgemm2_a_bin, csrgemm2_a_bin_double)
 {
     Arguments arg = setup_csrgemm2_a_arguments(GetParam());
 
-    hipsparseStatus_t status = testing_csrgemm2_a<double>(arg);
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+    testing_csrgemm2_a<double>(arg);
 }
 
 INSTANTIATE_TEST_SUITE_P(csrgemm2_a,
