@@ -31,6 +31,7 @@
 
 #include "../../shared/CLI11.hpp"
 #include "../../shared/arithmetic.h"
+#include "../../shared/device_properties.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/hip_object_wrapper.h"
 #include "device/generator/stockham_gen.h"
