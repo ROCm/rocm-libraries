@@ -136,6 +136,7 @@ void run_internal_discrete_tests()
             actual_prob[i] = histogram[i] / static_cast<double>(GlobalSizes::size);
 
         ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
+        // ASSERT_TRUE(ks_test_2_interval(expected_prob, actual_prob, 0.1, 100));
 
         ROCRAND_CHECK(rocrand_destroy_discrete_distribution(discrete_distribution));
     }
@@ -281,6 +282,7 @@ void run_external_discrete_tests(
             actual_prob[i] = histogram[i] / static_cast<double>(size);
 
         ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
+        // ASSERT_TRUE(ks_test_2_interval(expected_prob, actual_prob, 0.1, 100));
         ROCRAND_CHECK(rocrand_destroy_discrete_distribution(discrete_distribution));
     }
 
@@ -645,7 +647,6 @@ TEST(ExternalDiscreteDistributionTests, Philox4x32_10WithUIN4OutputTest)
             actual_prob[i] = histogram[i] / static_cast<double>(GlobalSizes::size * 4);
 
         ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
-
         ROCRAND_CHECK(rocrand_destroy_discrete_distribution(discrete_distribution));
     }
 
@@ -731,6 +732,7 @@ void run_internal_host_test(const DiscreteFunc& df)
             actual_prob[i] = histogram[i] / static_cast<double>(test_size);
 
         ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
+        // ASSERT_TRUE(ks_test_2_interval(expected_prob, actual_prob, 0.1, 100));
     }
 }
 
@@ -873,6 +875,7 @@ void run_host_test(const DiscreteFunc& df)
             actual_prob[i] = histogram[i] / static_cast<double>(test_size);
 
         ASSERT_TRUE(ks_test_2(expected_prob, actual_prob));
+        // ASSERT_TRUE(ks_test_2_interval(expected_prob, actual_prob, 0.1, 100));
 
     }
 }
