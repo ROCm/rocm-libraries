@@ -1538,6 +1538,55 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
     matrix_inst=[16, 16, 32, 1],
     mfma_wave_group=[2, 2]
 )
+
+def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
+    """
+    Questions: 
+    1. LRA0 and LRA1 are reading from LDSA0 and LDSA1 ? If so we have to keep issuing LWSA after every LRA0 and LRA1 right?
+    2. Why is there GRIncA 3 times in a row ? Shouldn't there be an increment followed by GRA
+    3. The schedule is for 1 SIMD ? 
+    4. The schedule is for 1 ITERATION ? as opposed to SUBITERATION ? 
+        * One subiteraton is 
+    5. Shouldn't we be alternating instructions of LRA0 and LRA1 and hence many LWSA instructions ?
+
+    """
+    if not (isTN(kernel) and TLDS):
+        return False, None
+
+    print("USING CMS!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    kernel["MfmaInitCVgprs"] = True
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    optSchedule = {
+    'SYNC': [[-1, 6, 17, 17, 27, 41, 41]],
+    'LRA0': [[0, 2, 3, 4, 5, 6, 7]],
+    'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
+    'LRB0': [[1, 8, 9, 10]],
+    'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
+    'GRA': [[17, 17, 19, 19, 21, 21, 23, 23, 25, 25, 28, 28, 30, 30]],
+    'LRSA': [[26]],
+    'LRSB': [[26]],
+    'GRB': [[32, 32, 34, 34, 37, 37, 39, 39]],
+    'LWSA': [[39]],
+    'LWSB': [[39]],
+    'LRA1': [[42, 44, 45, 46, 47, 48, 49]],
+    'LRB1': [[43, 50, 51, 52]],
+    'LCC': [[55, 55]],
+    }
+
+    syncCode = [
+        SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=3 newLW=0 newLR=3 for iteration == 0"),
+        SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
+        SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+        SBarrier(comment=""),
+        SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+        SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
+        SBarrier(comment="")
+    ]
+    numMfma = 56
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+
 def _get_schedule_224x256x64_16bit(kernel, userLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
