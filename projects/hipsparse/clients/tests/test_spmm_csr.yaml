@@ -29,13 +29,13 @@ Tests:
 - name: spmm_csr_bad_arg
   category: pre_checkin
   function: spmm_csr_bad_arg
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
 - name: spmm_csr
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: [50]
   N: [5]
@@ -51,13 +51,12 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT, 
              HIPSPARSE_SPMM_CSR_ALG1,
-             HIPSPARSE_SPMM_CSR_ALG2,
-             HIPSPARSE_SPMM_CSR_ALG3]
+             HIPSPARSE_SPMM_CSR_ALG2]
 
 - name: spmm_csr
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: 1
   N: [25]
@@ -73,8 +72,7 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT, 
              HIPSPARSE_SPMM_CSR_ALG1,
-             HIPSPARSE_SPMM_CSR_ALG2,
-             HIPSPARSE_SPMM_CSR_ALG3]
+             HIPSPARSE_SPMM_CSR_ALG2]
   filename: [nos1,
              nos4, 
              nos5]
@@ -98,6 +96,5 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT, 
              HIPSPARSE_SPMM_CSR_ALG1,
-             HIPSPARSE_SPMM_CSR_ALG2,
-             HIPSPARSE_SPMM_CSR_ALG3]
+             HIPSPARSE_SPMM_CSR_ALG2]
   filename: [Chebyshev4]

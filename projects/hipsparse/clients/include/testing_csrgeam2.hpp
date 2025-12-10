@@ -729,7 +729,7 @@ void testing_csrgeam2_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csrgeam2(Arguments argus)
+void testing_csrgeam2(Arguments argus)
 {
     int                  M          = argus.M;
     int                  N          = argus.N;
@@ -770,7 +770,7 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
            filename, M, N, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idx_base_A))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     // B = A so that we can compute the square of A
@@ -1120,8 +1120,6 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSRGEAM2_HPP

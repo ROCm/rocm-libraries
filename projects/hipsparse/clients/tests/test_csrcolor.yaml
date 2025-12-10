@@ -26,53 +26,40 @@ include: hipsparse_common.yaml
 
 
 Tests:
-- name: spmm_batched_csr_bad_arg
+- name: csrcolor_bad_arg
   category: pre_checkin
-  function: spmm_batched_csr_bad_arg
-  indextype: *i32_i64
+  function: csrcolor_bad_arg
   precision: *single_double_precisions_complex_real
 
-- name: spmm_batched_csr
+- name: csrcolor
   category: quick
-  function: spmm_batched_csr
-  indextype: *i32_i64
+  function: csrcolor
   precision: *single_double_precisions_complex_real
-  M: [50]
-  N: [5]
-  K: [23]
-  alpha: [2.0]
-  alphai: [0.0]
-  beta: [1.0]
-  betai: [0.0]
-  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  orderC: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT]
-
-- name: spmm_batched_csr
-  category: pre_checkin
-  function: spmm_batched_csr
-  indextype: *i32
-  precision: *single_double_precisions
   M: 1
-  N: [10]
-  K: 1
-  alpha: [2.0]
-  alphai: [0.0]
-  beta: [1.0]
-  betai: [0.0]
-  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  orderC: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  N: 1
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT]
   filename: [nos1,
-             nos2, 
-             nos3,
-             nos4, 
+             nos2,
+             nos3]
+
+- name: csrcolor
+  category: pre_checkin
+  function: csrcolor
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos4,
              nos5,
-             nos6, 
+             nos6,
              nos7]
+
+- name: csrcolor
+  category: pre_checkin
+  function: csrcolor
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  filename: [shipsec1,
+             bmwcra_1]
