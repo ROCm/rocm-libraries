@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_plugin_sdk/PluginSdk.hpp>
 
-TEST(PluginSdk, Example)
+TEST(TestPluginSdk, Example)
 {
     hipdnn::plugin_sdk::hello();
     EXPECT_TRUE(true);
