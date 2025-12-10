@@ -42,9 +42,9 @@ typed_test_def(RocprimBlockAdjacentDifference, name_suffix, SubtractLeft)
     constexpr size_t block_size = TestFixture::params::block_size;
 
     // clang-format off
-    static_for<0, 2,       T, T, op_type_1, MethodType::LEFT, block_size>::run();
-    static_for<2, 4,       T, T, op_type_2, MethodType::LEFT, block_size>::run();
-    static_for<4, n_items, T, T, op_type_3, MethodType::LEFT, block_size>::run();
+    static_for<0, 2,       T, T, op_type_1, TestBlockAdjacentDifferenceMethod::LEFT, block_size>::run();
+    static_for<2, 4,       T, T, op_type_2, TestBlockAdjacentDifferenceMethod::LEFT, block_size>::run();
+    static_for<4, n_items, T, T, op_type_3, TestBlockAdjacentDifferenceMethod::LEFT, block_size>::run();
     // clang-format on
 }
 
@@ -59,9 +59,9 @@ typed_test_def(RocprimBlockAdjacentDifference, name_suffix, SubtractRight)
     constexpr size_t block_size = TestFixture::params::block_size;
 
     // clang-format off
-    static_for<0, 2,       T, T, op_type_1, MethodType::RIGHT, block_size>::run();
-    static_for<2, 4,       T, T, op_type_2, MethodType::RIGHT, block_size>::run();
-    static_for<4, n_items, T, T, op_type_3, MethodType::RIGHT, block_size>::run();
+    static_for<0, 2,       T, T, op_type_1, TestBlockAdjacentDifferenceMethod::RIGHT, block_size>::run();
+    static_for<2, 4,       T, T, op_type_2, TestBlockAdjacentDifferenceMethod::RIGHT, block_size>::run();
+    static_for<4, n_items, T, T, op_type_3, TestBlockAdjacentDifferenceMethod::RIGHT, block_size>::run();
     // clang-format on
 }
 
@@ -76,9 +76,9 @@ typed_test_def(RocprimBlockAdjacentDifference, name_suffix, SubtractLeftPartial)
     constexpr size_t block_size = TestFixture::params::block_size;
 
     // clang-format off
-    static_for<0, 2,       T, T, op_type_1, MethodType::LEFT_PARTIAL, block_size>::run();
-    static_for<2, 4,       T, T, op_type_2, MethodType::LEFT_PARTIAL, block_size>::run();
-    static_for<4, n_items, T, T, op_type_3, MethodType::LEFT_PARTIAL, block_size>::run();
+    static_for<0, 2,       T, T, op_type_1, TestBlockAdjacentDifferenceMethod::LEFT_PARTIAL, block_size>::run();
+    static_for<2, 4,       T, T, op_type_2, TestBlockAdjacentDifferenceMethod::LEFT_PARTIAL, block_size>::run();
+    static_for<4, n_items, T, T, op_type_3, TestBlockAdjacentDifferenceMethod::LEFT_PARTIAL, block_size>::run();
     // clang-format on
 }
 
@@ -93,8 +93,8 @@ typed_test_def(RocprimBlockAdjacentDifference, name_suffix, SubtractRightPartial
     constexpr size_t block_size = TestFixture::params::block_size;
 
     // clang-format off
-    static_for<0, 2,       T, T, op_type_1, MethodType::RIGHT_PARTIAL, block_size>::run();
-    static_for<2, 4,       T, T, op_type_2, MethodType::RIGHT_PARTIAL, block_size>::run();
-    static_for<4, n_items, T, T, op_type_3, MethodType::RIGHT_PARTIAL, block_size>::run();
+    static_for<0, 2,       T, T, op_type_1, TestBlockAdjacentDifferenceMethod::RIGHT_PARTIAL, block_size>::run();
+    static_for<2, 4,       T, T, op_type_2, TestBlockAdjacentDifferenceMethod::RIGHT_PARTIAL, block_size>::run();
+    static_for<4, n_items, T, T, op_type_3, TestBlockAdjacentDifferenceMethod::RIGHT_PARTIAL, block_size>::run();
     // clang-format on
 }

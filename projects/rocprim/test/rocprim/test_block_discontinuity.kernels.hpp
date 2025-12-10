@@ -39,6 +39,12 @@
 #include <type_traits>
 #include <vector>
 
+enum TestBlockDiscontinuityMethod {
+    HEADS = 0,
+    TAILS = 1,
+    HEADS_AND_TAILS = 2
+};
+
 template<class T>
 struct custom_flag_op1
 {
@@ -207,7 +213,7 @@ template<
     unsigned int ItemsPerThread
 >
 auto test_block_discontinuity()
--> typename std::enable_if<Method == 0>::type
+-> typename std::enable_if<Method == TestBlockDiscontinuityMethod::HEADS>::type
 {
     using type                               = Type;
     using flag_type = FlagType;
@@ -293,7 +299,7 @@ template<
     unsigned int ItemsPerThread
 >
 auto test_block_discontinuity()
--> typename std::enable_if<Method == 1>::type
+-> typename std::enable_if<Method == TestBlockDiscontinuityMethod::TAILS>::type
 {
     using type                               = Type;
     using flag_type = FlagType;
@@ -378,7 +384,7 @@ template<
     unsigned int ItemsPerThread
 >
 auto test_block_discontinuity()
--> typename std::enable_if<Method == 2>::type
+-> typename std::enable_if<Method == TestBlockDiscontinuityMethod::HEADS_AND_TAILS>::type
 {
     using type                               = Type;
     using flag_type = FlagType;

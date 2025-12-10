@@ -34,13 +34,12 @@
 #include <rocprim/block/block_load_func.hpp>
 #include <rocprim/block/block_store.hpp>
 
-enum MethodType {
+enum TestBlockAdjacentDifferenceMethod {
     LEFT = 0,
     RIGHT = 1,
     LEFT_PARTIAL = 2,
     RIGHT_PARTIAL = 3
 };
-
 
 // Host (CPU) implementaions of the wrapping function that allows to pass 3 args
 template<class T, class FlagType, class FlagOp>
@@ -230,7 +229,7 @@ template<typename T,
          unsigned int Method,
          unsigned int BlockSize,
          unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == MethodType::LEFT>::type
+auto test_block_adjacent_difference() -> typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::LEFT>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 
@@ -317,7 +316,7 @@ template<typename T,
          unsigned int Method,
          unsigned int BlockSize,
          unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == MethodType::RIGHT>::type
+auto test_block_adjacent_difference() -> typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::RIGHT>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 
@@ -404,7 +403,7 @@ template<typename T,
          unsigned int Method,
          unsigned int BlockSize,
          unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == MethodType::LEFT_PARTIAL>::type
+auto test_block_adjacent_difference() -> typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::LEFT_PARTIAL>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 
@@ -506,7 +505,7 @@ template<typename T,
          unsigned int Method,
          unsigned int BlockSize,
          unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == MethodType::RIGHT_PARTIAL>::type
+auto test_block_adjacent_difference() -> typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::RIGHT_PARTIAL>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 
