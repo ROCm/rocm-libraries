@@ -1557,18 +1557,18 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     optSchedule = {
-    'SYNC': [[-1, 6, 17, 17, 27, 41, 41]],
-    'LRA0': [[0, 2, 3, 4, 5, 6, 7]],
+    'SYNC': [[-1, 6, 20, 20, 27, 41, 41]], # I don't understand why a sync @ 21 triggers an error ...
+    'LRA0': [[0,1, 2, 3, 4, 5, 6]],
     'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
-    'LRB0': [[1, 8, 9, 10]],
+    'LRB0': [[7, 8, 9, 10]],
     'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
-    'GRA': [[17, 17, 19, 19, 21, 21, 23, 23, 25, 25, 28, 28, 30, 30]],
+    'GRA': [[21,21,22 ,23,23, 23, 24, 25, 25, 28, 28, 30, 30,31]], # I don't know why GRA at 33 results in a mismatch.
     'LRSA': [[26]],
     'LRSB': [[26]],
     'GRB': [[32, 32, 34, 34, 37, 37, 39, 39]],
     'LWSA': [[39]],
     'LWSB': [[39]],
-    'LRA1': [[42, 44, 45, 46, 47, 48, 49]],
+    'LRA1': [[42, 43, 44, 45, 46, 47, 48]],
     'LRB1': [[43, 50, 51, 52]],
     'LCC': [[55, 55]],
     }
@@ -1576,7 +1576,7 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     syncCode = [
         SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=3 newLW=0 newLR=3 for iteration == 0"),
         SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
-        SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""),
+        SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment=""), # Not sure why I can't set dscnt=4 since this is for GRA. 
         SBarrier(comment=""),
         SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
         SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
