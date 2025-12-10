@@ -7,11 +7,7 @@ find_package(Threads REQUIRED)
 enable_language(HIP)
 
 if(NOT BUILD_PLUGIN_AS_DEPENDENCY)
-<<<<<<< HEAD
-    find_package(hipdnn_frontend CONFIG REQUIRED)
-=======
     find_package(hipdnn_test_sdk CONFIG REQUIRED)
->>>>>>> origin/develop
 endif()
 
 add_executable(
@@ -46,19 +42,8 @@ add_executable(
 target_compile_options(miopen_legacy_plugin_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 
 target_link_libraries(
-<<<<<<< HEAD
-    miopen_legacy_plugin_tests
-    PUBLIC GTest::gtest
-           GTest::gmock
-           hip::host
-           miopen_legacy_plugin_private
-           hipdnn_sdk
-           hipdnn_frontend
-           Threads::Threads
-=======
     miopen_legacy_plugin_tests PUBLIC GTest::gtest GTest::gmock hip::host
                                       miopen_legacy_plugin_private hipdnn_test_sdk Threads::Threads
->>>>>>> origin/develop
 )
 
 # make it so tests inside folders can find the mocks folder without having to use a relative path.

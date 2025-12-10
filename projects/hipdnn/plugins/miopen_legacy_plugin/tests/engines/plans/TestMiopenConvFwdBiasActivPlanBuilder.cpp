@@ -20,7 +20,7 @@
 
 using namespace miopen_legacy_plugin;
 using namespace hipdnn_plugin;
-using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_sdk::utilities;
 
 class TestMiopenConvFwdBiasActivPlanBuilder : public ::testing::Test

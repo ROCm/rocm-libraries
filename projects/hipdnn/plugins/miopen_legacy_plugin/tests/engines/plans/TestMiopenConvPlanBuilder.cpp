@@ -152,7 +152,7 @@ TEST_F(TestMiopenConvPlanBuilder, BuildPlanThrowsForUnsupportedGraph)
 TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForUnsupportedComputeType)
 {
     flatbuffers::FlatBufferBuilder builder
-        = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+        = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
 
     auto mutableGraph = hipdnn_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer());
     mutableGraph->mutable_nodes()->GetMutableObject(0)->mutate_compute_data_type(

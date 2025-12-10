@@ -91,7 +91,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForWro
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForUnsupportedComputeType)
 {
     flatbuffers::FlatBufferBuilder builder
-        = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingActivGraph();
+        = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
 
     auto mutableGraph = hipdnn_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer());
     mutableGraph->mutable_nodes()->GetMutableObject(1)->mutate_compute_data_type(
