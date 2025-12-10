@@ -45,9 +45,9 @@ template <typename T>
 void RunPooling3dTests()
 {
     pooling3d_driver<T> driver;
-    driver.type = miopen_type<T>{};
-    driver.full_set = false;
-    driver.dataset_id = 0;
+    driver.type              = miopen_type<T>{};
+    driver.full_set          = false;
+    driver.dataset_id        = 0;
     driver.config_iter_start = 0;
 
     std::vector<typename pooling3d_driver<T>::argument*> data_args;
@@ -60,7 +60,9 @@ void RunPooling3dTests()
     driver.iteration = 0;
     try
     {
-        run_data(data_args.begin(), data_args.end(), [&] { driver.template base_run<pooling3d_driver<T>>(); });
+        run_data(data_args.begin(), data_args.end(), [&] {
+            driver.template base_run<pooling3d_driver<T>>();
+        });
     }
     catch(const std::exception& e)
     {
