@@ -78,6 +78,18 @@ namespace rocRoller
                     rv << "_PreSW";
                 }
 
+                if(!scalePretileA.empty())
+                {
+                    rv << "_PTA";
+                    rocRoller::streamJoin(rv, scalePretileA, "x");
+                }
+
+                if(!scalePretileB.empty())
+                {
+                    rv << "_PTB";
+                    rocRoller::streamJoin(rv, scalePretileB, "x");
+                }
+
                 return rv.str();
             }
 
