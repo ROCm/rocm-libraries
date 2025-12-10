@@ -129,7 +129,7 @@ void testing_sparse_to_dense_csr_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename J, typename T>
-hipsparseStatus_t testing_sparse_to_dense_csr(Arguments argus)
+void testing_sparse_to_dense_csr(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11020)
     J                           m        = argus.M;
@@ -160,7 +160,7 @@ hipsparseStatus_t testing_sparse_to_dense_csr(Arguments argus)
     if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     I ld = (order == HIPSPARSE_ORDER_COL) ? m : n;
@@ -307,8 +307,6 @@ hipsparseStatus_t testing_sparse_to_dense_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matB));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPARSE_TO_DENSE_CSR_HPP

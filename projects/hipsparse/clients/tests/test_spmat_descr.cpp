@@ -32,7 +32,6 @@ TEST(spmat_descr_bad_arg, spmat_descr_float)
 
 TEST(spmat_descr, spmat_descr)
 {
-    hipsparseStatus_t status = testing_spmat_descr();
-    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS);
+    testing_spmat_descr();
 }
 #endif

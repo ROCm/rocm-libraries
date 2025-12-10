@@ -116,7 +116,7 @@ void testing_spvv_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_spvv(Arguments argus)
+void testing_spvv(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 10010 \
     || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
@@ -270,8 +270,6 @@ hipsparseStatus_t testing_spvv(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPVV_HPP

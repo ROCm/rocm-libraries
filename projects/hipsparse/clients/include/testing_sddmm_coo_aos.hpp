@@ -180,7 +180,7 @@ void testing_sddmm_coo_aos_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_sddmm_coo_aos(Arguments argus)
+void testing_sddmm_coo_aos(Arguments argus)
 {
 #if(!defined(CUDART_VERSION))
     I                    m        = argus.M;
@@ -217,7 +217,7 @@ hipsparseStatus_t testing_sddmm_coo_aos(Arguments argus)
     if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     std::vector<I> hrowcol_ind(nnz * 2);
@@ -450,8 +450,6 @@ hipsparseStatus_t testing_sddmm_coo_aos(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SDDMM_COO_AOS_HPP
