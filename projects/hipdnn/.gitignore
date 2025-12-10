@@ -67,6 +67,7 @@ _doxygen/
 .idea/
 cmake-build*/
 build*/
+CMakeUserPresets.json
 
 # Python virtualenv
 .venv/

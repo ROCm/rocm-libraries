@@ -77,7 +77,7 @@ void testing_doti_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_doti(Arguments argus)
+void testing_doti(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                  N        = argus.N;
@@ -192,8 +192,6 @@ hipsparseStatus_t testing_doti(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_DOTI_HPP

@@ -171,12 +171,12 @@ struct BatchNormInferTester
     miopen::Allocator::ManageDataPtr estVariance_dev; // GPU estimated variance data
     miopenActivationMode_t activ_mode;                // Activation mode
     miopenTensorLayout_t tensor_layout;               // Tensor layout
-    const float activ_alpha = static_cast<float>(0.5f);
-    const float activ_beta  = static_cast<float>(0.5f);
-    const float activ_gamma = static_cast<float>(0.5f);
+    const float activ_alpha = 0.5f;
+    const float activ_beta  = 0.5f;
+    const float activ_gamma = 0.5f;
     double epsilon          = 1.0e-5;
     bool perf_enable        = false;
-    PerfHelper<float> perf_helper;
+    PerfHelper perf_helper;
 };
 
 template <typename T>

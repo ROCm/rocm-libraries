@@ -39,7 +39,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csrcolor_bad_arg(void)
+void testing_csrcolor_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
 
@@ -226,52 +226,43 @@ void testing_csrcolor_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csrcolor()
+void testing_csrcolor(const Arguments& argus)
 {
-    std::cout << "testing_csrcolor" << std::endl;
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
-    // Determine absolute path of test matrix
-    // Matrices are stored at the same path in matrices directory
-    std::string filename = "nos3.bin";
+    hipsparseIndexBase_t idxBase  = argus.baseA;
+    std::string          filename = argus.filename;
+
+    floating_data_t<T> fractionToColor = make_DataType<floating_data_t<T>>(1.0);
 
     // hipSPARSE handle
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
 
-    std::cout << "AAAA" << std::endl;
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
 
-    std::cout << "BBBB" << std::endl;
-    // Host structures
-    std::vector<int>     hrow_ptr;
-    std::vector<int>     hcol_ind;
-    std::vector<T>       hval;
-    hipsparseIndexBase_t idx_base = HIPSPARSE_INDEX_BASE_ZERO;
+    CHECK_HIPSPARSE_ERROR(hipsparseSetMatIndexBase(descr, idxBase));
 
-    std::cout << "CCCC" << std::endl;
+    // Host structures
+    std::vector<int> hrow_ptr;
+    std::vector<int> hcol_ind;
+    std::vector<T>   hval;
+
     // Initial Data on CPU
     srand(12345ULL);
-    floating_data_t<T> fractionToColor = make_DataType<floating_data_t<T>>(1.0);
 
-    std::cout << "DDDD" << std::endl;
     int m;
     int k;
     int nnz;
-    if(!generate_csr_matrix(filename, m, k, nnz, hrow_ptr, hcol_ind, hval, idx_base))
+    if(!generate_csr_matrix(filename, m, k, nnz, hrow_ptr, hcol_ind, hval, idxBase))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
-
-    std::cout << "m: " << m << " k: " << k << " nnz: " << nnz << std::endl;
-
-    std::cout << "EEEE" << std::endl;
 
     hipsparseColorInfo_t colorInfo;
     CHECK_HIPSPARSE_ERROR(hipsparseCreateColorInfo(&colorInfo));
 
-    std::cout << "FFFF" << std::endl;
     // allocate memory on device
     auto drow_ptr_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * (m + 1)), device_free};
     auto dcol_ind_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * nnz), device_free};
@@ -285,14 +276,12 @@ hipsparseStatus_t testing_csrcolor()
     int* dcoloring   = (int*)dcoloring_managed.get();
     int* dreordering = (int*)dreordering_managed.get();
 
-    std::cout << "GGGG" << std::endl;
     // copy data from CPU to device
     CHECK_HIP_ERROR(
         hipMemcpy(drow_ptr, hrow_ptr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dcol_ind, hcol_ind.data(), sizeof(int) * nnz, hipMemcpyHostToDevice));
     CHECK_HIP_ERROR(hipMemcpy(dval, hval.data(), sizeof(T) * nnz, hipMemcpyHostToDevice));
 
-    std::cout << "HHHH" << std::endl;
     int ncolors;
 
     CHECK_HIPSPARSE_ERROR(hipsparseXcsrcolor(handle,
@@ -307,15 +296,75 @@ hipsparseStatus_t testing_csrcolor()
                                              dcoloring,
                                              dreordering,
                                              colorInfo));
-    std::cout << "IIII" << std::endl;
     CHECK_HIP_ERROR(hipDeviceSynchronize());
 
-    std::cout << "ncolors: " << ncolors << std::endl;
+    if(argus.unit_check)
+    {
+        std::vector<int> hcoloring(m);
+        std::vector<int> hreordering(m);
+        CHECK_HIP_ERROR(
+            hipMemcpy(hcoloring.data(), dcoloring, sizeof(int) * m, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(
+            hipMemcpy(hreordering.data(), dreordering, sizeof(int) * m, hipMemcpyDeviceToHost));
+
+        // Check that two adjacent nodes do not have the same color
+        for(int row = 0; row < m; ++row)
+        {
+            int row_color = hcoloring[row];
+
+            int start = hrow_ptr[row] - idxBase;
+            int end   = hrow_ptr[row + 1] - idxBase;
+
+            for(int j = start; j < end; ++j)
+            {
+                int col = hcol_ind[j] - idxBase;
+                if(row != col)
+                {
+                    int col_color = hcoloring[col];
+                    EXPECT_HIPSPARSE_STATUS((row_color != col_color)
+                                                ? HIPSPARSE_STATUS_SUCCESS
+                                                : HIPSPARSE_STATUS_INTERNAL_ERROR,
+                                            HIPSPARSE_STATUS_SUCCESS);
+                }
+            }
+        }
+
+        // Check if colors are contiguous
+        int max_value = 0;
+        for(size_t i = 0; i < hcoloring.size(); ++i)
+        {
+            // Check value is well defined.
+            EXPECT_HIPSPARSE_STATUS((hcoloring[i] >= 0 && hcoloring[i] < m)
+                                        ? HIPSPARSE_STATUS_SUCCESS
+                                        : HIPSPARSE_STATUS_INTERNAL_ERROR,
+                                    HIPSPARSE_STATUS_SUCCESS);
+
+            // Calculate maximum value.
+            if(hcoloring[i] > max_value)
+            {
+                max_value = hcoloring[i];
+            }
+        }
+        ++max_value;
+
+#ifdef __HIP_PLATFORM_AMD__
+        std::vector<bool> marker(max_value, false);
+        for(size_t i = 0; i < hcoloring.size(); ++i)
+        {
+            marker[hcoloring[i]] = true;
+        }
+
+        for(int i = 0; i < max_value; ++i)
+        {
+            EXPECT_HIPSPARSE_STATUS(marker[i] ? HIPSPARSE_STATUS_SUCCESS
+                                              : HIPSPARSE_STATUS_INTERNAL_ERROR,
+                                    HIPSPARSE_STATUS_SUCCESS);
+        }
+#endif
+    }
+
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyColorInfo(colorInfo));
 #endif
-
-    std::cout << "JJJJ" << std::endl;
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSRCOLOR_HPP

@@ -216,14 +216,6 @@ namespace rocRoller
         }
 
         template <>
-        inline void EmitterOutput::output(Raw32& obj)
-        {
-            std::stringstream ss;
-            ss << obj;
-            *emitter << ss.str();
-        }
-
-        template <>
         struct IOTraits<EmitterOutput>
         {
             using IO = EmitterOutput;
@@ -602,28 +594,6 @@ namespace YAML
             }
 
             rhs.scale = node[0].as<decltype(rhs.scale)>();
-            return true;
-        }
-    };
-
-    template <>
-    struct convert<rocRoller::Raw32>
-    {
-        static Node encode(const rocRoller::Raw32& rhs)
-        {
-            Node node;
-            node.push_back(rhs.value);
-            return node;
-        }
-
-        static bool decode(const Node& node, rocRoller::Raw32& rhs)
-        {
-            if(!node.IsSequence() || node.size() != 1)
-            {
-                return false;
-            }
-
-            rhs.value = node[0].as<decltype(rhs.value)>();
             return true;
         }
     };

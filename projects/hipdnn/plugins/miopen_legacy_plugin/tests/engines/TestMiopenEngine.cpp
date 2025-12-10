@@ -8,7 +8,7 @@
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
-#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 #include "engines/MiopenEngine.hpp"
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
@@ -100,7 +100,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsTrueIfAnyPlanBuilderApplicable)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph mockGraph;
-    auto graphBuilder = hipdnn_sdk::test_utilities::createEmptyValidGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
     auto graphPtr = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
     EXPECT_CALL(mockGraph, getGraph()).WillOnce(::testing::ReturnRef(*graphPtr));
 
@@ -122,7 +122,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsAfterTheFirstApplicablePlanBuilder)
     engine.addPlanBuilder(std::move(mockPlanBuilder2));
 
     MockGraph mockGraph;
-    auto graphBuilder = hipdnn_sdk::test_utilities::createEmptyValidGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
     auto graphPtr = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
     EXPECT_CALL(mockGraph, getGraph()).WillOnce(::testing::ReturnRef(*graphPtr));
 
@@ -135,7 +135,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilders)
     MiopenEngine engine(0);
 
     MockGraph mockGraph;
-    auto graphBuilder = hipdnn_sdk::test_utilities::createEmptyValidGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
     auto graphPtr = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
     EXPECT_CALL(mockGraph, getGraph()).WillOnce(::testing::ReturnRef(*graphPtr));
 
@@ -153,7 +153,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsFalseIfNoPlanBuilderApplicable)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph mockGraph;
-    auto graphBuilder = hipdnn_sdk::test_utilities::createEmptyValidGraph();
+    auto graphBuilder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
     auto graphPtr = hipdnn_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
     EXPECT_CALL(mockGraph, getGraph()).WillOnce(::testing::ReturnRef(*graphPtr));
 
@@ -172,7 +172,7 @@ TEST(TestMiopenEngine, IsApplicableReturnsFalseForComputeTypeNotF32)
     engine.addPlanBuilder(std::move(mockPlanBuilder));
 
     MockGraph mockGraph;
-    auto graphBuilder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph(
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph(
         {1, 3, 224, 224},
         {1, 3, 224, 224},
         hipdnn_sdk::data_objects::DataType::HALF,

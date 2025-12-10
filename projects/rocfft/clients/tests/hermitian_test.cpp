@@ -251,7 +251,7 @@ TEST(rocfft_UnitTest, gpu_symmetrizer)
         ASSERT_TRUE(p.valid(verbose));
 
         // Data buffers:
-        gpubuf buf;
+        gpubuf_t<hipDoubleComplex> buf;
         ASSERT_TRUE(buf.alloc(sizeof(hipDoubleComplex) * p.isize[0]) == hipSuccess);
         std::vector<hipDoubleComplex> hbuf(p.isize[0]);
 
@@ -303,16 +303,19 @@ TEST(rocfft_UnitTest, gpu_symmetrizer)
         ASSERT_TRUE(p.valid(verbose));
         ASSERT_TRUE(p.create_plan() == fft_status_success);
 
-        gpubuf ibuf, obuf;
+        gpubuf_t<double>           ibuf;
+        gpubuf_t<hipDoubleComplex> obuf;
         ASSERT_TRUE(ibuf.alloc(p.ibuffer_sizes()[0]) == hipSuccess);
         ASSERT_TRUE(obuf.alloc(p.obuffer_sizes()[0]) == hipSuccess);
 
         initreal_cm(p.length_cm(), p.istride_cm(), ibuf.data());
 
-        std::vector<void*> pibuf = {ibuf.data()};
-        std::vector<void*> pobuf = {obuf.data()};
+        std::vector<double*>           pibuf = {ibuf.data()};
+        std::vector<hipDoubleComplex*> pobuf = {obuf.data()};
 
-        ASSERT_TRUE(p.execute(pibuf.data(), pobuf.data()) == fft_status_success);
+        ASSERT_TRUE(p.execute(reinterpret_cast<void**>(pibuf.data()),
+                              reinterpret_cast<void**>(pobuf.data()))
+                    == fft_status_success);
 
         std::vector<hipDoubleComplex> h_output(p.osize[0]);
         std::fill(h_output.begin(), h_output.end(), hipDoubleComplex{0.0, 0.0});

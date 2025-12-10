@@ -126,6 +126,8 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/12.8/test_gtsv2_nopivot.yaml
     cuda/12.8/test_gtsv2_strided_batch.yaml
     cuda/12.8/test_gtsv_interleaved_batch.yaml
+    # Reorder
+    cuda/12.8/test_csrcolor.yaml
     # Conversion
     cuda/12.8/test_bsr2csr.yaml
     cuda/12.8/test_coo2csr.yaml

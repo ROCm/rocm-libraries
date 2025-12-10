@@ -297,6 +297,24 @@ hiptensorStatus_t
     case HIPTENSOR_OPERATION_DESCRIPTOR_TAG:
         std::memcpy(&desc->mTag, buf, sizeInBytes);
         break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE:
+        std::memcpy(&desc->mScalarType, buf, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_FLOPS:
+        std::memcpy(&desc->mFlops, buf, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_MOVED_BYTES:
+        std::memcpy(&desc->mMovedBytes, buf, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_LEFT:
+        std::memcpy(&desc->mPaddingLeft, buf, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_RIGHT:
+        std::memcpy(&desc->mPaddingRighT, buf, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_VALUE:
+        std::memcpy(desc->mPaddingValue, buf, sizeInBytes);
+        break;
     default:
         retStatus = HIPTENSOR_STATUS_NOT_SUPPORTED;
         break;
@@ -312,7 +330,37 @@ hiptensorStatus_t
                                              void*                                   buf,
                                              size_t                                  sizeInBytes)
 {
-    return HIPTENSOR_STATUS_SUCCESS;
+    hiptensorStatus_t retStatus = HIPTENSOR_STATUS_SUCCESS;
+
+    switch(attr)
+    {
+    case HIPTENSOR_OPERATION_DESCRIPTOR_TAG:
+        std::memcpy(buf, &desc->mTag, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE:
+        std::memcpy(buf, &desc->mScalarType, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_FLOPS:
+        std::memcpy(buf, &desc->mFlops, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_MOVED_BYTES:
+        std::memcpy(buf, &desc->mMovedBytes, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_LEFT:
+        std::memcpy(buf, &desc->mPaddingLeft, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_RIGHT:
+        std::memcpy(buf, &desc->mPaddingRighT, sizeInBytes);
+        break;
+    case HIPTENSOR_OPERATION_DESCRIPTOR_PADDING_VALUE:
+        std::memcpy(buf, desc->mPaddingValue, sizeInBytes);
+        break;
+    default:
+        retStatus = HIPTENSOR_STATUS_NOT_SUPPORTED;
+        break;
+    }
+
+    return retStatus;
 }
 
 hiptensorStatus_t hiptensorCreatePermutation(const hiptensorHandle_t            handle,
@@ -559,7 +607,18 @@ hiptensorStatus_t hiptensorPlanGetAttribute(const hiptensorHandle_t  handle,
                                             void*                    buf,
                                             size_t                   sizeInBytes)
 {
-    return HIPTENSOR_STATUS_SUCCESS;
+    hiptensorStatus_t retStatus = HIPTENSOR_STATUS_SUCCESS;
+    switch(attr)
+    {
+    case HIPTENSOR_PLAN_REQUIRED_WORKSPACE:
+        std::memcpy(buf, &plan->mRequiredWorkspace, sizeInBytes);
+        break;
+    default:
+        retStatus = HIPTENSOR_STATUS_NOT_SUPPORTED;
+        break;
+    }
+
+    return retStatus;
 }
 
 hiptensorStatus_t contractionGetWorkspaceSize(const hiptensorHandle_t              handle,

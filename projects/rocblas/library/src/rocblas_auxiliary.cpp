@@ -38,7 +38,7 @@
 extern "C" rocblas_pointer_mode rocblas_pointer_to_mode(void* ptr)
 {
     hipPointerAttribute_t attribute;
-    hipPointerGetAttributes(&attribute, ptr);
+    PRINT_IF_HIP_ERROR(hipPointerGetAttributes(&attribute, ptr));
     return ptr == attribute.devicePointer ? rocblas_pointer_mode_device : rocblas_pointer_mode_host;
 }
 
@@ -910,9 +910,9 @@ bool rocblas_internal_tensile_supports_ldc_ne_ldd(rocblas_handle handle)
 bool rocblas_internal_tensile_supports_xdl_math_op(rocblas_math_mode mode)
 {
     int deviceId;
-    hipGetDevice(&deviceId);
+    PRINT_IF_HIP_ERROR(hipGetDevice(&deviceId));
     hipDeviceProp_t deviceProperties;
-    hipGetDeviceProperties(&deviceProperties, deviceId);
+    PRINT_IF_HIP_ERROR(hipGetDeviceProperties(&deviceProperties, deviceId));
     std::string deviceString(deviceProperties.gcnArchName);
     return (deviceString.find("gfx942") != std::string::npos);
 }
@@ -921,9 +921,9 @@ bool rocblas_internal_tensile_supports_xdl_math_op(rocblas_math_mode mode)
 std::string rocblas_internal_get_arch_name()
 {
     int deviceId;
-    hipGetDevice(&deviceId);
+    PRINT_IF_HIP_ERROR(hipGetDevice(&deviceId));
     hipDeviceProp_t deviceProperties;
-    hipGetDeviceProperties(&deviceProperties, deviceId);
+    PRINT_IF_HIP_ERROR(hipGetDeviceProperties(&deviceProperties, deviceId));
     return ArchName<hipDeviceProp_t>{}(deviceProperties);
 }
 
@@ -931,9 +931,9 @@ std::string rocblas_internal_get_arch_name()
 std::string rocblas_internal_get_xnack_mode()
 {
     int deviceId;
-    hipGetDevice(&deviceId);
+    PRINT_IF_HIP_ERROR(hipGetDevice(&deviceId));
     hipDeviceProp_t deviceProperties;
-    hipGetDeviceProperties(&deviceProperties, deviceId);
+    PRINT_IF_HIP_ERROR(hipGetDeviceProperties(&deviceProperties, deviceId));
     return XnackMode<hipDeviceProp_t>{}(deviceProperties);
 }
 

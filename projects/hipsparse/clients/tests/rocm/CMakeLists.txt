@@ -157,6 +157,8 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_gtsv2_nopivot.yaml
     rocm/test_gtsv2_strided_batch.yaml
     rocm/test_gtsv_interleaved_batch.yaml
+    # Reorder
+    rocm/test_csrcolor.yaml
     # Conversion
     rocm/test_bsr2csr.yaml
     rocm/test_coo2csr.yaml
