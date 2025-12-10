@@ -518,18 +518,18 @@ template <typename T>
 void testing_bsrsm2(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
-    int                  m         = argus.M;
-    int                  nrhs      = argus.N;
-    int                  block_dim = argus.block_dim;
-    T                    h_alpha   = make_DataType<T>(argus.alpha);
-    hipsparseDirection_t dir       = argus.dirA;
-    hipsparseIndexBase_t idx_base  = argus.baseA;
-    hipsparseOperation_t transA    = argus.transA;
-    hipsparseOperation_t transX    = argus.transB;
+    int                    m         = argus.M;
+    int                    nrhs      = argus.N;
+    int                    block_dim = argus.block_dim;
+    T                      h_alpha   = make_DataType<T>(argus.alpha);
+    hipsparseDirection_t   dir       = argus.dirA;
+    hipsparseIndexBase_t   idx_base  = argus.baseA;
+    hipsparseOperation_t   transA    = argus.transA;
+    hipsparseOperation_t   transX    = argus.transB;
     hipsparseDiagType_t    diag_type = argus.diag_type;
     hipsparseFillMode_t    fill_mode = argus.fill_mode;
     hipsparseSolvePolicy_t policy    = argus.solve_policy;
-    std::string          filename  = argus.filename;
+    std::string            filename  = argus.filename;
 
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
@@ -885,10 +885,8 @@ void testing_bsrsm2(Arguments argus)
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
 
-        double gflop_count = csrsv_gflop_count(m,
-                                               size_t(nnzb) * block_dim * block_dim,
-                                               diag_type)
-                             * nrhs;
+        double gflop_count
+            = csrsv_gflop_count(m, size_t(nnzb) * block_dim * block_dim, diag_type) * nrhs;
         double gbyte_count = bsrsv_gbyte_count<T>(mb, nnzb, block_dim) * nrhs;
 
         double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
