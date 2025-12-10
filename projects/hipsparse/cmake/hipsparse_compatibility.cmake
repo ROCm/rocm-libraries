@@ -9,6 +9,13 @@ if(HIPSPARSE_ENABLE_CUDA AND HIPSPARSE_ENABLE_HIP)
     message(FATAL_ERROR "Cannot enable both CUDA and HIP backends simultaneously.")
 endif()
 
+# Ensure at least one backend is enabled
+if(NOT HIPSPARSE_ENABLE_CUDA AND NOT HIPSPARSE_ENABLE_HIP)
+    message(FATAL_ERROR 
+        "At least one backend must be enabled.\n"
+        "Set HIPSPARSE_ENABLE_CUDA=ON or HIPSPARSE_ENABLE_HIP=ON")
+endif()
+
 # Code coverage requires Debug or RelWithDebInfo build type
 if(HIPSPARSE_ENABLE_COVERAGE)
     if((NOT CMAKE_BUILD_TYPE STREQUAL "Debug") AND (NOT CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo"))

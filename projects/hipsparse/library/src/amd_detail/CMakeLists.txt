@@ -8,7 +8,6 @@ target_sources(hipsparse PRIVATE
 
 target_link_libraries(hipsparse
     PRIVATE
-        hip::host
         roc::rocsparse
 )
 

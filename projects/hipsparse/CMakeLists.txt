@@ -69,16 +69,11 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
-# Conditionally enable Fortran
-# NOTE: Behavior change - Fortran now controlled by HIPSPARSE_ENABLE_FORTRAN option (default ON)
-# Previously enabled automatically when building tests or benchmarks
 if(HIPSPARSE_ENABLE_FORTRAN)
     enable_language(Fortran)
 endif()
 
 # --- Dependency Setup ---
-# set(hipsparse_SOVERSION 4.3.0)
-
 find_package(Python3 3.9 COMPONENTS Interpreter REQUIRED)
 
 if(HIPSPARSE_ENABLE_CUDA)
@@ -254,4 +249,21 @@ if(HIPSPARSE_ENABLE_COVERAGE)
     )
     
     add_custom_target(coverage DEPENDS coverage_output)
+endif()
+
+# --- Address Sanitizer targets ---
+
+if(HIPSPARSE_ENABLE_ASAN)
+    # Apply ASAN to main library
+    target_compile_options(hipsparse PRIVATE -fsanitize=address -shared-libasan)
+    target_link_options(hipsparse PRIVATE -fsanitize=address -shared-libasan -fuse-ld=lld)
+    
+    # Apply ASAN to client common libraries
+    if(HIPSPARSE_ENABLE_CLIENT)
+        target_compile_options(hipsparse-clients-common PUBLIC -fsanitize=address -shared-libasan)
+        target_link_options(hipsparse-clients-common PUBLIC -fsanitize=address -shared-libasan -fuse-ld=lld)
+        
+        target_compile_options(hipsparse-samples-common PUBLIC -fsanitize=address -shared-libasan)
+        target_link_options(hipsparse-samples-common PUBLIC -fsanitize=address -shared-libasan -fuse-ld=lld)
+    endif()
 endif()
