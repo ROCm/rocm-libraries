@@ -151,6 +151,8 @@ struct Arguments
     double boostvali;
 
     double tolm;
+    double rand_gen_min;
+    double rand_gen_max;
 
     bool graph_test;
     bool skip_reproducibility;
@@ -298,6 +300,8 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(boostval);
         ROCSPARSE_FORMAT_CHECK(boostvali);
         ROCSPARSE_FORMAT_CHECK(tolm);
+        ROCSPARSE_FORMAT_CHECK(rand_gen_min);
+        ROCSPARSE_FORMAT_CHECK(rand_gen_max);
         ROCSPARSE_FORMAT_CHECK(graph_test);
         ROCSPARSE_FORMAT_CHECK(skip_reproducibility);
         ROCSPARSE_FORMAT_CHECK(sparsity_pattern_statistics);
@@ -517,6 +521,8 @@ private:
         print("boost_val", arg.boostval);
         print("boost_vali", arg.boostvali);
         print("tolm", arg.tolm);
+        print("rand_gen_min", arg.rand_gen_min);
+        print("rand_gen_max", arg.rand_gen_max);
         print("graph_test", arg.graph_test);
         print("skip_reproducibility", arg.skip_reproducibility);
         print("sparsity_pattern_statistics", arg.sparsity_pattern_statistics);

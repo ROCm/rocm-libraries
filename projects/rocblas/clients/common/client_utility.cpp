@@ -259,7 +259,7 @@ size_t
 /*! \brief  CPU Timer(in microsecond): synchronize with the default device and return wall time */
 double get_time_us_sync_device(void)
 {
-    hipDeviceSynchronize();
+    THROW_IF_HIP_ERROR(hipDeviceSynchronize());
 
     auto now = std::chrono::steady_clock::now();
     // now.time_since_epoch() is the duration since epoch
@@ -509,7 +509,9 @@ rocblas_local_handle::~rocblas_local_handle()
         rocblas_stream_end_capture();
 
     if(m_memory)
-        (hipFree)(m_memory);
+    {
+        PRINT_IF_HIP_ERROR((hipFree)(m_memory));
+    }
 
     if(m_hipblaslt_env_set)
     {

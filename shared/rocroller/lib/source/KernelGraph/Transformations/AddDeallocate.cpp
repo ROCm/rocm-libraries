@@ -63,7 +63,16 @@ namespace rocRoller::KernelGraph
 
             auto lastDependency = std::ranges::max(lastRWOps, compare);
 
-            auto downstreamBarriers = filter(original.control.isElemType<Barrier>(),
+            auto isBarrierInSameLoopPredicate = [&](int barrier) {
+                auto isBarrier = original.control.get<Barrier>(barrier).has_value();
+                if(!isBarrier)
+                    return false;
+                auto maybeBarrierForLoop = findContainingOperation<ForLoopOp>(barrier, original);
+                // We know maybeForLoop has a value, so...
+                return maybeBarrierForLoop && (maybeBarrierForLoop.value() == maybeForLoop.value());
+            };
+
+            auto downstreamBarriers = filter(isBarrierInSameLoopPredicate,
                                              original.control.depthFirstVisit(lastDependency))
                                           .to<std::vector>();
 
@@ -117,7 +126,11 @@ namespace rocRoller::KernelGraph
                     else if(rel == NodeOrdering::LeftInBodyOfRight
                             || rel == NodeOrdering::RightInBodyOfLeft)
                     {
-                        Throw<FatalError>("No body relationships should be here!");
+                        AssertFatal(false,
+                                    "Unexpected body relationship between",
+                                    ShowValue(*iterA),
+                                    ShowValue(*iterB),
+                                    ShowValue(rel));
                     }
                     else
                     {

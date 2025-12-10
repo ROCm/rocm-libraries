@@ -28,6 +28,7 @@
 #include "rocsparse_bsrilu0.hpp"
 
 #include "../level2/rocsparse_csrsv.hpp"
+#include "../level2/rocsparse_csrsv_deprecated_template.hpp"
 #include "bsrilu0_device.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"

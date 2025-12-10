@@ -17,9 +17,7 @@
 
 #include "StringUtil.hpp"
 
-namespace hipdnn_sdk
-{
-namespace utilities
+namespace hipdnn_sdk::utilities
 {
 
 constexpr const char* SHARED_LIB_EXT = ".dll";
@@ -73,8 +71,7 @@ inline std::filesystem::path getCurrentExecutableDirectory()
     return std::filesystem::path(result.data()).parent_path();
 }
 
-}
-}
+} // namespace hipdnn_sdk::utilities
 
 #else
 

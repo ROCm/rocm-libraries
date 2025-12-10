@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 include_directories(BEFORE
     ${PROJECT_SOURCE_DIR}/
     ${PROJECT_SOURCE_DIR}/profiler/include
@@ -60,6 +63,9 @@ function(add_test_executable TEST_NAME)
                 set(test 1)
             endif()
             if((source_name MATCHES "_fp32|_f32") AND NOT "fp32" IN_LIST DTYPES)
+                set(test 1)
+            endif()
+            if((source_name MATCHES "_tf32|_tf32") AND NOT "tf32" IN_LIST DTYPES)
                 set(test 1)
             endif()
             if((source_name MATCHES "_fp64|_f64") AND NOT "fp64" IN_LIST DTYPES)
@@ -151,6 +157,9 @@ function(add_gtest_executable TEST_NAME)
                 set(test 1)
             endif()
             if((source_name MATCHES "_fp32|_f32") AND NOT "fp32" IN_LIST DTYPES)
+                set(test 1)
+            endif()
+            if((source_name MATCHES "_tf32|_tf32") AND NOT "tf32" IN_LIST DTYPES)
                 set(test 1)
             endif()
             if((source_name MATCHES "_fp64|_f64") AND NOT "fp64" IN_LIST DTYPES)

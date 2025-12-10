@@ -11,22 +11,22 @@
 namespace hipdnn_sdk::data_objects
 {
 
-inline const char* toString(hipdnn_sdk::data_objects::NodeAttributes attributes)
+inline const char* toString(NodeAttributes attributes)
 {
-    return hipdnn_sdk::data_objects::EnumNameNodeAttributes(attributes);
+    return EnumNameNodeAttributes(attributes);
 }
 
-inline const char* toString(hipdnn_sdk::data_objects::DataType dataType)
+inline const char* toString(DataType dataType)
 {
-    return hipdnn_sdk::data_objects::EnumNameDataType(dataType);
+    return EnumNameDataType(dataType);
 }
 
-inline const char* toString(hipdnn_sdk::data_objects::PointwiseMode pointwiseMode)
+inline const char* toString(PointwiseMode pointwiseMode)
 {
-    return hipdnn_sdk::data_objects::EnumNamePointwiseMode(pointwiseMode);
+    return EnumNamePointwiseMode(pointwiseMode);
 }
 
-}
+} // namespace hipdnn_sdk::data_objects
 
 inline std::ostream& operator<<(std::ostream& os,
                                 hipdnn_sdk::data_objects::NodeAttributes attributes)

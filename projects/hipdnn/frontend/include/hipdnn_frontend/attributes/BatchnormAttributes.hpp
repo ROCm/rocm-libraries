@@ -9,9 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 class BatchnormAttributes : public Attributes<BatchnormAttributes>
 {
@@ -348,5 +346,4 @@ private:
 };
 
 typedef BatchnormAttributes Batchnorm_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

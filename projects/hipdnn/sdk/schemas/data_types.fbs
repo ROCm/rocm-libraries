@@ -3,12 +3,12 @@
 
 namespace hipdnn_sdk.data_objects;
 
-enum DataType : byte { 
-    UNSET = 0, 
-    FLOAT = 1, 
-    HALF = 2, 
-    BFLOAT16 = 3, 
-    DOUBLE = 4, 
+enum DataType : byte {
+    UNSET = 0,
+    FLOAT = 1,
+    HALF = 2,
+    BFLOAT16 = 3,
+    DOUBLE = 4,
     UINT8 = 5,
-    INT32 = 6  
+    INT32 = 6
 }

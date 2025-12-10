@@ -24,6 +24,8 @@
  *
  *******************************************************************************/
 
+#include "miopen/datatype.hpp"
+#include "miopen/miopen.h"
 #include <miopen/batchnorm/solvers.hpp>
 
 #include <miopen/batchnorm/invoke_params.hpp>
@@ -71,18 +73,16 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
         const auto& handle = context.GetStream();
         auto kernel        = KernelInfo{};
 
-        kernel.kernel_file = "MIOpenBatchNormActivBwd";
-        kernel.kernel_name = "MIOpenBatchNormActivBwd";
-        const auto mode    = bn_problem.GetMode();
+        const auto mode = bn_problem.GetMode();
         if(mode == miopenBNSpatial)
         { // SPATIAL kernels
-            kernel.kernel_file += "Spatial.cl";
-            kernel.kernel_name += "Spatial";
+            kernel.kernel_file = "MIOpenBatchNormActivBwdSpatial.cpp";
+            kernel.kernel_name = "MIOpenBatchNormActivBwdSpatial";
         }
         else
         { // PER ACTIVATION
-            kernel.kernel_file += "PerAct.cl";
-            kernel.kernel_name += "PerActivation";
+            kernel.kernel_file = "MIOpenBatchNormActivBwdPerAct.cpp";
+            kernel.kernel_name = "MIOpenBatchNormActivBwdPerActivation";
         }
         size_t xlocalsize, ylocalsize, zlocalsize;
         const auto& input_desc = bn_problem.GetXDesc();
@@ -97,9 +97,13 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
         if(mode == miopenBNSpatial)
         {
             if(in_cstride <= 1024 && in_cstride > 512)
+            {
                 xlocalsize = std::min(64 * ((in_cstride + 63) / 64), static_cast<size_t>(1024));
+            }
             else
+            {
                 xlocalsize = 1024;
+            }
         }
         else
         {
@@ -108,15 +112,19 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
         kernel.l_wk = {xlocalsize, ylocalsize, zlocalsize};
 
         size_t xgridsize = 1;
-        size_t zgridsize = 1;
         size_t ygridsize = 1;
+        size_t zgridsize = 1;
 
         if(mode == miopenBNSpatial)
         {
             if(in_cstride > 512)
+            {
                 xgridsize = static_cast<size_t>(c) * xlocalsize;
+            }
             else
+            {
                 xgridsize = 1024 * static_cast<size_t>(c);
+            }
         }
         else
         {
@@ -125,19 +133,14 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
             ygridsize    = segment * ylocalsize;
         }
 
-        kernel.g_wk       = {xgridsize, ygridsize, zgridsize};
-        size_t in_nstride = c * in_cstride;
-        size_t in_nchw    = n * in_nstride;
+        kernel.g_wk = {xgridsize, ygridsize, zgridsize};
 
         unsigned int ldsgcn   = xlocalsize / 64;
         unsigned int ldsnogcn = xlocalsize;
 
         int variant = 0;
-
         if(mode == miopenBNSpatial)
         {
-            ldsgcn   = xlocalsize / 64;
-            ldsnogcn = xlocalsize;
             if(in_cstride > 1024)
             {
                 variant = 1;
@@ -146,43 +149,34 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
             {
                 variant = (n >= 32) ? 1 : 3;
             }
-            else
-            {
-                variant = 0;
-            }
         }
+
+        auto dtype     = input_desc.GetType();
+        auto data_type = miopen::GetDataType(input_desc.GetType());
+
         const auto& activ_op =
             dynamic_cast<ActivBwdFusionOpDescriptor&>(*problem.fusion_plan_desc->op_map[1]);
         const auto build_params = KernelBuildParameters{
             {"MIO_BN_N", static_cast<int>(n)},
-            {"MIO_BN_C", static_cast<int>(c)},
-            {"MIO_BN_HW", static_cast<int>(in_cstride)},
+            {"MIO_BN_NCHW", static_cast<int>(n * c * h * w)},
             {"MIO_BN_NHW", static_cast<int>(n * h * w)},
-            {"MIO_BN_CHW", static_cast<int>(in_nstride)},
-            {"MIO_BN_NCHW", static_cast<int>(in_nchw)},
-            {"MIO_BN_GRP0", static_cast<int>(xlocalsize)},
-            {"MIO_BN_GRP1", static_cast<int>(ylocalsize)},
-            {"MIO_BN_GRP2", static_cast<int>(zlocalsize)},
-            {"MIO_BN_LDS_SIZE", static_cast<int>(ldsnogcn)},
-            {"MIO_BN_LDSGCN_SIZE", static_cast<int>(ldsgcn)},
-            {"MIO_BN_USESAVED", static_cast<int>(true)},
+            {"MIO_BN_CHW", static_cast<int>(c * h * w)},
+            {"MIO_BN_HW", static_cast<int>(h * w)},
+            {"LOCAL_SIZE_X", static_cast<int>(xlocalsize)},
+            {"LOCAL_SIZE_Y", static_cast<int>(ylocalsize)},
+            {"GRID_SIZE_Y", static_cast<int>(ygridsize)},
+            {"LDSNOGCN_SIZE", static_cast<int>(ldsnogcn)},
+            {"LDSGCN_SIZE", static_cast<int>(ldsgcn)},
             {"MIO_BN_VARIANT", static_cast<int>(variant)},
             {"MIO_BN_GFX103X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx103"))},
             {"MIO_BN_GFX110X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx110"))},
             {"MIO_BN_GFX120X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx120"))},
             {"MIO_BN_GFX115X", static_cast<int>(StartsWith(handle.GetDeviceName(), "gfx115"))},
-            {"MIO_BN_CBA_WRITE_INTERMEDIATE", static_cast<int>(0)},
-            {"MIOPEN_YES_ACTIV", static_cast<int>(1)},
             {"MIOPEN_NRN_OP_ID", static_cast<int>(activ_op.activMode)},
-            {"MIOPEN_USE_FP16", static_cast<int>(input_desc.GetType() == miopenHalf)},
-            {"MIOPEN_USE_FP32", static_cast<int>(input_desc.GetType() == miopenFloat)}};
-        kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
-        if(bn_problem.GetMode() == miopenBNSpatial)
-            kernel.comp_options += " -DSPATIAL_BN";
-        else
-            kernel.comp_options += " -DPERACT_BN";
-        if(input_desc.GetType() == miopenHalf)
-            kernel.comp_options += " -DMIOPEN_USE_FPMIX=1";
+            {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
+            {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
+            {"DATA_TYPE", data_type}};
+        kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
         result.construction_params.push_back(kernel);
     }
@@ -201,7 +195,6 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
             const auto activ_alpha = activ_invoker.activAlpha;
             const auto activ_beta  = activ_invoker.activBeta;
             const auto activ_gamma = activ_invoker.activGamma;
-            const auto mode        = bn_problem.GetMode();
             std::vector<OpKernelArg> kern_args;
             kern_args.push_back(bn_invoke.x);
             kern_args.push_back(activ_invoker.y);
@@ -227,8 +220,6 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
             kern_args.push_back(bn_invoke.resBnBiasDiff);
             kern_args.push_back(bn_invoke.savedMean);
             kern_args.push_back(bn_invoke.savedInvVariance);
-            if(mode == miopenBNSpatial)
-                kern_args.push_back(static_cast<float>(1.0f / (n * h * w)));
             kernel(kern_args);
         };
     };
