@@ -106,7 +106,7 @@ public:
     {
         miopenTensorDescriptor_t tensor;
         testing::internal::CaptureStderr();
-        auto status = miopenSet4dTensorDescriptor(nullptr, miopenHalf, 100, 32, 8, 8)
+        auto status = miopenSet4dTensorDescriptor(nullptr, miopenHalf, 100, 32, 8, 8);
         std::string output = testing::internal::GetCapturedStderr();
 
         ASSERT_EQ(miopenCreateTensorDescriptor(&tensor), miopenStatusSuccess);
