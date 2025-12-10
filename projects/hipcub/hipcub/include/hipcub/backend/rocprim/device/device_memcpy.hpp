@@ -48,6 +48,12 @@ struct DeviceMemcpy
                               _HIPCUB_STD::int64_t num_buffers,
                               hipStream_t          stream = 0)
     {
+        if(num_buffers == 0)
+        {
+            temp_storage_bytes = 0;
+            return hipSuccess;
+        }
+
         return rocprim::batch_memcpy(d_temp_storage,
                                      temp_storage_bytes,
                                      input_buffer_it,
