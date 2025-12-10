@@ -29,35 +29,35 @@ Tests:
 - name: spgemmreuse_csr_bad_arg
   category: pre_checkin
   function: spgemmreuse_csr_bad_arg
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions_complex_real
 
 - name: spgemmreuse_csr
   category: quick
   function: spgemmreuse_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions_complex_real
   M: [77, 981]
   K: [64, 1723]
   alpha: [2.0]
   alphai: [0.0]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ONE]
+  baseC: [HIPSPARSE_INDEX_BASE_ONE]
   spgemm_alg: [HIPSPARSE_SPGEMM_DEFAULT]
 
 - name: spgemmreuse_csr
   category: pre_checkin
   function: spgemmreuse_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions_complex_real
   M: 1
   K: 1
   alpha: [2.0]
   alphai: [0.0]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO]
   spgemm_alg: [HIPSPARSE_SPGEMM_DEFAULT]
   filename: [nos1,
              nos2, 

@@ -360,7 +360,7 @@ namespace rocRoller
                 if(tree.empty())
                     return {};
 
-                AssertFatal(tree.back().deps.size() == 1);
+                AssertFatal(tree.back().deps.size() == 1, ShowValue(tree.back().deps.size()));
 
                 auto        deps               = tree.back().deps;
                 auto        consolidationCount = tree.back().consolidationCount;
