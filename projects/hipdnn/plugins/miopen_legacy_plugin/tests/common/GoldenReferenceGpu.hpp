@@ -8,8 +8,8 @@
 #include <vector>
 
 #include <MiopenLegacyPlugin.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include <hipdnn_sdk/utilities/LoadGraphAndTensors.hpp>
 
@@ -44,9 +44,9 @@ protected:
         hipdnnPluginStatus_t status = hipdnnEnginePluginCreateImpl(&_handle);
         ASSERT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
 
-        _engineConfigBuffer = hipdnn_sdk::test_utilities::createValidEngineConfig(1).Release();
+        _engineConfigBuffer = hipdnn_test_sdk::utilities::createValidEngineConfig(1).Release();
 
-        _graphAndTensors = hipdnn_sdk::test_utilities::loadGraphAndTensors(path);
+        _graphAndTensors = hipdnn_test_sdk::utilities::loadGraphAndTensors(path);
         _referenceOutputTensors = _graphAndTensors.extractAndClearOutputTensorData();
     }
 
@@ -86,7 +86,7 @@ protected:
 auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
 {
     return testing::ValuesIn(
-        hipdnn_sdk::test_utilities::filesInDirectoryWithExtReturnEmptyPathOnThrow(
+        hipdnn_test_sdk::utilities::filesInDirectoryWithExtReturnEmptyPathOnThrow(
             hipdnn_sdk::utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data"
                 / subDirectory,
             ".json"));

@@ -5,18 +5,18 @@
 #include <random>
 
 #include <hip/hip_runtime.h>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "../tests/common/BatchnormCommon.hpp"
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
-using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_test_sdk::utilities;
 using namespace miopen_legacy_plugin::test_utilities;
 using namespace test_bn_common;
 
@@ -58,21 +58,23 @@ protected:
 
         auto derivedDims = getDerivedShape(testCase.dims);
 
+        auto dataType = getDataTypeEnumFromType<DataType>();
+        auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
+
         hipdnn_frontend::graph::Graph graphObj;
 
         graphObj.set_name("BatchnormBackwardTest");
         graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
-
-        auto dataType = getDataTypeEnumFromType<DataType>();
-        auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
+        graphObj.set_intermediate_data_type(intermediateDataType);
+        graphObj.set_io_data_type(dataType);
 
         auto xAttr = graph::makeTensorAttributes(
-            "x", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
+            "x", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         xAttr.set_uid(BatchnormBwdTensorIds::X_UID);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto dyAttr = graph::makeTensorAttributes(
-            "dy", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
+            "dy", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         dyAttr.set_uid(BatchnormBwdTensorIds::DY_UID);
         auto dyTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(dyAttr));
 
@@ -93,16 +95,12 @@ protected:
             = std::make_shared<graph::TensorAttributes>(std::move(invVarianceAttr));
 
         graph::BatchnormBackwardAttributes bnAttrs;
-        bnAttrs.set_name("batchnorm_backward");
         bnAttrs.set_saved_mean_and_inv_variance(meanTensorAttr, invVarianceTensorAttr);
 
         auto outputTensorsAttr
             = graphObj.batchnorm_backward(dyTensorAttr, xTensorAttr, scaleTensorAttr, bnAttrs);
 
         auto& dxTensorAttr = outputTensorsAttr[0];
-        dxTensorAttr->set_data_type(dataType);
-        dxTensorAttr->set_dim(testCase.dims);
-        dxTensorAttr->set_stride(generateStrides(testCase.dims, layout.strideOrder));
         dxTensorAttr->set_output(true);
 
         auto& dscaleTensorAttr = outputTensorsAttr[1];
