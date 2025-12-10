@@ -555,11 +555,17 @@ class Timeline:
         
         # Linear timelines for each loop.
         self._timelines: dict[str, list[ValidatorInstruction]] = {loop: [] for loop in self.loops}
-        
+        # One linear timeline that spans all loops.
         self.combined_timeline: list[ValidatorInstruction] = []
 
-        # Don't use defaultdict so we can error out if accessing a key that doesn't exist.
+        # Lookup for all instructions in a given loop for a given name.
+        # First key is the loop name, second key is the instruction name (e.g. "GRA").
+        # Value is a list of tuples of (index, instruction) for the given name in the given loop.
+        # Index is the index of the instruction in the loop, index in [0, len(self._timelines[loop])-1]
         self._instructions_for_name: dict[str, dict[str, list[tuple[int, ValidatorInstruction]]]] = {loop: defaultdict(list) for loop in self.loops}
+        # Same as above, except for all instructions across all loops.
+        # Only index by instruction name.
+        # Index is the index of the instruction in the combined timeline. index in [0, len(self.combined_timeline)-1]
         self._instructions_for_name_combined: dict[str, list[tuple[int, ValidatorInstruction]]] = defaultdict(list)
 
         # Populate the timeline with instructions
