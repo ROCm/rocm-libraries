@@ -30,6 +30,7 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 
 #include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/CodeGen/Annotate.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -130,7 +131,7 @@ namespace rocRoller
             r->setName(arg.name);
             r->setVariableType(arg.variableType);
             m_loadedValues[arg.name] = r;
-            co_yield m_context.lock()->mem()->loadScalar(r, argPtr, arg.offset, arg.size);
+            co_yield m_context.lock()->mem()->loadScalar(r, argPtr, arg.offset, arg.size).map(AddComment(arg.name));
         }
     }
 

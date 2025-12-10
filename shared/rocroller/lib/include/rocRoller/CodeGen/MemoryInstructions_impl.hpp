@@ -399,7 +399,7 @@ namespace rocRoller
         std::string modifier = glc ? "glc" : "";
 
         co_yield_(Instruction(
-            instruction_string, {dest}, {base, offsetLiteral}, {modifier}, "Load scalar value"));
+            instruction_string, {dest}, {base, offsetLiteral}, {modifier}, ""));
 
         auto ctx = m_context.lock();
         if(ctx->kernelOptions()->alwaysWaitAfterLoad)
