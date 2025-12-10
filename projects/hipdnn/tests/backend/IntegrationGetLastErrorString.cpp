@@ -158,9 +158,9 @@ TEST(IntegrationGetLastErrorString, PeekThenGetClears)
     hipdnnGetLastErrorString(getBuffer, sizeof(getBuffer));
     ASSERT_STREQ(peekBuffer, getBuffer);
 
-    // Next get should return empty (error was cleared by previous get)
+    // Next peek should return empty (error was cleared by previous get)
     char emptyBuffer[HIPDNN_ERROR_STRING_MAX_LENGTH];
-    hipdnnGetLastErrorString(emptyBuffer, sizeof(emptyBuffer));
+    hipdnnPeekLastErrorString_ext(emptyBuffer, sizeof(emptyBuffer));
     ASSERT_STREQ(emptyBuffer, "");
 }
 
