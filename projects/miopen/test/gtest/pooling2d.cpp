@@ -24,9 +24,9 @@ void RunPooling2dTests()
     // Run 1: full_set = false with default dataset (reduced combinations, various tensor sizes)
     {
         pooling2d_driver<T> driver;
-        driver.type = miopen_type<T>{};
-        driver.full_set = false;
-        driver.dataset_id = 0;
+        driver.type              = miopen_type<T>{};
+        driver.full_set          = false;
+        driver.dataset_id        = 0;
         driver.config_iter_start = 0;
 
         std::vector<typename pooling2d_driver<T>::argument*> data_args;
@@ -39,7 +39,9 @@ void RunPooling2dTests()
         driver.iteration = 0;
         try
         {
-            run_data(data_args.begin(), data_args.end(), [&] { driver.template base_run<pooling2d_driver<T>>(); });
+            run_data(data_args.begin(), data_args.end(), [&] {
+                driver.template base_run<pooling2d_driver<T>>();
+            });
         }
         catch(const std::exception& e)
         {
@@ -54,9 +56,9 @@ void RunPooling2dTests()
     // Run 2: full_set = true with minimal dataset (all combinations, small tensors)
     {
         pooling2d_driver<T> driver;
-        driver.type = miopen_type<T>{};
-        driver.full_set = true;
-        driver.dataset_id = 1; // Minimal dataset to avoid OOM
+        driver.type              = miopen_type<T>{};
+        driver.full_set          = true;
+        driver.dataset_id        = 1; // Minimal dataset to avoid OOM
         driver.config_iter_start = 0;
 
         std::vector<typename pooling2d_driver<T>::argument*> data_args;
@@ -69,7 +71,9 @@ void RunPooling2dTests()
         driver.iteration = 0;
         try
         {
-            run_data(data_args.begin(), data_args.end(), [&] { driver.template base_run<pooling2d_driver<T>>(); });
+            run_data(data_args.begin(), data_args.end(), [&] {
+                driver.template base_run<pooling2d_driver<T>>();
+            });
         }
         catch(const std::exception& e)
         {
