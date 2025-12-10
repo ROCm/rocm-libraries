@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -174,33 +174,37 @@ __forceinline__ __device__ __host__ Result_Type poisson_distribution_itr(State& 
     // George S. Fishman
     // Discrete-Event Simulation: Modeling, Programming, and Analysis
     // p. 333
-    double L;
-    double x = 1.0;
-    double y = 1.0;
-    Result_Type k   = 0;
-    int pow = 0;
+    Result_Type k = 0;
     // Algorithm ITR uses u from (0, 1) and uniform_double returns (0, 1]
     // Change u to ensure that 1 is never generated,
     // otherwise the inner loop never ends.
-    double u = rocrand_uniform_double(state) - ROCRAND_2POW32_INV_DOUBLE / 2.0;
-    double upow = pow + 500.0;
-    double ex = exp(-500.0);
-    do{
-        if (lambda > upow)
-            L = ex;
-        else
-            L = exp((double)(pow - lambda));
+    const double u = rocrand_uniform_double(state) - ROCRAND_2POW32_INV_DOUBLE / 2.0;
+    const double L = (lambda > 500.0) ? exp(-500.0) : exp(-lambda);
 
+    // First iteration, pow = 0 < lambda
+    double x = L;
+    double y = L;
+    while(u > y)
+    {
+        k++;
+        x *= ((double)lambda / (double)k);
+        y += x;
+    }
+
+    // Second iteration only if lambda > 500.0. No more iterations needed
+    // as we only call this method with lambda < 1000.0
+    if((double)500 < lambda)
+    {
+        // Now we now that necessarily lambda > upow = 500.0, so we already calculated before L = exp(-500)
         x *= L;
         y *= L;
-        pow += 500;
-        while (u > y)
+        while(u > y)
         {
             k++;
-            x *= ((double)lambda / (double) k);
+            x *= ((double)lambda / (double)k);
             y += x;
         }
-    } while((double)pow < lambda);
+    }
     return k;
 }
 
