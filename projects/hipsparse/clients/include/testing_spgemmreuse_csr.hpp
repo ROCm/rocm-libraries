@@ -36,7 +36,8 @@
 
 using namespace hipsparse_test;
 
-void testing_spgemmreuse_csr_bad_arg(void)
+template <typename I, typename J, typename T>
+void testing_spgemmreuse_csr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
     int64_t              m         = 100;
@@ -215,7 +216,7 @@ hipsparseStatus_t testing_spgemmreuse_csr(Arguments argus)
     hipsparseIndexBase_t idxBaseA = argus.baseA;
     hipsparseIndexBase_t idxBaseB = argus.baseB;
     hipsparseIndexBase_t idxBaseC = argus.baseC;
-    hipsparseSpGEMMAlg_t alg      = static_cast<hipsparseSpGEMMAlg_t>(argus.spgemm_alg);
+    hipsparseSpGEMMAlg_t alg      = argus.spgemm_alg;
     std::string          filename = argus.filename;
 
     T                    h_beta = make_DataType<T>(0);

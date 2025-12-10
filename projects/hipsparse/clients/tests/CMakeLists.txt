@@ -270,7 +270,44 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
                          test_prune_csr2csr.yaml
                          test_prune_csr2csr_by_percentage.yaml
                          test_prune_dense2csr.yaml
-                         test_prune_dense2csr_by_percentage.yaml)
+                         test_prune_dense2csr_by_percentage.yaml
+                         test_identity.yaml
+                         test_nnz.yaml
+                         test_coosort.yaml
+                         test_cscsort.yaml
+                         test_csrsort.yaml
+
+                         test_axpby.yaml
+                         test_rot.yaml
+                         test_gather.yaml
+                         test_scatter.yaml
+                         test_sddmm_coo_aos.yaml
+                         test_sddmm_coo.yaml
+                         test_sddmm_csc.yaml
+                         test_sddmm_csr.yaml
+                         test_dense_to_sparse_coo.yaml
+                         test_dense_to_sparse_csc.yaml
+                         test_dense_to_sparse_csr.yaml
+                         test_sparse_to_dense_coo.yaml
+                         test_sparse_to_dense_csc.yaml
+                         test_sparse_to_dense_csr.yaml
+                         test_spgemm_csr.yaml
+                         test_spgemmreuse_csr.yaml
+                         test_spmm_batched_coo.yaml
+                         test_spmm_batched_csc.yaml
+                         test_spmm_batched_csr.yaml
+                         test_spmm_coo.yaml
+                         test_spmm_csc.yaml
+                         test_spmm_csr.yaml
+                         test_spmv_coo_aos.yaml
+                         test_spmv_coo.yaml
+                         test_spmv_csr.yaml
+                         test_spmv_sell.yaml
+                         test_spsv_coo.yaml
+                         test_spsv_csr.yaml
+                         test_spsm_coo.yaml
+                         test_spsm_csr.yaml
+                         test_spvv.yaml)
 
 # Prepare testing data
 set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparse_test.data")

@@ -30,6 +30,9 @@ The checkout command of the two projects lasted less than 90 seconds.
 
 ## Working with the Superbuild
 
+> [!TIP]
+> 💡 Refer to the README.md file in each project [subfolder](projects) for details on building that specific project without making the superbuild. [TheRock](https://github.com/ROCm/TheRock) is now the preferred system for performing a superbuild of rocm-libraries. See TheRock [Development Guide](https://github.com/ROCm/TheRock/blob/main/docs/development/development_guide.md) for more details.
+
 To issue a full ROCm libraries superbuild for all projects and targets:
 
 ```bash
@@ -177,6 +180,34 @@ We are transitioning to trunk-based development, with the tentative plan happeni
 Until the switch is fully implemented, we will continue to sync changes to individual repositories following their existing development model (e.g., `develop` -> `staging` -> `mainline` -> `release`).
 However, once trunk-based development is in place, feature branches will be created directly from the default branch, `develop`.
 During this period, a high priority will be placed on keeping the `develop` branch healthy.
+
+## Pre-commit Hooks
+
+Pre-commit hooks automatically run code quality checks before you commit changes, catching issues early in the development process. This includes formatting checks, linting, and other automated validations. See [`.pre-commit-config.yaml`](.pre-commit-config.yaml) for specifics.
+
+### Setting Up Pre-commit
+
+1. Install pre-commit:
+```bash
+pip install pre-commit
+```
+
+2. Install the git hooks:
+```bash
+cd rocm-libraries
+pre-commit install
+```
+
+After they are installed, the hooks will run automatically for `git commit`. If any checks fail, the commit will be blocked until you fix the issues.
+
+### Running Pre-commit Manually
+
+Run checks on staged files:
+```bash
+pre-commit
+```
+
+---
 
 ## Pull Request Guidelines
 

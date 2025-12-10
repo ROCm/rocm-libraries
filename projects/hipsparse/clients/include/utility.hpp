@@ -3070,11 +3070,11 @@ void host_csrmm(J                    M,
                 const J*             csr_col_ind_A,
                 const T*             csr_val_A,
                 const T*             B,
-                J                    ldb,
+                int64_t              ldb,
                 hipsparseOrder_t     orderB,
                 T                    beta,
                 T*                   C,
-                J                    ldc,
+                int64_t              ldc,
                 hipsparseOrder_t     orderC,
                 hipsparseIndexBase_t base,
                 bool                 force_conj_A)
@@ -3091,15 +3091,15 @@ void host_csrmm(J                    M,
         {
             for(J j = 0; j < N; ++j)
             {
-                I row_begin = csr_row_ptr_A[i] - base;
-                I row_end   = csr_row_ptr_A[i + 1] - base;
-                J idx_C     = orderC == HIPSPARSE_ORDER_COL ? i + j * ldc : i * ldc + j;
+                I       row_begin = csr_row_ptr_A[i] - base;
+                I       row_end   = csr_row_ptr_A[i + 1] - base;
+                int64_t idx_C     = orderC == HIPSPARSE_ORDER_COL ? i + j * ldc : i * ldc + j;
 
                 T sum = make_DataType<T>(0);
 
                 for(I k = row_begin; k < row_end; ++k)
                 {
-                    J idx_B = 0;
+                    int64_t idx_B = 0;
                     if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE
                         && orderB == HIPSPARSE_ORDER_COL)
                        || (transB == HIPSPARSE_OPERATION_TRANSPOSE && orderB != HIPSPARSE_ORDER_COL)
@@ -3135,8 +3135,8 @@ void host_csrmm(J                    M,
         {
             for(J j = 0; j < N; ++j)
             {
-                J idx_C  = (orderC == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
-                C[idx_C] = testing_mult(beta, C[idx_C]);
+                int64_t idx_C = (orderC == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
+                C[idx_C]      = testing_mult(beta, C[idx_C]);
             }
         }
 
@@ -3152,7 +3152,7 @@ void host_csrmm(J                    M,
                     J col = csr_col_ind_A[k] - base;
                     T val = testing_conj(csr_val_A[k], conj_A);
 
-                    J idx_B = 0;
+                    int64_t idx_B = 0;
 
                     if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE
                         && orderB == HIPSPARSE_ORDER_COL)
@@ -3167,7 +3167,7 @@ void host_csrmm(J                    M,
                         idx_B = (j + i * ldb);
                     }
 
-                    J idx_C = (orderC == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
+                    int64_t idx_C = (orderC == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
 
                     C[idx_C]
                         = C[idx_C]
@@ -3183,8 +3183,8 @@ void host_csrmm_batched(J                    M,
                         J                    N,
                         J                    K,
                         J                    batch_count_A,
-                        J                    offsets_batch_stride_A,
-                        I                    columns_values_batch_stride_A,
+                        int64_t              offsets_batch_stride_A,
+                        int64_t              columns_values_batch_stride_A,
                         hipsparseOperation_t transA,
                         hipsparseOperation_t transB,
                         T                    alpha,
@@ -3192,15 +3192,15 @@ void host_csrmm_batched(J                    M,
                         const J*             csr_col_ind_A,
                         const T*             csr_val_A,
                         const T*             B,
-                        J                    ldb,
+                        int64_t              ldb,
                         J                    batch_count_B,
-                        I                    batch_stride_B,
+                        int64_t              batch_stride_B,
                         hipsparseOrder_t     order_B,
                         T                    beta,
                         T*                   C,
-                        J                    ldc,
+                        int64_t              ldc,
                         J                    batch_count_C,
-                        I                    batch_stride_C,
+                        int64_t              batch_stride_C,
                         hipsparseOrder_t     order_C,
                         hipsparseIndexBase_t base,
                         bool                 force_conj_A)
@@ -3299,11 +3299,11 @@ void host_cscmm(J                    M,
                 const J*             csc_row_ind_A,
                 const T*             csc_val_A,
                 const T*             B,
-                J                    ldb,
+                int64_t              ldb,
                 hipsparseOrder_t     order_B,
                 T                    beta,
                 T*                   C,
-                J                    ldc,
+                int64_t              ldc,
                 hipsparseOrder_t     order_C,
                 hipsparseIndexBase_t base)
 {
@@ -3380,8 +3380,8 @@ void host_cscmm_batched(J                    M,
                         J                    N,
                         J                    K,
                         J                    batch_count_A,
-                        I                    offsets_batch_stride_A,
-                        I                    rows_values_batch_stride_A,
+                        int64_t              offsets_batch_stride_A,
+                        int64_t              rows_values_batch_stride_A,
                         hipsparseOperation_t transA,
                         hipsparseOperation_t transB,
                         T                    alpha,
@@ -3389,15 +3389,15 @@ void host_cscmm_batched(J                    M,
                         const J*             csc_row_ind_A,
                         const T*             csc_val_A,
                         const T*             B,
-                        J                    ldb,
+                        int64_t              ldb,
                         J                    batch_count_B,
-                        I                    batch_stride_B,
+                        int64_t              batch_stride_B,
                         hipsparseOrder_t     order_B,
                         T                    beta,
                         T*                   C,
-                        J                    ldc,
+                        int64_t              ldc,
                         J                    batch_count_C,
-                        I                    batch_stride_C,
+                        int64_t              batch_stride_C,
                         hipsparseOrder_t     order_C,
                         hipsparseIndexBase_t base)
 {
@@ -3502,11 +3502,11 @@ void host_coomm(I                    M,
                 const I*             coo_col_ind_A,
                 const T*             coo_val_A,
                 const T*             B,
-                I                    ldb,
+                int64_t              ldb,
                 hipsparseOrder_t     order_B,
                 T                    beta,
                 T*                   C,
-                I                    ldc,
+                int64_t              ldc,
                 hipsparseOrder_t     order_C,
                 hipsparseIndexBase_t base)
 {
@@ -3522,7 +3522,7 @@ void host_coomm(I                    M,
 #endif
             for(I i = 0; i < M; ++i)
             {
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
 
                 C[idx_C] = testing_mult(beta, C[idx_C]);
             }
@@ -3539,9 +3539,9 @@ void host_coomm(I                    M,
                 I col = coo_col_ind_A[i] - base;
                 T val = testing_mult(alpha, coo_val_A[i]);
 
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? row + j * ldc : row * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? row + j * ldc : row * ldc + j;
 
-                I idx_B = 0;
+                int64_t idx_B = 0;
                 if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE && order_B == HIPSPARSE_ORDER_COL)
                    || (transB != HIPSPARSE_OPERATION_NON_TRANSPOSE
                        && order_B != HIPSPARSE_ORDER_COL))
@@ -3566,7 +3566,7 @@ void host_coomm(I                    M,
 #endif
             for(I i = 0; i < K; ++i)
             {
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
 
                 C[idx_C] = testing_mult(beta, C[idx_C]);
             }
@@ -3583,9 +3583,9 @@ void host_coomm(I                    M,
                 I col = coo_col_ind_A[i] - base;
                 T val = testing_mult(alpha, testing_conj(coo_val_A[i], conj_A));
 
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
 
-                I idx_B = 0;
+                int64_t idx_B = 0;
                 if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE && order_B == HIPSPARSE_ORDER_COL)
                    || (transB != HIPSPARSE_OPERATION_NON_TRANSPOSE
                        && order_B != HIPSPARSE_ORDER_COL))
@@ -3609,7 +3609,7 @@ void host_coomm_batched(I                    M,
                         I                    K,
                         I                    nnz,
                         I                    batch_count_A,
-                        I                    batch_stride_A,
+                        int64_t              batch_stride_A,
                         hipsparseOperation_t transA,
                         hipsparseOperation_t transB,
                         T                    alpha,
@@ -3617,15 +3617,15 @@ void host_coomm_batched(I                    M,
                         const I*             coo_col_ind_A,
                         const T*             coo_val_A,
                         const T*             B,
-                        I                    ldb,
+                        int64_t              ldb,
                         I                    batch_count_B,
                         I                    batch_stride_B,
                         hipsparseOrder_t     order_B,
                         T                    beta,
                         T*                   C,
-                        I                    ldc,
+                        int64_t              ldc,
                         I                    batch_count_C,
-                        I                    batch_stride_C,
+                        int64_t              batch_stride_C,
                         hipsparseOrder_t     order_C,
                         hipsparseIndexBase_t base)
 {

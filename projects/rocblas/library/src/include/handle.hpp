@@ -90,8 +90,10 @@ enum class Processor : int
     gfx1030 = 1030,
     gfx1031 = 1031,
     gfx1032 = 1032,
+    gfx1033 = 1033,
     gfx1034 = 1034,
     gfx1035 = 1035,
+    gfx1036 = 1036,
     gfx1100 = 1100,
     gfx1101 = 1101,
     gfx1102 = 1102,
@@ -147,16 +149,20 @@ private:
             : device_id(device_id)
             , old_device_id(-1)
         {
-            hipGetDevice(&old_device_id);
+            THROW_IF_HIP_ERROR(hipGetDevice(&old_device_id));
             if(device_id != old_device_id)
-                hipSetDevice(device_id);
+            {
+                THROW_IF_HIP_ERROR(hipSetDevice(device_id));
+            }
         }
 
         // Old device ID is restored on destruction
         ~_rocblas_saved_device_id()
         {
             if(device_id != old_device_id)
-                hipSetDevice(old_device_id);
+            {
+                (void)(hipSetDevice(old_device_id));
+            }
         }
 
         // Move constructor

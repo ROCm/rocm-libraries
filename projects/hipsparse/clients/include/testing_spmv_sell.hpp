@@ -39,7 +39,8 @@
 
 using namespace hipsparse_test;
 
-void testing_spmv_sell_bad_arg(void)
+template <typename I, typename J, typename T>
+void testing_spmv_sell_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION > 12011)
     int64_t              m                       = 100;

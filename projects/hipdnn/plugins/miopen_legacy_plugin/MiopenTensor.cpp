@@ -3,6 +3,7 @@
 
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
+#include <hipdnn_sdk/plugin/PluginException.hpp>
 
 namespace miopen_legacy_plugin
 {
@@ -12,6 +13,12 @@ MiopenTensor::MiopenTensor(const hipdnn_sdk::data_objects::TensorAttributes& ten
 {
     THROW_ON_MIOPEN_FAILURE(miopenCreateTensorDescriptor(&_descriptor));
 
+    PLUGIN_THROW_IF_NULL(tensor.dims(),
+                         HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                         "Tensor dims pointer is null for tensor UID: " + std::to_string(_uid));
+    PLUGIN_THROW_IF_NULL(tensor.strides(),
+                         HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                         "Tensor strides pointer is null for tensor UID: " + std::to_string(_uid));
     std::vector<int> dims(tensor.dims()->begin(), tensor.dims()->end());
     std::vector<int> strides(tensor.strides()->begin(), tensor.strides()->end());
     THROW_ON_MIOPEN_FAILURE(

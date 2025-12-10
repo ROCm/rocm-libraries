@@ -9,9 +9,7 @@
 #include <memory>
 #include <stdexcept>
 
-namespace hipdnn_sdk
-{
-namespace utilities
+namespace hipdnn_sdk::utilities
 {
 
 enum class MemoryLocation
@@ -369,5 +367,4 @@ private:
     DeviceAlloc _deviceAllocator;
 };
 
-} // namespace utilities
-} // namespace hipdnn_sdk
+} // namespace hipdnn_sdk::utilities

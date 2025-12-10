@@ -98,7 +98,7 @@ hipsparseStatus_t testing_axpyi(const Arguments& argus)
 
     // Initial Data on CPU
     srand(12345ULL);
-    hipsparseInitIndex(hxInd.data(), nnz, 1, N);
+    hipsparseInitIndex(hxInd.data(), nnz, idx_base, N + idx_base);
     hipsparseInit<T>(hxVal, 1, nnz);
     hipsparseInit<T>(hy_1, 1, N);
 

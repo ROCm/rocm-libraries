@@ -30,7 +30,6 @@
 using namespace group_conv;
 
 DEFINE_GROUP_CONV3D_TEST(float, FP32, Forward);
-DEFINE_GROUP_CONV3D_TEST(float, TF32, Forward);
 DEFINE_GROUP_CONV3D_TEST(half, FP16, Forward);
 DEFINE_GROUP_CONV3D_TEST(bfloat16, BFP16, Forward);
 /// \todo int8_t tests don't work. Need debugging

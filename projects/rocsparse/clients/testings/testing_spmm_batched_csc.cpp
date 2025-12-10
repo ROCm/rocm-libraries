@@ -204,6 +204,10 @@ void testing_spmm_batched_csc(const Arguments& arg)
                             nnz_A,
                             base);
 
+    // Redefine values
+    rocsparse_init_1d_array<A>(
+        hcsc_val_temp, nnz_A, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
+
     // Some matrix properties
     J A_m = (trans_A == rocsparse_operation_none) ? M : K;
     J A_n = (trans_A == rocsparse_operation_none) ? K : M;
@@ -248,14 +252,7 @@ void testing_spmm_batched_csc(const Arguments& arg)
         for(size_t j = 0; j < nnz_A; j++)
         {
             hcsc_row_ind[nnz_A * i + j] = hcsc_row_ind_temp[j];
-            if(arg.convert_to_int)
-            {
-                hcsc_val[nnz_A * i + j] = convertToInt<A>(hcsc_val_temp[j]);
-            }
-            else
-            {
-                hcsc_val[nnz_A * i + j] = hcsc_val_temp[j];
-            }
+            hcsc_val[nnz_A * i + j]     = hcsc_val_temp[j];
         }
     }
 
@@ -266,16 +263,10 @@ void testing_spmm_batched_csc(const Arguments& arg)
     host_vector<C> hC_gold(batch_count_C * nnz_C);
 
     // Initialize data on CPU
-    rocsparse_init<B>(hB, batch_count_B * nnz_B, 1, 1, arg.convert_to_int);
-    rocsparse_init<C>(hC_1, batch_count_C * nnz_C, 1, 1, arg.convert_to_int);
-
-    if(arg.convert_to_int)
-    {
-        for(J i = 0; i < batch_count_B * nnz_B; i++)
-        {
-            hB[i] = convertToInt<B>(hB[i]);
-        }
-    }
+    rocsparse_init_1d_array<B>(
+        hB, batch_count_B * nnz_B, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
+    rocsparse_init_1d_array<C>(
+        hC_1, batch_count_C * nnz_C, arg.convert_to_int, arg.rand_gen_min, arg.rand_gen_max);
 
     hC_2    = hC_1;
     hC_gold = hC_1;

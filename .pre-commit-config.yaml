@@ -25,7 +25,13 @@ exclude: |
     projects/miopen/src/kernels/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)
     projects/rocrand/library/.*precomputed\.(cpp|h)|
-    projects/rocrand/library/.*constants\.(cpp|h)
+    projects/rocrand/library/.*constants\.(cpp|h)|
+    # Binary files
+    projects/hipdnn/.*\.bin$|
+    # Reference data
+    projects/hipdnn/hipdnn_reference_data/.*|
+    # Generated hipDNN FlatBuffers headers
+    projects/hipdnn/sdk/include/hipdnn_sdk/data_objects/.*_generated\.h
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -34,10 +40,13 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        exclude: |
+          (?x)
+          ^projects/hipdnn/\.clang-format$
       - id: check-added-large-files
 
   - repo: https://github.com/psf/black
-    rev: 22.10.0
+    rev: 25.12.0
     hooks:
       - id: black
         language_version: python3
@@ -49,6 +58,15 @@ repos:
         name: clang-format (C/C++/ObjC)
         entry: clang-format -i -style=file
         files: '\.(c|cpp|cc|h|hpp|m|mm)$'
+
+  - repo: local
+    hooks:
+      - id: flatc-hipdnn
+        name: flatc (hipDNN)
+        entry: python projects/hipdnn/scripts/run_flatc.py
+        language: python
+        files: ^projects/hipdnn/sdk/schemas/.*\.fbs$
+        pass_filenames: true
 
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10

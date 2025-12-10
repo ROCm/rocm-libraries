@@ -347,7 +347,7 @@ void testing_hemv_batched(const Arguments& arg)
             CHECK_HIP_ERROR(d_beta.transfer_from(hbeta));
             CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
 
-            dy.transfer_from(hy_gold);
+            CHECK_HIP_ERROR(dy.transfer_from(hy_gold));
 
             handle.pre_test(arg);
             DAPI_CHECK(rocblas_hemv_batched_fn,

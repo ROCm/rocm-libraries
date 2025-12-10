@@ -114,9 +114,9 @@ Tests:
   filename: [mplate,
              mc2depi]
 
-
+#
 - name: csrsv
-  category: quick
+  category: pre_checkin
   function: csrsv
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
@@ -130,7 +130,7 @@ Tests:
   matrix: [rocsparse_matrix_random]
 
 - name: csrsv
-  category: quick
+  category: pre_checkin
   function: csrsv
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick

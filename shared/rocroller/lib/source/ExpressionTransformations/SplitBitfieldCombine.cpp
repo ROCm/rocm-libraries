@@ -45,7 +45,7 @@ namespace rocRoller
                 uint32_t dwordEndBit   = dwordStartBit + dwordSize - 1;
 
                 // Get new destination dword
-                ExpressionPtr dstDWord = bfe(DataType::UInt32, expr.rhs, dwordStartBit, dwordSize);
+                ExpressionPtr dstDWord = bfe(DataType::Raw32, expr.rhs, dwordStartBit, dwordSize);
 
                 // No overlap with this dword
                 if(combineStartBit > dwordEndBit || combineEndBit < dwordStartBit)
@@ -63,7 +63,7 @@ namespace rocRoller
                     ExpressionPtr srcDWord = expr.lhs;
                     if(resultVariableType(expr.lhs).getElementSize() * 8 > dwordSize)
                     {
-                        srcDWord  = bfe(DataType::UInt32, expr.lhs, srcOffset, overlapWidth);
+                        srcDWord  = bfe(DataType::Raw32, expr.lhs, srcOffset, overlapWidth);
                         srcOffset = 0;
                     }
 
@@ -141,18 +141,22 @@ namespace rocRoller
                 cpy.rhs = call(expr.rhs);
 
                 auto dstSize = resultVariableType(expr.rhs).getElementSize() * 8;
-                AssertFatal(expr.dstOffset + expr.width <= dstSize,
-                            "BitfieldCombine out of bounds: dstOffset={} + width={} > dstSize={}",
-                            expr.dstOffset,
-                            expr.width,
-                            dstSize);
+                AssertFatal(
+                    expr.dstOffset + expr.width <= dstSize,
+                    fmt::format(
+                        "BitfieldCombine out of bounds: dstOffset={} + width={} > dstSize={}",
+                        expr.dstOffset,
+                        expr.width,
+                        dstSize));
 
                 auto srcSize = resultVariableType(expr.lhs).getElementSize() * 8;
-                AssertFatal(expr.srcOffset + expr.width <= srcSize,
-                            "BitfieldCombine out of bounds: srcOffset={} + width={} > srcSize={}",
-                            expr.srcOffset,
-                            expr.width,
-                            srcSize);
+                AssertFatal(
+                    expr.srcOffset + expr.width <= srcSize,
+                    fmt::format(
+                        "BitfieldCombine out of bounds: srcOffset={} + width={} > srcSize={}",
+                        expr.srcOffset,
+                        expr.width,
+                        srcSize));
 
                 // No need to split if destination size is less than or equal to 32 bits
                 if(dstSize <= dwordSize && srcSize <= dwordSize)
