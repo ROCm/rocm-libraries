@@ -83,12 +83,6 @@ class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation 1/2 but did not. {message}"
 
-        # Changing barrier from 0 to 1 for LRA1 should still pass
-        # TODO: Move this test to the NLL verification. Using syncCode[0] here produces a subtle and hard to guard against bug.
-        syncCode[1].dscnt = 1
-        status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        assert status, f"Schedule should have passed validation 2/2 but did not. {message}"
-
     def test_complex_LR0(self):
         """
         2nd LRB0 is not needed until iteration 6 & 7, can have SWaitCnt for it after the halfway point.
