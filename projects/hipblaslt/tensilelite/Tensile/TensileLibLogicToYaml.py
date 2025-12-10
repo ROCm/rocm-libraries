@@ -34,6 +34,7 @@ import os
 import sys
 import re
 import yaml
+from typing import Optional, Tuple
 
 
 class Quoted(str):
@@ -85,7 +86,7 @@ def tPrint(verbosity: int, arg) -> None:
         sys.stdout.flush()
 
 
-def setGlobalParams(versionString, problemTypeState):
+def setGlobalParams(versionString: dict, problemTypeState: dict) -> dict:
     res = {}
     res["MinimumRequiredVersion"] = versionString["MinimumRequiredVersion"]
     res["SleepPercent"] = 0
@@ -104,7 +105,7 @@ def setGlobalParams(versionString, problemTypeState):
     return res
 
 
-def formProblemTypeYamlData(problemTypeState):
+def formProblemTypeYamlData(problemTypeState: dict) -> dict:
     if len(problemTypeState) == 0:
         raise RuntimeError(
             "Length of problem Type Parameters is empty!!, Please re-check the library logic file !"
@@ -134,7 +135,7 @@ def formProblemTypeYamlData(problemTypeState):
     return data
 
 
-def formGroups(MIInstruction9Bits):
+def formGroups(MIInstruction9Bits: dict) -> dict:
     data = {}
     data["Groups"] = [[]]
     group = {}
@@ -144,20 +145,7 @@ def formGroups(MIInstruction9Bits):
     return data
 
 
-def calculateThreadTileMacroTileWorkGroupParameters(
-    MIBlock, MIWaveTile, MIWaveGroup, waveFrontSize
-):
-    TT0 = int(MIWaveTile[0])
-    TT1 = int(MIWaveTile[1])
-    MT0 = int(MIBlock[0]) * int(MIBlock[4]) * int(MIWaveTile[0]) * int(MIWaveGroup[0])
-    MT1 = int(MIBlock[1]) * int(MIWaveTile[1]) * int(MIWaveGroup[1])
-    WG0 = int(MIBlock[0]) * int(MIBlock[4]) * int(MIWaveGroup[0])
-    WG1 = int(MIWaveGroup[0]) * int(MIWaveGroup[1]) * waveFrontSize // int(WG0)
-
-    return TT0, TT1, MT0, MT1, WG0, WG1
-
-
-def form9BitMIInst(currentSolutionState):
+def form9BitMIInst(currentSolutionState: dict) -> dict:
     MIBlock = currentSolutionState["MIBlock"]
     MIWaveTile = currentSolutionState["MIWaveTile"]
     MIWaveGroup = currentSolutionState["MIWaveGroup"]
@@ -181,7 +169,7 @@ def form9BitMIInst(currentSolutionState):
     return groups
 
 
-def formForkParams(currentIndexSolution, skipMI):
+def formForkParams(currentIndexSolution: dict, skipMI: bool) -> dict:
 
     data = {}
     data["InitialSolutionParameters"] = None
@@ -236,10 +224,10 @@ def formForkParams(currentIndexSolution, skipMI):
 
 
 def formProblemSize(
-    exactLogic,
-    solutionIndex,
-    problemTypeStat,
-):
+    exactLogic: Optional[list[Tuple[list, list]]],
+    solutionIndex: int,
+    problemTypeStat: dict,
+) -> dict:
     data = {}
     data["BenchmarkJoinParameters"] = None
     data["BenchmarkFinalParameters"] = []
@@ -268,9 +256,10 @@ def formProblemSize(
     return data
 
 
-def formLibraryLogic(scheduleName, deviceNames, architectureName):
+def formLibraryLogic(
+    scheduleName: str, deviceNames: list, architectureName: str
+) -> dict:
     data = {}
-
     # Form final library logic string
     data["ScheduleName"] = Quoted(scheduleName)
     data["DeviceNames"] = FlowList([Quoted(deviceNames[0])])
@@ -279,7 +268,8 @@ def formLibraryLogic(scheduleName, deviceNames, architectureName):
     return data
 
 
-def writeToTensileYamlFile(tensileYamlFile, tensileYamlData):
+def writeToTensileYamlFile(tensileYamlFile: str, tensileYamlData: str) -> Optional[str]:
+    ret = None
     try:
         fileDir = os.path.dirname(tensileYamlFile)
         if fileDir:
@@ -294,6 +284,7 @@ def writeToTensileYamlFile(tensileYamlFile, tensileYamlData):
                 Dumper=yaml.Dumper,
             )
         tPrint(1, "Config library is written to {}".format(tensileYamlFile))
+        ret = tensileYamlFile
 
     except (OSError, IOError):
         tPrint(
@@ -302,11 +293,37 @@ def writeToTensileYamlFile(tensileYamlFile, tensileYamlData):
                 tensileYamlFile
             ),
         )
-    
-    return tensileYamlFile
+    return ret
 
 
-def TensileLibLogicToYaml(logicFilePath, solutionIndex, tensileYamlFile, skipMI):
+def TensileLibLogicToYaml(
+    logicFilePath: str, solutionIndex: int, tensileYamlFile: str, skipMI: bool
+) -> Optional[str]:
+    """
+    Generate config from a library logic.
+
+    This function generates a config yaml by extracting a solution from a given library
+    logic and a solution index.
+
+    Input:
+    :param logicFilePath: String. Yaml format file. Input library logic to extract from.
+    :param solutionIndex: Int. Solution index to extract solution from the library.
+    :param tensileYamlFile: String. Config yaml file name. Creates the dir if path is given.
+    :param skipMI: Bool. If False ignores the MI instruction.
+
+    Output:
+    String or None. If the config file is generetaed return the name otherwise None.
+
+    Raises:
+    RuntimeError
+        If logicFilePath cannot be read
+        If solutionIndex is not in the logicFilePath
+        If tensileYamlFile string is empty or name is not valid
+
+    Example:
+    TensileLibLogicToYaml("gfx950_Cijk_Alik_Bljk_BSS_BH_BiasS_HAS_SAV_UserArgs.yaml", 0, "config.yaml", False)
+    """
+
     tPrint(1, "")
     tPrint(1, HR)
     tPrint(1, "#")
@@ -379,13 +396,7 @@ def TensileLibLogicToYaml(logicFilePath, solutionIndex, tensileYamlFile, skipMI)
     tensileYamlFileData["LibraryLogic"] = problemSizeData
 
     # Write the Formed Yaml data into the Yaml File
-    outputYamlFile = writeToTensileYamlFile(tensileYamlFile, tensileYamlFileData)
-
-    if tensileYamlFile == outputYamlFile:
-        return tensileYamlFile
-    else:
-        return None
-    
+    return writeToTensileYamlFile(tensileYamlFile, tensileYamlFileData)
 
 
 def parseArgs():
@@ -448,4 +459,3 @@ def main():
         TensileLibLogicToYaml(args.input, int(id), tensileYamlFile, args.skipMI)
         tensileYamlFiles.append(tensileYamlFile)
     tPrint(1, f"Tensile Files generated: {tensileYamlFiles}")
-
