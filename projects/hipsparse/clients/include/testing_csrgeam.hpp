@@ -692,7 +692,7 @@ void testing_csrgeam_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csrgeam(Arguments argus)
+void testing_csrgeam(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
     int                  M          = argus.M;
@@ -734,7 +734,7 @@ hipsparseStatus_t testing_csrgeam(Arguments argus)
            filename, M, N, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idx_base_A))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     // B = A
@@ -1050,8 +1050,6 @@ hipsparseStatus_t testing_csrgeam(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSRGEAM_HPP

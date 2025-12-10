@@ -61,7 +61,6 @@ void setPredicates(std::shared_ptr<GemmKernel> gemmKernel)
     });
 
     // parameters
-    auto unrollKExp        = literal(params->unrollK);
     auto workgroupTileMExp = literal(solutionParams->workgroupTile.m);
     auto workgroupTileNExp = literal(solutionParams->workgroupTile.n);
     auto workgroupTileKExp = literal(solutionParams->workgroupTile.k);
@@ -69,10 +68,6 @@ void setPredicates(std::shared_ptr<GemmKernel> gemmKernel)
     // constants
     auto zero = literal(0u);
     auto one  = literal(1u);
-
-    // sanitize parameters
-    auto sanUnrollKExp
-        = convert(DataType::UInt32, conditional(unrollKExp <= zero, one, unrollKExp));
 
     // predicates
     std::stringstream ss;
@@ -88,9 +83,8 @@ void setPredicates(std::shared_ptr<GemmKernel> gemmKernel)
     commandKernel->addPredicate(unrollYPredicate);
     ss.str("");
 
-    auto unrollKPredicate = (aSizeExps[1] % (workgroupTileKExp * sanUnrollKExp) == zero);
-    ss << "K must be a multiple of workgroupTile.k=" << solutionParams->workgroupTile.k
-       << " * unrollK=" << rocRoller::Expression::evaluate(sanUnrollKExp);
+    auto unrollKPredicate = (aSizeExps[1] % workgroupTileKExp == zero);
+    ss << "K must be a multiple of workgroupTile.k=" << solutionParams->workgroupTile.k;
     setComment(unrollKPredicate, ss.str());
     commandKernel->addPredicate(unrollKPredicate);
     ss.str("");

@@ -28,6 +28,7 @@
 #include "ptrdiff.h"
 #include "rocfft_against_fftw.h"
 #include "rocfft_hip.h"
+#include "test_callbacks.h"
 #include <chrono>
 #include <mpi.h>
 
@@ -565,6 +566,35 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
     {
         size_t testcase = testcases[i];
 
+        std::vector<gpubuf_t<callback_test_data>> all_cb_data;
+        std::vector<void*>                        load_cb_func;
+        std::vector<void*>                        load_cb_data;
+        std::vector<void*>                        store_cb_func;
+        std::vector<void*>                        store_cb_data;
+        if(all_params[testcase].run_callbacks)
+        {
+            auto runtime_err_handler
+                = [&](const std::string& msg) { throw std::runtime_error(msg); };
+
+            get_rank_load_callbacks(all_params[testcase],
+                                    load_cb_func,
+                                    load_cb_data,
+                                    runtime_err_handler,
+                                    false,
+                                    all_cb_data);
+            get_rank_store_callbacks(all_params[testcase],
+                                     store_cb_func,
+                                     store_cb_data,
+                                     runtime_err_handler,
+                                     false,
+                                     all_cb_data);
+
+            auto fft_status = all_params[testcase].set_callbacks(
+                &load_cb_func, &load_cb_data, &store_cb_func, &store_cb_data);
+            if(fft_status != fft_status_success)
+                throw std::runtime_error("set callback failure");
+        }
+
         if(run_bench)
         {
             if(i > 0)
@@ -608,6 +638,7 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
             fft_params params_inplace = params;
             params_inplace.placement  = fft_placement_inplace;
 
+            apply_load_callback(params_inplace, cpu_data);
             params.apply_host_load_ops(cpu_data);
 
             switch(params_inplace.precision)
@@ -624,6 +655,7 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
             }
 
             params.apply_host_store_ops(cpu_data);
+            apply_store_callback(params_inplace, cpu_data);
 
             cpu_output_norm = norm(cpu_data,
                                    params_inplace.ilength(),
@@ -704,6 +736,9 @@ std::vector<unsigned int> compute_final_grid(const std::vector<unsigned int>& mp
     }
     return final_grid;
 }
+
+int  n_hip_failures     = 0;
+bool skip_runtime_fails = false;
 
 // AllParams is a callable that returns a container of fft_params
 // structs to test.  It accepts a vector of library strings, which

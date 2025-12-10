@@ -33,7 +33,7 @@ __author__ = "Advanced Micro Devices, Inc."
 __all__ = [
     # These will be defined by the C++ bindings
     "Graph",
-    "Tensor", 
+    "Tensor",
     "TensorAttributes",
     "ConvolutionForwardAttributes",
     "ActivationAttributes",

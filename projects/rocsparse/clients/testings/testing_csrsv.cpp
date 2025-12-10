@@ -253,7 +253,6 @@ void testing_csrsv(const Arguments& arg)
             host_scalar<rocsparse_int> analysis_pivot;
             host_scalar<rocsparse_int> solve_pivot;
             CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-
             //
             // CHECK IF DEFAULT ZERO PIVOT IS -1
             //

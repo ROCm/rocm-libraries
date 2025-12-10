@@ -40,6 +40,10 @@
 // If use_exact is false (default value), the values will be random floating point values
 // If use_exact is true, the values will be integers in the range [a, b]
 template <typename T>
+void rocsparse_init_1d_array(
+    T* A, size_t size, bool use_exact = false, T a = static_cast<T>(0), T b = static_cast<T>(1));
+
+template <typename T>
 void rocsparse_init(T*     A,
                     size_t M,
                     size_t N,
@@ -75,6 +79,13 @@ void rocsparse_init_exact(T*     A,
 // Initialize vector with random values
 // If use_exact is false (default value), the values will be random floating point values
 // If use_exact is true, the values will be integers in the range [a, b]
+template <typename T>
+void rocsparse_init_1d_array(std::vector<T>& A,
+                             size_t          size,
+                             bool            use_exact = false,
+                             T               a         = static_cast<T>(0),
+                             T               b         = static_cast<T>(1));
+
 template <typename T>
 void rocsparse_init(std::vector<T>& A,
                     size_t          M,

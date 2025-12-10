@@ -8,33 +8,72 @@ import csv
 def parse_hipblaslt_output(output, line, tuning_info, mode):
     outputs = output.split('\n')
     print(output)
-    if mode == 'baseline':
-        latency = float(outputs[-5].split(',')[-1])
+
+    # Check if NO solution was found
+    if "NO solution found!" in output:
+        print(f"WARNING: No solution found for {mode} mode")
+        latency = -1
+        solution_idx = "NO_SOLUTION"
     else:
-        latency = float(outputs[-5].split(',')[-2])
-    solution_idx = outputs[-4].split(':')[-1]
+        try:
+            if mode == 'baseline':
+                latency = float(outputs[-5].split(',')[-1])
+            else:
+                latency = float(outputs[-5].split(',')[-2])
+            solution_idx = outputs[-4].split(':')[-1]
+        except (ValueError, IndexError) as e:
+            print(f"ERROR: Failed to parse output for {mode} mode: {e}")
+            latency = -1
+            solution_idx = "PARSE_ERROR"
+
     if mode == 'baseline':
         tuning_info[line].update({"baseline_latency(us)": latency})
         tuning_info[line].update({"baseline_solution_idx": solution_idx})
+        # Set status if baseline failed
+        if latency == -1:
+            tuning_info[line].update({"status": "BASELINE_FAILED"})
     elif mode == 'tuning':
         tuning_info[line].update({"tuned_latency(us)": latency})
         tuning_info[line].update({"tuned_solution_idx": solution_idx})
-        ratio = tuning_info[line]['baseline_latency(us)'] / latency * 100
-        ratio = round(ratio, 2)
-        tuning_info[line].update({"baseline/tuned": f"{ratio}%"})
+        baseline_latency = tuning_info[line].get('baseline_latency(us)', -1)
+        if baseline_latency > 0 and latency > 0:
+            ratio = baseline_latency / latency * 100
+            ratio = round(ratio, 2)
+            tuning_info[line].update({"baseline/tuned": f"{ratio}%"})
+            tuning_info[line].update({"status": "SUCCESS"})
+        else:
+            tuning_info[line].update({"baseline/tuned": "N/A"})
+            # Set status based on what failed
+            if baseline_latency == -1 and latency == -1:
+                tuning_info[line].update({"status": "BOTH_FAILED"})
+            elif latency == -1:
+                tuning_info[line].update({"status": "TUNING_FAILED"})
+            # If only baseline failed, status is already "BASELINE_FAILED" from baseline mode
 
 def export_csv(input_file, tuning_info, args):
-    fieldnames = ['m', 'n', 'k', 'lda', 'ldb', 'ldc', 'ldd', 'a_type', 'b_type', 'c_type', 'd_type', 'count', 'baseline_latency(us)', 'baseline_solution_idx', 'tuned_latency(us)', 'tuned_solution_idx', 'baseline/tuned']
+    fieldnames = ['m', 'n', 'k', 'lda', 'ldb', 'ldc', 'ldd', 'a_type', 'b_type', 'c_type', 'd_type', 'count', 'baseline_latency(us)', 'baseline_solution_idx', 'tuned_latency(us)', 'tuned_solution_idx', 'baseline/tuned', 'status']
     tuning_info_list = []
+
+    success_count = 0
+    total_count = 0
 
     with open(input_file, 'r') as f:
         for line in f:
-            tuning_info_list.append(tuning_info[line])
+            info = tuning_info[line]
+            status = info.get('status', 'UNKNOWN')
+
+            total_count += 1
+            if status == 'SUCCESS':
+                success_count += 1
+
+            tuning_info_list.append(info)
 
     with open(args.output_path + '/tuning_result.csv', 'w') as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(tuning_info_list)
+
+    return success_count, total_count
 
 def dynamic_iters(input_cmd, cold_iters, iters, tuning_info):
     if cold_iters == -1 or iters == -1:

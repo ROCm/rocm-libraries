@@ -30,6 +30,12 @@ public:
         getTensorMap,
         (),
         (const, override));
+    MOCK_METHOD(const std::vector<std::unique_ptr<INodeWrapper>>&,
+                nodeWrappers,
+                (),
+                (const, override));
+
+    ~MockGraph() override = default;
 };
 
 }
