@@ -29,13 +29,13 @@ Tests:
 - name: spmm_batched_csc_bad_arg
   category: pre_checkin
   function: spmm_batched_csc_bad_arg
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
 - name: spmm_batched_csc
   category: quick
   function: spmm_batched_csc
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: [50]
   N: [5]

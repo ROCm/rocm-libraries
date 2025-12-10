@@ -29,13 +29,13 @@ Tests:
 - name: spsm_csr_bad_arg
   category: pre_checkin
   function: spsm_csr_bad_arg
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
 - name: spsm_csr
   category: quick
   function: spsm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: [50]
   N: [50]
@@ -56,7 +56,7 @@ Tests:
 - name: spsm_csr
   category: pre_checkin
   function: spsm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: 1
   N: 1

@@ -8,6 +8,7 @@
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
+#include <hipdnn_sdk/plugin/test_utils/MockNode.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
@@ -67,6 +68,9 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForGraphWithUnsup
 {
     MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
+    // nodeWrappers is only used in an all_of check which will pass when it's empty
+    std::vector<std::unique_ptr<INodeWrapper>> nodeWrappers;
+    EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodeWrappers));
 
     bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
 
@@ -76,9 +80,12 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForGraphWithUnsup
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForUnsupportedAttributes)
 {
     MockGraph mockGraph;
-    EXPECT_CALL(mockGraph, nodeCount()).WillOnce(::testing::Return(1));
+    EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
     EXPECT_CALL(mockGraph, hasOnlySupportedAttributes(::testing::_))
         .WillOnce(::testing::Return(false));
+    // nodeWrappers is only used in an all_of check which will pass when it's empty
+    std::vector<std::unique_ptr<INodeWrapper>> nodeWrappers;
+    EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodeWrappers));
 
     bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
 
@@ -401,6 +408,30 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForFourNodeGraph)
 {
     MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(4));
+    // nodeWrappers is only used in an all_of check which will pass when it's empty
+    std::vector<std::unique_ptr<INodeWrapper>> nodeWrappers;
+    EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodeWrappers));
+
+    bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
+
+    EXPECT_FALSE(applicable);
+}
+
+TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForUnsupportedComputeType)
+{
+    MockGraph mockGraph;
+    EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(2));
+    auto nodeA = std::make_unique<MockNode>();
+    auto nodeB = std::make_unique<MockNode>();
+    EXPECT_CALL(*nodeA, computeDataType())
+        .WillOnce(::testing::Return(hipdnn_sdk::data_objects::DataType::FLOAT));
+    EXPECT_CALL(*nodeB, computeDataType())
+        .WillOnce(::testing::Return(hipdnn_sdk::data_objects::DataType::BFLOAT16));
+
+    std::vector<std::unique_ptr<INodeWrapper>> nodeWrappers;
+    nodeWrappers.emplace_back(std::move(nodeA));
+    nodeWrappers.emplace_back(std::move(nodeB));
+    EXPECT_CALL(mockGraph, nodeWrappers()).WillRepeatedly(::testing::ReturnRef(nodeWrappers));
 
     bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
 
