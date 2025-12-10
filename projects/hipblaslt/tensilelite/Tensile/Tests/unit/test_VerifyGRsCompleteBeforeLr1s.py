@@ -27,7 +27,7 @@ import pytest
 
 from rocisa.instruction import SWaitCnt, SBarrier
 
-from Tensile.Components.CustomSchedule import verify_lrs_and_grs
+from Tensile.Components.CMSValidator import verify_lrs_and_grs
 from test_CustomSchedule import create_base_kernel, ScheduleInfo
 
 class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):

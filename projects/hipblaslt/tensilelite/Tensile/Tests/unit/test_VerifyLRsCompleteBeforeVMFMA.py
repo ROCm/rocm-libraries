@@ -25,7 +25,7 @@
 import unittest
 from rocisa.instruction import SWaitCnt
 
-from Tensile.Components.CustomSchedule import verify_lrs_and_grs
+from Tensile.Components.CMSValidator import verify_lrs_and_grs
 from test_CustomSchedule import create_base_kernel, ScheduleInfo
 
 class TestVerifyLRsCompleteBeforeVMFMA(unittest.TestCase):

@@ -23,7 +23,8 @@
 import unittest
 from rocisa.instruction import SWaitCnt, SBarrier
 
-from Tensile.Components.CustomSchedule import ScheduleInfo, verify_lrs_and_grs
+from Tensile.Components.CustomSchedule import ScheduleInfo
+from Tensile.Components.CMSValidator import verify_lrs_and_grs
 from test_CustomSchedule import create_base_kernel
 
 class TestValidateNglAndNll(unittest.TestCase):
