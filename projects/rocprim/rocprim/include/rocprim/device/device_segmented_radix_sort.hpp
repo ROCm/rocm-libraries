@@ -374,7 +374,7 @@ inline hipError_t segmented_radix_sort_impl(
             }
             auto segmented_sort_medium_kernel = [=](auto arch_config)
             {
-                segmented_sort_medium<decltype(arch_config), Descending>(
+                segmented_sort_medium_or_small<decltype(arch_config), Descending, false>(
                     keys_input,
                     keys_tmp,
                     keys_output,
@@ -415,7 +415,7 @@ inline hipError_t segmented_radix_sort_impl(
             }
             auto segmented_sort_small_kernel = [=](auto arch_config)
             {
-                segmented_sort_small<decltype(arch_config), Descending>(
+                segmented_sort_medium_or_small<decltype(arch_config), Descending, true>(
                     keys_input,
                     keys_tmp,
                     keys_output,
