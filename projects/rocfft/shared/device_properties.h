@@ -49,10 +49,9 @@ static hipDeviceProp_t get_curr_device_prop()
 // If no devices are found, return empty string
 static std::string get_curr_gcn_arch_name()
 {
-    int dev_count = 0;
-    if(hipGetDeviceCount(&dev_count) != hipSuccess)
-        throw std::runtime_error("hipGetDeviceCount failed.");
-    if(dev_count == 0)
+    int  dev_count = 0;
+    auto ret       = hipGetDeviceCount(&dev_count);
+    if(ret != hipSuccess || dev_count == 0)
         return "";
 
     auto        dev_prop       = get_curr_device_prop();
