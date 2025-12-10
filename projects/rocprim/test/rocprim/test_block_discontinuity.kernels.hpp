@@ -39,7 +39,7 @@
 #include <type_traits>
 #include <vector>
 
-enum TestBlockDiscontinuityMethod {
+enum class TestBlockDiscontinuityMethod {
     HEADS = 0,
     TAILS = 1,
     HEADS_AND_TAILS = 2
@@ -208,7 +208,7 @@ template<
     class Type,
     class FlagType,
     class FlagOpType,
-    unsigned int Method,
+    TestBlockDiscontinuityMethod Method,
     unsigned int BlockSize,
     unsigned int ItemsPerThread
 >
@@ -294,7 +294,7 @@ template<
     class Type,
     class FlagType,
     class FlagOpType,
-    unsigned int Method,
+    TestBlockDiscontinuityMethod Method,
     unsigned int BlockSize,
     unsigned int ItemsPerThread
 >
@@ -379,7 +379,7 @@ template<
     class Type,
     class FlagType,
     class FlagOpType,
-    unsigned int Method,
+    TestBlockDiscontinuityMethod Method,
     unsigned int BlockSize,
     unsigned int ItemsPerThread
 >
@@ -489,7 +489,7 @@ template <
     class Type,
     class FlagType,
     class FlagOpType,
-    unsigned int Method,
+    TestBlockDiscontinuityMethod Method,
     unsigned int BlockSize = 256U
 >
 struct static_for
@@ -513,7 +513,7 @@ template <
     class Type,
     class FlagType,
     class FlagOpType,
-    unsigned int Method,
+    TestBlockDiscontinuityMethod Method,
     unsigned int BlockSize
 >
 struct static_for<N, N, Type, FlagType, FlagOpType, Method, BlockSize>

@@ -34,7 +34,7 @@
 #include <rocprim/block/block_load_func.hpp>
 #include <rocprim/block/block_store.hpp>
 
-enum TestBlockAdjacentDifferenceMethod {
+enum class TestBlockAdjacentDifferenceMethod {
     LEFT = 0,
     RIGHT = 1,
     LEFT_PARTIAL = 2,
@@ -226,7 +226,7 @@ __global__ __launch_bounds__(
 template<typename T,
          typename Output,
          typename BinaryFunction,
-         unsigned int Method,
+         TestBlockAdjacentDifferenceMethod Method,
          unsigned int BlockSize,
          unsigned int ItemsPerThread>
 auto test_block_adjacent_difference() -> typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::LEFT>::type
@@ -313,7 +313,7 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == TestB
 template<typename T,
          typename Output,
          typename BinaryFunction,
-         unsigned int Method,
+         TestBlockAdjacentDifferenceMethod Method,
          unsigned int BlockSize,
          unsigned int ItemsPerThread>
 auto test_block_adjacent_difference() -> typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::RIGHT>::type
@@ -400,7 +400,7 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == TestB
 template<typename T,
          typename Output,
          typename BinaryFunction,
-         unsigned int Method,
+         TestBlockAdjacentDifferenceMethod Method,
          unsigned int BlockSize,
          unsigned int ItemsPerThread>
 auto test_block_adjacent_difference() -> typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::LEFT_PARTIAL>::type
@@ -502,7 +502,7 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == TestB
 template<typename T,
          typename Output,
          typename BinaryFunction,
-         unsigned int Method,
+         TestBlockAdjacentDifferenceMethod Method,
          unsigned int BlockSize,
          unsigned int ItemsPerThread>
 auto test_block_adjacent_difference() -> typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::RIGHT_PARTIAL>::type
@@ -612,7 +612,7 @@ template<unsigned int First,
          class Type,
          class FlagType,
          class FlagOpType,
-         unsigned int Method,
+         TestBlockAdjacentDifferenceMethod Method,
          unsigned int BlockSize = 256U>
 struct static_for
 {
@@ -639,7 +639,7 @@ template<unsigned int N,
          class Type,
          class FlagType,
          class FlagOpType,
-         unsigned int Method,
+         TestBlockAdjacentDifferenceMethod Method,
          unsigned int BlockSize>
 struct static_for<N, N, Type, FlagType, FlagOpType, Method, BlockSize>
 {
