@@ -24,6 +24,7 @@
 #include "test.hpp"
 #include "testing_csrgeam2.hpp"
 
+#if(!defined(CUDART_VERSION))
 TEST_ROUTINE(csrgeam2,
              extra,
              arg.N,
@@ -35,3 +36,4 @@ TEST_ROUTINE(csrgeam2,
              arg.baseA,
              arg.baseB,
              arg.baseC);
+#endif

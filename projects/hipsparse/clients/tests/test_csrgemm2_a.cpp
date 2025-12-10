@@ -24,6 +24,7 @@
 #include "test.hpp"
 #include "testing_csrgemm2_a.hpp"
 
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 TEST_ROUTINE(csrgemm2_a,
              extra,
              arg.N,
@@ -36,3 +37,4 @@ TEST_ROUTINE(csrgemm2_a,
              arg.baseA,
              arg.baseB,
              arg.baseC);
+#endif

@@ -30,7 +30,7 @@ include: test_sctr.yaml
 include: test_gthr.yaml
 include: test_gthrz.yaml
 
-#level2
+# level2
 include: test_bsrmv.yaml
 include: test_bsrsv2.yaml
 include: test_csrmv.yaml
@@ -52,7 +52,10 @@ include: test_csrgemm.yaml
 include: test_csrgemm2_a.yaml
 include: test_csrgemm2_b.yaml
 
-#precond
+# reorder
+include: test_csrcolor.yaml
+
+# precond
 include: test_csric02.yaml
 include: test_csrilu02.yaml
 include: test_bsric02.yaml

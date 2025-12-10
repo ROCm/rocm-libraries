@@ -8,7 +8,7 @@
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
-#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/MiopenBatchnormPlanBuilder.hpp"
@@ -88,7 +88,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForUnsupportedAtt
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueForFusedTwoNodeGraph)
 {
     // Use a real flatbuffer graph with valid fusion pattern
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdInferActGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
@@ -99,7 +99,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueForFusedTwoNodeGra
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsTrueForFusedThreeNodeGraph)
 {
     // Use a real flatbuffer graph with valid fusion pattern
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferActBwdGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
@@ -419,7 +419,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, GetWorkspaceSizeReturnsExpectedValue)
 TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedInferenceNode)
 {
     // Use a real flatbuffer graph with a valid batchnorm node
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
@@ -430,7 +430,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedInferenceNod
 TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedBackwardNode)
 {
     // Use a real flatbuffer graph with a valid batchnorm backward node
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormBwdGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
@@ -441,7 +441,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForSupportedBackwardNode
 TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForFusedTwoNodeGraph)
 {
     // Use a real flatbuffer graph with valid fusion pattern
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdInferActGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdInferActGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
@@ -452,7 +452,7 @@ TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForFusedTwoNodeGraph)
 TEST_F(TestMiopenBatchnormPlanBuilder, BuildPlanSetsPlanForFusedThreeNodeGraph)
 {
     // Use a real flatbuffer graph with valid fusion pattern
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferActBwdGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferActBwdGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 

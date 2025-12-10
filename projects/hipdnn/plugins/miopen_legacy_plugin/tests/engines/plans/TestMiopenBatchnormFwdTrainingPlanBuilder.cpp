@@ -6,7 +6,7 @@
 #include <hipdnn_sdk/data_objects/graph_generated.h>
 #include <hipdnn_sdk/plugin/EnginePluginApi.h>
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
-#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
@@ -27,7 +27,7 @@ protected:
 
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsTrueForValidSingleNodeGraph)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
@@ -37,7 +37,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsTrueForVali
 
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsTrueForValidTwoNodeGraph)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingActivGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
@@ -227,7 +227,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
        IsApplicableReturnsFalseForGraphWithRunningStatistics)
 {
     // Create a fused batchnorm + activation graph with running statistics
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingActivGraph(
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
         true, true); // with mean/variance and running stats
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
@@ -243,7 +243,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder,
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, IsApplicableReturnsFalseForNonReluActivation)
 {
     // Create a graph with unsupported activation (e.g., SIGMOID_FWD)
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingActivGraph(
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
         false, false, hipdnn_sdk::data_objects::PointwiseMode::SIGMOID_FWD);
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
@@ -526,7 +526,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, GetWorkspaceSizeReturnsZero)
 
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanSetsPlanForValidSingleNodeGraph)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 
@@ -536,7 +536,7 @@ TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanSetsPlanForValidSingl
 
 TEST_F(TestMiopenBatchnormFwdTrainingPlanBuilder, BuildPlanSetsPlanForValidTwoNodeGraph)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormFwdTrainingActivGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 

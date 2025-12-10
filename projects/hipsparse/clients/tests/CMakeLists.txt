@@ -245,6 +245,8 @@ set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
                          test_csrgemm2_a.yaml
                          test_csrgemm2_b.yaml
                          
+                         test_csrcolor.yaml
+
                          test_csric02.yaml
                          test_csrilu02.yaml
                          test_bsric02.yaml

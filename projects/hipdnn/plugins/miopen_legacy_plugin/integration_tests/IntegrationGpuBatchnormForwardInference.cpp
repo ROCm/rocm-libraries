@@ -5,18 +5,18 @@
 #include <random>
 
 #include <hip/hip_runtime.h>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "../tests/common/BatchnormCommon.hpp"
 #include "IntegrationGraphVerificationHarness.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
-using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_test_sdk::utilities;
 using namespace miopen_legacy_plugin::test_utilities;
 using namespace test_bn_common;
 
@@ -39,13 +39,15 @@ protected:
         hipdnn_frontend::graph::Graph graphObj;
 
         graphObj.set_name("BatchnormInferenceTest");
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
         auto dataType = getDataTypeEnumFromType<DataType>();
         auto intermediateDataType = getDataTypeEnumFromType<IntermediateType>();
+        graphObj.set_intermediate_data_type(intermediateDataType)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(dataType);
 
         auto xAttr = graph::makeTensorAttributes(
-            "X", dataType, testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
+            "X", testCase.dims, generateStrides(testCase.dims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
         auto meanAttr
@@ -78,7 +80,6 @@ protected:
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         graph::BatchnormInferenceAttributes bnAttrs;
-        bnAttrs.set_name("batchnorm_inference");
 
         auto yTensorAttr = graphObj.batchnorm_inference(xTensorAttr,
                                                         meanTensorAttr,
@@ -87,9 +88,6 @@ protected:
                                                         biasTensorAttr,
                                                         bnAttrs);
 
-        yTensorAttr->set_data_type(dataType);
-        yTensorAttr->set_dim(testCase.dims);
-        yTensorAttr->set_stride(generateStrides(testCase.dims, layout.strideOrder));
         yTensorAttr->set_output(true);
 
         this->registerValidator(yTensorAttr, tolerance);
