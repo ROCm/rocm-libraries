@@ -13,7 +13,8 @@
 6. [Risks](#6-risks)
 7. [Execution Plan](#7-execution-plan)
 8. [Testing Plan](#8-testing-plan)
-9. [Glossary](#9-glossary)
+9. [Future Considerations](#9-future-considerations)
+9. [Glossary](#10-glossary)
 
 ## 1. Executive Summary
 hipDNN represents a system for the validation and execution of complex graphs of tensor operations that can be expressed as a directed acyclic graph (DAG). Rather than directly include engines that can capably execute those graphs directly in hipDNN code, hipDNN has implemented a plugin mechanism wherein engine authors can fulfill a simple C-compatible API with the goal of generating a dynamic plugin library. This allows the system the capability for flexibility without recompilation, allows for future growth, and allows for a robust ecosystem of engine providers.
@@ -46,10 +47,12 @@ Any state required should be attached to plugin handles, which should be isolate
 ### 2.2 Multi-Threading
 Shared library files aren't reloaded by `dlopen` calls from different threads, so we isolate threads by putting state on the hipDNN handle, but it also means that anything in the plugin needs to effectively be stateless after it's constructed (except for plans which are handed off to the execution context).
 
-For example, it would be problematic if the plugin container or engine manager had any caching or any other mutable state.
+For example, it would be problematic if the plugin container or engine manager had any caching or any other mutable state that wasn't thread safe.
 
 ## 3. Current System Overview
 The hipDNN framework consists of a frontend (C++ Graph API), a backend (core runtime), and a plugin system. The backend prepares and dispatches execution to dynamically loaded plugins via a C-API interface.
+
+The following diagram demonstrates how frontend calls pass through the backend and ultimately get handled by an engine plugin.  The call-stack demonstrated isn't exhaustive, it's mostly to illustrate the entry / exit points for each layer.  Our current implementation of the MIOpen plugin is overlayed to demonstrate how a plugin might implement the plugin interface.  The proposed plugin SDK will be an engine agnostic version of this existing design.
 
 ![Current System Overview](../images/current_system_overview.png)
 
@@ -107,6 +110,7 @@ This class encapsulates the lifecycle of an engine plugin from `hipdnnEnginePlug
 - **Threading:** Since this class can be accessed by multiple threads, it should be stateless.
 
 - **Methods:** The class will basically act as a C++ bridge to the plugin API. Each API call will have a corresponding method on it in `EnginePluginContainer`. Many of them will be passed through to an underlying `EngineManager`.
+    - One slight deviation, the execution context lifecycle functions and the execute method will be handled directly in this class without passing through to EngineManager, since the execution context has an IPlan attached to it, and the EnginePluginContainer therefore has enough information to manage it without intervention.
 
 - **Members:**
     - A private `EngineManager`
@@ -122,9 +126,8 @@ This represents the collection of all engines that can be found in the plugin. T
     - `static vector<int64_t> getAllEngineIds()` - Returns a list of all engines managed by this `EngineManager`
     - `static vector<int64_t> getApplicableEngineIds(handle, graph)` - Returns a list of all engines that can handle the supplied graph
     - `engine_details getEngineDetails(handle, graph, engine_id)` - Pass-through to the engine indicated by `engine_id`
-    - `size_t getWorkspaceSize(handle, graph, engine_config)` - Pass-through to the engine indicated by `engine_id`
+    - `size_t getMaxWorkspaceSize(handle, graph, engine_config)` - Pass-through to the engine indicated by `engine_id` from the engine_config
     - `execution_context initializeExecutionContext(handle, graph, engine_config)` - Pass-through to the engine indicated by `engine_id`
-        - **❓Open Question:** Should the `engine_config` be passed into the engine here?
 
 - **Members:**
     - A container of several `IEngine`-derived class instances.
@@ -136,15 +139,15 @@ For example, a `BatchNormEngine` might be able to handle single-op and simple fu
 
 - **Lifecycle:** The engines typically have the same lifecycle as the `EngineManager` that contains them. The `engine_details` returned by `getDetails()` has explicit create/destroy entry-points in the plugin. The `execution_plan` created by `initializeExecutionContext()` also has explicit create/destroy entry-points in the plugin. Default implementations of the destruction will just call `delete` on the appropriate objects.
 
-- **Threading:** Since this class can be accessed by multiple threads, it should be stateless. The engines should not be mutable. Store any state in the handle.
+- **Threading:** Since this class can be accessed by multiple threads, it should be stateless. The engines should not be mutable in a thread-unsafe fashion.  engine_config will be used for passing any user set state to the engine, which should make it easier to remain stateless.
 
 - **Methods:** The class will implement the following:
     - `bool isApplicable(handle, graph)` - Returns true if this engine can handle the supplied graph. Typically it would do this by checking all its plan builders. It's important that (for now) only a single plan builder for a given graph + engine combo be applicable until we have some sort of mechanism for plan builder selection.
     - `engine_details getDetails(handle, graph)` - Returns details about this engine
-    - `size_t getWorkspaceSize(handle, graph, engine_config)` - Pass-through to the plan builder indicated by the `engine_id` inside the `engine_config`
-        - **❓Open Question:** Should the `engine_config` be passed into the plan builder here?
-    - `execution_context initializeExecutionContext(handle, graph)` - Pass-through to the appropriate plan builder
-        - **❓Open Question:** Should the `engine_config` be passed into the plan builder here?
+    - `size_t getMaxWorkspaceSize(handle, graph, engine_config)` - Pass-through to the plan builder indicated by the `engine_id` inside the `engine_config`
+    - `execution_context initializeExecutionContext(handle, graph, engine_config)` - Pass-through to the appropriate plan builder
+
+- **Future Considerations:** Eventually engines will have behavioral notes (that will live in engine details) and settings (that will live in engine config)  This functionality is stubbed in somewhat for the future, but further work will need to be done here when those features land. Plugin authors will need to split their engines into grouping that have the same behavioral notes, and support similar engine configurations.
 
 - **Members:**
     - A container of several `IPlanBuilder`-derived class instances.
@@ -160,15 +163,15 @@ In the above example, a single `PlanBuilder` can handle a single batchnorm forwa
 
 - **Methods:** The class will implement the following:
     - `bool isApplicable(handle, graph)` - Returns true if this plan builder can handle this graph
-    - `size_t getWorkspaceSize(handle, graph)` - Returns the workspace required for the supplied graph
-    - `execution_context initializeExecutionContext(handle, graph)` - Creates an instance of an `IPlan`-derived class and attaches it to the execution context
+    - `size_t getMaxWorkspaceSize(handle, graph, engine_config)` - Returns the maximum workspace required for the supplied graph
+    - `execution_context initializeExecutionContext(handle, graph, engine_config)` - Creates an instance of an `IPlan`-derived class and attaches it to the execution context
 
 ### 4.6 Class: `PlanBase` (implements `IPlan` interface)
 This class represents a ready-to-execute plan that can take device data and then execute the desired operations on it.
 
-- **Lifecycle:** The plans typically share a lifespan with the `execution_plan` they are attached to.
+- **Lifecycle:** The plans typically share a lifespan with the `execution_plan` they are attached to.  Since the plan is immutable after the point of creation, its lifecycle and execution can be safely handled by the EnginePluginContainer.
 
-- **Threading:** Since this class is tied to a single execution plan, it can maintain stateful operations. Execution contexts should not be shared between threads.
+- **Threading:** Since this class is tied to a single execution plan.  Once it's finalized it should be read-only and re-usable across threads.
 
 - **Methods:** The class will implement the following:
     - `size_t getWorkspaceSize(handle)` - Returns the workspace required for this plan
@@ -193,7 +196,7 @@ Error handling will make use of C++ exceptions primarily, with the understanding
 - **Memory Management**: Shared/weak pointer lifecycle management across plugin boundaries and multiple threads could lead to memory leaks or premature destruction
 - **Testing Coverage**: The complexity of multi-threaded, multi-plugin scenarios makes comprehensive testing challenging, potentially missing edge cases
 - **Migration Complexity**: Moving existing MIOpen plugin to the new architecture risks introducing regressions while maintaining backward compatibility
-- **Ecosystem Fragmentation**: Having both SDK and Plugin SDK may confuse developers about which components to use for different scenarios
+- **Ecosystem Fragmentation**: Having both SDK and Plugin SDK may confuse developers about which components to use for different scenarios.  We will mitigate this by renaming the sdk to data_sdk in an upcoming effort.
 
 ## 7. Execution Plan
 - Create blank `plugin_sdk`
@@ -218,7 +221,17 @@ Error handling will make use of C++ exceptions primarily, with the understanding
 - Performance benchmarking to measure overhead of abstraction layers
 - Memory leak detection using valgrind or similar tools
 
-## 9. Glossary
+## 9. Future Considerations
+- Behavioral notes will be added to the engine_details.  
+    - These are which are tags which will identify certain engine characteristics used for filtering
+    - The behavorial notes on engines are controlled by plugin authors
+- Engine config settings which allow the user to control the behavior of the engine
+    - The available settings, and value ranges are controlled by plugin authors
+- Serialization of execution plans
+- Sampling execution API
+    - This should be a separate execution API that engines can use for sampling and determining the optimal choice during a benchmarking phase
+
+## 10. Glossary
 
 - **DAG (Directed Acyclic Graph)**: A graph structure representing tensor operations where edges indicate data flow and no cycles exist
 - **Engine**: A component capable of executing one or more types of operation graphs
