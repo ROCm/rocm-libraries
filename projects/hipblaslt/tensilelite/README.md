@@ -6,7 +6,7 @@ While full test suites can be run with a single `tox` command, developers may wi
 build the hipBLASLt tensilelite client executable (`tensilelite-client`) and run individual tests separately.
 This is useful for debugging specific problems or isolating issues in a specific test.
 
-### Run Full Test Suite with Tox
+### Run Test Suite with Tox
 
 The standard workflow for running the entire test suite is to use `tox`. This command will build
 `tensilelite-client` and execute all tests.
@@ -14,6 +14,12 @@ The standard workflow for running the entire test suite is to use `tox`. This co
 ```
 cd rocm-libraries/projects/hipblaslt/tensilelite
 tox -e py3 -- Tensile/Tests -m common
+```
+
+Subsequently, you can run just the Tensile unit tests via:
+
+```
+tox -e unit -- Tensile/Tests/unit
 ```
 
 ### Build client with invoke and Run a Test (Default Path)

@@ -49,12 +49,14 @@ public:
     {
         output = input;
 
-        // Temporary fix: issue with dpp bound_ctrl on Windows
-        #ifndef _WIN32
-        bool constexpr bndCtrl = true;
-        #else
+// Temporary fix: issue with dpp bound_ctrl on Windows, GFX10, GFX11, GFX12 and SPIR-V
+// RDNA encounters compile issues in hipCUB and rocThrust.
+#if defined(_WIN32) || defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__) \
+    || defined(__SPIRV__)
         bool constexpr bndCtrl = false;
-        #endif
+#else
+        bool constexpr bndCtrl = true;
+#endif
 
         if(VirtualWaveSize > 1)
         {

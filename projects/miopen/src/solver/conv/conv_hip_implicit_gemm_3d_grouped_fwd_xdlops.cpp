@@ -64,7 +64,7 @@ using Bilinear                             = ck::tensor_operation::element_wise:
 using Scale                                = ck::tensor_operation::element_wise::Scale;
 static constexpr ck::index_t NumDimSpatial = 3;
 
-template <typename DataType, typename ComputeType = DataType>
+template <typename DataType>
 using DeviceOpGFwdBilinear =
     ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NumDimSpatial,
                                                                   InLayout,
@@ -77,11 +77,9 @@ using DeviceOpGFwdBilinear =
                                                                   DataType,
                                                                   PassThrough,
                                                                   PassThrough,
-                                                                  Bilinear,
-                                                                  ComputeType,
-                                                                  ComputeType>;
+                                                                  Bilinear>;
 
-template <typename DataType, typename ComputeType = DataType>
+template <typename DataType>
 using DeviceOpGFwdScale =
     ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NumDimSpatial,
                                                                   InLayout,
@@ -94,10 +92,9 @@ using DeviceOpGFwdScale =
                                                                   DataType,
                                                                   PassThrough,
                                                                   PassThrough,
-                                                                  Scale,
-                                                                  ComputeType,
-                                                                  ComputeType>;
-template <typename DataType, typename ComputeType = DataType>
+                                                                  Scale>;
+
+template <typename DataType>
 using DeviceOpGFwdDefault =
     ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NumDimSpatial,
                                                                   InLayout,
@@ -110,28 +107,26 @@ using DeviceOpGFwdDefault =
                                                                   DataType,
                                                                   PassThrough,
                                                                   PassThrough,
-                                                                  PassThrough,
-                                                                  ComputeType,
-                                                                  ComputeType>;
+                                                                  PassThrough>;
 
-template <typename DataType, typename ComputeType = DataType>
+template <typename DataType>
 using DeviceOpGFwdBilinearPtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOpGFwdBilinear<DataType, ComputeType>>;
+        DeviceOpGFwdBilinear<DataType>>;
 
-template <typename DataType, typename ComputeType = DataType>
+template <typename DataType>
 using DeviceOpGFwdScalePtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOpGFwdScale<DataType, ComputeType>>;
+        DeviceOpGFwdScale<DataType>>;
 
-template <typename DataType, typename ComputeType = DataType>
+template <typename DataType>
 using DeviceOpGFwdDefaultPtrs =
     ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOpGFwdDefault<DataType, ComputeType>>;
+        DeviceOpGFwdDefault<DataType>>;
 
 namespace {
 
-template <typename DataType, typename ComputeType = DataType>
+template <typename DataType>
 struct CKArgs
 {
     CKArgs(const ::miopen::conv::ProblemDescription& problem)
@@ -224,7 +219,7 @@ struct CKArgs
         {
             (void)alpha;
             (void)beta;
-            static_assert(std::is_same_v<DeviceP, DeviceOpGFwdDefault<DataType, ComputeType>>,
+            static_assert(std::is_same_v<DeviceP, DeviceOpGFwdDefault<DataType>>,
                           "Default should be fwd pass through");
             return MakeDefaultArgPtr(conv_ptr, in, w, out);
         }
@@ -352,7 +347,7 @@ struct CKArgs
     miopenAlphaBetaCase_t alpha_beta_case;
 };
 
-template <typename DataType, typename ComputeType>
+template <typename DataType>
 std::vector<std::string>
 FillValidKernelsByAlphaBeta(const ::miopen::conv::ProblemDescription& problem)
 {
@@ -365,25 +360,22 @@ FillValidKernelsByAlphaBeta(const ::miopen::conv::ProblemDescription& problem)
         return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdScalePtrs<DataType>,
                                                    CKArgs<DataType>>(problem);
     default:
-        return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<DataType, ComputeType>,
-                                                   CKArgs<DataType, ComputeType>>(problem);
+        return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<DataType>,
+                                                   CKArgs<DataType>>(problem);
     }
 }
 } // namespace
 
-template <typename DataType, typename ComputeType>
-bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(
-    const miopen::conv::ProblemDescription& problem)
+template <typename DataType>
+void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(
+    const ::miopen::conv::ProblemDescription& problem)
 {
-    valid_kernels = FillValidKernelsByAlphaBeta<DataType, ComputeType>(problem);
-    if(valid_kernels.empty())
-        return false;
-    index     = 0;
-    kernel_id = valid_kernels[index];
-    return true;
+    valid_kernels = FillValidKernelsByAlphaBeta<DataType>(problem);
+    index         = 0;
+    kernel_id     = valid_kernels[index];
 }
 
-template <typename DataType, typename ComputeType>
+template <typename DataType>
 bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::CheckIsSupportCKArgs(
     const ::miopen::conv::ProblemDescription& problem) const
 {
@@ -396,12 +388,12 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::CheckIsSupportCKArgs(
         return IsCKArgsSupported<DeviceOpGFwdScalePtrs<DataType>, CKArgs<DataType>>(problem,
                                                                                     kernel_id);
     default:
-        return IsCKArgsSupported<DeviceOpGFwdDefaultPtrs<DataType, ComputeType>,
-                                 CKArgs<DataType, ComputeType>>(problem, kernel_id);
+        return IsCKArgsSupported<DeviceOpGFwdDefaultPtrs<DataType>, CKArgs<DataType>>(problem,
+                                                                                      kernel_id);
     }
 }
 
-template <typename DataType, typename ComputeType>
+template <typename DataType>
 bool ConvHipImplicitGemm3DGroupFwdXdlops::CheckCKApplicability(
     const ::miopen::conv::ProblemDescription& problem) const
 {
@@ -410,9 +402,7 @@ bool ConvHipImplicitGemm3DGroupFwdXdlops::CheckCKApplicability(
     case BILINEAR:
         return IsCKApplicable<DeviceOpGFwdBilinearPtrs<DataType>, CKArgs<DataType>>(problem);
     case SCALE: return IsCKApplicable<DeviceOpGFwdScalePtrs<DataType>, CKArgs<DataType>>(problem);
-    default:
-        return IsCKApplicable<DeviceOpGFwdDefaultPtrs<DataType, ComputeType>,
-                              CKArgs<DataType, ComputeType>>(problem);
+    default: return IsCKApplicable<DeviceOpGFwdDefaultPtrs<DataType>, CKArgs<DataType>>(problem);
     }
 }
 
@@ -422,17 +412,7 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::InitValidKernels(
     switch(problem.GetInDataType())
     {
     case miopenHalf: Init<ck::half_t>(problem); break;
-    case miopenFloat:
-        if(problem.UseTF32() && Init<float, ck::tf32_t>(problem))
-        {
-            use_tf32 = true;
-        }
-        else
-        {
-            use_tf32 = false;
-            Init<float>(problem);
-        }
-        break;
+    case miopenFloat: Init<float>(problem); break;
     case miopenInt8: Init<int8_t>(problem); break;
     case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
     default: break; // Unsupported data types - valid_kernels remains empty
@@ -586,12 +566,11 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         bool ai_success = false;
         miopen::ai::tuning::candidate_selection::CandidateSelectionResult result;
 
-        auto run_ai_heuristics = [&](auto CKDataType, auto CKComputeType) {
-            using T        = decltype(CKDataType);
-            using TCompute = decltype(CKComputeType);
+        auto run_ai_heuristics = [&](auto CKDataType) {
+            using T = decltype(CKDataType);
             auto fill_valid_kernels =
                 [=](const ::miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
-                return FillValidKernelsByAlphaBeta<T, TCompute>(problem);
+                return FillValidKernelsByAlphaBeta<T>(problem);
             };
             // Validation lambda for AI-predicted kernel + split_k combinations
             // Note: This solver currently doesn't use split_k (always 0), but validation
@@ -620,27 +599,9 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         };
         switch(problem.GetInDataType())
         {
-        case miopenHalf:
-            std::tie(ai_success, result) = run_ai_heuristics(ck::half_t{}, ck::half_t{});
-            break;
-        case miopenFloat:
-            if(problem.UseTF32())
-            {
-                std::tie(ai_success, result) = run_ai_heuristics(float{}, ck::tf32_t{});
-                if(!ai_success || result.IsEmpty())
-                {
-                    MIOPEN_LOG_I2("Step 3: AI heuristics with TF32 failed, retrying with FP32");
-                    std::tie(ai_success, result) = run_ai_heuristics(float{}, float{});
-                }
-            }
-            else
-            {
-                std::tie(ai_success, result) = run_ai_heuristics(float{}, float{});
-            }
-            break;
-        case miopenBFloat16:
-            std::tie(ai_success, result) = run_ai_heuristics(ck::bhalf_t{}, ck::bhalf_t{});
-            break;
+        case miopenHalf: std::tie(ai_success, result) = run_ai_heuristics(ck::half_t{}); break;
+        case miopenFloat: std::tie(ai_success, result) = run_ai_heuristics(float{}); break;
+        case miopenBFloat16: std::tie(ai_success, result) = run_ai_heuristics(ck::bhalf_t{}); break;
         default: break;
         }
         if(ai_success && !result.IsEmpty())
@@ -711,17 +672,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::IsValid(
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckIsSupportCKArgs<ck::half_t>(problem);
-    case miopenFloat:
-        if(problem.UseTF32() && CheckIsSupportCKArgs<float, ck::tf32_t>(problem))
-        {
-            use_tf32 = true;
-            return true;
-        }
-        else
-        {
-            use_tf32 = false;
-            return CheckIsSupportCKArgs<float>(problem);
-        }
+    case miopenFloat: return CheckIsSupportCKArgs<float>(problem);
     case miopenInt8: return CheckIsSupportCKArgs<int8_t>(problem);
     case miopenBFloat16: return CheckIsSupportCKArgs<ck::bhalf_t>(problem);
     case miopenInt64:
@@ -798,15 +749,7 @@ bool ConvHipImplicitGemm3DGroupFwdXdlops::IsApplicable(
     switch(problem.GetInDataType())
     {
     case miopenHalf: return CheckCKApplicability<ck::half_t>(problem);
-    case miopenFloat:
-        if(problem.UseTF32() && CheckCKApplicability<float, ck::tf32_t>(problem))
-        {
-            return true;
-        }
-        else
-        {
-            return CheckCKApplicability<float>(problem);
-        }
+    case miopenFloat: return CheckCKApplicability<float>(problem);
     case miopenInt8: return CheckCKApplicability<int8_t>(problem);
     case miopenBFloat16: return CheckCKApplicability<ck::bhalf_t>(problem);
     case miopenInt64:
@@ -855,9 +798,8 @@ ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     return MakeSolutionGroupConvImplicitGemmXdlops(
         problem,
-        [&](auto data_type_val, auto compute_type_val) {
-            using T        = decltype(data_type_val);
-            using TCompute = decltype(compute_type_val);
+        [&](auto data_type_val) {
+            using T = decltype(data_type_val);
             switch(problem.GetAlphaBetaCase())
             {
             case BILINEAR:
@@ -877,15 +819,14 @@ ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
             default:
                 return InitInvokerFactoryFwdNCHW<3,
                                                  false,
-                                                 DeviceOpGFwdDefaultPtrs<T, TCompute>,
-                                                 CKArgs<T, TCompute>,
+                                                 DeviceOpGFwdDefaultPtrs<T>,
+                                                 CKArgs<T>,
                                                  miopen::conv::DataInvokeParams>(
                     ctx, problem, config.kernel_id);
             }
         },
-        [&](auto data_type_val, auto compute_type_val) {
-            using T        = decltype(data_type_val);
-            using TCompute = decltype(compute_type_val);
+        [&](auto data_type_val) {
+            using T = decltype(data_type_val);
             switch(problem.GetAlphaBetaCase())
             {
             case BILINEAR:
@@ -902,13 +843,12 @@ ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
                     ctx, problem, config.kernel_id);
             default:
                 return InitInvokerFactoryNHWC<false,
-                                              DeviceOpGFwdDefaultPtrs<T, TCompute>,
-                                              CKArgs<T, TCompute>,
+                                              DeviceOpGFwdDefaultPtrs<T>,
+                                              CKArgs<T>,
                                               miopen::conv::DataInvokeParams>(
                     ctx, problem, config.kernel_id);
             }
-        },
-        config.UseTF32());
+        });
 
 #else
     return {};

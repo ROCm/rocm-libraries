@@ -164,13 +164,13 @@ function(add_rocwmma_test TEST_TARGET TEST_SOURCE)
           set(EXE_NAME "${TEST_TARGET}")
       endif()
   endif()
-  file(APPEND "${INSTALL_TEST_FILE}" "add_test(${TEST_TARGET} \"../${EXE_NAME}\")\n")
+  file(APPEND "${INSTALL_TEST_FILE}" "add_test(${TEST_TARGET} \"../${EXE_NAME}\" --omit 5)\n")
   file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(${TEST_TARGET} PROPERTIES SKIP_REGULAR_EXPRESSION \"no ROCm-capable device;unsupported host device\")\n")
 
-  file(APPEND "${INSTALL_SMOKE_TEST_FILE}" "add_test(\"${TEST_TARGET} smoke\" \"../../${EXE_NAME}\" --emulation smoke)\n")
+  file(APPEND "${INSTALL_SMOKE_TEST_FILE}" "add_test(\"${TEST_TARGET} smoke\" \"../../${EXE_NAME}\" --emulation smoke --omit 5)\n")
   file(APPEND "${INSTALL_SMOKE_TEST_FILE}" "set_tests_properties(\"${TEST_TARGET} smoke\" PROPERTIES SKIP_REGULAR_EXPRESSION \"no ROCm-capable device;unsupported host device\")\n")
 
-  file(APPEND "${INSTALL_REGRESSION_TEST_FILE}" "add_test(\"${TEST_TARGET} regression\" \"../../${EXE_NAME}\" --emulation regression)\n")
+  file(APPEND "${INSTALL_REGRESSION_TEST_FILE}" "add_test(\"${TEST_TARGET} regression\" \"../../${EXE_NAME}\" --emulation regression --omit 5)\n")
   file(APPEND "${INSTALL_REGRESSION_TEST_FILE}" "set_tests_properties(\"${TEST_TARGET} regression\" PROPERTIES SKIP_REGULAR_EXPRESSION \"no ROCm-capable device;unsupported host device\")\n")
 endfunction()
 

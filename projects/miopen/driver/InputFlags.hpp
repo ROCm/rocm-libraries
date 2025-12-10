@@ -28,8 +28,6 @@
 
 #include <miopen/miopen.h>
 
-#include <boost/optional.hpp>
-
 #include <map>
 #include <string>
 #include <vector>

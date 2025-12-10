@@ -4,11 +4,11 @@
 
 .. _streamk:
 
-********************************
-Using Stream-K with hipBLASLt
-********************************
+*****************************************
+Using Origami and Stream-K with hipBLASLt
+*****************************************
 
-hipBLASLt supports the Stream-K library, which reduces library sizes for a wide range of General Matrix-Matrix Multiplication (GEMM) shapes and sizes.
+hipBLASLt supports the Origami with Stream-K library, which reduces library sizes for a wide range of General Matrix-Matrix Multiplication (GEMM) shapes and sizes.
 It also provides more consistent performance, which might be better in some cases.
 Stream-K partitions an equal share of the aggregate inner-loop iterations among physical processing elements,
 which provides a near-perfect utilization of computing resources.
@@ -20,11 +20,12 @@ Configuring the kernel selection strategy
 =========================================
 
 The ``TENSILE_SOLUTION_SELECTION_METHOD`` environment variable controls the hipBLASLt kernel selection strategy for GEMM operations.
-Set this variable to ``2`` to enable the Stream-K library or leave it set to ``0`` to continue to use the default settings.
+These variables apply to all GEMMs in an application.
+Set this variable to ``2`` to enable the Origami with Stream-K library or leave it set to ``0`` to continue to use the default settings.
 
 .. note::
 
-   On the AMD Instinct™ MI350 series, Stream-K is the only kernel selection strategy available.
+   On the AMD Instinct™ MI350 series, Origami with Stream-K is the only kernel selection strategy available.
    There is no alternative library and the ``TENSILE_SOLUTION_SELECTION_METHOD`` variable has no effect.
 
 *  ``TENSILE_SOLUTION_SELECTION_METHOD=0`` (Standard tuned libraries)
@@ -36,9 +37,10 @@ Set this variable to ``2`` to enable the Stream-K library or leave it set to ``0
 
 *  ``TENSILE_SOLUTION_SELECTION_METHOD=2`` (Stream-K)
 
-   *  This enables the optional Stream-K library to use a GEMM scheduling algorithm that results in consistently good peak GEMM performance with far fewer tuned kernels.
-   *  The heuristic best kernel is selected from the Stream-K library.
-   *  User-driven tuning (tunable ops) considers all kernels from the standard grid, the free-size library, and the Stream-K library.
+   *  This enables the optional Origami with Stream-K solution selection to use a GEMM scheduling algorithm that results in consistently good
+      peak GEMM performance with far fewer tuned kernels.
+   *  The heuristic best kernel is selected from the Origami with Stream-K library.
+   *  User-driven tuning (tunable ops) considers all kernels from the standard grid, the free-size library, and the Origami with Stream-K library.
 
 .. note::
 
@@ -50,6 +52,7 @@ Configuring the kernel launch behavior
 =========================================
 
 You can control The Stream-K kernel launch behavior using the environment variables listed in the following table.
+These variables apply to all GEMMs in an application.
 By default, Stream-K uses a model to predict the optimal grid size to use when launching a GEMM kernel at runtime.
 However, you can choose how many workgroups to launch a GEMM kernel with using the Stream-K settings below:
 
@@ -57,7 +60,7 @@ However, you can choose how many workgroups to launch a GEMM kernel with using t
    :header: "Environment Variable","Description"
    :widths: 30, 100
 
-   "``TENSILE_STREAMK_DYNAMIC_GRID``","Set this variable to ``3`` to use the default setting. With this setting, the program automatically picks the number of work groups to launch for optimal performance. Set this variable to ``0`` to disable the dynamic grid and always use all available compute units."
+   "``TENSILE_STREAMK_DYNAMIC_GRID``","Set this variable to ``6`` to use the default setting. With this setting, the program automatically picks the number of work groups to launch for optimal performance. Set this variable to ``0`` to disable the dynamic grid and always use all available compute units."
    "``TENSILE_STREAMK_FIXED_GRID``","This variable overrides the default grid size and launches Stream-K GEMM kernels using the specified number of workgroups."
    "``TENSILE_STREAMK_MAX_CUS``","This variable sets the maximum number of compute units to use for Stream-K kernels. By default, Stream-K kernels are allowed to use all compute units on the device, but this setting lets you limit the number of units that can be used."
 

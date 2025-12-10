@@ -30,7 +30,7 @@ include: test_sctr.yaml
 include: test_gthr.yaml
 include: test_gthrz.yaml
 
-#level2
+# level2
 include: test_bsrmv.yaml
 include: test_bsrsv2.yaml
 include: test_csrmv.yaml
@@ -45,7 +45,10 @@ include: test_csrmm.yaml
 include: test_csrsm2.yaml
 include: test_gemmi.yaml
 
-#precond
+# reorder
+include: test_csrcolor.yaml
+
+# precond
 include: test_csric02.yaml
 include: test_csrilu02.yaml
 include: test_bsric02.yaml
@@ -79,3 +82,41 @@ include: test_prune_csr2csr.yaml
 include: test_prune_csr2csr_by_percentage.yaml
 include: test_prune_dense2csr.yaml
 include: test_prune_dense2csr_by_percentage.yaml
+include: test_identity.yaml
+include: test_nnz.yaml
+include: test_coosort.yaml
+include: test_cscsort.yaml
+include: test_csrsort.yaml
+
+# generic
+include: test_axpby.yaml
+include: test_gather.yaml
+include: test_scatter.yaml
+include: test_rot.yaml
+include: test_sddmm_coo_aos.yaml
+include: test_sddmm_coo.yaml
+include: test_sddmm_csc.yaml
+include: test_sddmm_csr.yaml
+include: test_dense_to_sparse_coo.yaml
+include: test_dense_to_sparse_csc.yaml
+include: test_dense_to_sparse_csr.yaml
+include: test_sparse_to_dense_coo.yaml
+include: test_sparse_to_dense_csc.yaml
+include: test_sparse_to_dense_csr.yaml
+include: test_spgemm_csr.yaml
+include: test_spgemmreuse_csr.yaml
+include: test_spmm_batched_coo.yaml
+include: test_spmm_batched_csc.yaml
+include: test_spmm_batched_csr.yaml
+include: test_spmm_coo.yaml
+include: test_spmm_csc.yaml
+include: test_spmm_csr.yaml
+include: test_spmv_coo_aos.yaml
+include: test_spmv_coo.yaml
+include: test_spmv_csr.yaml
+include: test_spmv_sell.yaml
+include: test_spsv_coo.yaml
+include: test_spsv_csr.yaml
+include: test_spsm_coo.yaml
+include: test_spsm_csr.yaml
+include: test_spvv.yaml

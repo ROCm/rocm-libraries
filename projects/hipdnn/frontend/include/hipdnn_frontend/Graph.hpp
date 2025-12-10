@@ -22,9 +22,7 @@
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/TopologicalSortingUtils.hpp>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 // When an error occurs, get the backend error string and append it to the error_message.
 #define RETURN_ON_BACKEND_FAILURE(backend_status, error_message)                        \
@@ -994,5 +992,5 @@ public:
         return newTensor;
     }
 };
-}
-}
+
+} // namespace hipdnn_frontend::graph

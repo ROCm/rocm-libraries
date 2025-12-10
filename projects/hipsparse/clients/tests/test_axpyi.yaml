@@ -32,11 +32,31 @@ Tests:
   precision: *single_double_precisions_complex_real
 
 - name: axpyi
+  category: quick
+  function: axpyi
+  precision: *single_double_precisions
+  N: [5000]
+  nnz: [0, 500, 2500, 5000]
+  alpha: [0.3]
+  alphai: [1.7]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+
+- name: axpyi
   category: pre_checkin
   function: axpyi
   precision: *single_double_precisions_complex_real
-  N: [15332, 22031, 31958]
-  nnz: [0, 1543, 7111, 10000]
+  N: [15332, 22031]
+  nnz: [0, 1543, 7111, 10000, 15332]
   alpha: [0.3]
   alphai: [-0.2, 1.7]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: axpyi
+  category: nightly
+  function: axpyi
+  precision: *single_double_precisions_complex_real
+  N: [100000, 500000]
+  nnz: [0, 10000, 50000, 100000]
+  alpha: [0.3]
+  alphai: [1.7]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]

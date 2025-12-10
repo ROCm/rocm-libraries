@@ -147,86 +147,111 @@ inline std::string get_filename(const std::string& matrix_filename)
 #define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
 #define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
 
-#define CHECK_HIP_ERROR(error)                \
-    if(error != hipSuccess)                   \
-    {                                         \
-        fprintf(stderr,                       \
-                "error: '%s'(%d) at %s:%d\n", \
-                hipGetErrorString(error),     \
-                error,                        \
-                __FILE__,                     \
-                __LINE__);                    \
-        exit(EXIT_FAILURE);                   \
-    }
-
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11003))
-
-#define CHECK_HIPSPARSE_ERROR_CASE__(token_) \
-    case token_:                             \
-        fprintf(stderr, #token_);            \
-        break
-
-#define CHECK_HIPSPARSE_ERROR(error)                                                      \
-    {                                                                                     \
-        auto local_error = (error);                                                       \
-        if(local_error != HIPSPARSE_STATUS_SUCCESS)                                       \
-        {                                                                                 \
-            fprintf(stderr, "hipSPARSE error: ");                                         \
-            switch(local_error)                                                           \
-            {                                                                             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_SUCCESS);                   \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_NOT_INITIALIZED);           \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_ALLOC_FAILED);              \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_INVALID_VALUE);             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_ARCH_MISMATCH);             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_MAPPING_ERROR);             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_EXECUTION_FAILED);          \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_INTERNAL_ERROR);            \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED); \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_ZERO_PIVOT);                \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_NOT_SUPPORTED);             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_INSUFFICIENT_RESOURCES);    \
-            }                                                                             \
-            fprintf(stderr, "\n");                                                        \
-            return local_error;                                                           \
-        }                                                                                 \
-    }                                                                                     \
-    (void)0
-
+inline const char* hipsparseStatusToString(hipsparseStatus_t status)
+{
+    switch(status)
+    {
+    case HIPSPARSE_STATUS_SUCCESS:
+        return "HIPSPARSE_STATUS_SUCCESS";
+    case HIPSPARSE_STATUS_NOT_INITIALIZED:
+        return "HIPSPARSE_STATUS_NOT_INITIALIZED";
+    case HIPSPARSE_STATUS_ALLOC_FAILED:
+        return "HIPSPARSE_STATUS_ALLOC_FAILED";
+    case HIPSPARSE_STATUS_INVALID_VALUE:
+        return "HIPSPARSE_STATUS_INVALID_VALUE";
+    case HIPSPARSE_STATUS_ARCH_MISMATCH:
+        return "HIPSPARSE_STATUS_ARCH_MISMATCH";
+    case HIPSPARSE_STATUS_MAPPING_ERROR:
+        return "HIPSPARSE_STATUS_MAPPING_ERROR";
+    case HIPSPARSE_STATUS_EXECUTION_FAILED:
+        return "HIPSPARSE_STATUS_EXECUTION_FAILED";
+    case HIPSPARSE_STATUS_INTERNAL_ERROR:
+        return "HIPSPARSE_STATUS_INTERNAL_ERROR";
+    case HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
+        return "HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED";
+    case HIPSPARSE_STATUS_ZERO_PIVOT:
+        return "HIPSPARSE_STATUS_ZERO_PIVOT";
+    case HIPSPARSE_STATUS_NOT_SUPPORTED:
+        return "HIPSPARSE_STATUS_NOT_SUPPORTED";
+    case HIPSPARSE_STATUS_INSUFFICIENT_RESOURCES:
+        return "HIPSPARSE_STATUS_INSUFFICIENT_RESOURCES";
+    }
+    return "<undefined HIPSPARSE_STATUS value>";
+}
 #else
-
-#define CHECK_HIPSPARSE_ERROR_CASE__(token_) \
-    case token_:                             \
-        fprintf(stderr, #token_);            \
-        break
-
-#define CHECK_HIPSPARSE_ERROR(error)                                                      \
-    {                                                                                     \
-        auto local_error = (error);                                                       \
-        if(local_error != HIPSPARSE_STATUS_SUCCESS)                                       \
-        {                                                                                 \
-            fprintf(stderr, "hipSPARSE error: ");                                         \
-            switch(local_error)                                                           \
-            {                                                                             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_SUCCESS);                   \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_NOT_INITIALIZED);           \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_ALLOC_FAILED);              \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_INVALID_VALUE);             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_ARCH_MISMATCH);             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_MAPPING_ERROR);             \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_EXECUTION_FAILED);          \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_INTERNAL_ERROR);            \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED); \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_ZERO_PIVOT);                \
-                CHECK_HIPSPARSE_ERROR_CASE__(HIPSPARSE_STATUS_NOT_SUPPORTED);             \
-            }                                                                             \
-            fprintf(stderr, "\n");                                                        \
-            return local_error;                                                           \
-        }                                                                                 \
-    }                                                                                     \
-    (void)0
-
+inline const char* hipsparseStatusToString(hipsparseStatus_t status)
+{
+    switch(status)
+    {
+    case HIPSPARSE_STATUS_SUCCESS:
+        return "HIPSPARSE_STATUS_SUCCESS";
+    case HIPSPARSE_STATUS_NOT_INITIALIZED:
+        return "HIPSPARSE_STATUS_NOT_INITIALIZED";
+    case HIPSPARSE_STATUS_ALLOC_FAILED:
+        return "HIPSPARSE_STATUS_ALLOC_FAILED";
+    case HIPSPARSE_STATUS_INVALID_VALUE:
+        return "HIPSPARSE_STATUS_INVALID_VALUE";
+    case HIPSPARSE_STATUS_ARCH_MISMATCH:
+        return "HIPSPARSE_STATUS_ARCH_MISMATCH";
+    case HIPSPARSE_STATUS_MAPPING_ERROR:
+        return "HIPSPARSE_STATUS_MAPPING_ERROR";
+    case HIPSPARSE_STATUS_EXECUTION_FAILED:
+        return "HIPSPARSE_STATUS_EXECUTION_FAILED";
+    case HIPSPARSE_STATUS_INTERNAL_ERROR:
+        return "HIPSPARSE_STATUS_INTERNAL_ERROR";
+    case HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED:
+        return "HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED";
+    case HIPSPARSE_STATUS_ZERO_PIVOT:
+        return "HIPSPARSE_STATUS_ZERO_PIVOT";
+    case HIPSPARSE_STATUS_NOT_SUPPORTED:
+        return "HIPSPARSE_STATUS_NOT_SUPPORTED";
+    }
+    return "<undefined HIPSPARSE_STATUS value>";
+}
 #endif
+
+// CHECK_HIP_ERROR
+#ifdef GOOGLE_TEST
+#define CHECK_HIP_ERROR2(ERROR) ASSERT_EQ(ERROR, hipSuccess)
+#else
+#define CHECK_HIP_ERROR2(ERROR)                   \
+    do                                            \
+    {                                             \
+        auto error = ERROR;                       \
+        if(error != hipSuccess)                   \
+        {                                         \
+            fprintf(stderr,                       \
+                    "error: '%s'(%d) at %s:%d\n", \
+                    hipGetErrorString(error),     \
+                    error,                        \
+                    __FILE__,                     \
+                    __LINE__);                    \
+            exit(EXIT_FAILURE);                   \
+        }                                         \
+    } while(0)
+#endif
+#define CHECK_HIP_ERROR(ERROR) CHECK_HIP_ERROR2(ERROR)
+
+// EXPECT_HIPSPARSE_STATUS
+#ifdef GOOGLE_TEST
+#define EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT) ASSERT_EQ(STATUS, EXPECT)
+#else
+#define EXPECT_HIPSPARSE_STATUS2(status, expect)                                            \
+    if(status != expect)                                                                    \
+    {                                                                                       \
+        std::cerr << "hipSPARSE status error: Expected " << hipsparseStatusToString(expect) \
+                  << ", received " << hipsparseStatusToString(status) << std::endl;         \
+        if(expect == HIPSPARSE_STATUS_SUCCESS)                                              \
+        {                                                                                   \
+            exit(EXIT_FAILURE);                                                             \
+        }                                                                                   \
+    }
+#endif
+#define EXPECT_HIPSPARSE_STATUS(STATUS, EXPECT) EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT)
+
+// CHECK_HIPSPARSE_ERROR
+#define CHECK_HIPSPARSE_ERROR(ERROR) EXPECT_HIPSPARSE_STATUS(ERROR, HIPSPARSE_STATUS_SUCCESS)
 
 #ifdef __HIP_PLATFORM_NVIDIA__
 static inline hipComplex operator-(const hipComplex& op)
@@ -3070,11 +3095,11 @@ void host_csrmm(J                    M,
                 const J*             csr_col_ind_A,
                 const T*             csr_val_A,
                 const T*             B,
-                J                    ldb,
+                int64_t              ldb,
                 hipsparseOrder_t     orderB,
                 T                    beta,
                 T*                   C,
-                J                    ldc,
+                int64_t              ldc,
                 hipsparseOrder_t     orderC,
                 hipsparseIndexBase_t base,
                 bool                 force_conj_A)
@@ -3091,15 +3116,15 @@ void host_csrmm(J                    M,
         {
             for(J j = 0; j < N; ++j)
             {
-                I row_begin = csr_row_ptr_A[i] - base;
-                I row_end   = csr_row_ptr_A[i + 1] - base;
-                J idx_C     = orderC == HIPSPARSE_ORDER_COL ? i + j * ldc : i * ldc + j;
+                I       row_begin = csr_row_ptr_A[i] - base;
+                I       row_end   = csr_row_ptr_A[i + 1] - base;
+                int64_t idx_C     = orderC == HIPSPARSE_ORDER_COL ? i + j * ldc : i * ldc + j;
 
                 T sum = make_DataType<T>(0);
 
                 for(I k = row_begin; k < row_end; ++k)
                 {
-                    J idx_B = 0;
+                    int64_t idx_B = 0;
                     if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE
                         && orderB == HIPSPARSE_ORDER_COL)
                        || (transB == HIPSPARSE_OPERATION_TRANSPOSE && orderB != HIPSPARSE_ORDER_COL)
@@ -3135,8 +3160,8 @@ void host_csrmm(J                    M,
         {
             for(J j = 0; j < N; ++j)
             {
-                J idx_C  = (orderC == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
-                C[idx_C] = testing_mult(beta, C[idx_C]);
+                int64_t idx_C = (orderC == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
+                C[idx_C]      = testing_mult(beta, C[idx_C]);
             }
         }
 
@@ -3152,7 +3177,7 @@ void host_csrmm(J                    M,
                     J col = csr_col_ind_A[k] - base;
                     T val = testing_conj(csr_val_A[k], conj_A);
 
-                    J idx_B = 0;
+                    int64_t idx_B = 0;
 
                     if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE
                         && orderB == HIPSPARSE_ORDER_COL)
@@ -3167,7 +3192,7 @@ void host_csrmm(J                    M,
                         idx_B = (j + i * ldb);
                     }
 
-                    J idx_C = (orderC == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
+                    int64_t idx_C = (orderC == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
 
                     C[idx_C]
                         = C[idx_C]
@@ -3183,8 +3208,8 @@ void host_csrmm_batched(J                    M,
                         J                    N,
                         J                    K,
                         J                    batch_count_A,
-                        J                    offsets_batch_stride_A,
-                        I                    columns_values_batch_stride_A,
+                        int64_t              offsets_batch_stride_A,
+                        int64_t              columns_values_batch_stride_A,
                         hipsparseOperation_t transA,
                         hipsparseOperation_t transB,
                         T                    alpha,
@@ -3192,15 +3217,15 @@ void host_csrmm_batched(J                    M,
                         const J*             csr_col_ind_A,
                         const T*             csr_val_A,
                         const T*             B,
-                        J                    ldb,
+                        int64_t              ldb,
                         J                    batch_count_B,
-                        I                    batch_stride_B,
+                        int64_t              batch_stride_B,
                         hipsparseOrder_t     order_B,
                         T                    beta,
                         T*                   C,
-                        J                    ldc,
+                        int64_t              ldc,
                         J                    batch_count_C,
-                        I                    batch_stride_C,
+                        int64_t              batch_stride_C,
                         hipsparseOrder_t     order_C,
                         hipsparseIndexBase_t base,
                         bool                 force_conj_A)
@@ -3299,11 +3324,11 @@ void host_cscmm(J                    M,
                 const J*             csc_row_ind_A,
                 const T*             csc_val_A,
                 const T*             B,
-                J                    ldb,
+                int64_t              ldb,
                 hipsparseOrder_t     order_B,
                 T                    beta,
                 T*                   C,
-                J                    ldc,
+                int64_t              ldc,
                 hipsparseOrder_t     order_C,
                 hipsparseIndexBase_t base)
 {
@@ -3380,8 +3405,8 @@ void host_cscmm_batched(J                    M,
                         J                    N,
                         J                    K,
                         J                    batch_count_A,
-                        I                    offsets_batch_stride_A,
-                        I                    rows_values_batch_stride_A,
+                        int64_t              offsets_batch_stride_A,
+                        int64_t              rows_values_batch_stride_A,
                         hipsparseOperation_t transA,
                         hipsparseOperation_t transB,
                         T                    alpha,
@@ -3389,15 +3414,15 @@ void host_cscmm_batched(J                    M,
                         const J*             csc_row_ind_A,
                         const T*             csc_val_A,
                         const T*             B,
-                        J                    ldb,
+                        int64_t              ldb,
                         J                    batch_count_B,
-                        I                    batch_stride_B,
+                        int64_t              batch_stride_B,
                         hipsparseOrder_t     order_B,
                         T                    beta,
                         T*                   C,
-                        J                    ldc,
+                        int64_t              ldc,
                         J                    batch_count_C,
-                        I                    batch_stride_C,
+                        int64_t              batch_stride_C,
                         hipsparseOrder_t     order_C,
                         hipsparseIndexBase_t base)
 {
@@ -3502,11 +3527,11 @@ void host_coomm(I                    M,
                 const I*             coo_col_ind_A,
                 const T*             coo_val_A,
                 const T*             B,
-                I                    ldb,
+                int64_t              ldb,
                 hipsparseOrder_t     order_B,
                 T                    beta,
                 T*                   C,
-                I                    ldc,
+                int64_t              ldc,
                 hipsparseOrder_t     order_C,
                 hipsparseIndexBase_t base)
 {
@@ -3522,7 +3547,7 @@ void host_coomm(I                    M,
 #endif
             for(I i = 0; i < M; ++i)
             {
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
 
                 C[idx_C] = testing_mult(beta, C[idx_C]);
             }
@@ -3539,9 +3564,9 @@ void host_coomm(I                    M,
                 I col = coo_col_ind_A[i] - base;
                 T val = testing_mult(alpha, coo_val_A[i]);
 
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? row + j * ldc : row * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? row + j * ldc : row * ldc + j;
 
-                I idx_B = 0;
+                int64_t idx_B = 0;
                 if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE && order_B == HIPSPARSE_ORDER_COL)
                    || (transB != HIPSPARSE_OPERATION_NON_TRANSPOSE
                        && order_B != HIPSPARSE_ORDER_COL))
@@ -3566,7 +3591,7 @@ void host_coomm(I                    M,
 #endif
             for(I i = 0; i < K; ++i)
             {
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? i + j * ldc : i * ldc + j;
 
                 C[idx_C] = testing_mult(beta, C[idx_C]);
             }
@@ -3583,9 +3608,9 @@ void host_coomm(I                    M,
                 I col = coo_col_ind_A[i] - base;
                 T val = testing_mult(alpha, testing_conj(coo_val_A[i], conj_A));
 
-                I idx_C = (order_C == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
+                int64_t idx_C = (order_C == HIPSPARSE_ORDER_COL) ? col + j * ldc : col * ldc + j;
 
-                I idx_B = 0;
+                int64_t idx_B = 0;
                 if((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE && order_B == HIPSPARSE_ORDER_COL)
                    || (transB != HIPSPARSE_OPERATION_NON_TRANSPOSE
                        && order_B != HIPSPARSE_ORDER_COL))
@@ -3609,7 +3634,7 @@ void host_coomm_batched(I                    M,
                         I                    K,
                         I                    nnz,
                         I                    batch_count_A,
-                        I                    batch_stride_A,
+                        int64_t              batch_stride_A,
                         hipsparseOperation_t transA,
                         hipsparseOperation_t transB,
                         T                    alpha,
@@ -3617,15 +3642,15 @@ void host_coomm_batched(I                    M,
                         const I*             coo_col_ind_A,
                         const T*             coo_val_A,
                         const T*             B,
-                        I                    ldb,
+                        int64_t              ldb,
                         I                    batch_count_B,
                         I                    batch_stride_B,
                         hipsparseOrder_t     order_B,
                         T                    beta,
                         T*                   C,
-                        I                    ldc,
+                        int64_t              ldc,
                         I                    batch_count_C,
-                        I                    batch_stride_C,
+                        int64_t              batch_stride_C,
                         hipsparseOrder_t     order_C,
                         hipsparseIndexBase_t base)
 {
