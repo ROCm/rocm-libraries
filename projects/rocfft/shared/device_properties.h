@@ -46,8 +46,14 @@ static hipDeviceProp_t get_curr_device_prop()
 }
 
 // Get current device GCN arch name without any suffix after ':'
+// If no devices are found, return empty string
 static std::string get_curr_gcn_arch_name()
 {
+    int  dev_count = 0;
+    auto ret       = hipGetDeviceCount(&dev_count);
+    if(ret != hipSuccess || dev_count == 0)
+        return "";
+
     auto        dev_prop       = get_curr_device_prop();
     std::string arch_name_full = dev_prop.gcnArchName;
 
