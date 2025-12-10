@@ -207,6 +207,11 @@ Run checks on staged files:
 pre-commit
 ```
 
+Run checks on all files in the repo:
+```bash
+pre-commit run --all-files
+```
+
 ### Opting a Project into Pre-commit Checks
 
 By default, most projects are excluded from pre-commit checks in [`.pre-commit-config.yaml`](.pre-commit-config.yaml). To opt-in a project:
