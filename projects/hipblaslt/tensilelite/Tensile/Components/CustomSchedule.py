@@ -2502,6 +2502,8 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = num_gr
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     
+    if isNT(kernel):
+        opt1.disableValidation()  # TODO: https://github.com/ROCm/rocm-libraries/issues/3287
     return True, opt1
 
 def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
