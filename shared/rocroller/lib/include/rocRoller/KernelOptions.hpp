@@ -43,6 +43,8 @@ namespace rocRoller
     const std::string KLOOP   = "KLoop";
     const std::string RECEIVE = "ReceiveTileLoop";
 
+    const std::string KLOOPTAIL = KLOOP + "Tail";
+
     const std::string SCRATCH = "SCRATCH";
     const std::string NUMWGS  = "numWGs";
     const std::string WGM     = "WGM";

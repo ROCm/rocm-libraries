@@ -16,9 +16,7 @@
 #include <variant>
 #include <vector>
 
-namespace hipdnn_frontend
-{
-namespace graph
+namespace hipdnn_frontend::graph
 {
 
 class TensorAttributes
@@ -284,5 +282,4 @@ private:
     ValueVariant _value;
 };
 typedef TensorAttributes Tensor_attributes;
-}
-}
+} // namespace hipdnn_frontend::graph

@@ -44,8 +44,8 @@ namespace rocsparse
         ROCSPARSE_ROUTINE_TRACE;
         if(info == nullptr)
         {
-            rocsparse::set_minus_one_async(
-                handle->stream, handle->pointer_mode, indextype, position);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::set_minus_one_async(
+                handle->pointer_mode, indextype, position, handle->stream));
             return rocsparse_status_success;
         }
 
