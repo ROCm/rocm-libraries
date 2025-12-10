@@ -283,33 +283,32 @@ namespace rocRoller::KernelGraph
 
             std::string operator()(JustNaryArgument const& n) const
             {
-                return concatenate("JustNaryArgument ", toString(n.argument));
+                return toString(n.argument);
             }
 
             std::string operator()(ComputeIndex const& ci) const
             {
-                return concatenate("ComputeIndex ", ci.argument, ": (", ci.index, ")");
+                return concatenate(ci.argument, ": (", ci.index, ")");
             }
 
             std::string operator()(TypeAndSubDimension const& ci) const
             {
-                return concatenate("TypeAndSubDimension ", ci.id, ": (", ci.subdimension, ")");
+                return concatenate(ci.id, ": (", ci.subdimension, ")");
             }
 
             std::string operator()(UnrollStride const& ci) const
             {
-                return concatenate(
-                    "UnrollStride ", ci.unrollStride, ": (", ci.unrollDimension, ")");
+                return concatenate(ci.unrollStride, ": (", ci.unrollDimension, ")");
             }
 
             std::string operator()(BaseOffset const& ci) const
             {
-                return concatenate("BaseOffset ", ci.base, ": (", ci.subdimension, ")");
+                return concatenate(ci.base, ": (", ci.subdimension, ")");
             }
 
             std::string operator()(TypeAndNaryArgument const& ci) const
             {
-                return concatenate("TypeAndNaryArgument ", ci.id, ": (", ci.argument, ")");
+                return concatenate(ci.id, ": (", ci.argument, ")");
             }
         };
 

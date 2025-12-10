@@ -224,8 +224,6 @@ namespace rocRoller
 
             if(m_context->registerTagManager()->hasRegister(offsetTag))
             {
-                co_yield Instruction::Comment(
-                    fmt::format("Offset register already exists for tag {}", offsetTag));
                 if(isStorePartOfGlobalToLDS)
                 {
                     auto tmp  = m_context->registerTagManager()->getRegister(offsetTag);
@@ -245,8 +243,6 @@ namespace rocRoller
             }
             else
             {
-                co_yield Instruction::Comment(
-                    fmt::format("Creating Offset register for tag {}", offsetTag));
                 auto baseTag = -1;
                 for(auto const& c : m_graph->mapper.getConnections(info.tag))
                 {
@@ -263,10 +259,9 @@ namespace rocRoller
                 {
                     Throw<FatalError>("Base offset not found");
                 }
+
                 if(isStorePartOfGlobalToLDS)
                 {
-                    co_yield Instruction::Comment(
-                        fmt::format("Offset register for GlobalToLDS store"));
                     auto tmp = m_context->registerTagManager()->getRegister(baseTag);
                     co_yield generate(info.data, info.data->expression() + tmp->expression());
                     m_context->getScopeManager()->addRegister(offsetTag);
@@ -274,8 +269,6 @@ namespace rocRoller
                 }
                 else
                 {
-                    co_yield Instruction::Comment(
-                        fmt::format("Offset register for tag {}", offsetTag));
                     info.rowOffsetReg = m_context->registerTagManager()->getRegister(
                         offsetTag,
                         Register::Type::Vector,
@@ -286,10 +279,6 @@ namespace rocRoller
 
                     // Copy base to new offset register
                     auto baseReg = m_context->registerTagManager()->getRegister(baseTag);
-                    co_yield Instruction::Comment(
-                        fmt::format("Copy base offset (tag {}) to offset register (tag {})",
-                                    baseTag,
-                                    offsetTag));
                     co_yield m_context->copier()->copy(info.rowOffsetReg, baseReg);
                 }
 
@@ -334,8 +323,6 @@ namespace rocRoller
             Register::ValuePtr& stride, RegisterExpressionAttributes& attrs, int tag, int dimension)
         {
             auto strideTag = m_graph->mapper.get<Stride>(tag, dimension);
-            co_yield Instruction::Comment(
-                fmt::format("Generating stride for tag {} dimension {}", tag, dimension));
             if(strideTag >= 0)
             {
                 auto [strideExpr, strideAttributes]
@@ -974,7 +961,6 @@ namespace rocRoller
 
                 if(info.kind == MemoryInstructions::MemoryKind::Buffer2LDS)
                 {
-                    co_yield Instruction::Comment("Setup for Buffer2LDS load");
                     info.bufOpts.lds = 1;
 
                     // get lds write stride
@@ -986,7 +972,6 @@ namespace rocRoller
                 }
                 else if(m_context->registerTagManager()->hasRegister(macTileTag))
                 {
-                    co_yield Instruction::Comment("Reusing existing register for macro tile");
                     auto reg = m_context->registerTagManager()->getRegister(macTileTag);
 
                     if(!m_context->targetArchitecture().HasCapability(
@@ -1006,7 +991,6 @@ namespace rocRoller
                 }
                 else
                 {
-                    co_yield Instruction::Comment("Creating new register for macro tile");
                     info.data = m_context->registerTagManager()->getRegister(macTileTag, tmpl);
 
                     auto viewTileTags
