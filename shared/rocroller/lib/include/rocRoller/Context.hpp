@@ -174,20 +174,20 @@ namespace rocRoller
         std::array<std::shared_ptr<Register::Allocator>, static_cast<size_t>(Register::Type::Count)>
             m_allocators;
 
-        std::shared_ptr<Scheduling::IObserver>                         m_observer;
-        AssemblyKernelPtr                                              m_kernel;
-        std::shared_ptr<ArgumentLoader>                                m_argLoader;
-        std::shared_ptr<ScheduledInstructions>                         m_instructions;
-        std::shared_ptr<MemoryInstructions>                            m_mem;
-        LabelAllocatorPtr                                              m_labelAllocator;
-        std::shared_ptr<LDSAllocator>                                  m_ldsAllocator;
+        std::shared_ptr<Scheduling::IObserver> m_observer;
+        AssemblyKernelPtr                      m_kernel;
+        std::shared_ptr<ArgumentLoader>        m_argLoader;
+        std::shared_ptr<ScheduledInstructions> m_instructions;
+        std::shared_ptr<MemoryInstructions>    m_mem;
+        LabelAllocatorPtr                      m_labelAllocator;
+        std::shared_ptr<LDSAllocator>          m_ldsAllocator;
         std::array<Expression::ExpressionPtr, static_cast<size_t>(Operations::ScratchPolicy::Count)>
-            m_scratchSizes;
-        std::shared_ptr<CopyGenerator>                                 m_copier;
-        std::shared_ptr<BranchGenerator>                               m_brancher;
-        std::shared_ptr<CrashKernelGenerator>                          m_crasher;
-        std::shared_ptr<RandomGenerator>                               m_random;
-        std::shared_ptr<KernelGraph::ScopeManager>                     m_scope;
+                                                   m_scratchSizes;
+        std::shared_ptr<CopyGenerator>             m_copier;
+        std::shared_ptr<BranchGenerator>           m_brancher;
+        std::shared_ptr<CrashKernelGenerator>      m_crasher;
+        std::shared_ptr<RandomGenerator>           m_random;
+        std::shared_ptr<KernelGraph::ScopeManager> m_scope;
 
         std::string   m_assemblyFileName;
         KernelOptions m_kernelOptions;

@@ -292,10 +292,10 @@ namespace rocRoller
     }
 
     Expression::ExpressionPtr Context::allocateScratch(Operations::ScratchPolicy policy,
-                                                        Expression::ExpressionPtr size)
+                                                       Expression::ExpressionPtr size)
     {
-        auto idx           = static_cast<size_t>(policy);
-        auto currentOffset = m_scratchSizes[idx];
+        auto idx            = static_cast<size_t>(policy);
+        auto currentOffset  = m_scratchSizes[idx];
         m_scratchSizes[idx] = simplify(m_scratchSizes[idx] + size);
         return currentOffset;
     }

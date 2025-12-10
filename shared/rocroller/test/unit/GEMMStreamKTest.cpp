@@ -78,9 +78,8 @@ namespace GEMMTests
             GTEST_SKIP() << "Skipping GPU_BasicGEMM test: CDNA1 not supported";
         }
 
-        auto [problemConfig, mode, loadPathA, loadPathB, storeLDSD]
-            = std::get<1>(GetParam());
-        auto [dataTypeAB, macM, macN, macK, m, n, k, numWGs] = problemConfig;
+        auto [problemConfig, mode, loadPathA, loadPathB, storeLDSD] = std::get<1>(GetParam());
+        auto [dataTypeAB, macM, macN, macK, m, n, k, numWGs]        = problemConfig;
 
         GEMMProblem gemm;
 
@@ -237,7 +236,14 @@ namespace GEMMTests
                 ::testing::Values(
                     // ProblemConfig: (dataTypeAB, macM, macN, macK, m, n, k, numWGs)
                     ProblemConfig{rocRoller::DataType::Half, 128, 128, 16, 128, 256, 15936, 128},
-                    ProblemConfig{rocRoller::DataType::Float, 64, 64, 64, 256, 256, 16384, 256}), /* problemConfig */
+                    ProblemConfig{rocRoller::DataType::Float,
+                                  64,
+                                  64,
+                                  64,
+                                  256,
+                                  256,
+                                  16384,
+                                  256}), /* problemConfig */
                 ::testing::Values(
                     StreamKMode::Standard, StreamKMode::TwoTile, StreamKMode::TwoTileDPFirst),
                 ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
