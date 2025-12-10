@@ -6,9 +6,9 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_sdk/plugin/test_utils/MockGraph.hpp>
-#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/StringUtil.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
 #include "HipdnnEnginePluginHandle.hpp"
@@ -600,35 +600,35 @@ INSTANTIATE_TEST_SUITE_P(,
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableReturnsFalseForUnsupportedGraph)
 {
     {
-        auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+        auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
         hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
-        auto builder = hipdnn_sdk::test_utilities::createValidBatchnormBwdGraph();
+        auto builder = hipdnn_test_sdk::utilities::createValidBatchnormBwdGraph();
         hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
-        auto builder = hipdnn_sdk::test_utilities::createValidConvFwdGraph();
+        auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph();
         hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
-        auto builder = hipdnn_sdk::test_utilities::createValidConvBwdGraph();
+        auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
         hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
         EXPECT_FALSE(applicable);
     }
     {
-        auto builder = hipdnn_sdk::test_utilities::createValidConvWrwGraph();
+        auto builder = hipdnn_test_sdk::utilities::createValidConvWrwGraph();
         hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
         bool applicable = _planBuilder.isApplicable(_dummyHandle, graph);
@@ -672,7 +672,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForWrongNode
 
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, GetWorkspaceSizeThrowsForUnsupportedGraph)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_THROW(_planBuilder.getWorkspaceSize(_dummyHandle, graph),
@@ -703,7 +703,7 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForWrongNodeCountGr
 
 TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForUnsupportedGraph)
 {
-    auto builder = hipdnn_sdk::test_utilities::createValidBatchnormInferenceGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
     HipdnnEnginePluginExecutionContext ctx;
 

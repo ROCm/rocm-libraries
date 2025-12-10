@@ -5,10 +5,10 @@
 #include <random>
 
 #include <hip/hip_runtime.h>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "../tests/common/ActivationCommon.hpp"
 #include "../tests/common/BatchnormCommon.hpp"
@@ -17,7 +17,7 @@
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
-using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_test_sdk::utilities;
 using namespace miopen_legacy_plugin::test_utilities;
 using namespace test_bn_common;
 
