@@ -7400,6 +7400,8 @@ class KernelWriterAssembly(KernelWriter):
                           kIncA = numMIInput//numSet0GroupA
                           if bk == 4 and self.states.asmCaps["HasMFMA_f8f6f4"]:
                             kIncA = 56 if kernel["MatrixInstK"] == 128 else 24
+                            if kernel["UseF32XEmulation"]:
+                              kIncA = 14 if kernel["MatrixInstK"] == 32 else 6
                           shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncA, "add part of K"))
                         # replace 0 for differnet thread
                         if kernel["LocalSplitU"] > 1:
@@ -7490,6 +7492,8 @@ class KernelWriterAssembly(KernelWriter):
                           kIncB = numMIInput//numSet0GroupB
                           if bk == 4: # when vgprPerInput == 8
                             kIncB = 56 if kernel["MatrixInstK"] == 128 else 24
+                            if kernel["UseF32XEmulation"]:
+                              kIncB = 14 if kernel["MatrixInstK"] == 32 else 6
                           shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB, "add part of K"))
                         # replace 0 for differnet thread
                         if kernel["LocalSplitU"] > 1:
