@@ -79,7 +79,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         specs.emplace(factors,
                       std::vector<unsigned int>(),
                       precision,
-                      "",
+                      get_curr_gcn_arch_name(),
                       static_cast<unsigned int>(kernel->workgroup_size),
                       PrintScheme(node.scheme));
         specs->threads_per_transform = kernel->threads_per_transform[0];
@@ -127,7 +127,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         specs.emplace(factors1d,
                       factors2d,
                       precision,
-                      "",
+                      get_curr_gcn_arch_name(),
                       static_cast<unsigned int>(kernel->workgroup_size),
                       PrintScheme(node.scheme));
         specs->threads_per_transform = kernel->threads_per_transform[0];
@@ -137,7 +137,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         specs2d.emplace(factors2d,
                         factors1d,
                         precision,
-                        "",
+                        get_curr_gcn_arch_name(),
                         static_cast<unsigned int>(kernel->workgroup_size),
                         PrintScheme(node.scheme));
         specs2d->threads_per_transform = kernel->threads_per_transform[1];
