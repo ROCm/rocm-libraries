@@ -46,7 +46,9 @@ void SampleRunner::operator()(const TensorLayout& layout)
     constexpr int64_t dilW = 1; // Width dilation
 
     auto graph = std::make_shared<graph::Graph>();
-    graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    graph->set_io_data_type(inputType)
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto xAttr = createTensor({n, c, h, w}, inputType, layout);
     auto wAttr = createTensor({k, c, r, s}, inputType, layout);
@@ -59,7 +61,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     auto yAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
     yAttr->set_output(false);
-    yAttr->set_data_type(inputType);
 
     graph::PointwiseAttributes pointwiseAttributes;
     pointwiseAttributes.set_mode(hipdnn_frontend::PointwiseMode::RELU_FWD);
