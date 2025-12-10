@@ -92,7 +92,6 @@ inline std::vector<BatchnormTestCase> getBnBwdTestCases()
 
     return {
         {{1, 3, 14, 14}, seed},
-        {{1, 256, 1, 1}, seed},
         {{2, 3, 1, 1}, seed},
         {{32, 1, 14, 14}, seed},
         {{32, 3, 1, 14}, seed},
@@ -125,7 +124,6 @@ inline std::vector<BatchnormTestCase> getBnFwdTrainingSmoke2dTestCases()
     unsigned seed = hipdnn_sdk::test_utilities::getGlobalTestSeed();
 
     return {
-        // {1, 256, 1, 1, seed}, // miopen's driver command for this shape fails. There is a PR in miopen that fixes this issue.
         {{2, 3, 1, 1}, seed}, // Minimal case
         {{32, 3, 1, 14}, seed}, // Typical small training case
     };

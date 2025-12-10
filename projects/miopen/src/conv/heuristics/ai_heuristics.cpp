@@ -37,6 +37,8 @@
 #include <miopen/filesystem.hpp>
 #include <miopen/env.hpp>
 
+#include <any>
+
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
 
 // 3D AI heuristics - now declared properly in header
@@ -513,8 +515,8 @@ GetCachedPrediction(const conv::ProblemDescription& problem, const std::string& 
     MIOPEN_LOG_I2("Cached " << model_type << "heuristic (TunaNet) result found");
 
     std::vector<uint64_t> db_sol(db_res->size());
-    std::transform(db_res->begin(), db_res->end(), db_sol.begin(), [](boost::any id) {
-        return boost::any_cast<uint64_t>(id);
+    std::transform(db_res->begin(), db_res->end(), db_sol.begin(), [](std::any id) {
+        return std::any_cast<uint64_t>(id);
     });
 
     if(miopen::IsLogging(LoggingLevel::Info2))
@@ -538,7 +540,7 @@ GetCachedPrediction(const conv::ProblemDescription& problem, const std::string& 
 void StorePredictionCache(const conv::ProblemDescription& problem,
                           const std::string& device,
                           bool is3d,
-                          std::vector<boost::any>& any_sol)
+                          std::vector<std::any>& any_sol)
 {
     std::string est_name = is3d ? (":memory:3d_" + device) : (":memory:" + device);
     auto& db             = AnyRamDb::GetCached(est_name);
@@ -550,8 +552,8 @@ void StorePredictionCache(const conv::ProblemDescription& problem,
  */
 struct PredictionResult
 {
-    std::vector<uint64_t> solver_ids;       ///< Sorted solver IDs by probability
-    std::vector<boost::any> any_solver_ids; ///< Same IDs in boost::any format for caching
+    std::vector<uint64_t> solver_ids;     ///< Sorted solver IDs by probability
+    std::vector<std::any> any_solver_ids; ///< Same IDs in std::any format for caching
 };
 
 /**

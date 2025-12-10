@@ -3157,10 +3157,9 @@ class Solution(collections.abc.Mapping):
     # Since we use PLR >= LoopIters for allocating numberOfIters vgprBuffer for a while
     # we need to support both PLR >= LoopIters and CLR parameter for solutions in rocBLAS
     if state["ClusterLocalRead"] and state["PrefetchLocalRead"] >= state["LoopIters"] and not state["ScheduleIterAlg"] == 2:
-      # 1 or 2 Byte input + DTVA or DTVB case, does not work with PLR=0. Reject it here.
-      if state["ProblemType"]["DataType"].numBytes() < 4 and \
-         (state["ProblemType"]["TLUA"] and state["DirectToVgprA"] or state["ProblemType"]["TLUB"] and state["DirectToVgprB"]):
-        reject(state, printRejectionReason, "DirectToVgpr does not work with 1 or 2 Byte input + TLU + PrefetchLocalRead(%u) >= LoopIters(%u)"%(state["PrefetchLocalRead"], state["LoopIters"]))
+      # Reject configuration: DTV enabled on one side is incompatible with PLR = 0
+      if state["DirectToVgprA"] ^ state["DirectToVgprB"]:
+        reject(state, printRejectionReason, "DirectToVgpr does not work with PrefetchLocalRead(%u) >= LoopIters(%u)"%(state["PrefetchLocalRead"], state["LoopIters"]))
         return
       state["ClusterLocalRead"] = 0
       state["PrefetchLocalRead"] = 0
