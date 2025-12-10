@@ -175,7 +175,6 @@ namespace rocRoller::KernelGraph
         int hoistedNode = duplicateControlNode(kgraph, nodeToHoist);
         Log::info("HoistLoopInvariant: Hoisted node {} to new node {}", nodeToHoist, hoistedNode);
         insertBefore(kgraph, loopNode, hoistedNode, hoistedNode);
-        // bypassAndDelete(kgraph, nodeToHoist);
         kgraph.control.setElement(nodeToHoist, NOP{});
         return hoistedNode;
     }
@@ -183,6 +182,18 @@ namespace rocRoller::KernelGraph
     KernelGraph HoistLoopInvariant::apply(KernelGraph const& original)
     {
         auto graph = original;
+
+        {
+            const auto connections = original.mapper.getConnections(837);
+            for(const auto& conn : connections)
+            {
+                Log::info("Connection {} {} {}",
+                          conn.control,
+                          toString(conn.connection),
+                          conn.coordinate);
+            }
+        }
+        // return graph;
 
         ControlFlowRWTracer tracer(graph);
         const auto          mapping = buildCoordinateLoopMapping(graph, tracer);

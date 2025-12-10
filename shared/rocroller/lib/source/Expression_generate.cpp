@@ -386,6 +386,9 @@ namespace rocRoller
                 Register::ValuePtr& rhs,
                 ResultType&         resType)
             {
+                co_yield Instruction::Comment("Generating arithmetic binary operation: "
+                                              + toString(expr) + " " + toString(resType) + " "
+                                              + (dest ? " -> " + toString(dest) : "nullptr"));
 
                 auto const lhsInfo  = DataTypeInfo::Get(lhs->variableType());
                 auto const rhsInfo  = DataTypeInfo::Get(rhs->variableType());
@@ -519,6 +522,9 @@ namespace rocRoller
                             rhsVal = conversion;
                         }
 
+                        co_yield Instruction::Comment(
+                            "Generating arithmetic binary operation element "
+                            + toString(dest->element({k})->allocation()->options()));
                         co_yield generateOp<T>(dest->element({k}), lhsVal, rhsVal);
                     }
                 }
