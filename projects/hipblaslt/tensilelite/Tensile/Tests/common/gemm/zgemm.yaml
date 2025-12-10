@@ -24,7 +24,8 @@ GlobalParameters:
   DataInitTypeA: 3 #12 #3
   DataInitTypeB: 3 #13 #3
   DataInitTypeC: 3 #3
-  DataInitTypeAlpha: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
   KernelTime: True
   PrintSolutionRejectionReason: True
 
