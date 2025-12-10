@@ -179,8 +179,15 @@ def set_bytes_per_element(kernels):
     wgs calculation can be overridden by using wgs_is_derived = true in kernel config.
     NOTE: Once all kernels are tuned by precision, this function can most likely go away.
     """
+
     d = dict()
-    # add precision entries for a given (length, scheme, lds_size_bytes) key
+
+    # For a given kernel key (length, scheme, lds_size_bytes, gcn_arch_name),
+    # we can have double-, single-, and half-precision entries, but those entries
+    # can be completely out of order in kernels list. We need the first loop to know,
+    # for a given key, what precision entries are available. The second loop assigns
+    # the maximum bytes per element, based on the available precision entries for a
+    # given key.
     for kernel in kernels:
         key = get_kernel_key(kernel)
         if key not in d:
