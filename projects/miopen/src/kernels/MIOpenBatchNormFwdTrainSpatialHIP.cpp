@@ -276,7 +276,7 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                 // index is unsigned int, so if the result would normally end up negative,
                 // the value wraps around and the check fails. Improves on the
                 // previous way of handling which was: if(index < (mio_bn_config::nchw - 3))
-                if(index - 3 < (mio_bn_config::nchw))
+                if(index + 3 < (mio_bn_config::nchw))
                 {
                     read4 = *(reinterpret_cast<const fp_type4*>(in + index));
                     miopen::batchnorm::_accumulate(mean, read4);
