@@ -41,6 +41,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -167,7 +168,7 @@ ClProgramPtr LoadProgram(cl_context ctx,
 
     if(program_name.extension() == ".cpp")
     {
-        boost::optional<miopen::TmpDir> dir(program_name);
+        std::optional<miopen::TmpDir> dir(program_name);
 #if MIOPEN_BUILD_DEV && !MIOPEN_WORKAROUND_COMPILER_CHANGE
         params += " -Werror";
         params += HipKernelWarningsString();

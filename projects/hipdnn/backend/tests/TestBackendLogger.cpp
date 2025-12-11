@@ -12,8 +12,8 @@
 #include <thread>
 #include <vector>
 
-#include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <logging/Logging.hpp>
 
 class TestBackendLogger : public ::testing::Test
@@ -22,17 +22,17 @@ protected:
     std::string _logFile;
     std::array<int, 2> _stderrPipe;
     int _oldStderr;
-    std::unique_ptr<hipdnn_sdk::test_utilities::ScopedEnvironmentVariableSetter> _logLevelGuard;
-    std::unique_ptr<hipdnn_sdk::test_utilities::ScopedEnvironmentVariableSetter> _logFileGuard;
+    std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logLevelGuard;
+    std::unique_ptr<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter> _logFileGuard;
 
 public:
     void SetUp() override
     {
         _logLevelGuard
-            = std::make_unique<hipdnn_sdk::test_utilities::ScopedEnvironmentVariableSetter>(
+            = std::make_unique<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter>(
                 "HIPDNN_LOG_LEVEL");
         _logFileGuard
-            = std::make_unique<hipdnn_sdk::test_utilities::ScopedEnvironmentVariableSetter>(
+            = std::make_unique<hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter>(
                 "HIPDNN_LOG_FILE");
 
         hipdnn_backend::logging::cleanup();

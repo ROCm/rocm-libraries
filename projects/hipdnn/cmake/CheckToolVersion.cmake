@@ -7,7 +7,7 @@ set(EXPECTED_CLANG_TIDY_VERSION "20")
 set(EXPECTED_LLVM_VERSION "20")
 
 # Common search paths
-set(LLVM_TOOL_PATHS /usr/bin /opt/rocm/llvm/bin)
+set(LLVM_TOOL_PATHS /usr/bin /usr/local/bin /opt/rocm/llvm/bin ${ROCM_PATH}/llvm/bin)
 get_filename_component(COMPILER_PATH "${CMAKE_CXX_COMPILER}" PATH)
 list(APPEND LLVM_TOOL_PATHS ${COMPILER_PATH})
 
@@ -86,6 +86,16 @@ function(findAndCheckClangTidy)
 
     # Export to parent scope
     set(CLANG_TIDY_EXE ${CLANG_TIDY_EXE} PARENT_SCOPE)
+
+    find_program(
+        RUN_CLANG_TIDY_EXE NAMES run-clang-tidy-${EXPECTED_CLANG_TIDY_VERSION} run-clang-tidy
+        PATHS ${LLVM_TOOL_PATHS}
+    )
+
+    if(RUN_CLANG_TIDY_EXE)
+        message(STATUS "Found run-clang-tidy at ${RUN_CLANG_TIDY_EXE}")
+        set(RUN_CLANG_TIDY_EXE ${RUN_CLANG_TIDY_EXE} PARENT_SCOPE)
+    endif()
 endfunction()
 
 # Finds and checks LLVM tools
