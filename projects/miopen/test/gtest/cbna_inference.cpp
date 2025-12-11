@@ -493,9 +493,9 @@ template <typename T>
 void RunCbnaInferenceTests()
 {
     cbna_fusion_driver<T> driver;
-    driver.type = miopen_type<T>{};
-    driver.full_set = false;
-    driver.dataset_id = 0;
+    driver.type              = miopen_type<T>{};
+    driver.full_set          = false;
+    driver.dataset_id        = 0;
     driver.config_iter_start = 0;
 
     std::vector<typename cbna_fusion_driver<T>::argument*> data_args;
@@ -568,17 +568,10 @@ class GPU_CbnaInference_FP16 : public testing::TestWithParam<miopenDataType_t>
     }
 };
 
-TEST_P(GPU_CbnaInference_FP32, FloatTest_cbna_inference)
-{
-    RunCbnaInferenceDriver(GetParam());
-}
+TEST_P(GPU_CbnaInference_FP32, FloatTest_cbna_inference) { RunCbnaInferenceDriver(GetParam()); }
 
-TEST_P(GPU_CbnaInference_FP16, HalfTest_cbna_inference)
-{
-    RunCbnaInferenceDriver(GetParam());
-}
+TEST_P(GPU_CbnaInference_FP16, HalfTest_cbna_inference) { RunCbnaInferenceDriver(GetParam()); }
 
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_CbnaInference_FP32, testing::ValuesIn({miopenFloat}));
 
 INSTANTIATE_TEST_SUITE_P(Smoke, GPU_CbnaInference_FP16, testing::ValuesIn({miopenHalf}));
-
