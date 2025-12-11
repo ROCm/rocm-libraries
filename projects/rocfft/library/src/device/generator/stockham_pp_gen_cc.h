@@ -360,8 +360,8 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
             stmts += CommentLines{
                 "no intrinsic when load to lds. FIXME- check why use nested branch is better"};
-            stmts += If{in_bound, tmp_stmts.statements};
-            stmts += If{Not{in_bound}, {If{pred, tmp_stmts.statements}}};
+            stmts += If{in_bound, tmp_stmts};
+            stmts += If{Not{in_bound}, {If{pred, tmp_stmts}}};
         }
         else
         {
@@ -395,12 +395,11 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                 ThreadGuardMode::GUARD_BY_IF,
                 true);
             non_intrinsic_stmts += CommentLines{"can't use intrinsic load"};
-            non_intrinsic_stmts += If{in_bound, tmp_stmts.statements};
-            non_intrinsic_stmts += If{!in_bound, {If{pred, tmp_stmts.statements}}};
+            non_intrinsic_stmts += If{in_bound, tmp_stmts};
+            non_intrinsic_stmts += If{!in_bound, {If{pred, tmp_stmts}}};
 
-            stmts += If{intrinsic_mode != "IntrinsicAccessType::DISABLE_BOTH",
-                        intrinsic_stmts.statements};
-            stmts += Else{non_intrinsic_stmts.statements};
+            stmts += If{intrinsic_mode != "IntrinsicAccessType::DISABLE_BOTH", intrinsic_stmts};
+            stmts += Else{non_intrinsic_stmts};
         }
 
         return stmts;
@@ -470,8 +469,8 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         stmts += CommentLines{
             "no intrinsic when store from lds. FIXME- check why use nested branch is better"};
-        stmts += If{in_bound, tmp_stmts.statements};
-        stmts += If{Not{in_bound}, {If{pred, tmp_stmts.statements}}};
+        stmts += If{in_bound, tmp_stmts};
+        stmts += If{Not{in_bound}, {If{pred, tmp_stmts}}};
 
         return stmts;
     }
@@ -952,8 +951,8 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                     false,
                     max_factor_pp);
 
-                body += If{Not{lds_is_real}, reg2lds_full.statements};
-                body += Else{reg2lds_half.statements};
+                body += If{Not{lds_is_real}, reg2lds_full};
+                body += Else{reg2lds_half};
             }
         }
         return f;

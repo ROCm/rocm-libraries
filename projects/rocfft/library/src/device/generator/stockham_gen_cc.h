@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -352,8 +352,8 @@ struct StockhamKernelCC : public StockhamKernel
 
             stmts += CommentLines{
                 "no intrinsic when load to lds. FIXME- check why use nested branch is better"};
-            stmts += If{in_bound, tmp_stmts.statements};
-            stmts += If{Not{in_bound}, {If{pred, tmp_stmts.statements}}};
+            stmts += If{in_bound, tmp_stmts};
+            stmts += If{Not{in_bound}, {If{pred, tmp_stmts}}};
             // stmts += Else{{If{pred, tmp_stmts}}}; // FIXME: Need to check with compiler team.
         }
         else
@@ -388,12 +388,11 @@ struct StockhamKernelCC : public StockhamKernel
                 ThreadGuardMode::GUARD_BY_IF,
                 true);
             non_intrinsic_stmts += CommentLines{"can't use intrinsic load"};
-            non_intrinsic_stmts += If{in_bound, tmp_stmts.statements};
-            non_intrinsic_stmts += If{!in_bound, {If{pred, tmp_stmts.statements}}};
+            non_intrinsic_stmts += If{in_bound, tmp_stmts};
+            non_intrinsic_stmts += If{!in_bound, {If{pred, tmp_stmts}}};
 
-            stmts += If{intrinsic_mode != "IntrinsicAccessType::DISABLE_BOTH",
-                        intrinsic_stmts.statements};
-            stmts += Else{non_intrinsic_stmts.statements};
+            stmts += If{intrinsic_mode != "IntrinsicAccessType::DISABLE_BOTH", intrinsic_stmts};
+            stmts += Else{non_intrinsic_stmts};
             // stmts += Else{{If{in_bound, tmp_stmts}}};
         }
 
@@ -436,8 +435,8 @@ struct StockhamKernelCC : public StockhamKernel
 
             stmts += CommentLines{
                 "no intrinsic when store from lds. FIXME- check why use nested branch is better"};
-            stmts += If{in_bound, tmp_stmts.statements};
-            stmts += If{Not{in_bound}, {If{pred, tmp_stmts.statements}}};
+            stmts += If{in_bound, tmp_stmts};
+            stmts += If{Not{in_bound}, {If{pred, tmp_stmts}}};
             // stmts += Else{{If{pred, tmp_stmts}}}; // FIXME: Need to check with compiler team.
         }
         else
@@ -472,12 +471,11 @@ struct StockhamKernelCC : public StockhamKernel
                 height,
                 ThreadGuardMode::GUARD_BY_IF);
             non_intrinsic_stmts += CommentLines{"can't use intrinsic store"};
-            non_intrinsic_stmts += If{in_bound, tmp_stmts.statements};
-            non_intrinsic_stmts += If{!in_bound, {If{pred, tmp_stmts.statements}}};
+            non_intrinsic_stmts += If{in_bound, tmp_stmts};
+            non_intrinsic_stmts += If{!in_bound, {If{pred, tmp_stmts}}};
 
-            stmts += If{intrinsic_mode == "IntrinsicAccessType::ENABLE_BOTH",
-                        intrinsic_stmts.statements};
-            stmts += Else{non_intrinsic_stmts.statements};
+            stmts += If{intrinsic_mode == "IntrinsicAccessType::ENABLE_BOTH", intrinsic_stmts};
+            stmts += Else{non_intrinsic_stmts};
             // stmts += Else{{If{in_bound, {If{pred, tmp_stmts}}}}};
         }
 
@@ -606,6 +604,6 @@ struct StockhamKernelCC : public StockhamKernel
                           height,
                           ThreadGuardMode::NO_GUARD);
 
-        return {If{apply_large_twiddle, stmts.statements}};
+        return {If{apply_large_twiddle, stmts}};
     }
 };
