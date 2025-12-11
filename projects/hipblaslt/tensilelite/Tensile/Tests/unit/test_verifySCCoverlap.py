@@ -25,7 +25,7 @@
 import unittest
 from rocisa.instruction import SWaitCnt
 
-from Tensile.Components.CustomSchedule import verify_scc_overlap
+from Tensile.Components.CMSValidator import verify_scc_overlap
 from test_CustomSchedule import create_base_kernel, ScheduleInfo
 
 class TestVerifySCCOverlap(unittest.TestCase):

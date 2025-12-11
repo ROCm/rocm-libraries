@@ -25,7 +25,7 @@
 import unittest
 from rocisa.instruction import SWaitCnt
 
-from Tensile.Components.CustomSchedule import verify_gr_inc_order
+from Tensile.Components.CMSValidator import verify_gr_inc_order
 from test_CustomSchedule import create_base_kernel, ScheduleInfo
 
 class TestGRIncOrder(unittest.TestCase):

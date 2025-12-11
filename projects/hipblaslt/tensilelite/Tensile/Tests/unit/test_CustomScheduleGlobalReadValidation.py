@@ -20,14 +20,8 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-import pytest
-
-from Tensile.Components.CustomSchedule import (
-    ScheduleInfo,
-    verify_global_reads_not_too_early,
-    get_most_recent_local_reads,
-)
-
+from Tensile.Components.CustomSchedule import ScheduleInfo
+from Tensile.Components.CMSValidator import verify_global_reads_not_too_early, get_most_recent_local_reads
 from rocisa.instruction import SBarrier, SWaitCnt
 
 
