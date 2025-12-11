@@ -96,33 +96,23 @@ void Run3dDriver(miopenDataType_t prec)
     }
 };
 
-bool IsTestSupportedForDevice(const miopen::Handle& handle) { return true; }
-
 } // namespace pooling3d
 using namespace pooling3d;
 
 TEST_F(GPU_Pooling3d_FP32, FloatTest_pooling3d)
 {
-    const auto& handle = get_handle();
-    if(IsTestSupportedForDevice(handle))
-    {
-        Run3dDriver(miopenFloat);
-    }
-    else
+    if(!IsTestSupportedByDevice(Gpu::All))
     {
         GTEST_SKIP();
     }
+    Run3dDriver(miopenFloat);
 }
 
 TEST_F(GPU_Pooling3d_FP16, HalfTest_pooling3d)
 {
-    const auto& handle = get_handle();
-    if(IsTestSupportedForDevice(handle))
-    {
-        Run3dDriver(miopenHalf);
-    }
-    else
+    if(!IsTestSupportedByDevice(Gpu::All))
     {
         GTEST_SKIP();
     }
+    Run3dDriver(miopenHalf);
 }
