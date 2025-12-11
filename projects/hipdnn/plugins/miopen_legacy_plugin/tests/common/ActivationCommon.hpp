@@ -23,12 +23,12 @@ struct ActivTestCase
     std::optional<float> softplusBeta;
 
     ActivTestCase(hipdnn_sdk::data_objects::PointwiseMode modeLocal,
-                  std::optional<float> reluLowerClipLocal,
-                  std::optional<float> reluUpperClipLocal,
-                  std::optional<float> reluLowerClipSlopeLocal,
-                  std::optional<float> swishBetaLocal,
-                  std::optional<float> eluAlphaLocal,
-                  std::optional<float> softplusBetaLocal)
+                  std::optional<float> reluLowerClipLocal = std::nullopt,
+                  std::optional<float> reluUpperClipLocal = std::nullopt,
+                  std::optional<float> reluLowerClipSlopeLocal = std::nullopt,
+                  std::optional<float> swishBetaLocal = std::nullopt,
+                  std::optional<float> eluAlphaLocal = std::nullopt,
+                  std::optional<float> softplusBetaLocal = std::nullopt)
         : mode(modeLocal)
         , reluLowerClip(reluLowerClipLocal)
         , reluUpperClip(reluUpperClipLocal)
