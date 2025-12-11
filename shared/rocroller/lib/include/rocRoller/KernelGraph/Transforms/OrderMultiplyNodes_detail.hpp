@@ -123,6 +123,10 @@ namespace rocRoller
                  */
                 std::optional<bool> orderByLastTagDependencies(int a, int b) const;
 
+                void logTagData() const;
+
+                void populateCache(auto range) const;
+
             private:
                 /**
                  * Helper function. Returns the existing order of the two nodes if it is
@@ -134,7 +138,7 @@ namespace rocRoller
                 ControlFlowRWTracer                                 m_tracer;
                 mutable std::unordered_map<int, std::optional<int>> m_downstreamMemoryNodes;
                 mutable std::unordered_map<int, std::vector<int>>   m_reversedTagDependencies;
-                mutable std::unordered_map<int, std::vector<int>>   m_downstreamTagReplacements;
+                mutable std::map<int, std::vector<int>>   m_downstreamTagReplacements;
             };
         }
     }

@@ -419,6 +419,7 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::AddF6LDSPadding>(m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::AddDirect2LDS>(m_context, m_commandParameters));
+        // transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::AddPRNG>(m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::UpdateWavefrontParameters>(m_commandParameters));
