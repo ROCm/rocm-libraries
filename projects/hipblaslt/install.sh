@@ -797,6 +797,10 @@ pushd .
     tensile_opt="${tensile_opt} -DHIPBLASLT_ENABLE_DEVICE=OFF"
   else
     if [[ -n "${tensile_logic}" ]]; then
+      if [[ "${tensile_logic}" != /* ]]; then
+        # Support relative paths passed to install.sh
+        tensile_logic="${root_path}/${tensile_logic}"
+      fi
       tensile_opt="${tensile_opt} -DHIPBLASLT_LIBLOGIC_PATH=${tensile_logic}"
     fi
     # tensile_opt="${tensile_opt} -DTensile_CODE_OBJECT_VERSION=${tensile_cov}"
