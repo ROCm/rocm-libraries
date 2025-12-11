@@ -333,9 +333,6 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
                 if inst.vlcnt != -1:
                     macro.addComment0("vmcnt used in ngl, applying %u shift"%shift0)
                     instModified.vlcnt = max(0, instModified.vlcnt - shift0)
-                if (inst.dscnt != -1 and opt1.nglnllZeroDscnt):
-                    macro.addComment0("setting dscnt = 0 for NGL/NLL")
-                    instModified.dscnt = 0
                 macro.add(instModified)
                 macro.add(ValueElseIf("\\useGR == 0 && \\usePLR == 0")) # in NLL
                 instModified = deepcopy(inst)
@@ -343,7 +340,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
                     macro.addComment0("vmcnt used in nll, applying %u shift"%shift1)
                     instModified.vlcnt = max(0, instModified.vlcnt - shift1)
                 if (inst.dscnt != -1 and opt1.nglnllZeroDscnt):
-                    macro.addComment0("setting dscnt = 0 for NGL/NLL")
+                    macro.addComment0("setting dscnt = 0 for NLL")
                     instModified.dscnt = 0
                 macro.add(instModified)
                 macro.add(ValueEndif())
