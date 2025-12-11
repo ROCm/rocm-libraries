@@ -132,15 +132,9 @@ bool IsTestSupportedForDevice(const miopen::Handle& handle) { return true; }
 
 } // namespace
 
-TEST_P(GPU_Pooling2d_FP32, FloatTest_pooling2d)
-{
-    Run2dDriver(GetParam());
-}
+TEST_P(GPU_Pooling2d_FP32, FloatTest_pooling2d) { Run2dDriver(GetParam()); }
 
-TEST_P(GPU_Pooling2d_FP16, HalfTest_pooling2d)
-{
-    Run2dDriver(GetParam());
-}
+TEST_P(GPU_Pooling2d_FP16, HalfTest_pooling2d) { Run2dDriver(GetParam()); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling2d_FP32, testing::ValuesIn({miopenFloat}));
 
