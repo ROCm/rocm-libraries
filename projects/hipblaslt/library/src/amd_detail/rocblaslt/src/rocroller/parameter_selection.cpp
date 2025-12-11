@@ -198,7 +198,7 @@ std::shared_ptr<SolutionParameters>
     }
 
     // Pass StreamK flag from solution index parameters
-    gemm->streamK = false;
+    gemm->streamK = true;
 
     // StreamK is not currently working with prefetching or workgroup mapping
     // if(gemm->streamK)
