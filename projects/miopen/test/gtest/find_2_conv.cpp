@@ -172,8 +172,6 @@ private:
             EXPECT_EQ(miopenSetFindOptionAttachBinaries(options, attach_binaries),
                       miopenStatusSuccess);
 
-            miopen::Allocator::ManageDataPtr workspace_dev;
-
             if(preallocate)
             {
                 std::size_t workspace_max = 0;
