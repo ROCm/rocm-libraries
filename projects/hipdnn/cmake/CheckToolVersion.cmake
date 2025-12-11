@@ -10,15 +10,8 @@ set(EXPECTED_LLVM_VERSION "20")
 # with a list of versioned path names.
 function(get_versioned_search_paths OUTPUT_VAR BASE_PATH VERSION)
     set(PATHS_LIST
-        "${BASE_PATH}${VERSION}/bin"
-        "${BASE_PATH}${VERSION}/lib/llvm/bin"
-        "${BASE_PATH}-${VERSION}/bin"
-        "${BASE_PATH}-${VERSION}/lib/llvm/bin"
-        "${BASE_PATH}_${VERSION}/bin"
-        "${BASE_PATH}_${VERSION}/lib/llvm/bin"
-        "${BASE_PATH}/${VERSION}/bin"
-        "${BASE_PATH}/${VERSION}/lib/llvm/bin"
-        "${BASE_PATH}/bin"
+        "${BASE_PATH}${VERSION}/bin" "${BASE_PATH}${VERSION}/lib/llvm/bin"
+        "${BASE_PATH}/${VERSION}/bin" "${BASE_PATH}/${VERSION}/lib/llvm/bin" "${BASE_PATH}/bin"
         "${BASE_PATH}/lib/llvm/bin"
     )
     set(${OUTPUT_VAR} ${PATHS_LIST} PARENT_SCOPE)
