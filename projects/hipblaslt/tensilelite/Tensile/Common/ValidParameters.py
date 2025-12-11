@@ -857,7 +857,13 @@ validParameters = { # we need to make sure this matches develop
     # 0  : Fetch from workgroup dim -> elements dim. (default)
     # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
     "MbskPrefetchMethod": [-1, 0, 1],
-    "UseCustomMainLoopSchedule" : [0, 1]
+    # Select whether to enable CMS
+    # CMS is supported for a given solution if there exists a CMS schedule in Components/CustomSchedule.py
+    #
+    # -1 : 0 if CMS is not supported, 1 if CMS is supported
+    # 0  : disable CMS even if supported
+    # 1  : enable  CMS, is set to 0 if not supported
+    "UseCustomMainLoopSchedule" : [-1, 0, 1]
 }
 
 newMIValidParameters = {
