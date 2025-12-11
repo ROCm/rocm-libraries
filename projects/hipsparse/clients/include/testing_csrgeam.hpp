@@ -41,13 +41,13 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csrgeam_bad_arg(void)
+void testing_csrgeam_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int safe_size = 1;
 
-    T alpha = 1.0;
-    T beta  = 1.0;
+    T alpha = make_DataType<T>(1.0);
+    T beta  = make_DataType<T>(1.0);
 
     int nnz_C;
 

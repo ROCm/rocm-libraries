@@ -34,7 +34,7 @@ protected:
         graphObj.set_name(doBias ? "ConvFwdBiasActivTest" : "ConvFwdActivTest");
 
         auto dataType = getDataTypeEnumFromType<DataType>();
-        graphObj.set_intermediate_data_type(dataType)
+        graphObj.set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
@@ -65,6 +65,7 @@ protected:
 
             graph::PointwiseAttributes biasAttrs;
             biasAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
+            biasAttrs.set_compute_data_type(dataType);
 
             yBiasTensorAttr = graphObj.pointwise(yConvTensorAttr, biasTensorAttr, biasAttrs);
         }

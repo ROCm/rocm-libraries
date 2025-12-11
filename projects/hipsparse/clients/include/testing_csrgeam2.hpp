@@ -41,13 +41,13 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csrgeam2_bad_arg(void)
+void testing_csrgeam2_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int safe_size = 1;
 
-    T alpha = 1.0;
-    T beta  = 1.0;
+    T alpha = make_DataType<T>(1.0);
+    T beta  = make_DataType<T>(1.0);
 
     int nnz_C;
 
@@ -771,6 +771,14 @@ void testing_csrgeam2(Arguments argus)
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
         return;
+    }
+
+    if(idx_base_C != idx_base_A || idx_base_C != idx_base_B || M == 0 || N == 0)
+    {
+#ifdef __HIP_PLATFORM_NVIDIA__
+        // cusparse does not support mixed index bases nor does it properly handle m == 0 or n == 0
+        return;
+#endif
     }
 
     // B = A so that we can compute the square of A

@@ -16,13 +16,35 @@ The following table lists all operations currently supported in hipDNN:
 | Batchnorm Training + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph³⁴ |
 | Convolution Dgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
-| Convolution Forward + (Bias) + Activation | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph²³ |
+| Convolution Forward + (Bias) + Activation⁵ | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph²³ |
 | Convolution Wgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only² |
 
 ¹ See Batchnorm Operations note below
 ² See Convolution Operations note below
 ³ See Fused Operations note below
 ⁴ See Batchnorm Training Running Statistics note below
+⁵ See Detailed Requirements below
+
+## Detailed Requirements
+
+### Convolution Forward + (Bias) + Activation
+#### Convolution forward node
+- Compute data type: FP32
+- Y tensor
+    - Virtual
+    - Data type:  FP32 or the input data type (the latter only if bias is used)
+#### Bias node (optional)
+- Compute data type: input data type
+- Output tensor
+    - Virtual
+    - Data type: FP32 or the input data type
+#### Activation node
+- Compute data type: FP32
+- Activation mode: RELU_FORWARD
+- Supports
+    - no clipping
+    - relu_lower_clip set
+    - relu_lower_clip and relu_upper_clip set
 
 ## Operation Notes
 
