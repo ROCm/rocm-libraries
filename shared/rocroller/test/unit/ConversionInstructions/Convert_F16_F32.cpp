@@ -132,15 +132,21 @@ namespace ConvertInstructionsTest
                 co_yield generateOp<Expression::Multiply>(
                     vgprIndex, vgprIndex, Register::Value::Literal(inputBytesPerElement));
 
+                Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
                 //rocRoller does the intial setup for the buffer (global memory)
-                auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
-                co_yield bufDesc->setup();
+                bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
+                // set the buffer base pointer to the starting address of the input vector
+                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_input->expression());
+
+                auto bufferRegs = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+                bufferExpr = bufferRegs->expression();
+
                 auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
-                // set the buffer base pointer to the starting address of the input vector
-                co_yield bufDesc->setBasePointer(s_input);
                 co_yield m_context->mem()->loadBuffer(
-                    vgprInputOutput, vgprIndex, 0, bufDesc, bufInstOpts, inputBytesPerElement);
+                    vgprInputOutput, vgprIndex, 0, bufferRegs, bufInstOpts, inputBytesPerElement);
 
                 // datatype convert instruction
                 co_yield_(
@@ -153,9 +159,11 @@ namespace ConvertInstructionsTest
                     vgprIndex, vgprIndex, Register::Value::Literal(outputBytesPerElement));
 
                 // set the buffer base pointer to the starting address of the output vector
-                co_yield bufDesc->setBasePointer(s_output);
+                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_output->expression());
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+
                 co_yield m_context->mem()->storeBuffer(
-                    vgprInputOutput, vgprIndex, 0, bufDesc, bufInstOpts, outputBytesPerElement);
+                    vgprInputOutput, vgprIndex, 0, bufferRegs, bufInstOpts, outputBytesPerElement);
             };
 
             // rocRoller schedules kernel instructions and postamble (standard)

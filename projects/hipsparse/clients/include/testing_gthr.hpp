@@ -72,7 +72,7 @@ void testing_gthr_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_gthr(Arguments argus)
+void testing_gthr(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  N        = argus.N;
@@ -160,8 +160,6 @@ hipsparseStatus_t testing_gthr(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_GTHR_HPP
