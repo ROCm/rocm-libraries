@@ -128,10 +128,12 @@ ADD ${PROJ}/script/redis-cli.conf /redis-cli.conf
 ADD ${PROJ}/script/sccache_wrapper.sh /sccache_wrapper.sh
 
 # rbuild is used to trigger build of requirements.txt, dev-requirements.txt.
-RUN if [ "$USE_FIN" = "ON" ]; then \
-    rbuild prepare -s fin -d $PREFIX -DGPU_ARCHS="${GPU_ARCHS}"; \
+# Composable Kernel install separated from rbuild 
+RUN sed -i '/composablekernel/d' /requirements.txt && \
+    if [ "$USE_FIN" = "ON" ]; then \
+        rbuild prepare -s fin -d $PREFIX -DGPU_ARCHS="${GPU_ARCHS}"; \
     else \
-    rbuild prepare -s develop -d $PREFIX -DGPU_ARCHS="${GPU_ARCHS}"; \
+        rbuild prepare -s develop -d $PREFIX -DGPU_ARCHS="${GPU_ARCHS}"; \
     fi && \
     ccache -s
 
