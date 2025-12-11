@@ -10,7 +10,6 @@
 #include <hipdnn_sdk/logging/CallbackTypes.h>
 #include <hipdnn_sdk/logging/Logger.hpp>
 #include <hipdnn_sdk/logging/LoggingUtils.hpp>
-#include <hipdnn_sdk/test_utilities/LoggingUtils.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <numeric>
@@ -85,6 +84,13 @@ inline TensorAttributes makeTensorAttributes(const std::string& name,
         strides);
 }
 
+inline TensorAttributes makeTensorAttributes(const std::string& name,
+                                             const std::vector<int64_t>& dims,
+                                             const std::vector<int64_t>& strides)
+{
+    return TensorAttributes().set_name(name).set_dim(dims).set_stride(strides);
+}
+
 inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
     createTensorFromAttribute(const TensorAttributes& attribute)
 {
@@ -92,6 +98,78 @@ inline std::unique_ptr<hipdnn_sdk::utilities::ITensor>
         toSdkType(attribute.get_data_type()), attribute.get_dim(), attribute.get_stride());
 }
 
+// Determines if batch normalization is in spatial mode based on scale tensor shape
+// Following MIOpen's DeriveBNTensorDescriptor convention:
+// Spatial mode: scale has shape [1, C, 1, 1, ...] - batch and spatial dims are 1
+// Per-activation mode: scale has shape [1, C, H, W, ...] - spatial dims match input
+// Note: Scale/bias tensors always use channel-first convention (C at index 1)
+inline bool isBatchNormSpatialMode(const std::shared_ptr<TensorAttributes>& scale)
+{
+    if(!scale || scale->get_dim().empty() || scale->get_dim().size() < 2)
+    {
+        return true; // Default to spatial if not fully initialized
+    }
+
+    const auto& scaleDims = scale->get_dim();
+
+    // Check if all spatial dimensions (indices 2+) are 1
+    for(size_t i = 2; i < scaleDims.size(); ++i)
+    {
+        if(scaleDims[i] != 1)
+        {
+            return false; // per-activation mode
+        }
+    }
+
+    return true; // spatial mode
+}
+
+// Validates batch normalization training spatial dimension constraints
+// Returns an Error indicating if the input tensor dimensions are valid for batch norm training
+inline Error
+    validateBatchNormTrainingSpatialDimensions(const std::shared_ptr<TensorAttributes>& x,
+                                               const std::shared_ptr<TensorAttributes>& scale,
+                                               const std::string& operation
+                                               = "Batch normalization training")
+{
+    if(!x || !scale || x->get_dim().size() < 2)
+    {
+        return {ErrorCode::OK, ""}; // Skip validation if dimensions not set yet
+    }
+
+    const auto& dims = x->get_dim();
+
+    if(isBatchNormSpatialMode(scale))
+    {
+        // Spatial mode: normalizes over N*spatial_dims per channel
+        // Requires N*H*W > 1 (or N*D*H*W > 1 for 3D)
+
+        // dims are always declared in NCHW & NCDHW order
+        int64_t spatialElements = dims[0]; // Start with N
+        for(size_t i = 2; i < dims.size(); ++i)
+        {
+            spatialElements *= dims[i]; // Multiply by spatial dimensions
+        }
+
+        if(spatialElements <= 1)
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    operation
+                        + " (spatial mode) requires more than 1 value per channel. "
+                          "N * spatial_dimensions must be > 1. Got N="
+                        + std::to_string(dims[0])};
+        }
+    }
+    else
+    {
+        // TODO: Add per-activation mode support (validate N > 1)
+        return {ErrorCode::INVALID_VALUE,
+                "Batch normalization per-activation mode is not currently supported. "
+                "Use spatial mode by ensuring scale/bias tensors have shape [1, C, 1, 1, ...]"};
+    }
+
+    return {ErrorCode::OK, ""};
+}
 }
 
 inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = hipdnnLoggingCallback_ext)

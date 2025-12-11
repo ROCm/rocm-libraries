@@ -13,12 +13,12 @@
 
 #include "TestPluginConstants.hpp"
 #include "plugin/PluginCore.hpp"
-#include <hipdnn_sdk/test_utilities/FileUtilities.hpp>
-#include <hipdnn_sdk/test_utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 using namespace hipdnn_backend;
-using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_test_sdk::utilities;
 
 namespace
 {
