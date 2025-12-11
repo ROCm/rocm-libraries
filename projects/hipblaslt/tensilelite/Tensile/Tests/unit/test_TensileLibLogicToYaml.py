@@ -28,6 +28,8 @@ import sys
 import os
 import tempfile
 import subprocess
+import filecmp
+from Tensile import TensileLibLogicToYaml
 
 
 parentDir = os.path.normpath(
@@ -373,6 +375,92 @@ VALID_LIBLOGIC_FILE_CONTENT = """
 - GridBased
 """
 
+VALID_CONFIG_FILE_CONTENT = """GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  SleepPercent: 0
+  KernelTime: true
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 1
+  DataInitTypeAlpha: 1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  DataInitTypeD: 12
+  PreciseKernelTime: 0
+  Device: 0
+  SkipSlowSolutionRatio: 0
+  KeepBuildTmp: false
+BenchmarkProblems:
+- - OperationType: GEMM
+    Activation: true
+    Batched: true
+    ComputeDataType: 0
+    DataType: 7
+    DataTypeA: 7
+    DataTypeB: 7
+    DataTypeE: 7
+    DestDataType: 7
+    HighPrecisionAccumulate: true
+    IndexAssignmentsA: [3, 0, 2]
+    IndexAssignmentsB: [3, 1, 2]
+    IndexAssignmentsLD: [4, 5, 6, 7]
+    NumIndicesC: 3
+    TransposeA: true
+    TransposeB: false
+    UseBias: 1
+    UseScaleAlphaVec: 1
+  - InitialSolutionParameters:
+    BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - ActivationFuncCall: [false]
+    - ClusterLocalRead: [0]
+    - DepthU: [128]
+    - ExpandPointerSwap: [0]
+    - GlobalReadVectorWidthA: [8]
+    - GlobalReadVectorWidthB: [8]
+    - GlobalSplitU: [0]
+    - LdsBlockSizePerPadA: [256]
+    - LdsBlockSizePerPadB: [256]
+    - LdsPadA: [16]
+    - LdsPadB: [16]
+    - LocalReadVectorWidth: [8]
+    - MaxLDS: [163840]
+    - MbskPrefetchMethod: [0]
+    - NonTemporalA: [2]
+    - NonTemporalB: [7]
+    - NonTemporalD: [4]
+    - PrefetchGlobalRead: [2]
+    - SourceSwap: [1]
+    - StaggerU: [8]
+    - StorePriorityOpt: [1]
+    - StoreSyncOpt: [4]
+    - StoreVectorWidth: [1]
+    - StreamK: [3]
+    - StreamKXCCMapping: [8]
+    - ThreadTile: [[1, 1]]
+    - TransposeLDS: [2]
+    - UseCustomMainLoopSchedule: [false]
+    - UseSgprForGRO: [1]
+    - VectorWidthA: [1]
+    - VectorWidthB: [1]
+    - WorkGroupMapping: [1]
+    - WorkGroupMappingXCC: [2]
+    - Groups:
+      - - MatrixInstruction: [16, 16, 32, 1, 1, 3, 3, 2, 2]
+          WorkGroup: [32, 8, 1]
+          MIArchVgpr: 0
+    BenchmarkJoinParameters:
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [768, 3072, 1, 3840, 768, 768, 3840, 3840]
+    - BiasTypeArgs: [0, 7]
+LibraryLogic:
+  ScheduleName: "gfx950"
+  DeviceNames: ["Device 75a0"]
+  ArchitectureName: "gfx950"
+"""
+
 
 @pytest.fixture
 def mockLibLogicFile():
@@ -382,7 +470,7 @@ def mockLibLogicFile():
         yield mockFile
 
 
-def findArch():
+def findAvailableArchs():
     availableArchs = []
     rocmpath = "/opt/rocm"
     if "ROCM_PATH" in os.environ:
@@ -399,27 +487,26 @@ def findArch():
     return availableArchs
 
 
-def getTensileClient(pytestconfig):
-    return pytestconfig.getoption("--prebuilt-client")
-
-
-arch = "gfx950"
-
-
-@pytest.mark.skipif(arch not in findArch(), reason="Requires gfx950 architecture")
-def test_TensileLibLogicToYaml(pytestconfig):
+@pytest.mark.skipif(
+    "gfx950" not in findAvailableArchs(), reason="Requires gfx950 architecture"
+)
+def test_TensileLibLogicToYaml():
     solutionIndex = 0
 
     with tempfile.NamedTemporaryFile("w+", delete=False) as f:
         f.write(VALID_LIBLOGIC_FILE_CONTENT)
         f.flush()
-        libName = f.name
-
-    tensileClient = getTensileClient(pytestconfig)
-    if not tensileClient:
-        pytest.skip("Provide a valid --prebuilt-client flag")
+        libLogicFileName = f.name
 
     with tempfile.TemporaryDirectory() as WORKSPACE:
-        assert TensileLibLogicToYamlRunner.main(
-            tensileClient, WORKSPACE, libName, solutionIndex
+        configYaml = os.path.join(WORKSPACE, "config.yaml")
+        TensileLibLogicToYaml.TensileLibLogicToYaml(
+            libLogicFileName, solutionIndex, configYaml, False
         )
+
+        with tempfile.NamedTemporaryFile("w+", delete=False) as f:
+            f.write(VALID_CONFIG_FILE_CONTENT)
+            f.flush()
+            configFileName = f.name
+
+        assert filecmp.cmp(configYaml, configFileName, shallow=False)

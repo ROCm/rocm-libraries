@@ -188,7 +188,7 @@ def formForkParams(currentIndexSolution: dict, skipMI: bool) -> dict:
             (i for i, d in enumerate(defaultBenchmarkCommonParameters) if forkKey in d),
             None,
         )
-        if index != None:
+        if index is not None:
             forkValue = [forkValue]  # convert to list
             if forkValue != defaultBenchmarkCommonParameters[index][forkKey]:
                 temp[forkKey] = FlowList(forkValue)
@@ -234,8 +234,7 @@ def formProblemSize(
 
     temp = {}
     # for origami exactLogic is not present so we need to create it
-
-    if exactLogic == None:
+    if exactLogic is None:
         tPrint(
             1, "Warning: For Origami liblogics, Exact logic needs to be set manually"
         )
