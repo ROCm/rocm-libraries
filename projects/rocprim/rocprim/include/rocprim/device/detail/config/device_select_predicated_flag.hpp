@@ -1474,7 +1474,7 @@ constexpr auto select_predicated_flag_config_picker() -> std::enable_if_t<
                   && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
-            {512, 18}
+            {256, 24}
         };
     }
     // Based on data_type = rocprim::half, flag_type = int8_t
@@ -1650,7 +1650,7 @@ constexpr auto select_predicated_flag_config_picker() -> std::enable_if_t<
                   && (sizeof(flag_type) > 1)))
     {
         return partition_config_params{
-            {512, 18}
+            {256, 18}
         };
     }
     // Based on data_type = short, flag_type = int8_t
