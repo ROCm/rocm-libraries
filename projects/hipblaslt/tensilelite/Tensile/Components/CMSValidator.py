@@ -470,6 +470,7 @@ class Timeline:
         self.vlcnt_shift = defaultdict(int)
         self.vlcnt_shift[NO_GLOBAL_LOAD_LOOP] = schedule_info.nglshift
         self.vlcnt_shift[NO_LOCAL_LOAD_LOOP] = schedule_info.nllshift
+        self.nll_zero_dscnt = schedule_info.nllZeroDscnt
 
         self.loops = [MAIN_LOOP_PREV, MAIN_LOOP, NO_GLOBAL_LOAD_LOOP, NO_LOCAL_LOAD_LOOP]
         # NOTE: num_vmfma + 1 to account for special idx=-1.
@@ -589,7 +590,10 @@ class Timeline:
                     if _instruction.vlcnt != -1:
                         vlcnt = max(0, _instruction.vlcnt - self.vlcnt_shift[loop])
                         _instruction.vlcnt = vlcnt
-                    
+                    if _instruction.dscnt != -1 and self.nll_zero_dscnt \
+                       and loop in [NO_LOCAL_LOAD_LOOP]:
+                        _instruction.dscnt = 0
+
                 # Other fields on other instructions are calculated later based on the issued_at index and LR.needed_by.
                 if isinstance(_instruction, LocalRead):
                     _instruction.needed_by += adjust

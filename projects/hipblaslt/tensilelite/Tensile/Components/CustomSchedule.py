@@ -101,6 +101,7 @@ def count_items(input_list: list[int], sv:int|None = None, ev:int|None = None):
             count += 1
     return count
 
+
 class ScheduleInfo:
     numCodePaths: int
     numMfma: int
@@ -114,6 +115,7 @@ class ScheduleInfo:
         syncCode,
         nglshift,
         nllshift,
+        nllZeroDscnt=False,
         mfmaReorder=[],
     ):
         self.numCodePaths = numCodePaths
@@ -122,6 +124,7 @@ class ScheduleInfo:
         self.syncCode = syncCode
         self.nglshift = nglshift  # vmcnt shift for noglobalload loop
         self.nllshift = nllshift  # vmcnt shift for nolocalload loop
+        self.nllZeroDscnt = nllZeroDscnt
         self.mfmaReorder = mfmaReorder
         self.__skipValidation__ = False
 
@@ -321,19 +324,24 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
                 needIfMacro = True
 
         def nllvmcntHandling(inst, shift0, shift1):
-            if isinstance(inst, SWaitCnt) and inst.vlcnt != -1:
+            if isinstance(inst, SWaitCnt) and (inst.vlcnt != -1 or (inst.dscnt != -1 and opt1.nllZeroDscnt)):
                 macro.add(ValueIf("\\useGR == 1 && \\usePLR == 1")) # in main loop
                 macro.addComment0("vmcnt used in main loop")
                 macro.add(inst)
                 macro.add(ValueElseIf("\\useGR == 0 && \\usePLR == 1")) # in NGL
-                macro.addComment0("vmcnt used in ngl, applying %u shift"%shift0)
                 instModified = deepcopy(inst)
-                instModified.vlcnt = max(0, instModified.vlcnt - shift0)
+                if inst.vlcnt != -1:
+                    macro.addComment0("vmcnt used in ngl, applying %u shift"%shift0)
+                    instModified.vlcnt = max(0, instModified.vlcnt - shift0)
                 macro.add(instModified)
                 macro.add(ValueElseIf("\\useGR == 0 && \\usePLR == 0")) # in NLL
-                macro.addComment0("vmcnt used in nll, applying %u shift"%shift1)
                 instModified = deepcopy(inst)
-                instModified.vlcnt = max(0, instModified.vlcnt - shift1)
+                if inst.vlcnt != -1:
+                    macro.addComment0("vmcnt used in nll, applying %u shift"%shift1)
+                    instModified.vlcnt = max(0, instModified.vlcnt - shift1)
+                if (inst.dscnt != -1 and opt1.nllZeroDscnt):
+                    macro.addComment0("setting dscnt = 0 for NLL")
+                    instModified.dscnt = 0
                 macro.add(instModified)
                 macro.add(ValueEndif())
             else:
@@ -1391,6 +1399,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     kernel["SwapGlobalReadOrder"] = False
     numMfma = 120
+    nllZeroDscnt = False
     syncs = SyncSchedule()
     gr_inc_step = 0
 
@@ -1443,7 +1452,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         lwsb   = [95]
 
         gr_inc_step = 1
-    
+
     elif isNT(kernel) and useLDSTr and TLDS == 0:
         lra0   = [0,1,3,5,7, 9,10,12,14,16, 18,19] # 12 loads
         lrb0   = [21,23,25,27,28, 30,32,34,36,37, 39,41,43,45,46, 48,50,52,54,55] # 20 loads
@@ -1452,7 +1461,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         syncs.add(-1, dscnt=len(lrb0)-2, comment="wait for all LRA1 and two items from LRB1 before starting the sub-iteration")
 
         i = 5 # next LRB1 is needed at index 6, so insert wait at 5
-        syncs.add(i, dscnt=count_items(lra0,ev=i), comment="wait for the rest of LRB1 to complete") 
+        syncs.add(i, dscnt=count_items(lra0,ev=i), comment="wait for the rest of LRB1 to complete")
         grinca = [0,1,2,3,4,5,6,7,8]
         grincb = [9,10,12,13,14,15,16,17,18]
 
@@ -1469,8 +1478,8 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         lra1   = [61,62,63,64,65, 66,67,69,71,73, 75,76] # 12 loads
 
         i = 65 # next LRB0 is needed at index 66, so insert wait at 65
-        syncs.add(i, dscnt=count_items(lra1,ev=i), barrier=True, 
-                  comment="wait for the rest of LRB0 to complete across all waves before GRB start") 
+        syncs.add(i, dscnt=count_items(lra1,ev=i), barrier=True,
+                  comment="wait for the rest of LRB0 to complete across all waves before GRB start")
         grb    = [66,70,75,79,84, 88,93,97,102,106] # one index for two instructions
         num_gr = len(gra) + len(grb)
 
@@ -1479,6 +1488,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         lrb1   = [78,80,82,84,86,88,90,92,94,96,98,100,102,104,106,108,110,112,114,116] # 20 loads
 
         gr_inc_step = 1
+        nllZeroDscnt = True
     else:
         return False, None
 
@@ -1501,10 +1511,8 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     }
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
-    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
-    
-    if isNT(kernel):
-        opt1.disableValidation()  # TODO: https://github.com/ROCm/rocm-libraries/issues/3287
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift, nllZeroDscnt)
+
     return True, opt1
 
 def _get_schedule_256x224x64_16bit(kernel, userLDSTr, TLDS):
@@ -1754,7 +1762,7 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
         ]
         numMfma = 120
         nglshift = nllshift = len(optSchedule["GRA"][0])/2 + len(optSchedule["GRB"][0])/2
-        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)    
+        opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     else:
         return False, None
     return True, opt1

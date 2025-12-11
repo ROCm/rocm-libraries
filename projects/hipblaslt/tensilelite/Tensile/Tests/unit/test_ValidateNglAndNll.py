@@ -59,7 +59,7 @@ class TestValidateNglAndNll(unittest.TestCase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
         return ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, nglshift, nllshift)
-    
+
     def test_simple_case_success(self):
         """
         Test the simple schedule using the exact amount of shift required to avoid race conditions.
@@ -68,7 +68,7 @@ class TestValidateNglAndNll(unittest.TestCase):
         schedule = self.make_simple_schedule(shift_value)
         status, message = verify_lrs_and_grs(schedule, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
-    
+
     def test_simple_case_failure(self):
         """
         Test the simple schedule using a shift value that is too small to avoid race conditions.
@@ -78,7 +78,7 @@ class TestValidateNglAndNll(unittest.TestCase):
         status, message = verify_lrs_and_grs(schedule, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed validation but passed. {message}"
         assert message == "Code path 0: GRB at index 2 is not valid. There are no guarantees on when it will be done."
-    
+
     def test_simple_case_success_too_high(self):
         """
         Test the simple schedule using a shift value larger than needed, ensure that we don't add in negative values.
@@ -87,7 +87,7 @@ class TestValidateNglAndNll(unittest.TestCase):
         schedule = self.make_simple_schedule(shift_value)
         status, message = verify_lrs_and_grs(schedule, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
-    
+
     def test_lr0_swait_depends_on_lr1(self):
         """
         Simple failure case where the SWaitCnt for LRB0 depends on the LRA1.
@@ -108,10 +108,10 @@ class TestValidateNglAndNll(unittest.TestCase):
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed validation but passed. {message}"
         assert message == "Code path 0: Loop NLL: LRB0 at index 0 is not valid. Needed before index 6 (of next iteration), but only guaranteed at index 7."
-    
-    def test_lr0_swait_depends_on_lr1_realistic(self):
+
+    def test_lr0_swait_depends_on_lr1_realistic(self, useZeroDscnt = False):
         """
-        A more realistic version of `test_lr0_swait_depends_on_lr1`. GRs are now present.
+        A more realistic version of `test_lr0_swait_depends_on_lr1`. GRs are now present. Optionally checks zero dscnt option for NLL
         """
         self.kernel = create_base_kernel()
         self.kernel["MIWaveTileA"] = 4
@@ -138,21 +138,30 @@ class TestValidateNglAndNll(unittest.TestCase):
         ]
         optSchedule = {
             "SYNC": [syncTable[::2]],
-            
+
             "LRA0": [[0]],
             "GRA":  [[2, 2]],
 
             "LRB0": [[3, 3, 3, 3]],
 
             "LRA1": [[22]],
-            
+
             # Irrelevant, but need to schedule for correctness
             "GRB":  [[28, 28]],
             "LRB1": [[30, 30, 30, 30]],
         }
         # We need to set nglshift and nllshift for the vlcnt adjustments
         num_gr = 2  # 2 GRs total (1 GRA + 1 GRB, but we only count the actual reads not the increments)
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncTable[1::2], num_gr, num_gr)
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncTable[1::2], num_gr, num_gr, useZeroDscnt)
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
-        assert not status, f"Schedule should have failed validation but passed. {message}"
-        assert message == "Code path 0: Loop NLL: LRB0 at index 3 is not valid. Needed before index 28 (of next iteration), but only guaranteed at index 31."
+        if useZeroDscnt:
+            assert status, f"Schedule should have passed validation but failed. {message}"
+        else:
+            assert not status, f"Schedule should have failed validation but passed. {message}"
+            assert message == "Code path 0: Loop NLL: LRB0 at index 3 is not valid. Needed before index 28 (of next iteration), but only guaranteed at index 31."
+
+    def test_lr0_swait_depends_on_lr1_realistic_zero_dscnt(self):
+        """
+        A more realistic version of `test_lr0_swait_depends_on_lr1`. GRs are now present also checks zero dscnt option for NLL
+        """
+        self.test_lr0_swait_depends_on_lr1_realistic(useZeroDscnt = True)
