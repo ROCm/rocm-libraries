@@ -90,15 +90,9 @@ void Run3dDriver(miopenDataType_t prec)
 
 } // namespace
 
-TEST_P(GPU_Pooling3d_FP32, FloatTest_pooling3d)
-{
-    Run3dDriver(GetParam());
-}
+TEST_P(GPU_Pooling3d_FP32, FloatTest_pooling3d) { Run3dDriver(GetParam()); }
 
-TEST_P(GPU_Pooling3d_FP16, HalfTest_pooling3d)
-{
-    Run3dDriver(GetParam());
-}
+TEST_P(GPU_Pooling3d_FP16, HalfTest_pooling3d) { Run3dDriver(GetParam()); }
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_FP32, testing::ValuesIn({miopenFloat}));
 
