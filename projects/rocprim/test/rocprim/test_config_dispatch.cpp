@@ -36,7 +36,14 @@ void write_target_arch([[maybe_unused]] target_arch host_arch, int* __restrict__
 #if !defined(ROCPRIM_TARGET_SPIRV)
     static constexpr auto arch = rocprim::detail::device_target_arch();
 
-    *result = arch == host_arch;
+    if constexpr(!ROCPRIM_IS_GENERIC())
+    {
+        *result = arch == host_arch;
+    }
+    else
+    {
+        *result = -2;
+    }
 #else
     *result = -1;
 #endif
@@ -94,8 +101,15 @@ TEST(RocprimConfigDispatchTests, HostMatchesDevice)
 
         if(result != -1)
         {
-            ASSERT_NE(host_arch, target_arch::invalid);
-            ASSERT_EQ(result, 1);
+            if(result != -2)
+            {
+                ASSERT_NE(host_arch, target_arch::invalid);
+                ASSERT_EQ(result, 1);
+            }
+            else
+            {
+                GTEST_SKIP() << "Generic build: result is null; skipping arch match assertion.";
+            }
         }
         else
         {

@@ -538,16 +538,21 @@ void trampoline_kernel(Kernel kernel)
     using Targets = typename Selector::targets;
     // If the arch does not exist in the Targets it should run the arch for the most_common_config.
     constexpr target device_arch_target = most_common_config<Targets>(target(device_target_arch()));
+    // If the build time arch from device_target_arch is a generic arch it is not the same as the runtime arch.
     if constexpr(Target::i == device_arch_target.i)
-#endif
     {
         kernel(ArchConfig{});
     }
-#if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
+    else if constexpr(ROCPRIM_IS_GENERIC())
+    {
+        kernel(ArchConfig{});
+    }
     else
     {
         __builtin_unreachable();
     }
+#else
+    kernel(ArchConfig{});
 #endif
 }
 
