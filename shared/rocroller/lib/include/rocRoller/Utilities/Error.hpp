@@ -66,8 +66,14 @@ namespace rocRoller
         using Error::Error;
     };
 
-    template <class T_Exception, typename... Ts>
-    [[noreturn]] void Throw(Ts const&..., auto errorLocation = std::source_location::current());
+    template <typename T_Exception, typename... Ts>
+    [[noreturn]] void Throw(std::source_location location,
+                            const char*          exceptionTag,
+                            const char*          conditionText,
+                            Ts const&... message);
+
+    template <typename T_Exception, typename... Ts>
+    [[noreturn]] void Throw(Ts const&... message);
 
     /**
      * Initiates a segfault.  This can be useful for debugging purposes.
@@ -93,23 +99,15 @@ namespace rocRoller
 
 #define ShowValue(var) concatenate("\t", #var, " = ", var, "\n")
 
-#define AssertError(T_Exception, condition, message...)                       \
-    do                                                                        \
-    {                                                                         \
-        std::source_location location      = std::source_location::current(); \
-        bool                 condition_val = static_cast<bool>(condition);    \
-        if(!(condition_val))                                                  \
-        {                                                                     \
-            Throw<T_Exception>(GetBaseFileName(location.file_name()),         \
-                               ":",                                           \
-                               location.line(),                               \
-                               ": ",                                          \
-                               #T_Exception,                                  \
-                               "(",                                           \
-                               #condition,                                    \
-                               ")\n",                                         \
-                               ##message);                                    \
-        }                                                                     \
+#define AssertError(T_Exception, condition, message...)                                \
+    do                                                                                 \
+    {                                                                                  \
+        bool condition_val = static_cast<bool>(condition);                             \
+        if(!(condition_val))                                                           \
+        {                                                                              \
+            Throw<T_Exception>(                                                        \
+                std::source_location::current(), #T_Exception, #condition, ##message); \
+        }                                                                              \
     } while(0)
 
 #define AssertFatal(...) AssertError(FatalError, __VA_ARGS__)

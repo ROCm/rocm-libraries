@@ -165,4 +165,33 @@ namespace rocRollerTest
 
         EXPECT_DEATH({ Throw<FatalError>("Error"); }, "");
     }
+
+    TEST_F(ErrorTest, ThrowIncludesSourceLocation)
+    {
+        Settings::getInstance()->set(Settings::BreakOnThrow, false);
+
+        const int   expectedLine = __LINE__ + 4;
+        const char* expectedFile = GetBaseFileName(__FILE__);
+
+        try
+        {
+            Throw<FatalError>("Throw location test");
+            FAIL() << "Expected FatalError to be thrown";
+        }
+        catch(const FatalError& e)
+        {
+            std::string output = e.what();
+
+            std::ostringstream prefix;
+            prefix << expectedFile << ":" << expectedLine << ":";
+
+            EXPECT_NE(output.find(prefix.str()), std::string::npos)
+                << "Expected location prefix '" << prefix.str() << "' in error message, but got:\n"
+                << output;
+        }
+        catch(...)
+        {
+            FAIL() << "Caught unexpected exception type, expected FatalError";
+        }
+    }
 }

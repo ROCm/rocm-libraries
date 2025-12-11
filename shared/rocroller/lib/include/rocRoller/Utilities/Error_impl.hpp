@@ -37,17 +37,52 @@ namespace rocRoller
     {
     }
 
+    // Overload used by AssertError/AssertFatal/AssertRecoverable
     template <typename T_Exception, typename... Ts>
-    [[noreturn]] void Throw(Ts const&... message, auto errorLocation)
+    [[noreturn]] void Throw(std::source_location location,
+                            const char*          exceptionTag,
+                            const char*          conditionText,
+                            Ts const&... message)
     {
-        auto errorMessage = concatenate(message..., " at line number ", errorLocation);
-        bool var          = Error::BreakOnThrow();
+        auto prefix = concatenate(GetBaseFileName(location.file_name()),
+                                  ":",
+                                  location.line(),
+                                  ": ",
+                                  exceptionTag,
+                                  "(",
+                                  conditionText,
+                                  ")\n");
+
+        auto fullMessage = concatenate(prefix, message...);
+
+        bool var = Error::BreakOnThrow();
         if(var)
         {
-            std::cerr << errorMessage << std::endl;
+            std::cerr << fullMessage << std::endl;
             Crash();
         }
 
-        throw T_Exception(errorMessage);
+        throw T_Exception(fullMessage);
+    }
+
+    // Overload for direct Throw<FatalError>("msg") etc.
+    template <typename T_Exception, typename... Ts>
+    [[noreturn]] void Throw(Ts const&... message)
+    {
+        auto location = std::source_location::current();
+
+        auto prefix
+            = concatenate(GetBaseFileName(location.file_name()), ":", location.line(), ": ");
+
+        auto fullMessage = concatenate(prefix, message...);
+
+        bool var = Error::BreakOnThrow();
+        if(var)
+        {
+            std::cerr << fullMessage << std::endl;
+            Crash();
+        }
+
+        throw T_Exception(fullMessage);
     }
 }
