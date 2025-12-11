@@ -96,13 +96,26 @@ function(findAndCheckTool OUTPUT_VAR TOOL_NAME EXPECTED_VERSION VERSION_REGEX ER
         ${OUTPUT_VAR} NAMES ${TOOL_NAME}-${EXPECTED_VERSION} ${TOOL_NAME} HINTS ${SEARCH_HINTS}
         PATHS ${LLVM_TOOL_PATHS}
     )
-    unset(SEARCH_HINTS)
 
     if(NOT ${OUTPUT_VAR})
-        message(
-            ${ERROR_LEVEL}
-            "${TOOL_NAME} not found in PATH or LLVM_TOOLS_SEARCH_PREFIX derived paths: ${SEARCH_HINTS}"
-        )
+        # Format SEARCH_HINTS with one path per line for output.
+        string(REPLACE ";" "\n  " FORMATTED_HINTS "${SEARCH_HINTS}")
+        if(ERROR_LEVEL STREQUAL "FATAL_ERROR")
+            message(
+                FATAL_ERROR
+                    "\n${TOOL_NAME} not found in PATH or LLVM_TOOLS_SEARCH_PREFIX derived paths:\n  ${FORMATTED_HINTS}\n"
+            )
+        else()
+            message(${ERROR_LEVEL}
+                    "${TOOL_NAME} not found in PATH or LLVM_TOOLS_SEARCH_PREFIX derived paths"
+            )
+            if(SEARCH_HINTS)
+                message(
+                    VERBOSE
+                    "Searched the following LLVM_TOOLS_SEARCH_PREFIX derived paths:\n  ${FORMATTED_HINTS}"
+                )
+            endif()
+        endif()
         return()
     endif()
 
