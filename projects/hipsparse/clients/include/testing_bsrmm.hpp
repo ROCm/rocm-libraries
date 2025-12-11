@@ -404,7 +404,7 @@ void testing_bsrmm_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_bsrmm(const Arguments& argus)
+void testing_bsrmm(const Arguments& argus)
 {
     int                  m         = argus.M;
     int                  n         = argus.N;
@@ -431,7 +431,7 @@ hipsparseStatus_t testing_bsrmm(const Arguments& argus)
     {
 #ifdef __HIP_PLATFORM_NVIDIA__
         // cusparse does not support m == 0 for csr2bsr
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
 #endif
     }
 
@@ -447,7 +447,7 @@ hipsparseStatus_t testing_bsrmm(const Arguments& argus)
     if(!generate_csr_matrix(filename, m, k, nnz, csr_row_ptr, csr_col_ind, csr_val, idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     // m and k can be modifed if we read in a matrix from a file
@@ -744,8 +744,6 @@ hipsparseStatus_t testing_bsrmm(const Arguments& argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_BSRMM_HPP
