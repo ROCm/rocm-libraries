@@ -30,7 +30,7 @@ Tests:
   category: pre_checkin
   function: csr2csr_compress_bad_arg
   precision: *single_double_precisions_complex_real
-
+  
 - name: csr2csr_compress
   category: quick
   function: csr2csr_compress
@@ -71,4 +71,3 @@ Tests:
              mc2depi,
              bibd_22_8,
              ASIC_320k]
-

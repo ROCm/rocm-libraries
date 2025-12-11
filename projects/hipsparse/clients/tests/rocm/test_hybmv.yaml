@@ -29,7 +29,7 @@ Tests:
   category: pre_checkin
   function: hybmv_bad_arg
   precision: *single_double_precisions_complex_real
-
+  
 - name: hybmv
   category: quick
   function: hybmv

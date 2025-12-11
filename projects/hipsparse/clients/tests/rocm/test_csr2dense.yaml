@@ -30,7 +30,7 @@ Tests:
   category: pre_checkin
   function: csr2dense_bad_arg
   precision: *single_double_precisions_complex_real
-
+  
 - name: csr2dense
   category: quick
   function: csr2dense
@@ -57,4 +57,3 @@ Tests:
   N: [4000]
   lda: [4000]
   baseA: [HIPSPARSE_INDEX_BASE_ONE]
-

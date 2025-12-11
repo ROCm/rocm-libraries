@@ -30,7 +30,7 @@ Tests:
   category: pre_checkin
   function: csrmm_bad_arg
   precision: *single_double_precisions_complex_real
-
+  
 - name: csrmm
   category: quick
   function: csrmm

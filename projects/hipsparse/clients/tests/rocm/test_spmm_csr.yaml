@@ -37,9 +37,9 @@ Tests:
   function: spmm_csr
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [50]
-  N: [5]
-  K: [84]
+  M: [102]
+  N: [56]
+  K: [83]
   alpha: [2.0]
   alphai: [0.0]
   beta: [1.0]
@@ -78,7 +78,7 @@ Tests:
              nos5]
 
 - name: spmm_csr
-  category: pre_checkin
+  category: nightly
   function: spmm_csr
   indextype: *i32
   precision: *double_only_precisions

@@ -29,7 +29,7 @@ Tests:
 - name: coosort_bad_arg
   category: pre_checkin
   function: coosort_bad_arg
-
+  
 - name: coosort
   category: quick
   function: coosort
@@ -38,7 +38,6 @@ Tests:
   permute: [0, 1]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-
 - name: coosort_file
   category: pre_checkin
   function: coosort
@@ -48,12 +47,22 @@ Tests:
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   filename: [mc2depi, 
-             scircuit, 
              nos1, 
              nos2, 
              nos3, 
              nos4, 
              nos5, 
              nos6, 
-             nos7, 
+             nos7]
+
+- name: coosort_file
+  category: nightly
+  function: coosort
+  M: 1
+  N: 1
+  permute: [0, 1]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [bmwcra_1, 
+             scircuit,
              shipsec1]

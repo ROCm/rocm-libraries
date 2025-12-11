@@ -30,7 +30,7 @@ Tests:
   category: pre_checkin
   function: csc2dense_bad_arg
   precision: *single_double_precisions_complex_real
-
+  
 - name: csc2dense
   category: quick
   function: csc2dense

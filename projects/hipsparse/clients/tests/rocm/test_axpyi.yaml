@@ -50,7 +50,7 @@ Tests:
   alpha: [0.3]
   alphai: [-0.2, 1.7]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-
+  
 - name: axpyi
   category: nightly
   function: axpyi
