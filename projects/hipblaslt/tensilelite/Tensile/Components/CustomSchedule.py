@@ -127,6 +127,7 @@ class ScheduleInfo:
         nllshift,
         nllZeroDscnt=False,
         mfmaReorder=[],
+        snopCode = [],
     ):
         self.numCodePaths = numCodePaths
         self.numMfma = numMfma
@@ -136,6 +137,7 @@ class ScheduleInfo:
         self.nllshift = nllshift  # vmcnt shift for nolocalload loop
         self.nllZeroDscnt = nllZeroDscnt
         self.mfmaReorder = mfmaReorder
+        self.snopCode = snopCode
         self.__skipValidation__ = False
 
     def disableValidation(self):
@@ -237,6 +239,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
         idMap["PackB%u"%uIdx] = PackCodeB[uIdx]
 
     idMap['SYNC'] = opt1.syncCode
+    idMap['SNOP'] = opt1.snopCode
 
     status, message = cmsv.isValid(opt1, {'kernel' : kernel, "idMap": idMap})
     # create the case str (TN, NT, TT, or NN)
