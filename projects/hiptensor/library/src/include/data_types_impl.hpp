@@ -27,6 +27,7 @@
 #pragma once
 
 #include "data_types.hpp"
+#include <iostream>
 
 namespace hiptensor
 {

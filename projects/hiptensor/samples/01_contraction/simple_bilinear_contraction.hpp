@@ -217,14 +217,14 @@ int bilinearContractionSample(void* alpha, void* beta)
                                                      modeC.data(),
                                                      typeCompute));
 
-#if 0 // TODO
     hiptensorDataType_t scalarType;
     CHECK_HIPTENSOR_ERROR(hiptensorOperationDescriptorGetAttribute(handle,
                 desc,
                 HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
                 (void*)&scalarType,
                 sizeof(scalarType)));
-#endif
+    assert(scalarType == *hiptensor::convertToHipTensorDataType(typeCompute));
+
     /***************************
      * Set the algorithm to use
      ***************************/

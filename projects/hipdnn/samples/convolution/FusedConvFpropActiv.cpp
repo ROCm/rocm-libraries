@@ -6,13 +6,13 @@
 #include <unordered_map>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceConvolution.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/pointwise/CpuReferencePointwise.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/pointwise/CpuReferencePointwise.hpp>
 
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
 #include <hipdnn_sdk/utilities/Workspace.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
 
@@ -46,7 +46,9 @@ void SampleRunner::operator()(const TensorLayout& layout)
     constexpr int64_t dilW = 1; // Width dilation
 
     auto graph = std::make_shared<graph::Graph>();
-    graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    graph->set_io_data_type(inputType)
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto xAttr = createTensor({n, c, h, w}, inputType, layout);
     auto wAttr = createTensor({k, c, r, s}, inputType, layout);
@@ -59,7 +61,6 @@ void SampleRunner::operator()(const TensorLayout& layout)
 
     auto yAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
     yAttr->set_output(false);
-    yAttr->set_data_type(inputType);
 
     graph::PointwiseAttributes pointwiseAttributes;
     pointwiseAttributes.set_mode(hipdnn_frontend::PointwiseMode::RELU_FWD);
@@ -121,10 +122,10 @@ void SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<InputType> yRefTensor(yAttr->get_dim(), layout);
         utilities::Tensor<InputType> pointwiseOutRefTensor(pointwiseOutAttr->get_dim(), layout);
 
-        test_utilities::CpuFpReferenceConvolution::fprop(
+        hipdnn_test_sdk::utilities::CpuFpReferenceConvolution::fprop(
             xTensor, wTensor, yRefTensor, {u, v}, {dilH, dilW}, {padH, padW});
 
-        test_utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
+        hipdnn_test_sdk::utilities::CpuReferencePointwiseImpl<InputType>::pointwiseCompute(
             hipdnn_sdk::data_objects::PointwiseMode::RELU_FWD,
             pointwiseOutRefTensor,
             yRefTensor,
@@ -132,10 +133,10 @@ void SampleRunner::operator()(const TensorLayout& layout)
             pointwiseAttributes.get_relu_upper_clip().value(),
             0.0f);
 
-        auto tolerance = test_utilities::conv::getToleranceFwd<InputType>();
+        auto tolerance = hipdnn_test_sdk::utilities::conv::getToleranceFwd<InputType>();
 
         auto outValidator
-            = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
+            = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
         bool outValid = outValidator.allClose(pointwiseOutRefTensor, pointwiseOutTensor);
 
