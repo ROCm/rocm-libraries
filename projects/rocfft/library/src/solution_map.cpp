@@ -583,7 +583,7 @@ bool solution_map::get_solution_map_version(const fs::path& sol_map_in_path)
 
     if(LOG_TRACE_ENABLED())
         (*LogSingleton::GetInstance().GetTraceOS())
-            << "reading solution map data from: " << sol_map_in_path.c_str() << std::endl;
+            << "reading solution map data from: " << sol_map_in_path << std::endl;
 
     if(fs::exists(sol_map_in_path))
     {
@@ -613,7 +613,7 @@ bool solution_map::read_solution_map_data(const fs::path& sol_map_in_path, bool 
 
     if(LOG_TRACE_ENABLED())
         (*LogSingleton::GetInstance().GetTraceOS())
-            << "reading solution map data from: " << sol_map_in_path.c_str() << std::endl;
+            << "reading solution map data from: " << sol_map_in_path << std::endl;
 
     // Read text from the file. If file not found, do nothing
     std::string solution_map_text = "";
