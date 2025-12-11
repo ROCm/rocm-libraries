@@ -57,7 +57,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
@@ -83,7 +83,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (GRA is not guaranteed before LRA1), but passed. {message}"
         assert message == "Code path 0: GRA at index 0 is not valid. There are no guarantees on when it will be done."
@@ -109,7 +109,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SWaitCnt(dscnt=-1, vlcnt=2, vscnt=-1, comment="Wait for GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (GRA is not guaranteed before LRA1), but passed. {message}"
         assert message == "Code path 0: GRA at index 0 is not valid. There is no SBarrier acting on it."
@@ -136,7 +136,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SWaitCnt(dscnt=-1, vlcnt=2, vscnt=-1, comment="Wait for GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (no barrier between GRA and LRA1), but passed. {message}"
         assert message == "Code path 0: GRA at index 0 is not valid. No SBarrier between SWait @ idx=3 and LR1 @ idx=6. Order must be GR -> SWait -> SBarrier -> LR1."
@@ -164,7 +164,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
 
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 4, 4)
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed (first LRA1 before last GRA), but passed. {message}"
         assert message == "Code path 0: GRA at index 0 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LR1 @ idx=3. Order must be GR -> SWait -> SBarrier -> LR1."
@@ -191,7 +191,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
@@ -217,7 +217,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 6, 6)
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
@@ -243,7 +243,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
@@ -268,7 +268,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
@@ -295,7 +295,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
@@ -322,7 +322,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
@@ -351,7 +351,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRAs (loading B)"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert status, f"Schedule should have passed validation but did not. {message}"
 
@@ -381,7 +381,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRBs (loading A)"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
         status, message = verify_lrs_and_grs(sched, {"kernel": self.kernel})
         assert not status, f"Schedule should have failed validation but passed. {message}"
         assert message == "Code path 0: GRB (Swapped, loading A) at index 3 is not valid. It is guaranteed by the SWait @ idx=4 which is after the first corresponding LR1 @ idx=2. Order must be GR -> SWait -> SBarrier -> LR1."
@@ -408,7 +408,7 @@ class TestVerifyGRsCompleteBeforeLr1s(unittest.TestCase):
             SBarrier(comment="For GRs"),
             SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LR1s"),
         ]
-        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
+        sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, 2, 2)
 
         with pytest.raises(AssertionError) as excinfo:
             verify_lrs_and_grs(sched, {"kernel": self.kernel})
