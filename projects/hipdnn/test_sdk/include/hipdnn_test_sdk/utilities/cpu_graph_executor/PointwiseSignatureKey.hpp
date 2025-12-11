@@ -133,8 +133,26 @@ struct PointwiseSignatureKey
         addUnaryPlanBuilders<hipdnn_sdk::data_objects::DataType::BFLOAT16,
                              hipdnn_sdk::data_objects::DataType::FLOAT,
                              hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
+        addUnaryPlanBuilders<hipdnn_sdk::data_objects::DataType::FLOAT,
+                             hipdnn_sdk::data_objects::DataType::FLOAT,
+                             hipdnn_sdk::data_objects::DataType::HALF>(map);
+        addUnaryPlanBuilders<hipdnn_sdk::data_objects::DataType::FLOAT,
+                             hipdnn_sdk::data_objects::DataType::FLOAT,
+                             hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
 
         // Add plan builders for implemented binary operations (input0/input1/compute/output)
+        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_sdk::data_objects::DataType::FLOAT>(map);
+        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::HALF,
+                              hipdnn_sdk::data_objects::DataType::HALF,
+                              hipdnn_sdk::data_objects::DataType::HALF,
+                              hipdnn_sdk::data_objects::DataType::HALF>(map);
+        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_sdk::data_objects::DataType::BFLOAT16>(map);
         addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::FLOAT,
                               hipdnn_sdk::data_objects::DataType::FLOAT,
                               hipdnn_sdk::data_objects::DataType::FLOAT,
@@ -162,6 +180,14 @@ struct PointwiseSignatureKey
         addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::FLOAT,
                               hipdnn_sdk::data_objects::DataType::HALF,
                               hipdnn_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_sdk::data_objects::DataType::FLOAT>(map);
+        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_sdk::data_objects::DataType::BFLOAT16,
+                              hipdnn_sdk::data_objects::DataType::FLOAT>(map);
+        addBinaryPlanBuilders<hipdnn_sdk::data_objects::DataType::FLOAT,
+                              hipdnn_sdk::data_objects::DataType::HALF,
+                              hipdnn_sdk::data_objects::DataType::HALF,
                               hipdnn_sdk::data_objects::DataType::FLOAT>(map);
 
         return map;
