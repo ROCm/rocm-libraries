@@ -958,7 +958,7 @@ void BuildHip(const std::string& name,
 
         auto rocm_path = env::value(ROCM_PATH);
 
-        if (!rocm_path.empty())
+        if(!rocm_path.empty())
         {
             opts.push_back("--rocm-path=" + rocm_path);
         }
