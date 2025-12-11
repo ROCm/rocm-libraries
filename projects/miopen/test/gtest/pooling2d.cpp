@@ -15,8 +15,7 @@ class GPU_Pooling2d_FP32 : public testing::TestWithParam<miopenDataType_t>
     void SetUp() override
     {
         prng::reset_seed();
-        const auto& handle = get_handle();
-        if(!IsTestSupportedForDevice(handle))
+        if(!IsTestSupportedByDevice(Gpu::All))
         {
             GTEST_SKIP();
         }
@@ -30,8 +29,7 @@ class GPU_Pooling2d_FP16 : public testing::TestWithParam<miopenDataType_t>
     void SetUp() override
     {
         prng::reset_seed();
-        const auto& handle = get_handle();
-        if(!IsTestSupportedForDevice(handle))
+        if(!IsTestSupportedByDevice(Gpu::All))
         {
             GTEST_SKIP();
         }
@@ -127,8 +125,6 @@ void Run2dDriver(miopenDataType_t prec)
     default: RunPooling2dTests<float>();
     }
 };
-
-bool IsTestSupportedForDevice(const miopen::Handle& handle) { return true; }
 
 } // namespace
 
