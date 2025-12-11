@@ -237,7 +237,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                    || !std::has_single_bit(static_cast<uint>(wgt.n))))
                 continue;
 
-            params.push_back({wgt, true});
+            params.push_back({wgt, true, false});
 
             if (prob.k < USE_WORKGROUP_MAPPING_K_SIZE)
             {
