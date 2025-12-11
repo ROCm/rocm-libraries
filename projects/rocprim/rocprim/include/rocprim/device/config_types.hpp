@@ -174,6 +174,7 @@ enum class target_arch : unsigned int
     gfx950  = 950,
     gfx1030 = 1030,
     gfx1100 = 1100,
+    gfx1101 = 1101,
     gfx1102 = 1102,
     gfx1152 = 1152,
     gfx1153 = 1153,
@@ -200,6 +201,7 @@ enum class gen
     cdna4,
     rdna2,
     rdna3,
+    rdna3_5,
     rdna4,
 };
 
@@ -234,10 +236,14 @@ constexpr gen gen_from_target_arch(target_arch i)
         case target_arch::gfx950: return gen::cdna4;
         case target_arch::gfx1030: return gen::rdna2;
         case target_arch::gfx1100:
+        case target_arch::gfx1101:
         case target_arch::gfx1102: return gen::rdna3;
+        case target_arch::gfx1152:
+        case target_arch::gfx1153: return gen::rdna3_5;
         case target_arch::gfx1200:
         case target_arch::gfx1201: return gen::rdna4;
-        default: return gen::unknown;
+        case target_arch::unknown:
+        case target_arch::invalid: return gen::unknown;
     }
 }
 
@@ -349,6 +355,7 @@ constexpr auto target_arch_descriptors = std::array{
     X(gfx950),
     X(gfx1030),
     X(gfx1100),
+    X(gfx1101),
     X(gfx1102),
     X(gfx1152),
     X(gfx1153),
@@ -395,6 +402,7 @@ constexpr arch::wavefront::target gen_wavefront_size(const gen gen)
         case gen::cdna4: return arch::wavefront::target::size64;
         case gen::rdna2:
         case gen::rdna3:
+        case gen::rdna3_5:
         case gen::rdna4: return arch::wavefront::target::size32;
     }
 }
@@ -688,6 +696,8 @@ constexpr gpu get_target_gpu_from_name(std::string_view name)
 {
     for(const auto& each : target_gpu_names)
     {
+        // Look for a substring in the marketing name, e.g.,
+        // "RX 7900" in "AMD Radeon RX 7900 XTX".
         if(name.find(std::get<0>(each)) != name.npos)
         {
             return std::get<1>(each);
