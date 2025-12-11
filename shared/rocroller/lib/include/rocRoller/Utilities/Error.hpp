@@ -67,7 +67,7 @@ namespace rocRoller
     };
 
     template <class T_Exception, typename... Ts>
-    [[noreturn]] void Throw(Ts const&...);
+    [[noreturn]] void Throw(Ts const&..., auto errorLocation = std::source_location::current());
 
     /**
      * Initiates a segfault.  This can be useful for debugging purposes.

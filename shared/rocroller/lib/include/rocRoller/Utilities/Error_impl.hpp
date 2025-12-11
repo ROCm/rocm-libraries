@@ -38,15 +38,16 @@ namespace rocRoller
     }
 
     template <typename T_Exception, typename... Ts>
-    [[noreturn]] void Throw(Ts const&... message)
+    [[noreturn]] void Throw(Ts const&... message, auto errorLocation)
     {
-        bool var = Error::BreakOnThrow();
+        auto errorMessage = concatenate(message..., " at line number ", errorLocation);
+        bool var          = Error::BreakOnThrow();
         if(var)
         {
-            std::cerr << concatenate(message...) << std::endl;
+            std::cerr << errorMessage << std::endl;
             Crash();
         }
 
-        throw T_Exception(message...);
+        throw T_Exception(errorMessage);
     }
 }
