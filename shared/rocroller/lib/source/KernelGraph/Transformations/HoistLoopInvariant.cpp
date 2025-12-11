@@ -183,15 +183,15 @@ namespace rocRoller::KernelGraph
         ControlFlowRWTracer tracer(graph);
         const auto          mapping = buildCoordinateLoopMapping(graph, tracer);
 
-        Log::info("HoistLoopInvariant: Coordinate to Loop Mapping:");
+        Log::debug("HoistLoopInvariant: Coordinate to Loop Mapping:");
         for(const auto& [coordinate, loopGroups] : mapping)
         {
-            Log::info("HoistLoopInvariant: Coordinate {}:", coordinate);
+            Log::debug("HoistLoopInvariant: Coordinate {}:", coordinate);
             for(const auto& [loop, controlNodes] : loopGroups)
             {
-                Log::info("HoistLoopInvariant:   Loop {}: Control Nodes {}",
-                          loop,
-                          fmt::join(controlNodes, ", "));
+                Log::debug("HoistLoopInvariant:   Loop {}: Control Nodes {}",
+                           loop,
+                           fmt::join(controlNodes, ", "));
             }
         }
 
@@ -257,7 +257,7 @@ namespace rocRoller::KernelGraph
 
                 if(allTagsLoopInvariant)
                 {
-                    Log::info("HoistLoopInvariant, {}, {}, loop, {}, {}",
+                    Log::info("HoistLoopInvariant, hoisting {}, {}, to, {}, {}",
                               controlNode,
                               Graph::variantToString(graph.control.getElement(controlNode)),
                               loopNode,
@@ -265,8 +265,6 @@ namespace rocRoller::KernelGraph
 
                     hoistNodeBeforeLoop(graph, controlNode, loopNode);
                     hoistedCount++;
-
-                    AssertFatal(false);
 
                     if(hoistedCount >= MAX_NODES_TO_HOIST)
                     {
