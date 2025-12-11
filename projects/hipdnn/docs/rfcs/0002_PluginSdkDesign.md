@@ -91,6 +91,8 @@ This architecture effectively separates the plugin interface from the engine imp
 
 ## 4. Proposed Design
 
+Here is a rough diagram of the proposed SDK architecture, representing a macro and a hierarchy of classes.
+
 ![Propsed Plugin SDK Architecture](../images/hipDNN_proposed_plugin_sdk_architecture.png)
 
 ### 4.1 Macro: `DECLARE_ENGINE_PLUGIN_DEFAULT_IMPL()`
@@ -107,8 +109,6 @@ This class encapsulates the lifecycle of an engine plugin from `hipdnnEnginePlug
 
 - **Lifecycle:** The default implementation will be an instance that is shared amongst plugin invocations and attached to the plugin handle via `shared_ptr`. A `weak_ptr` at global scope can be used to allow subsequent invocations of `hipdnnEnginePluginCreate()` to make an additional shared copy of the `EnginePluginContainer`. When the last `shared_ptr` of this class is destroyed (via destruction of the plugin handle), the `weak_ptr` ensures that the memory isn't held unnecessarily.
 
-- **Threading:** Since this class can be accessed by multiple threads, it should be stateless.
-
 - **Methods:** The class will basically act as a C++ bridge to the plugin API. Each API call will have a corresponding method on it in `EnginePluginContainer`. Many of them will be passed through to an underlying `EngineManager`.
     - One slight deviation, the execution context lifecycle functions and the execute method will be handled directly in this class without passing through to EngineManager, since the execution context has an IPlan attached to it, and the EnginePluginContainer therefore has enough information to manage it without intervention.
 
@@ -117,10 +117,6 @@ This class encapsulates the lifecycle of an engine plugin from `hipdnnEnginePlug
 
 ### 4.3 Class: `EngineManager`
 This represents the collection of all engines that can be found in the plugin. This class is a private member of the `EnginePluginContainer`, and shares a lifespan with it.
-
-- **Lifecycle:** Since this class by default is a private member of `EnginePluginContainer`, it will share the same lifecycle.
-
-- **Threading:** Since this class can be accessed by multiple threads, it should be stateless. The container of engines should not be mutable. Store any state in the handle.
 
 - **Methods:** The class will implement the following:
     - `static vector<int64_t> getAllEngineIds()` - Returns a list of all engines managed by this `EngineManager`
@@ -137,9 +133,11 @@ This represents an engine that can handle one or more graphs of operations.
 
 For example, a `BatchNormEngine` might be able to handle single-op and simple fused graphs that contain batchnorm operations.
 
-- **Lifecycle:** The engines typically have the same lifecycle as the `EngineManager` that contains them. The `engine_details` returned by `getDetails()` has explicit create/destroy entry-points in the plugin. The `execution_plan` created by `initializeExecutionContext()` also has explicit create/destroy entry-points in the plugin. Default implementations of the destruction will just call `delete` on the appropriate objects.
-
-- **Threading:** Since this class can be accessed by multiple threads, it should be stateless. The engines should not be mutable in a thread-unsafe fashion.  engine_config will be used for passing any user set state to the engine, which should make it easier to remain stateless.
+- **Lifecycle:** 
+    - The engines typically have the same lifecycle as the `EngineManager` that contains them. 
+    - The `engine_details` returned by `getDetails()` has explicit create/destroy entry-points in the plugin. 
+    - The `execution_plan` created by `initializeExecutionContext()` also has explicit create/destroy entry-points in the plugin.
+    - Since engine_detauls and the execution_plan are "owned" by the plugin consumer, the EnginePluginContainer is sufficient to manage their cleanup during their destroy api calls.
 
 - **Methods:** The class will implement the following:
     - `bool isApplicable(handle, graph)` - Returns true if this engine can handle the supplied graph. Typically it would do this by checking all its plan builders. It's important that (for now) only a single plan builder for a given graph + engine combo be applicable until we have some sort of mechanism for plan builder selection.
@@ -157,10 +155,6 @@ This represents a plan builder that can handle a specific graph of operations.
 
 In the above example, a single `PlanBuilder` can handle a single batchnorm forward operation, while another might be able to handle batchnorm + activation.
 
-- **Lifecycle:** The plan builders typically have the same lifecycle as the `Engine` that contains them.
-
-- **Threading:** Since this class can be accessed by multiple threads, it should be stateless. The plan builders should not be mutable. Store any state in the handle.
-
 - **Methods:** The class will implement the following:
     - `bool isApplicable(handle, graph)` - Returns true if this plan builder can handle this graph
     - `size_t getMaxWorkspaceSize(handle, graph, engine_config)` - Returns the maximum workspace required for the supplied graph
@@ -169,15 +163,27 @@ In the above example, a single `PlanBuilder` can handle a single batchnorm forwa
 ### 4.6 Class: `PlanBase` (implements `IPlan` interface)
 This class represents a ready-to-execute plan that can take device data and then execute the desired operations on it.
 
-- **Lifecycle:** The plans typically share a lifespan with the `execution_plan` they are attached to.  Since the plan is immutable after the point of creation, its lifecycle and execution can be safely handled by the EnginePluginContainer.
-
-- **Threading:** Since this class is tied to a single execution plan.  Once it's finalized it should be read-only and re-usable across threads.
+- **Lifecycle:** The plans typically share a lifespan with the `execution_context` they are attached to.  Since the plan is immutable after the point of creation, its lifecycle and execution can be safely handled by the EnginePluginContainer.
 
 - **Methods:** The class will implement the following:
     - `size_t getWorkspaceSize(handle)` - Returns the workspace required for this plan
     - `void execute(handle, buffers, workspace)` - Executes the plan as built by the `IPlanBuilder` that created it
 
 - **Members:** Since a plan gets attached to an execution context, it can have internal state.
+
+### 4.7 Threading and Lifecycle Notes
+
+Above of the plugin there are a few objects that have lifecycles managed by the backend / frontend.  They are usually opaque data tied to handles / descriptors which means that it's up to the plugin authors how they are used, but below are some examples of how they might be used in a plugin.
+
+- **Plugin Handle:** Created with explicit create / destroy methods, this is an opaque pointer to an object ultimately defined by the plugin author.  It can be used to tie information from invocations of a plugin to other resources.  In the MIOpen plugin, for example, the handle contains a reference to EnginePluginContainer and a pointer to the stream passed into setStream calls.  This handle is usually created when a plugin is loaded during initialization.
+
+- **Engine Details:** Created when the framework requests engine details from the plugin.  The lifespan is controlled by the consuming application.
+
+- **Execution Context:** Created when the framework creates an execution plan.  A typically use for this object is to attach an IPlan for it.  An execution plan represents a "finalized" plan, and is meant to be immutable and can be re-used with different device buffers.  The lifespan is controlled by the consuming application.
+
+For threading purposes, be mindful that any object might be accessed from multiple threads.  For example, an execution context might be created and then passed to multiple threads with their own device buffers.  Just be mindful when adding members to classes like Engines, EngineManagers, EnginePluginContainers, etc. that you'll have to potentially protect any mutable state from unsafe thread access.  The easiest way to manage this is to keep these objects as stateless as possible, but that's a guideline, not a prohibition.
+
+Future considerations will be adding the ability to have thread-safe containers and objects that would allow a plugin creator to easily implement thread-safe caches and other utilities.
 
 ### 4.7 Error Handling
 Error handling will make use of C++ exceptions primarily, with the understanding that they will be transitioned into error codes at the C API interface.
