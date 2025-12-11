@@ -30,7 +30,11 @@ endfunction()
 # find_program(PATHS) which is set to LLVM_TOOL_PATHS in this file. All folders are searched first
 # for the first program name, and this then repeats for each name provided in find_program(NAMES).
 if(NOT WIN32)
-    set(LLVM_TOOL_PATHS /usr/bin)
+    # Common search paths
+    set(LLVM_TOOL_PATHS /usr/bin /usr/local/bin /opt/rocm/llvm/bin)
+    if(DEFINED ROCKM_PATH)
+        list(APPEND LLVM_TOOLS_PATHS ${ROCM_PATH}/llvm/bin)
+    endif()
 endif()
 
 # Set up LLVM_TOOL_HINTS if LLVM_TOOLS_SEARCH_PREFIX is defined
@@ -80,7 +84,7 @@ endfunction()
 #   TOOL_NAME - The single name of the single tool to search for (e.g., "clang-format")
 #   EXPECTED_VERSION - Expected version to search for (typically assumed to be the tool's major version number)
 #   VERSION_REGEX - Regex to extract the relevant portion to match EXPECTED_VERSION frmo the tool's --version output
-#   ERROR_LEVEL - "FATAL_ERROR" or "WARNING" for the not found message
+#   ERROR_LEVEL - FATAL_ERROR, WARNING, STATUS, or VERBOSE for the not found message
 # ~~~
 function(findAndCheckTool OUTPUT_VAR TOOL_NAME EXPECTED_VERSION VERSION_REGEX ERROR_LEVEL)
     # Build version-specific paths if LLVM_TOOL_HINTS is set
@@ -120,10 +124,14 @@ function(findAndCheckTool OUTPUT_VAR TOOL_NAME EXPECTED_VERSION VERSION_REGEX ER
         return()
     endif()
 
-    checktoolversion(
-        ${${OUTPUT_VAR}} "${TOOL_NAME}" ${EXPECTED_VERSION} "${VERSION_REGEX}"
-        "Found ${TOOL_NAME} version {VERSION} at {PATH}"
-    )
+    if(VERSION_REGEX STREQUAL "SKIP_VERSION_CHECK")
+        message(STATUS "Found ${TOOL_NAME} at ${${OUTPUT_VAR}}")
+    else()
+        checktoolversion(
+            ${${OUTPUT_VAR}} "${TOOL_NAME}" ${EXPECTED_VERSION} "${VERSION_REGEX}"
+            "Found ${TOOL_NAME} version {VERSION} at {PATH}"
+        )
+    endif()
 
     # Export to parent scope
     set(${OUTPUT_VAR} ${${OUTPUT_VAR}} PARENT_SCOPE)
@@ -149,6 +157,15 @@ function(findAndCheckClangTidy)
 
     # Export to parent scope
     set(CLANG_TIDY_EXE ${CLANG_TIDY_EXE} PARENT_SCOPE)
+
+    findandchecktool(
+        RUN_CLANG_TIDY_EXE "run-clang-tidy" ${EXPECTED_CLANG_TIDY_VERSION} "SKIP_VERSION_CHECK"
+        VERBOSE
+    )
+
+    if(RUN_CLANG_TIDY_EXE)
+        set(RUN_CLANG_TIDY_EXE ${RUN_CLANG_TIDY_EXE} PARENT_SCOPE)
+    endif()
 endfunction()
 
 # Finds and checks LLVM tools

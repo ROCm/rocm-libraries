@@ -205,6 +205,9 @@ To do a standalone build of hipDNN, you will need to set up a number of pre-requ
 > [!NOTE]
 > The standalone build of hipDNN requires a subset of the full environment required for building TheRock. Refer to [TheRock Windows Support](https://github.com/ROCm/TheRock/blob/main/docs/development/windows_support.md) for a full Windows 11 build environment setup for TheRock (_but do not perform a build of TheRock_ as this is generally not necessary for building hipDNN standalone).
 
+#### Automated Setup Script (Optional)
+An automated PowerShell script is available to perform the steps outlined below. This script is provided as a convenience and may not work in all environments. Review the script before running it to ensure it meets your needs: [windows_build_setup.ps1](../scripts/windows/windows_build_setup.ps1).
+
 #### 1. Install Chocolatey Package Manager
 
 Though dependencies can be installed _and configured_ manually, using [Chocolatey](https://community.chocolatey.org/) will streamline the environment setup. The Chocolatey client, `choco` is used in the instructions below.
