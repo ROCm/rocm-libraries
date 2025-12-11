@@ -188,7 +188,7 @@ void testing_spmm_coo_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_spmm_coo(Arguments argus)
+void testing_spmm_coo(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     I                    m        = argus.M;
@@ -207,7 +207,7 @@ hipsparseStatus_t testing_spmm_coo(Arguments argus)
 #if(defined(CUDART_VERSION))
     if(orderB != orderC || orderB != HIPSPARSE_ORDER_COL)
     {
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 #endif
 
@@ -238,7 +238,7 @@ hipsparseStatus_t testing_spmm_coo(Arguments argus)
                             idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     std::vector<I> hrow_ind(nnz_A);
@@ -466,8 +466,6 @@ hipsparseStatus_t testing_spmm_coo(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPMM_COO_HPP

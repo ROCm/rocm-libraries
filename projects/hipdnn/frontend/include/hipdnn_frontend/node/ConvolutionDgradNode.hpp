@@ -202,6 +202,37 @@ public:
                                 0,
                                 ErrorCode::INVALID_VALUE,
                                 "ConvolutionDgradNode: Post-padding must be non-negative");
+
+            if(!dxDims.empty())
+            {
+                auto outputSize = dyDims[i + 2];
+                auto kernelSize = wDims[i + 2];
+                auto inputSize = dxDims[i + 2];
+
+                auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
+                auto numerator = inputSize + prePad + postPad - dilatedKernelSize;
+
+                HIPDNN_RETURN_IF_LT(numerator,
+                                    0,
+                                    ErrorCode::INVALID_VALUE,
+                                    "ConvolutionDgradNode: Input spatial dimension at index "
+                                        + std::to_string(i) + " (" + std::to_string(inputSize)
+                                        + ") is too small for the kernel size ("
+                                        + std::to_string(kernelSize) + ") and dilation ("
+                                        + std::to_string(dilationVal) + ")");
+
+                int64_t expectedOutputSize = (numerator / strideVal) + 1;
+
+                HIPDNN_RETURN_IF_NE(
+                    outputSize,
+                    expectedOutputSize,
+                    ErrorCode::INVALID_VALUE,
+                    "ConvolutionDgradNode: dy tensor spatial dimension at index "
+                        + std::to_string(i) + " (" + std::to_string(outputSize)
+                        + ") does not match expected dimension ("
+                        + std::to_string(expectedOutputSize)
+                        + ") given dx dimensions, kernel size, padding, stride, and dilation");
+            }
         }
 
         return {};
@@ -294,6 +325,14 @@ public:
                 auto dilatedKernelSize = (dilationVal * (kernelSize - 1)) + 1;
 
                 dxDims[i] = strideVal * (dySize - 1) + dilatedKernelSize - prePad - postPad;
+
+                HIPDNN_RETURN_IF_LE(
+                    dxDims[i],
+                    0,
+                    ErrorCode::INVALID_VALUE,
+                    "ConvolutionDgradNode: Inferred input spatial dimension at index "
+                        + std::to_string(i) + " (" + std::to_string(dxDims[i])
+                        + ") is non-positive. Check padding, stride, and dilation parameters.");
             }
 
             dx->set_dim(dxDims);

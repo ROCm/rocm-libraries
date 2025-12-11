@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "../tests/common/ActivationCommon.hpp"
 #include "../tests/common/ConvolutionCommon.hpp"
@@ -10,7 +10,7 @@
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_sdk::utilities;
-using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_test_sdk::utilities;
 using namespace miopen_legacy_plugin::test_utilities;
 
 namespace
@@ -31,43 +31,28 @@ protected:
         const auto& [convTestCase, doBias, activTestCase] = this->GetParam();
 
         graph::Graph graphObj;
-
         graphObj.set_name(doBias ? "ConvFwdBiasActivTest" : "ConvFwdActivTest");
-        graphObj.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
-
-        int64_t uid = 1;
 
         auto dataType = getDataTypeEnumFromType<DataType>();
+        graphObj.set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+            .set_io_data_type(dataType);
 
-        auto xAttr
-            = graph::makeTensorAttributes("x",
-                                          dataType,
-                                          convTestCase.xDims,
-                                          generateStrides(convTestCase.xDims, layout.strideOrder));
-        xAttr.set_uid(uid++);
+        auto xAttr = graph::makeTensorAttributes(
+            "x", convTestCase.xDims, generateStrides(convTestCase.xDims, layout.strideOrder));
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
-        auto wAttr
-            = graph::makeTensorAttributes("w",
-                                          dataType,
-                                          convTestCase.wDims,
-                                          generateStrides(convTestCase.wDims, layout.strideOrder));
-        wAttr.set_uid(uid++);
+        auto wAttr = graph::makeTensorAttributes(
+            "w", convTestCase.wDims, generateStrides(convTestCase.wDims, layout.strideOrder));
         auto wTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(wAttr));
 
         graph::ConvFpropAttributes convAttrs;
-        convAttrs.set_name("convolution_forward");
         convAttrs.set_pre_padding(convTestCase.convPrePadding);
         convAttrs.set_post_padding(convTestCase.convPostPadding);
         convAttrs.set_stride(convTestCase.convStride);
         convAttrs.set_dilation(convTestCase.convDilation);
 
         auto yConvTensorAttr = graphObj.conv_fprop(xTensorAttr, wTensorAttr, convAttrs);
-        yConvTensorAttr->set_name("y_conv");
-        yConvTensorAttr->set_data_type(dataType);
-        yConvTensorAttr->set_dim(convTestCase.yDims);
-        yConvTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
-        yConvTensorAttr->set_uid(uid++);
 
         std::shared_ptr<graph::TensorAttributes> yBiasTensorAttr;
         if(doBias)
@@ -75,24 +60,17 @@ protected:
             const auto biasDims = getDerivedShape(convTestCase.yDims);
 
             auto biasAttr = graph::makeTensorAttributes(
-                "bias", dataType, biasDims, generateStrides(biasDims, layout.strideOrder));
-            biasAttr.set_uid(uid++);
+                "bias", biasDims, generateStrides(biasDims, layout.strideOrder));
             auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
             graph::PointwiseAttributes biasAttrs;
-            biasAttrs.set_name("bias");
             biasAttrs.set_mode(hipdnn_frontend::PointwiseMode::ADD);
+            biasAttrs.set_compute_data_type(dataType);
 
             yBiasTensorAttr = graphObj.pointwise(yConvTensorAttr, biasTensorAttr, biasAttrs);
-            yBiasTensorAttr->set_name("y_bias");
-            yBiasTensorAttr->set_data_type(dataType);
-            yBiasTensorAttr->set_dim(convTestCase.yDims);
-            yBiasTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
-            yBiasTensorAttr->set_uid(uid++);
         }
 
         graph::PointwiseAttributes activAttrs;
-        activAttrs.set_name("activation_forward");
         activAttrs.set_mode(static_cast<hipdnn_frontend::PointwiseMode>(activTestCase.mode));
         if(activTestCase.reluLowerClip.has_value())
         {
@@ -121,12 +99,7 @@ protected:
 
         auto yTensorAttr
             = graphObj.pointwise(doBias ? yBiasTensorAttr : yConvTensorAttr, activAttrs);
-        yTensorAttr->set_name("y");
-        yTensorAttr->set_data_type(dataType);
-        yTensorAttr->set_dim(convTestCase.yDims);
-        yTensorAttr->set_stride(generateStrides(convTestCase.yDims, layout.strideOrder));
         yTensorAttr->set_output(true);
-        yTensorAttr->set_uid(uid);
 
         this->registerValidator(yTensorAttr, tolerance);
 
