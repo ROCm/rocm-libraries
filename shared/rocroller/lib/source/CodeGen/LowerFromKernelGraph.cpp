@@ -728,8 +728,7 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, ComputeIndex const& ci)
             {
-                co_yield m_loadStoreTileGenerator.genComputeIndex(
-                    tag, ci, m_graph->buildTransformer(tag));
+                co_yield Instruction::Comment(concatenate("ComputeIndex ", tag));
             }
 
             Generator<Instruction> operator()(int tag, SetCoordinate const& setCoordinate)
