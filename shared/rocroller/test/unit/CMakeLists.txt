@@ -51,7 +51,6 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/ArgumentValueTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArithmeticTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AssemblerTest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/BufferDescriptorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CommandTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CommonSubexpressionElimTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ComponentTest.cpp"
@@ -123,4 +122,14 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/VectorAddBenchmark.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WaitCountObserverTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WaitCountTest.cpp"
+
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContextFixture.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMF8F6F4.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMTestBase.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GenericContextFixture.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GPUContextFixture.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MatrixMultiplyTestBase.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SimpleFixture.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SourceMatcher.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Utilities.hpp"
 )

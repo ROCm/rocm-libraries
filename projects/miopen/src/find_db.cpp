@@ -33,6 +33,8 @@
 #include <miopen_data.hpp>
 #endif
 #include <miopen/filesystem.hpp>
+
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -44,10 +46,10 @@ namespace debug {
 MIOPEN_EXPORT bool testing_find_db_enabled = true;
 
 /// \todo Remove when #1723 is resolved.
-boost::optional<fs::path>& testing_find_db_path_override()
+std::optional<fs::path>& testing_find_db_path_override()
 {
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-    static boost::optional<fs::path> data = boost::none;
+    static std::optional<fs::path> data{std::nullopt};
     return data;
 }
 
@@ -233,22 +235,29 @@ bool FindDbRecord_t<TDb>::Validate(const Handle& handle, const NetworkConfig& co
     auto unbuilt = false;
     auto any     = false;
 
-    for(const auto& pair : content->As<FindDbData>())
+    if(content.has_value())
     {
-        if(in_sync)
+        for(const auto& pair : content->As<FindDbData>())
         {
-            if(!handle.GetInvoker(config, {{pair.first}}))
+            if(in_sync)
             {
-                unbuilt = true;
-                // This is not an logged as error because no error was detected.
-                // Find wasn't executed yet and invokers were not prepared.
-                LogFindDbItem(pair);
-                break;
-            }
+                if(!handle.GetInvoker(config, {{pair.first}}))
+                {
+                    unbuilt = true;
+                    // This is not an logged as error because no error was detected.
+                    // Find wasn't executed yet and invokers were not prepared.
+                    LogFindDbItem(pair);
+                    break;
+                }
 
-            any = true;
-            continue;
+                any = true;
+                continue;
+            }
         }
+    }
+    else
+    {
+        MIOPEN_LOG_E("Error: no content.");
     }
 
     return !any || unbuilt;
@@ -257,20 +266,34 @@ bool FindDbRecord_t<TDb>::Validate(const Handle& handle, const NetworkConfig& co
 template <class TDb>
 void FindDbRecord_t<TDb>::CopyTo(std::vector<Solution>& to) const
 {
-    const auto range = content->As<FindDbData>();
-    std::transform(range.begin(), range.end(), std::back_inserter(to), [](const auto& pair) {
-        return Solution{solver::Id{pair.first}, pair.second.time, pair.second.workspace};
-    });
+    if(content.has_value())
+    {
+        const auto range = content->As<FindDbData>();
+        std::transform(range.begin(), range.end(), std::back_inserter(to), [](const auto& pair) {
+            return Solution{solver::Id{pair.first}, pair.second.time, pair.second.workspace};
+        });
+    }
+    else
+    {
+        MIOPEN_LOG_E("Error: no content.");
+    }
 }
 
 template <class TDb>
 void FindDbRecord_t<TDb>::LogFindDbItem(const std::pair<std::string, FindDbData>& item) const
 {
-    MIOPEN_LOG_I2("Kernel cache entry not found for solver: "
-                  << item.first << " at network config: " << content->GetKey());
+    if(content.has_value())
+    {
+        MIOPEN_LOG_I2("Kernel cache entry not found for solver: "
+                      << item.first << " at network config: " << content->GetKey());
 
-    for(const auto& pair2 : content->As<FindDbData>())
-        MIOPEN_LOG_I2("Find-db record content: " << pair2.first << ':' << pair2.second);
+        for(const auto& pair2 : content->As<FindDbData>())
+            MIOPEN_LOG_I2("Find-db record content: " << pair2.first << ':' << pair2.second);
+    }
+    else
+    {
+        MIOPEN_LOG_E("Error: no content.");
+    }
 }
 
 template class FindDbRecord_t<FindDb>;

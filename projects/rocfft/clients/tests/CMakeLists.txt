@@ -70,7 +70,6 @@ set( rocfft-test_source
   gtest_main.cpp
   rocfft_accuracy_test.cpp
   bitwise_repro/bitwise_repro_test.cpp
-  accuracy_test.cpp
   accuracy_test_1D.cpp	
   accuracy_test_2D.cpp
   accuracy_test_3D.cpp
@@ -89,6 +88,8 @@ set( rocfft-test_source
   validate_length_stride.cpp
   random.cpp
   ../../shared/array_validator.cpp
+  ../../shared/test_callbacks.cpp
+  ../../shared/data_gen_device.cpp
   )
 
 add_executable( rocfft-test ${rocfft-test_source} ${rocfft-test_includes} )
@@ -409,7 +410,7 @@ endif()
 if( ROCFFT_MPI_ENABLE )
   # normal and dynamic-loading MPI worker processes
   foreach(worker rocfft_mpi_worker dyna_rocfft_mpi_worker)
-    add_executable( ${worker} rocfft_mpi_worker.cpp )
+    add_executable( ${worker} rocfft_mpi_worker.cpp ../../shared/test_callbacks.cpp )
 
     if( BUILD_CLIENTS_TESTS_OPENMP )
       set_target_properties( ${worker} PROPERTIES
