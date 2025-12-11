@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -304,15 +304,15 @@ struct StockhamKernelRC : public StockhamKernel
         };
 
         StatementList xy_z_offset;
-        xy_z_offset += If{transpose_type == "DIAGONAL", xy_z_diagonal()};
-        xy_z_offset += Else{xy_z_regular()};
+        xy_z_offset += If{transpose_type == "DIAGONAL", xy_z_diagonal().statements};
+        xy_z_offset += Else{xy_z_regular().statements};
 
         StatementList z_xy_offset;
-        z_xy_offset += If{transpose_type == "DIAGONAL", z_xy_diagonal()};
-        z_xy_offset += Else{z_xy_regular()};
+        z_xy_offset += If{transpose_type == "DIAGONAL", z_xy_diagonal().statements};
+        z_xy_offset += Else{z_xy_regular().statements};
 
-        offset_3d += If{sbrc_type == "SBRC_3D_FFT_TRANS_XY_Z", xy_z_offset};
-        offset_3d += Else{z_xy_offset};
+        offset_3d += If{sbrc_type == "SBRC_3D_FFT_TRANS_XY_Z", xy_z_offset.statements};
+        offset_3d += Else{z_xy_offset.statements};
 
         // Offset in/out/lds
         offset_3d += Assign{offset_in,
@@ -322,8 +322,8 @@ struct StockhamKernelRC : public StockhamKernel
                             plane_id * stride_plane_out
                                 + tile_index_in_plane * transforms_per_block * stride0_out};
 
-        stmts += If{sbrc_type == "SBRC_2D", offset_2d};
-        stmts += Else{offset_3d};
+        stmts += If{sbrc_type == "SBRC_2D", offset_2d.statements};
+        stmts += Else{offset_3d.statements};
 
         stmts += LineBreak{};
         stmts += Assign{batch, block_id / num_of_tiles_in_batch};
@@ -536,8 +536,8 @@ struct StockhamKernelRC : public StockhamKernel
                 }
             }
 
-            stmts += If{Or{transpose_type != "TILE_UNALIGNED", Not{edge}}, regular_load};
-            stmts += Else{edge_load};
+            stmts += If{Or{transpose_type != "TILE_UNALIGNED", Not{edge}}, regular_load.statements};
+            stmts += Else{edge_load.statements};
         }
         else
         {
@@ -627,7 +627,8 @@ struct StockhamKernelRC : public StockhamKernel
                 thread_id < transforms_per_block,
                 {StoreGlobal{buf, offset + offset_tile_wbuf(i), lds_complex[offset_tile_rlds(i)]}}};
             non_edge_stmts += regular_store;
-            non_edge_stmts += If{sbrc_type == "SBRC_3D_FFT_ERC_TRANS_Z_XY", stmts_erc_post_no_edge};
+            non_edge_stmts
+                += If{sbrc_type == "SBRC_3D_FFT_ERC_TRANS_Z_XY", stmts_erc_post_no_edge.statements};
 
             StatementList stmts_erc_post_edge;
             stmts_erc_post_edge
@@ -637,7 +638,8 @@ struct StockhamKernelRC : public StockhamKernel
                                                    offset + offset_tile_wbuf(i),
                                                    lds_complex[tid_hor * stride_lds + length]}}};
             edge_stmts += regular_store;
-            edge_stmts += If{sbrc_type == "SBRC_3D_FFT_ERC_TRANS_Z_XY", stmts_erc_post_edge};
+            edge_stmts
+                += If{sbrc_type == "SBRC_3D_FFT_ERC_TRANS_Z_XY", stmts_erc_post_edge.statements};
         }
         else
         {
@@ -658,8 +660,8 @@ struct StockhamKernelRC : public StockhamKernel
             edge_stmts = non_edge_stmts;
         }
 
-        stmts += If{Or{transpose_type != "TILE_UNALIGNED", Not{edge}}, non_edge_stmts};
-        stmts += Else{{If{pred, edge_stmts}}};
+        stmts += If{Or{transpose_type != "TILE_UNALIGNED", Not{edge}}, non_edge_stmts.statements};
+        stmts += Else{{If{pred, edge_stmts.statements}}};
 
         return stmts;
     }
@@ -718,7 +720,7 @@ struct StockhamKernelRC : public StockhamKernel
                            null,
                            null}};
         }
-        return {If{sbrc_type == "SBRC_3D_FFT_ERC_TRANS_Z_XY", stmts}};
+        return {If{sbrc_type == "SBRC_3D_FFT_ERC_TRANS_Z_XY", stmts.statements}};
     }
 
     StatementList real_trans_pre_post() override

@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -850,10 +850,10 @@ TEST(rocfft_UnitTest, rtc_test_harness)
         for(i = 0; i < files.size(); ++i)
         {
 #ifdef WIN32
-            const std::string command = "amdclang++ -x hip -c -std=c++17 -o NUL " + files[i].first;
+            const std::string command = "amdclang++ -x hip -c -std=c++20 -o NUL " + files[i].first;
 #else
             const std::string command
-                = "amdclang++ -x hip -c -std=c++17 -o /dev/null " + files[i].first;
+                = "amdclang++ -x hip -c -std=c++20 -o /dev/null " + files[i].first;
 #endif
             files[i].second = std::system(command.c_str());
         }

@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -96,6 +96,7 @@ TEST_P(accuracy_test, vs_fftw)
     {
     case fft_params::fft_mp_lib_none:
     {
+#ifdef _CUFFT_BACKEND
         // skipping symptomatic case(s), unless forcefully/knowingly executing normally-disabled
         // test tokens (e.g., by using --gtest_also_run_disabled_tests)
         const char* test_suite_name
@@ -109,6 +110,7 @@ TEST_P(accuracy_test, vs_fftw)
                    "CLI arguments '--gtest_also_run_disabled_tests' to force the test execution "
                    "(via another test suite).";
         }
+#endif
         // only do round trip for forward FFTs
         const bool do_round_trip = params.is_forward();
 

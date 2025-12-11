@@ -188,7 +188,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                               ThreadGuardMode::GUARD_BY_IF);
         }
 
-        return {If{inbound, stmts}};
+        return {If{inbound, stmts.statements}};
     }
 
     StatementList store_to_global(bool store_registers) override
@@ -222,7 +222,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             throw std::runtime_error(
                 "Direct store from registers not allowed in partial pass SBRR kernels");
 
-        return {If{inbound, stmts}};
+        return {If{inbound, stmts.statements}};
     }
 
     StatementList load_lds_step_1_2_generator(
@@ -509,8 +509,8 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             loadr += CommentLines{"load global into registers"};
             loadr += load_from_global(true);
 
-            body += If{direct_load_to_reg, loadr};
-            body += Else{loadlds};
+            body += If{direct_load_to_reg, loadr.statements};
+            body += Else{loadlds.statements};
         }
 
         body += LineBreak{};

@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -53,7 +53,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                         continue;
                     if(length % t == 0)
                     {
-                        if(std::all_of(factors.begin(), factors.end(), [=](unsigned int f) {
+                        if(std::all_of(factors.begin(), factors.end(), [=, this](unsigned int f) {
                                return (length / t) % f == 0;
                            }))
                             threads_per_transform = t;
@@ -549,7 +549,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         if(guard == ThreadGuardMode::GUARD_BY_IF && !std::holds_alternative<Literal>(guard_expr))
         {
             stmts += CommentLines{"more than enough threads, some do nothing"};
-            stmts += If{guard_expr, work};
+            stmts += If{guard_expr, work.statements};
         }
         else
         {
@@ -571,7 +571,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
             // put in if only if guard_by_if
             if(guard == ThreadGuardMode::GUARD_BY_IF)
-                stmts += If{guard_expr, work};
+                stmts += If{guard_expr, work.statements};
             else
                 stmts += work;
         }
@@ -752,8 +752,8 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                     height,
                     ThreadGuardMode::GUARD_BY_IF);
 
-                body += If{Not{lds_is_real}, reg2lds_full};
-                body += Else{reg2lds_half};
+                body += If{Not{lds_is_real}, reg2lds_full.statements};
+                body += Else{reg2lds_half.statements};
             }
         }
         return f;
@@ -827,8 +827,8 @@ struct StockhamKernel : public StockhamGeneratorSpecs
             loadr += CommentLines{"load global into registers"};
             loadr += load_from_global(true);
 
-            body += If{direct_load_to_reg, loadr};
-            body += Else{loadlds};
+            body += If{direct_load_to_reg, loadr.statements};
+            body += Else{loadlds.statements};
         }
 
         body += LineBreak{};
@@ -906,8 +906,8 @@ struct StockhamKernel : public StockhamGeneratorSpecs
             storer += CommentLines{"store registers into global"};
             storer += store_to_global(true);
 
-            body += If{direct_store_from_reg, storer};
-            body += Else{storelds};
+            body += If{direct_store_from_reg, storer.statements};
+            body += Else{storelds.statements};
         }
 
         f.templates = global_templates();

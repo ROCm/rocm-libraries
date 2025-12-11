@@ -58,9 +58,9 @@ else( )
 endif( )
 
 if( CMAKE_COMPILER_IS_GNUCXX )
-  list( APPEND Boost.Command cxxflags=-fPIC -std=c++11 )
+  list( APPEND Boost.Command cxxflags=-fPIC -std=c++20 )
 elseif( XCODE_VERSION OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang") )
-  list( APPEND Boost.Command cxxflags=-std=c++11 -stdlib=libc++ linkflags=-stdlib=libc++ )
+  list( APPEND Boost.Command cxxflags=-std=c++20 -stdlib=libc++ linkflags=-stdlib=libc++ )
 endif( )
 
 include( ProcessorCount )

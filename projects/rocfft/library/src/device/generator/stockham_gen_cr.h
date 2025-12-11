@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -245,8 +245,8 @@ struct StockhamKernelCR : public StockhamKernel
 
             edge_stmts += stmts_c2real_pre_edge;
 
-            stmts += If{in_bound, non_edge_stmts};
-            stmts += If{Not{in_bound}, {If{pred, edge_stmts}}};
+            stmts += If{in_bound, non_edge_stmts.statements};
+            stmts += If{Not{in_bound}, {If{pred, edge_stmts.statements}}};
         }
         else
         {
@@ -280,11 +280,12 @@ struct StockhamKernelCR : public StockhamKernel
                 ThreadGuardMode::GUARD_BY_IF,
                 true);
             non_intrinsic_stmts += CommentLines{"can't use intrinsic load"};
-            non_intrinsic_stmts += If{in_bound, non_edge_stmts};
-            non_intrinsic_stmts += If{!in_bound, {If{pred, non_edge_stmts}}};
+            non_intrinsic_stmts += If{in_bound, non_edge_stmts.statements};
+            non_intrinsic_stmts += If{!in_bound, {If{pred, non_edge_stmts.statements}}};
 
-            stmts += If{intrinsic_mode != "IntrinsicAccessType::DISABLE_BOTH", intrinsic_stmts};
-            stmts += Else{non_intrinsic_stmts};
+            stmts += If{intrinsic_mode != "IntrinsicAccessType::DISABLE_BOTH",
+                        intrinsic_stmts.statements};
+            stmts += Else{non_intrinsic_stmts.statements};
         }
 
         return stmts;
@@ -384,8 +385,8 @@ struct StockhamKernelCR : public StockhamKernel
                                   {StoreGlobal{buf, offset + buf_idx, lds_complex[lds_idx]}}};
             }
 
-            stmts += If{in_bound, regular_store};
-            stmts += If{Not{in_bound}, edge_store};
+            stmts += If{in_bound, regular_store.statements};
+            stmts += If{Not{in_bound}, edge_store.statements};
             // stmts += Else{edge_store};  // FIXME: Need to check with compiler team.
         }
         else
