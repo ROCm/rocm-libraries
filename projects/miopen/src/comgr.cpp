@@ -956,6 +956,13 @@ void BuildHip(const std::string& name,
            }))
             opts.push_back("-std=c++17");
 
+        auto rocm_path = env::value(ROCM_PATH);
+
+        if (!rocm_path.empty())
+        {
+            opts.push_back("--rocm-path=" + rocm_path);
+        }
+
         HiprtcProgram prog(name, text);
         prog.Compile(opts);
         prog.GetCode(binary);
