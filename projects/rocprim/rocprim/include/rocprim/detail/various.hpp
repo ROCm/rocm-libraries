@@ -668,6 +668,16 @@ public:
     {
         return reinterpret_cast<T*>(&data);
     }
+
+    ROCPRIM_FORCE_INLINE ROCPRIM_DEVICE
+    T operator[](int index)
+    {
+        T ret;
+        __builtin_memcpy(reinterpret_cast<void*>(&ret),
+                         reinterpret_cast<char*>(data) + (index * sizeof(T)),
+                         sizeof(T));
+        return ret;
+    }
 };
 
 } // end namespace detail
