@@ -133,9 +133,9 @@ This represents an engine that can handle one or more graphs of operations.
 
 For example, a `BatchNormEngine` might be able to handle single-op and simple fused graphs that contain batchnorm operations.
 
-- **Lifecycle:** 
-    - The engines typically have the same lifecycle as the `EngineManager` that contains them. 
-    - The `engine_details` returned by `getDetails()` has explicit create/destroy entry-points in the plugin. 
+- **Lifecycle:**
+    - The engines typically have the same lifecycle as the `EngineManager` that contains them.
+    - The `engine_details` returned by `getDetails()` has explicit create/destroy entry-points in the plugin.
     - The `execution_plan` created by `initializeExecutionContext()` also has explicit create/destroy entry-points in the plugin.
     - Since engine_detauls and the execution_plan are "owned" by the plugin consumer, the EnginePluginContainer is sufficient to manage their cleanup during their destroy api calls.
 
@@ -228,7 +228,7 @@ Error handling will make use of C++ exceptions primarily, with the understanding
 - Memory leak detection using valgrind or similar tools
 
 ## 9. Future Considerations
-- Behavioral notes will be added to the engine_details.  
+- Behavioral notes will be added to the engine_details.
     - These are which are tags which will identify certain engine characteristics used for filtering
     - The behavorial notes on engines are controlled by plugin authors
 - Engine config settings which allow the user to control the behavior of the engine
