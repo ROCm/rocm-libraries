@@ -289,53 +289,16 @@ namespace rocRoller::KernelGraph
                                    int                        coordinate,
                                    ControlFlowRWTracer const& tracer)
     {
-        // Get all control nodes that write to this coordinate
         auto records = tracer.coordinatesReadWrite(coordinate);
 
-        // Helper lambda to check if a node is a descendant of the loop
-        std::function<bool(int, std::set<int>&)> isDescendantOfLoop;
-        isDescendantOfLoop = [&](int node, std::set<int>& visited) -> bool {
-            // Avoid infinite recursion
-            if(visited.count(node) > 0)
-                return false;
-            visited.insert(node);
-
-            // Check if this node is directly output of the loop via Initialize, Body, or ForLoopIncrement edges
-            for(int initNode : kgraph.control.getOutputNodeIndices<Initialize>(loopNode))
-            {
-                if(initNode == node)
-                    return true;
-                if(isDescendantOfLoop(initNode, visited))
-                    return true;
-            }
-
-            for(int bodyNode : kgraph.control.getOutputNodeIndices<Body>(loopNode))
-            {
-                if(bodyNode == node)
-                    return true;
-                if(isDescendantOfLoop(bodyNode, visited))
-                    return true;
-            }
-
-            for(int incNode : kgraph.control.getOutputNodeIndices<ForLoopIncrement>(loopNode))
-            {
-                if(incNode == node)
-                    return true;
-                if(isDescendantOfLoop(incNode, visited))
-                    return true;
-            }
-
-            return false;
-        };
-
-        // Check if any write operation is within the loop
         for(const auto& record : records)
         {
             if(record.rw == ControlFlowRWTracer::WRITE
                || record.rw == ControlFlowRWTracer::READWRITE)
             {
-                std::set<int> visited;
-                if(isDescendantOfLoop(record.control, visited))
+                auto stack = controlStack(record.control, kgraph);
+
+                if(std::find(stack.begin(), stack.end(), loopNode) != stack.end())
                 {
                     return true;
                 }
