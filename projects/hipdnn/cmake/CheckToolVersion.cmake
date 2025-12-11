@@ -6,10 +6,38 @@ set(EXPECTED_CLANG_FORMAT_VERSION "18")
 set(EXPECTED_CLANG_TIDY_VERSION "20")
 set(EXPECTED_LLVM_VERSION "20")
 
-# Common search paths
-set(LLVM_TOOL_PATHS /usr/bin /opt/rocm/llvm/bin)
+# Helper function to generate version-specific search paths hints by concatenating the base path
+# with a list of versioned path names.
+function(get_versioned_search_paths OUTPUT_VAR BASE_PATH VERSION)
+    set(PATHS_LIST
+        "${BASE_PATH}${VERSION}/bin"
+        "${BASE_PATH}${VERSION}/lib/llvm/bin"
+        "${BASE_PATH}-${VERSION}/bin"
+        "${BASE_PATH}-${VERSION}/lib/llvm/bin"
+        "${BASE_PATH}_${VERSION}/bin"
+        "${BASE_PATH}_${VERSION}/lib/llvm/bin"
+        "${BASE_PATH}/${VERSION}/bin"
+        "${BASE_PATH}/${VERSION}/lib/llvm/bin"
+        "${BASE_PATH}/bin"
+        "${BASE_PATH}/lib/llvm/bin"
+    )
+    set(${OUTPUT_VAR} ${PATHS_LIST} PARENT_SCOPE)
+endfunction()
+
+# CMake find_program() search order: CMAKE_PREFIX_PATH, CMAKE_PROGRAM_PATH, find_program(HINTS)
+# which is set to LLVM_TOOL_HINTS below when LLVM_TOOLS_SEARCH_PREFIX is provided by the user,
+# CMAKE_*_COMPILER_PATH, system PATH, CMake built-in common locations, and finally
+# find_program(PATHS) which is set to LLVM_TOOL_PATHS in this file. All folders are searched first
+# for the first program name, and this then repeats for each name provided in find_program(NAMES).
+set(LLVM_TOOL_PATHS /usr/bin)
 get_filename_component(COMPILER_PATH "${CMAKE_CXX_COMPILER}" PATH)
 list(APPEND LLVM_TOOL_PATHS ${COMPILER_PATH})
+
+# Set up LLVM_TOOL_HINTS if LLVM_TOOLS_SEARCH_PREFIX is defined
+if(DEFINED LLVM_TOOLS_SEARCH_PREFIX)
+    set(LLVM_TOOL_HINTS "${LLVM_TOOLS_SEARCH_PREFIX}")
+    message(VERBOSE "Using LLVM_TOOLS_SEARCH_PREFIX as hint: ${LLVM_TOOLS_SEARCH_PREFIX}")
+endif()
 
 # Checks the version of a tool
 function(checkToolVersion TOOL_BINARY TOOL_NAME EXPECTED_VERSION VERSION_REGEX
@@ -44,9 +72,18 @@ endfunction()
 
 # Finds and checks clang-format
 function(findAndCheckClangFormat)
+    # Build version-specific paths if LLVM_TOOL_HINTS is set
+    set(SEARCH_HINTS)
+    if(DEFINED LLVM_TOOL_HINTS)
+        foreach(HINT ${LLVM_TOOL_HINTS})
+            get_versioned_search_paths(VERSIONED_HINTS "${HINT}" "${EXPECTED_CLANG_FORMAT_VERSION}")
+            list(APPEND SEARCH_HINTS ${VERSIONED_HINTS})
+        endforeach()
+    endif()
+
     find_program(
         CLANG_FORMAT_BINARY NAMES clang-format-${EXPECTED_CLANG_FORMAT_VERSION} clang-format
-        PATHS ${LLVM_TOOL_PATHS}
+        HINTS ${SEARCH_HINTS} PATHS ${LLVM_TOOL_PATHS}
     )
 
     if(NOT CLANG_FORMAT_BINARY)
@@ -67,9 +104,18 @@ endfunction()
 
 # Finds and checks clang-tidy
 function(findAndCheckClangTidy)
+    # Build version-specific paths if LLVM_TOOL_HINTS is set
+    set(SEARCH_HINTS)
+    if(DEFINED LLVM_TOOL_HINTS)
+        foreach(HINT ${LLVM_TOOL_HINTS})
+            get_versioned_search_paths(VERSIONED_HINTS "${HINT}" "${EXPECTED_CLANG_TIDY_VERSION}")
+            list(APPEND SEARCH_HINTS ${VERSIONED_HINTS})
+        endforeach()
+    endif()
+
     find_program(
         CLANG_TIDY_EXE NAMES clang-tidy-${EXPECTED_CLANG_TIDY_VERSION} clang-tidy
-        PATHS ${LLVM_TOOL_PATHS}
+        HINTS ${SEARCH_HINTS} PATHS ${LLVM_TOOL_PATHS}
     )
 
     if(NOT CLANG_TIDY_EXE)
@@ -90,6 +136,15 @@ endfunction()
 
 # Finds and checks LLVM tools
 function(findAndCheckLlvmTools)
+    # Build version-specific paths if LLVM_TOOL_HINTS is set
+    set(SEARCH_HINTS)
+    if(DEFINED LLVM_TOOL_HINTS)
+        foreach(HINT ${LLVM_TOOL_HINTS})
+            get_versioned_search_paths(VERSIONED_HINTS "${HINT}" "${EXPECTED_LLVM_VERSION}")
+            list(APPEND SEARCH_HINTS ${VERSIONED_HINTS})
+        endforeach()
+    endif()
+
     # Define the tools we need
     set(LLVM_TOOLS llvm-profdata llvm-cov llvm-cxxfilt)
 
@@ -98,7 +153,7 @@ function(findAndCheckLlvmTools)
         string(REPLACE "-" "_" TOOL_VAR ${TOOL_UPPER})
 
         find_program(
-            ${TOOL_VAR}_BINARY NAMES ${TOOL}-${EXPECTED_LLVM_VERSION} ${TOOL}
+            ${TOOL_VAR}_BINARY NAMES ${TOOL}-${EXPECTED_LLVM_VERSION} ${TOOL} HINTS ${SEARCH_HINTS}
             PATHS ${LLVM_TOOL_PATHS}
         )
 
@@ -121,9 +176,18 @@ endfunction()
 
 # Finds and checks llvm-symbolizer
 function(findAndCheckLlvmSymbolizer)
+    # Build version-specific paths if LLVM_TOOL_HINTS is set
+    set(SEARCH_HINTS)
+    if(DEFINED LLVM_TOOL_HINTS)
+        foreach(HINT ${LLVM_TOOL_HINTS})
+            get_versioned_search_paths(VERSIONED_HINTS "${HINT}" "${EXPECTED_LLVM_VERSION}")
+            list(APPEND SEARCH_HINTS ${VERSIONED_HINTS})
+        endforeach()
+    endif()
+
     find_program(
         LLVM_SYMBOLIZER_EXE NAMES llvm-symbolizer-${EXPECTED_LLVM_VERSION} llvm-symbolizer
-        PATHS ${LLVM_TOOL_PATHS}
+        HINTS ${SEARCH_HINTS} PATHS ${LLVM_TOOL_PATHS}
     )
 
     if(NOT LLVM_SYMBOLIZER_EXE)
