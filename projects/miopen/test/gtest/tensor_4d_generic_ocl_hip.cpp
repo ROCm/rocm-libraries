@@ -83,41 +83,10 @@ std::vector<TensorsConfig> TensorsConfigs()
 
     if constexpr(PERF_ENABLE)
     {
-        const auto& handle = get_handle();
-        auto deviceDevice = handle.GetDeviceName();
-        size_t maxTotalSize;
+        size_t maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
 
         // Generate all NCHW tensors that are limited by L3 cache size
         // or 2xL2 cache size when L3 is not available
-        if(miopen::StartsWith(deviceName, "gfx90a") ||
-           miopen::StartsWith(deviceName, "gfx908"))
-        {
-            maxTotalSize = 16; // twice the 8MB L2
-        }
-        else if(miopen::StartsWith(deviceName, "gfx803"))
-        {
-            maxTotalSize = 4; // twice the 2MB L2
-        }
-        else if(miopen::StartsWith(deviceName, "gfx900") ||
-                miopen::StartsWith(deviceName, "gfx906"))
-        {
-            maxTotalSize = 8; // twice the 4MB L2
-        }
-        else if(miopen::StartsWith(deviceName, "gfx942"))
-        {
-            maxTotalSize = 256; // 256MB L3
-        }
-        else if(miopen::StartsWith(deviceName, "gfx103"))
-        {
-            maxTotalSize = 128; // 128MB L3
-        }
-        else
-        {
-            maxTotalSize = 4; // twice the 2MB L2, default case.
-        }
-
-        maxTotalSize = maxTotalSize * 1024ull * 1024ull / sizeof(T);
-
         if constexpr(POW_2)
         {
             for(size_t N = 1; N <= maxTotalSize; N *= 2)
