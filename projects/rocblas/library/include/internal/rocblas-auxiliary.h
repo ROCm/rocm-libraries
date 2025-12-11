@@ -35,52 +35,52 @@
 extern "C" {
 #endif
 
-/*! \brief Create handle
+/*! \brief Create handle.
  */
 ROCBLAS_EXPORT rocblas_status rocblas_create_handle(rocblas_handle* handle);
 
-/*! \brief Destroy handle
+/*! \brief Destroy handle.
  */
 ROCBLAS_EXPORT rocblas_status rocblas_destroy_handle(rocblas_handle handle);
 
-/*! \brief Set stream for handle
+/*! \brief Set stream for handle.
  */
 ROCBLAS_EXPORT rocblas_status rocblas_set_stream(rocblas_handle handle, hipStream_t stream);
 
-/*! \brief Get stream [0] from handle
+/*! \brief Get stream [0] from handle.
  */
 ROCBLAS_EXPORT rocblas_status rocblas_get_stream(rocblas_handle handle, hipStream_t* stream);
 
-/*! \brief Set rocblas_pointer_mode
+/*! \brief Set ``rocblas_pointer_mode``.
  */
 ROCBLAS_EXPORT rocblas_status rocblas_set_pointer_mode(rocblas_handle       handle,
                                                        rocblas_pointer_mode pointer_mode);
-/*! \brief Get rocblas_pointer_mode
+/*! \brief Get ``rocblas_pointer_mode``.
  */
 ROCBLAS_EXPORT rocblas_status rocblas_get_pointer_mode(rocblas_handle        handle,
                                                        rocblas_pointer_mode* pointer_mode);
 
-/*! \brief Set rocblas_atomics_mode
+/*! \brief Set ``rocblas_atomics_mode``
  *  \details
- *  Some rocBLAS functions may have implementations which use atomic operations to increase performance.
+ *  Some rocBLAS functions have implementations which use atomic operations to increase performance.
  *  By using atomic operations, results are not guaranteed to be identical between multiple runs.
- *  Results will be accurate with or without atomic operations. Atomic operations in rocBLAS are turned
- *  off by default. They can be turned on or off for a handle by calling rocblas_set_atomics_mode.
+ *  Results are accurate with or without atomic operations. Atomic operations in rocBLAS are turned
+ *  off by default. They can be turned on or off on a per-handle basis by calling ``rocblas_set_atomics_mode``.
  */
 ROCBLAS_EXPORT rocblas_status rocblas_set_atomics_mode(rocblas_handle       handle,
                                                        rocblas_atomics_mode atomics_mode);
 
-/*! \brief Get rocblas_atomics_mode
+/*! \brief Get ``rocblas_atomics_mode``.
  */
 ROCBLAS_EXPORT rocblas_status rocblas_get_atomics_mode(rocblas_handle        handle,
                                                        rocblas_atomics_mode* atomics_mode);
 
-/*! \brief Set rocblas_math_mode
+/*! \brief Set ``rocblas_math_mode``.
  */
 ROCBLAS_EXPORT rocblas_status rocblas_set_math_mode(rocblas_handle    handle,
                                                     rocblas_math_mode math_mode);
 
-/*! \brief Get rocblas_math_mode
+/*! \brief Get ``rocblas_math_mode``.
  */
 ROCBLAS_EXPORT rocblas_status rocblas_get_math_mode(rocblas_handle     handle,
                                                     rocblas_math_mode* math_mode);
@@ -89,7 +89,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_get_math_mode(rocblas_handle     handle,
  */
 ROCBLAS_EXPORT rocblas_pointer_mode rocblas_pointer_to_mode(void* ptr);
 
-/*! \brief Copy vector from host to device
+/*! \brief Copy vector from host to device.
     @param[in]
     n           [rocblas_int]
                 number of elements in the vector
@@ -117,7 +117,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_set_vector(rocblas_int n,
 ROCBLAS_EXPORT rocblas_status rocblas_set_vector_64(
     int64_t n, int64_t elem_size, const void* x, int64_t incx, void* y, int64_t incy);
 
-/*! \brief Copy vector from device to host
+/*! \brief Copy vector from device to host.
     @param[in]
     n           [rocblas_int]
                 number of elements in the vector
@@ -145,7 +145,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_get_vector(rocblas_int n,
 ROCBLAS_EXPORT rocblas_status rocblas_get_vector_64(
     int64_t n, int64_t elem_size, const void* x, int64_t incx, void* y, int64_t incy);
 
-/*! \brief Copy matrix from host to device
+/*! \brief Copy matrix from host to device.
     @param[in]
     rows        [rocblas_int]
                 number of rows in matrices
@@ -182,7 +182,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_set_matrix_64(int64_t     rows,
                                                     void*       b,
                                                     int64_t     ldb);
 
-/*! \brief Copy matrix from device to host
+/*! \brief Copy matrix from device to host.
     @param[in]
     rows        [rocblas_int]
                 number of rows in matrices
@@ -219,10 +219,10 @@ ROCBLAS_EXPORT rocblas_status rocblas_get_matrix_64(int64_t     rows,
                                                     void*       b,
                                                     int64_t     ldb);
 
-/*! \brief Asynchronously copy vector from host to device
+/*! \brief Asynchronously copy vector from host to device.
      \details
-    rocblas_set_vector_async copies a vector from pinned host memory to device memory asynchronously.
-    Memory on the host must be allocated with hipHostMalloc or the transfer will be synchronous.
+    ``rocblas_set_vector_async`` copies a vector from pinned host memory to device memory asynchronously.
+    Memory on the host must be allocated with ``hipHostMalloc`` or the transfer will be synchronous.
     @param[in]
     n           [rocblas_int]
                 number of elements in the vector
@@ -258,10 +258,10 @@ ROCBLAS_EXPORT rocblas_status rocblas_set_vector_async_64(int64_t     n,
                                                           int64_t     incy,
                                                           hipStream_t stream);
 
-/*! \brief Asynchronously copy vector from device to host
+/*! \brief Asynchronously copy vector from device to host.
      \details
-    rocblas_get_vector_async copies a vector from pinned host memory to device memory asynchronously.
-    Memory on the host must be allocated with hipHostMalloc or the transfer will be synchronous.
+    ``rocblas_get_vector_async`` copies a vector from device memory to pinned host memory asynchronously.
+    Memory on the host must be allocated with ``hipHostMalloc`` or the transfer will be synchronous.
     @param[in]
     n           [rocblas_int]
                 number of elements in the vector
@@ -297,10 +297,10 @@ ROCBLAS_EXPORT rocblas_status rocblas_get_vector_async_64(int64_t     n,
                                                           int64_t     incy,
                                                           hipStream_t stream);
 
-/*! \brief Asynchronously copy matrix from host to device
+/*! \brief Asynchronously copy matrix from host to device.
      \details
-    rocblas_set_matrix_async copies a matrix from pinned host memory to device memory asynchronously.
-    Memory on the host must be allocated with hipHostMalloc or the transfer will be synchronous.
+    ``rocblas_set_matrix_async`` copies a matrix from pinned host memory to device memory asynchronously.
+    Memory on the host must be allocated with ``hipHostMalloc`` or the transfer will be synchronous.
     @param[in]
     rows        [rocblas_int]
                 number of rows in matrices
@@ -341,10 +341,10 @@ ROCBLAS_EXPORT rocblas_status rocblas_set_matrix_async_64(int64_t     rows,
                                                           int64_t     ldb,
                                                           hipStream_t stream);
 
-/*! \brief asynchronously copy matrix from device to host
+/*! \brief Asynchronously copy matrix from device to host.
      \details
-    rocblas_get_matrix_async copies a matrix from device memory to pinned host memory asynchronously.
-    Memory on the host must be allocated with hipHostMalloc or the transfer will be synchronous.
+    ``rocblas_get_matrix_async`` copies a matrix from device memory to pinned host memory asynchronously.
+    Memory on the host must be allocated with ``hipHostMalloc`` or the transfer will be synchronous.
     @param[in]
     rows        [rocblas_int]
                 number of rows in matrices
