@@ -442,36 +442,12 @@ namespace rocRoller
                 scope->addRegister(offset);
             }
 
-            // Create a buffer descriptor
             if(buffer > 0)
             {
-                auto user = m_graph->coordinates.get<User>(target);
-                if(user && !tagger->hasRegister(buffer))
-                {
-                    AssertFatal(
-                        user->size, "Invalid User dimension: missing size.", ShowValue(target));
-
-                    auto bufferReg = tagger->getRegister(
-                        buffer, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
-                    bufferReg->setName(concatenate("Buffer", buffer));
-                    if(bufferReg->allocationState() == Register::AllocationState::Unallocated)
-                    {
-                        Register::ValuePtr        basePointer;
-                        auto                      bufferExpr = bufferReg->expression();
-                        Expression::ExpressionPtr base       = Expression::fromKernelArgument(
-                            m_context->kernel()->findArgument(user->argumentName));
-                        if(user->offset)
-                            base = base + user->offset;
-
-                        bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, base);
-                        bufferExpr = BufferDescriptor::SetOptions(
-                            bufferExpr, BufferDescriptor::GetDefaultOptions(m_context));
-                        // TODO: Handle sizes larger than 32 bits
-                        bufferExpr = BufferDescriptor::SetSize(bufferExpr, toBytes(user->size));
-                        co_yield Expression::generate(bufferReg, bufferExpr, m_context);
-                    }
-                    scope->addRegister(buffer);
-                }
+                auto bufferReg = tagger->getRegister(
+                    buffer, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
+                bufferReg->setName(concatenate("Buffer", buffer));
+                scope->addRegister(buffer);
             }
         }
 

@@ -419,10 +419,6 @@ namespace rocRoller
 
             AssertFatal(user->size, "Invalid User dimension: missing size.", ShowValue(target));
 
-            // Check if buffer register already exists
-            if(context->registerTagManager()->hasRegister(buffer))
-                return -1;
-
             auto toBytes = [&](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
                 uint numBits = DataTypeInfo::Get(ci.valueType).elementBits;
 
@@ -433,36 +429,35 @@ namespace rocRoller
                 return (expr * L(numBits)) / L(8u);
             };
 
-            // Create buffer descriptor expression
             auto bufferVarType = VariableType{DataType::None, PointerType::Buffer};
             auto bufferRegType = Register::Type::Scalar;
-            auto bufferReg  = context->registerTagManager()->getRegister(
-                buffer, bufferRegType, bufferVarType, 1);
-            bufferReg->setName(concatenate("Buffer", buffer));
 
-            if(bufferReg->allocationState() == Register::AllocationState::Unallocated)
-            {
-                Expression::ExpressionPtr bufferExpr  = L(rocRoller::Buffer{0, 0, 0, 0});
-                Expression::ExpressionPtr basePointer = Expression::fromKernelArgument(
-                    context->kernel()->findArgument(user->argumentName));
+            // Create a buffer descriptor expression
+            Expression::ExpressionPtr bufferExpr  = L(rocRoller::Buffer{0, 0, 0, 0});
+            Expression::ExpressionPtr basePointer = Expression::fromKernelArgument(
+                context->kernel()->findArgument(user->argumentName));
 
-                if(user->offset)
-                    basePointer = basePointer + user->offset;
+            if(user->offset)
+                basePointer = basePointer + user->offset;
 
-                bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, basePointer);
-                bufferExpr = BufferDescriptor::SetOptions(
-                    bufferExpr, BufferDescriptor::GetDefaultOptions(context));
-                // TODO: Handle sizes larger than 32 bits
-                bufferExpr = BufferDescriptor::SetSize(bufferExpr, toBytes(user->size));
+            bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, basePointer);
+            bufferExpr = BufferDescriptor::SetOptions(bufferExpr,
+                                                      BufferDescriptor::GetDefaultOptions(context));
+            // TODO: Handle sizes larger than 32 bits
+            bufferExpr = BufferDescriptor::SetSize(bufferExpr, toBytes(user->size));
 
-                auto assignNode         = Assign{bufferRegType, bufferExpr};
-                assignNode.variableType = bufferVarType;
-                auto assignTag          = graph.control.addElement(assignNode);
-                graph.mapper.connect(assignTag, buffer, NaryArgument::DEST);
-                return assignTag;
-            }
+            auto assignNode         = Assign{bufferRegType, bufferExpr};
+            assignNode.variableType = bufferVarType;
+            auto assignTag          = graph.control.addElement(assignNode);
+            graph.mapper.connect(assignTag, buffer, NaryArgument::DEST);
 
-            return -1;
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::makeBuffer: assign {} expression {} to buffer {}",
+                assignTag,
+                toString(assignNode.expression),
+                buffer);
+
+            return assignTag;
         }
 
         KernelGraph AssignComputeIndex::apply(KernelGraph const& original)
