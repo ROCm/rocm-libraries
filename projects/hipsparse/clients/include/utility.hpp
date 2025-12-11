@@ -3738,14 +3738,14 @@ void host_coomm_batched(I                    M,
 }
 
 template <typename T>
-int csrilu0(int                  m,
-            const int*           ptr,
-            const int*           col,
-            T*                   val,
-            hipsparseIndexBase_t idx_base,
-            bool                 boost,
-            double               boost_tol,
-            T                    boost_val)
+int host_csrilu0(int                  m,
+                 const int*           ptr,
+                 const int*           col,
+                 T*                   val,
+                 hipsparseIndexBase_t idx_base,
+                 bool                 boost,
+                 double               boost_tol,
+                 T                    boost_val)
 {
     // pointer of upper part of each row
     std::vector<int> diag_offset(m);
@@ -3785,6 +3785,13 @@ int csrilu0(int                  m,
                 }
                 else
                 {
+                    // // Check for numeric singular pivot
+                    // if(testing_abs(diag_val) <= boost_tol)
+                    // {
+                    //     std::cout << "AAAA" << std::endl;
+                    //     return col_j + idx_base;
+                    // }
+
                     // Check for numeric pivot
                     if(diag_val == make_DataType<T>(0.0))
                     {
@@ -3820,12 +3827,44 @@ int csrilu0(int                  m,
 
         if(!has_diag)
         {
+            std::cout << "BBBB" << std::endl;
             // Structural zero digonal
             return ai + idx_base;
         }
+        else
+        {
+            // set diagonal pointer to diagonal element
+            diag_offset[ai] = j;
+            
+            if(boost)
+            {
+                if(testing_abs(val[j]) <= boost_tol)
+                {
+                    val[j] = boost_val;
+                }
+            }
+            else
+            {
+                const bool is_diag = (j >= 0) && (col[j] == (ai + idx_base));
 
-        // set diagonal pointer to diagonal element
-        diag_offset[ai] = j;
+                const bool is_singular_diag = is_diag && (testing_abs(val[j]) <= boost_tol);
+                const bool is_zero_diag     = is_diag && (val[j] == make_DataType<T>(0));
+
+                // check for singular diagonal
+                //if(is_singular_diag)
+                //{
+                //    std::cout << "CCCC" << std::endl;
+                //    return ai + idx_base;
+                //}
+
+                // check for zero diagonal
+                if(is_zero_diag)
+                {
+                    std::cout << "DDDD" << std::endl;
+                    return ai + idx_base;
+                }
+            }
+        }
 
         // clear nnz entries
         for(j = row_start; j < row_end; ++j)

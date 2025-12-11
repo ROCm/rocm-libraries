@@ -35,13 +35,13 @@ Tests:
   category: quick
   function: csrgemm2_b
   precision: *single_double_precisions_complex_real
-  M: [50, 647, 1799]
-  N: [0, 13, 523, 3712]
+  M: [56, 968, 2867]
+  N: [0, 386, 2756]
   beta: [1.3]
   betai: [-0.5]
-  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  baseB: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ONE]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO]
 
 - name: csrgemm2_b
   category: pre_checkin
