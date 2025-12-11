@@ -109,7 +109,7 @@ class TestValidateNglAndNll(unittest.TestCase):
         assert not status, f"Schedule should have failed validation but passed. {message}"
         assert message == "Code path 0: Loop NLL: LRB0 at index 0 is not valid. Needed before index 6 (of next iteration), but only guaranteed at index 7."
 
-    def test_lr0_swait_depends_on_lr1_realistic(self, useZeroDscnt = True):
+    def test_lr0_swait_depends_on_lr1_realistic(self, useZeroDscnt = False):
         """
         A more realistic version of `test_lr0_swait_depends_on_lr1`. GRs are now present. Optionally checks zero dscnt option for NGL/NLL
         """
