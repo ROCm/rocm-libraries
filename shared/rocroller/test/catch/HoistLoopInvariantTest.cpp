@@ -207,9 +207,6 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
 
     SECTION("isCoordinateWrittenInLoop")
     {
-        graph = transform<HoistLoopInvariant>(graph);
-        writeDotToFile(graph.toDOT(false), "hoistLoopInvariant_result.dot");
-
         // Written in both
         CHECK(isCoordinateWrittenInLoop(graph, 1122, 510, tracer));
         CHECK(isCoordinateWrittenInLoop(graph, 1127, 510, tracer));
@@ -217,5 +214,49 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
         // For loop variable only written in one loop
         CHECK(isCoordinateWrittenInLoop(graph, 1127, 314, tracer));
         CHECK(!isCoordinateWrittenInLoop(graph, 1122, 314, tracer));
+    }
+
+    SECTION("hoistNodeBeforeLoop")
+    {
+        const int nodeBeforeLoop = 3143;
+        const int assignNode     = 3048;
+        const int loopNode       = 1127;
+
+        std::vector<int> oldPath
+            = {nodeBeforeLoop, 3146, loopNode, 1982, 314, 318, 218, 3650, assignNode};
+        // -1 for new nodes/edges
+        std::vector<int> newPath
+            = {nodeBeforeLoop, 3653, -1, -1, loopNode, 1982, 314, 318, 218, 3650, assignNode};
+
+        const auto compare = [](const std::vector<int>& actual, const std::vector<int>& expected) {
+            REQUIRE(actual.size() == expected.size());
+            for(size_t i = 0; i < expected.size(); ++i)
+            {
+                if(expected[i] == -1)
+                    continue;
+                CHECK(actual[i] == expected[i]);
+            }
+        };
+
+        const auto oldPathResult = graph.control
+                                       .path<Graph::Direction::Downstream>(
+                                           std::vector{nodeBeforeLoop}, std::vector{assignNode})
+                                       .to<std::vector>();
+        compare(oldPathResult, oldPath);
+
+        const auto oldAssignExpression = graph.control.get<Assign>(assignNode)->expression;
+
+        hoistNodeBeforeLoop(graph, assignNode, loopNode);
+
+        const auto newPathResult = graph.control
+                                       .path<Graph::Direction::Downstream>(
+                                           std::vector{nodeBeforeLoop}, std::vector{assignNode})
+                                       .to<std::vector>();
+        compare(newPathResult, newPath);
+
+        AssertFatal(newPathResult.size() == 11, newPathResult.size());
+        const auto newAssignExpression = graph.control.get<Assign>(newPathResult[2])->expression;
+
+        CHECK(oldAssignExpression == newAssignExpression);
     }
 }
