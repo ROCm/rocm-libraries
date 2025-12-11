@@ -12,10 +12,20 @@ namespace pooling2d {
 
 class GPU_Pooling2d_FP32 : public testing::Test
 {
+    void SetUp() override
+    {
+        // Decrease log level to reduce output
+        lib_env::update(MIOPEN_LOG_LEVEL, 2);
+    }
 };
 
 class GPU_Pooling2d_FP16 : public testing::Test
 {
+    void SetUp() override
+    {
+        // Decrease log level to reduce output
+        lib_env::update(MIOPEN_LOG_LEVEL, 2);
+    }
 };
 
 template <typename T>
