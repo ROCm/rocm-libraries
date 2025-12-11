@@ -34,10 +34,11 @@
 #include <rocprim/block/block_load_func.hpp>
 #include <rocprim/block/block_store.hpp>
 
-enum class TestBlockAdjacentDifferenceMethod {
-    LEFT = 0,
-    RIGHT = 1,
-    LEFT_PARTIAL = 2,
+enum class TestBlockAdjacentDifferenceMethod
+{
+    LEFT          = 0,
+    RIGHT         = 1,
+    LEFT_PARTIAL  = 2,
     RIGHT_PARTIAL = 3
 };
 
@@ -227,9 +228,10 @@ template<typename T,
          typename Output,
          typename BinaryFunction,
          TestBlockAdjacentDifferenceMethod Method,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::LEFT>::type
+         unsigned int                      BlockSize,
+         unsigned int                      ItemsPerThread>
+auto test_block_adjacent_difference() ->
+    typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::LEFT>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 
@@ -314,9 +316,10 @@ template<typename T,
          typename Output,
          typename BinaryFunction,
          TestBlockAdjacentDifferenceMethod Method,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::RIGHT>::type
+         unsigned int                      BlockSize,
+         unsigned int                      ItemsPerThread>
+auto test_block_adjacent_difference() ->
+    typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::RIGHT>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 
@@ -401,9 +404,10 @@ template<typename T,
          typename Output,
          typename BinaryFunction,
          TestBlockAdjacentDifferenceMethod Method,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::LEFT_PARTIAL>::type
+         unsigned int                      BlockSize,
+         unsigned int                      ItemsPerThread>
+auto test_block_adjacent_difference() ->
+    typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::LEFT_PARTIAL>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 
@@ -503,9 +507,10 @@ template<typename T,
          typename Output,
          typename BinaryFunction,
          TestBlockAdjacentDifferenceMethod Method,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread>
-auto test_block_adjacent_difference() -> typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::RIGHT_PARTIAL>::type
+         unsigned int                      BlockSize,
+         unsigned int                      ItemsPerThread>
+auto test_block_adjacent_difference() ->
+    typename std::enable_if<Method == TestBlockAdjacentDifferenceMethod::RIGHT_PARTIAL>::type
 {
     using stored_type = std::conditional_t<std::is_same<Output, bool>::value, int, Output>;
 
@@ -613,7 +618,7 @@ template<unsigned int First,
          class FlagType,
          class FlagOpType,
          TestBlockAdjacentDifferenceMethod Method,
-         unsigned int BlockSize = 256U>
+         unsigned int                      BlockSize = 256U>
 struct static_for
 {
     static void run()
@@ -640,7 +645,7 @@ template<unsigned int N,
          class FlagType,
          class FlagOpType,
          TestBlockAdjacentDifferenceMethod Method,
-         unsigned int BlockSize>
+         unsigned int                      BlockSize>
 struct static_for<N, N, Type, FlagType, FlagOpType, Method, BlockSize>
 {
     static void run() {}
