@@ -118,6 +118,10 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
     if(gemm->kernelType.scaleBMode != Operations::ScaleMode::None)
         rv << "SB_" << genScaleModeString(gemm->kernelType.scaleBMode) << "_";
 
+    if(gemm->streamK)
+    {
+        rv << "SK_";
+    }   
     rv << "WGT_";
     rocRoller::streamJoin(
         rv, std::vector{gemm->workgroupTile.m, gemm->workgroupTile.n, gemm->workgroupTile.k}, "x");
@@ -530,14 +534,9 @@ size_t workspaceRequired(std::shared_ptr<GemmKernel> gemm, const RocblasltContra
 
     auto runtimeArgs = commandArgs.runtimeArguments();
 
-    // Sum scratch requirements for all policies
-    size_t total = 0;
-    for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
-    {
-        auto policy = static_cast<Operations::ScratchPolicy>(i);
-        total += gemm->commandKernel->scratchSpaceRequired(policy, runtimeArgs);
-    }
-    return total;
+    // Only return scratch space for ScratchPolicy::None (uses prob.workspace)
+    return gemm->commandKernel->scratchSpaceRequired(
+        Operations::ScratchPolicy::None, runtimeArgs);
 }
 
 CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
@@ -638,23 +637,31 @@ rocblaslt_status runGemmKernel(std::shared_ptr<GemmKernel>        gemm,
     }
     auto commandArgs = createCommandArguments(gemm, prob, DEFAULT_WGM);
 
-    // Track allocated scratch memory for each policy
-    std::array<void*, static_cast<size_t>(Operations::ScratchPolicy::Count)> scratchPtrs = {};
-    std::array<size_t, static_cast<size_t>(Operations::ScratchPolicy::Count)> scratchSizes = {};
 
     if(gemm->params->streamK)
     {
         auto runtimeArgs = commandArgs.runtimeArguments();
-        for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
+
+        // Use prob.workspace for ScratchPolicy::None
+        auto noneScratchSize = gemm->commandKernel->scratchSpaceRequired(
+            Operations::ScratchPolicy::None, runtimeArgs);
+        if(noneScratchSize > 0 && prob.workspace != nullptr)
         {
-            auto policy = static_cast<Operations::ScratchPolicy>(i);
-            scratchSizes[i] = gemm->commandKernel->scratchSpaceRequired(policy, runtimeArgs);
-            if(scratchSizes[i] > 0)
-            {
-                commandArgs.setArgument(
-                    gemm->tagScratch.at(policy), ArgumentType::Value,
-                    static_cast<unsigned char*>(scratchPtrs[i]));
-            }
+            commandArgs.setArgument(
+                gemm->tagScratch.at(Operations::ScratchPolicy::None),
+                ArgumentType::Value,
+                static_cast<unsigned char*>(prob.workspace));
+        }
+
+        // Use prob.Synchronizer for ScratchPolicy::ZeroedBeforeAndAfter
+        auto zeroedScratchSize = gemm->commandKernel->scratchSpaceRequired(
+            Operations::ScratchPolicy::ZeroedBeforeAndAfter, runtimeArgs);
+        if(zeroedScratchSize > 0 && prob.Synchronizer != nullptr)
+        {
+            commandArgs.setArgument(
+                gemm->tagScratch.at(Operations::ScratchPolicy::ZeroedBeforeAndAfter),
+                ArgumentType::Value,
+                static_cast<unsigned char*>(prob.Synchronizer));
         }
     }
 
@@ -662,27 +669,10 @@ rocblaslt_status runGemmKernel(std::shared_ptr<GemmKernel>        gemm,
 
     if(!gemm->commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error))
     {
-        // Free allocated scratch memory before returning
-        for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
-        {
-            if(scratchPtrs[i] != nullptr)
-            {
-                AssertFatal(hipFree(scratchPtrs[i]), "Failed to free scratch memory" + ShowValue(i));
-            }
-        }
         return rocblaslt_status_invalid_value;
     }
 
     gemm->commandKernel->launchKernel(runtimeArgs, prob.stream);
-
-    // Free allocated scratch memory after kernel completes
-    for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
-    {
-        if(scratchPtrs[i] != nullptr)
-        {
-            AssertFatal(hipFree(scratchPtrs[i]), "Failed to free scratch memory" + ShowValue(i));
-        }
-    }
 
     return rocblaslt_status_success;
 }

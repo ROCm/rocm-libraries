@@ -493,11 +493,7 @@ namespace rocRoller
 
             // TODO: Improve setting of arch-specific buffer options
             BufferInstructionOptions bufOpts{.glc = true};
-            // if(!(context->targetArchitecture().target().isCDNA1GPU()
-            //      || context->targetArchitecture().target().isCDNA2GPU()))
-            // {
-            //     bufOpts.sc1 = true;
-            // }
+
             auto storeFlagTag = graph.control.addElement(StoreSGPR(DataType::UInt32, bufOpts));
             graph.mapper.connect<User>(storeFlagTag, flagsScratchTag);
             graph.mapper.connect<VGPR>(storeFlagTag, flagRegister);
@@ -720,9 +716,7 @@ namespace rocRoller
             graph.control.addElement(Sequence(), {boundsCheckTag}, {doWhileTag});
             graph.control.addElement(Body(), {doWhileTag}, {loadFlagTag});
 
-            // auto waitBeforeResetTag = graph.control.addElement(WaitZero());
             graph.control.chain<Sequence>(doWhileTag,
-                                          //   waitBeforeResetTag,
                                           barrierBeforeResetTag,
                                           wave0ResetFlagTag);
             graph.control.addElement(Body(), {wave0ResetFlagTag}, {assignResetFlagTag});

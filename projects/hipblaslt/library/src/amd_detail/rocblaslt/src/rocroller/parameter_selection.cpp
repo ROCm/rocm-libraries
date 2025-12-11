@@ -37,6 +37,7 @@ std::string SolutionParameters::toString() const
     result << "MachineInstruction:" << machineInstruction.m << "x" << machineInstruction.n << "x"
            << machineInstruction.k << std::endl;
     result << "WorkgroupSize:" << workgroupSizeX << "x" << workgroupSizeY << std::endl;
+    result << "StreamK: " << streamK << std::endl;
     result << "LoadA: " << loadPathA << std::endl;
     result << "LoadB: " << loadPathB << std::endl;
     result << "LDS Usage";
@@ -197,9 +198,9 @@ std::shared_ptr<SolutionParameters>
     }
 
     // Pass StreamK flag from solution index parameters
-    gemm->streamK = solutionIndexParameters.streamK;
+    gemm->streamK = false;
 
-    // // StreamK is not currently working with prefetching or workgroup mapping
+    // StreamK is not currently working with prefetching or workgroup mapping
     // if(gemm->streamK)
     // {
     //     gemm->prefetch = false;
