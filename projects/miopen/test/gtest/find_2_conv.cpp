@@ -370,8 +370,6 @@ void RunFind2ConvTests()
     }
 }
 
-bool IsTestSupportedForDevice(const miopen::Handle& handle) { return true; }
-
 } // namespace
 
 class GPU_Find2Conv_FP32 : public testing::TestWithParam<int>
@@ -379,8 +377,7 @@ class GPU_Find2Conv_FP32 : public testing::TestWithParam<int>
     void SetUp() override
     {
         prng::reset_seed();
-        const auto& handle = get_handle();
-        if(!IsTestSupportedForDevice(handle))
+        if(!IsTestSupportedByDevice(Gpu::All))
         {
             GTEST_SKIP();
         }
