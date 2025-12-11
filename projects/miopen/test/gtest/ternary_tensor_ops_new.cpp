@@ -113,8 +113,26 @@ private:
     tensor<T> tensorB;
     tensor<T> tensorC;
 
-    std::vector<T> nativeGPUData;
-    std::vector<T> referenceData;
+    std::vector<T> naiveGPUData;
+    std::vector<T> naiveCPUData;
+
+    std::vector<T>& referenceData     = naiveCPUData;
+    std::vector<T>& unitUnderTestData = naiveGPUData;
+    constexpr void setUUTData() override
+    {
+        if(UUT == miopenUnitNaiveGPU)
+        {
+            unitUnderTestData = naiveGPUData;
+        }
+    }
+
+    void setREFData() override
+    {
+        if(this->currentREF == miopenTestReferenceNaiveCPU)
+        {
+            referenceData = naiveCPUData;
+        }
+    }
 
 protected:
     static void SetUpTestSuite()
@@ -192,7 +210,7 @@ protected:
                          testCase.offsets[2],
                          false); // it does not verify non-standard behaviour
 
-        nativeGPUData = handle.Read<T>(c_dev, tensorC.data.size());
+        naiveGPUData = handle.Read<T>(c_dev, tensorC.data.size());
     }
     void runOptimizedCPU() override { std::cout << "runOptimizedCPU()\n"; }
     void runNaiveCPU() override
@@ -206,25 +224,25 @@ protected:
 
         if(testCase.operation == miopenTensorOpAdd)
         {
-            referenceData = CalculateOnCPUDataOp([alpha1, alpha2, beta](auto& C, auto A, auto B) {
+            naiveCPUData = CalculateOnCPUDataOp([alpha1, alpha2, beta](auto& C, auto A, auto B) {
                 C = A * alpha1 + B * alpha2 + C * beta;
             });
         }
         else if(testCase.operation == miopenTensorOpMul)
         {
-            referenceData = CalculateOnCPUDataOp([alpha1, alpha2, beta](auto& C, auto A, auto B) {
+            naiveCPUData = CalculateOnCPUDataOp([alpha1, alpha2, beta](auto& C, auto A, auto B) {
                 C = A * alpha1 * B * alpha2 + C * beta;
             });
         }
         else if(testCase.operation == miopenTensorOpMin)
         {
-            referenceData = CalculateOnCPUDataOp([alpha1, alpha2, beta](auto& C, auto A, auto B) {
+            naiveCPUData = CalculateOnCPUDataOp([alpha1, alpha2, beta](auto& C, auto A, auto B) {
                 C = std::min(A * alpha1, B * alpha2) + C * beta;
             });
         }
         else
         {
-            referenceData = CalculateOnCPUDataOp([alpha1, alpha2, beta](auto& C, auto A, auto B) {
+            naiveCPUData = CalculateOnCPUDataOp([alpha1, alpha2, beta](auto& C, auto A, auto B) {
                 C = std::max(A * alpha1, B * alpha2) + C * beta;
             });
         }
@@ -251,13 +269,8 @@ protected:
         return r.data;
     }
 
-    std::pair<bool, std::unordered_map<std::string, double>> verifyOptimizedGPU() override
+    std::pair<bool, std::unordered_map<std::string, double>> verify() override
     {
-        return {true, {}};
-    };
-    std::pair<bool, std::unordered_map<std::string, double>> verifyNaiveGPU() override
-    {
-        std::cout << "verifyNaiveGPU" << std::endl;
         const TestCase& testCase = GetParam();
 
         double tolerance = 1;
@@ -269,7 +282,7 @@ protected:
         }
 
         double threshold = std::numeric_limits<T>::epsilon() * tolerance;
-        double error     = miopen::rms_range(referenceData, nativeGPUData);
+        double error     = miopen::rms_range(referenceData, unitUnderTestData);
 
         EXPECT_LE(error, threshold)
             << "TensorOp: " << testCase.operation << std::endl
@@ -287,11 +300,6 @@ protected:
         {
             return {false, {{"output", error}}};
         }
-    };
-
-    std::pair<bool, std::unordered_map<std::string, double>> verifyOptimizedCPU() override
-    {
-        return {true, {}};
     };
 
 public:
