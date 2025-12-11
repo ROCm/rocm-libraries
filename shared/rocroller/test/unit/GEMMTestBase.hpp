@@ -838,10 +838,23 @@ namespace GEMMTests
                                           scratchSpaceRequired[zeroedIdx],
                                           hipMemcpyDeviceToHost),
                                 HasHipSuccess(0));
-                    EXPECT_TRUE(std::all_of(
-                        zeroedResult.begin(), zeroedResult.end(), [](uint8_t v) { return v == 0; }))
+
+                    bool allZeros = true;
+                    for(size_t i = 0; i < zeroedResult.size(); ++i)
+                    {
+                        if(zeroedResult[i] != 0)
+                        {
+                            allZeros = false;
+                            // Print as uint32 since flags are UInt32
+                            size_t flagIndex = i / sizeof(uint32_t);
+                            std::cerr << "Non-zero at byte " << i << " (flag index " << flagIndex
+                                      << "): " << static_cast<int>(zeroedResult[i]) << std::endl;
+                        }
+                    }
+                    EXPECT_TRUE(allZeros)
                         << "ZeroedBeforeAndAfter scratch should be all zeros after kernel "
-                           "execution";
+                           "execution (size="
+                        << scratchSpaceRequired[zeroedIdx] << " bytes)";
                 }
 
                 if(debuggable && !res.ok)

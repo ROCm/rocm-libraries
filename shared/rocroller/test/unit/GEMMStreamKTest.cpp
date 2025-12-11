@@ -112,10 +112,10 @@ namespace GEMMTests
         switch(dataTypeAB)
         {
         case DataType::Half:
-            basicGEMM<Half>(gemm);
+            basicGEMM<Half>(gemm, false, false, 100);
             break;
         case DataType::Float:
-            basicGEMM<float>(gemm);
+            basicGEMM<float>(gemm, false, false, 100);
             break;
         default:
             Throw<FatalError>(fmt::format("Unexpected data type: {}. ", toString(dataTypeAB)));
