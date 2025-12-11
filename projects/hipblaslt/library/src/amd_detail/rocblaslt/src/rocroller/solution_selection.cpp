@@ -243,6 +243,15 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             {
                 params.back().workgroupMapping = false;
             }
+
+            // Enable StreamK when number of output tiles < number of CUs
+            size_t numTilesM = prob.m / wgt.m;
+            size_t numTilesN = prob.n / wgt.n;
+            size_t numTiles = numTilesM * numTilesN * prob.batch_count;
+            if(numTiles < analytical_hardware.N_CU)
+            {
+                params.back().streamK = true;
+            }
         }
     }
 
@@ -261,6 +270,8 @@ int parametersToIndex(const SolutionIndexParameters& params)
     result |= ((params.workgroupTile.m / REQUIRED_MULTIPLE_M_N) << pos);
     pos += MAX_BITS_WORKGROUPTILE_M;
     result |= ((params.workgroupMapping ? 1 : 0) << pos);
+    pos += 1;
+    result |= ((params.streamK ? 1 : 0) << pos);
 
     // Set top bit indicating it is a rocRoller index
     result |= (1 << 31);
@@ -290,6 +301,8 @@ SolutionIndexParameters indexToParameters(int index)
         = ((index >> pos) & mask(MAX_BITS_WORKGROUPTILE_M)) * REQUIRED_MULTIPLE_M_N;
     pos += MAX_BITS_WORKGROUPTILE_M;
     result.workgroupMapping = (index >> pos) & 1;
+    pos += 1;
+    result.streamK = (index >> pos) & 1;
 
     return result;
 }

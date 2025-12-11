@@ -69,6 +69,7 @@ struct SolutionIndexParameters
 {
     WorkGroupTileSize workgroupTile;
     bool              workgroupMapping;
+    bool              streamK;
 };
 
 int parametersToIndex(const SolutionIndexParameters& params);

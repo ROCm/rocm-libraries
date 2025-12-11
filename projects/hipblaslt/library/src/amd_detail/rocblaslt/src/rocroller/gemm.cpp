@@ -170,7 +170,8 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
                 ShowValue(gemm->kernelType.scaleBMode));
 
     std::optional<Operations::OperationTag> tagTensorScaleA, tagLoadScaleA, tagBlockScaleA,
-        tagTensorScaleB, tagLoadScaleB, tagBlockScaleB, tagScratch, tagSKGrid, tagWGM;
+        tagTensorScaleB, tagLoadScaleB, tagBlockScaleB, tagSKGrid, tagWGM;
+    std::map<Operations::ScratchPolicy, Operations::OperationTag> tagScratch;
 
     if(gemm->kernelType.scaleAMode == Operations::ScaleMode::Separate)
     {
@@ -265,12 +266,19 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
                                 DataDirection::ReadOnly,
                                 rocRoller::NUMWGS);
 
-        tagScratch = command->allocateTag();
-        command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
-                                *tagScratch,
-                                ArgumentType::Value,
-                                DataDirection::ReadWrite,
-                                rocRoller::SCRATCH);
+        // Create Scratch operations for each ScratchPolicy
+        for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
+        {
+            auto policy = static_cast<Operations::ScratchPolicy>(i);
+            auto tag = command->allocateTag();
+            command->addOperation(Operations::Scratch(tag, policy));
+            command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
+                                    tag,
+                                    ArgumentType::Value,
+                                    DataDirection::ReadWrite,
+                                    rocRoller::getScratchName(policy));
+            tagScratch[policy] = tag;
+        }
     }
 
     if(gemm->workgroupMappingDim != -1)
@@ -489,8 +497,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     if(tagTensorScaleB)
         gemmKernel->tagTensorScaleB = *tagTensorScaleB;
 
-    if(tagScratch)
-        gemmKernel->tagScratch = *tagScratch;
+    gemmKernel->tagScratch = tagScratch;
 
     if(tagSKGrid)
         gemmKernel->tagSKGrid = *tagSKGrid;
@@ -523,7 +530,14 @@ size_t workspaceRequired(std::shared_ptr<GemmKernel> gemm, const RocblasltContra
 
     auto runtimeArgs = commandArgs.runtimeArguments();
 
-    return gemm->commandKernel->scratchSpaceRequired(runtimeArgs);
+    // Sum scratch requirements for all policies
+    size_t total = 0;
+    for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
+    {
+        auto policy = static_cast<Operations::ScratchPolicy>(i);
+        total += gemm->commandKernel->scratchSpaceRequired(policy, runtimeArgs);
+    }
+    return total;
 }
 
 CommandArguments createCommandArguments(std::shared_ptr<GemmKernel>        gemm,
@@ -622,23 +636,53 @@ rocblaslt_status runGemmKernel(std::shared_ptr<GemmKernel>        gemm,
         }
         return rocblaslt_status_invalid_value;
     }
-
     auto commandArgs = createCommandArguments(gemm, prob, DEFAULT_WGM);
 
-    // Add scratch space
-    if(workSpaceRequired > 0)
+    // Track allocated scratch memory for each policy
+    std::array<void*, static_cast<size_t>(Operations::ScratchPolicy::Count)> scratchPtrs = {};
+    std::array<size_t, static_cast<size_t>(Operations::ScratchPolicy::Count)> scratchSizes = {};
+
+    if(gemm->params->streamK)
     {
-        commandArgs.setArgument(
-            gemm->tagScratch, ArgumentType::Value, static_cast<unsigned char*>(prob.workspace));
+        auto runtimeArgs = commandArgs.runtimeArguments();
+        for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
+        {
+            auto policy = static_cast<Operations::ScratchPolicy>(i);
+            scratchSizes[i] = gemm->commandKernel->scratchSpaceRequired(policy, runtimeArgs);
+            if(scratchSizes[i] > 0)
+            {
+                commandArgs.setArgument(
+                    gemm->tagScratch.at(policy), ArgumentType::Value,
+                    static_cast<unsigned char*>(scratchPtrs[i]));
+            }
+        }
     }
 
     auto runtimeArgs = commandArgs.runtimeArguments();
 
     if(!gemm->commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error))
     {
+        // Free allocated scratch memory before returning
+        for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
+        {
+            if(scratchPtrs[i] != nullptr)
+            {
+                AssertFatal(hipFree(scratchPtrs[i]), "Failed to free scratch memory" + ShowValue(i));
+            }
+        }
         return rocblaslt_status_invalid_value;
     }
 
     gemm->commandKernel->launchKernel(runtimeArgs, prob.stream);
+
+    // Free allocated scratch memory after kernel completes
+    for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
+    {
+        if(scratchPtrs[i] != nullptr)
+        {
+            AssertFatal(hipFree(scratchPtrs[i]), "Failed to free scratch memory" + ShowValue(i));
+        }
+    }
+
     return rocblaslt_status_success;
 }
