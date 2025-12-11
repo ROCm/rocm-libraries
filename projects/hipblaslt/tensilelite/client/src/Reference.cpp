@@ -33,7 +33,7 @@
 #include <cstddef>
 #include <omp.h>
 
-#define MAX_OMP_THREADS 64
+#define MAX_OMP_THREADS 1
 
 namespace TensileLite
 {

@@ -53,7 +53,7 @@ def CPUThreadCount(enable=True):
             # is actually 64, but some handles are needed for accounting).
             cpu_count = min(os.cpu_count(), 61)
         else:
-            cpu_count = len(os.sched_getaffinity(0))
+            cpu_count = 1
         cpuThreads = globalParameters["CpuThreads"]
         if cpuThreads == -1:
             return cpu_count
