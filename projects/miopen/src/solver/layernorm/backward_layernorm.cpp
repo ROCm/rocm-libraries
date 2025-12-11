@@ -54,12 +54,23 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
         get_reqd_work_item_cnt(context, PerformanceConfigLayernorm::max_parallel_local_size);
 
     {
-        size_t xlocalsize = problem.stride <= config.local_size
-                                ? config.local_size / (1 << mloLg2(problem.stride))
-                                : config.local_size;
-        size_t xgridsize  = problem.outer_size * xlocalsize;
-        size_t ylocalsize = problem.stride <= config.local_size ? problem.stride : 1;
-        size_t ygridsize  = problem.stride;
+        size_t xlocalsize, xgridsize, ylocalsize, ygridsize;
+        if(config.separate_stride)
+        {
+            xlocalsize = problem.stride <= config.local_size && config.stride_in_local_size
+                                    ? config.local_size >> mloLg2(problem.stride)
+                                    : config.local_size;
+            xgridsize  = problem.outer_size * xlocalsize;
+            ylocalsize = problem.stride <= config.local_size && config.stride_in_local_size ? problem.stride : 1;
+            ygridsize  = problem.stride;
+        }
+        else
+        {
+            xlocalsize = config.local_size;
+            xgridsize = problem.outer_size * problem.stride * xlocalsize;
+            ylocalsize = 1;
+            ygridsize = 1;
+        }
         size_t zlocalsize = 1;
         size_t zgridsize  = 1;
 
@@ -76,10 +87,11 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
             {"OUTER_SIZE", problem.outer_size},
             {"INNER_SIZE", problem.inner_size},
             {"STRIDE", problem.stride},
-            {"LOCAL_SIZE", config.local_size},
+            {"LOCAL_SIZE_X", xlocalsize},
+            {"LOCAL_SIZE_Y", ylocalsize},
             {"MODE", mode},
-            {"EPSILON", 0},
             {"VECTORIZED", config.vectorized},
+            {"SEPARATE_STRIDE", config.separate_stride},
             {"PARALLEL_SIZE", 1},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
@@ -129,10 +141,11 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                 {"INNER_SIZE", problem.inner_size},
                 {"STRIDE", problem.stride},
                 {"PARALLEL_SIZE", parallelism_size},
-                {"LOCAL_SIZE", config.local_size},
+                {"LOCAL_SIZE_X", xlocalsize},
+                {"LOCAL_SIZE_Y", ylocalsize},
                 {"MODE", mode},
-                {"EPSILON", 0},
                 {"VECTORIZED", config.vectorized},
+                {"SEPARATE_STRIDE", config.separate_stride},
                 {"MIOPEN_ELEMENTWISE_AFFINE", 0},
                 {"MIOPEN_WEIGHT_BIAS", 1},
                 {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},
@@ -176,10 +189,11 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                 {"INNER_SIZE", problem.inner_size},
                 {"STRIDE", problem.stride},
                 {"PARALLEL_SIZE", parallelism_size},
-                {"LOCAL_SIZE", config.local_size},
+                {"LOCAL_SIZE_X", xlocalsize},
+                {"LOCAL_SIZE_Y", ylocalsize},
                 {"MODE", mode},
-                {"EPSILON", 0},
                 {"VECTORIZED", config.vectorized},
+                {"SEPARATE_STRIDE", config.separate_stride},
                 {"MIOPEN_ELEMENTWISE_AFFINE", 0},
                 {"MIOPEN_WEIGHT_BIAS", 1},
                 {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},
@@ -224,10 +238,11 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
             {"INNER_SIZE", problem.inner_size},
             {"STRIDE", problem.stride},
             {"PARALLEL_SIZE", 1},
-            {"LOCAL_SIZE", config.local_size},
+            {"LOCAL_SIZE_X", xlocalsize},
+            {"LOCAL_SIZE_Y", ylocalsize},
             {"MODE", mode},
-            {"EPSILON", 0},
             {"VECTORIZED", config.vectorized},
+            {"SEPARATE_STRIDE", config.separate_stride},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
         };

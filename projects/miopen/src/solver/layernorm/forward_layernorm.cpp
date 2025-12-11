@@ -53,12 +53,23 @@ ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
         auto mode      = problem.GetMode();
         auto data_type = miopen::GetDataType(problem.GetXDesc().GetType());
 
-        size_t xlocalsize = problem.stride <= config.local_size
-                                ? config.local_size / (1 << mloLg2(problem.stride))
-                                : config.local_size;
-        size_t xgridsize  = problem.outer_size * xlocalsize;
-        size_t ylocalsize = problem.stride <= config.local_size ? problem.stride : 1;
-        size_t ygridsize  = problem.stride;
+        size_t xlocalsize, xgridsize, ylocalsize, ygridsize;
+        if(config.separate_stride)
+        {
+            xlocalsize = problem.stride <= config.local_size && config.stride_in_local_size
+                                    ? config.local_size >> mloLg2(problem.stride)
+                                    : config.local_size;
+            xgridsize  = problem.outer_size * xlocalsize;
+            ylocalsize = problem.stride <= config.local_size && config.stride_in_local_size ? problem.stride : 1;
+            ygridsize  = problem.stride;
+        }
+        else
+        {
+            xlocalsize = config.local_size;
+            xgridsize = problem.outer_size * problem.stride * xlocalsize;
+            ylocalsize = 1;
+            ygridsize = 1;
+        }
         size_t zlocalsize = 1;
         size_t zgridsize  = 1;
 
@@ -76,10 +87,11 @@ ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
             {"INNER_SIZE", problem.inner_size},
             {"STRIDE", problem.stride},
             {"PARALLEL_SIZE", 1},
-            {"LOCAL_SIZE", config.local_size},
+            {"LOCAL_SIZE_X", xlocalsize},
+            {"LOCAL_SIZE_Y", ylocalsize},
             {"MODE", mode},
-            {"EPSILON", static_cast<float>(problem.GetEpsilon())},
             {"VECTORIZED", config.vectorized},
+            {"SEPARATE_STRIDE", config.separate_stride},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
         };
@@ -107,7 +119,8 @@ ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
                    params.bias,
                    params.y,
                    params.mean,
-                   params.rstd);
+                   params.rstd,
+                   params.epsilon);
         };
     };
 

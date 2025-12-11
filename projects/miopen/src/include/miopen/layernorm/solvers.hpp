@@ -49,16 +49,18 @@ struct PerformanceConfigLayernorm : PerfConfigBase<PerformanceConfigLayernorm>
 {
     int local_size;
     bool vectorized;
+    bool separate_stride;
+    bool stride_in_local_size;
     bool initialized = false;
-    PerformanceConfigLayernorm(int _local_size, bool _vectorized)
-        : local_size(_local_size), vectorized(_vectorized)
+    PerformanceConfigLayernorm(int _local_size, bool _vectorized, bool _separate_stride, bool _stride_in_local_size)
+        : local_size(_local_size), vectorized(_vectorized), separate_stride(_separate_stride), stride_in_local_size(_stride_in_local_size)
     {
     }
-    PerformanceConfigLayernorm() : PerformanceConfigLayernorm(start_local_size, start_vectorized)
+    PerformanceConfigLayernorm() : PerformanceConfigLayernorm(start_local_size, start_vectorized, start_separate_stride, start_stride_in_local_size)
     {
     }
     PerformanceConfigLayernorm(bool)
-        : PerformanceConfigLayernorm(start_local_size, start_vectorized)
+        : PerformanceConfigLayernorm(start_local_size, start_vectorized, start_separate_stride, start_stride_in_local_size)
     {
     }
     void HeuristicInit(const miopen::layernorm::ProblemDescription& problem);
@@ -72,6 +74,8 @@ struct PerformanceConfigLayernorm : PerfConfigBase<PerformanceConfigLayernorm>
     {
         f(s.local_size, "local_size");
         f(s.vectorized, "vectorized");
+        f(s.separate_stride, "separate_stride");
+        f(s.stride_in_local_size, "stride_in_local_size");
     }
     bool operator==(const PerformanceConfigLayernorm& other) const;
 
@@ -100,6 +104,10 @@ public:
         }
     };
     static constexpr auto start_vectorized = false;
+    static constexpr auto default_separate_stride = false;
+    static constexpr auto start_separate_stride = false;
+    static constexpr auto default_stride_in_local_size = true;
+    static constexpr auto start_stride_in_local_size = false;
 
 private:
     bool CheckParallelKernelBounds(const ExecutionContext& context,
