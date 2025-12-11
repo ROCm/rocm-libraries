@@ -152,9 +152,9 @@ endif()
 #endif()
 
 # Include sources
-if(HIPBLAS_ENABLE_HIP)
+if(HIPSPARSE_ENABLE_HIP)
   include(rocm/CMakeLists.txt)
-elseif(HIPBLAS_ENABLE_CUDA)
+elseif(HIPSPARSE_ENABLE_CUDA)
   if(CUDA_VERSION VERSION_EQUAL "12.8")
     include(cuda/12.8/CMakeLists.txt)
     message("Building hipsparse-test executable using CUDA_VERSION ${CUDA_VERSION}")
