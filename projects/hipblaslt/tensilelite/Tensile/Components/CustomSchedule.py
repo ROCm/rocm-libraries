@@ -115,7 +115,7 @@ class ScheduleInfo:
         syncCode,
         nglshift,
         nllshift,
-        nglnllZeroDscnt=False,
+        nllZeroDscnt=False,
         mfmaReorder=[],
     ):
         self.numCodePaths = numCodePaths
@@ -124,7 +124,7 @@ class ScheduleInfo:
         self.syncCode = syncCode
         self.nglshift = nglshift  # vmcnt shift for noglobalload loop
         self.nllshift = nllshift  # vmcnt shift for nolocalload loop
-        self.nglnllZeroDscnt = nglnllZeroDscnt
+        self.nllZeroDscnt = nllZeroDscnt
         self.mfmaReorder = mfmaReorder
         self.__skipValidation__ = False
 
@@ -324,7 +324,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
                 needIfMacro = True
 
         def nllvmcntHandling(inst, shift0, shift1):
-            if isinstance(inst, SWaitCnt) and (inst.vlcnt != -1 or (inst.dscnt != -1 and opt1.nglnllZeroDscnt)):
+            if isinstance(inst, SWaitCnt) and (inst.vlcnt != -1 or (inst.dscnt != -1 and opt1.nllZeroDscnt)):
                 macro.add(ValueIf("\\useGR == 1 && \\usePLR == 1")) # in main loop
                 macro.addComment0("vmcnt used in main loop")
                 macro.add(inst)
@@ -339,7 +339,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
                 if inst.vlcnt != -1:
                     macro.addComment0("vmcnt used in nll, applying %u shift"%shift1)
                     instModified.vlcnt = max(0, instModified.vlcnt - shift1)
-                if (inst.dscnt != -1 and opt1.nglnllZeroDscnt):
+                if (inst.dscnt != -1 and opt1.nllZeroDscnt):
                     macro.addComment0("setting dscnt = 0 for NLL")
                     instModified.dscnt = 0
                 macro.add(instModified)
@@ -1399,7 +1399,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     kernel["SwapGlobalReadOrder"] = False
     numMfma = 120
-    nglnllZeroDscnt = False
+    nllZeroDscnt = False
     syncs = SyncSchedule()
     gr_inc_step = 0
 
@@ -1488,7 +1488,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
         lrb1   = [78,80,82,84,86,88,90,92,94,96,98,100,102,104,106,108,110,112,114,116] # 20 loads
 
         gr_inc_step = 1
-        nglnllZeroDscnt = True
+        nllZeroDscnt = True
     else:
         return False, None
 
@@ -1511,7 +1511,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     }
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
-    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift, nglnllZeroDscnt)
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift, nllZeroDscnt)
 
     return True, opt1
 

@@ -111,7 +111,7 @@ class TestValidateNglAndNll(unittest.TestCase):
 
     def test_lr0_swait_depends_on_lr1_realistic(self, useZeroDscnt = False):
         """
-        A more realistic version of `test_lr0_swait_depends_on_lr1`. GRs are now present. Optionally checks zero dscnt option for NGL/NLL
+        A more realistic version of `test_lr0_swait_depends_on_lr1`. GRs are now present. Optionally checks zero dscnt option for NLL
         """
         self.kernel = create_base_kernel()
         self.kernel["MIWaveTileA"] = 4
@@ -162,6 +162,6 @@ class TestValidateNglAndNll(unittest.TestCase):
 
     def test_lr0_swait_depends_on_lr1_realistic_zero_dscnt(self):
         """
-        A more realistic version of `test_lr0_swait_depends_on_lr1`. GRs are now present also checks zero dscnt option for NGL/NLL
+        A more realistic version of `test_lr0_swait_depends_on_lr1`. GRs are now present also checks zero dscnt option for NLL
         """
         self.test_lr0_swait_depends_on_lr1_realistic(useZeroDscnt = True)
