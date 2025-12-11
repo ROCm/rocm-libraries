@@ -310,8 +310,6 @@ void testing_csrilu02(Arguments argus)
         unit_check_general(1, 1, 1, &position_gold, &hposition_1);
         unit_check_general(1, 1, 1, &position_gold, &hposition_2);
 
-        std::cout << "position_gold: " << position_gold << " hposition_1: " << hposition_1 << " hposition_2: " << hposition_2 << std::endl;
-
         if(hposition_1 != -1)
         {
             verify_hipsparse_status_zero_pivot(pivot_status_1,
@@ -325,23 +323,6 @@ void testing_csrilu02(Arguments argus)
                                                "expected HIPSPARSE_STATUS_ZERO_PIVOT");
             return;
         }
-
-        // std::cout << "result1" << std::endl;
-        // for(size_t i = 0; i < result1.size(); i++)
-        // {
-        //     std::cout << result1[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
-
-        // std::cout << "hcsr_val" << std::endl;
-        // for(size_t i = 0; i < hcsr_val.size(); i++)
-        // {
-        //     std::cout << hcsr_val[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
-
-
-
 
 #if defined(__HIP_PLATFORM_AMD__)
         unit_check_general(1, nnz, 1, hcsr_val.data(), result1.data());

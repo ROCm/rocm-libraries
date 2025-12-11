@@ -3827,7 +3827,7 @@ int host_csrilu0(int                  m,
         {
             // set diagonal pointer to diagonal element
             diag_offset[ai] = j;
-            
+
             if(boost)
             {
                 if(testing_abs(val[j]) <= boost_tol)
