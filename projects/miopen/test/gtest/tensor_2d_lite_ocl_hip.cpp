@@ -113,8 +113,8 @@ protected:
             }
         }
 
-        long max_num_wg = 4096;
-        num_wg          = num_wg > max_num_wg ? max_num_wg : num_wg;
+        long max_num_wg{4096};
+        num_wg = num_wg > max_num_wg ? max_num_wg : num_wg;
 
         auto len     = tensorsConfig.aclens[2];
         auto RD_BLCK = (len % 4 == 0) ? 4 : (len % 2 == 0) ? 2 : 1;
@@ -171,9 +171,9 @@ protected:
             alpha0,
             alpha1,
             beta,
-            uint64_t(0),
-            uint64_t(0),
-            uint64_t(0),
+            0L,
+            0L,
+            0L,
             total_work,
             total_work2,
             use_beta,
@@ -194,9 +194,9 @@ protected:
                     alpha0,
                     alpha1,
                     beta,
-                    uint64_t(0),
-                    uint64_t(0),
-                    uint64_t(0),
+                    0L,
+                    0L,
+                    0L,
                     total_work,
                     total_work2,
                     use_beta,
