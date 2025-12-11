@@ -1558,7 +1558,7 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     optSchedule = {
     'SYNC': [[-1, 6, 22, 22, 27,27, 41, 41]], 
-    'LRA0': [[0,1, 2, 3, 4, 5, 6]],
+    'LRA0': [[0,1, 2,6,6,7,8]],
     'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 3, 4]],
     'LRB0': [[7, 8, 9, 10]],
     'GRIncB': [[ 4, 4, 4, 5, 5, 5,11,12,13]],
@@ -1575,8 +1575,8 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
 
     syncCode = [
         SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=3 newLW=0 newLR=3 for iteration == 0"),
-        SWaitCnt(dscnt=6, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
-        SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment=""), # This is for GRA
+        SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
+        SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment=""), # This is for GRA
         SBarrier(comment=""),
         SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
         SBarrier(comment=""),
