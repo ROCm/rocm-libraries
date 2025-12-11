@@ -65,8 +65,6 @@ namespace GEMMTests
 
     TEST_P(StreamKMultipleFixupsTestGPU, GPU_BasicGEMMFP16)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
-
         GEMMProblem gemm;
 
         hipDeviceProp_t deviceProperties;
@@ -104,8 +102,6 @@ namespace GEMMTests
 
     TEST_P(StreamKWGMTestGPU, GPU_BasicGEMMStreamKWorkgroupMapping)
     {
-        REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs, GPUCapability::HasXCC);
-
         GEMMProblem gemm;
 
         hipDeviceProp_t deviceProperties;
@@ -130,8 +126,6 @@ namespace GEMMTests
 
     TEST_P(StreamKTestGPU, GPU_BasicGEMM)
     {
-        REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs, GPUCapability::HasXCC);
-
         auto [typeAB, unrollK, loadPathA, loadPathB, storeLDSD, mode, betaZero]
             = std::get<1>(GetParam());
 
