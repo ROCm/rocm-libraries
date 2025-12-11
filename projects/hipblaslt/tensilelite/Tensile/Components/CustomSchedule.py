@@ -1565,8 +1565,8 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     'GRA': [[22,22 ,23, 24, 25, 25, 26, 27, 28, 28, 29, 29,30, 30]], # I don't know why GRA at 33 results in a mismatch.
     'LRSA': [[26]],
     'LRSB': [[26]],
-    'GRB': [[34, 37, 37, 39, 39,48,49,54]],
-    'LWSA': [[39]],
+    'GRB': [[34, 37, 37, 39, 39,40,53,54]],
+    'LWSA': [[54]],
     'LWSB': [[54]],
     'LRA1': [[42, 43, 44, 45, 46, 47, 48]],
     'LRB1': [[ 50, 51, 52, 54]],
@@ -1580,7 +1580,7 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
         SBarrier(comment=""),
         SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
         SBarrier(comment=""),
-        SWaitCnt(dscnt=-1, vlcnt=8, vscnt=-1, comment="wait for previous set of global reads"),
+        SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="wait for previous set of global reads"),
         SBarrier(comment="")
     ]
     numMfma = 56
