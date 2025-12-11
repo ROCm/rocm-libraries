@@ -29,9 +29,9 @@ endfunction()
 # CMAKE_*_COMPILER_PATH, system PATH, CMake built-in common locations, and finally
 # find_program(PATHS) which is set to LLVM_TOOL_PATHS in this file. All folders are searched first
 # for the first program name, and this then repeats for each name provided in find_program(NAMES).
-set(LLVM_TOOL_PATHS /usr/bin)
-get_filename_component(COMPILER_PATH "${CMAKE_CXX_COMPILER}" PATH)
-list(APPEND LLVM_TOOL_PATHS ${COMPILER_PATH})
+if(NOT WIN32)
+    set(LLVM_TOOL_PATHS /usr/bin)
+endif()
 
 # Set up LLVM_TOOL_HINTS if LLVM_TOOLS_SEARCH_PREFIX is defined
 if(DEFINED LLVM_TOOLS_SEARCH_PREFIX)
@@ -70,32 +70,56 @@ function(checkToolVersion TOOL_BINARY TOOL_NAME EXPECTED_VERSION VERSION_REGEX
     endif()
 endfunction()
 
-# Finds and checks clang-format
-function(findAndCheckClangFormat)
+# Common helper function to find and check a tool. This function will search first for a file named
+# ${TOOL_NAME}-${EXPECTED_VERSION} and then for the bare ${TOOL_NAME}. Folders based on a provided
+# LLVM_TOOLS_SEARCH_PREFIX will be searched as well as the standard CMake paths used by
+# find_program().
+# ~~~
+# Parameters:
+#   OUTPUT_VAR - Variable name to store the found tool path
+#   TOOL_NAME - The single name of the single tool to search for (e.g., "clang-format")
+#   EXPECTED_VERSION - Expected version to search for (typically assumed to be the tool's major version number)
+#   VERSION_REGEX - Regex to extract the relevant portion to match EXPECTED_VERSION frmo the tool's --version output
+#   ERROR_LEVEL - "FATAL_ERROR" or "WARNING" for the not found message
+# ~~~
+function(findAndCheckTool OUTPUT_VAR TOOL_NAME EXPECTED_VERSION VERSION_REGEX ERROR_LEVEL)
     # Build version-specific paths if LLVM_TOOL_HINTS is set
     set(SEARCH_HINTS)
     if(DEFINED LLVM_TOOL_HINTS)
         foreach(HINT ${LLVM_TOOL_HINTS})
-            get_versioned_search_paths(VERSIONED_HINTS "${HINT}" "${EXPECTED_CLANG_FORMAT_VERSION}")
+            get_versioned_search_paths(VERSIONED_HINTS "${HINT}" "${EXPECTED_VERSION}")
             list(APPEND SEARCH_HINTS ${VERSIONED_HINTS})
         endforeach()
     endif()
 
     find_program(
-        CLANG_FORMAT_BINARY NAMES clang-format-${EXPECTED_CLANG_FORMAT_VERSION} clang-format
-        HINTS ${SEARCH_HINTS} PATHS ${LLVM_TOOL_PATHS}
+        ${OUTPUT_VAR} NAMES ${TOOL_NAME}-${EXPECTED_VERSION} ${TOOL_NAME} HINTS ${SEARCH_HINTS}
+        PATHS ${LLVM_TOOL_PATHS}
     )
+    unset(SEARCH_HINTS)
 
-    if(NOT CLANG_FORMAT_BINARY)
+    if(NOT ${OUTPUT_VAR})
         message(
-            FATAL_ERROR "clang-format not found in PATH, /opt/rocm/llvm/bin, or compiler directory"
+            ${ERROR_LEVEL}
+            "${TOOL_NAME} not found in PATH or LLVM_TOOLS_SEARCH_PREFIX derived paths: ${SEARCH_HINTS}"
         )
         return()
     endif()
 
     checktoolversion(
-        ${CLANG_FORMAT_BINARY} "clang-format" ${EXPECTED_CLANG_FORMAT_VERSION}
-        "clang-format version ([0-9]+)\\." "Found clang-format version {VERSION} at {PATH}"
+        ${${OUTPUT_VAR}} "${TOOL_NAME}" ${EXPECTED_VERSION} "${VERSION_REGEX}"
+        "Found ${TOOL_NAME} version {VERSION} at {PATH}"
+    )
+
+    # Export to parent scope
+    set(${OUTPUT_VAR} ${${OUTPUT_VAR}} PARENT_SCOPE)
+endfunction()
+
+# Finds and checks clang-format
+function(findAndCheckClangFormat)
+    findandchecktool(
+        CLANG_FORMAT_BINARY "clang-format" ${EXPECTED_CLANG_FORMAT_VERSION}
+        "clang-format version ([0-9]+)\\." FATAL_ERROR
     )
 
     # Export to parent scope
@@ -104,30 +128,9 @@ endfunction()
 
 # Finds and checks clang-tidy
 function(findAndCheckClangTidy)
-    # Build version-specific paths if LLVM_TOOL_HINTS is set
-    set(SEARCH_HINTS)
-    if(DEFINED LLVM_TOOL_HINTS)
-        foreach(HINT ${LLVM_TOOL_HINTS})
-            get_versioned_search_paths(VERSIONED_HINTS "${HINT}" "${EXPECTED_CLANG_TIDY_VERSION}")
-            list(APPEND SEARCH_HINTS ${VERSIONED_HINTS})
-        endforeach()
-    endif()
-
-    find_program(
-        CLANG_TIDY_EXE NAMES clang-tidy-${EXPECTED_CLANG_TIDY_VERSION} clang-tidy
-        HINTS ${SEARCH_HINTS} PATHS ${LLVM_TOOL_PATHS}
-    )
-
-    if(NOT CLANG_TIDY_EXE)
-        message(
-            FATAL_ERROR "clang-tidy not found in PATH, /opt/rocm/llvm/bin, or compiler directory"
-        )
-        return()
-    endif()
-
-    checktoolversion(
-        ${CLANG_TIDY_EXE} "clang-tidy" ${EXPECTED_CLANG_TIDY_VERSION} "version ([0-9]+)\\."
-        "Found clang-tidy version {VERSION} at {PATH}"
+    findandchecktool(
+        CLANG_TIDY_EXE "clang-tidy" ${EXPECTED_CLANG_TIDY_VERSION} "version ([0-9]+)\\."
+        FATAL_ERROR
     )
 
     # Export to parent scope
@@ -136,15 +139,6 @@ endfunction()
 
 # Finds and checks LLVM tools
 function(findAndCheckLlvmTools)
-    # Build version-specific paths if LLVM_TOOL_HINTS is set
-    set(SEARCH_HINTS)
-    if(DEFINED LLVM_TOOL_HINTS)
-        foreach(HINT ${LLVM_TOOL_HINTS})
-            get_versioned_search_paths(VERSIONED_HINTS "${HINT}" "${EXPECTED_LLVM_VERSION}")
-            list(APPEND SEARCH_HINTS ${VERSIONED_HINTS})
-        endforeach()
-    endif()
-
     # Define the tools we need
     set(LLVM_TOOLS llvm-profdata llvm-cov llvm-cxxfilt)
 
@@ -152,21 +146,9 @@ function(findAndCheckLlvmTools)
         string(TOUPPER ${TOOL} TOOL_UPPER)
         string(REPLACE "-" "_" TOOL_VAR ${TOOL_UPPER})
 
-        find_program(
-            ${TOOL_VAR}_BINARY NAMES ${TOOL}-${EXPECTED_LLVM_VERSION} ${TOOL} HINTS ${SEARCH_HINTS}
-            PATHS ${LLVM_TOOL_PATHS}
-        )
-
-        if(NOT ${TOOL_VAR}_BINARY)
-            message(
-                FATAL_ERROR "${TOOL} not found in PATH, /opt/rocm/llvm/bin, or compiler directory"
-            )
-            return()
-        endif()
-
-        checktoolversion(
-            ${${TOOL_VAR}_BINARY} ${TOOL} ${EXPECTED_LLVM_VERSION} "LLVM version ([0-9]+)\\."
-            "Found ${TOOL} version {VERSION} at {PATH}"
+        findandchecktool(
+            ${TOOL_VAR}_BINARY "${TOOL}" ${EXPECTED_LLVM_VERSION} "LLVM version ([0-9]+)\\."
+            FATAL_ERROR
         )
 
         # Export to parent scope
@@ -176,34 +158,16 @@ endfunction()
 
 # Finds and checks llvm-symbolizer
 function(findAndCheckLlvmSymbolizer)
-    # Build version-specific paths if LLVM_TOOL_HINTS is set
-    set(SEARCH_HINTS)
-    if(DEFINED LLVM_TOOL_HINTS)
-        foreach(HINT ${LLVM_TOOL_HINTS})
-            get_versioned_search_paths(VERSIONED_HINTS "${HINT}" "${EXPECTED_LLVM_VERSION}")
-            list(APPEND SEARCH_HINTS ${VERSIONED_HINTS})
-        endforeach()
-    endif()
-
-    find_program(
-        LLVM_SYMBOLIZER_EXE NAMES llvm-symbolizer-${EXPECTED_LLVM_VERSION} llvm-symbolizer
-        HINTS ${SEARCH_HINTS} PATHS ${LLVM_TOOL_PATHS}
+    findandchecktool(
+        LLVM_SYMBOLIZER_EXE "llvm-symbolizer" ${EXPECTED_LLVM_VERSION} "LLVM version ([0-9]+)\\."
+        WARNING
     )
 
-    if(NOT LLVM_SYMBOLIZER_EXE)
-        message(
-            WARNING
-                "llvm-symbolizer not found in PATH, /opt/rocm/llvm/bin, or compiler directory.  ASAN tests will be missing symbolized stack traces."
-        )
-        return()
+    if(LLVM_SYMBOLIZER_EXE)
+        set(CMAKE_SYMBOLIZER ${LLVM_SYMBOLIZER_EXE} PARENT_SCOPE)
+        # Export to parent scope
+        set(LLVM_SYMBOLIZER_EXE ${LLVM_SYMBOLIZER_EXE} PARENT_SCOPE)
+    else()
+        message(WARNING "ASAN tests will be missing symbolized stack traces.")
     endif()
-
-    checktoolversion(
-        ${LLVM_SYMBOLIZER_EXE} "llvm-symbolizer" ${EXPECTED_LLVM_VERSION}
-        "LLVM version ([0-9]+)\\." "Found llvm-symbolizer version {VERSION} at {PATH}"
-    )
-
-    set(CMAKE_SYMBOLIZER ${LLVM_SYMBOLIZER_EXE} PARENT_SCOPE)
-    # Export to parent scope
-    set(LLVM_SYMBOLIZER_EXE ${LLVM_SYMBOLIZER_EXE} PARENT_SCOPE)
 endfunction()
