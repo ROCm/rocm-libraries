@@ -415,7 +415,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         return {scalar_type, lds_is_real, lds_linear, direct_load_to_reg};
     }
 
-    virtual TemplateList device_pp_templates()
+    TemplateList device_pp_templates()
     {
         TemplateList tpls;
         tpls.append(scalar_type);

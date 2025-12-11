@@ -687,6 +687,68 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return f;
     }
 
+    TemplateList device_pp_call_templates()
+    {
+        return {scalar_type, lds_is_real, lds_linear, direct_load_to_reg};
+    }
+
+    TemplateList device_pp_templates()
+    {
+        TemplateList tpls;
+        tpls.append(scalar_type);
+        tpls.append(lds_is_real);
+        tpls.append(lds_linear);
+        tpls.append(direct_load_to_reg);
+        return tpls;
+    }
+
+    std::vector<Expression> device_pp_call_arguments(unsigned int call_iter)
+    {
+        return {R,
+                lds_real,
+                lds_complex,
+                stride_lds_pp,
+                call_iter ? Expression{offset_lds_pp
+                                       + call_iter * stride_lds_pp * transforms_per_block_pp}
+                          : Expression{offset_lds_pp},
+                Literal{"true"}};
+    }
+
+    ArgumentList device_pp_arguments()
+    {
+        ArgumentList args{R, lds_real, lds_complex, stride_lds, offset_lds, write};
+        return args;
+    }
+
+    Function generate_pp_device_function()
+    {
+        std::string function_name = "forward_partial_pass_length" + std::to_string(pp_factors_prod)
+                                    + "_" + tiling_name() + "_device";
+
+        Function f{function_name};
+        f.arguments = device_pp_arguments();
+        f.templates = device_pp_templates();
+        f.qualifier = "__device__";
+        if(pp_factors_prod == 1)
+            return f;
+
+        StatementList& body = f.body;
+
+        for(unsigned int npass = 0; npass < factors_pp.size(); ++npass)
+        {
+            unsigned int pass_width = factors_pp[npass];
+            float pass_height = static_cast<float>(length) / pass_width / threads_per_transform;
+
+            auto butterfly = std::mem_fn(&StockhamKernel::butterfly_generator);
+            body += add_work(std::bind(butterfly, this, _1, _2, _3, _4, _5),
+                             pass_width,
+                             pass_height,
+                             ThreadGuardMode::NO_GUARD);
+        }
+
+        return f;
+    }
+
     Function generate_local_transpose_pp_function()
     {
         std::string function_name
@@ -730,10 +792,12 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
     {
         StatementList stmts;
 
-        stmts += Declaration{stride_lds_pp, Literal{1}};
-
         unsigned int width  = factors_pp[0];
         unsigned int height = length / width / threads_per_transform;
+
+        stmts += LineBreak{};
+        stmts += CommentLines{"partial-pass offsets"};
+        stmts += Declaration{stride_lds_pp, Literal{1}};
         stmts += Declaration{offset_lds_pp, thread_id * Literal{width * height}};
 
         auto pre_post_lds_tmpl = device_lds_reg_inout_device_call_templates();
@@ -741,28 +805,33 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         pre_post_lds_tmpl.set_value(stride_type.name, "lds_linear ? SB_UNIT : SB_NONUNIT");
 
         StatementList preLoad;
+        stmts += LineBreak{};
+        stmts += CommentLines{"call a pre-load from lds to registers"};
         preLoad += Call{"lds_to_reg_input_partial_pass_length" + std::to_string(length) + "_device",
                         pre_post_lds_tmpl,
                         pre_post_lds_args};
         stmts += preLoad;
 
-        for(unsigned int npass = 0; npass < factors_pp.size(); ++npass)
-        {
-            unsigned int pass_width = factors_pp[npass];
-            float pass_height = static_cast<float>(length) / pass_width / threads_per_transform;
+        auto device_tmpl = device_pp_call_templates();
+        auto device_args = device_pp_call_arguments(0);
 
-            auto butterfly = std::mem_fn(&StockhamKernel::butterfly_generator);
-            stmts += add_work(std::bind(butterfly, this, _1, _2, _3, _4, _5),
-                              pass_width,
-                              pass_height,
-                              ThreadGuardMode::NO_GUARD);
-        }
+        StatementList device;
+        stmts += LineBreak{};
+        stmts += CommentLines{"partial transform in off-dimension"};
+        device += Call{"forward_partial_pass_length" + std::to_string(pp_factors_prod) + "_"
+                           + tiling_name() + "_device",
+                       device_tmpl,
+                       device_args};
+        device += LineBreak{};
+        stmts += device;
 
         width  = factors_pp.back();
         height = length / width / threads_per_transform;
         stmts += Assign{offset_lds_pp, thread_id * Literal{width * height}};
 
         StatementList postStore;
+        stmts += LineBreak{};
+        stmts += CommentLines{"call a post-store from registers to lds"};
         postStore
             += Call{"lds_from_reg_output_partial_pass_length" + std::to_string(length) + "_device",
                     pre_post_lds_tmpl,

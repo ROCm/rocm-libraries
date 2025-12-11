@@ -379,7 +379,8 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
                 kernel_pp->generate_lds_from_reg_partial_pass_output_function());
             local_transpose_pp
                 = std::make_unique<Function>(kernel_pp->generate_local_transpose_pp_function());
-            device = std::make_unique<Function>(kernel_pp->generate_device_function());
+            device    = std::make_unique<Function>(kernel_pp->generate_device_function());
+            device_pp = std::make_unique<Function>(kernel_pp->generate_pp_device_function());
             break;
         }
         default:
@@ -472,8 +473,7 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
         src += lds2reg_pp_steps->render();
         src += reg2lds_pp_steps->render();
 
-        if(ppType == PPT_SBRR)
-            src += device_pp->render();
+        src += device_pp->render();
 
         if(ppType == PPT_SBCC)
             src += local_transpose_pp->render();
