@@ -5,7 +5,7 @@
 #include <miopen/miopen.h>
 
 #include <hipdnn_sdk/plugin/PluginException.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnEnginePluginHandle.hpp"
 #include "MiopenHandleFactory.hpp"

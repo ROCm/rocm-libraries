@@ -3,8 +3,8 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
 #include "HipdnnEnginePluginHandle.hpp"
@@ -35,7 +35,7 @@ protected:
 TEST(TestConvBwdParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid convolution graph
-    auto builder = hipdnn_sdk::test_utilities::createValidConvBwdGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
@@ -65,7 +65,7 @@ TEST(TestConvBwdParams, ThrowsOnAssymetricPadding)
     std::vector<int64_t> convPostPadding = {1, 1};
     std::vector<int64_t> convStrides = {1, 1};
     std::vector<int64_t> convDilation = {1, 1};
-    auto builder = hipdnn_sdk::test_utilities::createValidConvBwdGraph(dxDims,
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph(dxDims,
                                                                        dxStrides,
                                                                        wDims,
                                                                        wStrides,
@@ -98,7 +98,7 @@ TEST(TestConvBwdParams, ThrowsOnInvalidPostPaddingVectorSize)
     std::vector<int64_t> convPostPadding = {0, 0, 0}; // Invalid post padding vector size
     std::vector<int64_t> convStrides = {1, 1};
     std::vector<int64_t> convDilation = {1, 1};
-    auto builder = hipdnn_sdk::test_utilities::createValidConvBwdGraph(dxDims,
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph(dxDims,
                                                                        dxStrides,
                                                                        wDims,
                                                                        wStrides,
@@ -132,7 +132,7 @@ TEST(TestConvBwdParams, ThrowsOnInvalidPaddingVectorsSize)
     std::vector<int64_t> convPostPadding = {0, 0, 0}; // Invalid post padding vector size
     std::vector<int64_t> convStrides = {1, 1};
     std::vector<int64_t> convDilation = {1, 1};
-    auto builder = hipdnn_sdk::test_utilities::createValidConvBwdGraph(dxDims,
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph(dxDims,
                                                                        dxStrides,
                                                                        wDims,
                                                                        wStrides,
@@ -165,7 +165,7 @@ TEST(TestConvBwdParams, ThrowsOnInvalidStrideVectorSize)
     std::vector<int64_t> convPostPadding = {0, 0};
     std::vector<int64_t> convStrides = {1}; // Invalid strides vector size
     std::vector<int64_t> convDilation = {1, 1};
-    auto builder = hipdnn_sdk::test_utilities::createValidConvBwdGraph(dxDims,
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph(dxDims,
                                                                        dxStrides,
                                                                        wDims,
                                                                        wStrides,
@@ -198,7 +198,7 @@ TEST(TestConvBwdParams, ThrowsOnInvalidDilationVectorSize)
     std::vector<int64_t> convPostPadding = {0, 0};
     std::vector<int64_t> convStrides = {1, 1};
     std::vector<int64_t> convDilation = {1}; // Invalid dilation vector size
-    auto builder = hipdnn_sdk::test_utilities::createValidConvBwdGraph(dxDims,
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph(dxDims,
                                                                        dxStrides,
                                                                        wDims,
                                                                        wStrides,
@@ -222,7 +222,7 @@ TEST(TestConvBwdParams, ThrowsOnInvalidDilationVectorSize)
 TEST_F(TestGpuConvBwdPlan, CreatesPlanWithValidGraph)
 {
     // Create a valid convolution graph
-    auto builder = hipdnn_sdk::test_utilities::createValidConvBwdGraph();
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
     hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the convolution node and attributes
@@ -250,7 +250,7 @@ TEST_F(TestGpuConvBwdPlan, ThrowsOnInvalidDims)
     std::vector<int64_t> convPostPadding = {0, 0};
     std::vector<int64_t> convStrides = {1, 1};
     std::vector<int64_t> convDilation = {1, 1};
-    auto builder = hipdnn_sdk::test_utilities::createValidConvBwdGraph(dxDims,
+    auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph(dxDims,
                                                                        dxStrides,
                                                                        wDims,
                                                                        wStrides,

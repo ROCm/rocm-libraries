@@ -14,9 +14,9 @@ if(NOT EXISTS "${CMAKE_MATRICES_DIR}")
 else()
     # Copy matrices
     if(NOT CMAKE_MATRICES_DIR STREQUAL "${PROJECT_BINARY_DIR}/matrices")
-    message("Copy matrix files from ${CMAKE_MATRICES_DIR} to ${PROJECT_BINARY_DIR}/matrices")
+        message("Copy matrix files from ${CMAKE_MATRICES_DIR} to ${PROJECT_BINARY_DIR}/matrices")
 
-    file(COPY ${CMAKE_MATRICES_DIR}/ DESTINATION ${PROJECT_BINARY_DIR}/matrices)
+        file(COPY ${CMAKE_MATRICES_DIR}/ DESTINATION ${PROJECT_BINARY_DIR}/matrices)
 
         if(STATUS AND NOT STATUS EQUAL 0)
             message(FATAL_ERROR "Failed to copy matrix .bin files, aborting.")
@@ -151,6 +151,20 @@ endif()
 #    target_include_directories(hipsparse-test PRIVATE "${hipsparse_INCLUDE_DIRS}/hipsparse")
 #endif()
 
+# Include sources
+if(HIPBLAS_ENABLE_HIP)
+  include(rocm/CMakeLists.txt)
+elseif(HIPBLAS_ENABLE_CUDA)
+  if(CUDA_VERSION VERSION_EQUAL "12.8")
+    include(cuda/12.8/CMakeLists.txt)
+    message("Building hipsparse-test executable using CUDA_VERSION ${CUDA_VERSION}")
+  else()
+    message("ERROR: Testing on CUDA_VERSION ${CUDA_VERSION} not supported.")
+  endif()
+endif()
+
+# add_executable(hipsparse-test hipsparse_gtest_main.cpp ${HIPSPARSE_TEST_SOURCES} ${HIPSPARSE_CLIENTS_COMMON})
+
 target_compile_definitions(hipsparse-test PRIVATE GOOGLE_TEST)
 
 target_link_libraries(hipsparse-test PRIVATE
@@ -161,6 +175,9 @@ target_link_libraries(hipsparse-test PRIVATE
 if(HIPSPARSE_ENABLE_OPENMP)
     target_link_libraries(hipsparse-test PRIVATE OpenMP::OpenMP_CXX)
 endif()
+# # Internal common header
+# target_include_directories(hipsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
+# target_include_directories(hipsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 
 if(HIPSPARSE_ENABLE_CUDA)
     target_compile_definitions(hipsparse-test PRIVATE __HIP_PLATFORM_NVIDIA__)
@@ -251,102 +268,11 @@ add_custom_target(hipsparse-common
     DEPENDS "${HIPSPARSE_COMMON}" "${HIPSPARSE_TEMPLATE}" "${HIPSPARSE_CLIENTMATRICES}" "${HIPSPARSE_GENTEST}" "${HIPSPARSE_CONVERT}"
 )
 
-set(HIPSPARSE_TEST_YAMLS test_axpyi.yaml
-                         test_doti.yaml
-                         test_dotci.yaml
-                         test_sctr.yaml
-                         test_roti.yaml
-                         test_gthr.yaml
-                         test_gthrz.yaml
-                         
-                         test_bsrmv.yaml
-                         test_csrmv.yaml
-                         test_bsrsv2.yaml
-                         test_csrsv2.yaml
-                         test_gemvi.yaml
-                         test_hybmv.yaml
-
-                         test_bsrmm.yaml
-                         test_bsrsm2.yaml
-                         test_csrmm.yaml
-                         test_csrsm2.yaml
-                         test_gemmi.yaml
-
-                         test_csric02.yaml
-                         test_csrilu02.yaml
-                         test_bsric02.yaml
-                         test_bsrilu02.yaml
-                         test_gtsv.yaml
-                         test_gtsv2_nopivot.yaml
-                         test_gtsv2_strided_batch.yaml
-                         test_gtsv_interleaved_batch.yaml
-                         test_gpsv_interleaved_batch.yaml
-
-                         test_bsr2csr.yaml
-                         test_coo2csr.yaml
-                         test_csc2dense.yaml
-                         test_csr2bsr.yaml
-                         test_csr2coo.yaml
-                         test_csr2csc.yaml
-                         test_csr2csc_ex2.yaml
-                         test_csr2csr_compress.yaml
-                         test_csr2dense.yaml
-                         test_csr2gebsr.yaml
-                         test_csr2hyb.yaml
-                         test_csru2csr.yaml
-                         test_dense2csc.yaml
-                         test_dense2csr.yaml
-                         test_gebsr2csr.yaml
-                         test_gebsr2gebsc.yaml
-                         test_gebsr2gebsr.yaml
-                         test_hyb2csr.yaml
-                         test_prune_csr2csr.yaml
-                         test_prune_csr2csr_by_percentage.yaml
-                         test_prune_dense2csr.yaml
-                         test_prune_dense2csr_by_percentage.yaml
-                         test_identity.yaml
-                         test_nnz.yaml
-                         test_coosort.yaml
-                         test_cscsort.yaml
-                         test_csrsort.yaml
-
-                         test_axpby.yaml
-                         test_rot.yaml
-                         test_gather.yaml
-                         test_scatter.yaml
-                         test_sddmm_coo_aos.yaml
-                         test_sddmm_coo.yaml
-                         test_sddmm_csc.yaml
-                         test_sddmm_csr.yaml
-                         test_dense_to_sparse_coo.yaml
-                         test_dense_to_sparse_csc.yaml
-                         test_dense_to_sparse_csr.yaml
-                         test_sparse_to_dense_coo.yaml
-                         test_sparse_to_dense_csc.yaml
-                         test_sparse_to_dense_csr.yaml
-                         test_spgemm_csr.yaml
-                         test_spgemmreuse_csr.yaml
-                         test_spmm_batched_coo.yaml
-                         test_spmm_batched_csc.yaml
-                         test_spmm_batched_csr.yaml
-                         test_spmm_coo.yaml
-                         test_spmm_csc.yaml
-                         test_spmm_csr.yaml
-                         test_spmv_coo_aos.yaml
-                         test_spmv_coo.yaml
-                         test_spmv_csr.yaml
-                         test_spmv_sell.yaml
-                         test_spsv_coo.yaml
-                         test_spsv_csr.yaml
-                         test_spsm_coo.yaml
-                         test_spsm_csr.yaml
-                         test_spvv.yaml)
-
 # Prepare testing data
 set(HIPSPARSE_TEST_DATA "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_test.data")
 add_custom_command(OUTPUT "${HIPSPARSE_TEST_DATA}"
-                   COMMAND ${Python3_EXECUTABLE} "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py" -m ${PROJECT_BINARY_DIR}/matrices -I "${PROJECT_SOURCE_DIR}/clients/include" "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_test.yaml" -o "${HIPSPARSE_TEST_DATA}"
-                   DEPENDS "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py" "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse_test.yaml" "${PROJECT_SOURCE_DIR}/clients/include/hipsparse_common.yaml" ${HIPSPARSE_TEST_YAMLS}
+                   COMMAND ${Python3_EXECUTABLE} "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py" -m ${PROJECT_BINARY_DIR}/matrices -I "${PROJECT_SOURCE_DIR}/clients/include" "${HIPSPARSE_TEST_YAML_INCLUDE}" -o "${HIPSPARSE_TEST_DATA}"
+                   DEPENDS "${PROJECT_SOURCE_DIR}/clients/common/hipsparse_gentest.py" "${HIPSPARSE_TEST_YAML_INCLUDE}" "${PROJECT_SOURCE_DIR}/clients/include/hipsparse_common.yaml" ${HIPSPARSE_TEST_YAMLS}
                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 add_custom_target(hipsparse-test-data
   DEPENDS "${HIPSPARSE_TEST_DATA}" )
