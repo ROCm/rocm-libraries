@@ -24,25 +24,23 @@ int main()
 {
     // Host input
     std::vector<float> h_input{0.6f, 0.3f, 0.65f, 0.4f, 0.2f, 0.08f, 1.0f, 0.7f};
-    const size_t size = h_input.size();
+    const size_t       size = h_input.size();
 
     common::device_ptr<float> d_input(h_input);
     common::device_ptr<float> d_output(size);
 
     // Temporary storage
-    size_t temp_storage_bytes = 0;
+    size_t                   temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
     const auto launch = [&]()
     {
-        return rocprim::merge_sort(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_input.get(),
-            d_output.get(),
-            size,
-            rocprim::less<float>()
-        );
+        return rocprim::merge_sort(d_temp_storage.get(),
+                                   temp_storage_bytes,
+                                   d_input.get(),
+                                   d_output.get(),
+                                   size,
+                                   rocprim::less<float>());
     };
 
     // First call: query required temporary storage size
@@ -54,7 +52,7 @@ int main()
     // Second call: perform the actual merge sort
     HIP_CHECK(launch());
 
-    const auto h_output = d_output.load();
+    const auto         h_output = d_output.load();
     std::vector<float> expected{0.08f, 0.2f, 0.3f, 0.4f, 0.6f, 0.65f, 0.7f, 1.0f};
 
     bool passed = true;

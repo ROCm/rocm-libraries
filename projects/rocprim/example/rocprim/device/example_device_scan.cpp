@@ -23,7 +23,7 @@
 int main()
 {
     // Host input
-    const size_t       N       = 8;
+    const size_t       N = 8;
     std::vector<short> h_input{1, 2, 3, 4, 5, 6, 7, 8};
 
     // Expected inclusive sum (in int)
@@ -32,17 +32,17 @@ int main()
     common::device_ptr<short> d_input(h_input);
     common::device_ptr<int>   d_output(N);
 
-    size_t temp_storage_bytes = 0;
+    size_t                   temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::inclusive_scan(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_input.get(),
-            d_output.get(),
-            N,
-            rocprim::plus<int>());
+    const auto launch = [&]
+    {
+        return rocprim::inclusive_scan(d_temp_storage.get(),
+                                       temp_storage_bytes,
+                                       d_input.get(),
+                                       d_output.get(),
+                                       N,
+                                       rocprim::plus<int>());
     };
 
     // First launch: query temp storage size

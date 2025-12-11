@@ -27,9 +27,9 @@ int main()
     std::vector<float> h_samples{-10.0f, 0.3f, 9.5f, 8.1f, 1.5f, 1.9f, 100.0f, 5.1f};
 
     // 5 bins => levels = 6, range [0, 10)
-    const unsigned int levels     = 6;
-    const float        lower_lvl  = 0.0f;
-    const float        upper_lvl  = 10.0f;
+    const unsigned int levels    = 6;
+    const float        lower_lvl = 0.0f;
+    const float        upper_lvl = 10.0f;
 
     // Histogram has (levels - 1) elements
     std::vector<int> h_hist(levels - 1, 0);
@@ -37,20 +37,19 @@ int main()
     common::device_ptr<float> d_samples(h_samples);
     common::device_ptr<int>   d_hist(h_hist);
 
-    std::size_t temp_storage_bytes = 0;
+    std::size_t              temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::histogram_even(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_samples.get(),
-            size,
-            d_hist.get(),
-            levels,
-            lower_lvl,
-            upper_lvl
-        );
+    const auto launch = [&]
+    {
+        return rocprim::histogram_even(d_temp_storage.get(),
+                                       temp_storage_bytes,
+                                       d_samples.get(),
+                                       size,
+                                       d_hist.get(),
+                                       levels,
+                                       lower_lvl,
+                                       upper_lvl);
     };
 
     // Query required temporary storage size
@@ -71,7 +70,7 @@ int main()
     std::vector<int> expected{3, 0, 1, 0, 2};
 
     bool passed = true;
-    for (size_t i = 0; i < expected.size(); ++i)
+    for(size_t i = 0; i < expected.size(); ++i)
     {
         passed = passed && (result[i] == expected[i]);
     }

@@ -21,16 +21,18 @@
 #include "../../example_utils.hpp"
 
 // A tiny kernel to produce the initial value on device
-__global__ void compute_intermediate(int* out, int val)
+__global__
+void compute_intermediate(int* out, int val)
 {
-    if(threadIdx.x == 0 && blockIdx.x == 0) *out = val;
+    if(threadIdx.x == 0 && blockIdx.x == 0)
+        *out = val;
 }
 
 int main()
 {
     // Host input
     std::vector<int> h_in = {1, 2, 3, 4, 5, 6, 7, 8};
-    const size_t N = h_in.size();
+    const size_t     N    = h_in.size();
 
     common::device_ptr<int> d_in(h_in);
     common::device_ptr<int> d_out(N);
@@ -53,36 +55,33 @@ int main()
     void*  d_temp_storage = nullptr;
     size_t temp_bytes     = 0;
 
-    HIP_CHECK(rocprim::exclusive_scan(
-        d_temp_storage,                 // temporary storage pointer (nullptr to query)
-        temp_bytes,                     // will be filled with required size
-        d_in.get(),                     // input iterator
-        d_out.get(),                    // output iterator
-        init,                           // initial value (future_value<int>)
-        N,                              // number of items
-        rocprim::plus<int>{},           // scan op
-        stream
-    ));
+    HIP_CHECK(
+        rocprim::exclusive_scan(d_temp_storage, // temporary storage pointer (nullptr to query)
+                                temp_bytes, // will be filled with required size
+                                d_in.get(), // input iterator
+                                d_out.get(), // output iterator
+                                init, // initial value (future_value<int>)
+                                N, // number of items
+                                rocprim::plus<int>{}, // scan op
+                                stream));
 
     // Allocate temp storage
     HIP_CHECK(hipMalloc(&d_temp_storage, temp_bytes));
 
-    HIP_CHECK(rocprim::exclusive_scan(
-        d_temp_storage,
-        temp_bytes,
-        d_in.get(),
-        d_out.get(),
-        init,
-        N,
-        rocprim::plus<int>{},
-        stream
-    ));
+    HIP_CHECK(rocprim::exclusive_scan(d_temp_storage,
+                                      temp_bytes,
+                                      d_in.get(),
+                                      d_out.get(),
+                                      init,
+                                      N,
+                                      rocprim::plus<int>{},
+                                      stream));
 
     // Ensure completion
     HIP_CHECK(hipStreamSynchronize(stream));
 
     // Exclusive scan of [1..8] with init=5 => [5, 6, 8, 11, 15, 20, 26, 33]
-    const auto h_out = d_out.load();
+    const auto       h_out    = d_out.load();
     std::vector<int> expected = {5, 6, 8, 11, 15, 20, 26, 33};
 
     bool passed = true;

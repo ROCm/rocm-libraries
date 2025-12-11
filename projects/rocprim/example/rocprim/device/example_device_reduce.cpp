@@ -24,30 +24,27 @@ int main()
 {
     // Host input
     std::vector<short> h_input{4, 7, 6, 2, 5, 1, 3, 8};
-    const unsigned int input_size = static_cast<unsigned int>(h_input.size());
-    int start_value = 9; // min(start_value, all elements) -> should end up as 1
+    const unsigned int input_size  = static_cast<unsigned int>(h_input.size());
+    int                start_value = 9; // min(start_value, all elements) -> should end up as 1
 
     common::device_ptr<short> d_input(h_input);
     common::device_ptr<int>   d_output(1); // single result
 
     // Custom reduce op (min)
-    auto min_op = [] __device__ (int a, int b) -> int {
-        return a < b ? a : b;
-    };
+    auto min_op = [](int a, int b) { return a < b ? a : b; };
 
-    std::size_t temp_storage_bytes = 0;
+    std::size_t              temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::reduce(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_input.get(),
-            d_output.get(),
-            start_value,
-            input_size,
-            min_op
-        );
+    const auto launch = [&]
+    {
+        return rocprim::reduce(d_temp_storage.get(),
+                               temp_storage_bytes,
+                               d_input.get(),
+                               d_output.get(),
+                               start_value,
+                               input_size,
+                               min_op);
     };
 
     // First launch: get temp storage size

@@ -29,8 +29,8 @@ int main()
     // expect aggregates: [6, 4, 18, 8]
     // expect unique_count: 4
     std::vector<int> h_keys{1, 1, 1, 2, 10, 10, 10, 88};
-    std::vector<int> h_values{1, 2, 3, 4,  5,  6,  7,  8};
-    const size_t input_size   = h_keys.size();
+    std::vector<int> h_values{1, 2, 3, 4, 5, 6, 7, 8};
+    const size_t     input_size = h_keys.size();
 
     common::device_ptr<int> d_keys(h_keys);
     common::device_ptr<int> d_values(h_values);
@@ -38,20 +38,19 @@ int main()
     common::device_ptr<int> d_aggregates(4);
     common::device_ptr<int> d_unique_count(1);
 
-    size_t temp_storage_bytes = 0;
+    size_t                   temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::reduce_by_key(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_keys.get(),
-            d_values.get(),
-            input_size,
-            d_unique.get(),
-            d_aggregates.get(),
-            d_unique_count.get()
-        );
+    const auto launch = [&]
+    {
+        return rocprim::reduce_by_key(d_temp_storage.get(),
+                                      temp_storage_bytes,
+                                      d_keys.get(),
+                                      d_values.get(),
+                                      input_size,
+                                      d_unique.get(),
+                                      d_aggregates.get(),
+                                      d_unique_count.get());
     };
 
     // First launch: query temp storage size
@@ -61,21 +60,21 @@ int main()
     // Second launch: actual reduce_by_key
     HIP_CHECK(launch());
 
-    const auto h_unique        = d_unique.load();
-    const auto h_aggregates    = d_aggregates.load();
-    const auto h_unique_count  = d_unique_count.load();
-    const int  unique_count    = h_unique_count[0];
+    const auto h_unique       = d_unique.load();
+    const auto h_aggregates   = d_aggregates.load();
+    const auto h_unique_count = d_unique_count.load();
+    const int  unique_count   = h_unique_count[0];
 
     // Expected
     std::vector<int> expected_unique{1, 2, 10, 88};
     std::vector<int> expected_aggregates{6, 4, 18, 8};
-    int expected_count = 4;
+    int              expected_count = 4;
 
     bool passed = true;
-    passed = passed && (unique_count == expected_count);
+    passed      = passed && (unique_count == expected_count);
     for(int i = 0; i < expected_count; ++i)
     {
-        passed = passed && (h_unique[i]     == expected_unique[i]);
+        passed = passed && (h_unique[i] == expected_unique[i]);
         passed = passed && (h_aggregates[i] == expected_aggregates[i]);
     }
     ASSERT_TRUE(passed);

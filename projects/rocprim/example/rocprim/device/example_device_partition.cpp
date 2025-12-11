@@ -24,7 +24,7 @@ int main()
 {
     // Host input
     std::vector<int> h_input{1, 2, 3, 4, 5, 6, 7, 8};
-    const size_t size = h_input.size();
+    const size_t     size = h_input.size();
 
     common::device_ptr<int>    d_input(h_input);
     common::device_ptr<int>    d_selected(size);
@@ -32,26 +32,21 @@ int main()
     common::device_ptr<size_t> d_selected_count(1);
 
     // Predicate: keep even numbers
-    auto predicate = [] __device__ (int a) -> bool
-    {
-        return (a % 2) == 0;
-    };
+    auto predicate = [](int a) { return (a % 2) == 0; };
 
-    size_t temp_storage_bytes = 0;
+    size_t                   temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
     const auto launch = [&]
     {
-        return rocprim::partition_two_way(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_input.get(),
-            d_selected.get(),
-            d_rejected.get(),
-            d_selected_count.get(),
-            size,
-            predicate
-        );
+        return rocprim::partition_two_way(d_temp_storage.get(),
+                                          temp_storage_bytes,
+                                          d_input.get(),
+                                          d_selected.get(),
+                                          d_rejected.get(),
+                                          d_selected_count.get(),
+                                          size,
+                                          predicate);
     };
 
     // First launch: query temp storage size
@@ -69,12 +64,12 @@ int main()
     // selected: [2,4,6,8]
     // rejected: [1,3,5,7]
     // count   : 4
-    std::vector<int> expected_selected{2,4,6,8};
-    std::vector<int> expected_rejected{1,3,5,7};
-    const size_t     expected_count    = 4;
+    std::vector<int> expected_selected{2, 4, 6, 8};
+    std::vector<int> expected_rejected{1, 3, 5, 7};
+    const size_t     expected_count = 4;
 
     bool passed = (h_selected_count[0] == expected_count);
-    for (int i = 0; i < 4; ++i)
+    for(int i = 0; i < 4; ++i)
     {
         passed = passed && (h_selected[i] == expected_selected[i]);
         passed = passed && (h_rejected[i] == expected_rejected[i]);

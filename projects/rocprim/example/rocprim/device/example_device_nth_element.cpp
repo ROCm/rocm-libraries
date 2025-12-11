@@ -24,22 +24,21 @@ int main()
 {
     // Host input
     std::vector<unsigned int> h_keys{6, 3, 5, 4, 1, 8, 2, 7};
-    const size_t input_size = h_keys.size();
-    const size_t nth = 4;                    // after nth_element, keys[4] should be 5
+    const size_t              input_size = h_keys.size();
+    const size_t              nth        = 4; // after nth_element, keys[4] should be 5
 
     common::device_ptr<unsigned int> d_keys(h_keys);
 
-    size_t temp_storage_bytes = 0;
+    size_t                   temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::nth_element(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_keys.get(),
-            nth,
-            input_size
-        );
+    const auto launch = [&]
+    {
+        return rocprim::nth_element(d_temp_storage.get(),
+                                    temp_storage_bytes,
+                                    d_keys.get(),
+                                    nth,
+                                    input_size);
     };
 
     // First call: query temp storage size

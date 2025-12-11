@@ -23,7 +23,7 @@
 int main()
 {
     // Host input
-    const size_t N = 8;
+    const size_t       N = 8;
     std::vector<short> h_input{1, 2, 3, 4, 5, 6, 7, 8};
     std::vector<int>   h_expected{6, 7, 8, 9, 10, 11, 12, 13};
 
@@ -31,24 +31,13 @@ int main()
     common::device_ptr<int>   d_output(N);
 
     // Unary transform functor: y = x + 5
-    auto transform_op =
-    [] __host__ __device__ (short x) -> int
-    {
-        return static_cast<int>(x) + 5;
-    };
+    auto transform_op = [](short x) { return static_cast<int>(x) + 5; };
 
     // Launch transform on device
-    HIP_CHECK(
-        rocprim::transform(
-            d_input.get(),
-            d_output.get(),
-            N,
-            transform_op
-        )
-    );
+    HIP_CHECK(rocprim::transform(d_input.get(), d_output.get(), N, transform_op));
 
     const auto h_result = d_output.load();
-    bool passed = true;
+    bool       passed   = true;
     for(size_t i = 0; i < N; ++i)
     {
         passed = passed && (h_result[i] == h_expected[i]);

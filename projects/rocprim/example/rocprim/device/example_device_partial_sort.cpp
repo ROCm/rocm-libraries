@@ -32,17 +32,17 @@ int main()
     common::device_ptr<unsigned int> d_input(h_input);
     common::device_ptr<unsigned int> d_output(h_output);
 
-    size_t                    temp_storage_size = 0;
-    common::device_ptr<void>  d_temp_storage;
+    size_t                   temp_storage_size = 0;
+    common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::partial_sort_copy(
-            d_temp_storage.get(),
-            temp_storage_size,
-            d_input.get(),
-            d_output.get(),
-            middle,
-            input_size);
+    const auto launch = [&]
+    {
+        return rocprim::partial_sort_copy(d_temp_storage.get(),
+                                          temp_storage_size,
+                                          d_input.get(),
+                                          d_output.get(),
+                                          middle,
+                                          input_size);
     };
 
     // Query required storage
@@ -58,7 +58,7 @@ int main()
 
     // Expected: first 4 smallest elements sorted: 1, 2, 3, 4
     std::vector<unsigned int> expected_first{1, 2, 3, 4};
-    bool                      passed         = true;
+    bool                      passed = true;
     for(size_t i = 0; i < middle; i++)
     {
         passed = passed && (result[i] == expected_first[i]);

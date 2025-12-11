@@ -25,7 +25,7 @@ int main()
     // Keys: same keys will be scanned together
     std::vector<int>   h_keys{1, 1, 2, 2, 3, 3, 3, 5};
     std::vector<short> h_values{1, 2, 3, 4, 5, 6, 7, 8};
-    const size_t       size     = h_keys.size(); // 8
+    const size_t       size = h_keys.size(); // 8
 
     // Expected result of inclusive scan-by-key with plus<int>:
     // key=1: 1, 1+2=3
@@ -38,19 +38,19 @@ int main()
     common::device_ptr<short> d_values(h_values);
     common::device_ptr<int>   d_output(size);
 
-    size_t temp_storage_bytes = 0;
+    size_t                   temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::inclusive_scan_by_key(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_keys.get(),
-            d_values.get(),
-            d_output.get(),
-            size,
-            rocprim::plus<int>(),
-            rocprim::equal_to<int>());
+    const auto launch = [&]
+    {
+        return rocprim::inclusive_scan_by_key(d_temp_storage.get(),
+                                              temp_storage_bytes,
+                                              d_keys.get(),
+                                              d_values.get(),
+                                              d_output.get(),
+                                              size,
+                                              rocprim::plus<int>(),
+                                              rocprim::equal_to<int>());
     };
 
     // First launch: query required temp storage size

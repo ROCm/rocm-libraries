@@ -25,24 +25,18 @@ int main()
     // Host-side data
     // unsorted: 0.6, 0.3, 0.65, 0.4, 0.2, 0.08, 1, 0.7
     std::vector<float> h_input{0.6f, 0.3f, 0.65f, 0.4f, 0.2f, 0.08f, 1.0f, 0.7f};
-    const size_t size = h_input.size();
+    const size_t       size = h_input.size();
 
     common::device_ptr<float> d_input(h_input);
     common::device_ptr<float> d_tmp(size);
 
     rocprim::double_buffer<float> keys(d_input.get(), d_tmp.get());
 
-    size_t temp_storage_bytes = 0;
+    size_t                   temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::radix_sort_keys(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            keys,
-            size
-        );
-    };
+    const auto launch = [&]
+    { return rocprim::radix_sort_keys(d_temp_storage.get(), temp_storage_bytes, keys, size); };
 
     // Query temporary storage size
     HIP_CHECK(launch());
@@ -53,20 +47,15 @@ int main()
     HIP_CHECK(hipDeviceSynchronize());
 
     std::vector<float> h_result(size);
-    HIP_CHECK(hipMemcpy(
-        h_result.data(),
-        keys.current(),
-        size * sizeof(float),
-        hipMemcpyDeviceToHost));
+    HIP_CHECK(
+        hipMemcpy(h_result.data(), keys.current(), size * sizeof(float), hipMemcpyDeviceToHost));
 
     // Expected ascending:
     // 0.08, 0.2, 0.3, 0.4, 0.6, 0.65, 0.7, 1
-    std::vector<float> expected{
-        0.08f, 0.2f, 0.3f, 0.4f, 0.6f, 0.65f, 0.7f, 1.0f
-    };
+    std::vector<float> expected{0.08f, 0.2f, 0.3f, 0.4f, 0.6f, 0.65f, 0.7f, 1.0f};
 
     bool passed = true;
-    for (size_t i = 0; i < size; ++i)
+    for(size_t i = 0; i < size; ++i)
     {
         passed = passed && (h_result[i] = expected[i]);
     }

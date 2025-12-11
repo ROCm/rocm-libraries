@@ -38,16 +38,16 @@ int main()
     size_t                   temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::segmented_radix_sort_keys(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_input.get(),
-            d_output.get(),
-            input_size,
-            segments,
-            d_offsets.get(),
-            d_offsets.get() + 1);
+    const auto launch = [&]
+    {
+        return rocprim::segmented_radix_sort_keys(d_temp_storage.get(),
+                                                  temp_storage_bytes,
+                                                  d_input.get(),
+                                                  d_output.get(),
+                                                  input_size,
+                                                  segments,
+                                                  d_offsets.get(),
+                                                  d_offsets.get() + 1);
     };
 
     // Query temp storage size
@@ -60,13 +60,13 @@ int main()
     const auto         output   = d_output.load();
     std::vector<float> expected = {
         0.3f,
-        0.6f,  // segment 0
+        0.6f, // segment 0
         0.65f, // segment 1
         0.08f,
         0.2f,
         0.4f,
         0.7f,
-        1.0f   // segment 2
+        1.0f // segment 2
     };
 
     bool passed = true;

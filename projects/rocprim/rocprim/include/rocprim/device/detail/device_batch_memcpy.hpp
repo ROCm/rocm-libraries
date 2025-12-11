@@ -398,10 +398,12 @@ private:
     {
         auto size_class = batch_memcpy::size_class::tlev;
         // We presume the size to be no larger than maximum of unsigned int
-        size_class
-            = static_cast<unsigned int>(size) > params.wlev_size_threshold ? batch_memcpy::size_class::wlev : size_class;
-        size_class
-            = static_cast<unsigned int>(size) > params.blev_size_threshold ? batch_memcpy::size_class::blev : size_class;
+        size_class = static_cast<unsigned int>(size) > params.wlev_size_threshold
+                         ? batch_memcpy::size_class::wlev
+                         : size_class;
+        size_class = static_cast<unsigned int>(size) > params.blev_size_threshold
+                         ? batch_memcpy::size_class::blev
+                         : size_class;
         return size_class;
     }
 
@@ -1066,7 +1068,8 @@ public:
             // If the tile has already reached beyond the work of the end of the last buffer
             // We presume the size to be no larger than maximum of unsigned int
             if(buffer_id >= num_blev_buffers - 1
-               && tile_offset_within_buffer > static_cast<unsigned int>(blev_buffers.sizes[buffer_id]))
+               && tile_offset_within_buffer
+                      > static_cast<unsigned int>(blev_buffers.sizes[buffer_id]))
             {
                 return;
             }

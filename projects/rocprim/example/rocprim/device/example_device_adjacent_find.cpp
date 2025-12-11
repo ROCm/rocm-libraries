@@ -24,28 +24,26 @@ int main()
 {
     // Host input:
     // Pairs: (8,7)->no, (7,5)->yes, so answer should be index 1
-    std::vector<int> h_input{8, 7, 5, 4, 3, 2, 1, 0};
+    std::vector<int>  h_input{8, 7, 5, 4, 3, 2, 1, 0};
     const std::size_t size = h_input.size();
 
-    common::device_ptr<int> d_input(h_input);
+    common::device_ptr<int>         d_input(h_input);
     common::device_ptr<std::size_t> d_output(1);
 
     // Custom predicate
-    auto diff_is_two = [](auto a, auto b) {
-        return (a - b) == 2;
-    };
+    auto diff_is_two = [](auto a, auto b) { return (a - b) == 2; };
 
-    std::size_t temp_storage_bytes = 0;
+    std::size_t              temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::adjacent_find(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_input.get(),
-            d_output.get(),
-            size,
-            diff_is_two);
+    const auto launch = [&]
+    {
+        return rocprim::adjacent_find(d_temp_storage.get(),
+                                      temp_storage_bytes,
+                                      d_input.get(),
+                                      d_output.get(),
+                                      size,
+                                      diff_is_two);
     };
 
     // First launch: query temp storage size

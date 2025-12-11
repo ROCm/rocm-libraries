@@ -26,12 +26,12 @@ int main()
     // haystack must be sorted
     // {0, 1.5, 3, 4.5, 6, 7.5, 9}
     std::vector<double> h_haystack{0.0, 1.5, 3.0, 4.5, 6.0, 7.5, 9.0};
-    const size_t haystack_size = h_haystack.size();
+    const size_t        haystack_size = h_haystack.size();
 
     // Needles to search for
     // {1, 2, 3, 4, 5}
     std::vector<double> h_needles{1.0, 2.0, 3.0, 4.0, 5.0};
-    const size_t needles_size = h_needles.size();
+    const size_t        needles_size = h_needles.size();
 
     common::device_ptr<double> d_haystack(h_haystack);
     common::device_ptr<double> d_needles(h_needles);
@@ -40,22 +40,21 @@ int main()
     // Comparator
     rocprim::less<double> compare_op;
 
-    size_t temp_storage_bytes = 0;
+    size_t                   temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
     const auto launch = [&]
     {
-        return rocprim::lower_bound(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_haystack.get(),
-            d_needles.get(),
-            d_output.get(),
-            haystack_size,
-            needles_size,
-            compare_op,
-            0,
-            false);
+        return rocprim::lower_bound(d_temp_storage.get(),
+                                    temp_storage_bytes,
+                                    d_haystack.get(),
+                                    d_needles.get(),
+                                    d_output.get(),
+                                    haystack_size,
+                                    needles_size,
+                                    compare_op,
+                                    0,
+                                    false);
     };
 
     // First launch: query temp storage size

@@ -34,14 +34,14 @@ int main()
     std::size_t              temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::adjacent_difference(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_input.get(),
-            d_output.get(),
-            size,
-            subtract_op);
+    const auto launch = [&]
+    {
+        return rocprim::adjacent_difference(d_temp_storage.get(),
+                                            temp_storage_bytes,
+                                            d_input.get(),
+                                            d_output.get(),
+                                            size,
+                                            subtract_op);
     };
 
     // First launch: query temp storage size
@@ -52,7 +52,7 @@ int main()
     HIP_CHECK(launch());
     HIP_CHECK(hipDeviceSynchronize());
 
-    const auto       output   = d_output.load();
+    const auto       output = d_output.load();
     std::vector<int> expected{1, 1, 1, 1, 1, 1, 1, 1};
 
     bool passed = true;

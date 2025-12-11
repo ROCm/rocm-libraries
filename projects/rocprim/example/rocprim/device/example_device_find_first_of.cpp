@@ -25,8 +25,8 @@ int main()
     std::vector<int> h_input{6, 3, 5, 4, 1, 8, 2, 7};
     std::vector<int> h_keys{10, 5, 100};
 
-    const size_t size      = h_input.size();  // 8
-    const size_t keys_size = h_keys.size();   // 3
+    const size_t size      = h_input.size(); // 8
+    const size_t keys_size = h_keys.size(); // 3
 
     common::device_ptr<int> d_input(h_input);
     common::device_ptr<int> d_keys(h_keys);
@@ -34,21 +34,21 @@ int main()
     // Output is just one index (the found position)
     common::device_ptr<unsigned int> d_output(1);
 
-    size_t temp_storage_size = 0;
+    size_t                   temp_storage_size = 0;
     common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::find_first_of(
-            d_temp_storage.get(),
-            temp_storage_size,
-            d_input.get(),
-            d_keys.get(),
-            d_output.get(),
-            size,
-            keys_size,
-            rocprim::equal_to<int>{}, // comparator
-            0,                        // stream
-            false                     // debug
+    const auto launch = [&]
+    {
+        return rocprim::find_first_of(d_temp_storage.get(),
+                                      temp_storage_size,
+                                      d_input.get(),
+                                      d_keys.get(),
+                                      d_output.get(),
+                                      size,
+                                      keys_size,
+                                      rocprim::equal_to<int>{}, // comparator
+                                      0, // stream
+                                      false // debug
         );
     };
 

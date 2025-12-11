@@ -29,12 +29,13 @@ int main()
     common::device_ptr<int>    d_input(h_input);
     common::device_ptr<char>   d_flags(h_flags);
     common::device_ptr<int>    d_output(input_size); // max possible = input_size
-    common::device_ptr<size_t> d_count(1);           // number of selected items
+    common::device_ptr<size_t> d_count(1); // number of selected items
 
-    size_t                    temp_bytes = 0;
-    common::device_ptr<void>  d_temp;
+    size_t                   temp_bytes = 0;
+    common::device_ptr<void> d_temp;
 
-    const auto launch = [&] {
+    const auto launch = [&]
+    {
         return rocprim::select(d_temp.get(),
                                temp_bytes,
                                d_input.get(),
@@ -52,8 +53,8 @@ int main()
     HIP_CHECK(launch());
 
     // Copy back results
-    const auto   h_out    = d_output.load();  // length == input_size (only first count are valid)
-    const auto   h_count  = d_count.load();   // vector<size_t> of size 1
+    const auto   h_out    = d_output.load(); // length == input_size (only first count are valid)
+    const auto   h_count  = d_count.load(); // vector<size_t> of size 1
     const size_t selected = h_count[0];
 
     // Expected selected: [2, 3, 6, 8], count = 4

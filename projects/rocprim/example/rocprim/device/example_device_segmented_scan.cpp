@@ -35,19 +35,19 @@ int main()
     auto min_op = [](auto a, auto b) { return a < b ? a : b; };
 
     // Temporary storage handled via device_ptr
-    size_t temp_storage_bytes = 0;
+    size_t                   temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::segmented_inclusive_scan(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_input.get(),
-            d_output.get(),
-            num_segments,
-            d_offsets.get(),
-            d_offsets.get() + 1,
-            min_op);
+    const auto launch = [&]
+    {
+        return rocprim::segmented_inclusive_scan(d_temp_storage.get(),
+                                                 temp_storage_bytes,
+                                                 d_input.get(),
+                                                 d_output.get(),
+                                                 num_segments,
+                                                 d_offsets.get(),
+                                                 d_offsets.get() + 1,
+                                                 min_op);
     };
 
     // First launch: query temp storage size

@@ -36,18 +36,18 @@ int main()
     common::device_ptr<unsigned int> d_key(h_key);
     common::device_ptr<unsigned int> d_output(1); // single index
 
-    size_t temp_storage_bytes = 0;
+    size_t                   temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::find_end(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_input.get(),
-            d_key.get(),
-            d_output.get(),
-            size,
-            key_size);
+    const auto launch = [&]
+    {
+        return rocprim::find_end(d_temp_storage.get(),
+                                 temp_storage_bytes,
+                                 d_input.get(),
+                                 d_key.get(),
+                                 d_output.get(),
+                                 size,
+                                 key_size);
     };
 
     // First launch: query temp storage size
@@ -65,4 +65,3 @@ int main()
 
     return 0;
 }
-

@@ -25,7 +25,8 @@ constexpr unsigned int BlockSize      = 256;
 constexpr unsigned int ItemsPerThread = 8;
 
 // Kernel: block-level key-only sort (ascending)
-__global__ void block_sort_kernel(const int* d_in, int* d_out)
+__global__
+void block_sort_kernel(const int* d_in, int* d_out)
 {
     // Specialize block_sort for int, 256 threads per block, 8 items per thread
     using block_sort_int = rocprim::block_sort<int, BlockSize, ItemsPerThread>;
@@ -39,18 +40,18 @@ __global__ void block_sort_kernel(const int* d_in, int* d_out)
     const unsigned int block_base = blockIdx.x * BlockSize * ItemsPerThread;
 
     // Load 8 items per thread from global memory
-    int items[ItemsPerThread];
+    int                items[ItemsPerThread];
     const unsigned int base = block_base + tid * ItemsPerThread;
-    #pragma unroll
-    for (unsigned int i = 0; i < ItemsPerThread; ++i)
+#pragma unroll
+    for(unsigned int i = 0; i < ItemsPerThread; ++i)
         items[i] = d_in[base + i];
 
     // Execute block sort (ascending, key-only)
     block_sort_int().sort(items, storage);
 
-    // Store sorted items back to global memory
-    #pragma unroll
-    for (unsigned int i = 0; i < ItemsPerThread; ++i)
+// Store sorted items back to global memory
+#pragma unroll
+    for(unsigned int i = 0; i < ItemsPerThread; ++i)
         d_out[base + i] = items[i];
 }
 
@@ -61,7 +62,7 @@ int main()
 
     // Host input: simple reverse order, so the expected sorted result is 0..2047
     std::vector<int> h_in(total_items);
-    for (int i = 0; i < total_items; ++i)
+    for(int i = 0; i < total_items; ++i)
     {
         h_in[i] = total_items - 1 - i;
     }
@@ -70,14 +71,13 @@ int main()
     common::device_ptr<int> d_out(total_items);
 
     // Launch 1 block of 256 threads
-    hipLaunchKernelGGL(block_sort_kernel, dim3(1), dim3(BlockSize), 0, 0,
-                       d_in.get(), d_out.get());
+    hipLaunchKernelGGL(block_sort_kernel, dim3(1), dim3(BlockSize), 0, 0, d_in.get(), d_out.get());
     HIP_CHECK(hipDeviceSynchronize());
 
     const auto h_out = d_out.load();
 
     bool passed = true;
-    for (int i = 0; i < total_items; ++i)
+    for(int i = 0; i < total_items; ++i)
     {
         passed = passed && (h_out[i] == i);
     }

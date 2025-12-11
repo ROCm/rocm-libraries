@@ -27,11 +27,8 @@ void block_load_kernel(const int* d_in, int* d_out)
     constexpr int BlockSize      = 128;
     constexpr int ItemsPerThread = 8;
 
-    using block_load_t = rocprim::block_load<
-        int,
-        BlockSize,
-        ItemsPerThread,
-        rocprim::block_load_method::block_load_direct>;
+    using block_load_t = rocprim::
+        block_load<int, BlockSize, ItemsPerThread, rocprim::block_load_method::block_load_direct>;
 
     // Shared storage for block_load (required by some overloads)
     __shared__ typename block_load_t::storage_type storage;
@@ -51,7 +48,7 @@ void block_load_kernel(const int* d_in, int* d_out)
 
     // Write back in blocked layout
     const int base = offset + tid * ItemsPerThread;
-    #pragma unroll
+#pragma unroll
     for(int i = 0; i < ItemsPerThread; ++i)
         d_out[base + i] = items[i];
 }
@@ -74,13 +71,16 @@ int main()
 
     // Launch one block of 128 threads
     hipLaunchKernelGGL(block_load_kernel,
-                       dim3(1), dim3(BlockSize),
-                       0, 0,
-                       d_input.get(), d_output.get());
+                       dim3(1),
+                       dim3(BlockSize),
+                       0,
+                       0,
+                       d_input.get(),
+                       d_output.get());
     HIP_CHECK(hipDeviceSynchronize());
 
-    const auto out = d_output.load();
-    bool passed = true;
+    const auto out    = d_output.load();
+    bool       passed = true;
     for(int i = 0; i < TotalItems; ++i)
     {
         passed = passed && (out[i] == input[i]);

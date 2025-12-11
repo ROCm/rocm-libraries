@@ -26,22 +26,21 @@ int main()
     // left  = [1, 3, 5, 7]
     // right = [0, 2, 4, 6]
     std::vector<int> h_data{1, 3, 5, 7, 0, 2, 4, 6};
-    const size_t left_size  = 4;
-    const size_t right_size = 4;
+    const size_t     left_size  = 4;
+    const size_t     right_size = 4;
 
     common::device_ptr<int> d_data(h_data);
 
-    size_t temp_storage_bytes = 0;
+    size_t                   temp_storage_bytes = 0;
     common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::merge_inplace(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_data.get(),
-            left_size,
-            right_size
-        );
+    const auto launch = [&]
+    {
+        return rocprim::merge_inplace(d_temp_storage.get(),
+                                      temp_storage_bytes,
+                                      d_data.get(),
+                                      left_size,
+                                      right_size);
     };
 
     // First launch: query temp storage size
@@ -51,11 +50,11 @@ int main()
     // Second launch: actual in-place merge on device
     HIP_CHECK(launch());
 
-    const auto h_out = d_data.load();
+    const auto       h_out = d_data.load();
     std::vector<int> expected{0, 1, 2, 3, 4, 5, 6, 7};
 
     bool passed = true;
-    for (size_t i = 0; i < expected.size(); ++i)
+    for(size_t i = 0; i < expected.size(); ++i)
     {
         passed = passed && (h_out[i] == expected[i]);
     }

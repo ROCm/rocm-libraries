@@ -31,18 +31,18 @@ int main()
     common::device_ptr<int> d_counts(4);
     common::device_ptr<int> d_runs_count(1);
 
-    size_t                    temp_storage_bytes = 0;
-    common::device_ptr<void>  d_temp_storage;
+    size_t                   temp_storage_bytes = 0;
+    common::device_ptr<void> d_temp_storage;
 
-    const auto launch = [&] {
-        return rocprim::run_length_encode(
-            d_temp_storage.get(),
-            temp_storage_bytes,
-            d_input.get(),
-            input_size,
-            d_unique.get(),
-            d_counts.get(),
-            d_runs_count.get());
+    const auto launch = [&]
+    {
+        return rocprim::run_length_encode(d_temp_storage.get(),
+                                          temp_storage_bytes,
+                                          d_input.get(),
+                                          input_size,
+                                          d_unique.get(),
+                                          d_counts.get(),
+                                          d_runs_count.get());
     };
 
     // First launch: get temp storage size
@@ -63,7 +63,7 @@ int main()
     // runs:   4
     std::vector<int> expected_unique{1, 2, 10, 88};
     std::vector<int> expected_counts{3, 1, 3, 1};
-    int              expected_runs   = 4;
+    int              expected_runs = 4;
 
     bool passed = true;
     // Check runs_count first

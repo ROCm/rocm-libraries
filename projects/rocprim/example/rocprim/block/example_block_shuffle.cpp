@@ -24,23 +24,19 @@
 constexpr unsigned int BlockSize = 192;
 
 // Kernel: rotate values inside a block by +1 (up)
-__global__ void block_shuffle_rotate_kernel(const int* d_in, int* d_out)
+__global__
+void block_shuffle_rotate_kernel(const int* d_in, int* d_out)
 {
     using block_shuffle_t = rocprim::block_shuffle<int, BlockSize>;
 
     // Shared storage required by the storage-based overloads
     __shared__ typename block_shuffle_t::storage_type storage;
 
-    const unsigned int tid = threadIdx.x;        // flat id (1D block)
-    int value = d_in[tid];
+    const unsigned int tid   = threadIdx.x; // flat id (1D block)
+    int                value = d_in[tid];
 
     // Rotate up by 1: thread i receives value from (i-1), wrapping at block edges
-    block_shuffle_t().rotate(
-        tid,
-        value,
-        value,
-        1,
-        storage);
+    block_shuffle_t().rotate(tid, value, value, 1, storage);
 
     d_out[tid] = value;
 }
@@ -49,7 +45,7 @@ int main()
 {
     // Host input: 0..191
     std::vector<int> h_in(BlockSize);
-    for (unsigned int i = 0; i < BlockSize; ++i)
+    for(unsigned int i = 0; i < BlockSize; ++i)
     {
         h_in[i] = static_cast<int>(i);
     }
@@ -58,21 +54,26 @@ int main()
     common::device_ptr<int> d_out(BlockSize);
 
     // Launch exactly 192 threads in one block
-    hipLaunchKernelGGL(block_shuffle_rotate_kernel, dim3(1), dim3(BlockSize), 0, 0,
-                       d_in.get(), d_out.get());
+    hipLaunchKernelGGL(block_shuffle_rotate_kernel,
+                       dim3(1),
+                       dim3(BlockSize),
+                       0,
+                       0,
+                       d_in.get(),
+                       d_out.get());
     HIP_CHECK(hipDeviceSynchronize());
 
     const auto h_out = d_out.load();
 
     // Expected: out[i] = in[(i + BlockSize - 1) % BlockSize]
     std::vector<int> expected(BlockSize);
-    for (unsigned int i = 0; i < BlockSize; ++i)
+    for(unsigned int i = 0; i < BlockSize; ++i)
     {
         expected[i] = static_cast<int>((i + 1) % BlockSize);
     }
 
     bool passed = true;
-    for (unsigned int i = 0; i < BlockSize; ++i)
+    for(unsigned int i = 0; i < BlockSize; ++i)
     {
         passed = passed && (h_out[i] == expected[i]);
     }

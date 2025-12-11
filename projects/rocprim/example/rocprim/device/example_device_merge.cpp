@@ -34,11 +34,12 @@ int main()
     common::device_ptr<int> d_input2(h_input2);
     common::device_ptr<int> d_output(total);
 
-    size_t                    temp_storage_size = 0;
-    common::device_ptr<void>  d_temp_storage;
+    size_t                   temp_storage_size = 0;
+    common::device_ptr<void> d_temp_storage;
 
     // Lambda for merge (query + actual)
-    const auto launch = [&] {
+    const auto launch = [&]
+    {
         return rocprim::merge<rocprim::default_config,
                               int*, // InputIterator1
                               int*, // InputIterator2

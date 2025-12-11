@@ -28,19 +28,19 @@ int main()
     common::device_ptr<int> output(1);
 
     // Temporary storage and its size
-    std::size_t temp_storage_size = 0;
+    std::size_t              temp_storage_size = 0;
     common::device_ptr<void> temp_storage;
 
     // Lambda to launch rocprim::search
-    const auto launch = [&] {
-        return rocprim::search(
-            temp_storage.get(),
-            temp_storage_size,
-            input.get(),
-            key.get(),
-            output.get(),
-            input.size(),
-            key.size());
+    const auto launch = [&]
+    {
+        return rocprim::search(temp_storage.get(),
+                               temp_storage_size,
+                               input.get(),
+                               key.get(),
+                               output.get(),
+                               input.size(),
+                               key.size());
     };
 
     // First launch: query required temp storage size
