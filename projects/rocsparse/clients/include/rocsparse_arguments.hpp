@@ -166,7 +166,6 @@ struct Arguments
     char hardware[32];
     char skip_hardware[32];
 
-    uint32_t req_memory;
     uint32_t host_memory_gb;
     uint32_t device_memory_gb;
 
@@ -315,7 +314,6 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(category);
         ROCSPARSE_FORMAT_CHECK(hardware);
         ROCSPARSE_FORMAT_CHECK(skip_hardware);
-        ROCSPARSE_FORMAT_CHECK(req_memory);
         ROCSPARSE_FORMAT_CHECK(host_memory_gb);
         ROCSPARSE_FORMAT_CHECK(device_memory_gb);
     }
@@ -536,7 +534,8 @@ private:
         print("category", arg.category);
         print("hardware", arg.hardware);
         print("skip_hardware", arg.skip_hardware);
-        print("req_memory", arg.req_memory);
+        print("host_memory_gb", arg.host_memory_gb);
+        print("device_memory_gb", arg.device_memory_gb);
         print("unit_check", arg.unit_check);
         print("timing", arg.timing);
         print("iters", arg.iters);

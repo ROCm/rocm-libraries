@@ -189,25 +189,4 @@ namespace rocsparse_memory_check
         return g_available_device_memory_gb;
     }
 
-    // Check if a test should be run based on memory requirements
-    inline bool should_run_test(size_t required_host_gb, size_t required_device_gb)
-    {
-        size_t available_host   = get_available_host_memory_gb();
-        size_t available_device = get_available_device_memory_gb();
-
-        bool can_run
-            = (required_host_gb <= available_host) && (required_device_gb <= available_device);
-
-        if(!can_run)
-        {
-            std::cout << "SKIPPING TEST: Insufficient memory" << std::endl;
-            std::cout << "  Required host:   " << required_host_gb
-                      << " GB (available: " << available_host << " GB)" << std::endl;
-            std::cout << "  Required device: " << required_device_gb
-                      << " GB (available: " << available_device << " GB)" << std::endl;
-        }
-
-        return can_run;
-    }
-
 } // namespace rocsparse_memory_check

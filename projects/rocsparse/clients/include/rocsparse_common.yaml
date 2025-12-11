@@ -608,7 +608,6 @@ Arguments:
   - category: c_char*32
   - hardware: c_char*32
   - skip_hardware: c_char*32
-  - req_memory: c_uint
   - host_memory_gb: c_uint
   - device_memory_gb: c_uint
 
@@ -761,8 +760,7 @@ Defaults:
   category: nightly
   hardware: all
   skip_hardware: none
-  req_memory: 4
-  host_memory_gb: 2
-  device_memory_gb: 2
+  host_memory_gb: 4
+  device_memory_gb: 4
   filename: '*'
   name: '*'
