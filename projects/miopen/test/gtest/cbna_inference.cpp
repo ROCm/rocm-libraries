@@ -542,8 +542,6 @@ void RunCbnaInferenceDriver(miopenDataType_t prec)
     }
 };
 
-bool IsTestSupportedForDevice(const miopen::Handle& handle) { return true; }
-
 } // namespace
 
 class GPU_CbnaInference_FP32 : public testing::TestWithParam<miopenDataType_t>
@@ -551,8 +549,7 @@ class GPU_CbnaInference_FP32 : public testing::TestWithParam<miopenDataType_t>
     void SetUp() override
     {
         prng::reset_seed();
-        const auto& handle = get_handle();
-        if(!IsTestSupportedForDevice(handle))
+        if(!IsTestSupportedByDevice(Gpu::All))
         {
             GTEST_SKIP();
         }
@@ -564,8 +561,7 @@ class GPU_CbnaInference_FP16 : public testing::TestWithParam<miopenDataType_t>
     void SetUp() override
     {
         prng::reset_seed();
-        const auto& handle = get_handle();
-        if(!IsTestSupportedForDevice(handle))
+        if(!IsTestSupportedByDevice(Gpu::All))
         {
             GTEST_SKIP();
         }
