@@ -492,9 +492,23 @@ namespace rocRoller
 
             // TODO: Improve setting of arch-specific buffer options
             BufferInstructionOptions bufOpts{.glc = true};
+            // if(!(context->targetArchitecture().target().isCDNA1GPU()
+            //      || context->targetArchitecture().target().isCDNA2GPU()))
+            // {
+            //     bufOpts.sc1 = true;
+            // }
             auto storeFlagTag = graph.control.addElement(StoreSGPR(DataType::UInt32, bufOpts));
             graph.mapper.connect<User>(storeFlagTag, flagsScratchTag);
             graph.mapper.connect<VGPR>(storeFlagTag, flagRegister);
+
+            // Create workitem coordinate and expression for wave 0 check
+            // Only workitem 0 (wave 0) should write to the flag
+            auto workitemTag = graph.coordinates.addElement(Workitem(0));
+            auto workitemDF  = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{workitemTag, Register::Type::Vector, DataType::UInt32});
+            auto isWave0Expr       = (workitemDF == Expression::literal(0u));
+            auto wave0FlagStoreTag = graph.control.addElement(
+                ConditionalOp{isWave0Expr, "Wave0 Store Flag"});
 
             // Add to control
             auto preWaitZeroTag  = graph.control.addElement(WaitZero());
@@ -502,14 +516,18 @@ namespace rocRoller
 
             graph.control.addElement(Sequence(), {preWaitZeroTag}, {sendTileTag});
             graph.control.addElement(Body(), {sendTileTag}, {forX});
-            graph.control.chain<Sequence>(
-                forX, waitZeroTag, barrierTag, assignFlagTag, storeFlagTag, postWaitZeroTag);
+            graph.control.chain<Sequence>(forX, waitZeroTag, barrierTag, wave0FlagStoreTag);
+            graph.control.addElement(Body(), {wave0FlagStoreTag}, {assignFlagTag});
+            auto waitAfterStoreFlagTag = graph.control.addElement(WaitZero());
+            graph.control.chain<Sequence>(assignFlagTag, storeFlagTag, waitAfterStoreFlagTag);
+            graph.control.chain<Sequence>(assignFlagTag, storeFlagTag);
+            graph.control.addElement(Sequence(), {wave0FlagStoreTag}, {postWaitZeroTag});
 
             return {preWaitZeroTag, sendTileTag};
         }
 
         /**
-         * Create send-tile block, which is roughly:
+         * Create receive-tile block, which is roughly:
          *
          *     WaitZero()
          *     if receiveTileExpr:
@@ -519,6 +537,8 @@ namespace rocRoller
          *          do:
          *          LoadSGPR(flag[nextWG])
          *          while flag[nextWG] == 0
+         *          Barrier()
+         *          Assign(flag[nextWG] = 0)
          *          partiallyAccumulatedTile = LoadTiled()
          *          fullyAccumulatedTile = Assign(localPartiallyAccumulatedTile)
          *          fullyAccumulatedTile = Assign(fullyAccumulatedTile + partiallyAccumulatedTile)
@@ -569,6 +589,12 @@ namespace rocRoller
 
             // TODO: Improve setting of arch-specific buffer options
             BufferInstructionOptions bufOpts{.glc = true};
+
+            // if(!(context->targetArchitecture().target().isCDNA1GPU()
+            // || context->targetArchitecture().target().isCDNA2GPU()))
+            // {
+            //     bufOpts.sc1 = true;
+            // }
 
             auto flagRegister = graph.coordinates.addElement(VGPR());
             auto loadFlagTag  = graph.control.addElement(LoadSGPR(DataType::UInt32, bufOpts));
@@ -630,6 +656,15 @@ namespace rocRoller
             graph.mapper.connect<User>(resetFlagTag, resetFlagsScratchTag);
             graph.mapper.connect<VGPR>(resetFlagTag, flagRegister);
 
+            // Create workitem coordinate and expression for wave 0 check
+            // Only workitem 0 (wave 0) should write to the flag
+            auto workitemTag = graph.coordinates.addElement(Workitem(0));
+            auto workitemDF  = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{workitemTag, Register::Type::Vector, DataType::UInt32});
+            auto isWave0Expr        = (workitemDF == Expression::literal(0u));
+            auto wave0ResetFlagTag  = graph.control.addElement(
+                ConditionalOp{isWave0Expr, "Wave0 Reset Flag"});
+
             auto barrierBeforeResetTag = graph.control.addElement(Barrier());
 
             auto accumulatorTile = graph.coordinates.get<MacroTile>(accumulatorTileTag);
@@ -690,12 +725,17 @@ namespace rocRoller
             graph.control.addElement(Sequence(), {boundsCheckTag}, {doWhileTag});
             graph.control.addElement(Body(), {doWhileTag}, {loadFlagTag});
 
+            auto waitBeforeResetTag = graph.control.addElement(WaitZero());
+            auto waitAfterResetTag  = graph.control.addElement(WaitZero());
             graph.control.chain<Sequence>(doWhileTag,
+                                          waitBeforeResetTag,
                                           barrierBeforeResetTag,
-                                          assignResetFlagTag,
-                                          resetFlagTag,
-                                          loadAddForX,
-                                          postWaitZeroTag);
+                                          wave0ResetFlagTag);
+            graph.control.addElement(Body(), {wave0ResetFlagTag}, {assignResetFlagTag});
+            auto waitAfterRestFlagStoreTag = graph.control.addElement(WaitZero());
+            graph.control.chain<Sequence>(assignResetFlagTag, resetFlagTag, waitAfterRestFlagStoreTag);
+            graph.control.chain<Sequence>(
+                wave0ResetFlagTag, waitAfterResetTag, loadAddForX, postWaitZeroTag);
 
             return {preWaitZeroTag, receiveTileTag, setPlusOneTag};
         }
