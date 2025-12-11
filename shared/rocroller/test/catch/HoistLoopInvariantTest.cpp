@@ -201,6 +201,7 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
             CHECK(foundKLoop);
             CHECK(foundTailLoop);
         }
+        CHECK(loopMapping.size() == 140);
     }
     writeDotToFile(graph.toDOT(false), "hoistLoopInvariant_before.dot");
 }

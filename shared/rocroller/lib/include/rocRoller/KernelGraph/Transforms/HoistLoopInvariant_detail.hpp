@@ -76,18 +76,6 @@ namespace rocRoller
         int hoistNodeBeforeLoop(KernelGraph& kgraph, int nodeToHoist, int loopNode);
 
         /**
-         * @brief Find the enclosing ForLoopOp for a given control node
-         * 
-         * This function traverses up the control graph to find the first
-         * ForLoopOp that contains the given node in its body.
-         * 
-         * @param kgraph The kernel graph to search
-         * @param controlNode The control node to find the enclosing loop for
-         * @return The node index of the enclosing ForLoopOp, or std::nullopt if none exists
-         */
-        std::optional<int> findEnclosingLoop(KernelGraph const& kgraph, int controlNode);
-
-        /**
          * @brief Check if a coordinate is written to within a ForLoopOp
          * 
          * This function uses the ControlFlowRWTracer to check if the specified

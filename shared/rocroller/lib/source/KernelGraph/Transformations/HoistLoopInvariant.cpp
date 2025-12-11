@@ -286,19 +286,6 @@ namespace rocRoller::KernelGraph
         return "HoistLoopInvariant";
     }
 
-    std::optional<int> findEnclosingLoop(KernelGraph const& kgraph, int controlNode)
-    {
-        for(int parentNode : kgraph.control.nodesContaining(controlNode))
-        {
-            // TODO: handle other loop types
-            if(kgraph.control.get<ForLoopOp>(parentNode).has_value())
-            {
-                return parentNode;
-            }
-        }
-        return std::nullopt;
-    }
-
     bool isCoordinateWrittenInLoop(KernelGraph const&         kgraph,
                                    int                        loopNode,
                                    int                        coordinate,
