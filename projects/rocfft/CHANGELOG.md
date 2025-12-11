@@ -3,7 +3,7 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
-## rocFFT 1.0.37 (unreleased)
+## (Unreleased) rocFFT 1.0.37
 
 * Fixed potential issue with data generation for multidimensional transforms in rocfft-tests and rocfft-bench.
 * Fixed issue that sometimes blocked complex-to-complex FFT plan creation when using noncontiguous strides in multiple dimensions.
