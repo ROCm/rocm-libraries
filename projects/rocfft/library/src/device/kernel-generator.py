@@ -581,25 +581,26 @@ def generate_kernel_functions(precisions_type_dict, kernels, launchers_json):
             ]
 
             f = Function(arguments=ArgumentList(data, back),
-                         meta=NS(factors=factors,
-                                 length=length,
-                                 params=params,
-                                 precision=precision,
-                                 gcn_arch_name=gcn_arch_name,
-                                 runtime_compile=runtime_compile,
-                                 scheme=scheme,
-                                 workgroup_size=workgroup_size,
-                                 transforms_per_block=transforms_per_block,
-                                 threads_per_transform=tpt_list,
-                                 transpose=sbrc_transpose_type,
-                                 use_3steps_large_twd=use_3steps_large_twd,
-                                 lds_size_bytes=kernel.lds_size_bytes,
-                                 pp_child_scheme=pp_child_scheme,
-                                 pp_threads_per_transform=pp_threads_per_transform,
-                                 pp_factors_curr=pp_factors_curr,
-                                 pp_factors_other=pp_factors_other,
-                                 pp_current_dim=pp_current_dim,
-                                 pp_off_dim=pp_off_dim))
+                         meta=NS(
+                             factors=factors,
+                             length=length,
+                             params=params,
+                             precision=precision,
+                             gcn_arch_name=gcn_arch_name,
+                             runtime_compile=runtime_compile,
+                             scheme=scheme,
+                             workgroup_size=workgroup_size,
+                             transforms_per_block=transforms_per_block,
+                             threads_per_transform=tpt_list,
+                             transpose=sbrc_transpose_type,
+                             use_3steps_large_twd=use_3steps_large_twd,
+                             lds_size_bytes=kernel.lds_size_bytes,
+                             pp_child_scheme=pp_child_scheme,
+                             pp_threads_per_transform=pp_threads_per_transform,
+                             pp_factors_curr=pp_factors_curr,
+                             pp_factors_other=pp_factors_other,
+                             pp_current_dim=pp_current_dim,
+                             pp_off_dim=pp_off_dim))
 
             if (scheme == 'CS_3D_PP'):
                 pp_kernel_functions.append(f)
