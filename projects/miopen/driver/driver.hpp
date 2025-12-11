@@ -58,6 +58,7 @@ using bfloat8_fnuz = miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>;
 #endif
 #elif MIOPEN_BACKEND_HIP
 #include <hip/hip_runtime_api.h>
+#include <functional>
 #endif
 
 #define UNPACK_VEC4(v) (v[0]), (v[1]), (v[2]), (v[3])
@@ -530,6 +531,12 @@ public:
     cl_command_queue& GetStream() { return q; }
 #elif MIOPEN_BACKEND_HIP
     hipStream_t& GetStream() { return q; }
+    using hipGraphFuncPtrType = std::function<int()>;
+    hipGraph_t hipGraph = nullptr;
+    hipGraphExec_t hipGraphExec = nullptr;
+    int HipGraphCapture(hipGraphFuncPtrType functPtr);
+    int HipGraphExecute();
+    void HipGraphFinalize();
 #endif
     virtual ~Driver() { miopenDestroy(handle); }
 

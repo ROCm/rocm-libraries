@@ -54,3 +54,56 @@ GPUMem::Check Driver::GetGpuBufferCheck(const InputFlags& inflags) const
         exit(EXIT_FAILURE);
     }
 }
+
+#if MIOPEN_BACKEND_HIP
+int Driver::HipGraphCapture(hipGraphFuncPtrType functPtr) {
+
+    // warm up:
+    int rc = functPtr();
+    if(rc != miopenStatusSuccess)
+    {
+        return rc;
+    }
+
+    hipError_t he = hipStreamBeginCapture(q, hipStreamCaptureModeGlobal);
+    if(he != hipSuccess)
+        return miopenStatusInternalError;
+
+    rc = functPtr();
+    if(rc != miopenStatusSuccess)
+    {
+        hipStreamEndCapture(q, &hipGraph);
+        return rc;
+    }
+
+    he = hipStreamEndCapture(q, &hipGraph);
+    if(he != hipSuccess)
+        return miopenStatusInternalError;
+
+    he = hipGraphInstantiate(&hipGraphExec, hipGraph, nullptr, nullptr, 0);
+    if(he != hipSuccess)
+    {
+        hipGraphDestroy(hipGraph);
+        return miopenStatusInternalError;
+    }
+
+    return miopenStatusSuccess;
+}
+
+int Driver::HipGraphExecute(){
+    hipError_t he = hipGraphLaunch(hipGraphExec, q);
+    if(he != hipSuccess)
+    {
+        hipGraphExecDestroy(hipGraphExec);
+        hipGraphDestroy(hipGraph);
+        return miopenStatusInternalError;
+    }
+}
+
+void Driver::HipGraphFinalize(){
+    hipStreamSynchronize(q);
+    hipGraphExecDestroy(hipGraphExec);
+    hipGraphDestroy(hipGraph);
+}
+
+#endif

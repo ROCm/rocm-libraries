@@ -638,10 +638,24 @@ int ConvDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
         }
     }
 
+#if MIOPEN_BACKEND_HIP
+    use_hip_graph = (inflags.GetValueInt("use_hip_graph") == 1);
+
     if(time_enabled)
     {
-        miopenEnableProfiling(GetHandle(), true);
+        if(use_hip_graph)
+        {
+            miopenEnableProfiling(GetHandle(), false);
+        }else{
+            miopenEnableProfiling(GetHandle(), true);
+        }
     }
+#else
+    if(time_enabled)
+    {
+            miopenEnableProfiling(GetHandle(), true);
+    }
+#endif
 
     is_fwd = (inflags.GetValueInt("forw") == 0 || inflags.GetValueInt("forw") & 1);
     is_bwd = (inflags.GetValueInt("forw") == 0 || inflags.GetValueInt("forw") & 2);
@@ -713,9 +727,6 @@ int ConvDriver<Tgpu, Tref>::ParseCmdLineArgs(int argc, char* argv[])
     warmup_out.SetGpuallocMode(is_gpualloc);
 
     init_output_nan = (inflags.GetValueInt("init_output_nan") == 1);
-#if MIOPEN_BACKEND_HIP
-    use_hip_graph = (inflags.GetValueInt("use_hip_graph") == 1);
-#endif
 
     buffer_check = GetGpuBufferCheck(inflags);
 
@@ -2121,6 +2132,17 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuFind(const bool is_transform)
         {
             out.FillGpuBufferWithNans(handle, outputTensor);
         }
+
+        // Use HIP events for timing instead of MIOpen profiling
+        hipEvent_t evt_start = nullptr, evt_stop = nullptr;
+        float evt_ms = 0.0f;
+        if(time_enabled)
+        {
+            hipEventCreate(&evt_start);
+            hipEventCreate(&evt_stop);
+            hipEventRecord(evt_start, q_stream);
+        }
+
         rc = miopenConvolutionForward(GetHandle(),
                                       &alpha,
                                       in_tens,
@@ -2135,25 +2157,46 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuFind(const bool is_transform)
                                       workspace_dev != nullptr ? workspace_dev->GetMem() : nullptr,
                                       ws_size);
         if(rc != miopenStatusSuccess)
+        {
+            if(time_enabled)
+            {
+                hipEventDestroy(evt_start);
+                hipEventDestroy(evt_stop);
+            }
             return rc;
+        }
 
         if(wall_enabled)
             wall_first_time = wall.interim_time_ms();
 
         if(time_enabled)
         {
-            float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
-            kernel_total_time += time;
-            kernel_first_time = time;
+            hipEventRecord(evt_stop, q_stream);
+            hipEventSynchronize(evt_stop);
+            hipEventElapsedTime(&evt_ms, evt_start, evt_stop);
+            kernel_total_time += evt_ms;
+            kernel_first_time = evt_ms;
         }
+
+        // Temporarily disable MIOpen profiling during capture to avoid invalidation
+        const bool restore_prof = time_enabled;
+        if(restore_prof)
+            miopenEnableProfiling(GetHandle(), false);
 
         // Begin capture
         hipGraph_t graph = nullptr;
         hipGraphExec_t graphExec = nullptr;
         hipError_t he = hipStreamBeginCapture(q_stream, hipStreamCaptureModeGlobal);
         if(he != hipSuccess)
+        {
+            if(restore_prof) miopenEnableProfiling(GetHandle(), true);
+            if(time_enabled)
+            {
+                hipEventDestroy(evt_start);
+                hipEventDestroy(evt_stop);
+            }
             return miopenStatusInternalError;
+        }
 
         // Record one iteration body
         if(init_output_nan)
@@ -2176,34 +2219,81 @@ int ConvDriver<Tgpu, Tref>::RunForwardGpuFind(const bool is_transform)
         if(rc != miopenStatusSuccess)
         {
             hipStreamEndCapture(q_stream, &graph);
+            if(restore_prof) miopenEnableProfiling(GetHandle(), true);
+            if(time_enabled)
+            {
+                hipEventDestroy(evt_start);
+                hipEventDestroy(evt_stop);
+            }
             return rc;
         }
 
         he = hipStreamEndCapture(q_stream, &graph);
         if(he != hipSuccess)
+        {
+            if(restore_prof) miopenEnableProfiling(GetHandle(), true);
+            if(time_enabled)
+            {
+                hipEventDestroy(evt_start);
+                hipEventDestroy(evt_stop);
+            }
             return miopenStatusInternalError;
+        }
 
         he = hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0);
         if(he != hipSuccess)
         {
             hipGraphDestroy(graph);
+            if(restore_prof) miopenEnableProfiling(GetHandle(), true);
+            if(time_enabled)
+            {
+                hipEventDestroy(evt_start);
+                hipEventDestroy(evt_stop);
+            }
             return miopenStatusInternalError;
         }
 
-        // Replay remaining iterations
+        // Replay remaining iterations with HIP event timing
         for(int i = 1; i < num_iterations; ++i)
         {
+            if(time_enabled) hipEventRecord(evt_start, q_stream);
+
             he = hipGraphLaunch(graphExec, q_stream);
             if(he != hipSuccess)
             {
                 hipGraphExecDestroy(graphExec);
                 hipGraphDestroy(graph);
+                if(restore_prof) miopenEnableProfiling(GetHandle(), true);
+                if(time_enabled)
+                {
+                    hipEventDestroy(evt_start);
+                    hipEventDestroy(evt_stop);
+                }
                 return miopenStatusInternalError;
             }
+
+            if(time_enabled)
+            {
+                hipEventRecord(evt_stop, q_stream);
+                hipEventSynchronize(evt_stop);
+                hipEventElapsedTime(&evt_ms, evt_start, evt_stop);
+                kernel_total_time += evt_ms;
+            }
         }
+
         hipStreamSynchronize(q_stream);
         hipGraphExecDestroy(graphExec);
         hipGraphDestroy(graph);
+
+        // Restore profiling on handle
+        if(restore_prof)
+            miopenEnableProfiling(GetHandle(), true);
+
+        if(time_enabled)
+        {
+            hipEventDestroy(evt_start);
+            hipEventDestroy(evt_stop);
+        }
     }
     else
 #endif
