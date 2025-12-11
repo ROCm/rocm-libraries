@@ -103,16 +103,17 @@ function(findAndCheckTool OUTPUT_VAR TOOL_NAME EXPECTED_VERSION VERSION_REGEX ER
         if(ERROR_LEVEL STREQUAL "FATAL_ERROR")
             message(
                 FATAL_ERROR
-                    "\n${TOOL_NAME} not found in PATH or LLVM_TOOLS_SEARCH_PREFIX derived paths:\n  ${FORMATTED_HINTS}\n"
+                    "\n${TOOL_NAME} not found in searching PATH, CMake PROGRAM and PREFIX paths, and these LLVM_TOOLS_SEARCH_PREFIX derived paths:\n  ${FORMATTED_HINTS}\n"
             )
         else()
-            message(${ERROR_LEVEL}
-                    "${TOOL_NAME} not found in PATH or LLVM_TOOLS_SEARCH_PREFIX derived paths"
+            message(
+                ${ERROR_LEVEL}
+                "${TOOL_NAME} not found in searching PATH, CMake PROGRAM and PREFIX paths, and LLVM_TOOLS_SEARCH_PREFIX derived paths"
             )
             if(SEARCH_HINTS)
                 message(
                     VERBOSE
-                    "Searched the following LLVM_TOOLS_SEARCH_PREFIX derived paths:\n  ${FORMATTED_HINTS}"
+                    "Search included the following LLVM_TOOLS_SEARCH_PREFIX derived paths:\n  ${FORMATTED_HINTS}"
                 )
             endif()
         endif()
