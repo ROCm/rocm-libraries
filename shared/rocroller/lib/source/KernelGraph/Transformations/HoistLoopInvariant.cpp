@@ -29,6 +29,7 @@
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/HoistLoopInvariant.hpp>
+#include <rocRoller/KernelGraph/Transforms/HoistLoopInvariant_detail.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 
@@ -125,9 +126,8 @@ namespace rocRoller::KernelGraph
         return visitor.tags;
     }
 
-    HoistLoopInvariant::CoordinateToLoops
-        HoistLoopInvariant::buildCoordinateLoopMapping(KernelGraph const&         graph,
-                                                       ControlFlowRWTracer const& tracer)
+    CoordinateToLoops buildCoordinateLoopMapping(KernelGraph const&         graph,
+                                                 ControlFlowRWTracer const& tracer)
     {
         CoordinateToLoops result;
 
@@ -135,15 +135,14 @@ namespace rocRoller::KernelGraph
 
         for(const auto& record : records)
         {
-            Log::info("Processing record: coordinate {}, control node {}, rw {}",
-                      record.coordinate,
-                      record.control,
-                      static_cast<int>(record.rw));
+            Log::debug("Processing record: coordinate {}, control node {}, rw {}",
+                       record.coordinate,
+                       record.control,
+                       static_cast<int>(record.rw));
 
-            if(record.rw != ControlFlowRWTracer::WRITE
-               && record.rw != ControlFlowRWTracer::READWRITE)
+            if(record.rw == ControlFlowRWTracer::READ)
             {
-                Log::info("  Skipping record due to rw type");
+                Log::debug("  Skipping record due to read");
                 continue;
             }
 
@@ -152,30 +151,27 @@ namespace rocRoller::KernelGraph
             for(auto it = stack.rbegin(); it != stack.rend(); ++it)
             {
                 int node = *it;
-                Log::info("  Saw in control stack node {}",
-                          Graph::variantToString(graph.control.getElement(node)));
+                Log::debug("  Saw in control stack node {}",
+                           Graph::variantToString(graph.control.getElement(node)));
 
                 if(graph.control.get<ForLoopOp>(node).has_value()
-                   || graph.control.get<DoWhileOp>(node).has_value()
-                   || graph.control.get<Scope>(node).has_value())
+                   || graph.control.get<DoWhileOp>(node).has_value())
                 {
                     containingLoop = node;
                     break;
                 }
             }
-
-            result[record.coordinate][containingLoop].insert(record.control);
+            if(containingLoop != -1)
+                result[record.coordinate][containingLoop].insert(record.control);
         }
-
         return result;
     }
 
-    int HoistLoopInvariant::hoistNodeBeforeLoop(KernelGraph& kgraph, int nodeToHoist, int loopNode)
+    int hoistNodeBeforeLoop(KernelGraph& kgraph, int nodeToHoist, int loopNode)
     {
         int hoistedNode = duplicateControlNode(kgraph, nodeToHoist);
-        Log::info("HoistLoopInvariant: Hoisted node {} to new node {}", nodeToHoist, hoistedNode);
+        Log::debug("HoistLoopInvariant: Hoisted node {} to new node {}", nodeToHoist, hoistedNode);
         insertBefore(kgraph, loopNode, hoistedNode, hoistedNode);
-        // bypassAndDelete(kgraph, nodeToHoist);
         kgraph.control.setElement(nodeToHoist, NOP{});
         return hoistedNode;
     }
@@ -212,7 +208,7 @@ namespace rocRoller::KernelGraph
 
                 if(controlNodes.size() != 1)
                 {
-                    Log::info(
+                    Log::debug(
                         "HoistLoopInvariant: Coordinate {} has {} writers in loop {}, skipping",
                         coordinate,
                         controlNodes.size(),
@@ -225,14 +221,14 @@ namespace rocRoller::KernelGraph
                 auto maybeAssign = graph.control.get<Assign>(controlNode);
                 if(!maybeAssign.has_value())
                 {
-                    Log::info("HoistLoopInvariant: Control node {} is not an Assign, skipping",
-                              controlNode);
+                    Log::debug("HoistLoopInvariant: Control node {} is not an Assign, skipping",
+                               controlNode);
                     continue;
                 }
 
                 auto assignNode = maybeAssign.value();
 
-                Log::info(
+                Log::debug(
                     "HoistLoopInvariant: Analyzing Assign node {} for coordinate {} in loop {}",
                     controlNode,
                     coordinate,
@@ -245,38 +241,44 @@ namespace rocRoller::KernelGraph
                 {
                     if(isCoordinateWrittenInLoop(graph, loopNode, tag, tracer))
                     {
-                        Log::info("HoistLoopInvariant:   DataFlowTag {} is written in loop {}, not "
-                                  "invariant",
-                                  tag,
-                                  loopNode);
+                        Log::debug(
+                            "HoistLoopInvariant:   DataFlowTag {} is written in loop {}, not "
+                            "invariant",
+                            tag,
+                            loopNode);
                         allTagsLoopInvariant = false;
                         break;
                     }
                 }
 
-                Log::info("HoistLoopInvariant:   Used DataFlowTags: {}, all loop invariant: {}",
-                          fmt::join(usedTags, ", "),
-                          allTagsLoopInvariant);
+                Log::debug("HoistLoopInvariant:   Used DataFlowTags: {}, all loop invariant: {}",
+                           fmt::join(usedTags, ", "),
+                           allTagsLoopInvariant);
 
                 if(allTagsLoopInvariant)
                 {
-                    Log::info("HoistLoopInvariant: Hoisting Assign node {} out of loop {}",
+                    Log::info("HoistLoopInvariant, {}, {}, loop, {}, {}",
                               controlNode,
-                              loopNode);
+                              Graph::variantToString(graph.control.getElement(controlNode)),
+                              loopNode,
+                              Graph::variantToString(graph.control.getElement(loopNode)));
+
                     hoistNodeBeforeLoop(graph, controlNode, loopNode);
                     hoistedCount++;
 
+                    AssertFatal(false);
+
                     if(hoistedCount >= MAX_NODES_TO_HOIST)
                     {
-                        Log::info("HoistLoopInvariant: Reached maximum hoisted node count of {}, "
-                                  "stopping.",
-                                  MAX_NODES_TO_HOIST);
+                        Log::debug("HoistLoopInvariant: Reached maximum hoisted node count of {}, "
+                                   "stopping.",
+                                   MAX_NODES_TO_HOIST);
                         return graph;
                     }
                 }
             }
         }
-        return graph;
+        return original; // Note: logging only
     }
 
     std::string HoistLoopInvariant::name() const
@@ -284,8 +286,7 @@ namespace rocRoller::KernelGraph
         return "HoistLoopInvariant";
     }
 
-    std::optional<int> HoistLoopInvariant::findEnclosingLoop(KernelGraph const& kgraph,
-                                                             int                controlNode)
+    std::optional<int> findEnclosingLoop(KernelGraph const& kgraph, int controlNode)
     {
         for(int parentNode : kgraph.control.nodesContaining(controlNode))
         {
@@ -298,10 +299,10 @@ namespace rocRoller::KernelGraph
         return std::nullopt;
     }
 
-    bool HoistLoopInvariant::isCoordinateWrittenInLoop(KernelGraph const&         kgraph,
-                                                       int                        loopNode,
-                                                       int                        coordinate,
-                                                       ControlFlowRWTracer const& tracer)
+    bool isCoordinateWrittenInLoop(KernelGraph const&         kgraph,
+                                   int                        loopNode,
+                                   int                        coordinate,
+                                   ControlFlowRWTracer const& tracer)
     {
         // Get all control nodes that write to this coordinate
         auto records = tracer.coordinatesReadWrite(coordinate);

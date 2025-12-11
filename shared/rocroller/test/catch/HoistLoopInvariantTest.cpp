@@ -24,21 +24,24 @@
  *
  *******************************************************************************/
 
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+#include <catch2/matchers/catch_matchers_contains.hpp>
+
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
-#include <rocRoller/KernelGraph/Transforms/HoistLoopInvariant.hpp>
+#include <rocRoller/KernelGraph/Transforms/All.hpp>
+#include <rocRoller/KernelGraph/Transforms/HoistLoopInvariant_detail.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
-
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/matchers/catch_matchers_contains.hpp>
 
 #include <fstream>
 #include <iostream>
 
 #include "TestContext.hpp"
 #include <common/CommonGraphs.hpp>
+#include <common/Utilities.hpp>
 
 void writeDotToFile(const std::string& dotContent, const std::string& filename)
 {
@@ -51,132 +54,6 @@ void writeDotToFile(const std::string& dotContent, const std::string& filename)
     }
 }
 
-TEST_CASE("HoistLoopInvariant independent",
-          "[kernel-graph][hoist-loop-invariant][graph-transforms]")
-{
-    using namespace rocRoller;
-    namespace kg = rocRoller::KernelGraph;
-    using namespace kg::ControlGraph;
-    using namespace kg::CoordinateGraph;
-
-    auto ctx = TestContext::ForDefaultTarget();
-
-    kg::KernelGraph graph0;
-
-    auto head = graph0.control.addElement(NOP{});
-
-    auto loopSize                  = Expression::literal(10);
-    auto [loopIndexCoord, forLoop] = kg::rangeFor(graph0, loopSize, "TestLoop");
-
-    auto loopBody     = graph0.control.addElement(NOP{});
-    auto loadConstant = graph0.control.addElement(LoadVGPR{});
-
-    auto constantCoord = graph0.coordinates.addElement(VGPR{});
-    auto resultCoord   = graph0.coordinates.addElement(VGPR{});
-
-    auto constantDF = graph0.coordinates.addElement(DataFlow{}, {constantCoord}, {resultCoord});
-
-    graph0.mapper.connect<VGPR>(loadConstant, constantDF);
-
-    auto DF = [](int tag) {
-        return std::make_shared<Expression::Expression>(
-            Expression::DataFlowTag{tag, Register::Type::Vector, DataType::Float});
-    };
-
-    auto loopInvariantExpr = Expression::literal(2.0f) * DF(constantDF);
-    auto assignInvariant
-        = graph0.control.addElement(Assign{Register::Type::Vector, loopInvariantExpr});
-
-    graph0.mapper.connect(assignInvariant, resultCoord, NaryArgument::DEST);
-
-    graph0.control.addElement(Sequence{}, {head}, {loadConstant});
-    graph0.control.addElement(Sequence{}, {loadConstant}, {forLoop});
-    graph0.control.addElement(Body{}, {forLoop}, {loopBody});
-    graph0.control.addElement(Sequence{}, {loopBody}, {assignInvariant});
-
-    std::string dotOutputBefore = graph0.toDOT(true);
-    writeDotToFile(dotOutputBefore, "hoist_loop_invariant_independent_before.dot");
-
-    // Apply the HoistLoopInvariant transformation
-    kg::HoistLoopInvariant transform;
-    auto                   graph1 = transform.apply(graph0);
-
-    std::string dotOutputAfter = graph1.toDOT(true);
-    writeDotToFile(dotOutputAfter, "hoist_loop_invariant_independent_after.dot");
-
-    // Verify that the assign node was hoisted before the loop
-    // The assignInvariant node should now have a sequence edge to the forLoop
-    auto assignOutputs
-        = graph1.control.getOutputNodeIndices<Sequence>(assignInvariant).to<std::vector>();
-    REQUIRE(std::find(assignOutputs.begin(), assignOutputs.end(), forLoop) != assignOutputs.end());
-
-    // Verify that assignInvariant is no longer inside the loop body
-    auto loopBodyChildren
-        = graph1.control.depthFirstVisit(loopBody, Graph::Direction::Downstream).to<std::vector>();
-    REQUIRE(std::find(loopBodyChildren.begin(), loopBodyChildren.end(), assignInvariant)
-            == loopBodyChildren.end());
-}
-
-TEST_CASE("HoistLoopInvariant dependent", "[kernel-graph][hoist-loop-invariant][graph-transforms]")
-{
-    using namespace rocRoller;
-    namespace kg = rocRoller::KernelGraph;
-    using namespace kg::ControlGraph;
-    using namespace kg::CoordinateGraph;
-
-    auto ctx = TestContext::ForDefaultTarget();
-
-    kg::KernelGraph graph0;
-
-    auto head = graph0.control.addElement(NOP{});
-
-    auto loopSize                  = Expression::literal(10);
-    auto [loopIndexCoord, forLoop] = kg::rangeFor(graph0, loopSize, "TestLoop");
-
-    auto loopBody  = graph0.control.addElement(NOP{});
-    auto destCoord = graph0.coordinates.addElement(VGPR{});
-
-    auto rangeCoord = graph0.mapper.get(forLoop, NaryArgument::DEST);
-
-    auto DF = [](int tag) {
-        return std::make_shared<Expression::Expression>(
-            Expression::DataFlowTag{tag, Register::Type::Scalar, DataType::Int32});
-    };
-
-    auto loopDependentExpr = DF(rangeCoord) * Expression::literal(2);
-
-    auto assignDependent
-        = graph0.control.addElement(Assign{Register::Type::Vector, loopDependentExpr});
-
-    graph0.mapper.connect(assignDependent, destCoord, NaryArgument::DEST);
-
-    graph0.control.addElement(Sequence{}, {head}, {forLoop});
-    graph0.control.addElement(Body{}, {forLoop}, {loopBody});
-    graph0.control.addElement(Sequence{}, {loopBody}, {assignDependent});
-
-    std::string dotOutputBefore = graph0.toDOT(true);
-    writeDotToFile(dotOutputBefore, "hoist_loop_invariant_dependent_before.dot");
-
-    // Apply the HoistLoopInvariant transformation
-    kg::HoistLoopInvariant transform;
-    auto                   graph1 = transform.apply(graph0);
-
-    std::string dotOutputAfter = graph1.toDOT(true);
-    writeDotToFile(dotOutputAfter, "hoist_loop_invariant_dependent_after.dot");
-
-    // Verify that the assign node was NOT hoisted because it depends on the loop variable
-    // The assignDependent node should still be inside the loop body
-    auto loopBodyChildren
-        = graph1.control.depthFirstVisit(loopBody, Graph::Direction::Downstream).to<std::vector>();
-    REQUIRE(std::find(loopBodyChildren.begin(), loopBodyChildren.end(), assignDependent)
-            != loopBodyChildren.end());
-
-    // Verify that assignDependent does NOT have a direct sequence edge to the forLoop
-    auto assignOutputs
-        = graph1.control.getOutputNodeIndices<Sequence>(assignDependent).to<std::vector>();
-    REQUIRE(std::find(assignOutputs.begin(), assignOutputs.end(), forLoop) == assignOutputs.end());
-}
-
 TEST_CASE("extractDataFlowTags", "[kernel-graph][hoist-loop-invariant][expression]")
 {
     using namespace rocRoller;
@@ -184,27 +61,23 @@ TEST_CASE("extractDataFlowTags", "[kernel-graph][hoist-loop-invariant][expressio
 
     SECTION("Binary operation with DataFlowTags")
     {
-        // Create two DataFlowTag expressions with different tag IDs
         Expression::DataFlowTag tag1{42, Register::Type::Vector, DataType::Float};
         Expression::DataFlowTag tag2{77, Register::Type::Vector, DataType::Float};
 
         auto tag1Ptr = std::make_shared<Expression::Expression>(tag1);
         auto tag2Ptr = std::make_shared<Expression::Expression>(tag2);
 
-        // Combine them with a binary operation (addition)
         auto binaryExpr = Expression::Add{{tag1Ptr, tag2Ptr}};
 
-        // Extract the DataFlowTags
         auto extractedTags = kg::extractDataFlowTags(binaryExpr);
 
-        // Verify that both tags were extracted
         REQUIRE(extractedTags.size() == 2);
         REQUIRE(extractedTags.count(42) == 1);
         REQUIRE(extractedTags.count(77) == 1);
     }
 }
 
-TEST_CASE("hoistNodeBeforeLoop", "[kernel-graph][hoist-loop-invariant][helper]")
+TEST_CASE("hoistNodeBeforeLoop", "[kernel-graph][hoist-loop-invariant]")
 {
     using namespace rocRoller;
     namespace kg = rocRoller::KernelGraph;
@@ -235,22 +108,99 @@ TEST_CASE("hoistNodeBeforeLoop", "[kernel-graph][hoist-loop-invariant][helper]")
     writeDotToFile(dotOutputBefore, "hoistNodeBeforeLoop_before.dot");
 
     // Hoist only the first node
-    int result = kg::HoistLoopInvariant::hoistNodeBeforeLoop(graph, nodeToHoist, forLoop);
+    int result = kg::hoistNodeBeforeLoop(graph, nodeToHoist, forLoop);
 
     std::string dotOutputAfter = graph.toDOT(true);
     writeDotToFile(dotOutputAfter, "hoistNodeBeforeLoop_after.dot");
 }
 
-TEST_CASE("hoist matrixmultiply")
+TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]")
 {
     using namespace rocRoller;
+    using namespace rocRoller::KernelGraph;
     namespace kg = rocRoller::KernelGraph;
-    using namespace kg::ControlGraph;
-    using namespace kg::CoordinateGraph;
+    using namespace rocRoller::KernelGraph::CoordinateGraph;
+    using namespace rocRoller::KernelGraph::ControlGraph;
 
-    auto example = rocRollerTest::Graphs::MatrixMultiply(DataType::Float);
-    auto graph   = example.getKernelGraph();
+    auto context = TestContext::ForDefaultTarget();
+
+    auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
+
+    int macK  = 16;
+    int waveK = 2;
+
+    example.setTileSize(256, 64, macK);
+    example.setMFMA(32, 32, waveK, 1);
+    example.setUseLDS(true, true, false);
+    example.setUnroll(2, 2);
+
+    example.setPrefetch(true, 2, 2, false);
+
+    auto graph  = example.getKernelGraph();
+    auto params = example.getCommandParameters();
+
+    graph = transform<IdentifyParallelDimensions>(graph);
+    graph = transform<OrderMemory>(graph, true);
+    graph = transform<UpdateParameters>(graph, params);
+    graph = transform<AddLDS>(graph, params, context.get());
+    graph = transform<LowerLinear>(graph, context.get());
+    graph = transform<LowerTile>(graph, params, context.get());
+    graph = transform<LowerTensorContraction>(graph, params, context.get());
+    graph = transform<Simplify>(graph);
+
+    graph = transform<ConstantPropagation>(graph);
+    graph = transform<FuseExpressions>(graph);
+    graph = transform<ConnectWorkgroups>(graph, context.get());
+    graph = transform<WorkgroupRemapXCC>(graph, context.get(), params->workgroupRemapXCC);
+    graph = transform<UnrollLoops>(graph, params, context.get());
+    graph = transform<FuseLoops>(graph);
+    graph = transform<RemoveDuplicates>(graph);
+    graph = transform<OrderEpilogueBlocks>(graph);
+    graph = transform<CleanLoops>(graph);
+    graph = transform<AddPrefetch>(graph, params, context.get());
+    graph = transform<AddComputeIndex>(graph);
+    graph = transform<AddPRNG>(graph, context.get());
+    graph = transform<UpdateWavefrontParameters>(graph, params);
+    graph = transform<LoadPacked>(graph, context.get());
+    graph = transform<AddConvert>(graph);
+    graph = transform<AddDeallocateDataFlow>(graph);
+    graph = transform<InlineIncrements>(graph);
+    graph = transform<Simplify>(graph);
+
+    SECTION("buildCoordinateLoopMapping")
     {
-        writeDotToFile(graph.toDOT(true), "hoist_matrixmultiply_before.dot");
+        ControlFlowRWTracer tracer(graph);
+        auto                loopMapping = kg::buildCoordinateLoopMapping(graph, tracer);
+
+        for(const auto& [coord, loopSet] : loopMapping)
+        {
+            Log::info("Coordinate {} is associated with loops:", coord);
+            for(const auto& loop : loopSet)
+            {
+                Log::info("  Loop {}", loop);
+            }
+        }
+
+        {
+            // coord 510 is a MacroTile
+            CHECK(loopMapping[510].size() > 0);
+            CHECK_NOTHROW(graph.coordinates.getNode<MacroTile>(510));
+
+            // written in k loop and tail loop
+            bool foundKLoop    = false;
+            bool foundTailLoop = false;
+            for(const auto& [loop, writes] : loopMapping[510])
+            {
+                auto str = Graph::variantToString(graph.control.getElement(loop));
+                if(str.find("KLoop") != std::string::npos)
+                    foundKLoop = true;
+                if(str.find("KLoopTail") != std::string::npos)
+                    foundTailLoop = true;
+                CHECK(writes.size() >= 8); // written at least 8 times in each loop
+            }
+            CHECK(foundKLoop);
+            CHECK(foundTailLoop);
+        }
     }
+    writeDotToFile(graph.toDOT(false), "hoistLoopInvariant_before.dot");
 }
