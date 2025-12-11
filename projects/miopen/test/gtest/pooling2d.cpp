@@ -8,21 +8,33 @@
 #include "../driver.hpp"
 #include <half/half.hpp>
 
-namespace pooling2d {
+namespace {
 
-class GPU_Pooling2d_FP32 : public testing::Test
+class GPU_Pooling2d_FP32 : public testing::TestWithParam<miopenDataType_t>
 {
     void SetUp() override
     {
+        prng::reset_seed();
+        const auto& handle = get_handle();
+        if(!IsTestSupportedForDevice(handle))
+        {
+            GTEST_SKIP();
+        }
         // Decrease log level to reduce output
         lib_env::update(MIOPEN_LOG_LEVEL, 2);
     }
 };
 
-class GPU_Pooling2d_FP16 : public testing::Test
+class GPU_Pooling2d_FP16 : public testing::TestWithParam<miopenDataType_t>
 {
     void SetUp() override
     {
+        prng::reset_seed();
+        const auto& handle = get_handle();
+        if(!IsTestSupportedForDevice(handle))
+        {
+            GTEST_SKIP();
+        }
         // Decrease log level to reduce output
         lib_env::update(MIOPEN_LOG_LEVEL, 2);
     }
@@ -45,7 +57,6 @@ void RunPooling2dTests()
             data_args.push_back(&arg);
         }
 
-        prng::reset_seed();
         driver.iteration = 0;
         try
         {
@@ -77,7 +88,6 @@ void RunPooling2dTests()
             data_args.push_back(&arg);
         }
 
-        prng::reset_seed();
         driver.iteration = 0;
         try
         {
@@ -120,31 +130,18 @@ void Run2dDriver(miopenDataType_t prec)
 
 bool IsTestSupportedForDevice(const miopen::Handle& handle) { return true; }
 
-} // namespace pooling2d
-using namespace pooling2d;
+} // namespace
 
-TEST_F(GPU_Pooling2d_FP32, FloatTest_pooling2d)
+TEST_P(GPU_Pooling2d_FP32, FloatTest_pooling2d)
 {
-    const auto& handle = get_handle();
-    if(IsTestSupportedForDevice(handle))
-    {
-        Run2dDriver(miopenFloat);
-    }
-    else
-    {
-        GTEST_SKIP();
-    }
+    Run2dDriver(GetParam());
 }
 
-TEST_F(GPU_Pooling2d_FP16, HalfTest_pooling2d)
+TEST_P(GPU_Pooling2d_FP16, HalfTest_pooling2d)
 {
-    const auto& handle = get_handle();
-    if(IsTestSupportedForDevice(handle))
-    {
-        Run2dDriver(miopenHalf);
-    }
-    else
-    {
-        GTEST_SKIP();
-    }
+    Run2dDriver(GetParam());
 }
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling2d_FP32, testing::ValuesIn({miopenFloat}));
+
+INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling2d_FP16, testing::ValuesIn({miopenHalf}));
