@@ -79,7 +79,8 @@ def worker_lock_path(tmp_path_factory, worker_id):
     if not worker_id:
         return None
 
-    return tmp_path_factory.getbasetemp().parent / "client_execution.lock"
+    return None 
+    # return tmp_path_factory.getbasetemp().parent / f"client_execution_{worker_id}.lock"
 
 @pytest.fixture
 def tensile_script_path():
