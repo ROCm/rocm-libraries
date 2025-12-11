@@ -198,15 +198,14 @@ std::shared_ptr<SolutionParameters>
     }
 
     // Pass StreamK flag from solution index parameters
-    gemm->streamK = true;
+    gemm->streamK = solutionIndexParameters.streamK;
 
-    // StreamK is not currently working with prefetching or workgroup mapping
-    // if(gemm->streamK)
-    // {
-    //     gemm->prefetch = false;
-    //     gemm->workgroupMappingDim = -1;
-    //     gemm->workgroupRemapXCC = false;
-    // }
+    // StreamK is not currently working with workgroup mapping due to register pressure
+    if(gemm->streamK)
+    {
+        gemm->workgroupMappingDim = -1;
+        gemm->workgroupRemapXCC = false;
+    }
 
     return gemm;
 }
