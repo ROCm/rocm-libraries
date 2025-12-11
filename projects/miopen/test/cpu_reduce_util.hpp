@@ -509,7 +509,7 @@ reduce_cpu_common(const miopenReduceTensorOp_t& reduceOp,
 
         if(parallel)
         {
-            par_for(static_cast<int>(P), worker);
+            miopen::par_for(static_cast<int>(P), worker);
         }
         else
         {
@@ -601,7 +601,7 @@ reduce_cpu_common(const miopenReduceTensorOp_t& reduceOp,
 
         if(parallel)
         {
-            par_for(static_cast<int>(Te), worker);
+            miopen::par_for(static_cast<int>(Te), worker);
         }
         else
         {
