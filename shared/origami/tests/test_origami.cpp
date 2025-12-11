@@ -1,0 +1,287 @@
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright 2025 AMD ROCm(TM) Software
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+
+#include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
+#include "common.hpp"
+
+using Catch::Approx;
+
+// Test functions for origami.hpp/cpp
+
+TEST_CASE("Origami: compute_perf_gflops", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - faster clock yields higher GFLOPS") {
+      // TODO: Add support for make_hardware using hipDeviceProperties
+      auto hardware_slow = make_hardware(gpu_arch, 304, 65536, 8, 1.0, 1.0, 1.0, 4000000, 1.4);
+      auto hardware_fast = make_hardware(gpu_arch, 304, 65536, 8, 1.0, 1.0, 1.0, 4000000, 1.8);
+      auto problem =
+          make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 2);
+      auto config = make_config(128, 128, 64, 32, 32, 8, 1);
+
+      auto config_slow = config;
+      auto config_fast = config;
+
+      auto latency_config_slow =
+          origami::compute_total_latency(problem, hardware_slow, config_slow, hardware_slow.N_CU);
+      auto flops_slow = origami::compute_perf_gflops(hardware_slow, problem, latency_config_slow);
+
+      auto latency_config_fast =
+          origami::compute_total_latency(problem, hardware_fast, config_fast, hardware_fast.N_CU);
+      auto flops_fast = origami::compute_perf_gflops(hardware_fast, problem, latency_config_fast);
+
+      REQUIRE(flops_fast > flops_slow);
+    }
+  }
+}
+
+TEST_CASE("Origami: hardware_arch_enum", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " architecture enum") {
+      std::string arch_str = "gfx" + std::to_string(gpu_arch);
+      auto arch_enum       = origami::hardware_t::arch_name_to_enum(arch_str);
+
+      if (gpu_arch == 942) {
+        REQUIRE(arch_enum == origami::hardware_t::architecture_t::gfx942);
+      } else if (gpu_arch == 950) {
+        REQUIRE(arch_enum == origami::hardware_t::architecture_t::gfx950);
+      }
+    }
+  }
+}
+
+TEST_CASE("Origami: best_grid_size", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - grid size selection") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(1024, 1024, 4096);
+      auto config   = make_config(256, 256, 64, 32, 32, 8, 1);
+
+      auto grid_size = origami::streamk::select_grid_size(
+          problem, hardware, config, origami::grid_selection_t::k_split_aware, hardware.N_CU);
+
+      REQUIRE(grid_size >= 16);
+    }
+  }
+}
+
+TEST_CASE("Origami: best_macro_tile_size", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - rank configs by latency") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(1024, 1024, 4096);
+
+      // List 1: config A first, then config B
+      std::vector<origami::config_t> configs;
+
+      // config A[0]
+      configs.push_back(make_config(256, 256, 32, 32, 32, 8, 1, 6, 0, 0));
+      // config A[1]
+      configs.push_back(make_config(128, 128, 64, 32, 32, 8, 1, 6, 0, 0));
+      // config A[2]
+      configs.push_back(make_config(64, 64, 64, 32, 32, 8, 1, 6, 0, 0));
+
+      auto results = origami::rank_configs(problem, hardware, configs);
+
+      REQUIRE(results.size() == configs.size());
+      // Results should be ranked, so latencies should be in ascending order (best first)
+      for (size_t i = 0; i < results.size() - 1; i++) {
+        REQUIRE(results[i].latency < results[i + 1].latency);
+      }
+    }
+  }
+}
+
+TEST_CASE("Origami: select_workgroup_mapping", "[origami]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - workgroup mapping selection") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem  = make_problem(4096, 4096, 8192);
+
+      auto config_large = make_config(256, 256, 32, 32, 32, 8, 1);
+      auto skGrid_large = (4096 + 256 - 1) / 256 * (4096 + 256 - 1) / 256;
+      auto [best_wgmxcc_large_tile, best_wgm_large_tile] =
+          origami::select_workgroup_mapping(problem, hardware, config_large, skGrid_large);
+
+      auto config_small = make_config(128, 128, 64, 32, 32, 8, 1);
+      auto skGrid_small = (4096 + 128 - 1) / 128 * (4096 + 128 - 1) / 128;
+      auto [best_wgmxcc_small_tile, best_wgm_small_tile] =
+          origami::select_workgroup_mapping(problem, hardware, config_small, skGrid_small);
+
+      // Different problem size for nonsquare test
+      origami::problem_t problem_nonsquare = problem;
+      problem_nonsquare.size.m             = 2048;
+      problem_nonsquare.size.n             = 5120;
+      auto skGrid_nonsquare                = (2048 + 128 - 1) / 128 * (5120 + 128 - 1) / 128;
+
+      auto [best_wgmxcc_nonsquare_tile, best_wgm_nonsquare] = origami::select_workgroup_mapping(
+          problem_nonsquare, hardware, config_large, skGrid_nonsquare);
+
+      REQUIRE(best_wgmxcc_large_tile == best_wgmxcc_small_tile);
+      REQUIRE(best_wgm_large_tile > best_wgm_small_tile);
+      REQUIRE(best_wgm_large_tile != best_wgm_nonsquare);
+    }
+  }
+}
+
+TEST_CASE("GEMM: negative_occupancy", "[gemm]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - test negative occupancy") {
+      auto hardware              = make_hardware(gpu_arch);
+      origami::problem_t problem = {
+          .size            = {32, 800000, 16},
+          .batch           = 1,
+          .a_transpose     = origami::transpose_t::N,
+          .b_transpose     = origami::transpose_t::T,
+          .a_dtype         = origami::data_type_t::XFloat32,  // element_size_A = 16
+          .b_dtype         = origami::data_type_t::XFloat32,
+          .mi_dtype        = origami::data_type_t::XFloat32,
+          .a_mx_block_size = 0,
+          .b_mx_block_size = 0,
+      };
+      // List 1: config A first, then config B
+      std::vector<origami::config_t> config;
+
+      // config[0]
+      config.push_back(make_config(256, 256, 32, 16, 16, 32, -1, 6, 0, 0));
+      // config[1]
+      config.push_back(make_config(32, 256, 16, 32, 32, 8, 2, 6, 0, 0));
+
+      // Call select_config
+      auto best_tile = origami::select_config(problem, hardware, config);
+
+      size_t MT_M = best_tile.config.mt.m;
+      size_t MT_N = best_tile.config.mt.n;
+      size_t MT_K = best_tile.config.mt.k;
+      REQUIRE(MT_M == 32);   //"MT_M should be 32"
+      REQUIRE(MT_N == 256);  //"MT_N should be 256"
+      REQUIRE(MT_K == 16);   //"MT_K should be 16"
+    }
+  }
+}
+
+TEST_CASE("GEMM: deterministic_tie_breaking", "[gemm]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - Verify deterministic selection") {
+      auto hardware = make_hardware(gpu_arch);
+      // Square problem size
+      auto problem =
+          make_problem(1024, 1024, 1024, origami::transpose_t::N, origami::transpose_t::N, 1);
+
+      // Two config with same arithmetic intensity: 256x64x32 and 64x256x32
+      // AI = (2 * MT_M * MT_N * MT_K) / (MT_M*MT_K + MT_N*MT_K + MT_M*MT_N)
+      // Both have AI = 1048576 / 26624 = 39.38
+
+      // List 1: config A first, then config B
+      std::vector<origami::config_t> config_A;
+      std::vector<origami::config_t> config_B;
+
+      // config A[0]
+      config_A.push_back(make_config(256, 64, 32, 32, 32, 8, 1, 6, 0, 0));
+      // config A[1]
+      config_A.push_back(make_config(64, 256, 32, 32, 32, 8, 1, 6, 0, 0));
+
+      // config B[0] (reversed order)
+      config_B.push_back(make_config(64, 256, 32, 32, 32, 8, 1, 6, 0, 0));
+      // config B[1] (reversed order)
+      config_B.push_back(make_config(256, 64, 32, 32, 32, 8, 1, 6, 0, 0));
+
+      // Call select_config with both orderings
+      auto best_tile_A = origami::select_config(problem, hardware, config_A);
+
+      auto best_tile_B = origami::select_config(problem, hardware, config_B);
+
+      size_t MT_M_A_first = best_tile_A.config.mt.m;
+      size_t MT_N_A_first = best_tile_A.config.mt.n;
+      size_t MT_K_A_first = best_tile_A.config.mt.k;
+
+      size_t MT_M_B_first = best_tile_B.config.mt.m;
+      size_t MT_N_B_first = best_tile_B.config.mt.n;
+      size_t MT_K_B_first = best_tile_B.config.mt.k;
+
+      // Verify deterministic selection: both should select the same tile (256x64x32)
+      // regardless of input order, using the final tie-breaker (prefer larger MT_M)
+      REQUIRE(MT_M_A_first == MT_M_B_first);  //"Selected tile MT_M should be consistent"
+      REQUIRE(MT_N_A_first == MT_N_B_first);  //"Selected tile MT_N should be consistent"
+      REQUIRE(MT_K_A_first == MT_K_B_first);  //"Selected tile MT_K should be consistent"
+
+      // Verify it selected the tile with larger MT_M (256 > 64)
+      REQUIRE(MT_M_A_first == 256);  //"Should prefer tile with larger MT_M"
+      REQUIRE(MT_N_A_first == 64);   //"Should prefer tile with larger MT_M"
+    }
+  }
+}
+
+TEST_CASE("GEMM: Verify deterministic tile selection", "[gemm]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - Verify deterministic selection") {
+      auto hardware = make_hardware(gpu_arch);
+
+      // problem size
+      auto problem =
+          make_problem(42598, 153, 128, origami::transpose_t::N, origami::transpose_t::T);
+
+      // List 1: config A first, then config B
+      std::vector<origami::config_t> config_A;
+      std::vector<origami::config_t> config_B;
+
+      // config A[0]
+      config_A.push_back(make_config(256, 160, 32, 16, 16, 32, 1, 6, 0, 0));  // Tile A
+      // config A[1]
+      config_A.push_back(make_config(192, 160, 64, 16, 16, 32, 1, 6, 0, 0));  // Tile B
+
+      // config B[0] Previous two tiles + a new one
+      config_B.push_back(make_config(256, 160, 32, 16, 16, 32, 1, 6, 0, 0));  // Tile A
+      // config B[1]
+      config_B.push_back(make_config(192, 160, 64, 16, 16, 32, 1, 6, 0, 0));  // Tile B
+      // config B[2]
+      config_B.push_back(make_config(192, 160, 32, 16, 16, 32, 1, 6, 0, 0));  // Tile C
+
+      // Call select_config with both tile configs
+      auto best_tile_A = origami::select_config(problem, hardware, config_A);
+
+      auto best_tile_B = origami::select_config(problem, hardware, config_B);
+
+      size_t MT_M1 = best_tile_A.config.mt.m;
+      size_t MT_N1 = best_tile_A.config.mt.n;
+      size_t MT_K1 = best_tile_A.config.mt.k;
+
+      size_t MT_M2 = best_tile_B.config.mt.m;
+      size_t MT_N2 = best_tile_B.config.mt.n;
+      size_t MT_K2 = best_tile_B.config.mt.k;
+
+      auto winner_is_acceptable =
+          [](auto const& actual, auto const& candidate1, auto const& candidate2) -> bool {
+        return (actual == candidate1) || (actual == candidate2);
+      };
+
+      INFO("Winner is not acceptable");
+      REQUIRE(winner_is_acceptable(MT_M2, MT_M1, config_B[2].mt.m));
+      REQUIRE(winner_is_acceptable(MT_N2, MT_N1, config_B[2].mt.n));
+      REQUIRE(winner_is_acceptable(MT_K2, MT_K1, config_B[2].mt.k));
+    }
+  }
+}
