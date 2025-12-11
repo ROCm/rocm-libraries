@@ -250,7 +250,7 @@ namespace rocRoller::KernelGraph
                 }
             }
         }
-        return original; // Note: logging only
+        return graph;
     }
 
     std::string HoistLoopInvariant::name() const
