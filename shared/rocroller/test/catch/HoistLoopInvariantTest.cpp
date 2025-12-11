@@ -167,10 +167,10 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
     graph = transform<InlineIncrements>(graph);
     graph = transform<Simplify>(graph);
 
+    ControlFlowRWTracer tracer(graph);
     SECTION("buildCoordinateLoopMapping")
     {
-        ControlFlowRWTracer tracer(graph);
-        auto                loopMapping = kg::buildCoordinateLoopMapping(graph, tracer);
+        auto loopMapping = kg::buildCoordinateLoopMapping(graph, tracer);
 
         for(const auto& [coord, loopSet] : loopMapping)
         {
@@ -197,11 +197,25 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
                 if(str.find("KLoopTail") != std::string::npos)
                     foundTailLoop = true;
                 CHECK(writes.size() >= 8); // written at least 8 times in each loop
+                Log::info("Coordinate 510 written in loop {} with {} writes", str, writes);
             }
             CHECK(foundKLoop);
             CHECK(foundTailLoop);
         }
         CHECK(loopMapping.size() == 140);
     }
-    writeDotToFile(graph.toDOT(false), "hoistLoopInvariant_before.dot");
+
+    SECTION("isCoordinateWrittenInLoop")
+    {
+        graph = transform<HoistLoopInvariant>(graph);
+        writeDotToFile(graph.toDOT(false), "hoistLoopInvariant_result.dot");
+
+        // Written in both
+        CHECK(isCoordinateWrittenInLoop(graph, 1122, 510, tracer));
+        CHECK(isCoordinateWrittenInLoop(graph, 1127, 510, tracer));
+
+        // For loop variable only written in one loop
+        CHECK(isCoordinateWrittenInLoop(graph, 1127, 314, tracer));
+        CHECK(!isCoordinateWrittenInLoop(graph, 1122, 314, tracer));
+    }
 }

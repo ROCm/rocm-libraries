@@ -35,57 +35,30 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        using LoopToControlNodes = std::unordered_map<int, std::set<int>>;
-        using CoordinateToLoops  = std::unordered_map<int, LoopToControlNodes>;
-
         /**
          * @brief Extract all DataFlowTags referenced in an expression
-         * @param expr The expression to extract tags from
-         * @return Set of DataFlowTag IDs found in the expression
+         * @return Set of DataFlowTags found in the expression
          */
         std::set<int> extractDataFlowTags(Expression::Expression const& expr);
 
+        using LoopToControlNodes = std::unordered_map<int, std::set<int>>;
+        using CoordinateToLoops  = std::unordered_map<int, LoopToControlNodes>;
         /**
          * @brief Build a mapping of coordinates to loop groups to control nodes
          * 
-         * This helper function processes tracer records to create a hierarchical mapping:
-         * - For each coordinate accessed in the graph
-         * - Groups control nodes by the loop they belong to
-         * - Special key -1 is used for control nodes not in any loop
-         * 
-         * @param graph The kernel graph being analyzed
-         * @param tracer The control flow read/write tracer with access records
          * @return Mapping of coordinate -> loop -> [control nodes]
          */
         CoordinateToLoops buildCoordinateLoopMapping(KernelGraph const&         graph,
                                                      ControlFlowRWTracer const& tracer);
 
         /**
-         * @brief Hoist a single node out of a loop and insert it before the loop (for testing)
-         * 
-         * This function disconnects the given node from the loop body and inserts it
-         * into the control flow before the loop starts.
-         * 
-         * @param kgraph The kernel graph to modify
-         * @param nodeToHoist The node to hoist out of the loop
-         * @param loopNode The loop from which to hoist the node
-         * @param predecessorNode The node that should precede the hoisted node
-         * @param sequenceEdge The sequence edge leading into the loop (will be deleted)
-         * @return The hoisted node, which becomes the new predecessor for subsequent operations
+         * @brief Hoist a single node out of a loop and insert it before the loop
          */
         int hoistNodeBeforeLoop(KernelGraph& kgraph, int nodeToHoist, int loopNode);
 
         /**
-         * @brief Check if a coordinate is written to within a ForLoopOp
+         * @brief Check if a coordinate is written to within a ForLoopOp, including nested loops/scopes
          * 
-         * This function uses the ControlFlowRWTracer to check if the specified
-         * coordinate is written to by any control node that is a descendant
-         * of the given loop node.
-         * 
-         * @param kgraph The kernel graph to search
-         * @param loopNode The ForLoopOp node to check within
-         * @param coordinate The coordinate to check for writes
-         * @param tracer The ControlFlowRWTracer with read/write information
          * @return True if the coordinate is written within the loop, false otherwise
          */
         bool isCoordinateWrittenInLoop(KernelGraph const&         kgraph,

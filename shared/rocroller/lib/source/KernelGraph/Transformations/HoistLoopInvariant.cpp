@@ -142,7 +142,6 @@ namespace rocRoller::KernelGraph
 
             if(record.rw == ControlFlowRWTracer::READ)
             {
-                Log::debug("  Skipping record due to read");
                 continue;
             }
 
@@ -151,9 +150,6 @@ namespace rocRoller::KernelGraph
             for(auto it = stack.rbegin(); it != stack.rend(); ++it)
             {
                 int node = *it;
-                Log::debug("  Saw in control stack node {}",
-                           Graph::variantToString(graph.control.getElement(node)));
-
                 if(graph.control.get<ForLoopOp>(node).has_value()
                    || graph.control.get<DoWhileOp>(node).has_value())
                 {
@@ -162,7 +158,9 @@ namespace rocRoller::KernelGraph
                 }
             }
             if(containingLoop != -1)
+            {
                 result[record.coordinate][containingLoop].insert(record.control);
+            }
         }
         return result;
     }
@@ -183,36 +181,18 @@ namespace rocRoller::KernelGraph
         ControlFlowRWTracer tracer(graph);
         const auto          mapping = buildCoordinateLoopMapping(graph, tracer);
 
-        Log::debug("HoistLoopInvariant: Coordinate to Loop Mapping:");
-        for(const auto& [coordinate, loopGroups] : mapping)
-        {
-            Log::debug("HoistLoopInvariant: Coordinate {}:", coordinate);
-            for(const auto& [loop, controlNodes] : loopGroups)
-            {
-                Log::debug("HoistLoopInvariant:   Loop {}: Control Nodes {}",
-                           loop,
-                           fmt::join(controlNodes, ", "));
-            }
-        }
-
-        const size_t MAX_NODES_TO_HOIST = 9999; // TODO: remove
-        size_t       hoistedCount       = 0;
-
         for(const auto& [coordinate, loopGroups] : mapping)
         {
             for(const auto& [loopNode, controlNodes] : loopGroups)
             {
-                // -1 means top-level
-                if(loopNode == -1)
-                    continue;
+                AssertFatal(loopNode >= 0);
 
                 if(controlNodes.size() != 1)
                 {
-                    Log::debug(
-                        "HoistLoopInvariant: Coordinate {} has {} writers in loop {}, skipping",
-                        coordinate,
-                        controlNodes.size(),
-                        loopNode);
+                    Log::debug("HoistLoopInvariant: skipping {} with {} writers in {} loop body",
+                               coordinate,
+                               controlNodes.size(),
+                               loopNode);
                     continue;
                 }
 
@@ -221,8 +201,9 @@ namespace rocRoller::KernelGraph
                 auto maybeAssign = graph.control.get<Assign>(controlNode);
                 if(!maybeAssign.has_value())
                 {
-                    Log::debug("HoistLoopInvariant: Control node {} is not an Assign, skipping",
-                               controlNode);
+                    // Skip LoadLDSTile, StoreLDSTile, etc.
+                    Log::debug("HoistLoopInvariant: skipping {}",
+                               Graph::variantToString(graph.control.getElement(controlNode)));
                     continue;
                 }
 
@@ -264,15 +245,6 @@ namespace rocRoller::KernelGraph
                               Graph::variantToString(graph.control.getElement(loopNode)));
 
                     hoistNodeBeforeLoop(graph, controlNode, loopNode);
-                    hoistedCount++;
-
-                    if(hoistedCount >= MAX_NODES_TO_HOIST)
-                    {
-                        Log::debug("HoistLoopInvariant: Reached maximum hoisted node count of {}, "
-                                   "stopping.",
-                                   MAX_NODES_TO_HOIST);
-                        return graph;
-                    }
                 }
             }
         }
