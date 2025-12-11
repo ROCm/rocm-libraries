@@ -55,9 +55,7 @@ namespace TensileLite
 {
     namespace Client
     {
-        std::vector<amdsmi_socket_handle>    HardwareMonitor::m_socketHandles;
-        std::vector<amdsmi_processor_handle> HardwareMonitor::m_processorHandles;
-        uint32_t                             HardwareMonitor::GetAMDSMIIndex(int hipDeviceIndex)
+        uint32_t HardwareMonitor::GetAMDSMIIndex(int hipDeviceIndex)
         {
             InitAMDSMI();
 
@@ -147,7 +145,7 @@ namespace TensileLite
             m_smiDeviceIndex = GetAMDSMIIndex(hipDeviceIndex);
             initThread();
 
-#if amd_smi_VERSION_MAJOR >= 25
+#if AMDSMI_LIB_VERSION_MAJOR >= 25
             auto status
                 = amdsmi_get_gpu_xcd_counter(m_processorHandles[m_smiDeviceIndex], &m_XCDCount);
             if(status != AMDSMI_STATUS_SUCCESS || m_XCDCount == 0)
@@ -167,7 +165,7 @@ namespace TensileLite
             m_smiDeviceIndex = GetAMDSMIIndex(hipDeviceIndex);
             initThread();
 
-#if amd_smi_VERSION_MAJOR >= 25
+#if AMDSMI_LIB_VERSION_MAJOR >= 25
             auto status
                 = amdsmi_get_gpu_xcd_counter(m_processorHandles[m_smiDeviceIndex], &m_XCDCount);
 
@@ -393,7 +391,7 @@ namespace TensileLite
 
                 if(m_clockMetrics[i] == AMDSMI_CLK_TYPE_SYS)
                 {
-#if amd_smi_VERSION_MAJOR >= 25
+#if AMDSMI_LIB_VERSION_MAJOR >= 25
                     amdsmi_gpu_metrics_t gpuMetrics;
                     // multi_XCD
                     auto status = amdsmi_get_gpu_metrics_info(m_processorHandles[m_smiDeviceIndex],

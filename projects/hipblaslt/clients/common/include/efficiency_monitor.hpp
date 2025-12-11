@@ -56,5 +56,5 @@ public:
     virtual uint16_t            getCuCount()               = 0;
     virtual std::string         getDeviceString()          = 0;
 
-    static std::unique_ptr<EfficiencyMonitor> create();
+    static std::shared_ptr<EfficiencyMonitor> create();
 };

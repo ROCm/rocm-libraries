@@ -53,7 +53,7 @@ namespace TensileLite
         {
         public:
             /** Translates the Hip device index into the corresponding device index for AMD-SMI. */
-            static uint32_t GetAMDSMIIndex(int hipDeviceIndex);
+            uint32_t GetAMDSMIIndex(int hipDeviceIndex);
 
             using clock = std::chrono::steady_clock;
 
@@ -164,8 +164,8 @@ namespace TensileLite
             std::vector<uint64_t>              m_SYSCLK_sum;
             std::vector<std::vector<uint64_t>> m_SYSCLK_array;
 
-            static std::vector<amdsmi_socket_handle>    m_socketHandles;
-            static std::vector<amdsmi_processor_handle> m_processorHandles;
+            std::vector<amdsmi_socket_handle>    m_socketHandles;
+            std::vector<amdsmi_processor_handle> m_processorHandles;
         };
     } // namespace Client
 } // namespace TensileLite
