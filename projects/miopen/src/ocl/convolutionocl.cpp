@@ -964,6 +964,8 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
                 interim.emplace_back(
                     miopenConvSolution_t{ai_time(idx), ws, solver_id.Value(), algo});
                 ++idx;
+                if(interim.size() >= maxSolutionCount)
+                    break; // solvers are ordered done searching
             }
         }
     }
