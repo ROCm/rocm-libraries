@@ -43,17 +43,6 @@
 #include <common/CommonGraphs.hpp>
 #include <common/Utilities.hpp>
 
-void writeDotToFile(const std::string& dotContent, const std::string& filename)
-{
-    std::ofstream outFile(filename);
-    if(outFile.is_open())
-    {
-        outFile << dotContent;
-        outFile.close();
-        std::cout << filename << std::endl;
-    }
-}
-
 TEST_CASE("extractDataFlowTags", "[kernel-graph][hoist-loop-invariant][expression]")
 {
     using namespace rocRoller;
@@ -75,43 +64,6 @@ TEST_CASE("extractDataFlowTags", "[kernel-graph][hoist-loop-invariant][expressio
         REQUIRE(extractedTags.count(42) == 1);
         REQUIRE(extractedTags.count(77) == 1);
     }
-}
-
-TEST_CASE("hoistNodeBeforeLoop", "[kernel-graph][hoist-loop-invariant]")
-{
-    using namespace rocRoller;
-    namespace kg = rocRoller::KernelGraph;
-    using namespace kg::ControlGraph;
-    using namespace kg::CoordinateGraph;
-
-    auto ctx = TestContext::ForDefaultTarget();
-
-    kg::KernelGraph graph;
-
-    auto predecessor = graph.control.addElement(NOP{});
-
-    auto loopSize                  = Expression::literal(10);
-    auto [loopIndexCoord, forLoop] = kg::rangeFor(graph, loopSize, "TestLoop");
-
-    auto loopBody = graph.control.addElement(NOP{});
-    graph.control.addElement(Body{}, {forLoop}, {loopBody});
-    auto sequenceEdge = graph.control.addElement(Sequence{}, {predecessor}, {forLoop});
-
-    auto nodeToHoist  = graph.control.addElement(NOP{});
-    auto nodeToRemain = graph.control.addElement(NOP{});
-
-    // Connect the nodes: loopBody -> nodeToHoist -> nodeToRemain
-    graph.control.addElement(Sequence{}, {loopBody}, {nodeToHoist});
-    graph.control.addElement(Sequence{}, {nodeToHoist}, {nodeToRemain});
-
-    std::string dotOutputBefore = graph.toDOT(true);
-    writeDotToFile(dotOutputBefore, "hoistNodeBeforeLoop_before.dot");
-
-    // Hoist only the first node
-    int result = kg::hoistNodeBeforeLoop(graph, nodeToHoist, forLoop);
-
-    std::string dotOutputAfter = graph.toDOT(true);
-    writeDotToFile(dotOutputAfter, "hoistNodeBeforeLoop_after.dot");
 }
 
 TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]")

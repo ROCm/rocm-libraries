@@ -46,8 +46,7 @@ namespace rocRoller::KernelGraph
      * @brief Visitor for extracting DataFlowTags from expressions
      * 
      * This visitor traverses an expression tree and collects all DataFlowTag
-     * references found within it, following the visitor pattern used elsewhere
-     * in the codebase (e.g., DataFlowTagPropagation).
+     * references found within it.
      */
     struct DataFlowTagExtractorVisitor
     {
@@ -116,9 +115,6 @@ namespace rocRoller::KernelGraph
         }
     };
 
-    /**
-     * @brief Extract all DataFlowTags referenced in an expression
-     */
     std::set<int> extractDataFlowTags(Expression::Expression const& expr)
     {
         DataFlowTagExtractorVisitor visitor;
@@ -211,12 +207,6 @@ namespace rocRoller::KernelGraph
 
                 auto assignNode = maybeAssign.value();
 
-                Log::debug(
-                    "HoistLoopInvariant: Analyzing Assign node {} for coordinate {} in loop {}",
-                    controlNode,
-                    coordinate,
-                    loopNode);
-
                 auto usedTags = extractDataFlowTags(*assignNode.expression);
 
                 bool allTagsLoopInvariant = true;
@@ -233,10 +223,6 @@ namespace rocRoller::KernelGraph
                         break;
                     }
                 }
-
-                Log::debug("HoistLoopInvariant:   Used DataFlowTags: {}, all loop invariant: {}",
-                           fmt::join(usedTags, ", "),
-                           allTagsLoopInvariant);
 
                 if(allTagsLoopInvariant)
                 {
