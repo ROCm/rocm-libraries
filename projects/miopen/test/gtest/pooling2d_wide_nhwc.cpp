@@ -95,7 +95,7 @@ void Run2dDriver(miopenDataType_t prec)
     }
 };
 
-bool IsTestSupportedForDevice(const miopen::Handle& handle) { return true; }
+bool IsTestSupportedForDevice() { return true; }
 
 std::vector<std::string> GetTestCases(const std::string& precision)
 {
@@ -115,8 +115,7 @@ using namespace pooling2d_wide_nhwc;
 
 TEST_P(GPU_WidePooling2d_NHWC_FP32, FloatTest_pooling2d_wide_nhwc)
 {
-    const auto& handle = get_handle();
-    if(IsTestSupportedForDevice(handle))
+    if(IsTestSupportedForDevice())
     {
         Run2dDriver(miopenFloat);
     }
@@ -128,8 +127,7 @@ TEST_P(GPU_WidePooling2d_NHWC_FP32, FloatTest_pooling2d_wide_nhwc)
 
 TEST_P(GPU_WidePooling2d_NHWC_FP16, HalfTest_pooling2d_wide_nhwc)
 {
-    const auto& handle = get_handle();
-    if(IsTestSupportedForDevice(handle))
+    if(IsTestSupportedForDevice())
     {
         Run2dDriver(miopenHalf);
     }

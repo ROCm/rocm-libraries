@@ -176,14 +176,14 @@ struct verify_forward_pooling
                 int end_idx  = start_idx[i] + kers[i];
                 end_idx      = std::min(end_idx, in_dim[i]);
                 start_idx[i] = std::max(start_idx[i], 0);
-                win_sz[i]    = end_idx - start_idx[i];
-                win_sz[i]    = std::max(win_sz[i], 1);
+                win_sz[i]    = std::max(end_idx - start_idx[i], 0);
             }
 
             int pool_size =
                 filter.GetMode() == miopenPoolingAverageInclusive
                     ? std::accumulate(kers.begin(), kers.end(), 1, std::multiplies<int>())
                     : std::accumulate(win_sz.begin(), win_sz.end(), 1, std::multiplies<int>());
+            pool_size = std::max(pool_size, 1); // Avoid division by zero when window is in padding
 
             double acc = op.start();
             miopen::unpacker(ford)(win_sz)([&](auto... in_spatial_id_pack) {
@@ -325,6 +325,21 @@ struct verify_backward_pooling
                     bool in_cmp_idx = true;
                     if(use_global_index)
                     {
+                        auto total_spatial = std::accumulate(
+                            in_dim.begin() + 2, in_dim.end(), 1ULL, std::multiplies<std::size_t>());
+                        in_cmp_idx = (mx_idx < total_spatial);
+
+                        auto out_spatial_id = make_array(out_spatial_id_pack...);
+                        for(int i = 0; i < SptDim && in_cmp_idx; i++)
+                        {
+                            int win_start = out_spatial_id[i] * strides[i] - pads[i];
+                            int win_end   = win_start + kers[i] - 1;
+                            if(win_end < 0 || win_start >= in_dim[i + 2])
+                            {
+                                in_cmp_idx = false;
+                            }
+                        }
+
                         for(int i = 0; i < SptDim; i++)
                         {
                             std::size_t mx_idx_dim = mx_idx;
@@ -401,7 +416,7 @@ struct verify_backward_pooling
                         int end_idx  = start_idx[i] + kers[i];
                         end_idx      = std::min(end_idx, in_dim[i + 2]);
                         win_sz[i]    = end_idx - std::max(start_idx[i], 0);
-                        win_sz[i]    = std::max(win_sz[i], 1);
+                        win_sz[i]    = std::max(win_sz[i], 0);
                     }
 
                     int pool_size =
@@ -409,6 +424,7 @@ struct verify_backward_pooling
                             ? std::accumulate(kers.begin(), kers.end(), 1, std::multiplies<int>())
                             : std::accumulate(
                                   win_sz.begin(), win_sz.end(), 1, std::multiplies<int>());
+                    pool_size = std::max(pool_size, 1); // Avoid division by zero
 
                     ford_ker([&](auto... ker_id_pack) {
                         auto ker_id = make_array(ker_id_pack...);
