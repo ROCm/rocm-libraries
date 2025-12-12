@@ -223,8 +223,10 @@ public:
                          hipdnn_sdk::utilities::TensorBase<DxDataType>& dx,
                          hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& dscale,
                          hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& dbias,
-                         const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>* mean = nullptr,
-                         const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>* invVariance = nullptr,
+                         const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>* mean
+                         = nullptr,
+                         const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>* invVariance
+                         = nullptr,
                          double epsilon = 1e-5)
     {
         if(x.dims().size() < 2)
@@ -264,8 +266,8 @@ public:
                     batchAndSpatial, [&](const std::vector<int64_t>& batchSpatialIndices) {
                         auto fullIndices = hipdnn_sdk::utilities::buildTensorIndices(
                             batchSpatialIndices[0], cidx, batchSpatialIndices, 1);
-                        auto inVal
-                            = hipdnn_sdk::utilities::staticCast<ComputeDataType>(x.getHostValue(fullIndices));
+                        auto inVal = hipdnn_sdk::utilities::staticCast<ComputeDataType>(
+                            x.getHostValue(fullIndices));
                         meanAccum = meanAccum + inVal;
                         varianceAccum = varianceAccum + (inVal * inVal);
                     });
@@ -276,16 +278,19 @@ public:
                     = (varianceAccum / nhwF) - (channelMean * channelMean);
 
                 ComputeDataType denominator = sqrtInternal(calculatedVariance + epsilonCompute);
-                channelInvVariance = hipdnn_sdk::utilities::staticCast<ComputeDataType>(1.0) / denominator;
+                channelInvVariance
+                    = hipdnn_sdk::utilities::staticCast<ComputeDataType>(1.0) / denominator;
             }
             else
             {
-                channelMean = hipdnn_sdk::utilities::staticCast<ComputeDataType>(mean->getHostValue(0, cidx));
-                channelInvVariance
-                    = hipdnn_sdk::utilities::staticCast<ComputeDataType>(invVariance->getHostValue(0, cidx));
+                channelMean = hipdnn_sdk::utilities::staticCast<ComputeDataType>(
+                    mean->getHostValue(0, cidx));
+                channelInvVariance = hipdnn_sdk::utilities::staticCast<ComputeDataType>(
+                    invVariance->getHostValue(0, cidx));
             }
 
-            auto channelScale = hipdnn_sdk::utilities::staticCast<ComputeDataType>(scale.getHostValue(0, cidx));
+            auto channelScale
+                = hipdnn_sdk::utilities::staticCast<ComputeDataType>(scale.getHostValue(0, cidx));
 
             // Calculate dot product for (x - mean) * channelInvVariance * dy and ∑ dy for this channel
             auto dotProduct = hipdnn_sdk::utilities::staticCast<ComputeDataType>(0.0);

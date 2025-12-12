@@ -111,13 +111,13 @@ void SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<IntermediateType> dbiasRefTensor(dbias->get_dim());
 
         hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::backward(dyTensor,
-                                                          xTensor,
-                                                          scaleTensor,
-                                                          dxRefTensor,
-                                                          dscaleRefTensor,
-                                                          dbiasRefTensor,
-                                                          &savedMeanTensor,
-                                                          &savedInvVarTensor);
+                                                                      xTensor,
+                                                                      scaleTensor,
+                                                                      dxRefTensor,
+                                                                      dscaleRefTensor,
+                                                                      dbiasRefTensor,
+                                                                      &savedMeanTensor,
+                                                                      &savedInvVarTensor);
 
         auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceBackward<InputType>();
 
