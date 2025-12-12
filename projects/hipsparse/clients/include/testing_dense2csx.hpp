@@ -177,7 +177,7 @@ void testing_dense2csx_bad_arg(FUNC& dense2csx)
 }
 
 template <hipsparseDirection_t DIRA, typename T, typename FUNC>
-hipsparseStatus_t testing_dense2csx(const Arguments& argus, FUNC& dense2csx)
+void testing_dense2csx(const Arguments& argus, FUNC& dense2csx)
 {
     int                  M        = argus.M;
     int                  N        = argus.N;
@@ -194,7 +194,7 @@ hipsparseStatus_t testing_dense2csx(const Arguments& argus, FUNC& dense2csx)
     if(M == 0 || N == 0)
     {
 #ifdef __HIP_PLATFORM_NVIDIA__
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
 #endif
     }
 
@@ -340,8 +340,6 @@ hipsparseStatus_t testing_dense2csx(const Arguments& argus, FUNC& dense2csx)
         std::cout << "GBytes/s: " << gpu_gbyte << " time (ms): " << get_gpu_time_msec(gpu_time_used)
                   << std::endl;
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_DENSE2CSX_HPP

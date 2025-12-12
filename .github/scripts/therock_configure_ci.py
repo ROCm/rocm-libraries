@@ -177,13 +177,18 @@ def retrieve_projects(args):
 
 
 def run(args):
+    platform = args.get("platform")
     project_to_run, test_type = retrieve_projects(args)
-    set_github_output({"projects": json.dumps(project_to_run), "test_type": test_type})
+    set_github_output(
+        {f"{platform}_projects": json.dumps(project_to_run), "test_type": test_type}
+    )
 
 
 if __name__ == "__main__":
     args = {}
     github_event_name = os.getenv("GITHUB_EVENT_NAME")
+    platform = os.getenv("PLATFORM")
+    args["platform"] = platform
     args["is_pull_request"] = github_event_name == "pull_request"
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"

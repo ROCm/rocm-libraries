@@ -105,9 +105,16 @@ option(HIP_DNN_GENERATE_SDK_HEADERS "Automatically generates sdk headers from sc
 option(HIP_DNN_SKIP_TESTS "Skips building all tests" OFF)
 
 option(CODE_COVERAGE "Build with code coverage flags" OFF)
-option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
+if(WIN32)
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
+    if(ENABLE_CLANG_TIDY)
+        message(WARNING "Clang-Tidy enabled on Windows - this significantly increases build time.")
+    endif()
+else()
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL
                                                  "Add paths to linker search and installed rpath"
