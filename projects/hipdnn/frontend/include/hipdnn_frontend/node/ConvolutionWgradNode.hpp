@@ -72,22 +72,12 @@ public:
                               ErrorCode::ATTRIBUTE_NOT_SET,
                               "ConvolutionWgradNode missing dilation for pre-validation");
 
-        HIPDNN_RETURN_IF_FALSE(
-            x->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionWgradNode: x tensor dimensions and strides must be set and positive");
-
         // dy implicitly checked here too since they must be equal
         HIPDNN_RETURN_IF_LT(
             xDims.size(),
             3,
             ErrorCode::INVALID_VALUE,
             "ConvolutionWgradNode: x tensor must have at least 3 dimensions (N, C, spatial)");
-
-        HIPDNN_RETURN_IF_FALSE(
-            dy->validate_dims_and_strides_set_and_positive(),
-            ErrorCode::INVALID_VALUE,
-            "ConvolutionWgradNode: dy tensor dimensions and strides must be set and positive");
 
         HIPDNN_RETURN_IF_NE(dyDims.size(),
                             xDims.size(),
@@ -131,11 +121,6 @@ public:
                 ErrorCode::INVALID_VALUE,
                 "ConvolutionWgradNode: dw tensor output channels must be divisible by "
                 "the number of groups");
-
-            HIPDNN_RETURN_IF_FALSE(
-                dw->validate_dims_set_and_positive(),
-                ErrorCode::INVALID_VALUE,
-                "ConvolutionWgradNode: dw tensor dimensions must be set and positive");
 
             // Verifies that spatial dimensions are compatible
             for(size_t i = 0; i < spatialDims; ++i)

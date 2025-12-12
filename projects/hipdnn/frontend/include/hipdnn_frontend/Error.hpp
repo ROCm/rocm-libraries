@@ -26,6 +26,15 @@ enum class ErrorCode
     ATTRIBUTE_NOT_SET
 };
 
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline std::string to_string(ErrorCode code)
+{
+    static std::vector<std::string> s_errorCodes{
+        "OK", "INVALID_VALUE", "HIPDNN_BACKEND_ERROR", "ATTRIBUTE_NOT_SET"};
+
+    return s_errorCodes[static_cast<size_t>(code)];
+}
+
 typedef ErrorCode error_code_t; // NOLINT(readability-identifier-naming)
 
 struct Error
@@ -80,6 +89,11 @@ struct Error
         return code != other.code;
     }
 };
+
+inline std::ostream& operator<<(std::ostream& os, const Error& error)
+{
+    return os << "{" << to_string(error.code) << ", " << error.get_message() << "}";
+}
 
 typedef Error error_object; // NOLINT(readability-identifier-naming)
 typedef Error error_t; // NOLINT(readability-identifier-naming)

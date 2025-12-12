@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_sdk/utilities/StringUtil.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -124,6 +125,54 @@ TEST(TestTensorAttributes, PackAttributes)
     EXPECT_EQ(unpacked->strides, std::vector<int64_t>({1, 2, 3}));
     EXPECT_EQ(unpacked->dims, std::vector<int64_t>({4, 5, 6}));
     EXPECT_TRUE(unpacked->virtual_);
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnVirtualValueTensor)
+{
+    TensorAttributes tensor(1.f);
+    tensor.set_dim({1});
+    tensor.set_stride({1});
+    tensor.set_is_virtual(true);
+
+    EXPECT_EQ(tensor.validate(),
+              Error(ErrorCode::INVALID_VALUE, "Tensor  cannot be virtual and pass by value"));
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnDifferentDimAndStrideSize)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({1});
+    tensor.set_stride({1, 2});
+    tensor.set_data_type(DataType::FLOAT);
+
+    EXPECT_EQ(tensor.validate(),
+              Error(ErrorCode::INVALID_VALUE, "Tensor  dims and strides have different sizes"));
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnEmptyDims)
+{
+    TensorAttributes tensor;
+    tensor.set_data_type(DataType::FLOAT);
+
+    EXPECT_EQ(tensor.validate(),
+              Error(ErrorCode::ATTRIBUTE_NOT_SET, "Tensor  dims must be non-empty"));
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnNonPositiveDimension)
+{
+    std::vector<std::vector<int64_t>> testDims = {{0, 1}, {1, 0, 1}, {-1, 1, 1}, {1, 1, 1, -1}};
+
+    for(const auto& dim : testDims)
+    {
+        TensorAttributes tensor;
+        tensor.set_dim(dim);
+        tensor.set_stride(dim);
+        tensor.set_data_type(DataType::FLOAT);
+
+        EXPECT_EQ(tensor.validate(),
+                  Error(ErrorCode::INVALID_VALUE, "Tensor  must have only positive dimensions"))
+            << "Dims: " << hipdnn_sdk::utilities::vecToString(dim);
+    }
 }
 
 TEST(TestTensorAttributes, ValidateDimsAndStridesSetAndPositiveValidCase)
