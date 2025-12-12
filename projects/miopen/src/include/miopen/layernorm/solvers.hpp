@@ -80,16 +80,7 @@ struct PerformanceConfigLayernorm : PerfConfigBase<PerformanceConfigLayernorm>
     bool operator==(const PerformanceConfigLayernorm& other) const;
 
 public:
-    static constexpr auto default_local_size(const miopen::layernorm::ProblemDescription& problem)
-    {
-        switch(problem.GetDirection())
-        {
-        case miopen::layernorm::Direction::Forward:
-            return 16;
-        case miopen::layernorm::Direction::Backward:
-            return 128;
-        }
-    }
+    static constexpr auto default_local_size      = 32;
     static constexpr auto max_local_size          = 1024;
     static constexpr auto max_parallel_local_size = 256;
     static constexpr auto start_local_size        = 1;
@@ -106,7 +97,7 @@ public:
     static constexpr auto start_vectorized = false;
     static constexpr auto default_separate_stride = false;
     static constexpr auto start_separate_stride = false;
-    static constexpr auto default_stride_in_local_size = true;
+    static constexpr auto default_stride_in_local_size = false;
     static constexpr auto start_stride_in_local_size = false;
 
 private:
