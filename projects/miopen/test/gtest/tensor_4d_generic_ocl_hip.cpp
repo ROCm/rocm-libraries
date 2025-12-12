@@ -83,7 +83,29 @@ std::vector<TensorsConfig> TensorsConfigs()
 
     if constexpr(PERF_ENABLE)
     {
-        size_t maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
+        // Determine a cache-aware cap on total tensor elements for HIP/AMD:
+        // 1) Query L2 size via HIP and use 2x L2 as working set
+        // 2) Fallback to per-architecture table if L2 is not reported
+        size_t maxTotalSize = 0;
+
+        // 1) HIP L2 cache query
+        int dev = -1;
+        if(hipSuccess == hipGetDevice(&dev))
+        {
+            int L2_bytes = 0;
+            if(hipSuccess == hipDeviceGetAttribute(&L2_bytes, hipDeviceAttributeL2CacheSize, dev) &&
+               L2_bytes > 0)
+            {
+                // Use 2x L2 as a working-set heuristic
+                maxTotalSize = 2ul * static_cast<size_t>(L2_bytes);
+                // Convert bytes -> elements of type T
+                maxTotalSize /= sizeof(T);
+            }
+        }
+
+        // 2) Fallback table by architecture family
+        if(maxTotalSize == 0)
+            maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
 
         // Generate all NCHW tensors that are limited by L3 cache size
         // or 2xL2 cache size when L3 is not available
@@ -296,39 +318,35 @@ protected:
         std::string program_name       = "MIOpenTensorKernels.cl";
         std::string network_config_ocl = network_config + "-ocl";
 
-        handle.AddKernel(kernel_name,
-                         network_config_ocl,
-                         program_name,
-                         kernel_name,
-                         vld,
-                         vgd,
-                         params)(tensA_dev.get(),
-                                 static_cast<int>(tensorsConfig.acstrides[0]),
-                                 static_cast<int>(tensorsConfig.acstrides[1]),
-                                 static_cast<int>(tensorsConfig.acstrides[2]),
-                                 tensB_dev.get(),
-                                 static_cast<int>(tensorsConfig.blens[1]),
-                                 static_cast<int>(tensorsConfig.blens[2]),
-                                 static_cast<int>(tensorsConfig.blens[3]),
-                                 static_cast<int>(tensorsConfig.bstrides[0]),
-                                 static_cast<int>(tensorsConfig.bstrides[1]),
-                                 static_cast<int>(tensorsConfig.bstrides[2]),
-                                 tensC_dev.get(),
-                                 static_cast<int>(tensorsConfig.aclens[1]),
-                                 static_cast<int>(tensorsConfig.aclens[2]),
-                                 static_cast<int>(tensorsConfig.aclens[3]),
-                                 static_cast<int>(tensorsConfig.acstrides[0]),
-                                 static_cast<int>(tensorsConfig.acstrides[1]),
-                                 static_cast<int>(tensorsConfig.acstrides[2]),
-                                 alpha0,
-                                 alpha1,
-                                 beta,
-                                 bitmap,
-                                 work_per_wg,
-                                 static_cast<long>(0),
-                                 static_cast<long>(0),
-                                 static_cast<long>(0),
-                                 num_wg_orig);
+        handle.AddKernel(
+            kernel_name, network_config_ocl, program_name, kernel_name, vld, vgd, params)(
+            tensA_dev.get(),
+            static_cast<int>(tensorsConfig.acstrides[0]),
+            static_cast<int>(tensorsConfig.acstrides[1]),
+            static_cast<int>(tensorsConfig.acstrides[2]),
+            tensB_dev.get(),
+            static_cast<int>(tensorsConfig.blens[1]),
+            static_cast<int>(tensorsConfig.blens[2]),
+            static_cast<int>(tensorsConfig.blens[3]),
+            static_cast<int>(tensorsConfig.bstrides[0]),
+            static_cast<int>(tensorsConfig.bstrides[1]),
+            static_cast<int>(tensorsConfig.bstrides[2]),
+            tensC_dev.get(),
+            static_cast<int>(tensorsConfig.aclens[1]),
+            static_cast<int>(tensorsConfig.aclens[2]),
+            static_cast<int>(tensorsConfig.aclens[3]),
+            static_cast<int>(tensorsConfig.acstrides[0]),
+            static_cast<int>(tensorsConfig.acstrides[1]),
+            static_cast<int>(tensorsConfig.acstrides[2]),
+            alpha0,
+            alpha1,
+            beta,
+            bitmap,
+            work_per_wg,
+            static_cast<long>(0),
+            static_cast<long>(0),
+            static_cast<long>(0),
+            num_wg_orig);
 
         tensC_ocl.data = handle.Read<T>(tensC_dev, tensC_ocl.data.size());
 
@@ -382,39 +400,35 @@ protected:
         std::string program_name       = "MIOpenTensorKernelsHip.cpp";
         std::string network_config_hip = network_config + "-hip";
 
-        handle.AddKernel(kernel_name,
-                         network_config_hip,
-                         program_name,
-                         kernel_name,
-                         vld,
-                         vgd,
-                         params)(tensA_dev.get(),
-                                 static_cast<int>(tensorsConfig.acstrides[0]),
-                                 static_cast<int>(tensorsConfig.acstrides[1]),
-                                 static_cast<int>(tensorsConfig.acstrides[2]),
-                                 tensB_dev.get(),
-                                 static_cast<int>(tensorsConfig.blens[1]),
-                                 static_cast<int>(tensorsConfig.blens[2]),
-                                 static_cast<int>(tensorsConfig.blens[3]),
-                                 static_cast<int>(tensorsConfig.bstrides[0]),
-                                 static_cast<int>(tensorsConfig.bstrides[1]),
-                                 static_cast<int>(tensorsConfig.bstrides[2]),
-                                 tensC_dev.get(),
-                                 static_cast<int>(tensorsConfig.aclens[1]),
-                                 static_cast<int>(tensorsConfig.aclens[2]),
-                                 static_cast<int>(tensorsConfig.aclens[3]),
-                                 static_cast<int>(tensorsConfig.acstrides[0]),
-                                 static_cast<int>(tensorsConfig.acstrides[1]),
-                                 static_cast<int>(tensorsConfig.acstrides[2]),
-                                 alpha0,
-                                 alpha1,
-                                 beta,
-                                 bitmap,
-                                 work_per_wg,
-                                 static_cast<long>(0),
-                                 static_cast<long>(0),
-                                 static_cast<long>(0),
-                                 num_wg_orig);
+        handle.AddKernel(
+            kernel_name, network_config_hip, program_name, kernel_name, vld, vgd, params)(
+            tensA_dev.get(),
+            static_cast<int>(tensorsConfig.acstrides[0]),
+            static_cast<int>(tensorsConfig.acstrides[1]),
+            static_cast<int>(tensorsConfig.acstrides[2]),
+            tensB_dev.get(),
+            static_cast<int>(tensorsConfig.blens[1]),
+            static_cast<int>(tensorsConfig.blens[2]),
+            static_cast<int>(tensorsConfig.blens[3]),
+            static_cast<int>(tensorsConfig.bstrides[0]),
+            static_cast<int>(tensorsConfig.bstrides[1]),
+            static_cast<int>(tensorsConfig.bstrides[2]),
+            tensC_dev.get(),
+            static_cast<int>(tensorsConfig.aclens[1]),
+            static_cast<int>(tensorsConfig.aclens[2]),
+            static_cast<int>(tensorsConfig.aclens[3]),
+            static_cast<int>(tensorsConfig.acstrides[0]),
+            static_cast<int>(tensorsConfig.acstrides[1]),
+            static_cast<int>(tensorsConfig.acstrides[2]),
+            alpha0,
+            alpha1,
+            beta,
+            bitmap,
+            work_per_wg,
+            static_cast<long>(0),
+            static_cast<long>(0),
+            static_cast<long>(0),
+            num_wg_orig);
 
         tensC_hip.data = handle.Read<T>(tensC_dev, tensC_hip.data.size());
 
