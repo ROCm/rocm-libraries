@@ -958,10 +958,10 @@ def verify_lrs_and_grs(schedule_info: 'ScheduleInfo', context: dict) -> tuple[bo
 
         available_keys = schedule_info.optSchedule.keys()
         if "LRA1" not in available_keys and "LRA3" in available_keys:
-            printWarning("LRA3 is present in schedule, but LRA1 is not. This is not yet supported in CMS validation")
+            #printWarning("LRA3 is present in schedule, but LRA1 is not. This is not yet supported in CMS validation")
             return None
         if "LRB1" not in available_keys and "LRB3" in available_keys:
-            printWarning("LRB3 is present in schedule, but LRB1 is not. This is not yet supported in CMS validation")
+            #printWarning("LRB3 is present in schedule, but LRB1 is not. This is not yet supported in CMS validation")
             return None
 
         relevant_names = ["GRA", "GRB", "LRA0", "LRB0", "LRA1", "LRB1", "SYNC"]
