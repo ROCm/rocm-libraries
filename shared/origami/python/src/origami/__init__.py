@@ -29,14 +29,25 @@ Origami: Analytical GEMM Solution Selection
 Python bindings for the Origami C++ library.
 """
 
+# Import the compiled extension module
+HAS_CORE = False
 try:
-    # Import the compiled extension module
     from .origami import *
+    HAS_CORE = True
 except ImportError as e:
     raise ImportError(
         f"Failed to import origami extension module: {e}. "
         "Please ensure the package is properly installed."
     ) from e
 
+# Import the torch heuristic selection module if possible
+HAS_TORCH_HEURISTICS = False
+try:
+    from .torch_ext import *
+    HAS_TORCH_HEURISTICS = True
+except ImportError:
+    pass
+
+__all__ = ["HAS_CORE", "HAS_TORCH_HEURISTICS"]
 __version__ = "0.1.0"
 
