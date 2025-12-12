@@ -3,8 +3,8 @@
 
 #include <gtest/gtest.h>
 #include <hipdnn_sdk/plugin/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_sdk/test_utilities/FlatbufferGraphTestUtils.hpp>
-#include <hipdnn_sdk/test_utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
 #include "HipdnnEnginePluginHandle.hpp"
@@ -12,7 +12,7 @@
 
 using namespace miopen_legacy_plugin;
 using namespace hipdnn_sdk::data_objects;
-using namespace hipdnn_sdk::test_utilities;
+using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_sdk::utilities;
 
 class TestGpuConvFwdBiasActivPlan : public ::testing::Test

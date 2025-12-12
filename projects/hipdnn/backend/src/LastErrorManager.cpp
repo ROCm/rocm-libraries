@@ -37,3 +37,8 @@ const char* hipdnn_backend::LastErrorManager::getLastError()
 {
     return s_lastError;
 }
+
+void hipdnn_backend::LastErrorManager::clearLastError()
+{
+    s_lastError[0] = '\0';
+}

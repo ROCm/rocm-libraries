@@ -112,7 +112,7 @@ void testing_gtsv2_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_gtsv2(Arguments argus)
+void testing_gtsv2(Arguments argus)
 {
     int m = argus.M;
     int n = argus.N;
@@ -220,8 +220,6 @@ hipsparseStatus_t testing_gtsv2(Arguments argus)
     }
 
     CHECK_HIP_ERROR(hipFree(buffer));
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_GTSV2_HPP
