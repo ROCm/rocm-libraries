@@ -197,6 +197,9 @@ if(NOT HIP_DNN_SKIP_TESTS)
     add_dependencies(check_ctest validate_test_names)
 endif()
 
+# keep this after all the targets have been added that could use the HIP language compiler.
+add_clang_tidy_custom_target()
+
 if(CODE_COVERAGE)
     findandcheckllvmtools()
 
