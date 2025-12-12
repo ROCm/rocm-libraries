@@ -116,17 +116,17 @@ public:
         }
         ::rocprim::syncthreads();
 
-        discontinuity().flag_heads(head_flags, input, flags_op, storage_.flag);
-        ::rocprim::syncthreads();
-
         // The start of the first bin is not overwritten since the input is sorted
         // and the starts are based on the second item.
-        // The very first item is never used as `b` in the operator
-        // This means that this should not need synchromization, but in practice it does.
+        // The very first item is never used as `b` in the discontinuity operator,
+        // so storage_.start[input[0]] will not be written during discontinuity
+        // operation, thus assigning its value here will not cause data race.
         if(flat_tid == 0)
         {
             storage_.start[static_cast<unsigned int>(input[0])] = 0;
         }
+
+        discontinuity().flag_heads(head_flags, input, flags_op, storage_.flag);
         ::rocprim::syncthreads();
 
         ROCPRIM_UNROLL
