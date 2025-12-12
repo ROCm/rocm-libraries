@@ -321,11 +321,9 @@ void PerformanceConfigPoolingForwardNaive::Init(const miopen::pooling::ProblemDe
 }
 
 void PerformanceConfigPoolingForwardNaive::HeuristicInit(
-    const miopen::pooling::ProblemDescription& problem)
+    [[maybe_unused]] const miopen::pooling::ProblemDescription& problem)
 {
-#if !MIOPEN_BACKEND_HIP
-    std::ignore = problem;
-#else
+#if MIOPEN_BACKEND_HIP
     switch(problem.GetXDesc().GetType())
     {
     case miopenHalf:
@@ -349,18 +347,14 @@ bool PerformanceConfigPoolingForwardNaive::SetNextValue(
     return false;
 #else
 #if WORKAROUND_ISSUE_MIFIN_80
-    static constexpr int wavesize = 64;
-    do
-    {
-        if(!NextTwoPower<1, wavesize>(local_size0))
-            break;
-        if(!NextTwoPower<1, wavesize>(local_size1))
-            break;
-        if(!NextTwoPower<1, wavesize>(local_size2))
-            break;
-        return false;
-    } while(false);
-    return true;
+    constexpr int wavesize = 64;
+    if(!NextTwoPower<1, wavesize>(local_size0))
+        return true;
+    if(!NextTwoPower<1, wavesize>(local_size1))
+        return true;
+    if(!NextTwoPower<1, wavesize>(local_size2))
+        return true;
+    return false;
 #else
     return false;
 #endif
@@ -370,7 +364,7 @@ bool PerformanceConfigPoolingForwardNaive::SetNextValue(
 bool PerformanceConfigPoolingForwardNaive::IsValidValue() const
 {
 #if WORKAROUND_ISSUE_MIFIN_80
-    static constexpr int wavesize = 64;
+    constexpr int wavesize = 64;
     if(!IsTwoPower<1, wavesize>(local_size0))
         return false;
     if(!IsTwoPower<1, wavesize>(local_size1))
@@ -387,10 +381,10 @@ bool PerformanceConfigPoolingForwardNaive::IsValidValue() const
 }
 
 bool PerformanceConfigPoolingForwardNaive::IsValid(
-    const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
+    const ExecutionContext&,
+    [[maybe_unused]] const miopen::pooling::ProblemDescription& problem) const
 {
 #if !MIOPEN_BACKEND_HIP
-    std::ignore = problem;
     return false;
 #else
     switch(problem.GetXDesc().GetType())

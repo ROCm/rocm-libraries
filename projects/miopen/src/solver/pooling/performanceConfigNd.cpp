@@ -23,11 +23,9 @@ void PerformanceConfigPoolingNd<OpType>::Init(const miopen::pooling::ProblemDesc
 
 template <OperationType OpType>
 void PerformanceConfigPoolingNd<OpType>::HeuristicInit(
-    const miopen::pooling::ProblemDescription& problem)
+    [[maybe_unused]] const miopen::pooling::ProblemDescription& problem)
 {
-#if !MIOPEN_BACKEND_HIP
-    std::ignore = problem;
-#else
+#if MIOPEN_BACKEND_HIP
     switch(problem.GetXDesc().GetType())
     {
     case miopenHalf:
@@ -44,13 +42,12 @@ void PerformanceConfigPoolingNd<OpType>::HeuristicInit(
 #endif
 }
 
-
 template <OperationType OpType>
 bool PerformanceConfigPoolingNd<OpType>::IsValid(
-    const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
+    const ExecutionContext&,
+    [[maybe_unused]] const miopen::pooling::ProblemDescription& problem) const
 {
 #if !MIOPEN_BACKEND_HIP
-    std::ignore = problem;
     return false;
 #else
     switch(problem.GetXDesc().GetType())

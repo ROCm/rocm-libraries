@@ -147,9 +147,9 @@ ConvSolution PoolingForwardNd::GetSolution(const ExecutionContext&,
     const int top_h = *(problem.GetYDesc().GetLengths().rbegin() + 1);
     const int top_w = *(problem.GetYDesc().GetLengths().rbegin());
 
-    int top_w_per_work = config.pix_w_per_work;
-    int top_h_per_work = config.pix_h_per_work;
-    int top_d_per_work = config.pix_d_per_work;
+    const int top_w_per_work = config.pix_w_per_work;
+    const int top_h_per_work = config.pix_h_per_work;
+    const int top_d_per_work = config.pix_d_per_work;
 
     const int top_blk_w = std::max((top_w + top_w_per_work - 1) / top_w_per_work, 1);
     const int top_blk_h = std::max((top_h + top_h_per_work - 1) / top_h_per_work, 1);
@@ -272,19 +272,15 @@ bool PerformanceConfigPoolingNdForward::SetNextValue(
 #if !MIOPEN_BACKEND_HIP
     return false;
 #else
-    do
-    {
-        if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_w_per_work))
-            break;
-        if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_h_per_work))
-            break;
-        if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_d_per_work))
-            break;
-        if(!NextTwoPower<1, 64>(local_size))
-            break;
-        return false;
-    } while(false);
-    return true;
+    if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_w_per_work))
+        return true;
+    if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_h_per_work))
+        return true;
+    if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_d_per_work))
+        return true;
+    if(!NextTwoPower<1, 64>(local_size))
+        return true;
+    return false;
 #endif
 }
 
