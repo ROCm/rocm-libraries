@@ -727,7 +727,7 @@ bool solution_map::write_solution_map_data(const fs::path& sol_map_out_path,
 {
     if(LOG_TUNING_ENABLED())
         (*LogSingleton::GetInstance().GetTuningOS())
-            << "writing solution map data to: " << sol_map_out_path.c_str() << std::endl;
+            << "writing solution map data to: " << sol_map_out_path << std::endl;
 
     std::ofstream outfile;
     outfile.open(sol_map_out_path.c_str(), (std::ios::out | std::ios::trunc));
