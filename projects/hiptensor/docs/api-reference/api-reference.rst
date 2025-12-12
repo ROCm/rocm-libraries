@@ -28,6 +28,14 @@ List of supported CDNA architectures:
 
 .. _hiptensor-supported-data-types:
 
+List of supported RDNA architectures:
+
+* gfx1200
+* gfx1201
+
+.. note::
+    gfx12 = gfx1200, gfx1201
+
 Supported data types
 --------------------
 
@@ -60,7 +68,7 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 |                     |     f16 / f16 / f32          |  gfx908             | 2m2n2k (Rank4)      |
 | Contraction         +------------------------------+  gfx90a             |                     |
 | (Scale, bilinear)   |     bf16 / bf16 / f32        |  gfx942+            | 3m3n3k (Rank6)      |
-|                     +------------------------------+                     |                     |
+|                     +------------------------------+  gfx12              |                     |
 |                     |     f32 / f32 / f32          |                     | 4m4n4k (Rank8)      |
 |                     +------------------------------+                     |                     |
 |                     |     f32 / f32 / f16          |                     | 5m5n5k (Rank10)     |
@@ -78,13 +86,13 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 |                     |     f16 / f16 / \-           |  gfx908             | Rank2 - Rank6       |
 | Element-wise        +------------------------------+  gfx90a             |                     |
 | Operations          |     f16 / f32 / \-           |  gfx942+            |                     |
-|                     +------------------------------+                     |                     |
+|                     +------------------------------+  gfx12              |                     |
 |                     |     f32 / f32 / \-           |                     |                     |
 +---------------------+------------------------------+---------------------+---------------------+
 |                     |     f16 / f16 / f16          |  gfx908             | Rank2 - Rank6       |
 | Reduction           +------------------------------+  gfx90a             |                     |
 |                     |     f16 / f16 / f32          |  gfx942+            |                     |
-|                     +------------------------------+                     |                     |
+|                     +------------------------------+  gfx12              |                     |
 |                     |     bf16 / bf16 / bf16       |                     |                     |
 |                     +------------------------------+                     |                     |
 |                     |     bf16 / bf16 / f32        |                     |                     |

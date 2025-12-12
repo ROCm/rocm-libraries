@@ -39,11 +39,14 @@ namespace hiptensor
             GFX90A           = 0x90A,
             GFX942           = 0x942,
             GFX950           = 0x950,
+            GFX1200          = 0x1200,
+            GFX1201          = 0x1201,
             UNSUPPORTED_ARCH = 0x0,
         };
 
         enum hipWarpSize_t : uint32_t
         {
+            Wave32                = 32u,
             Wave64                = 64u,
             UNSUPPORTED_WARP_SIZE = 0u,
         };
