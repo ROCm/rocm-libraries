@@ -18,4 +18,27 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-LDS_160k = 160 * 1024
+from enum import Enum
+
+
+class lds_config(Enum):
+    SIZE_64KiB = 64 * 1024
+    SIZE_160KiB = 160 * 1024
+
+
+class supported_arch(Enum):
+    GFX_GENERIC = "gfx_generic"
+    GFX_803 = "gfx803"
+    GFX_900 = "gfx900"
+    GFX_906 = "gfx906"
+    GFX_908 = "gfx908"
+    GFX_90A = "gfx90a"
+    GFX_942 = "gfx942"
+    GFX_950 = "gfx950"
+    GFX_1030 = "gfx1030"
+    GFX_1100 = "gfx1100"
+    GFX_1101 = "gfx1101"
+    GFX_1102 = "gfx1102"
+    GFX_1151 = "gfx1151"
+    GFX_1200 = "gfx1200"
+    GFX_1201 = "gfx1201"
