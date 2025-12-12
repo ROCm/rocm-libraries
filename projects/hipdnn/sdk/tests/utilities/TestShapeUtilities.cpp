@@ -590,6 +590,40 @@ INSTANTIATE_TEST_SUITE_P(
         ExtractStrideOrderTestCase{
             {1, 4, 8, 8, 8, 1}, {1, 2, 5, 4, 3, 0}, true, {4, 2, 1, 1, 1, 1}}));
 
+TEST(TestShapeUtils, IsTensorPackedTrueForPackedTensor)
+{
+    std::vector<int64_t> shape3D = {2, 3, 4};
+    auto strides3D = generateStrides(shape3D);
+    EXPECT_TRUE(isTensorPacked(shape3D, strides3D));
+
+    std::vector<int64_t> shape4D = {2, 3, 4, 5};
+    auto stridesNchw = generateStrides(shape4D);
+    EXPECT_TRUE(isTensorPacked(shape4D, stridesNchw));
+    auto stridesNhwc = generateStrides(shape4D, {3, 0, 2, 1});
+    EXPECT_TRUE(isTensorPacked(shape4D, stridesNhwc));
+
+    std::vector<int64_t> shape5D = {2, 3, 4, 5, 6};
+    auto stridesNcdhw = generateStrides(shape5D);
+    EXPECT_TRUE(isTensorPacked(shape5D, stridesNcdhw));
+    auto stridesNdhwc = generateStrides(shape5D, {4, 0, 3, 2, 1});
+    EXPECT_TRUE(isTensorPacked(shape5D, stridesNdhwc));
+}
+
+TEST(TestShapeUtils, IsTensorPackedFalseForNonPackedTensor)
+{
+    std::vector<int64_t> shape3D = {2, 3, 4};
+    std::vector<int64_t> nonPackedStrides3D = {13, 4, 1};
+    EXPECT_FALSE(isTensorPacked(shape3D, nonPackedStrides3D));
+
+    std::vector<int64_t> shape4D = {2, 3, 4, 5};
+    std::vector<int64_t> nonPackedStrides4D = {50, 20, 5, 1};
+    EXPECT_FALSE(isTensorPacked(shape4D, nonPackedStrides4D));
+
+    std::vector<int64_t> shape5D = {2, 3, 4, 5, 6};
+    std::vector<int64_t> nonPackedStrides5D = {400, 120, 30, 6, 1};
+    EXPECT_FALSE(isTensorPacked(shape5D, nonPackedStrides5D));
+}
+
 TEST(TestShapeUtils, GetDerivedShape5DValid)
 {
     std::vector<int64_t> shape = {2, 4, 8, 16, 32};
