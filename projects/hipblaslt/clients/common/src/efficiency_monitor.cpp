@@ -34,7 +34,6 @@
 #ifndef _WIN32
 
 #include <hip/hip_runtime.h>
-#include <amd_smi/amd_smiConfig.h>
 #include <amd_smi/amdsmi.h>
 
 template <typename T>

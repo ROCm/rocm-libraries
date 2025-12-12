@@ -33,7 +33,6 @@
 #include <tuple>
 #include <vector>
 
-#include <amd_smi/amd_smiConfig.h>
 #include <amd_smi/amdsmi.h>
 #include <hip/hip_runtime.h>
 
