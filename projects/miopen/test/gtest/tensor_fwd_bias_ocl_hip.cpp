@@ -105,10 +105,11 @@ std::vector<TensorsConfig> TensorsConfigs()
             maxTotalSize /= sizeof(T);
         }
     }
-
     // 2) Fallback table by architecture family
     if(maxTotalSize == 0)
+    {
         maxTotalSize = getCacheSizeLimit<T>(get_handle().GetDeviceName());
+    }
 
     // Generate all NCHW tensors that are limited by L3 cache size
     // or 2xL2 cache size when L3 is not available
