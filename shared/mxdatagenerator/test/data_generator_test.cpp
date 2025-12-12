@@ -1160,26 +1160,32 @@ public:
         
         double skewness_tolerance, excess_kurtosis_tolerance;
         
-        if (total_bits <= 4) {
-            // Extremely low precision (4 bits)
-            skewness_tolerance = 3.0;
-            excess_kurtosis_tolerance = 6.0;
-        } else if (total_bits <= 6) {
-            // Very low precision (6 bits)
-            skewness_tolerance = 2.5;
-            excess_kurtosis_tolerance = 5.0;
+        // Add after generating data in testForDataType()
+double max_val = *std::max_element(data.begin(), data.end());
+double min_val = *std::min_element(data.begin(), data.end());
+std::cout << "  Value range: [" << min_val << ", " << max_val << "]\n";
+
+// Count values at the extremes
+int at_max = std::count_if(data.begin(), data.end(), 
+    [max_val](double v) { return std::abs(v - max_val) < 1e-10 || std::abs(v + max_val) < 1e-10; });
+std::cout << "  Values at ±max: " << at_max << " (" << (100.0 * at_max / data.size()) << "%)\n";
+
+        if (total_bits <= 6) {
+            // Extremely low precision (4 | 6 bits)
+            skewness_tolerance = 0.1;
+            excess_kurtosis_tolerance = 0.2;
         } else if (total_bits <= 8) {
             // Low precision (8 bits)
-            skewness_tolerance = 2.0;
-            excess_kurtosis_tolerance = 4.0;
+            skewness_tolerance = 0.05;
+            excess_kurtosis_tolerance = 0.1;
         } else if (total_bits <= 16) {
             // Medium precision (16 bits)
-            skewness_tolerance = 1.0;
-            excess_kurtosis_tolerance = 2.0;
+            skewness_tolerance = 0.025;
+            excess_kurtosis_tolerance = 0.05;
         } else {
             // High precision (32 bits)
-            skewness_tolerance = 0.5;
-            excess_kurtosis_tolerance = 1.0;
+            skewness_tolerance = 0.012;
+            excess_kurtosis_tolerance = 0.025;
         }
         
         // Test if the generated data follows the expected normal distribution
