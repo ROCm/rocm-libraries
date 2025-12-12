@@ -266,6 +266,68 @@ double getExcessKurtosis(const std::vector<double>& data)
     return term1 * sum_quad - term2;
 }
 
+double getExcessKurtosisDebug(const std::vector<double>& data, const std::string& typeName = "")
+{
+    std::cout << "\n=== getExcessKurtosis Debug for " << typeName << " ===\n";
+    std::cout << "Data size: " << data.size() << "\n";
+    
+    if(data.size() < 4)
+    {
+        std::cout << "ERROR: Data size < 4, returning NaN\n";
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    
+    const double mean = getMean(data);
+    const double std_dev = getStdDev(data);
+    
+    std::cout << "Mean: " << mean << "\n";
+    std::cout << "Std Dev: " << std_dev << "\n";
+    
+    if(std::isnan(mean) || std::isnan(std_dev) || std_dev == 0.0)
+    {
+        std::cout << "ERROR: Invalid mean/std_dev, returning NaN\n";
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    
+    double sum_quad = 0.0;
+    
+    // Print first 10 and last 5 z-scores and their contributions
+    std::cout << "\nFirst 10 z-scores and z^4 contributions:\n";
+    for(size_t i = 0; i < std::min(data.size(), size_t(10)); i++)
+    {
+        double z = (data[i] - mean) / std_dev;
+        double z4 = z * z * z * z;
+        std::cout << "  data[" << i << "] = " << data[i] 
+                  << " -> z = " << z << " -> z^4 = " << z4 << "\n";
+    }
+    
+    // Compute full sum
+    for(const double& val : data)
+    {
+        double z = (val - mean) / std_dev;
+        sum_quad += z * z * z * z;
+    }
+    
+    std::cout << "\nSum of z^4: " << sum_quad << "\n";
+    
+    // Sample excess kurtosis with bias correction
+    const double n = static_cast<double>(data.size());
+    const double term1 = n * (n + 1.0) / ((n - 1.0) * (n - 2.0) * (n - 3.0));
+    const double term2 = 3.0 * (n - 1.0) * (n - 1.0) / ((n - 2.0) * (n - 3.0));
+    
+    std::cout << "n: " << n << "\n";
+    std::cout << "term1 (scaling factor): " << term1 << "\n";
+    std::cout << "term2 (bias correction): " << term2 << "\n";
+    std::cout << "term1 * sum_quad: " << (term1 * sum_quad) << "\n";
+    
+    double result = term1 * sum_quad - term2;
+    std::cout << "Final excess kurtosis: " << result << "\n";
+    std::cout << "=== End Debug ===\n\n";
+    
+    return result;
+}
+
+
 // Test normality using skewness and kurtosis
 // Returns true if the data appears to be normally distributed within given tolerances
 bool testNormalityViaSkewnessKurtosis(const std::vector<double>& data, 
@@ -1160,15 +1222,7 @@ public:
         
         double skewness_tolerance, excess_kurtosis_tolerance;
         
-        // Add after generating data in testForDataType()
-double max_val = *std::max_element(data.begin(), data.end());
-double min_val = *std::min_element(data.begin(), data.end());
-std::cout << "  Value range: [" << min_val << ", " << max_val << "]\n";
 
-// Count values at the extremes
-int at_max = std::count_if(data.begin(), data.end(), 
-    [max_val](double v) { return std::abs(v - max_val) < 1e-10 || std::abs(v + max_val) < 1e-10; });
-std::cout << "  Values at ±max: " << at_max << " (" << (100.0 * at_max / data.size()) << "%)\n";
 
         if (total_bits <= 6) {
             // Extremely low precision (4 | 6 bits)
@@ -1203,6 +1257,35 @@ std::cout << "  Values at ±max: " << at_max << " (" << (100.0 * at_max / data.s
                   << " (tolerance: ±" << excess_kurtosis_tolerance << ")\n";
         std::cout << "  Result: " << (normality_result ? "PASS" : "FAIL") << "\n";
         
+            // Inside testForDataType(), after generating data, add:
+
+// Check if this is ocp_e2m3_mxfp6 and use debug version
+if constexpr (std::is_same_v<DataType, ocp_e2m3_mxfp6>) {
+    std::cout << "\n*** Using debug kurtosis for ocp_e2m3_mxfp6 ***\n";
+    
+    // Also print some statistics about the data distribution
+    std::map<double, int> value_counts;
+    for (const auto& v : data) {
+        value_counts[v]++;
+    }
+    
+    std::cout << "Unique values in data: " << value_counts.size() << "\n";
+    std::cout << "Top 10 most frequent values:\n";
+    
+    std::vector<std::pair<double, int>> sorted_counts(value_counts.begin(), value_counts.end());
+    std::sort(sorted_counts.begin(), sorted_counts.end(), 
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+    
+    for (size_t i = 0; i < std::min(sorted_counts.size(), size_t(10)); i++) {
+        std::cout << "  value " << sorted_counts[i].first 
+                  << " appears " << sorted_counts[i].second << " times\n";
+    }
+    
+    // Call debug version
+    double debug_kurtosis = getExcessKurtosisDebug(data, "ocp_e2m3_mxfp6");
+    std::cout << "Debug Excess Kurtosis: " << debug_kurtosis << "\n";
+}
+
         EXPECT_TRUE(normality_result);
     }
 };
