@@ -150,7 +150,7 @@ cmake -DBUILD_ADDRESS_SANITIZER=ON ..
 ninja check
 
 # Check code coverage (optional but recommended)
-cmake -DCODE_COVERAGE=ON ..
+cmake -DHIPDNN_ENABLE_COVERAGE=ON ..
 ninja code_coverage
 ```
 

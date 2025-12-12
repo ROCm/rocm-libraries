@@ -104,7 +104,7 @@ option(HIP_DNN_GENERATE_SDK_HEADERS "Automatically generates sdk headers from sc
 )
 option(HIP_DNN_SKIP_TESTS "Skips building all tests" OFF)
 
-option(CODE_COVERAGE "Build with code coverage flags" OFF)
+option(HIPDNN_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
 if(WIN32)
@@ -138,7 +138,7 @@ include(cmake/Tests.cmake)
 # Add global compile options
 set(EXTRA_COMPILE_OPTIONS)
 set(EXTRA_LINK_OPTIONS)
-if(CODE_COVERAGE)
+if(HIPDNN_ENABLE_COVERAGE)
     list(PREPEND EXTRA_COMPILE_OPTIONS -fprofile-instr-generate -fcoverage-mapping)
     list(PREPEND EXTRA_LINK_OPTIONS -fprofile-instr-generate -fcoverage-mapping)
 endif()
@@ -204,7 +204,7 @@ if(NOT HIP_DNN_SKIP_TESTS)
     add_dependencies(check_ctest validate_test_names)
 endif()
 
-if(CODE_COVERAGE)
+if(HIPDNN_ENABLE_COVERAGE)
     findandcheckllvmtools()
 
     if(HIP_DNN_BUILD_PLUGINS)
@@ -228,24 +228,38 @@ if(CODE_COVERAGE)
         ./${CMAKE_INSTALL_BINDIR}/public_hipdnn_backend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_sdk_tests
+        -object
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_plugin_sdk_tests
+        -object
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_test_sdk_tests
         ${MIOPEN_PLUGIN_CODE_COVERAGE_OBJECT}
     )
 
     add_custom_target(
         code_coverage
-        COMMAND cd ${CMAKE_BINARY_DIR} && find . -name \"*.profraw\" -print0 | xargs -0
-                ${LLVM_PROFDATA_BINARY} merge -sparse -o ./hipdnn.profdata
-        COMMAND ${LLVM_COV_BINARY} report ${CODE_COVERAGE_OBJECTS} -instr-profile=./hipdnn.profdata
-                -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" > ./code_cov_hipdnn.report
+        COMMAND find . -name \"*.profraw\" -print0 | xargs -0 ${LLVM_PROFDATA_BINARY} merge -sparse
+                -o ./coverage_report/hipdnn.profdata
+        COMMAND
+            ${LLVM_COV_BINARY} report ${CODE_COVERAGE_OBJECTS}
+            -instr-profile=./coverage_report/hipdnn.profdata
+            -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" >
+            ./coverage_report/code_cov_hipdnn.report
         COMMAND
             ${LLVM_COV_BINARY} show -Xdemangler=${LLVM_CXXFILT_BINARY} ${CODE_COVERAGE_OBJECTS}
-            -instr-profile=./hipdnn.profdata
+            -instr-profile=./coverage_report/hipdnn.profdata
             -ignore-filename-regex=\"${CODE_COVERAGE_IGNORE_REGEX}\" --format=html
-            --output-dir=./hipdnn_coverage_html
+            --output-dir=coverage_report
+        COMMAND
+            ${LLVM_COV_BINARY} export ${CODE_COVERAGE_OBJECTS}
+            -instr-profile=./coverage_report/hipdnn.profdata --format=lcov >
+            ./coverage_report/coverage.info
         DEPENDS check
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Generating code coverage report"
     )
+
+    # Make alias to target coverage
+    add_custom_target(coverage DEPENDS code_coverage COMMENT "Alias to match mathci")
 endif()
 
 if(NOT HIP_DNN_SKIP_TESTS)
