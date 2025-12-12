@@ -55,8 +55,8 @@ namespace TensileLite
     struct ExactLogicLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
         using Row = LibraryRow<MyProblem, MySolution, MyPredicate>;
-        std::vector<Row> rows;
-        mutable bool     lastFindTopRetAll;
+        std::vector<Row>          rows;
+        mutable std::atomic<bool> lastFindTopRetAll = false;
 
         ExactLogicLibrary() = default;
         ExactLogicLibrary(std::initializer_list<Row> init)

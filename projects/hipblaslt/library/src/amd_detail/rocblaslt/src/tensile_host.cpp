@@ -3628,6 +3628,18 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
 
     auto algoCount = min(static_cast<size_t>(requestedAlgoCount), solutions.size());
     memset(heuristicResultsArray, 0, sizeof(rocblaslt_matmul_heuristic_result) * algoCount);
+
+    if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+    {
+        std::ostringstream msg;
+        for(size_t i = 0; i < algoCount; ++i)
+        {
+            auto& solution = solutions[i];
+            msg << "getBestSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
+        }
+        log_info(__func__, msg.str());
+    }
+
     _convertToHeuristicResultArray(solutions,
                                    requestedAlgoCount,
                                    heuristicResultsArray,
@@ -3725,8 +3737,13 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
         else
             heuristicResults[i].workspaceSize = 0;
 
-        // debug
-        // std::cout << "getAllSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            std::ostringstream msg;
+            msg << "getAllSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
+            log_info(__func__, msg.str());
+        }
+
         i++;
     }
     heuristicResults.resize(i);
@@ -4204,12 +4221,16 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
         heuristicResults.clear();
         heuristicResults.resize(algoCount);
 
-        // debug
-        // for(size_t i = 0; i < algoCount; ++i)
-        // {
-        //     auto& solution = solutions[i];
-        //     std::cout << "getBestSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
-        // }
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            std::ostringstream msg;
+            for(size_t i = 0; i < algoCount; ++i)
+            {
+                auto& solution = solutions[i];
+                msg << "getBestSolutions(): sol-idx = " << solution->index << ", sol-tag = " << solution->matchingTag() << std::endl;
+            }
+            log_info(__func__, msg.str());
+        }
 
         _convertToHeuristicResultArray(solutions,
                                        algoCount,

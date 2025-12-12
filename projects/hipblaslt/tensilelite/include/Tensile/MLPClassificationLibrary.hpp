@@ -56,7 +56,7 @@ namespace TensileLite
         std::shared_ptr<MLPNet>                    model;
         SolutionFeatures                           solFeatures;
         ProblemFeatures                            probFeatures;
-        mutable bool                               lastFindTopRetAll;
+        mutable std::atomic<bool>                  lastFindTopRetAll = false;
 
         static std::string Type()
         {

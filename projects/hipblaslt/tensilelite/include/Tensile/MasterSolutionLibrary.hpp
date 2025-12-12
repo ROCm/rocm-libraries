@@ -103,7 +103,7 @@ namespace TensileLite
         mutable SolutionMap<MySolution>                         solutions;
         std::string                                             version;
         mutable std::mutex                                      solutionsGuard;
-        mutable bool                                            lastFindTopRetAll;
+        mutable std::atomic<bool>                               lastFindTopRetAll = false;
 
         MasterSolutionLibrary() = default;
 

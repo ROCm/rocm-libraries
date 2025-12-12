@@ -49,7 +49,7 @@ namespace TensileLite
         std::vector<origami::config_t>                       origami_config_list;
         std::unordered_map<origami::config_t, int>           origami_config_map;
 
-        mutable bool lastFindTopRetAll = false;
+        mutable std::atomic<bool> lastFindTopRetAll = false;
 
         static std::string Type()
         {

@@ -186,7 +186,7 @@ namespace TensileLite
 
         std::shared_ptr<Property<MyProblem, Key>> property;
         LibraryMap<MyProblem, MySolution, Key>    map;
-        mutable bool                              lastFindTopRetAll;
+        mutable std::atomic<bool>                 lastFindTopRetAll = false;
 
         virtual SolutionVector<MySolution> findTopSolutions(MyProblem const& problem,
                                                             Hardware const&  hardware,

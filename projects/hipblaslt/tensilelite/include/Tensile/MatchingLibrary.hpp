@@ -46,8 +46,8 @@ namespace TensileLite
     {
         using Element = std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>;
         using Table   = Matching::MatchingTable<MyProblem, Element, std::shared_ptr<MySolution>>;
-        std::shared_ptr<Table> table;
-        mutable bool           lastFindTopRetAll;
+        std::shared_ptr<Table>    table;
+        mutable std::atomic<bool> lastFindTopRetAll = false;
 
         static std::string Type()
         {

@@ -334,7 +334,7 @@ namespace TensileLite
         mutable Caches            m_caches;
         mutable CachesAllSolsFlag m_cachesAllSolutions;
         mutable CachesGroupedGemm m_cachesGroupedGemm;
-        mutable bool              lastFindTopRetAll;
+        mutable std::atomic<bool> lastFindTopRetAll = false;
     };
 
 #if 0

@@ -1848,6 +1848,8 @@ rocblaslt_status
         {
             // set excluded lib here: if the #-returned < #-requested, we'll call getAll.
             // But in that case, we don't need to get GridBased or Prediction which are already returned here
+            static std::mutex mtx;
+            std::lock_guard<std::mutex> lock(mtx);
             TensileLite::Debug::Instance().setExcludedLibFromGetAll(defExcludedSet);
 
             std::vector<rocblaslt_matmul_heuristic_result> allSolutionsResults;
@@ -2098,6 +2100,8 @@ rocblaslt_status
         {
             // set excluded lib here: if the #-returned < #-requested, we'll call getAll.
             // But in that case, we don't need to get GridBased or Prediction which are already returned here
+            static std::mutex mtx;
+            std::lock_guard<std::mutex> lock(mtx);
             TensileLite::Debug::Instance().setExcludedLibFromGetAll(defExcludedSet);
 
             std::vector<rocblaslt_matmul_heuristic_result> allSolutionsResults;

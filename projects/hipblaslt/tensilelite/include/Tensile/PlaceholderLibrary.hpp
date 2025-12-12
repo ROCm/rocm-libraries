@@ -149,7 +149,7 @@ namespace TensileLite
         std::string                                                     filePrefix;
         std::string                                                     suffix;
         std::string                                                     libraryDirectory;
-        mutable bool                                                    lastFindTopRetAll;
+        mutable std::atomic<bool>                                       lastFindTopRetAll = false;
 
         mutable std::map<std::string, std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>>*
             indexLoadedLibraries;
