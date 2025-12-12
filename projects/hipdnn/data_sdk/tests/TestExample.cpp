@@ -6,6 +6,6 @@
 
 TEST(TestDataSdk, Example)
 {
-    hipdnn::data_sdk::hello();
+    hipdnn_data_sdk::hello();
     EXPECT_TRUE(true);
 }
