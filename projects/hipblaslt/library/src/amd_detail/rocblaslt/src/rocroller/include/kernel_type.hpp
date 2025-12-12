@@ -30,6 +30,30 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
+struct ScaleType
+{
+    rocRoller::Operations::ScaleMode mode;
+    size_t blockRowSize = 32u;
+    size_t blockColSize = 1u;
+    rocRoller::DataType type = rocRoller::DataType::E8M0;
+
+    auto operator<=>(const ScaleType& other) const = default;
+};
+
+template<>
+struct std::hash<ScaleType>
+{
+    size_t operator()(const ScaleType& s) const noexcept
+    {
+        size_t modeHash = std::hash<rocRoller::Operations::ScaleMode>{}(s.mode);
+        size_t blockRowSizeHash = std::hash<size_t>{}(s.blockRowSize);
+        size_t blockColSizeHash = std::hash<size_t>{}(s.blockColSize);
+        size_t typeHash = std::hash<rocRoller::DataType>{}(s.type);
+
+        return modeHash ^ (blockRowSizeHash << 1) ^ (blockColSizeHash << 2) ^ (typeHash << 3);
+    }
+};
+
 /**
  * @brief KernelType
  *
@@ -48,16 +72,29 @@ struct KernelType
     bool transA;
     bool transB;
 
-    rocRoller::Operations::ScaleMode scaleAMode;
-    rocRoller::Operations::ScaleMode scaleBMode;
-
-    size_t scaleABlockRowSize = 32u;
-    size_t scaleABlockColSize = 1u;
-    size_t scaleBBlockRowSize = 1u;
-    size_t scaleBBlockColSize = 32u;
-
-    rocRoller::DataType scaleTypeA = rocRoller::DataType::E8M0;
-    rocRoller::DataType scaleTypeB = rocRoller::DataType::E8M0;
+    ScaleType scaleTypeA;
+    ScaleType scaleTypeB;
 
     auto operator<=>(const KernelType& other) const = default;
+};
+
+template<>
+struct std::hash<KernelType>
+{
+    size_t operator()(const KernelType& k) const noexcept
+    {
+        size_t typeAHash = std::hash<rocRoller::DataType>{}(k.typeA);
+        size_t typeBHash = std::hash<rocRoller::DataType>{}(k.typeB);
+        size_t typeCHash = std::hash<rocRoller::DataType>{}(k.typeC);
+        size_t typeDHash = std::hash<rocRoller::DataType>{}(k.typeD);
+        size_t typeAccHash = std::hash<rocRoller::DataType>{}(k.typeAcc);
+        size_t scaleTypeAHash = std::hash<ScaleType>{}(k.scaleTypeA);
+        size_t scaleTypeBHash = std::hash<ScaleType>{}(k.scaleTypeB);
+        size_t transAHash = std::hash<bool>{}(k.transA);
+        size_t transBHash = std::hash<bool>{}(k.transB);
+
+        return typeAHash ^ (typeBHash << 1) ^ (typeCHash << 2) ^
+                 (typeDHash << 3) ^ (typeAccHash << 4) ^ (scaleTypeAHash << 5) ^
+                 (scaleTypeBHash << 6) ^ (transAHash << 7) ^ (transBHash << 8);
+    }
 };
