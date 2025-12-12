@@ -40,15 +40,14 @@ private:
     static void LogVector(std::ostream& os, const std::string& vec_name, const std::vector<T>& vec)
     {
         os << vec_name << ": [";
-        for (size_t i = 0; i < vec.size(); ++i)
+        for(size_t i = 0; i < vec.size(); ++i)
         {
             os << vec[i];
-            if (i < vec.size() - 1)
+            if(i < vec.size() - 1)
                 os << ",";
         }
         os << "] ";
     }
-
 };
 
 template <miopenDataType_t datatype>
