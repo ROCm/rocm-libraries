@@ -165,16 +165,6 @@ hipsparseStatus_t hipsparseSpSM_solve_ex(hipsparseHandle_t           handle,
                                          hipsparseSpSMAlg_t          alg,
                                          hipsparseSpSMDescr_t        spsmDescr)
 {
-    return hipsparseSpSM_solve(handle,
-                               opA,
-                               opB,
-                               alpha,
-                               matA,
-                               matB,
-                               matC,
-                               computeType,
-                               alg,
-                               spsmDescr,
-                               nullptr);
+    return hipsparseSpSM_solve(
+        handle, opA, opB, alpha, matA, matB, matC, computeType, alg, spsmDescr, nullptr);
 }
-
