@@ -189,6 +189,7 @@ inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strid
     return strideOrder;
 }
 
+// Checks if the tensor defined by dims and strides is packed (contiguous in memory).
 inline bool isTensorPacked(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
 {
     if(dims.size() != strides.size())
