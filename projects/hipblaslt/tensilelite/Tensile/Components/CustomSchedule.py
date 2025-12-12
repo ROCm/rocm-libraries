@@ -1562,14 +1562,14 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 3, 4]],
     'LRB0': [[9,15, 17, 19]],
     'GRIncB': [[ 4, 4, 4, 5, 5, 5,11,12,13]],
-    'GRA': [[22,22 ,23, 23, 24, 24, 25, 25, 26, 27,30,31,32,32]], 
+    'GRA': [[22,22 ,23, 23, 24, 24, 25, 25, 26, 27,28,29,30,31]], 
     'LRSA': [[26]],
     'LRSB': [[26]],
-    'GRB': [[37, 37, 39, 39,40,40,53,54]],
+    'GRB': [[36,36,37,37,38,38, 39, 39]],
     'LWSA': [[54]],
     'LWSB': [[54]],
     'LRA1': [[42, 43, 44, 45, 46, 47, 48]],
-    'LRB1': [[ 50, 51, 52, 54]],
+    'LRB1': [[ 49,50, 51, 54]],
     'LCC': [[55, 55]],
     }
 
@@ -1580,7 +1580,7 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
         SBarrier(comment=""),
         SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
         SBarrier(comment=""),
-        SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="wait for previous set of global reads"),
+        SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
         SBarrier(comment="")
     ]
     numMfma = 56
