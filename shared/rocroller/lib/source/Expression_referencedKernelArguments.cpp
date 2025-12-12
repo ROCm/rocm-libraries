@@ -30,6 +30,7 @@
 
 #include <rocRoller/AssemblyKernelArgument.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
+#include <rocRoller/Operations/CommandArgument.hpp>
 
 namespace rocRoller
 {
@@ -83,6 +84,11 @@ namespace rocRoller
             void operator()(AssemblyKernelArgumentPtr const& expr)
             {
                 m_referencedArgs.insert(expr->name);
+            }
+
+            void operator()(CommandArgumentPtr const& expr)
+            {
+                m_referencedArgs.insert(expr->name());
             }
 
             void operator()(DataFlowTag const& expr)

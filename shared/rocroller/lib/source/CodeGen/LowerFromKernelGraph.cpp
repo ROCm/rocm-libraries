@@ -665,22 +665,8 @@ namespace rocRoller
                         }
 
                         Log::debug("  immediate: count {}", assign.valueCount);
-                        if(assign.regType == Register::Type::Accumulator
-                           || assign.regType == Register::Type::Vector)
-                        {
-                            dest = m_context->registerTagManager()->getRegister(
-                                dimTag,
-                                assign.regType,
-                                varType,
-                                valueCount,
-                                Register::AllocationOptions{.contiguousChunkWidth
-                                                            = static_cast<int>(valueCount)});
-                        }
-                        else
-                        {
-                            dest = m_context->registerTagManager()->getRegister(
-                                dimTag, assign.regType, varType, valueCount);
-                        }
+                        dest = m_context->registerTagManager()->getRegister(
+                            dimTag, assign.regType, varType, valueCount);
                         if(dest->name().empty())
                             dest->setName(concatenate("DataFlowTag", dimTag));
                     }

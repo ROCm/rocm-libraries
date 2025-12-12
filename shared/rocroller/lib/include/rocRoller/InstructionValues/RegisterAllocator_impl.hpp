@@ -210,7 +210,7 @@ namespace rocRoller
                 {
                     std::vector<int> indices(width);
                     std::iota(indices.begin(), indices.end(), idx);
-                    rv.insert(rv.begin(), indices.begin(), indices.end());
+                    rv.insert(rv.end(), indices.begin(), indices.end());
                 }
                 else
                 {
@@ -308,7 +308,7 @@ namespace rocRoller
                         }
 
                         std::iota(indices.begin(), indices.end(), start);
-                        rv.insert(rv.begin(), indices.begin(), indices.end());
+                        rv.insert(rv.end(), indices.begin(), indices.end());
 
                         // Update candidate
                         blockSize -= width;

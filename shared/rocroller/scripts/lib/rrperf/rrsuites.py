@@ -1695,6 +1695,20 @@ def fp4_kernels():
     yield from fp4_d2lds_wgts256x256x256()
 
 
+def addStreamK(suite, value=True):
+    for run in suite:
+        run.streamK = value
+        yield run
+
+def fp4_kernels_streamk():
+    """Only the FP4 kernel configurations that pass with StreamK enabled."""
+    yield from addStreamK(fp4_target())
+    yield from addStreamK(fp4_target_d2lds_mi32x32x64_pf2x1())
+    yield from addStreamK(fp4_target_d2lds_mi32x32x64_pf4x1())
+    yield from addStreamK(fp4_target_d2lds_mi16x16x128_pf4x1())
+    yield from addStreamK(fp4_d2lds_wgts256x256x256())
+
+
 def fp4_target_sweep_wgms():
     for wgm_dim in [0, 1]:
         for wgm_value in range(1, 50):
@@ -2099,3 +2113,4 @@ def priority_problems():
         "2. Halfs": {"type_A": "half"},
         "3. Floats": {"type_A": "float"},
     }
+

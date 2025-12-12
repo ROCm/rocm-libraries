@@ -121,7 +121,13 @@ namespace rocRoller::KernelGraph
         {
             auto& dest = m_referencedArgs[node];
 
-            dest.insert(m_kernel->findArgument(arg).name);
+            // If the arg is a kernel argument name, use it directly.
+            // Otherwise it may be a CommandArgument name - store it as-is
+            // and fixup() will resolve it via m_subReferencedArgs.
+            if(m_kernel->hasArgument(arg))
+                dest.insert(m_kernel->findArgument(arg).name);
+            else
+                dest.insert(arg);
         }
 
         void operator()(int node, CG::SetCoordinate const& op)
@@ -143,6 +149,19 @@ namespace rocRoller::KernelGraph
 
         void operator()(int node, CG::Assign const& op)
         {
+            auto dest = m_graph.mapper.get(node, NaryArgument::DEST);
+            if(dest > 0)
+            {
+                // Register the expression in m_tagManager before incorporate,
+                // so DataFlowTags referencing this tag can be resolved.
+                if(op.expression)
+                    m_tagManager.addExpression(dest, op.expression, {});
+
+                // Trace the coordinate's size/stride for kernel argument references.
+                incorporate(node, m_tracer.trace(dest, false));
+                incorporate(node, m_tracer.trace(dest, true));
+            }
+
             incorporate(node, op.expression);
         }
 
