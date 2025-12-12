@@ -183,9 +183,8 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
     SECTION("bitFieldExtract")
     {
         CHECK_THAT(simplify(bfe(DataType::Int32, v, 0, 32)), IdenticalTo(v));
-        // TODO: Enable this simplification with a reinterpret_cast expression
-        // CHECK_THAT(simplify(bfe(DataType::UInt32, v, 0, 32)),
-        //            IdenticalTo(reinterpret(DataType::UInt32, v)));
+        CHECK_THAT(simplify(bfe(DataType::UInt32, v, 0, 32)),
+                   IdenticalTo(reinterpret(DataType::UInt32, v)));
 
         auto expr  = bfe(DataType::Int32, v, 16, 16);
         auto expr2 = bfe(DataType::Int32, expr, 0, 16);
@@ -228,6 +227,18 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
             simplify(concat({bfe(DataType::UInt32, v3, 0, 32), bfe(DataType::UInt32, v3, 32, 32)},
                             {DataType::UInt64})),
             IdenticalTo(v3));
+    }
+
+    SECTION("convert")
+    {
+        CHECK_THAT(simplify(convert(DataType::Int32, v)), IdenticalTo(v));
+        CHECK_THAT(simplify(convert(DataType::UInt64, v3)), IdenticalTo(v3));
+    }
+
+    SECTION("reinterpret")
+    {
+        CHECK_THAT(simplify(reinterpret(DataType::Int32, v)), IdenticalTo(v));
+        CHECK_THAT(simplify(reinterpret(DataType::UInt64, v3)), IdenticalTo(v3));
     }
 }
 
@@ -594,10 +605,10 @@ TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
 
     SECTION("nested convert")
     {
-        // Int32(r64 + Int64(r32 * r32)) -> Int32(Int32(r64), Int64(r32 * r32))
+        // Int32(r64 + Int64(r32 * r32)) -> Int32(Int32(r64) + Int32(r32 * r32))
         CHECK_THAT(
             convertPropagation(convert(Int32, r64[0] + convert(Int64, r32[1] * r32[2]))),
-            IdenticalTo(convert(Int32, convert(Int32, r64[0]) + convert(Int64, r32[1] * r32[2]))));
+            IdenticalTo(convert(Int32, convert(Int32, r64[0]) + convert(Int32, r32[1] * r32[2]))));
 
         // Do not propagate existing converts to larger types
         // Int32(r64 + Int64(r64 * r64)) -> Int32(Int32(r64) + Int64(r64 * r64))
@@ -649,6 +660,45 @@ TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
 
         CHECK_THAT(convertPropagation(convert(Int32, (r64[0] / r64[1]))),
                    IdenticalTo(convert(Int32, convert(Int32, (r64[0] / r64[1])))));
+    }
+}
+
+TEST_CASE("Nested Reinterpret simplification", "[expression][expression-transformation]")
+{
+    using namespace rocRoller;
+    using namespace Expression;
+
+    auto context = TestContext::ForDefaultTarget();
+
+    auto r_int32
+        = Register::Value::Placeholder(context.get(), Register::Type::Vector, DataType::Int32, 1);
+    r_int32->allocateNow();
+    auto v = r_int32->expression();
+
+    SECTION("Double reinterpret same size types")
+    {
+        auto expr       = reinterpret(DataType::Int32, reinterpret(DataType::Float, v));
+        auto simplified = simplify(expr);
+
+        CHECK_THAT(simplified, IdenticalTo(v));
+    }
+
+    SECTION("Reinterpret chain")
+    {
+        auto expr       = reinterpret(DataType::UInt32, reinterpret(DataType::Float, v));
+        auto simplified = simplify(expr);
+
+        CHECK_THAT(simplified, IdenticalTo(reinterpret(DataType::UInt32, v)));
+    }
+
+    SECTION("Reinterpret of literal")
+    {
+        auto lit        = literal(10.0f);
+        auto expr       = reinterpret(DataType::UInt32, lit);
+        auto simplified = simplify(expr);
+
+        CHECK(std::holds_alternative<CommandArgumentValue>(*simplified));
+        CHECK(std::get<uint32_t>(evaluate(simplified)) == 1092616192);
     }
 }
 
