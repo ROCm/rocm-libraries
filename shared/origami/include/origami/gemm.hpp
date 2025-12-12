@@ -1,245 +1,197 @@
-// Copyright Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright 2025 AMD ROCm(TM) Software
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
 
 #pragma once
 
-#include "origami/hardware.hpp"
 #include <vector>
+#include "origami/hardware.hpp"
+#include "origami/types.hpp"
 
-namespace origami
-{
-    // Placeholder for compute_reuse_in_block_gemm function.
-    // TODO move over L2 hit rate simulation for tie-breaking.
-    double compute_reuse_in_block_gemm(size_t                  grid_m,
-                                       size_t                  grid_n,
-                                       size_t                  grid_k,
-                                       size_t                  A_size,
-                                       size_t                  B_size,
-                                       size_t                  C_size,
-                                       size_t                  nproc,
-                                       size_t                  capacity,
-                                       const std::vector<int>& radix,
-                                       bool                    print_radix,
-                                       bool                    print_output,
-                                       size_t                  max_timesteps,
-                                       size_t                  max_iters);
+namespace origami {
 
-    // Compute <numActiveCUs, numWaves, splitFactor>
-    std::tuple<size_t, size_t, size_t, size_t> compute_CU_occupancy(const hardware_t& hardware,
-                                                                    size_t            M,
-                                                                    size_t            N,
-                                                                    size_t            K,
-                                                                    size_t            batch,
-                                                                    bool              transA,
-                                                                    bool              transB,
-                                                                    size_t            MT_M,
-                                                                    size_t            MT_N,
-                                                                    size_t            MT_K,
-                                                                    size_t            MI_M,
-                                                                    size_t            MI_N,
-                                                                    size_t            MI_K,
-                                                                    size_t            element_size_A,
-                                                                    size_t            element_size_B,
-                                                                    size_t            element_size_out,
-                                                                    data_type_t       mi_datatype,
-                                                                    int               WGM,
-                                                                    size_t            workspace_size,
-                                                                    size_t            workspace_size_per_elem_c,
-                                                                    int               occupancy,
-                                                                    int               dynamic_grid_version,
-                                                                    size_t            split,
-                                                                    size_t            max_cus = 0);
+/**
+ * @brief Compute the number of matrix instructions required to compute a single MT_MXMT_NXMT_K
+ * tile.
+ *
+ * @param mt Macro tile dimensions
+ * @param mi Micro tile dimensions
+ * @return size_t Number of matrix instructions
+ */
+size_t compute_number_matrix_instructions(dim3_t mt, dim3_t mi);
 
-    /* ---------------------------------------------------------------------------------------- */
-    /* Compute-related functions                                                                */
-    /* ---------------------------------------------------------------------------------------- */
-    // Compute the number of matrix instructions required to compute a single MT_MXMT_NXMT_K tile.
-    size_t compute_number_matrix_instructions(const hardware_t& hardware,
-                                              size_t            MT_M,
-                                              size_t            MT_N,
-                                              size_t            MT_K,
-                                              size_t            MI_M,
-                                              size_t            MI_N,
-                                              size_t            MI_K);
+/**
+ * @brief Compute TF32 conversion overhead.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @return double Latency in cycles.
+ */
+static inline double compute_cvt_overhead(const problem_t& problem,
+                                          const hardware_t& hardware,
+                                          const config_t& config);
+/**
+ * @brief Compute the latency to process a single macro-tile for the given problem and hardware.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @return size_t Latency in cycles.
+ */
+size_t compute_mt_compute_latency(const problem_t& problem,
+                                  const hardware_t& hardware,
+                                  const config_t& config);
 
-    // Determine the compute latency per MT_MxMT_NxMT_K Macro Tile (L_MT).
-    size_t compute_mt_compute_latency(const hardware_t& hardware,
-                                      size_t            M,
-                                      size_t            N,
-                                      size_t            K,
-                                      bool              transA,
-                                      bool              transB,
-                                      size_t            MT_M,
-                                      size_t            MT_N,
-                                      size_t            MT_K,
-                                      size_t            MI_M,
-                                      size_t            MI_N,
-                                      size_t            MI_K,
-                                      size_t            element_size_A, //In bits
-                                      size_t            element_size_B, //In bits,
-                                      data_type_t       mi_datatype);
+/**
+ * @brief Check if MT fits in LDS
+ *
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param mt Macro tile dimensions
+ * @param a_dtype Data type of operand A
+ * @param b_dtype Data type of operand B
+ * @return bool True if MT fits in LDS, false otherwise
+ */
+bool check_lds_capacity(const hardware_t& hardware,
+                        dim3_t mt,
+                        data_type_t a_dtype,
+                        data_type_t b_dtype);
 
-    /* ---------------------------------------------------------------------------------------- */
-    /* Memory-related functions                                                                 */
-    /* ---------------------------------------------------------------------------------------- */
-    // Check if MT fits in LDS
-    bool check_lds_capacity(
-        const hardware_t& hardware, size_t MT_M, size_t MT_N, size_t MT_K, size_t element_size_out);
+/**
+ * @brief Compute the amount of data loaded from A to produce a MT_MxMT_NxMT_K tile.
+ *
+ * @param MT_M Macro tile dimension M
+ * @param MT_K Macro tile dimension K
+ * @return size_t Amount of data loaded from A
+ */
+size_t compute_A_loads(size_t MT_M, size_t MT_K);
 
-    // Compute the amount of data loaded from A to produce a MT_MxMT_NxMT_K tile.
-    size_t compute_A_loads(size_t MT_M, size_t MT_K);
+/**
+ * @brief Compute the amount of data loaded from B to produce a MT_MxMT_NxMT_K tile.
+ *
+ * @param MT_N Macro tile dimension N
+ * @param MT_K Macro tile dimension K
+ * @return size_t Amount of data loaded from B
+ */
+size_t compute_B_loads(size_t MT_N, size_t MT_K);
 
-    // Compute the amount of data loaded from B to produce a MT_MxMT_NxMT_K tile.
-    size_t compute_B_loads(size_t MT_N, size_t MT_K);
+/**
+ * @brief A linear-estimation method for estimating L2-hitrate.
+ *
+ * @todo Parameterize this based on the space-filling curve algos.
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param splitting_factor
+ * @return double Predicted L2-hitrate.
+ */
+double estimate_l2_hit(const problem_t& problem,
+                       const hardware_t& hardware,
+                       const config_t& config,
+                       std::size_t splitting_factor);
 
-    // Computes total data loads per CU per MT from A and B
-    // Reads happen every MT, Writes happen every K-complete tile.
-    size_t compute_cu_loads(size_t MT_M, size_t MT_N, size_t MT_K);
+/**
+ * @brief Estimate the MALL-hitrate (last-level cache.)
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param num_active_cus
+ * @param splitting_factor
+ * @return double Predicted MALL-hitrate.
+ */
+double estimate_mall_hit(const problem_t& problem,
+                         const hardware_t& hardware,
+                         const config_t& config,
+                         std::size_t num_active_cus,
+                         std::size_t splitting_factor);
 
-    // Estimates the l2 hit-rate
-    double estimate_l2_hit(const hardware_t& hardware,
-                           size_t            M,
-                           size_t            N,
-                           size_t            K,
-                           size_t            batch,
-                           size_t            MT_M,
-                           size_t            MT_N,
-                           size_t            MT_K,
-                           size_t            element_size,
-                           int               WGM,
-                           size_t            splittingFactor);
+/**
+ * @brief Determine the memory latency per MT_M x MT_N x MT_K Macro Tile (L_MT).
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param num_active_cus
+ * @param splitting_factor
+ * @return double Latency in cycles.
+ */
+double compute_memory_latency(const problem_t& problem,
+                              const hardware_t& hardware,
+                              const config_t& config,
+                              std::size_t num_active_cus,
+                              std::size_t splitting_factor);
 
-    // Estimates the mall hit-rate
-    double estimate_mall_hit(const hardware_t& hardware,
-                             size_t            M,
-                             size_t            N,
-                             size_t            K,
-                             size_t            batch,
-                             size_t            MT_M,
-                             size_t            MT_N,
-                             size_t            MT_K,
-                             size_t            element_size,
-                             int               WGM,
-                             size_t            numActiveCUs,
-                             size_t            splittingFactor);
+/**
+ * @brief Computes the latency to compute a K-COMPLETE tile.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param num_active_cus
+ * @param splitting_factor
+ * @return double Latency in cycles.
+ */
+double compute_tile_latency(const problem_t& problem,
+                            const hardware_t& hardware,
+                            const config_t& config,
+                            std::size_t num_active_cus,
+                            std::size_t splitting_factor);
 
-    // Determine the memory latency per MT_MxMT_NxMT_K Macro Tile (L_MT).
-    double compute_memory_latency(const hardware_t& hardware,
-                                  size_t            M,
-                                  size_t            N,
-                                  size_t            K,
-                                  bool              transA,
-                                  bool              transB,
-                                  size_t            batch,
-                                  size_t            MT_M,
-                                  size_t            MT_N,
-                                  size_t            MT_K,
-                                  size_t            element_size_A, //In bits
-                                  size_t            element_size_B, //In bits,
-                                  size_t            mx_block_size,
-                                  int               WGM,
-                                  size_t            numActiveCUs,
-                                  size_t            splittingFactor);
+/**
+ * @brief Computes the latency per K-complete MT wave.
+ * A wave is defined as the time it takes for one CU to complete one
+ * K-complete output tile
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param num_active_cus
+ * @param splitting_factor
+ * @return double Latency in cycles.
+ */
+double compute_timestep_latency(const problem_t& problem,
+                                const hardware_t& hardware,
+                                const config_t& config,
+                                std::size_t num_active_cus,
+                                std::size_t splitting_factor);
 
-    /* ---------------------------------------------------------------------------------------- */
-    /* Tile-related functions                                                                   */
-    /* ---------------------------------------------------------------------------------------- */
-    // Computes the latency to compute a K-COMPLETE tile.
-    double compute_tile_latency(const hardware_t& hardware,
-                                size_t            M,
-                                size_t            N,
-                                size_t            K,
-                                size_t            batch,
-                                bool              transA,
-                                bool              transB,
-                                size_t            MT_M,
-                                size_t            MT_N,
-                                size_t            MT_K,
-                                size_t            MI_M,
-                                size_t            MI_N,
-                                size_t            MI_K,
-                                size_t            element_size_A, //In bits
-                                size_t            element_size_B, //In bits,
-                                size_t            element_size_out, //In bits
-                                data_type_t       mi_datatype,
-                                size_t            mx_block_size,
-                                int               WGM,
-                                int               occupancy,
-                                size_t            numActiveCUs,
-                                size_t            splittingFactor);
+/**
+ * @brief Compute the total latency of a gemm based on the latency of one wave multiplied by the
+ * number of waves A wave is defined as the time it takes for one CU to complete one K-complete
+ * output tile.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param max_cus
+ * @return double Latency in cycles.
+ */
+double compute_total_latency(const problem_t& problem,
+                             const hardware_t& hardware,
+                             const config_t& config,
+                             size_t max_cus);
 
-    // Computes the latency per K-complete MT wave.
-    // A wave is defined as : The time it takes for one CU to complete one K-complete output tile
-    double compute_wave_latency(const hardware_t& hardware,
-                                size_t            M,
-                                size_t            N,
-                                size_t            K,
-                                size_t            batch,
-                                bool              transA,
-                                bool              transB,
-                                size_t            MT_M,
-                                size_t            MT_N,
-                                size_t            MT_K,
-                                size_t            MI_M,
-                                size_t            MI_N,
-                                size_t            MI_K,
-                                size_t            element_size_A, //In bits
-                                size_t            element_size_B, //In bits,
-                                size_t            element_size_out, //In bits
-                                data_type_t       mi_datatype,
-                                size_t            mx_block_size,
-                                int               WGM,
-                                int               occupancy,
-                                size_t            numActiveCUs,
-                                size_t            splittingFactor);
-
-    // Compute the total latency of a gemm based on the latency of one wave multiplied by the number of waves
-    // A wave is defined as : The time it takes for one CU to complete one K-complete output tile
-    double compute_total_latency(const hardware_t& hardware,
-                                 size_t            M,
-                                 size_t            N,
-                                 size_t            K,
-                                 size_t            batch,
-                                 bool              transA,
-                                 bool              transB,
-                                 size_t            MT_M,
-                                 size_t            MT_N,
-                                 size_t            MT_K,
-                                 size_t            MI_M,
-                                 size_t            MI_N,
-                                 size_t            MI_K,
-                                 size_t            element_size_A, //In bits
-                                 size_t            element_size_B, //In bits,
-                                 size_t            element_size_out, //In bits
-                                 data_type_t       mi_datatype,
-                                 size_t            mx_block_size,
-                                 int               WGM,
-                                 int               non_temporal_a = 0,
-                                 int               non_temporal_b = 0,
-                                 int               occupancy      = 1,
-                                 size_t            split          = 0,
-                                 size_t            max_cus        = 0);
-
-    // Compute the performance from the latency.
-    // IMPORTANT : This program is NOT meant to be an analytical model for performance, but rather a way to rank different macro tile sizes.
-    // These performance values could be wildly inaccurate in absolute terms, but will often result in the correct ranking of MTin relative terms.
-    double compute_perf_gflops(const hardware_t& hardware,
-                               size_t            M,
-                               size_t            N,
-                               size_t            K,
-                               size_t            batch,
-                               bool              transA,
-                               bool              transB,
-                               size_t            MT_M,
-                               size_t            MT_N,
-                               size_t            MT_K,
-                               size_t            MI_M,
-                               size_t            MI_N,
-                               size_t            MI_K,
-                               size_t            element_size_A,
-                               size_t            element_size_B,
-                               size_t            element_size_out,
-                               data_type_t       mi_datatype,
-                               int               WGM,
-                               size_t            max_cus = 0);
-} // namespace origami
+}  // namespace origami

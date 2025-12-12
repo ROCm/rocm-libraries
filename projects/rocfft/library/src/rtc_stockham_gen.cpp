@@ -457,7 +457,7 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
     // only SBCCs need this
     if(scheme == CS_KERNEL_STOCKHAM_BLOCK_CC || scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
         src += large_twiddles_h;
-    // append the neccessary functions only
+    // append the necessary functions only
     append_radix_h(src, all_factors);
     // SBCCs don't need this
     if(scheme != CS_KERNEL_STOCKHAM_BLOCK_CC && scheme != CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
