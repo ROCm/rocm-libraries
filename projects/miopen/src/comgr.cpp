@@ -960,7 +960,10 @@ void BuildHip(const std::string& name,
 
         if(!rocm_path.empty())
         {
-            opts.push_back("--rocm-path=" + rocm_path);
+            auto rocm_path_arg = "--rocm-path=" + rocm_path;
+            opts.push_back(rocm_path_arg);
+            std::cout << "HIPRTC compile ROCm path override argument: " << rocm_path_arg
+                      << std::endl;
         }
 
         HiprtcProgram prog(name, text);
