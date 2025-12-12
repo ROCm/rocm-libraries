@@ -803,12 +803,16 @@ namespace GEMMTests
             for(int iteration = 0; iteration < numIters; ++iteration)
             {
                 ASSERT_THAT(hipMemset(deviceD.get(), 0, M * N * sizeof(TD)), HasHipSuccess(0));
-                for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
+                if(iteration == 0)
                 {
-                    if(scratchSpaceRequired[i] > 0)
+                    for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
                     {
-                        ASSERT_THAT(hipMemset(deviceScratch[i].get(), 0, scratchSpaceRequired[i]),
-                                    HasHipSuccess(0));
+                        if(scratchSpaceRequired[i] > 0)
+                        {
+                            ASSERT_THAT(
+                                hipMemset(deviceScratch[i].get(), 0, scratchSpaceRequired[i]),
+                                HasHipSuccess(0));
+                        }
                     }
                 }
 

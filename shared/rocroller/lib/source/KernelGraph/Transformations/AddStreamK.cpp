@@ -716,9 +716,7 @@ namespace rocRoller
             graph.control.addElement(Sequence(), {boundsCheckTag}, {doWhileTag});
             graph.control.addElement(Body(), {doWhileTag}, {loadFlagTag});
 
-            graph.control.chain<Sequence>(doWhileTag,
-                                          barrierBeforeResetTag,
-                                          wave0ResetFlagTag);
+            graph.control.chain<Sequence>(doWhileTag, barrierBeforeResetTag, wave0ResetFlagTag);
             graph.control.addElement(Body(), {wave0ResetFlagTag}, {assignResetFlagTag});
             auto waitAfterRestFlagStoreTag = graph.control.addElement(WaitZero());
             graph.control.chain<Sequence>(

@@ -244,11 +244,12 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                 params.back().workgroupMapping = false;
             }
 
-            // Enable StreamK when number of output tiles < number of CUs
+            // Enable StreamK when number of output tiles < number of CUs and not f6 data type
             size_t numTilesM = prob.m / wgt.m;
             size_t numTilesN = prob.n / wgt.n;
             size_t numTiles = numTilesM * numTilesN * prob.batch_count;
-            if(numTiles < analytical_hardware.N_CU)
+            auto isF6 = (kernelType.typeA == rocRoller::DataType::FP6 || kernelType.typeA == rocRoller::DataType::BF6 || kernelType.typeB == rocRoller::DataType::FP6 || kernelType.typeB == rocRoller::DataType::BF6);
+            if(numTiles < analytical_hardware.N_CU && !isF6)
             {
                 params.back().streamK = true;
             }
