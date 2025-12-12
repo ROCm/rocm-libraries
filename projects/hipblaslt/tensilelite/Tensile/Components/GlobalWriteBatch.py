@@ -1457,7 +1457,7 @@ class GlobalWriteBatchWriter:
           module.add(VMovB32(vgpr(dataV+2), vgpr(atomicDestVgpr), "dataV+2 = tmp (new original C)" ))
           module.add(VMovB32(vgpr(dataV+3), vgpr(atomicDestVgpr+1), "dataV+3 = tmp (new original C)" ))
         else:
-          module.add(VMovB32(vgpr(dataV+1), vgpr(atomicDestVgpr), "dataV+1 = tmp (new original C)" ))
+          module.add(VMovB32(dst=vgpr(dataV+1), src=vgpr(atomicDestVgpr), comment="dataV+1 = tmp (new original C)" ))
         module.add(self._chooseAddForAtomic(self.kernel, \
                         vgpr(dataV+0,vgprCnt), vgpr(dataV+1*vgprIdx,vgprCnt), vgpr("ValuC+%u"%newSumIdxV,vgprCnt), \
                         "newC = rC + originalC"))
@@ -1612,6 +1612,13 @@ class GlobalWriteBatchWriter:
           module.add(VMacF32(dst=vgpr("ValuC+%u"%(newSumIdx)), src0=(sgpr("Alpha+1").getMinus()), src1=vgpr("ValuC+%u"%(newSumIdx+1)), comment="*= alpha ( Cr += -Ai * Ci )"))
           module.add(VMulF32(dst=vgpr("ValuC+%u"%(newSumIdx+1)), src0=sgpr("Alpha"), src1=vgpr("ValuC+%u"%(newSumIdx+1)), comment="*= alpha ( Ci = Ar * Ci)"))
           module.add(VMacF32(dst=vgpr("ValuC+%u"%(newSumIdx+1)), src0=sgpr("Alpha+1"), src1=vgpr(tmpVgpr), comment="*= alpha ( Ci += Ai * Cr_backup )"))
+          if usePK:
+            newSumIdx2 = newSumIdx + 2
+            module.add(VMovB32(dst=vgpr(tmpVgpr), src=vgpr("ValuC+%u"%(newSumIdx2)), comment="store Cr"))
+            module.add(VMulF32(dst=vgpr("ValuC+%u"%(newSumIdx2)), src0=sgpr("Alpha"), src1=vgpr("ValuC+%u"%(newSumIdx2)), comment="*= alpha ( Cr = Ar * Cr)"))
+            module.add(VMacF32(dst=vgpr("ValuC+%u"%(newSumIdx2)), src0=(sgpr("Alpha+1").getMinus()), src1=vgpr("ValuC+%u"%(newSumIdx2+1)), comment="*= alpha ( Cr += -Ai * Ci )"))
+            module.add(VMulF32(dst=vgpr("ValuC+%u"%(newSumIdx2+1)), src0=sgpr("Alpha"), src1=vgpr("ValuC+%u"%(newSumIdx2+1)), comment="*= alpha ( Ci = Ar * Ci)"))
+            module.add(VMacF32(dst=vgpr("ValuC+%u"%(newSumIdx2+1)), src0=sgpr("Alpha+1"), src1=vgpr(tmpVgpr), comment="*= alpha ( Ci += Ai * Cr_backup )"))
           self.parentWriter.vgprPool.checkIn(tmpVgpr)
 
         # double precision complex
@@ -1624,9 +1631,19 @@ class GlobalWriteBatchWriter:
           # tmp2 = a.imag * b.real
           module.add(VMulF64(dst=vgpr(vtmp2,2), src0=sgpr("Alpha+2",2), src1=vgpr("ValuC+%u"%(newSumIdx+0),2)))
           # c.real = a.real * b.real - a.imag * b.imag = tmp1 - a.imag * b.imag
-          module.add(VFmaF64(dst=vgpr("ValuC+%u"%(newSumIdx+0),2), src0=sgpr("Alpha+2",2), src1=vgpr("ValuC+%u"%(newSumIdx+2),2), src2=vgpr(vtmp1,2)))
+          module.add(VFmaF64(dst=vgpr("ValuC+%u"%(newSumIdx+0),2), src0=sgpr("Alpha+2",2), src1=vgpr("ValuC+%u"%(newSumIdx+2),2).getMinus(), src2=vgpr(vtmp1,2)))
           # c.imag = a.real * b.imag + a.imag * b.real = a.real * b.imag + tmp2
           module.add(VFmaF64(dst=vgpr("ValuC+%u"%(newSumIdx+2),2), src0=sgpr("Alpha+0",2), src1=vgpr("ValuC+%u"%(newSumIdx+2),2), src2=vgpr(vtmp2,2)))
+          if usePK:
+            newSumIdx2 = newSumIdx + 4
+            # tmp1 = a.real * b.real
+            module.add(VMulF64(dst=vgpr(vtmp1,2), src0=sgpr("Alpha+0",2), src1=vgpr("ValuC+%u"%(newSumIdx2+0),2)))
+            # tmp2 = a.imag * b.real
+            module.add(VMulF64(dst=vgpr(vtmp2,2), src0=sgpr("Alpha+2",2), src1=vgpr("ValuC+%u"%(newSumIdx2+0),2)))
+            # c.real = a.real * b.real - a.imag * b.imag = tmp1 - a.imag * b.imag
+            module.add(VFmaF64(dst=vgpr("ValuC+%u"%(newSumIdx2+0),2), src0=sgpr("Alpha+2",2), src1=vgpr("ValuC+%u"%(newSumIdx2+2),2).getMinus(), src2=vgpr(vtmp1,2)))
+            # c.imag = a.real * b.imag + a.imag * b.real = a.real * b.imag + tmp2
+            module.add(VFmaF64(dst=vgpr("ValuC+%u"%(newSumIdx2+2),2), src0=sgpr("Alpha+0",2), src1=vgpr("ValuC+%u"%(newSumIdx2+2),2), src2=vgpr(vtmp2,2)))
           self.parentWriter.vgprPool.checkIn(vtmp1)
           self.parentWriter.vgprPool.checkIn(vtmp2)
     return module
@@ -1736,7 +1753,7 @@ class GlobalWriteBatchWriter:
       elif kernel["ProblemType"]["DestDataType"].isDoubleComplex():
         newSumIdxV = sumIdxV * 4 - self.parentWriter.states.c.startVgprValu
         module.add(VFmaF64(dst=vgpr("ValuC+%u"%(newSumIdxV+0),2), src0=vgpr(dataV+0,2), src1=sgpr("Beta+0",2), src2=vgpr("ValuC+%u"%(newSumIdxV+0),2), comment="c.real += a.real * b.real"))
-        module.add(VFmaF64(dst=vgpr("ValuC+%u"%(newSumIdxV+0),2), src0=vgpr(dataV+2,2), src1=sgpr("Beta+2",2), src2=vgpr("ValuC+%u"%(newSumIdxV+0),2), comment="c.real -= a.imag * b.imag"))
+        module.add(VFmaF64(dst=vgpr("ValuC+%u"%(newSumIdxV+0),2), src0=vgpr(dataV+2,2), src1=sgpr("Beta+2",2).getMinus(), src2=vgpr("ValuC+%u"%(newSumIdxV+0),2), comment="c.real -= a.imag * b.imag"))
         module.add(VFmaF64(dst=vgpr("ValuC+%u"%(newSumIdxV+2),2), src0=vgpr(dataV+0,2), src1=sgpr("Beta+2",2), src2=vgpr("ValuC+%u"%(newSumIdxV+2),2), comment="c.imag += a.real * b.imag"))
         module.add(VFmaF64(dst=vgpr("ValuC+%u"%(newSumIdxV+2),2), src0=vgpr(dataV+2,2), src1=sgpr("Beta+0",2), src2=vgpr("ValuC+%u"%(newSumIdxV+2),2), comment="c.imag += a.imag * b.real"))
 
