@@ -516,11 +516,11 @@ set(rocsparse_source
   src/precond/bsrilu0/rocsparse_bsrilu0_analysis.cpp
   src/precond/bsrilu0/rocsparse_bsrilu0_buffer_size.cpp
   src/precond/bsrilu0/rocsparse_bsrilu0_clear.cpp
-  src/precond/bsrilu0/rocsparse_bsrilu0_strided_batched_kernel.cpp
-  src/precond/bsrilu0/rocsparse_bsrilu0_strided_batched_kernel_2_8.cpp
-  src/precond/bsrilu0/rocsparse_bsrilu0_strided_batched_kernel_9_32.cpp
-  src/precond/bsrilu0/rocsparse_bsrilu0_strided_batched_kernel_33_64.cpp
-  src/precond/bsrilu0/rocsparse_bsrilu0_strided_batched_kernel_general.cpp
+  src/precond/bsrilu0/rocsparse_bsrilu0_kernel_launch.cpp
+  src/precond/bsrilu0/rocsparse_bsrilu0_kernel_2_8.cpp
+  src/precond/bsrilu0/rocsparse_bsrilu0_kernel_9_32.cpp
+  src/precond/bsrilu0/rocsparse_bsrilu0_kernel_33_64.cpp
+  src/precond/bsrilu0/rocsparse_bsrilu0_kernel_general.cpp
   src/precond/bsrilu0/rocsparse_bsrilu0_zero_pivot.cpp
   src/precond/bsrilu0/rocsparse_xbsrilu0.cpp
   src/precond/bsrilu0/rocsparse_xbsrilu0_buffer_size.cpp

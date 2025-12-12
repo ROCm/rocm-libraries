@@ -21,31 +21,23 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#pragma once
 
-#include "rocsparse_bsrilu0.hpp"
-#include "rocsparse_bsrilu0_kernel_launch.hpp"
-#include "rocsparse_utility.hpp"
+#include "rocsparse-types.h"
+#include "rocsparse_bsrilu0_info.hpp"
 
-rocsparse_status rocsparse::bsrilu0(rocsparse_handle       handle,
-                                    rocsparse_bsrilu0_info bsrilu0_info,
-                                    rocsparse_spmat_descr  A,
-                                    size_t                 buffer_size,
-                                    void* __restrict__ buffer)
+namespace rocsparse
 {
-    if(A->rows == 0 || A->batch_count == 0)
-    {
-        return rocsparse_status_success;
-    }
 
-    rocsparse::trm_info_t* trm_info
-        = bsrilu0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
+    typedef rocsparse_status (*bsrilu0_kernel_33_64_launch_t)(rocsparse_handle       handle,
+                                                              rocsparse_bsrilu0_info bsrilu0_info,
+                                                              rocsparse_spmat_descr  A,
+                                                              size_t                 buffer_size,
+                                                              void* __restrict__ buffer);
 
-    ROCSPARSE_CHECKARG(1,
-                       bsrilu0_info,
-                       ((A->rows > 0) && (trm_info == nullptr)),
-                       rocsparse_status_invalid_pointer);
+    bsrilu0_kernel_33_64_launch_t
+        find_bsrilu0_kernel_33_64_launch(rocsparse_handle            handle,
+                                         rocsparse_bsrilu0_info      bsrilu0_info,
+                                         rocsparse_const_spmat_descr A);
 
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::bsrilu0_kernel_launch(handle, bsrilu0_info, A, buffer_size, buffer));
-    return rocsparse_status_success;
 }

@@ -95,8 +95,8 @@ namespace rocsparse
                                    descr,
                                    info);
 
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::bsrilu0(handle, &bsr, policy, bsrilu0_info, temp_buffer));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrilu0(
+            handle, bsrilu0_info, &bsr, std::numeric_limits<size_t>::max(), temp_buffer));
 
         return rocsparse_status_success;
     }

@@ -34,6 +34,10 @@ namespace rocsparse
                                                   rocsparse_const_spmat_descr A,
                                                   size_t* p_buffer_size_in_bytes);
 
+    rocsparse_status bsrilu0_solve_buffer_size(rocsparse_handle            handle,
+                                               rocsparse_const_spmat_descr A,
+                                               size_t*                     p_buffer_size_in_bytes);
+
     rocsparse_status bsrilu0_analysis(rocsparse_handle          handle,
                                       rocsparse_spmat_descr     A,
                                       rocsparse_analysis_policy analysis,
@@ -41,14 +45,10 @@ namespace rocsparse
                                       rocsparse_bsrilu0_info*   p_bsrilu0_info,
                                       void*                     temp_buffer);
 
-    rocsparse_status bsrilu0_solve_buffer_size(rocsparse_handle            handle,
-                                               rocsparse_const_spmat_descr A,
-                                               size_t*                     p_buffer_size_in_bytes);
-
     rocsparse_status bsrilu0(rocsparse_handle       handle,
-                             rocsparse_spmat_descr  A,
-                             rocsparse_solve_policy policy,
                              rocsparse_bsrilu0_info bsrilu0_info,
-                             void*                  temp_buffer);
+                             rocsparse_spmat_descr  A,
+                             size_t                 buffer_size,
+                             void* __restrict__ buffer);
 
 }
