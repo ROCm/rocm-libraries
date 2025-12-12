@@ -189,17 +189,20 @@ namespace rocRoller
             return result;
         }
 
-        DataType getOffsetTypeFromComputeIndex(const KernelGraph& graph, int offsetTag)
+        DataType getOffsetDataTypeFromGraph(int                op,
+                                            KernelGraph const& graph,
+                                            bool               isStorePartOfGGlobalToLDSOp)
         {
-            for(auto const& conn : graph.mapper.getCoordinateConnections(offsetTag))
+            DataType rv = DataType::UInt64;
+            auto     s  = graph.control.get<StoreTiled>(op);
+            auto     l  = graph.control.get<LoadTiled>(op);
+            auto     ll = graph.control.get<LoadLDSTile>(op);
+            auto     sl = graph.control.get<StoreLDSTile>(op);
+            if(s || l || ll || sl || isStorePartOfGGlobalToLDSOp)
             {
-                if(auto computeIndex = graph.control.get<ComputeIndex>(conn.control);
-                   computeIndex.has_value())
-                {
-                    return computeIndex->offsetType;
-                }
+                rv = DataType::UInt32;
             }
-            Throw<FatalError>("No ComputeIndex found for Offset tag.", ShowValue(offsetTag));
+            return rv;
         }
 
         Generator<Instruction> LoadStoreTileGenerator::getOffset(LoadStoreTileInfo& info,
@@ -268,7 +271,7 @@ namespace rocRoller
                     info.rowOffsetReg = m_context->registerTagManager()->getRegister(
                         offsetTag,
                         Register::Type::Vector,
-                        getOffsetTypeFromComputeIndex(*m_graph, offsetTag),
+                        getOffsetDataTypeFromGraph(info.tag, *m_graph, isStorePartOfGlobalToLDS),
                         1);
                     info.rowOffsetReg->setName(concatenate("Offset", offsetTag));
                     m_context->getScopeManager()->addRegister(offsetTag);

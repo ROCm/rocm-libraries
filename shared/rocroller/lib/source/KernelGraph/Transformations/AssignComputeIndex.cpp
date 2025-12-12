@@ -623,6 +623,14 @@ namespace rocRoller
                     insertAfter(kgraph, ciTag, assignBaseTag, assignBaseTag);
             }
 
+            // Replace all ComputeIndex nodes with NOP nodes
+            for(const auto& tag : candidates)
+            {
+                auto nopTag = kgraph.control.addElement(NOP());
+                replaceWith(kgraph, tag, nopTag, false);
+                purgeNodes(kgraph, std::vector<int>{tag});
+            }
+
             return kgraph;
         }
     }
