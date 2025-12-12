@@ -79,7 +79,8 @@ const auto& GetTestParams()
 
 } // namespace
 
-// For I8 datatype we get "Empty code object path", so it requires additional investigation/debugging
+// For I8 datatype we get "Empty code object path", so it requires additional
+// investigation/debugging
 
 using GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16 =
     miopen::unit_tests::UnitTestConvSolverGroupXDlops<miopen::conv::Direction::Forward, miopenHalf>;
