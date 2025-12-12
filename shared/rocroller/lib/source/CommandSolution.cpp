@@ -440,7 +440,6 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
         transforms.push_back(std::make_shared<KernelGraph::OrderMultiplyNodes>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
-        transforms.push_back(std::make_shared<KernelGraph::HoistLoopInvariant>());
         transforms.push_back(std::make_shared<KernelGraph::AliasDataFlowTags>());
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocateDataFlow>());
         transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context, m_command));
@@ -448,6 +447,7 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::MergeAdjacentDeallocates>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::SetWorkitemCount>(m_context));
+        transforms.push_back(std::make_shared<KernelGraph::HoistLoopInvariant>());
 
         for(auto const& t : transforms)
         {
