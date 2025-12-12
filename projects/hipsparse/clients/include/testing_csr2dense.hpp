@@ -36,13 +36,11 @@ void testing_csr2dense_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csr2dense(Arguments argus)
+void testing_csr2dense(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     static constexpr hipsparseDirection_t DIRA = HIPSPARSE_DIRECTION_ROW;
     return testing_csx2dense<DIRA, T>(argus, hipsparseXcsr2dense<T>, hipsparseXdense2csr<T>);
-#else
-    return HIPSPARSE_STATUS_SUCCESS;
 #endif
 }
 

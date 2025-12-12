@@ -5131,6 +5131,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.miLatency, miIssueLatency = getSMFMAIssueLatency(kernel["ProblemType"]["DataType"].toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"]) if kernel["ProblemType"]["Sparse"] else \
                                               getMFMAIssueLatency(kernel["ProblemType"]["DataType"].toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"])
 
+      # TODO: Avoid the logic which does not make sense. 
+      # For gfx950, we can't issue any VALU or DS instruction in next 4 cycles.
+      # Changed the value based on this and also to mitigate some instruction scheduling issues.
+      if not kernel["ProblemType"]["Sparse"] and kernel['ISA'] == IsaVersion(9,5,0) and kernel["ProblemType"]["DataType"].numBytes() == 2:
+        self.states.miLatency = kernel["MatrixInstM"] // 2
+        miIssueLatency = 2
+
       # give 1 quad-cycle buffer to prevend bubble from sync
       miLatencyBuffer = 1
       self.states.miLatencyLeft = max(self.states.miLatency - miLatencyBuffer - miIssueLatency,0)
@@ -5140,7 +5147,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["MatrixInstruction"] == [4, 4, 4, 4]:
           if kernel['ISA'] == IsaVersion(9,0,10):
             self.states.miDependency = 4
-
 
     # shift vectors determined later
 

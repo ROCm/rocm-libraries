@@ -89,7 +89,7 @@ void testing_rot_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_rot(Arguments argus)
+void testing_rot(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 13000))
     I size = argus.N;
@@ -246,8 +246,6 @@ hipsparseStatus_t testing_rot(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_ROT_HPP
