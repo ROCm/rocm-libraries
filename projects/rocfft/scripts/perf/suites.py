@@ -1059,7 +1059,7 @@ def partial_pass():
                     ]:
 
                         yield Problem(length,
-                                      tag=mktag("partial_pass", 1, precision,
+                                      tag=mktag("partial_pass", 3, precision,
                                                 direction, place, False),
                                       nbatch=batch,
                                       direction=direction,
