@@ -2172,6 +2172,65 @@ def _get_schedule_128x224x64_16bit(kernel, useLDSTr, TLDS):
     return True, opt1
 
 @RegisterSchedule(
+    tile_config=TileConfig(128, 192, 32, 2, 0, True, 0, 0),
+    dtype_predicate=isTF32,
+    vector_widths=[4, 4, 4],
+    matrix_inst=[16, 16, 32, 1],
+    mfma_wave_group=[2, 2]
+)
+def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
+    kernel["MfmaInitCVgprs"] = True
+    optSchedule = dict()
+    syncCode = []
+    nglshift = nllshift = 0 # vmcnt shift for ngl and nll
+    if isNN(kernel) and not useLDSTr and TLDS==1:
+        kernel["UsePLRPack"] = True
+        optSchedule = {
+            'SYNC'  : [[-1, 3, 17, 35, 35, 35, 53, 53, 53]],
+            'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 2, 2]],
+            'GRIncB': [[3, 3, 3, 4, 4, 4, 5, 5, 5]],
+            'LRA0'  : [[0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7]],
+            'LRB0'  : [[8, 9, 10, 11, 12, 13]],
+            'PackA3': [[-1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]],
+            'PackB3': [[-1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]],
+            'GRA'   : [[35, 35, 35, 35, 35, 35, 35, 35]],
+            'GRB'   : [[35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35]],
+            'PackA0': [[17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20]],
+            'PackB0': [[17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 19, 19, 19, 19, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21, 21]],
+            'LRA3'  : [[54, 54, 55, 55, 56, 56, 57, 57, 59, 59, 60, 60, 61, 61, 62, 62]],
+            'LRB3'  : [[58, 58, 63, 64, 65, 66]],
+            'LRSA'  : [[16]],
+            'LRSB'  : [[16]],
+            'LWSA'  : [[52]],
+            'LWSB'  : [[52]],
+            #'SNOP'  : [[-1, 0, 1, 2, 3, 17, 18, 19, 20, 21]],
+        }
+        syncCode = [
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0") ,
+            SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write") ,
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0") ,
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="") ,
+            SBarrier(comment="") ,
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0") ,
+            SWaitCnt(dscnt=-1, vlcnt=10, vscnt=-1, comment="wait for previous set of global reads") ,
+            SBarrier(comment="") ,
+            SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0") ,
+        ]
+        nglshift = nllshift = 10
+    elif isTN(kernel) and useLDSTr and TLDS==1:
+        # TODO: Add NN schedule in upcoming PR
+        pass
+    elif isNT(kernel) and useLDSTr and TLDS==0:
+        # TODO: Add NT schedule in upcoming PR
+        pass
+    else:
+        return False, None
+    
+    numMfma = 72
+    opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
+    return True, opt1
+
+@RegisterSchedule(
     tile_config=TileConfig(192, 256, 32, 2, 0, True, 0, 0),
     dtype_predicate=isTF32,
     vector_widths=[4, 4, 4],
