@@ -44,15 +44,15 @@ __kernel void UniversalTranspose(const __global _FLOAT* in,
                                  ulong out_strides_h,
                                  ulong out_strides_w)
 {
-    const ulong local_size = get_local_size(0);
-    const ulong local_id   = get_local_id(0);
+    const ulong global_size = get_global_size(0);
+    const ulong global_id   = get_global_id(0);
 
     const ulong lens_wh    = lens_w * lens_h;
     const ulong lens_whd   = lens_wh * lens_d;
     const ulong lens_whdc  = lens_whd * lens_c;
     const ulong lens_whdcn = lens_whdc * lens_n;
 
-    for(ulong id = local_id; id < lens_whdcn; id += local_size)
+    for(ulong id = global_id; id < lens_whdcn; id += global_size)
     {
         const ulong n = id / lens_whdc;
         const ulong c = (id / lens_whd) % lens_c;

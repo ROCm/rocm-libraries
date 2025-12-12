@@ -91,11 +91,11 @@ void Run3dDriver(miopenDataType_t prec)
         testing::internal::CaptureStderr();
         test_drive<pooling3d_driver>(ptrs.size(), ptrs.data());
         auto capture = testing::internal::GetCapturedStderr();
-        std::cout << capture;
+        std::cerr << capture;
     }
 };
 
-bool IsTestSupportedForDevice(const miopen::Handle& handle) { return true; }
+bool IsTestSupportedForDevice() { return true; }
 
 std::vector<std::string> GetTestCases(const std::string& precision)
 {
@@ -115,8 +115,7 @@ using namespace pooling3d_ndhwc;
 
 TEST_P(GPU_Pooling3d_NDHWC_FP32, FloatTest_pooling3d_ndhwc)
 {
-    const auto& handle = get_handle();
-    if(IsTestSupportedForDevice(handle))
+    if(IsTestSupportedForDevice())
     {
         Run3dDriver(miopenFloat);
     }
@@ -128,8 +127,7 @@ TEST_P(GPU_Pooling3d_NDHWC_FP32, FloatTest_pooling3d_ndhwc)
 
 TEST_P(GPU_Pooling3d_NDHWC_FP16, HalfTest_pooling3d_ndhwc)
 {
-    const auto& handle = get_handle();
-    if(IsTestSupportedForDevice(handle))
+    if(IsTestSupportedForDevice())
     {
         Run3dDriver(miopenHalf);
     }

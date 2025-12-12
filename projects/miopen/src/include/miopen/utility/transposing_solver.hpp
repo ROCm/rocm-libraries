@@ -184,7 +184,7 @@ struct UniversalTransposeSolver : TransposePseudoSolver
 
             const auto build_params = GetDataTypeKBP(problem.input.GetType());
 
-            constexpr std::size_t max_block_size = 256;
+            constexpr std::size_t max_block_size = 1024;
             const auto local_size = std::min<std::size_t>(group_size * 16, max_block_size);
 
             transposeKernel.kernel_file  = "UniversalTranspose.cl";
@@ -468,7 +468,8 @@ struct TransposingSolver : Base
         for(const auto& transpose : Derived::GetTransposes())
         {
             const auto& descriptor = (transposed_problem.*(transpose.cdescriptor))();
-            ws_size += descriptor.GetElementSpace();
+            const auto e_size      = get_data_size(descriptor.GetType());
+            ws_size += descriptor.GetElementSpace() * e_size;
         }
 
         return ws_size;

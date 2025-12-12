@@ -91,11 +91,11 @@ void Run2dDriver(miopenDataType_t prec)
         testing::internal::CaptureStderr();
         test_drive<pooling2d_driver>(ptrs.size(), ptrs.data());
         auto capture = testing::internal::GetCapturedStderr();
-        std::cout << capture;
+        std::cerr << capture;
     }
 };
 
-bool IsTestSupportedForDevice(const miopen::Handle& handle) { return true; }
+bool IsTestSupportedForDevice() { return true; }
 
 std::vector<std::string> GetTestCases(const std::string& precision)
 {
@@ -115,8 +115,7 @@ using namespace pooling2d_asymmetric_nhwc;
 
 TEST_P(GPU_AsymPooling2d_NHWC_FP32, FloatTest_pooling2d_asymmetric_nhwc)
 {
-    const auto& handle = get_handle();
-    if(IsTestSupportedForDevice(handle))
+    if(IsTestSupportedForDevice())
     {
         Run2dDriver(miopenFloat);
     }
@@ -128,8 +127,7 @@ TEST_P(GPU_AsymPooling2d_NHWC_FP32, FloatTest_pooling2d_asymmetric_nhwc)
 
 TEST_P(GPU_AsymPooling2d_NHWC_FP16, HalfTest_pooling2d_asymmetric_nhwc)
 {
-    const auto& handle = get_handle();
-    if(IsTestSupportedForDevice(handle))
+    if(IsTestSupportedForDevice())
     {
         Run2dDriver(miopenHalf);
     }
