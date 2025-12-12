@@ -215,9 +215,9 @@ def verify_global_reads_not_too_early_single_code_path(
     return True, ""
 
 
-def verify_global_reads_not_too_early(scheduleInfo, context: dict):
+def verify_global_reads_not_too_early(scheduleInfo, context: dict, code_path: int) -> tuple[bool, str]:
     """
-    We require the sequence of instructions to be of the form:
+    We require the sequence of instructions to be of the form for a single code path:
 
     last LRA0 instruction
     [...]
@@ -264,49 +264,42 @@ def verify_global_reads_not_too_early(scheduleInfo, context: dict):
             return l[0]
         return l[codePath]
 
-    nCodePaths = scheduleInfo.numCodePaths
-    if not nCodePaths:
-        nCodePaths = 1
-    for codePath in range(nCodePaths):
-        globalReadA = get("GRA", codePath)
-        globalReadB = get("GRB", codePath)
-        if context.get("kernel", {}).get("SwapGlobalReadOrder", False):
-            globalReadA, globalReadB = globalReadB, globalReadA
+    globalReadA = get("GRA", code_path)
+    globalReadB = get("GRB", code_path)
+    if context.get("kernel", {}).get("SwapGlobalReadOrder", False):
+        globalReadA, globalReadB = globalReadB, globalReadA
 
-        kernel = context.get("kernel", {})
-        aDirect = kernel.get("DirectToLdsA", False) or kernel.get("DirectToLds", False)
-        bDirect = kernel.get("DirectToLdsB", False) or kernel.get("DirectToLds", False)
+    kernel = context.get("kernel", {})
+    aDirect = kernel.get("DirectToLdsA", False) or kernel.get("DirectToLds", False)
+    bDirect = kernel.get("DirectToLdsB", False) or kernel.get("DirectToLds", False)
 
-        # The actual buffer loads correspond to the indices of the lists
-        # if using DirectToLDS.
-        if aDirect:
-            globalReadA = globalReadA[1::2]
+    # The actual buffer loads correspond to the indices of the lists
+    # if using DirectToLDS.
+    if aDirect:
+        globalReadA = globalReadA[1::2]
 
-        if bDirect:
-            globalReadB = globalReadB[1::2]
+    if bDirect:
+        globalReadB = globalReadB[1::2]
 
-        localReadA0 = get("LRA0", codePath)
-        localReadB0 = get("LRB0", codePath)
-        localReadA1 = get("LRA1", codePath)
-        localReadB1 = get("LRB1", codePath)
-        syncIndices = get("SYNC", codePath)
-        syncCodes = scheduleInfo.syncCode
+    localReadA0 = get("LRA0", code_path)
+    localReadB0 = get("LRB0", code_path)
+    localReadA1 = get("LRA1", code_path)
+    localReadB1 = get("LRB1", code_path)
+    syncIndices = get("SYNC", code_path)
+    syncCodes = scheduleInfo.syncCode
 
-        status, message = verify_global_reads_not_too_early_single_code_path(
-            globalReadA,
-            globalReadB,
-            localReadA0,
-            localReadB0,
-            localReadA1,
-            localReadB1,
-            syncIndices,
-            syncCodes,
-            context,
-            positions,
-        )
-        if status is False:
-            return status, message
-
+    status, message = verify_global_reads_not_too_early_single_code_path(
+        globalReadA,
+        globalReadB,
+        localReadA0,
+        localReadB0,
+        localReadA1,
+        localReadB1,
+        syncIndices,
+        syncCodes,
+        context,
+        positions,
+    )
     return status, message
 
 class ValidatorInstruction(ABC):
@@ -839,9 +832,9 @@ class GRIncData:
     intervals: list[tuple[int, int]]
     insts: list[int]
 
-def verify_scc_overlap(scheduleInfo, context: dict = {}):
+def verify_scc_overlap(scheduleInfo, context: dict, code_path: int) -> tuple[bool, str]:
     """
-    Ensure we don't overlap scalar instructions modifying SCC.
+    Ensure we don't overlap scalar instructions modifying SCC for a single code path.
     This can happen:
         - between GRIncA and GRIncB
         - between GRInc and GR when DLT is activated
@@ -889,53 +882,49 @@ def verify_scc_overlap(scheduleInfo, context: dict = {}):
     def getDeclarationIndex(name):
         return list(scheduleInfo.optSchedule).index(name)
 
-    def verify(scheduleInfo: 'ScheduleInfo', codePath: int) -> tuple[bool, str]:
-        GRIncNames = ["GRIncA", "GRIncB"]
-        names = ["LWSA", "LWSB"]
-        # We only care about GRA/B when DTL is activated (m0 usage)
-        if DTL:
-            names += ["GRA", "GRB"]
+    GRIncNames = ["GRIncA", "GRIncB"]
+    names = ["LWSA", "LWSB"]
+    # We only care about GRA/B when DTL is activated (m0 usage)
+    if DTL:
+        names += ["GRA", "GRB"]
 
-        def verifyIndices(grIncData : GRIncData, name : str, indices : list[int]) -> tuple[bool, str]:
-            dclIndex = getDeclarationIndex(name)
-            dclIndexGrInc = getDeclarationIndex(grIncData.name)
-            for v in indices:
-                for interval in grIncData.intervals:
-                    if inInterval(v,interval, dclIndex<dclIndexGrInc):
-                        return False, f"{name} at index {v} can't be between {grIncData.name} {interval[0]}-{interval[1]} due to SCC usage."
+    def verifyIndices(grIncData : GRIncData, name : str, indices : list[int]) -> str | None:
+        dclIndex = getDeclarationIndex(name)
+        dclIndexGrInc = getDeclarationIndex(grIncData.name)
+        for v in indices:
+            for interval in grIncData.intervals:
+                if inInterval(v,interval, dclIndex<dclIndexGrInc):
+                    return f"{name} at index {v} can't be between {grIncData.name} {interval[0]}-{interval[1]} due to SCC usage."
+        return None
 
-        GRIncs = []
-        for GRIncName in GRIncNames:
-            GRInc = schedule_get(GRIncName, codePath, scheduleInfo)
-            assert numElements==len(GRInc), f"{GRIncName} expected size if {numElements}, given {len(GRInc)}."
-            GRIncs.append(GRIncData(name = GRIncName, insts = GRInc, intervals = getIntervals(GRInc)))
+    GRIncs = []
+    for GRIncName in GRIncNames:
+        GRInc = schedule_get(GRIncName, code_path, scheduleInfo)
+        assert numElements==len(GRInc), f"{GRIncName} expected size if {numElements}, given {len(GRInc)}."
+        GRIncs.append(GRIncData(name = GRIncName, insts = GRInc, intervals = getIntervals(GRInc)))
 
-        # First check GRIncA&B together
-        errorMessage = verifyIndices(GRIncs[0],GRIncs[1].name, GRIncs[1].insts)
-        if errorMessage:
-            return errorMessage
+    # First check GRIncA&B together
+    errorMessage = verifyIndices(GRIncs[0],GRIncs[1].name, GRIncs[1].insts)
+    if errorMessage:
+        return False, errorMessage
 
-        # Then, check GR and LW on all GRIncs
-        for grIncData in GRIncs:
-            for name in names:
-                insts = schedule_get(name, codePath, scheduleInfo)
-                # In case of GRA/GRB, just take m0 updates indices
-                if name.startswith("GR"):
-                    insts = insts[0::2]
-                errorMessage = verifyIndices(grIncData, name, insts)
-                if errorMessage:
-                    return errorMessage
-
-    for codePath in range(scheduleInfo.numCodePaths):
-            errorMessage = verify(scheduleInfo, codePath)
+    # Then, check GR and LW on all GRIncs
+    for grIncData in GRIncs:
+        for name in names:
+            insts = schedule_get(name, code_path, scheduleInfo)
+            # In case of GRA/GRB, just take m0 updates indices
+            if name.startswith("GR"):
+                insts = insts[0::2]
+            errorMessage = verifyIndices(grIncData, name, insts)
             if errorMessage:
-                return False, f"Code path {codePath}: {errorMessage}"
+                return False, errorMessage
+
     return True, ""
 
 
-def verify_gr_inc_order(scheduleInfo, context: dict = {}):
+def verify_gr_inc_order(scheduleInfo, context: dict, code_path: int) -> tuple[bool, str]:
     """
-    Ensure GRInc A and B are done before GR A & B.
+    Ensure GRInc A and B are done before GR A & B for a single code path.
     When using `SwapGlobalReadOrder=True`, one should check GRIncB is done before GRA (and GRIncA before GRB)
     """
     SwapGR = context["kernel"]["SwapGlobalReadOrder"]
@@ -943,64 +932,54 @@ def verify_gr_inc_order(scheduleInfo, context: dict = {}):
     def getDeclarationIndex(name):
         return list(scheduleInfo.optSchedule).index(name)
 
-    def verify(scheduleInfo: 'ScheduleInfo', codePath: int) -> tuple[bool, str]:
-        GRIncNames = ["GRIncA", "GRIncB"]
-        GRNames = ["GRA", "GRB"] if not SwapGR else ["GRB", "GRA"]
+    GRIncNames = ["GRIncA", "GRIncB"]
+    GRNames = ["GRA", "GRB"] if not SwapGR else ["GRB", "GRA"]
 
-        for [grIncName, grName] in zip(GRIncNames, GRNames):
-            grInc = schedule_get(grIncName, codePath, scheduleInfo)
-            gr = schedule_get(grName, codePath, scheduleInfo)[1::2] # ignore m0
-            grIncDclAfter = getDeclarationIndex(grIncName)>getDeclarationIndex(grName)
-            # Fails if GrInc is after Gr or if same index but grInc is declared after.
-            if max(grInc)>min(gr) or (grIncDclAfter and max(grInc) == min(gr)):
-                 return False, f"{grIncName} finishes after {grName} starts ({max(grInc)} vs {min(gr)})"
+    for [grIncName, grName] in zip(GRIncNames, GRNames):
+        grInc = schedule_get(grIncName, code_path, scheduleInfo)
+        gr = schedule_get(grName, code_path, scheduleInfo)[1::2] # ignore m0
+        grIncDclAfter = getDeclarationIndex(grIncName)>getDeclarationIndex(grName)
+        # Fails if GrInc is after Gr or if same index but grInc is declared after.
+        if max(grInc)>min(gr) or (grIncDclAfter and max(grInc) == min(gr)):
+             return False, f"{grIncName} finishes after {grName} starts ({max(grInc)} vs {min(gr)})"
 
-    for codePath in range(scheduleInfo.numCodePaths):
-            errorMessage = verify(scheduleInfo, codePath)
-            if errorMessage:
-                return False, f"Code path {codePath}: {errorMessage}"
-    
     return True, ""
 
-def verify_lrs_and_grs(schedule_info: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
+def verify_lrs_and_grs(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
     """
-    Ensure several properties are valid of LRs and GRs:
+    Ensure several properties are valid of LRs and GRs for a single code path:
     1. The GlobalReads issued in the previous iteration are guaranteed to be complete before the first corresponding LRA1/LRB1 of this iteration.
     2. The LR1s and LR0s are guaranteed to be complete before the first VMFMA that uses their data.
     """
-    def verify(schedule_info: 'ScheduleInfo', code_path: int) -> str | None:
-        if len(schedule_info.mfmaReorder) != 0:
-            printWarning("Do not currently support mfmaReorder in CMS validation, cannot guarantee that LR1s will be correct.")
-            return None
+    if len(schedule_info.mfmaReorder) != 0:
+        printWarning("Do not currently support mfmaReorder in CMS validation, cannot guarantee that LR1s will be correct.")
+        return True, ""
 
-        available_keys = schedule_info.optSchedule.keys()
-        if "LRA1" not in available_keys and "LRA3" in available_keys:
-            printWarning("LRA3 is present in schedule, but LRA1 is not. This is not yet supported in CMS validation")
-            return None
-        if "LRB1" not in available_keys and "LRB3" in available_keys:
-            printWarning("LRB3 is present in schedule, but LRB1 is not. This is not yet supported in CMS validation")
-            return None
+    available_keys = schedule_info.optSchedule.keys()
+    if "LRA1" not in available_keys and "LRA3" in available_keys:
+        printWarning("LRA3 is present in schedule, but LRA1 is not. This is not yet supported in CMS validation")
+        return True, ""
+    if "LRB1" not in available_keys and "LRB3" in available_keys:
+        printWarning("LRB3 is present in schedule, but LRB1 is not. This is not yet supported in CMS validation")
+        return True, ""
 
-        relevant_names = ["GRA", "GRB", "LRA0", "LRB0", "LRA1", "LRB1", "SYNC"]
-        kernel = context["kernel"]
-        timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
-        
-        # Apply standalone functions to populate timeline fields
-        set_gr_needed_by_from_lr1s(timeline, kernel["SwapGlobalReadOrder"])
-        apply_swaits(timeline)
-        apply_barriers(timeline)
+    relevant_names = ["GRA", "GRB", "LRA0", "LRB0", "LRA1", "LRB1", "SYNC"]
+    kernel = context["kernel"]
+    timeline = Timeline(relevant_names, code_path, schedule_info, kernel)
+    
+    # Apply standalone functions to populate timeline fields
+    set_gr_needed_by_from_lr1s(timeline, kernel["SwapGlobalReadOrder"])
+    apply_swaits(timeline)
+    apply_barriers(timeline)
 
-        return validate_timeline(timeline)
-
-    for code_path in range(schedule_info.numCodePaths):
-        error_message = verify(schedule_info, code_path)
-        if error_message:
-            return False, f"Code path {code_path}: {error_message}"
+    message = validate_timeline(timeline)
+    if message:
+        return False, message
     return True, ""
 
-def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
+def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context: dict, code_path: int) -> tuple[bool, str]:
     """
-    Verify that the number of instructions in the schedule is correct.
+    Verify that the number of instructions in the schedule is correct for a single code path.
     """
     if "idMap" not in context:
         # NOTE: Only skipping because the idMap is hard to construct in testing, but will always be present
@@ -1008,26 +987,19 @@ def verify_correct_number_of_instructions(schedule_info: 'ScheduleInfo', context
         printWarning("idMap not found in context. Skipping CMS validation for correct number of instructions.")
         return True, ""
 
-    def verify(schedule_info: 'ScheduleInfo', code_path: int) -> str | None:
-        for instruction_name in schedule_info.optSchedule.keys():
-            schedule = schedule_get(instruction_name, code_path, schedule_info)
+    for instruction_name in schedule_info.optSchedule.keys():
+        schedule = schedule_get(instruction_name, code_path, schedule_info)
 
-            len_actual = len(schedule)
-            len_expected = len(context["idMap"][instruction_name])
-            if len_actual != len_expected:
-                return f"{instruction_name} has {len_actual} instructions, but {len_expected} instructions are required."
-        return None
-
-    for code_path in range(schedule_info.numCodePaths):
-        error_message = verify(schedule_info, code_path)
-        if error_message:
-            return False, f"Code path {code_path}: {error_message}"
+        len_actual = len(schedule)
+        len_expected = len(context["idMap"][instruction_name])
+        if len_actual != len_expected:
+            return False, f"{instruction_name} has {len_actual} instructions, but {len_expected} instructions are required."
     return True, ""
 
 
-def verify_ascending_order(scheduleInfo, context: dict = {}):
+def verify_ascending_order(scheduleInfo, context: dict, code_path: int) -> tuple[bool, str]:
     """
-    Ensure that all sequences of scheduleInfo.optSchedule are non-decreasing.
+    Ensure that all sequences of scheduleInfo.optSchedule are non-decreasing for a single code path.
 
     Context and example: There will be a sequence of N 'GRIncA' instructions
     for incrementing the memory address that the A macro tile is read from.
@@ -1044,16 +1016,17 @@ def verify_ascending_order(scheduleInfo, context: dict = {}):
     instructions are non-decreasing. This rule is true for all groups of instructions,
     not just the 'GRIncA' instructions.
     """
-    for k, sequences in scheduleInfo.optSchedule.items():
-        for seq in sequences:
-            for i in range(1, len(seq)):
-                if seq[i] < seq[i - 1]:
-                    return False, (
-                        f"Non-descending-order rule failed, "
-                        f"schedule key '{k}', sequence {seq}: "
-                        f"value {seq[i]} at index {i} is less than "
-                        f"{seq[i-1]} at index {i-1}."
-                    )
+    for k in scheduleInfo.optSchedule.keys():
+        seq = schedule_get(k, code_path, scheduleInfo)
+        for i in range(1, len(seq)):
+            if seq[i] < seq[i - 1]:
+                return (
+                    False,
+                    f"Non-descending-order rule failed, "
+                    f"schedule key '{k}', sequence {seq}: "
+                    f"value {seq[i]} at index {i} is less than "
+                    f"{seq[i-1]} at index {i-1}."
+                )
     return True, ""
 
 
@@ -1083,7 +1056,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
         # All rules bypassed, considered valid.
         return True, message
 
-    # The set of validation rules to run
+    # The set of validation rules to run (code-path aware)
     rules = [
         verify_correct_number_of_instructions,
         verify_ascending_order,
@@ -1093,10 +1066,11 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
         verify_gr_inc_order
     ]
 
-    for rule in rules:
-        status, message = rule(scheduleInfo, context)
-        if status is False:
-            return False, message
+    for code_path in range(scheduleInfo.numCodePaths):
+        for rule in rules:
+            status, message = rule(scheduleInfo, context, code_path)
+            if not status:
+                return False, f"Code path {code_path}: {message}"
 
     # All rules passed, considered valid.
     return True, ""

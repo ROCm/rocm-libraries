@@ -34,7 +34,7 @@ class TestValidateDescendingOrder:
         sched = ScheduleInfo(
             None, None, {"P": [[3, 2, 1]]}, None, None, None, None
         )
-        status, message = verify_ascending_order(sched)
+        status, message = verify_ascending_order(sched, {}, 0)
 
         expected = "Non-descending-order rule failed, schedule key 'P', sequence [3, 2, 1]: value 2 at index 1 is less than 3 at index 0."
         assert status == False
@@ -43,6 +43,6 @@ class TestValidateDescendingOrder:
         sched = ScheduleInfo(
             None, None, {"P": [[1, 1, 2]]}, None, None, None, None
         )
-        status, message = verify_ascending_order(sched)
+        status, message = verify_ascending_order(sched, {}, 0)
         assert status == True
 

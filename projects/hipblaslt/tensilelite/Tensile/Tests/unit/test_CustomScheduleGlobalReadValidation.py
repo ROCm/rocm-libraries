@@ -255,7 +255,7 @@ class TestCustomScheduleGlobalReadValidation:
                 ("grb", 11),
             ]
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == ""
         assert status is True
 
@@ -275,7 +275,7 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == ""
         assert status is True
 
@@ -295,7 +295,7 @@ class TestCustomScheduleGlobalReadValidation:
                 ("grb", 10),
             ]
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == ""
         assert status is True
 
@@ -315,7 +315,7 @@ class TestCustomScheduleGlobalReadValidation:
                 ("gra", 10),
             ]
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == (
             "Failed to verify that all local reads for B (LRB0) are complete before the first global read for B is issued. "
             "Last local read for B issued at vmfma_index:0. "
@@ -341,7 +341,7 @@ class TestCustomScheduleGlobalReadValidation:
                 ("gra", 10),
             ]
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == ""
         assert status is True
 
@@ -364,7 +364,7 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == ""
         assert status is True
 
@@ -384,7 +384,13 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        # Check code path 0 - should pass
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
+        assert message == ""
+        assert status is True
+        
+        # Check code path 1 - should fail (LRA0 is late)
+        status, message = verify_global_reads_not_too_early(schedule, {}, 1)
         assert message == (
             "Failed to verify that all local reads for A (LRA0) are complete before the first global read for A is issued. "
             "Last local read for A issued at vmfma_index:6. "
@@ -404,7 +410,7 @@ class TestCustomScheduleGlobalReadValidation:
                 ("grb", 11),
             ]
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == (
             "Failed to verify that all local reads for B (LRB0) are complete before the first global read for B is issued. "
             "Last local read for B issued at vmfma_index:1. "
@@ -424,7 +430,7 @@ class TestCustomScheduleGlobalReadValidation:
                 ("grb", 11),
             ]
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == (
             "Failed to verify that a barrier (to sync waves) exists between completion of local reads for A and the first global read for A. "
             "Last local read of A issued at vmfma_index 0, first global read of A issued at vmfma_index 10, wave completion at vmfma_index 5. "
@@ -445,7 +451,7 @@ class TestCustomScheduleGlobalReadValidation:
                 ("grb", 10),
             ]
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == ""
         assert status is True
 
@@ -465,7 +471,7 @@ class TestCustomScheduleGlobalReadValidation:
                 ("grb", 10),
             ]
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == ""
         assert status is True
 
@@ -485,7 +491,7 @@ class TestCustomScheduleGlobalReadValidation:
                 ("grb", 10),
             ]
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == (
             "Failed to verify that all local reads for A (LRA0) are complete before the first global read for A is issued. "
             "Last local read for A issued at vmfma_index:2. "
@@ -514,7 +520,7 @@ class TestCustomScheduleGlobalReadValidation:
                 ("grb", 100),
             ]
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == ""
         assert status is True
 
@@ -535,7 +541,7 @@ class TestCustomScheduleGlobalReadValidation:
                 ("grb", 100),
             ]
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == ""
         assert status is True
 
@@ -558,13 +564,13 @@ class TestCustomScheduleGlobalReadValidation:
         )
 
         status, message = verify_global_reads_not_too_early(
-            schedule, {"kernel": {"DirectToLdsA": True}}
+            schedule, {"kernel": {"DirectToLdsA": True}}, 0
         )
         assert message == ""
         assert status is True
 
         status, message = verify_global_reads_not_too_early(
-            schedule, {"kernel": {"DirectToLds": True}}
+            schedule, {"kernel": {"DirectToLds": True}}, 0
         )
         assert message == ""
         assert status is True
@@ -575,7 +581,7 @@ class TestCustomScheduleGlobalReadValidation:
         )
 
         status, message = verify_global_reads_not_too_early(
-            schedule, {"kernel": {"DirectToLdsB": True}}
+            schedule, {"kernel": {"DirectToLdsB": True}}, 0
         )
         assert "First global read for B issued at vmfma_index:4" in message
         assert message == (
@@ -600,7 +606,7 @@ class TestCustomScheduleGlobalReadValidation:
             ]
         )
         status, message = verify_global_reads_not_too_early(
-            schedule, {"kernel": {"SwapGlobalReadOrder": True}}
+            schedule, {"kernel": {"SwapGlobalReadOrder": True}}, 0
         )
         assert message == ""
         assert status is True
@@ -619,7 +625,7 @@ class TestCustomScheduleGlobalReadValidation:
             ]
         )
         status, message = verify_global_reads_not_too_early(
-            schedule, {"kernel": {"SwapGlobalReadOrder": True}}
+            schedule, {"kernel": {"SwapGlobalReadOrder": True}}, 0
         )
         assert message == (
             "Failed to verify that all local reads for B (LRB0) are complete before the first global read for B is issued. "
@@ -655,7 +661,7 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == (
             "Failed to verify that all local reads for B (LRB0) are complete before the first global read for B is issued. "
             "Last local read for B issued at vmfma_index:5. "
@@ -689,7 +695,7 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == (
             "Failed to verify that all local reads for A (LRA0) are complete before the first global read for A is issued. "
             "Last local read for A issued at vmfma_index:5. "
@@ -721,7 +727,7 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert (
             "Failed to verify that a barrier (to sync waves) exists between completion of local reads"
             in message
@@ -750,7 +756,7 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert (
             "Failed to verify that a barrier (to sync waves) exists between completion of local reads for B"
             in message
@@ -779,7 +785,7 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == ""
         assert status is True
 
@@ -799,7 +805,7 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == (
             "Failed to verify that all local reads for B (LRB0) are complete before the first global read for B is issued. "
             "Last local read for B issued at vmfma_index:5. "
@@ -824,7 +830,7 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == (
             (
                 "Failed to verify that all local reads for A (LRA0) are complete before the first global read for A is issued. "
@@ -856,7 +862,7 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == (
             "Failed to verify that all local reads for A (LRA0) are complete before the first global read for A is issued. "
             "Last local read for A issued at vmfma_index:5. "
@@ -882,7 +888,7 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == (
             "Failed to verify that a barrier (to sync waves) exists between completion of local reads for A and the first global read for A. "
             "Last local read of A issued at vmfma_index 5, first global read of A issued at vmfma_index 10, wave completion at vmfma_index 5. "
@@ -911,7 +917,7 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == ""
         assert status is True
 
@@ -936,7 +942,7 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == (
             "Failed to verify that all local reads for A (LRA0) are complete before the first global read for A is issued. "
             "Last local read for A issued at vmfma_index:3. First global read for A issued at vmfma_index:4. "
@@ -966,7 +972,7 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == ""
         assert status is True
 
@@ -992,7 +998,7 @@ class TestCustomScheduleGlobalReadValidation:
             None,
             None,
         )
-        status, message = verify_global_reads_not_too_early(schedule, {})
+        status, message = verify_global_reads_not_too_early(schedule, {}, 0)
         assert message == (
             "Failed to verify that all local reads for A (LRA0) are complete before the first global read for A is issued. "
             "Last local read for A issued at vmfma_index:3. "

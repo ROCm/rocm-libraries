@@ -55,29 +55,29 @@ class TestGRIncOrder(unittest.TestCase):
         ]
 
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
+        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel}, 0)
         assert status, f"Schedule should have passed validation but did not. {message}"
 
         # GRA before GRIncA
         optSchedule["GRA"] = [[0, 0]]
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
+        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel}, 0)
         assert not status, f"Schedule should have failed validation but did not. {message}"
 
         # GRA before GRIncB
         optSchedule["GRA"] = [[11, 11]]
         optSchedule["GRB"] = [[6, 6]]
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
+        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel}, 0)
         assert not status, f"Schedule should have failed validation but did not. {message}"
 
         # GRA Pass with same index
         optSchedule["GRA"] = [[5, 5]]
         optSchedule["GRB"] = [[12, 12]]
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
+        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel}, 0)
         assert  status, f"Schedule should have passed validation but did not. {message}"
 
         # GRB Fail with same index
         optSchedule["GRB"] = [[10, 10]]
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
+        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel}, 0)
         assert  not status, f"Schedule should have failed validation but did not. {message}"
 
 
@@ -98,16 +98,16 @@ class TestGRIncOrder(unittest.TestCase):
         ]
 
         sched = ScheduleInfo(1, self.num_vmfma, optSchedule, syncCode, None, None)
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
+        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel}, 0)
         assert status, f"Schedule should have passed validation but did not. {message}"
 
         # GRA before GRIncB
         optSchedule["GRA"] = [[0, 0]]
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
+        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel}, 0)
         assert not status, f"Schedule should have failed validation but did not. {message}"
 
         # GRB before GRIncA
         optSchedule["GRA"] = [[11, 11]]
         optSchedule["GRB"] = [[6, 6]]
-        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel})
+        status, message = verify_gr_inc_order(sched, {"kernel": self.kernel}, 0)
         assert not status, f"Schedule should have failed validation but did not. {message}"

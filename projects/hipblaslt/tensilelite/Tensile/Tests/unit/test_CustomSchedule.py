@@ -557,7 +557,7 @@ class TestCustomScheduleValidation:
 
         # No verification message means that the schedule info is considered valid.
         scheduleInfo = ScheduleInfo(
-            None, None, invalid_schedule, None, None, None, None
+            1, None, invalid_schedule, None, None, None, None
         )
         scheduleInfo.disableValidation()
         status, message = isValid(scheduleInfo, {"kernel" : {"DepthU": 42}})
@@ -566,6 +566,6 @@ class TestCustomScheduleValidation:
 
         # A non-empty verification message means that the schedule info is considered invalid.
         status, message = isValid(
-            ScheduleInfo(None, None, invalid_schedule, None, None, None, None), {}
+            ScheduleInfo(1, None, invalid_schedule, None, None, None, None), {}
         )
         assert status == False
