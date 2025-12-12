@@ -213,7 +213,83 @@ void testing_csrsv(const Arguments& arg)
     }
 
     host_dense_matrix<T> hx(M, 1);
-    rocsparse_matrix_utils::init(hx);
+    host_dense_matrix<T> hx_expected(M, 1); // Store expected integer solution for convert_to_int
+
+    // If convert_to_int is enabled, convert matrix to integer values and compute b = A*x
+    if(arg.convert_to_int)
+    {
+        for(rocsparse_int i = 0; i < hA.nnz; ++i)
+        {
+            hA.val[i] = static_cast<T>(1);
+        }
+
+        if(diag == rocsparse_diag_type_non_unit)
+        {
+            for(rocsparse_int i = 0; i < M; ++i)
+            {
+                for(rocsparse_int j = hA.ptr[i] - base; j < hA.ptr[i + 1] - base; ++j)
+                {
+                    rocsparse_int col = hA.ind[j] - base;
+
+                    if(col == i)
+                    {
+                        hA.val[j] = static_cast<T>(128);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Generate integer vector x
+        for(rocsparse_int i = 0; i < M; ++i)
+        {
+            hx_expected[i] = (*h_alpha);
+        }
+
+        // Compute b = (1/alpha) * A * x (the right-hand side) using only the triangular part
+        // We need to account for alpha so that the solution remains integer
+        host_dense_matrix<T> hb(M, 1);
+        for(rocsparse_int i = 0; i < M; ++i)
+        {
+            hb[i] = static_cast<T>(0);
+        }
+
+        for(rocsparse_int i = 0; i < M; ++i)
+        {
+            for(rocsparse_int j = hA.ptr[i] - base; j < hA.ptr[i + 1] - base; ++j)
+            {
+                rocsparse_int col = hA.ind[j] - base;
+
+                // Only use entries in the active triangular part
+                bool use_entry = (uplo == rocsparse_fill_mode_lower) ? (col <= i) : (col >= i);
+
+                if(use_entry)
+                {
+                    T aval = hA.val[j];
+                    // For unit diagonal, use 1 instead of stored diagonal value
+                    if(diag == rocsparse_diag_type_unit && col == i)
+                    {
+                        aval = static_cast<T>(1);
+                    }
+                    hb[i] += aval * hx_expected[col] / (*h_alpha);
+                }
+            }
+        }
+        // Verify that hb[i] and hx_expected[i] are integers
+        for(rocsparse_int i = 0; i < M; ++i)
+        {
+            check_integer(&hb[i]);
+            check_integer(&hx_expected[i]);
+        }
+
+        // Use b as the right-hand side for csrsv testing
+        // We'll solve A*y = b, and y should equal x_expected
+        hx = hb;
+    }
+    else
+    {
+        rocsparse_matrix_utils::init(hx);
+    }
 
     device_csr_matrix<T>       dA(hA);
     device_dense_matrix<T>     dx(hx), dy(M, 1);
@@ -294,6 +370,19 @@ void testing_csrsv(const Arguments& arg)
         if(*h_analysis_pivot == -1 && *h_solve_pivot == -1)
         {
             hy.near_check(dy, tol);
+
+            // If convert_to_int is enabled, verify that the solution has integer values
+            if(arg.convert_to_int)
+            {
+                // Check that the solution matches the expected integer vector
+                hx_expected.near_check(dy, tol);
+
+                // Additionally, verify that each entry in dy is an integer
+                for(rocsparse_int i = 0; i < M; ++i)
+                {
+                    check_integer(&dy[i]);
+                }
+            }
         }
 
         //

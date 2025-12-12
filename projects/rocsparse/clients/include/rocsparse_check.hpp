@@ -111,6 +111,9 @@ inline void near_check_segments(int64_t            n,
     near_check_general(1, n, a, 1, b, 1, tol);
 }
 
+template <typename T>
+inline void check_integer(const T* a);
+
 void unit_check_garray(rocsparse_datatype val_type,
                        int64_t            size,
                        const void*        source,
