@@ -336,7 +336,8 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                 best                              = elapsed;
                 selected                          = sol;
                 best_invoker                      = invoker;
-                core_result.find_search_best_time = best;
+                if(best < core_result.find_search_best_time)
+                    core_result.find_search_best_time = best;
             }
 
             auto solution = Solution{solver::Id{sol.solver_id}, elapsed, sol.workspace_sz};
