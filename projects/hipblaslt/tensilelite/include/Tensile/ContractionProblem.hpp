@@ -36,6 +36,7 @@
 #include <Tensile/ContractionSolution_fwd.hpp>
 
 #include <Tensile/TensorDescriptor.hpp>
+#include <Tensile/TensorOps.hpp>
 #include <Tensile/Utils.hpp>
 
 namespace TensileLite
@@ -427,9 +428,13 @@ namespace TensileLite
         static ContractionProblemGemm GEMM(bool                    transA,
                                            bool                    transB,
                                            TensorDescriptor const& a,
+                                           TensorOps const&        aOps,
                                            TensorDescriptor const& b,
+                                           TensorOps const&        bOps,
                                            TensorDescriptor const& c,
+                                           TensorOps const&        cOps,
                                            TensorDescriptor const& d,
+                                           TensorOps const&        dOps,
                                            double                  beta);
 
         /**
@@ -440,7 +445,10 @@ namespace TensileLite
                                         FreeIndices&       freeIndices,
                                         BatchIndices&      batchIndices,
                                         BoundIndices&      boundIndices,
-                                        std::vector<bool>& isComplex);
+                                        TensorOps&         aOps,
+                                        TensorOps&         bOps,
+                                        TensorOps&         cOps,
+                                        TensorOps&         dOps);
 
         /**
          * Create a ContractionProblemGemm from a definition of each index, the
@@ -478,12 +486,16 @@ namespace TensileLite
                                                      std::vector<size_t> const& indexSizes,
                                                      rocisa::DataType           aType,
                                                      std::vector<size_t> const& aStrides,
+                                                     TensorOps const&           aOps,
                                                      rocisa::DataType           bType,
                                                      std::vector<size_t> const& bStrides,
+                                                     TensorOps const&           bOps,
                                                      rocisa::DataType           cType,
                                                      std::vector<size_t> const& cStrides,
+                                                     TensorOps const&           cOps,
                                                      rocisa::DataType           dType,
                                                      std::vector<size_t> const& dStrides,
+                                                     TensorOps const&           dOps,
                                                      double                     beta);
 
         /**
@@ -544,7 +556,30 @@ namespace TensileLite
                                BatchIndices const&     batchIndices,
                                BoundIndices const&     boundIndices,
                                double                  beta,
-                               size_t                  workspaceSize = 0);
+                               size_t                  workspaceSize = 0
+                               );
+
+        ContractionProblemGemm(TensorDescriptor const& a,
+                               TensorDescriptor const& b,
+                               TensorDescriptor const& c,
+                               TensorDescriptor const& d,
+                               TensorDescriptor const& e,
+                               TensorDescriptor const& bias,
+                               TensorDescriptor const& scaleA,
+                               TensorDescriptor const& scaleB,
+                               TensorDescriptor const& scaleC,
+                               TensorDescriptor const& scaleD,
+                               TensorDescriptor const& scaleAlphaVec,
+                               FreeIndices const&      freeIndices,
+                               BatchIndices const&     batchIndices,
+                               BoundIndices const&     boundIndices,
+                               double                  beta,
+                               TensorOps const&        aOps,
+                               TensorOps const&        bOps,
+                               TensorOps const&        cOps,
+                               TensorOps const&        dOps,
+                               size_t                  workspaceSize = 0
+                               );
 
         //! Returns size given original index assignment (in range
         //! 0..NumIndicesC+boundSizes)
@@ -1073,6 +1108,22 @@ namespace TensileLite
         {
             return m_tensors[ContractionProblemGemm::TENSOR::AMAXD];
         }
+        TensorOps const& aOps() const
+        {
+            return m_aOps;
+        }
+        TensorOps const& bOps() const
+        {
+            return m_bOps;
+        }
+        TensorOps const& cOps() const
+        {
+            return m_cOps;
+        }
+        TensorOps const& dOps() const
+        {
+            return m_dOps;
+        }
         FreeIndices const& freeIndicesA() const
         {
             return m_freeIndicesA;
@@ -1212,6 +1263,11 @@ namespace TensileLite
                                  size_t                         maxWorkspaceBytes);
 
     private:
+        TensorOps        m_aOps;
+        TensorOps        m_bOps;
+        TensorOps        m_cOps;
+        TensorOps        m_dOps;
+
         std::string m_sumNames;
         std::string m_operationIdentifier;
 

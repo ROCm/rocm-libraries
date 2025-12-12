@@ -38,7 +38,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csrgemm2_a_bad_arg(void)
+void testing_csrgemm2_a_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int M         = 1;
@@ -48,7 +48,7 @@ void testing_csrgemm2_a_bad_arg(void)
     int nnz_B     = 1;
     int safe_size = 1;
 
-    T alpha = 1.0;
+    T alpha = make_DataType<T>(1.0);
 
     size_t size;
     int    nnz_C;
@@ -1038,7 +1038,7 @@ void testing_csrgemm2_a_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csrgemm2_a(Arguments argus)
+void testing_csrgemm2_a(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  M          = argus.M;
@@ -1078,7 +1078,7 @@ hipsparseStatus_t testing_csrgemm2_a(Arguments argus)
     if(M == 0 || N == 0 || K == 0)
     {
 #ifdef __HIP_PLATFORM_NVIDIA__
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
 #endif
     }
 
@@ -1095,7 +1095,7 @@ hipsparseStatus_t testing_csrgemm2_a(Arguments argus)
            filename, M, K, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idx_base_A))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     std::vector<int> hcsr_row_ptr_B;
@@ -1285,7 +1285,7 @@ hipsparseStatus_t testing_csrgemm2_a(Arguments argus)
         // If nnz_C == 0, we are done
         if(nnz_C_gold == 0)
         {
-            return HIPSPARSE_STATUS_SUCCESS;
+            return;
         }
 
         std::vector<int> hcsr_col_ind_C_gold(nnz_C_gold);
@@ -1412,8 +1412,6 @@ hipsparseStatus_t testing_csrgemm2_a(Arguments argus)
 #endif
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSRGEMM2_A_HPP

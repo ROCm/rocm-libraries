@@ -39,7 +39,7 @@ Set this variable to ``2`` to enable the Origami with Stream-K library or leave 
 
    *  This enables the optional Origami with Stream-K solution selection to use a GEMM scheduling algorithm that results in consistently good
       peak GEMM performance with far fewer tuned kernels.
-   *  The heuristic best kernel is selected from the Origmai with Stream-K library.
+   *  The heuristic best kernel is selected from the Origami with Stream-K library.
    *  User-driven tuning (tunable ops) considers all kernels from the standard grid, the free-size library, and the Origami with Stream-K library.
 
 .. note::

@@ -30,6 +30,9 @@ The checkout command of the two projects lasted less than 90 seconds.
 
 ## Working with the Superbuild
 
+> [!TIP]
+> 💡 Refer to the README.md file in each project [subfolder](projects) for details on building that specific project without making the superbuild. [TheRock](https://github.com/ROCm/TheRock) is now the preferred system for performing a superbuild of rocm-libraries. See TheRock [Development Guide](https://github.com/ROCm/TheRock/blob/main/docs/development/development_guide.md) for more details.
+
 To issue a full ROCm libraries superbuild for all projects and targets:
 
 ```bash

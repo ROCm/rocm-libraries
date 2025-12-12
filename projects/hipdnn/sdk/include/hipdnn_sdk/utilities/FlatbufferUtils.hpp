@@ -30,9 +30,8 @@ inline std::vector<T> convertFlatBufferVectorToStdVector(const flatbuffers::Vect
 }
 
 template <typename TargetType>
-TargetType
-    extractValueFromTensorValue(const hipdnn_sdk::data_objects::TensorAttributesT& tensorAttr,
-                                const char* paramName)
+TargetType extractValueFromTensorValue(const data_objects::TensorAttributesT& tensorAttr,
+                                       const char* paramName)
 {
     if(tensorAttr.value.value == nullptr)
     {
@@ -41,43 +40,43 @@ TargetType
 
     switch(tensorAttr.data_type)
     {
-    case hipdnn_sdk::data_objects::DataType::DOUBLE:
+    case data_objects::DataType::DOUBLE:
         if(auto val = tensorAttr.value.AsFloat64Value())
         {
             return static_cast<TargetType>(val->value());
         }
         break;
-    case hipdnn_sdk::data_objects::DataType::FLOAT:
+    case data_objects::DataType::FLOAT:
         if(auto val = tensorAttr.value.AsFloat32Value())
         {
             return static_cast<TargetType>(val->value());
         }
         break;
-    case hipdnn_sdk::data_objects::DataType::HALF:
+    case data_objects::DataType::HALF:
         if(auto val = tensorAttr.value.AsFloat16Value())
         {
             return static_cast<TargetType>(val->value());
         }
         break;
-    case hipdnn_sdk::data_objects::DataType::BFLOAT16:
+    case data_objects::DataType::BFLOAT16:
         if(auto val = tensorAttr.value.AsBFloat16Value())
         {
             return static_cast<TargetType>(val->value());
         }
         break;
-    case hipdnn_sdk::data_objects::DataType::INT32:
+    case data_objects::DataType::INT32:
         if(auto val = tensorAttr.value.AsInt32Value())
         {
             return static_cast<TargetType>(val->value());
         }
         break;
-    case hipdnn_sdk::data_objects::DataType::UINT8:
+    case data_objects::DataType::UINT8:
         if(auto val = tensorAttr.value.AsFloat8Value())
         {
             return static_cast<TargetType>(val->value());
         }
         break;
-    case hipdnn_sdk::data_objects::DataType::UNSET:
+    case data_objects::DataType::UNSET:
         throw std::runtime_error(std::string(paramName) + " tensor has UNSET data type");
     default:
         throw std::runtime_error(std::string(paramName) + " has unsupported data type");
@@ -87,7 +86,7 @@ TargetType
 }
 
 template <typename TargetType>
-TargetType extractValueFromTensorValue(const hipdnn_sdk::data_objects::TensorAttributes* tensorAttr,
+TargetType extractValueFromTensorValue(const data_objects::TensorAttributes* tensorAttr,
                                        const char* paramName)
 {
     if(tensorAttr == nullptr)
@@ -95,22 +94,20 @@ TargetType extractValueFromTensorValue(const hipdnn_sdk::data_objects::TensorAtt
         throw std::runtime_error(std::string(paramName) + " tensor attribute is null");
     }
 
-    hipdnn_sdk::data_objects::TensorAttributesT unpacked;
+    data_objects::TensorAttributesT unpacked;
     tensorAttr->UnPackTo(&unpacked);
 
     return extractValueFromTensorValue<TargetType>(unpacked, paramName);
 }
 
-inline double
-    extractDoubleFromTensorValue(const hipdnn_sdk::data_objects::TensorAttributesT& tensorAttr,
-                                 const char* paramName)
+inline double extractDoubleFromTensorValue(const data_objects::TensorAttributesT& tensorAttr,
+                                           const char* paramName)
 {
     return extractValueFromTensorValue<double>(tensorAttr, paramName);
 }
 
-inline double
-    extractDoubleFromTensorValue(const hipdnn_sdk::data_objects::TensorAttributes* tensorAttr,
-                                 const char* paramName)
+inline double extractDoubleFromTensorValue(const data_objects::TensorAttributes* tensorAttr,
+                                           const char* paramName)
 {
     return extractValueFromTensorValue<double>(tensorAttr, paramName);
 }

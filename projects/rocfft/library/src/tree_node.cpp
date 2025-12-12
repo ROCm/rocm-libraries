@@ -703,7 +703,7 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
         }
         else
         {
-            // Inter-proccess communication
+            // Inter-process communication
 #if !defined ROCFFT_MPI_ENABLE
             throw std::runtime_error("MPI communication not enabled");
 #else
@@ -840,7 +840,7 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
         }
         else
         {
-            // Inter-proccess communication
+            // Inter-process communication
 #if !defined ROCFFT_MPI_ENABLE
             throw std::runtime_error("MPI communication not enabled");
 #else

@@ -4695,14 +4695,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.startVgprAddressDbg = vgprIdx
     vgprIdx += numVgprAddressDbg
 
-    # for zgemm + (SCIU or MIAV) case, allocate 4 vgpr for alpha calculation (cannot use tmp vgpr in unroll loop or write batch)
+    # for cgemm or zgemm + MIAV case, allocate 2 or 4 vgpr for alpha calculation (cannot use tmp vgpr in write batch)
     if kernel["ProblemType"]["DataType"].isComplex() \
-        and (kernel["StoreCInUnroll"] or kernel["MIArchVgpr"]) \
-        and (kernel["_GlobalAccumulation"] != 'MultipleBuffer'):
+      and kernel["MIArchVgpr"] \
+      and (kernel["_GlobalAccumulation"] == 'SingleBuffer' or kernel["_GlobalAccumulation"] == None):
+      
       # need proper alignment
       vgprIdx = ((vgprIdx+2 - 1)//2)*2
       self.states.startVgprAlphaTmp = vgprIdx
-      vgprIdx += 4
+      vgprIdx += kernel["ProblemType"]["DataType"].numRegisters()
 
     # for swapping vgpr offsets of different lds buffers
     if self.states.a.numVgprLocalReadSwapAddr > 0:
@@ -5131,6 +5132,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.miLatency, miIssueLatency = getSMFMAIssueLatency(kernel["ProblemType"]["DataType"].toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"]) if kernel["ProblemType"]["Sparse"] else \
                                               getMFMAIssueLatency(kernel["ProblemType"]["DataType"].toEnum(), kernel["MatrixInstM"], kernel["MatrixInstB"])
 
+      # TODO: Avoid the logic which does not make sense. 
+      # For gfx950, we can't issue any VALU or DS instruction in next 4 cycles.
+      # Changed the value based on this and also to mitigate some instruction scheduling issues.
+      if not kernel["ProblemType"]["Sparse"] and kernel['ISA'] == IsaVersion(9,5,0) and kernel["ProblemType"]["DataType"].numBytes() == 2:
+        self.states.miLatency = kernel["MatrixInstM"] // 2
+        miIssueLatency = 2
+
       # give 1 quad-cycle buffer to prevend bubble from sync
       miLatencyBuffer = 1
       self.states.miLatencyLeft = max(self.states.miLatency - miLatencyBuffer - miIssueLatency,0)
@@ -5140,7 +5148,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["MatrixInstruction"] == [4, 4, 4, 4]:
           if kernel['ISA'] == IsaVersion(9,0,10):
             self.states.miDependency = 4
-
 
     # shift vectors determined later
 

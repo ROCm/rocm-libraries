@@ -88,7 +88,19 @@ def main():
     if args.stablize_gpu:
         gpu_reset(args.gpu_id)
 
-    export_csv(unique_log_name, tuning_info, args)
+    success_count, total_count = export_csv(unique_log_name, tuning_info, args)
+
+    # Print summary report
+    failed_count = total_count - success_count
+    print("\n" + "="*60)
+    print("GEMM TUNING SUMMARY")
+    print("="*60)
+    print(f"Total GEMMs processed: {total_count}")
+    print(f"  - Successful: {success_count}")
+    print(f"  - Failed: {failed_count}")
+    print("="*60)
+    print(f"Results saved to: {args.output_path}/tuning_result.csv")
+    print()
 
 
 if __name__ == "__main__":

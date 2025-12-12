@@ -68,8 +68,10 @@ namespace Tensile
             gfx1030 = 1030,
             gfx1031 = 1031,
             gfx1032 = 1032,
+            gfx1033 = 1033,
             gfx1034 = 1034,
             gfx1035 = 1035,
+            gfx1036 = 1036,
             gfx1100 = 1100,
             gfx1101 = 1101,
             gfx1102 = 1102,
@@ -110,10 +112,14 @@ namespace Tensile
                 return "gfx1031";
             case AMDGPU::Processor::gfx1032:
                 return "gfx1032";
+            case AMDGPU::Processor::gfx1033:
+                return "gfx1033";
             case AMDGPU::Processor::gfx1034:
                 return "gfx1034";
             case AMDGPU::Processor::gfx1035:
                 return "gfx1035";
+            case AMDGPU::Processor::gfx1036:
+                return "gfx1036";
             case AMDGPU::Processor::gfx1100:
                 return "gfx1100";
             case AMDGPU::Processor::gfx1101:
@@ -179,6 +185,30 @@ namespace Tensile
             else if(deviceString.find("gfx1030") != std::string::npos)
             {
                 return AMDGPU::Processor::gfx1030;
+            }
+            else if(deviceString.find("gfx1031") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1031;
+            }
+            else if(deviceString.find("gfx1032") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1032;
+            }
+            else if(deviceString.find("gfx1033") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1033;
+            }
+            else if(deviceString.find("gfx1034") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1034;
+            }
+            else if(deviceString.find("gfx1035") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1035;
+            }
+            else if(deviceString.find("gfx1036") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1036;
             }
             else if(deviceString.find("gfx1100") != std::string::npos)
             {
