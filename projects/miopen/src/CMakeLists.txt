@@ -925,6 +925,11 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
     else()
         # Use the aliased targets when we pull CK from /opt/rocm or other place on disc.
         set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
+        
+        if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
+            add_subdirectory(kernels/ck_builder)
+            list(APPEND MIOPEN_CK_LINK_FLAGS ck_builder)
+        endif()
     endif()
 endif()
 
