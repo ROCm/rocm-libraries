@@ -205,15 +205,15 @@ TEST_CASE("hoist loop invariant helpers", "[kernel-graph][hoist-loop-invariant]"
         CHECK(loopMapping.size() == 140);
     }
 
-    SECTION("isCoordinateWrittenInLoop")
+    SECTION("countCoordinateWritesInLoop")
     {
         // Written in both
-        CHECK(isCoordinateWrittenInLoop(graph, 1122, 510, tracer));
-        CHECK(isCoordinateWrittenInLoop(graph, 1127, 510, tracer));
+        CHECK(countCoordinateWritesInLoop(graph, 1122, 510, tracer) > 0);
+        CHECK(countCoordinateWritesInLoop(graph, 1127, 510, tracer) > 0);
 
         // For loop variable only written in one loop
-        CHECK(isCoordinateWrittenInLoop(graph, 1127, 314, tracer));
-        CHECK(!isCoordinateWrittenInLoop(graph, 1122, 314, tracer));
+        CHECK(countCoordinateWritesInLoop(graph, 1127, 314, tracer) > 0);
+        CHECK(countCoordinateWritesInLoop(graph, 1122, 314, tracer) == 0);
     }
 
     SECTION("hoistNodeBeforeLoop")

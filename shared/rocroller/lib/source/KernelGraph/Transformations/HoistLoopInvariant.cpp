@@ -187,12 +187,14 @@ namespace rocRoller::KernelGraph
             {
                 AssertFatal(loopNode >= 0);
 
-                if(controlNodes.size() != 1)
+                if(controlNodes.size() != 1
+                   || countCoordinateWritesInLoop(graph, loopNode, coordinate, tracer) != 1)
                 {
-                    Log::debug("HoistLoopInvariant: skipping {} with {} writers in {} loop body",
-                               coordinate,
-                               controlNodes.size(),
-                               loopNode);
+                    Log::debug(
+                        "HoistLoopInvariant: skipping {} with {} writers in immediate loop body {}",
+                        coordinate,
+                        controlNodes.size(),
+                        loopNode);
                     continue;
                 }
 
@@ -220,7 +222,7 @@ namespace rocRoller::KernelGraph
                 bool allTagsLoopInvariant = true;
                 for(auto tag : usedTags)
                 {
-                    if(isCoordinateWrittenInLoop(graph, loopNode, tag, tracer))
+                    if(countCoordinateWritesInLoop(graph, loopNode, tag, tracer) > 0)
                     {
                         Log::debug(
                             "HoistLoopInvariant:   DataFlowTag {} is written in loop {}, not "
@@ -256,12 +258,13 @@ namespace rocRoller::KernelGraph
         return "HoistLoopInvariant";
     }
 
-    bool isCoordinateWrittenInLoop(KernelGraph const&         kgraph,
-                                   int                        loopNode,
-                                   int                        coordinate,
-                                   ControlFlowRWTracer const& tracer)
+    int countCoordinateWritesInLoop(KernelGraph const&         kgraph,
+                                    int                        loopNode,
+                                    int                        coordinate,
+                                    ControlFlowRWTracer const& tracer)
     {
-        auto records = tracer.coordinatesReadWrite(coordinate);
+        auto records    = tracer.coordinatesReadWrite(coordinate);
+        int  writeCount = 0;
 
         for(const auto& record : records)
         {
@@ -272,11 +275,11 @@ namespace rocRoller::KernelGraph
 
                 if(std::find(stack.begin(), stack.end(), loopNode) != stack.end())
                 {
-                    return true;
+                    writeCount++;
                 }
             }
         }
 
-        return false;
+        return writeCount;
     }
 }

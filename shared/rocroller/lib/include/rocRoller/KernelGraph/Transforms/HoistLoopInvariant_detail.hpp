@@ -46,6 +46,9 @@ namespace rocRoller
         /**
          * @brief Build a mapping of coordinates to loop groups to control nodes
          * 
+         * Note the loop here is the immediate loop containing the control node,
+         * does not include nested loops/scopes.
+         * 
          * @return Mapping of coordinate -> loop -> [control nodes]
          */
         CoordinateToLoops buildCoordinateLoopMapping(KernelGraph const&         graph,
@@ -57,13 +60,13 @@ namespace rocRoller
         int hoistNodeBeforeLoop(KernelGraph& kgraph, int nodeToHoist, int loopNode);
 
         /**
-         * @brief Check if a coordinate is written to within a ForLoopOp, including nested loops/scopes
+         * @brief Count how many times a coordinate is written within a ForLoopOp, including nested loops/scopes
          * 
-         * @return True if the coordinate is written within the loop, false otherwise
+         * @return The number of times the coordinate is written within the loop
          */
-        bool isCoordinateWrittenInLoop(KernelGraph const&         kgraph,
-                                       int                        loopNode,
-                                       int                        coordinate,
-                                       ControlFlowRWTracer const& tracer);
+        int countCoordinateWritesInLoop(KernelGraph const&         kgraph,
+                                        int                        loopNode,
+                                        int                        coordinate,
+                                        ControlFlowRWTracer const& tracer);
     }
 }
