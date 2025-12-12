@@ -143,9 +143,15 @@ endfunction()
 
 # Finds and checks clang-tidy
 function(findAndCheckClangTidy)
+    if(ENABLE_CLANG_TIDY)
+        set(_not_found_log_level FATAL_ERROR)
+    else()
+        set(_not_found_log_level STATUS)
+    endif()
+
     findandchecktool(
         CLANG_TIDY_EXE "clang-tidy" ${EXPECTED_CLANG_TIDY_VERSION} "version ([0-9]+)\\."
-        FATAL_ERROR
+        ${_not_found_log_level}
     )
 
     # Export to parent scope

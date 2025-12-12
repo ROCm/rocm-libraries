@@ -4,9 +4,7 @@
 include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
 include(ProcessorCount)
 
-if(ENABLE_CLANG_TIDY)
-    findandcheckclangtidy()
-endif()
+findandcheckclangtidy()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -38,8 +36,14 @@ endfunction()
 
 # Add the 'tidy' target to the project to run tidy on all files in the hipDNN folder.
 function(add_clang_tidy_custom_target)
-    if(NOT RUN_CLANG_TIDY_EXE)
-        findandcheckclangtidy()
+    if(WIN32)
+        message(STATUS "Skipped creating 'tidy' targets; not available on Windows")
+        return()
+    endif()
+    if(ENABLE_CLANG_TIDY)
+        set(_not_found_log_level WARNING)
+    else()
+        set(_not_found_log_level STATUS)
     endif()
     if(RUN_CLANG_TIDY_EXE)
         processorcount(N)
@@ -82,8 +86,8 @@ function(add_clang_tidy_custom_target)
         if(HIP_LANGUAGE_SOURCE_FILES_REGEXP)
             if(NOT CLANG_TIDY_HIP_ARGS)
                 message(
-                    WARNING
-                        "tidy args for HIP language files are not set, tidy will not be run on HIP language files."
+                    ${_not_found_log_level}
+                    "tidy args for HIP language files are not set, tidy is disabled for HIP language files."
                 )
             else()
                 add_custom_target(
@@ -100,7 +104,9 @@ function(add_clang_tidy_custom_target)
             endif()
         endif()
     else()
-        message(WARNING "run-clang-tidy-20 not found. The 'tidy' target will not be available.")
+        message(${_not_found_log_level}
+                "run-clang-tidy-20 not found. The 'tidy' targets will not be available."
+        )
     endif()
 endfunction()
 
@@ -108,8 +114,8 @@ endfunction()
 #
 # @param TARGET target to enable clang-tidy checks for
 function(clang_tidy_check TARGET)
+    setclangtidyvars()
     if(ENABLE_CLANG_TIDY)
-        setclangtidyvars()
         set_target_properties(${TARGET} PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_COMMAND}")
         if(CLANG_TIDY_HIP_ARGS)
             set(CLANG_TIDY_HIP_COMMAND ${CLANG_TIDY_COMMAND} ${CLANG_TIDY_HIP_ARGS})
