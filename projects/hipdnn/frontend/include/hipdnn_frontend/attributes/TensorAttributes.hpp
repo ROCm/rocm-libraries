@@ -193,6 +193,14 @@ public:
                     "Tensor " + _name + " does not have a data type set"};
         }
 
+        HIPDNN_RETURN_IF_TRUE(_isVirtual && get_pass_by_value(),
+                              ErrorCode::INVALID_VALUE,
+                              "Tensor " + _name + " cannot be virtual and pass by value");
+        HIPDNN_RETURN_IF_NE(_dim.size(),
+                            _stride.size(),
+                            ErrorCode::INVALID_VALUE,
+                            "Tensor " + _name + " dims and strides have different sizes");
+
         return {ErrorCode::OK, ""};
     }
 

@@ -43,6 +43,7 @@ private:
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _engineHeuristicDesc;
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _engineConfigDesc;
     std::unique_ptr<ScopedHipdnnBackendDescriptor> _executionPlanDesc;
+
     std::optional<int64_t> _preferredEngineId = std::nullopt;
 
     static std::shared_ptr<TensorAttributes> outputTensor(const std::string& name)
@@ -346,34 +347,29 @@ public:
     {
         HIPDNN_FE_LOG_INFO("Validating graph {}", graph_attributes.get_name());
 
-        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-        gatherHipdnnTensorsSubtree(allTensors);
+        // Collect input and output tensors
+        std::unordered_set<std::shared_ptr<TensorAttributes>> inputTensors;
+        std::unordered_set<std::shared_ptr<TensorAttributes>> outputTensors;
+        gatherOutputTensors(outputTensors);
+        gatherInputTensors(inputTensors, outputTensors);
 
-        auto result = checkNoDuplicateTensorIdsImpl(allTensors);
-        if(result.code != ErrorCode::OK)
+        std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors = inputTensors;
+        allTensors.insert(outputTensors.begin(), outputTensors.end());
+
+        HIPDNN_CHECK_ERROR(checkNoDuplicateTensorIdsImpl(allTensors));
+
+        HIPDNN_CHECK_ERROR(topologicallySortGraph());
+
+        for(const auto& tensor : inputTensors)
         {
-            return result;
+            HIPDNN_CHECK_ERROR(tensor->validate());
         }
 
-        result = topologicallySortGraph();
-        if(result.code != ErrorCode::OK)
-        {
-            return result;
-        }
+        HIPDNN_CHECK_ERROR(validateSubtree());
 
-        result = validateSubtree();
-        if(result.code != ErrorCode::OK)
+        for(const auto& tensor : outputTensors)
         {
-            return result;
-        }
-
-        for(const auto& tensor : allTensors)
-        {
-            result = tensor->validate();
-            if(result.code != ErrorCode::OK)
-            {
-                return result;
-            }
+            HIPDNN_CHECK_ERROR(tensor->validate());
         }
 
         return {ErrorCode::OK, ""};
