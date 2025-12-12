@@ -37,13 +37,14 @@ else()
     set(ROCM_PATH "/opt/rocm")
 endif()
 
-# Find or build origami library
-# First try to find it as an installed package
-find_package(origami QUIET)
-
-if(NOT origami_FOUND)
-    # If not found, build it from parent directory
-    message(STATUS "origami not found, building from source")
+# Use origami library
+# Check if the target is already available (when added as subdirectory from parent)
+if(TARGET roc::origami)
+    message(STATUS "Using origami target from parent CMakeLists.txt")
+    set(ORIGAMI_TARGET roc::origami)
+else()
+    # If not available, build it from parent directory (for standalone builds)
+    message(STATUS "origami target not found, building from parent directory")
     
     # Get parent directory (shared/origami) - go up one level from python/
     get_filename_component(ORIGAMI_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
@@ -58,9 +59,6 @@ if(NOT origami_FOUND)
     else()
         message(FATAL_ERROR "Could not find origami CMakeLists.txt at ${ORIGAMI_ROOT}/CMakeLists.txt")
     endif()
-else()
-    message(STATUS "Found origami package")
-    set(ORIGAMI_TARGET roc::origami)
 endif()
 
 # Find HIP - add ROCM_PATH to CMAKE_PREFIX_PATH if not already there
