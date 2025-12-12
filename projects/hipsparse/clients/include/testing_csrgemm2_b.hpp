@@ -38,7 +38,7 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csrgemm2_b_bad_arg(void)
+void testing_csrgemm2_b_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int M         = 1;
@@ -46,7 +46,7 @@ void testing_csrgemm2_b_bad_arg(void)
     int nnz_D     = 1;
     int safe_size = 1;
 
-    T beta = 1.0;
+    T beta = make_DataType<T>(1.0);
 
     hipsparseStatus_t status;
     size_t            size;

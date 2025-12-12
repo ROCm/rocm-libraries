@@ -41,6 +41,8 @@ struct WorkGroupTileSize
     int m;
     int n;
     int k;
+
+    auto operator<=>(const WorkGroupTileSize& other) const = default;
 };
 
 /**
@@ -70,6 +72,8 @@ struct SolutionIndexParameters
     WorkGroupTileSize workgroupTile;
     bool              workgroupMapping;
     bool              streamK;
+
+    auto operator<=>(const SolutionIndexParameters& other) const = default;
 };
 
 int parametersToIndex(const SolutionIndexParameters& params);

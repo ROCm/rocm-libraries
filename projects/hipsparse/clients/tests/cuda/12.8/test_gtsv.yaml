@@ -1,4 +1,5 @@
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# ########################################################################
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -12,10 +13,34 @@
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
+#
+# ########################################################################
 
-LDS_160k = 160 * 1024
+---
+include: hipsparse_common.yaml
+
+
+Tests:
+- name: gtsv2_bad_arg
+  category: pre_checkin
+  function: gtsv_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: gtsv2
+  category: quick
+  function: gtsv2
+  precision: *single_double_precisions_complex_real
+  M: [512]
+  N: [512]
+
+- name: gtsv2
+  category: pre_checkin
+  function: gtsv2
+  precision: *single_double_precisions_complex_real
+  M: [100000]
+  N: [10]
