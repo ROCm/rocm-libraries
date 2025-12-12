@@ -37,12 +37,12 @@ namespace rocRoller
     {
     }
 
-    // Overload used by AssertError/AssertFatal/AssertRecoverable
+    // Implementation for AssertError / AssertFatal / AssertRecoverable.
     template <typename T_Exception, typename... Ts>
-    [[noreturn]] void Throw(std::source_location location,
-                            const char*          exceptionTag,
-                            const char*          conditionText,
-                            Ts const&... message)
+    [[noreturn]] void ThrowTagged(std::source_location location,
+                                  const char*          exceptionTag,
+                                  const char*          conditionText,
+                                  Ts const&... message)
     {
         auto prefix = concatenate(GetBaseFileName(location.file_name()),
                                   ":",
@@ -67,10 +67,8 @@ namespace rocRoller
 
     // Overload for direct Throw<FatalError>("msg") etc.
     template <typename T_Exception, typename... Ts>
-    [[noreturn]] void Throw(Ts const&... message)
+    [[noreturn]] void ThrowWithLocation(std::source_location location, Ts const&... message)
     {
-        auto location = std::source_location::current();
-
         auto prefix
             = concatenate(GetBaseFileName(location.file_name()), ":", location.line(), ": ");
 

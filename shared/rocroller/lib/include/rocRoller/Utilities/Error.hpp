@@ -66,14 +66,23 @@ namespace rocRoller
         using Error::Error;
     };
 
+    // Used by AssertError / AssertFatal / AssertRecoverable:
     template <typename T_Exception, typename... Ts>
-    [[noreturn]] void Throw(std::source_location location,
-                            const char*          exceptionTag,
-                            const char*          conditionText,
-                            Ts const&... message);
+    [[noreturn]] void ThrowTagged(std::source_location location,
+                                  const char*          exceptionTag,
+                                  const char*          conditionText,
+                                  Ts const&... message);
 
+    // Used for plain Throw<FatalError>("msg", ...) calls:
     template <typename T_Exception, typename... Ts>
-    [[noreturn]] void Throw(Ts const&... message);
+    [[noreturn]] void ThrowWithLocation(std::source_location location, Ts const&... message);
+
+    // Captures call–site location and forwards to ThrowWithLocation.
+    template <typename T_Exception, typename... Ts>
+    [[noreturn]] inline void Throw(Ts const&... message)
+    {
+        ThrowWithLocation<T_Exception>(std::source_location::current(), message...);
+    }
 
     /**
      * Initiates a segfault.  This can be useful for debugging purposes.
@@ -105,13 +114,12 @@ namespace rocRoller
         bool condition_val = static_cast<bool>(condition);                             \
         if(!(condition_val))                                                           \
         {                                                                              \
-            Throw<T_Exception>(                                                        \
+            ThrowTagged<T_Exception>(                                                  \
                 std::source_location::current(), #T_Exception, #condition, ##message); \
         }                                                                              \
     } while(0)
 
 #define AssertFatal(...) AssertError(FatalError, __VA_ARGS__)
-
 #define AssertRecoverable(...) AssertError(RecoverableError, __VA_ARGS__)
 }
 

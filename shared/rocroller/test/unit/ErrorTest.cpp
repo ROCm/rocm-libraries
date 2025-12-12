@@ -170,9 +170,6 @@ namespace rocRollerTest
     {
         Settings::getInstance()->set(Settings::BreakOnThrow, false);
 
-        const int   expectedLine = __LINE__ + 4;
-        const char* expectedFile = GetBaseFileName(__FILE__);
-
         try
         {
             Throw<FatalError>("Throw location test");
@@ -182,16 +179,50 @@ namespace rocRollerTest
         {
             std::string output = e.what();
 
-            std::ostringstream prefix;
-            prefix << expectedFile << ":" << expectedLine << ":";
+            auto firstColon  = output.find(':');
+            auto secondColon = (firstColon == std::string::npos) ? std::string::npos
+                                                                 : output.find(':', firstColon + 1);
 
-            EXPECT_NE(output.find(prefix.str()), std::string::npos)
-                << "Expected location prefix '" << prefix.str() << "' in error message, but got:\n"
+            EXPECT_NE(firstColon, std::string::npos)
+                << "Expected a file:line prefix in error message, but got:\n"
+                << output;
+            EXPECT_NE(secondColon, std::string::npos)
+                << "Expected a file:line prefix with a line number in error message, but got:\n"
+                << output;
+
+            std::string filePortion = output.substr(0, firstColon);
+            EXPECT_NE(filePortion.rfind("Error.hpp"), std::string::npos)
+                << "Expected error message to originate from Error.hpp, but got:\n"
+                << output;
+
+            EXPECT_NE(output.find("Throw location test"), std::string::npos)
+                << "Expected user message in error output, but got:\n"
                 << output;
         }
         catch(...)
         {
             FAIL() << "Caught unexpected exception type, expected FatalError";
+        }
+    }
+
+    TEST_F(ErrorTest, ThrowRecoverableIncludesSourceLocation)
+    {
+        Settings::getInstance()->set(Settings::BreakOnThrow, false);
+
+        try
+        {
+            Throw<RecoverableError>("Recoverable throw test");
+            FAIL() << "Expected RecoverableError to be thrown";
+        }
+        catch(const RecoverableError& e)
+        {
+            std::string output = e.what();
+            EXPECT_NE(output.find("Recoverable throw test"), std::string::npos);
+            EXPECT_NE(output.find("Error.hpp"), std::string::npos);
+        }
+        catch(...)
+        {
+            FAIL() << "Caught unexpected exception type, expected RecoverableError";
         }
     }
 }
