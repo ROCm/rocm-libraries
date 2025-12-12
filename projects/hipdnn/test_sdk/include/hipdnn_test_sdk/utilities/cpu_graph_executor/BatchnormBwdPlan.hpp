@@ -189,13 +189,12 @@ public:
 
         if(hasMean)
         {
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid().value());
-            CHECK_TENSOR_TYPE(
-                tensorMap, nodeAttributes->mean_tensor_uid().value(), MeanVarianceDataTypeEnum);
-            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid().value());
-            CHECK_TENSOR_TYPE(tensorMap,
-                              nodeAttributes->inv_variance_tensor_uid().value(),
-                              MeanVarianceDataTypeEnum);
+            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid());
+            CHECK_OPTIONAL_TENSOR_TYPE(
+                tensorMap, nodeAttributes->mean_tensor_uid(), MeanVarianceDataTypeEnum);
+            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid());
+            CHECK_OPTIONAL_TENSOR_TYPE(
+                tensorMap, nodeAttributes->inv_variance_tensor_uid(), MeanVarianceDataTypeEnum);
         }
 
         return true;

@@ -376,7 +376,7 @@ public:
                  ScaleBiasDataType,
                  MeanVarianceDataType,
                  DxDataType,
-                 ComputeDataType>(dy, x, scale, dx, dscale, dbias, mean, invVariance);
+                 ComputeDataType>(dy, x, scale, dx, dscale, dbias, &mean, &invVariance);
     }
 
 private:
