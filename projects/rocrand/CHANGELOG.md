@@ -12,6 +12,7 @@ Documentation for rocRAND is available at
 ### Added
 
 * Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
+* Experimental SPIR-V support.
 
 ### Changed
 
