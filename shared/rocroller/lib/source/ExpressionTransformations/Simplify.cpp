@@ -746,6 +746,23 @@ namespace rocRoller
                 return std::make_shared<Expression>(cpy);
             }
 
+            ExpressionPtr operator()(Reinterpret const& expr) const
+            {
+                if(resultVariableType(expr.arg).dataType == expr.destinationType)
+                    return call(expr.arg);
+
+                if(expr.arg && std::holds_alternative<Reinterpret>(*expr.arg))
+                {
+                    // Collapse: reinterpret(B, reinterpret(A, x)) -> reinterpret(B, x)
+                    auto const& innerReinterpret = std::get<Reinterpret>(*expr.arg);
+                    return call(reinterpret(expr.destinationType, innerReinterpret.arg));
+                }
+
+                Reinterpret cpy = expr;
+                cpy.arg         = call(expr.arg);
+                return std::make_shared<Expression>(cpy);
+            }
+
             template <CBinary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
@@ -827,16 +844,12 @@ namespace rocRoller
                 if(result.has_value())
                     return literal(result.value());
 
-                // Extracting the entire arg with no offset (same type)
+                // Extracting the entire arg with no offset
                 auto argVarType = resultVariableType(cpy.arg);
                 if(cpy.offset == 0 && cpy.width == argVarType.getElementSize() * 8
-                   && argVarType.dataType == cpy.outputDataType)
-                    return call(cpy.arg);
-
-                // TODO: Enable this simplification with a reinterpret_cast expression
-                // // Extracting the entire arg with no offset
-                // if(cpy.offset == 0 && cpy.width == resultVariableType(cpy.arg).getElementSize() * 8)
-                //     return call(convert(cpy.outputDataType, cpy.arg));
+                   && argVarType.getElementSize()
+                          == DataTypeInfo::Get(cpy.outputDataType).elementBytes)
+                    return call(reinterpret(cpy.outputDataType, cpy.arg));
 
                 cpy.arg = call(cpy.arg);
                 return std::make_shared<Expression>(cpy);
