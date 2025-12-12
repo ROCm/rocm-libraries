@@ -4,134 +4,281 @@
 #include <gtest/gtest.h>
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
-#include "pooling2d.hpp"
-#include "../driver.hpp"
+#include "../pooling_common.hpp"
 #include <half/half.hpp>
+#include <vector>
+#include <limits>
 
 namespace {
 
-class GPU_Pooling2d_FP32 : public testing::TestWithParam<miopenDataType_t>
+struct Pooling2dTestCase
 {
-    void SetUp() override
-    {
-        prng::reset_seed();
-        if(!IsTestSupportedByDevice(Gpu::All))
-        {
-            GTEST_SKIP();
-        }
-        // Decrease log level to reduce output
-        lib_env::update(MIOPEN_LOG_LEVEL, 2);
-    }
-};
+    std::vector<int> input_dims;  // [N, C, H, W]
+    std::vector<int> lens;        // [H, W]
+    std::vector<int> pads;        // [H, W]
+    std::vector<int> strides;    // [H, W]
+    std::string index_type;
+    std::string mode;
+    int wsidx;
 
-class GPU_Pooling2d_FP16 : public testing::TestWithParam<miopenDataType_t>
-{
-    void SetUp() override
+    friend std::ostream& operator<<(std::ostream& os, const Pooling2dTestCase& tc)
     {
-        prng::reset_seed();
-        if(!IsTestSupportedByDevice(Gpu::All))
-        {
-            GTEST_SKIP();
-        }
-        // Decrease log level to reduce output
-        lib_env::update(MIOPEN_LOG_LEVEL, 2);
+        return os << "input_dims: " << miopen::Join(tc.input_dims, ", ")
+                  << ", lens: " << miopen::Join(tc.lens, ", ")
+                  << ", pads: " << miopen::Join(tc.pads, ", ")
+                  << ", strides: " << miopen::Join(tc.strides, ", ")
+                  << ", index_type: " << tc.index_type
+                  << ", mode: " << tc.mode
+                  << ", wsidx: " << tc.wsidx;
     }
 };
 
 template <typename T>
-void RunPooling2dTests()
+std::vector<Pooling2dTestCase> GetPooling2dTestCases()
 {
-    // Run 1: full_set = false with default dataset (reduced combinations, various tensor sizes)
+    return {
+        // input_dims, lens, pads, strides, index_type, mode, wsidx
+        {{5, 32, 8, 8}, {2, 2}, {0, 0}, {2, 2}, "miopenIndexUint8", "MAX", 1},
+        {{5, 32, 8, 8}, {3, 3}, {1, 1}, {1, 1}, "miopenIndexUint8", "AVERAGE", 1},
+        {{1, 4, 4, 4}, {2, 2}, {0, 0}, {1, 1}, "miopenIndexUint8", "MAX", 0},
+        {{1, 4, 4, 4}, {2, 2}, {0, 0}, {2, 2}, "miopenIndexUint8", "AVERAGE", 1},
+    };
+}
+
+template <typename T>
+void RunPooling2dTest(const Pooling2dTestCase& test_case)
+{
+    // Create input tensor
+    tensor<T> input{static_cast<size_t>(test_case.input_dims[0]),
+                    static_cast<size_t>(test_case.input_dims[1]),
+                    static_cast<size_t>(test_case.input_dims[2]),
+                    static_cast<size_t>(test_case.input_dims[3])};
+    input.generate(tensor_elem_gen_integer{miopen_type<T>{} == miopenHalf ? 5 : 17});
+
+    // Setup pooling descriptor
+    std::unordered_map<std::string, miopenIndexType_t> index_type_lookup = {
+        {miopen::ToUpper("miopenIndexUint8"), miopenIndexUint8},
+        {miopen::ToUpper("miopenIndexUint16"), miopenIndexUint16},
+        {miopen::ToUpper("miopenIndexUint32"), miopenIndexUint32},
+        {miopen::ToUpper("miopenIndexUint64"), miopenIndexUint64},
+    };
+
+    std::unordered_map<std::string, miopenPoolingMode_t> mode_lookup = {
+        {"MAX", miopenPoolingMax},
+        {"MIOPENPOOLINGMAX", miopenPoolingMax},
+        {"AVERAGE", miopenPoolingAverage},
+        {"MIOPENPOOLINGAVERAGE", miopenPoolingAverage},
+        {"AVERAGEINCLUSIVE", miopenPoolingAverageInclusive},
+        {"MIOPENPOOLINGAVERAGEINCLUSIVE", miopenPoolingAverageInclusive},
+    };
+
+    auto idx_typ = index_type_lookup.at(miopen::ToUpper(test_case.index_type));
+    auto mode    = mode_lookup.at(miopen::ToUpper(test_case.mode));
+
+    miopen::PoolingDescriptor filter{
+        mode, miopenPaddingDefault, test_case.lens, test_case.strides, test_case.pads};
+    filter.SetIndexType(idx_typ);
+    filter.SetWorkspaceIndexMode(miopenPoolingWorkspaceIndexMode_t(test_case.wsidx));
+
+    // Validate dimensions
+    auto input_desc = miopen::TensorDescriptor(miopen_type<T>{}, test_case.input_dims);
+    int spt_dim     = static_cast<int>(test_case.input_dims.size()) - 2;
+
+    if(spt_dim != 2)
     {
-        pooling2d_driver<T> driver;
-        driver.type              = miopen_type<T>{};
-        driver.full_set          = false;
-        driver.dataset_id        = 0;
-        driver.config_iter_start = 0;
+        GTEST_SKIP() << "Only 2D pooling is supported (spt_dim == 2)";
+    }
 
-        std::vector<typename pooling2d_driver<T>::argument*> data_args;
-        for(auto&& arg : driver.arguments)
+    for(int i = 0; i < spt_dim; i++)
+    {
+        if(test_case.lens[i] >
+           (input_desc.GetLengths()[i + 2] + static_cast<uint64_t>(2) * test_case.pads[i]))
         {
-            data_args.push_back(&arg);
-        }
-
-        driver.iteration = 0;
-        try
-        {
-            run_data(data_args.begin(), data_args.end(), [&] {
-                driver.template base_run<pooling2d_driver<T>>();
-            });
-        }
-        catch(const std::exception& e)
-        {
-            FAIL() << "Exception in pooling2d test (full_set=false, dataset=0): " << e.what();
-        }
-        catch(...)
-        {
-            FAIL() << "Unknown exception in pooling2d test (full_set=false, dataset=0)";
+            GTEST_SKIP() << "Invalid config: lens[" << i
+                         << "] > (input_dims[" << i + 2 << "] + 2 * pads[" << i << "])";
         }
     }
 
-    // Run 2: full_set = true with minimal dataset (all combinations, small tensors)
+    // Run forward and backward pooling based on index type
+    switch(idx_typ)
     {
-        pooling2d_driver<T> driver;
-        driver.type              = miopen_type<T>{};
-        driver.full_set          = true;
-        driver.dataset_id        = 1; // Minimal dataset to avoid OOM
-        driver.config_iter_start = 0;
+    case miopenIndexUint8: {
+        std::vector<uint8_t> indices;
+        verify_forward_pooling<2> forward_verifier;
+        auto forward_result = forward_verifier.cpu(input, filter, indices);
+        auto forward_gpu_result = forward_verifier.gpu(input, filter, indices);
 
-        std::vector<typename pooling2d_driver<T>::argument*> data_args;
-        for(auto&& arg : driver.arguments)
-        {
-            data_args.push_back(&arg);
-        }
+        // Compare forward results
+        EXPECT_EQ(miopen::range_distance(forward_result),
+                  miopen::range_distance(forward_gpu_result));
 
-        driver.iteration = 0;
-        try
-        {
-            run_data(data_args.begin(), data_args.end(), [&] {
-                driver.template base_run<pooling2d_driver<T>>();
-            });
-        }
-        catch(const std::exception& e)
-        {
-            FAIL() << "Exception in pooling2d test (full_set=true, dataset=1): " << e.what();
-        }
-        catch(...)
-        {
-            FAIL() << "Unknown exception in pooling2d test (full_set=true, dataset=1)";
-        }
+        using value_type = T;
+        const double tolerance = 80.0;
+        const double threshold = std::numeric_limits<value_type>::epsilon() * tolerance;
+        const double forward_rms_error = miopen::rms_range(forward_result, forward_gpu_result);
+
+        EXPECT_LE(forward_rms_error, threshold)
+            << "Forward RMS error: " << forward_rms_error << " exceeds threshold: " << threshold;
+
+        // Run backward pooling
+        auto dout = forward_result;
+        dout.generate(tensor_elem_gen_integer{2503});
+
+        verify_backward_pooling<2> backward_verifier;
+        auto backward_result = backward_verifier.cpu(
+            input, dout, forward_result, filter, indices, test_case.wsidx != 0, true);
+        auto backward_gpu_result = backward_verifier.gpu(
+            input, dout, forward_result, filter, indices, test_case.wsidx != 0, true);
+
+        // Compare backward results
+        EXPECT_EQ(miopen::range_distance(backward_result),
+                  miopen::range_distance(backward_gpu_result));
+
+        const double backward_rms_error = miopen::rms_range(backward_result, backward_gpu_result);
+
+        EXPECT_LE(backward_rms_error, threshold)
+            << "Backward RMS error: " << backward_rms_error << " exceeds threshold: " << threshold;
+        break;
+    }
+    case miopenIndexUint16: {
+        std::vector<uint16_t> indices;
+        verify_forward_pooling<2> forward_verifier;
+        auto forward_result = forward_verifier.cpu(input, filter, indices);
+        auto forward_gpu_result = forward_verifier.gpu(input, filter, indices);
+
+        EXPECT_EQ(miopen::range_distance(forward_result),
+                  miopen::range_distance(forward_gpu_result));
+
+        using value_type = T;
+        const double tolerance = 80.0;
+        const double threshold = std::numeric_limits<value_type>::epsilon() * tolerance;
+        const double forward_rms_error = miopen::rms_range(forward_result, forward_gpu_result);
+
+        EXPECT_LE(forward_rms_error, threshold);
+
+        auto dout = forward_result;
+        dout.generate(tensor_elem_gen_integer{2503});
+
+        verify_backward_pooling<2> backward_verifier;
+        auto backward_result = backward_verifier.cpu(
+            input, dout, forward_result, filter, indices, test_case.wsidx != 0, true);
+        auto backward_gpu_result = backward_verifier.gpu(
+            input, dout, forward_result, filter, indices, test_case.wsidx != 0, true);
+
+        EXPECT_EQ(miopen::range_distance(backward_result),
+                  miopen::range_distance(backward_gpu_result));
+
+        const double backward_rms_error = miopen::rms_range(backward_result, backward_gpu_result);
+        EXPECT_LE(backward_rms_error, threshold);
+        break;
+    }
+    case miopenIndexUint32: {
+        std::vector<uint32_t> indices;
+        verify_forward_pooling<2> forward_verifier;
+        auto forward_result = forward_verifier.cpu(input, filter, indices);
+        auto forward_gpu_result = forward_verifier.gpu(input, filter, indices);
+
+        EXPECT_EQ(miopen::range_distance(forward_result),
+                  miopen::range_distance(forward_gpu_result));
+
+        using value_type = T;
+        const double tolerance = 80.0;
+        const double threshold = std::numeric_limits<value_type>::epsilon() * tolerance;
+        const double forward_rms_error = miopen::rms_range(forward_result, forward_gpu_result);
+
+        EXPECT_LE(forward_rms_error, threshold);
+
+        auto dout = forward_result;
+        dout.generate(tensor_elem_gen_integer{2503});
+
+        verify_backward_pooling<2> backward_verifier;
+        auto backward_result = backward_verifier.cpu(
+            input, dout, forward_result, filter, indices, test_case.wsidx != 0, true);
+        auto backward_gpu_result = backward_verifier.gpu(
+            input, dout, forward_result, filter, indices, test_case.wsidx != 0, true);
+
+        EXPECT_EQ(miopen::range_distance(backward_result),
+                  miopen::range_distance(backward_gpu_result));
+
+        const double backward_rms_error = miopen::rms_range(backward_result, backward_gpu_result);
+        EXPECT_LE(backward_rms_error, threshold);
+        break;
+    }
+    case miopenIndexUint64: {
+        std::vector<uint64_t> indices;
+        verify_forward_pooling<2> forward_verifier;
+        auto forward_result = forward_verifier.cpu(input, filter, indices);
+        auto forward_gpu_result = forward_verifier.gpu(input, filter, indices);
+
+        EXPECT_EQ(miopen::range_distance(forward_result),
+                  miopen::range_distance(forward_gpu_result));
+
+        using value_type = T;
+        const double tolerance = 80.0;
+        const double threshold = std::numeric_limits<value_type>::epsilon() * tolerance;
+        const double forward_rms_error = miopen::rms_range(forward_result, forward_gpu_result);
+
+        EXPECT_LE(forward_rms_error, threshold);
+
+        auto dout = forward_result;
+        dout.generate(tensor_elem_gen_integer{2503});
+
+        verify_backward_pooling<2> backward_verifier;
+        auto backward_result = backward_verifier.cpu(
+            input, dout, forward_result, filter, indices, test_case.wsidx != 0, true);
+        auto backward_gpu_result = backward_verifier.gpu(
+            input, dout, forward_result, filter, indices, test_case.wsidx != 0, true);
+
+        EXPECT_EQ(miopen::range_distance(backward_result),
+                  miopen::range_distance(backward_gpu_result));
+
+        const double backward_rms_error = miopen::rms_range(backward_result, backward_gpu_result);
+        EXPECT_LE(backward_rms_error, threshold);
+        break;
+    }
     }
 }
 
-void Run2dDriver(miopenDataType_t prec)
-{
-    switch(prec)
-    {
-    case miopenFloat: RunPooling2dTests<float>(); break;
-    case miopenHalf: RunPooling2dTests<half_float::half>(); break;
-    case miopenBFloat16:
-    case miopenInt8:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenInt32:
-    case miopenInt64:
-    case miopenDouble:
-        FAIL() << "miopenBFloat16, miopenInt8, miopenInt32, miopenDouble, miopenFloat8_fnuz, "
-                  "miopenBFloat8_fnuz "
-                  "data type not supported by "
-                  "pooling2d test";
+} // namespace
 
-    default: RunPooling2dTests<float>();
+class GPU_Pooling2d_FP32 : public testing::TestWithParam<Pooling2dTestCase>
+{
+    void SetUp() override
+    {
+        prng::reset_seed();
+        if(!IsTestSupportedByDevice(Gpu::All))
+        {
+            GTEST_SKIP();
+        }
+        // Decrease log level to reduce output
+        lib_env::update(MIOPEN_LOG_LEVEL, 2);
     }
 };
 
-} // namespace
+class GPU_Pooling2d_FP16 : public testing::TestWithParam<Pooling2dTestCase>
+{
+    void SetUp() override
+    {
+        prng::reset_seed();
+        if(!IsTestSupportedByDevice(Gpu::All))
+        {
+            GTEST_SKIP();
+        }
+        // Decrease log level to reduce output
+        lib_env::update(MIOPEN_LOG_LEVEL, 2);
+    }
+};
 
-TEST_P(GPU_Pooling2d_FP32, FloatTest_pooling2d) { Run2dDriver(GetParam()); }
+TEST_P(GPU_Pooling2d_FP32, FloatTest_pooling2d)
+{
+    RunPooling2dTest<float>(GetParam());
+}
 
-TEST_P(GPU_Pooling2d_FP16, HalfTest_pooling2d) { Run2dDriver(GetParam()); }
+TEST_P(GPU_Pooling2d_FP16, HalfTest_pooling2d)
+{
+    RunPooling2dTest<half_float::half>(GetParam());
+}
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling2d_FP32, testing::ValuesIn({miopenFloat}));
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Pooling2d_FP32, testing::ValuesIn(GetPooling2dTestCases<float>()));
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling2d_FP16, testing::ValuesIn({miopenHalf}));
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Pooling2d_FP16, testing::ValuesIn(GetPooling2dTestCases<half_float::half>()));
