@@ -204,16 +204,16 @@ install_packages( )
     fi
   fi
 
-  # wget and openssl are needed for cmake
+  # wget is needed for cmake pre-built binary download
   if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt $CMAKE_MIN_VERSION); then
     if $update_cmake == true; then
-      library_dependencies_ubuntu+=("wget" "libssl-dev")
-      library_dependencies_centos_rhel+=("wget" "openssl-devel")
-      library_dependencies_centos_8+=("wget" "openssl-devel")
-      library_dependencies_rhel_8+=("wget" "openssl-devel")
-      library_dependencies_rhel_9+=("wget" "openssl-devel")
+      library_dependencies_ubuntu+=("wget")
+      library_dependencies_centos_rhel+=("wget")
+      library_dependencies_centos_8+=("wget")
+      library_dependencies_rhel_8+=("wget")
+      library_dependencies_rhel_9+=("wget")
       library_dependencies_fedora+=("wget")
-      library_dependencies_sles+=("wget" "libopenssl-devel")
+      library_dependencies_sles+=("wget")
     fi
   fi
 
@@ -351,7 +351,8 @@ rocBLAS dependency & installation helper script. Invokes rmake.py for build step
                                      (Generated binaries will be located at <builddir>/release/clients/staging)
     --clients-only                   Skip building the library and only build the clients with a pre-built library.
 
-    --cmake_install                  Install minimum cmake version if required.
+    --cmake_install                  Install minimum cmake version (3.26.0) if required.
+                                     Downloads pre-built binary to <builddir>/deps (much faster than building from source).
 
     -d, --dependencies               Build and install external dependencies.
                                      Dependencies are to be installed in /usr/local. This should be done only once.
@@ -541,20 +542,38 @@ if [[ "${install_dependencies}" == true ]]; then
   if [ -z "$CMAKE_VERSION" ] || $(dpkg --compare-versions $CMAKE_VERSION lt $CMAKE_MIN_VERSION); then
       if $update_cmake == true; then
         pushd .
-        printf "\033[32mBuilding \033[33mcmake\033[32m from source; installing into \033[33m/usr/local\033[0m\n"
+        printf "\033[32mInstalling \033[33mcmake ${CMAKE_MIN_VERSION}\033[32m from pre-built binary\033[0m\n"
         CMAKE_REPO="https://github.com/Kitware/CMake/releases/download"
-        CMAKE_TARGZ="cmake-${CMAKE_MIN_VERSION}.tar.gz"
-        mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-        wget -nv ${CMAKE_REPO}/v${CMAKE_MIN_VERSION}/${CMAKE_TARGZ}
-        tar -xvf ${CMAKE_TARGZ}
-        rm ${CMAKE_TARGZ}
-        cd cmake-${CMAKE_MIN_VERSION}
-        ./bootstrap --no-system-curl --parallel=16
-        make -j16
-        elevate_if_not_root make install
+        CMAKE_ARCH="linux-x86_64"
+        CMAKE_TARGZ="cmake-${CMAKE_MIN_VERSION}-${CMAKE_ARCH}.tar.gz"
+        CMAKE_INSTALL_DIR="${build_dir}/deps/cmake-${CMAKE_MIN_VERSION}"
+        
+        # Check if already installed
+        if [[ -f "${CMAKE_INSTALL_DIR}/bin/cmake" ]]; then
+          printf "\033[32mCMake ${CMAKE_MIN_VERSION} already installed at \033[33m${CMAKE_INSTALL_DIR}\033[0m\n"
+        else
+          mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
+          printf "\033[32mDownloading CMake pre-built binary from \033[33m${CMAKE_REPO}/v${CMAKE_MIN_VERSION}/${CMAKE_TARGZ}\033[0m\n"
+          wget -nv ${CMAKE_REPO}/v${CMAKE_MIN_VERSION}/${CMAKE_TARGZ}
+          
+          printf "\033[32mExtracting CMake to \033[33m${CMAKE_INSTALL_DIR}\033[0m\n"
+          tar -xzf ${CMAKE_TARGZ}
+          rm ${CMAKE_TARGZ}
+          
+          # Move extracted directory to standard location
+          mv cmake-${CMAKE_MIN_VERSION}-${CMAKE_ARCH} cmake-${CMAKE_MIN_VERSION}
+          printf "\033[32mCMake ${CMAKE_MIN_VERSION} successfully installed!\033[0m\n"
+        fi
+        
+        # Update cmake_executable to use the newly installed version
+        cmake_executable="${CMAKE_INSTALL_DIR}/bin/cmake"
+        export PATH="${CMAKE_INSTALL_DIR}/bin:$PATH"
+        printf "\033[32mUsing cmake from: \033[33m${cmake_executable}\033[0m\n"
+        ${cmake_executable} --version
+        
         popd
       else
-          echo "rocBLAS requires CMake version >= ${CMAKE_MIN_VERSION} and CMake version ${CMAKE_VERSION} is installed. Run install.sh again with --cmake_install flag and CMake version ${CMAKE_MIN_VERSION} will be installed to /usr/local"
+          echo "rocBLAS requires CMake version >= ${CMAKE_MIN_VERSION} and CMake version ${CMAKE_VERSION} is installed. Run install.sh again with --cmake_install flag and CMake version ${CMAKE_MIN_VERSION} will be installed to ${build_dir}/deps"
           exit 2
       fi
   fi
