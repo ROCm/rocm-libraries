@@ -31,6 +31,7 @@
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 
+#include <atomic>
 #include <algorithm>
 #include <map>
 

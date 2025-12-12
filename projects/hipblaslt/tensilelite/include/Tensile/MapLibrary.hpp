@@ -26,8 +26,9 @@
 
 #pragma once
 
-#include <Tensile/SolutionLibrary.hpp>
+#include <atomic>
 
+#include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/PropertyMatching.hpp>
 
 namespace TensileLite

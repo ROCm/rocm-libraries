@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <atomic>
+
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/Debug.hpp>
 #include <Tensile/Predicates.hpp>

@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <queue>
 #include <set>
 #include <vector>
