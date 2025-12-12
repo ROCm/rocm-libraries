@@ -1033,3 +1033,48 @@ def verify_ascending_order(scheduleInfo, context: dict = {}):
                     )
     return True, ""
 
+
+def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
+    """
+    Return True if all the validation rules pass, False otherwise.
+    If validation fails, a string containing the reason is returned.
+
+    Note 1: If True is returned, this is not proof that this schedule
+    is valid. It may be a false negative.
+
+    Note 2: if False is returned, this is not proof that the schedule
+    is invalid. It may be a false positive.
+    """
+
+    if scheduleInfo.__skipValidation__:
+        mt0 = context.get("kernel", {}).get("MacroTile0", "?")
+        mt1 = context.get("kernel", {}).get("MacroTile1", "?")
+        du = context.get("kernel", {}).get("DepthU", "?")
+        transA = context.get("kernel", {}).get("TransA")
+        transB = context.get("kernel", {}).get("TransB")
+        transA = "T" if transA else "N"
+        transB = "T" if transB else "N"
+        message = f"CMS validation explicitly disabled. Running on kernel with MT0xMT1xDepthU = {mt0}x{mt1}x{du} {transA}{transB}"
+        print(f"WARNING: {message}")
+
+        # All rules bypassed, considered valid.
+        return True, message
+
+    # The set of validation rules to run
+    rules = [
+        verify_correct_number_of_instructions,
+        verify_ascending_order,
+        verify_global_reads_not_too_early,
+        verify_lrs_and_grs,
+        verify_scc_overlap,
+        verify_gr_inc_order
+    ]
+
+    for rule in rules:
+        status, message = rule(scheduleInfo, context)
+        if status is False:
+            return False, message
+
+    # All rules passed, considered valid.
+    return True, ""
+

@@ -138,52 +138,8 @@ class ScheduleInfo:
         self.mfmaReorder = mfmaReorder
         self.__skipValidation__ = False
 
-        # The set of validation rules to run inside `isValid`.
-        self.rules: list[Callable[[ScheduleInfo, dict], [bool, str]]] = [
-            cmsv.verify_correct_number_of_instructions,
-            cmsv.verify_ascending_order,
-            cmsv.verify_global_reads_not_too_early,
-            cmsv.verify_lrs_and_grs,
-            cmsv.verify_scc_overlap,
-            cmsv.verify_gr_inc_order
-        ]
-
     def disableValidation(self):
         self.__skipValidation__ = True
-
-    def isValid(self, context: dict):
-        """
-        Return True if all the validation rules pass, False otherwise.
-        If validation fails, a string containing the reason is returned.
-
-        Note 1: If True is returned, this is not proof that this schedule
-        is valid. It may be a false negative.
-
-        Note 2: if False is returned, this is not proof that the schedule
-        is invalid. It may be a false positive.
-        """
-
-        if self.__skipValidation__:
-            mt0 = context.get("kernel", {}).get("MacroTile0", "?")
-            mt1 = context.get("kernel", {}).get("MacroTile1", "?")
-            du = context.get("kernel", {}).get("DepthU", "?")
-            transA = context.get("kernel", {}).get("TransA")
-            transB = context.get("kernel", {}).get("TransB")
-            transA = "T" if transA else "N"
-            transB = "T" if transB else "N"
-            message = f"CMS validation explicitly disabled. Running on kernel with MT0xMT1xDepthU = {mt0}x{mt1}x{du} {transA}{transB}"
-            print(f"WARNING: {message}")
-
-            # All rules bypassed, considered valid.
-            return True, message
-
-        for rule in self.rules:
-            status, message = rule(self, context)
-            if status is False:
-                return False, message
-
-        # All rules passed, considered valid.
-        return True, ""
 
 
 def removeComments(module):
@@ -282,7 +238,7 @@ def customMainLoopSchedule(writer, kernel, tensorParametersA, tensorParametersB,
 
     idMap['SYNC'] = opt1.syncCode
 
-    status, message = opt1.isValid({'kernel' : kernel, "idMap": idMap})
+    status, message = cmsv.isValid(opt1, {'kernel' : kernel, "idMap": idMap})
     # create the case str (TN, NT, TT, or NN)
     if isTN(kernel):
         case_str = "TN"
