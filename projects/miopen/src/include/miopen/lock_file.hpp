@@ -183,8 +183,6 @@ private:
     {
         // clang-format off
         MIOPEN_LOG_E_FROM(from, "File <" << path << "> " << operation << " failed. "
-//                                "Error code: " << ex.get_error_code() << ". "
-//                                "Native error: " << ex.get_native_error() << ". "
                                 "Description: '" << ex.what() << "'");
         // clang-format on
     }
