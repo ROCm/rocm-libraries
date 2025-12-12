@@ -113,7 +113,7 @@ void getEngineDetails([[maybe_unused]] hipdnnEnginePluginHandle_t handle,
 void destroyEngineDetails([[maybe_unused]] hipdnnEnginePluginHandle_t handle,
                           hipdnnPluginConstData_t* engineDetails)
 {
-    delete[] static_cast<const uint8_t*>(engineDetails->ptr);
+    delete[](const uint8_t*)(engineDetails->ptr); // INTENTIONAL ERROR: C-style cast for testing
     engineDetails->ptr = nullptr;
     engineDetails->size = 0;
 }
