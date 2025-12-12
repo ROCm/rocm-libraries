@@ -54,7 +54,7 @@ else( )
   else( )
     set( gtest_make "make" )
 
-    # The -j paramter does not work with nmake
+    # The -j parameter does not work with nmake
     if( NOT Cores EQUAL 0 )
       math( EXPR Cores "${Cores} + 1 " )
       list( APPEND gtest_make -j ${Cores} )

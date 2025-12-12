@@ -82,7 +82,7 @@ void testing_gather_bad_arg(const Arguments& argus)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_gather(Arguments argus)
+void testing_gather(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     I                    size    = argus.N;
@@ -182,8 +182,6 @@ hipsparseStatus_t testing_gather(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpVec(x));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_GATHER_HPP

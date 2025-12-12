@@ -35,6 +35,20 @@
         }                                                                               \
     } while(0)
 
+#define HIPDNN_PREPEND_MESSAGE_ON_THROW(statement, message)                           \
+    do                                                                                \
+    {                                                                                 \
+        try                                                                           \
+        {                                                                             \
+            statement;                                                                \
+        }                                                                             \
+        catch(hipdnn_plugin::HipdnnPluginException error)                             \
+        {                                                                             \
+            throw hipdnn_plugin::HipdnnPluginException(error.getStatus(),             \
+                                                       message + error.getMessage()); \
+        }                                                                             \
+    } while(0)
+
 namespace miopen_legacy_plugin::miopen_utils
 {
 
@@ -46,7 +60,7 @@ struct ActivationParams
     double gamma;
 };
 
-std::optional<ActivationParams>
+ActivationParams
     mapPointwiseModeToMiopenActivation(const hipdnn_sdk::data_objects::PointwiseAttributes& attrs);
 
 hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,

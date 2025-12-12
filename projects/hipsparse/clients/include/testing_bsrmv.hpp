@@ -283,7 +283,7 @@ void testing_bsrmv_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_bsrmv(Arguments argus)
+void testing_bsrmv(Arguments argus)
 {
     int                  m         = argus.M;
     int                  n         = argus.N;
@@ -311,7 +311,7 @@ hipsparseStatus_t testing_bsrmv(Arguments argus)
     {
 #ifdef __HIP_PLATFORM_NVIDIA__
         // cusparse only accepts block_dim > 1
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
 #endif
     }
 
@@ -327,7 +327,7 @@ hipsparseStatus_t testing_bsrmv(Arguments argus)
     if(!generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcsr_col_ind, hcsr_val, idx_base))
     {
         fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
+        return;
     }
 
     mb = (m + block_dim - 1) / block_dim;
@@ -572,8 +572,6 @@ hipsparseStatus_t testing_bsrmv(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_BSRMV_HPP
