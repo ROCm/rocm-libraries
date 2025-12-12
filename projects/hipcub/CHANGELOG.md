@@ -4,6 +4,9 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 ## hipCUB-4.2.0 for ROCm 7.2.0
  
+### Added
+* Experimental SPIR-V support.
+
 ### Resolved issues
  
 * Fixed memory leak issues with some unit tests.
