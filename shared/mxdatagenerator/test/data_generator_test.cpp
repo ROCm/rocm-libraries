@@ -258,73 +258,12 @@ double getExcessKurtosis(const std::vector<double>& data)
         sum_quad += z * z * z * z;
     }
     
-    // Sample excess kurtosis with bias correction
+    // Sample excess kurtosis
     const double n = static_cast<double>(data.size());
     const double term1 = n * (n + 1.0) / ((n - 1.0) * (n - 2.0) * (n - 3.0));
     const double term2 = 3.0 * (n - 1.0) * (n - 1.0) / ((n - 2.0) * (n - 3.0));
     
     return term1 * sum_quad - term2;
-}
-
-double getExcessKurtosisDebug(const std::vector<double>& data, const std::string& typeName = "")
-{
-    std::cout << "\n=== getExcessKurtosis Debug for " << typeName << " ===\n";
-    std::cout << "Data size: " << data.size() << "\n";
-    
-    if(data.size() < 4)
-    {
-        std::cout << "ERROR: Data size < 4, returning NaN\n";
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-    
-    const double mean = getMean(data);
-    const double std_dev = getStdDev(data);
-    
-    std::cout << "Mean: " << mean << "\n";
-    std::cout << "Std Dev: " << std_dev << "\n";
-    
-    if(std::isnan(mean) || std::isnan(std_dev) || std_dev == 0.0)
-    {
-        std::cout << "ERROR: Invalid mean/std_dev, returning NaN\n";
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-    
-    double sum_quad = 0.0;
-    
-    // Print first 10 and last 5 z-scores and their contributions
-    std::cout << "\nFirst 10 z-scores and z^4 contributions:\n";
-    for(size_t i = 0; i < std::min(data.size(), size_t(10)); i++)
-    {
-        double z = (data[i] - mean) / std_dev;
-        double z4 = z * z * z * z;
-        std::cout << "  data[" << i << "] = " << data[i] 
-                  << " -> z = " << z << " -> z^4 = " << z4 << "\n";
-    }
-    
-    // Compute full sum
-    for(const double& val : data)
-    {
-        double z = (val - mean) / std_dev;
-        sum_quad += z * z * z * z;
-    }
-    
-    std::cout << "\nSum of z^4: " << sum_quad << "\n";
-    
-    // Sample excess kurtosis with bias correction
-    const double n = static_cast<double>(data.size());
-    const double term1 = n * (n + 1.0) / ((n - 1.0) * (n - 2.0) * (n - 3.0));
-    const double term2 = 3.0 * (n - 1.0) * (n - 1.0) / ((n - 2.0) * (n - 3.0));
-    
-    std::cout << "n: " << n << "\n";
-    std::cout << "term1 (scaling factor): " << term1 << "\n";
-    std::cout << "term2 (bias correction): " << term2 << "\n";
-    std::cout << "term1 * sum_quad: " << (term1 * sum_quad) << "\n";
-    
-    double result = term1 * sum_quad - term2;
-    std::cout << "Final excess kurtosis: " << result << "\n";
-    std::cout << "=== End Debug ===\n\n";
-    
-    return result;
 }
 
 
@@ -377,101 +316,6 @@ class EDF{
             return pos / n;
         }
 };
-
-// Perform One-Sample Kolmogorov-Smirnov Test
-// Tests if a sample follows a normal distribution with given mean and standard deviation
-bool ks_test_one_sample_normal(const std::vector<double>& data, double mean, double std_dev, double alpha = 0.05) {
-    if (data.empty() || std_dev <= 0) {
-        return false;
-    }
-    
-    // Create a sorted copy of the data
-    std::vector<double> sorted_data = data;
-    std::sort(sorted_data.begin(), sorted_data.end());
-    
-    size_t n = sorted_data.size();
-    double max_diff = 0.0;
-    
-    // Calculate the maximum difference between empirical and theoretical CDF
-    for (size_t i = 0; i < n; ++i) {
-        // Standardize the data point
-        double z = (sorted_data[i] - mean) / std_dev;
-        
-        // Theoretical CDF value
-        double F_theoretical = normalCDF(z);
-        
-        // Empirical CDF values (before and after this point)
-        double F_empirical_before = static_cast<double>(i) / n;
-        double F_empirical_after = static_cast<double>(i + 1) / n;
-        
-        // Maximum difference at this point
-        double diff1 = std::abs(F_empirical_before - F_theoretical);
-        double diff2 = std::abs(F_empirical_after - F_theoretical);
-        
-        max_diff = std::max(max_diff, std::max(diff1, diff2));
-    }
-    
-    // Critical value for the KS test
-    // Using the asymptotic approximation for large samples
-    double c_alpha;
-    
-    // Common critical values for one-sample KS test
-    if (std::abs(alpha - 0.05) < 1e-6) {
-        c_alpha = 1.36;  // For alpha = 0.05
-    } else if (std::abs(alpha - 0.10) < 1e-6) {
-        c_alpha = 1.22;  // For alpha = 0.10
-    } else if (std::abs(alpha - 0.20) < 1e-6) {
-        c_alpha = 1.07;  // For alpha = 0.20
-    } else if (std::abs(alpha - 0.30) < 1e-6) {
-        c_alpha = 0.97;  // For alpha = 0.30
-    } else if (std::abs(alpha - 0.40) < 1e-6) {
-        c_alpha = 0.89;  // For alpha = 0.40
-    } else if (std::abs(alpha - 0.50) < 1e-6) {
-        c_alpha = 0.83;  // For alpha = 0.50
-    } else {
-        // General approximation using inverse of Kolmogorov distribution
-        // For other alpha values, use linear interpolation or approximation
-        c_alpha = std::sqrt(-0.5 * std::log(alpha / 2.0));
-    }
-    
-    std::cout << "c_alpha: " << c_alpha  << "\n";
-    // Critical value adjusted for sample size
-    double critical_value = c_alpha / std::sqrt(n);
-    std::cout << "max_diff: " << max_diff  << "critical_value: " << critical_value << "\n";
-    std::cout << "difference: " << max_diff - critical_value << "\n";
-    
-    return max_diff <= critical_value;
-}
-
-// Perform Two-Sample Kolmogorov-Smirnov Test
-bool ks_test_2(const std::vector<double> & expected, const std::vector<double> & actual, double alpha = 0.1){
-    EDF aEDF(expected);
-    EDF eEDF(actual);
-
-    double n = static_cast<double>(expected.size());
-    double m = static_cast<double>(actual.size());
-
-    // For continuous distributions, we need to check at all unique values
-    std::vector<double> all_values;
-    all_values.reserve(expected.size() + actual.size());
-    all_values.insert(all_values.end(), expected.begin(), expected.end());
-    all_values.insert(all_values.end(), actual.begin(), actual.end());
-    std::sort(all_values.begin(), all_values.end());
-    auto last = std::unique(all_values.begin(), all_values.end());
-    all_values.erase(last, all_values.end());
-
-    // Calculate the statistical value: the maximum difference between the two EDF functions
-    double d = 0.0;
-    for(const auto& x : all_values) {
-        d = std::max(d, std::abs(aEDF(x) - eEDF(x)));
-    }
-
-    // calculating the critical value
-    double c_alpha = std::sqrt(-std::log(alpha / 2) * 0.5);
-    double cv = std::sqrt((n + m) / ( n * m)) * c_alpha;
-
-    return d <= cv; // <= because we reject if d > cv
-}
 
 template <typename DataType>
 class DataGeneratorBoundedTest : public ::TestWithParam<BoundedTupleType>
@@ -1216,7 +1060,6 @@ public:
         }
 
         // Use skewness and kurtosis to verify normal distribution
-        // Adjust tolerances based on data type precision
         const auto total_bits = getDataSignBits<DataType>() + getDataExponentBits<DataType>() 
                               + getDataMantissaBits<DataType>();
         
