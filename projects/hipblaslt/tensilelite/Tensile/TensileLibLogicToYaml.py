@@ -298,29 +298,27 @@ def writeToTensileYamlFile(tensileYamlFile: str, tensileYamlData: str) -> Option
 def TensileLibLogicToYaml(
     logicFilePath: str, solutionIndex: int, tensileYamlFile: str, skipMI: bool
 ) -> Optional[str]:
-    """
-    Generate config from a library logic.
+    """Generate config from a library logic.
 
-    This function generates a config yaml by extracting a solution from a given library
+    This function generates a config yaml by extracting a solution from a given a library
     logic and a solution index.
 
-    Input:
-    :param logicFilePath: String. Yaml format file. Input library logic to extract from.
-    :param solutionIndex: Int. Solution index to extract solution from the library.
-    :param tensileYamlFile: String. Config yaml file name. Creates the dir if path is given.
-    :param skipMI: Bool. If False ignores the MI instruction.
+    Args:
+        logicFilePath: Yaml format file. Input library logic to extract from.
+        solutionIndex: Solution index to extract solution from the library.
+        tensileYamlFile: Config yaml file name. Creates the dir if path is given.
+        skipMI: If False ignores the MI instruction.
 
-    Output:
-    String or None. If the config file is generetaed return the name otherwise None.
+    Returns:
+        If generated the config file name otherwise None.
 
     Raises:
-    RuntimeError
-        If logicFilePath cannot be read
-        If solutionIndex is not in the logicFilePath
-        If tensileYamlFile string is empty or name is not valid
+        RuntimeError: If logicFilePath cannot be read.
+        RuntimeError: If solutionIndex is not in the logicFilePath.
+        RuntimeError: If tensileYamlFile string is empty or name is not valid.
 
     Example:
-    TensileLibLogicToYaml("gfx950_Cijk_Alik_Bljk_BSS_BH_BiasS_HAS_SAV_UserArgs.yaml", 0, "config.yaml", False)
+        TensileLibLogicToYaml("gfx950_Cijk_Alik_Bljk_BSS_BH_BiasS_HAS_SAV_UserArgs.yaml", 0, "config.yaml", False)
     """
 
     tPrint(1, "")

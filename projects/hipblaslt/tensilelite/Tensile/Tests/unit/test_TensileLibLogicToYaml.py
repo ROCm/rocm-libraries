@@ -29,15 +29,8 @@ import os
 import tempfile
 import subprocess
 import filecmp
+
 from Tensile import TensileLibLogicToYaml
-
-
-parentDir = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..")
-)
-sys.path.append(parentDir)
-from Tensile import TensileLibLogicToYamlRunner
-
 
 # Test data
 VALID_LIBLOGIC_FILE_CONTENT = """
