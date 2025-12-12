@@ -27,59 +27,14 @@
 #include <hipfft/hipfft.h>
 #include <hipfft/hipfftXt.h>
 
+#include "sample_utils.hpp"
+
 DISABLE_WARNING_PUSH
 DISABLE_WARNING_DEPRECATED_DECLARATIONS
 DISABLE_WARNING_RETURN_TYPE
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
 
-void sneaky(std::vector<std::complex<double>> &cinput,
-            const int Nx, const int Ny, const int direction)
-{
-    hipError_t           hip_rt;
-    hipfftDoubleComplex* x;
-
-    using ArrayType = typename std::remove_reference<decltype(cinput)>::type;
-    using ValueType = typename std::remove_extent<ArrayType>::type;
-    size_t complex_bytes = sizeof(ValueType) * cinput.size();
-    
-    //size_t complex_bytes = sizeof(std::remove_extent<decltype(std::remove_reference<cinput>)::value_type>) * cinput.size();
-
-    
-    hip_rt = hipMalloc(&x, complex_bytes);
-    if(hip_rt != hipSuccess)
-        throw std::runtime_error("hipMalloc failed");
-    hip_rt = hipMemcpy(x, cinput.data(), complex_bytes, hipMemcpyHostToDevice);
-    if(hip_rt != hipSuccess)
-        throw std::runtime_error("hipMemcpy failed");
-    hipfftHandle plan{};
-    hipfftResult hipfft_rt = hipfftCreate(&plan);
-    if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftCreate failed");
-
-    hipfft_rt = hipfftPlan2d(&plan, // plan handle
-                             Nx, // transform length
-                             Ny, // transform length
-                             HIPFFT_Z2Z); // transform type (HIPFFT_C2C for single-precision)
-    if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftPlan2d failed");
-    hipfft_rt = hipfftExecZ2Z(plan, x, x, -direction);
-    if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("hipfftExecZ2Z failed");
-    hip_rt = hipMemcpy(cinput.data(), x, complex_bytes, hipMemcpyDeviceToHost);
-    if(hip_rt != hipSuccess)
-        throw std::runtime_error("hipMemcpy failed");
-
-    double norm = 1.0 / (Nx * Ny);
-    for(auto &val : cinput)
-        val *= norm;
-        
-    hipfftDestroy(plan);
-
-    hip_rt = hipFree(x);
-    if(hip_rt != hipSuccess)
-        throw std::runtime_error("hipFree failed");
-}
 
 int main()
 {
@@ -124,26 +79,8 @@ int main()
     }
 
     std::cout << "Input:\n";
-    for(int xidx = 0; xidx < Nx; ++xidx)
-    {
-        if(xidx > printlimit)
-        {
-            std::cout << "...\n";
-            xidx = Nx - 1;
-        }
-        for(int yidx = 0; yidx < Ny; ++yidx)
-        {
-            if(yidx > printlimit)
-            {
-                std::cout << "... ";
-                yidx = Ny - 1;
-            }
-            int pos = xidx * Ny + yidx;
-            std::cout << cinput[pos] << " ";
-        }
-        std::cout << "\n";
-    }
-
+    printarraylimit(cinput, Nx, Ny, printlimit);
+    std::cout << "\n";
         
     hipfftHandle plan;
     if(hipfftCreate(&plan) != HIPFFT_SUCCESS)
@@ -216,25 +153,7 @@ int main()
         {
             throw std::runtime_error("hipMemcpy failed.");
         }
-        for(int xidx = 0; xidx < Nxmax; ++xidx)
-        {
-            if(xidx > printlimit)
-            {
-                std::cout << "...\n";
-                xidx = Nxmax - 1;
-            }
-            for(int yidx = 0; yidx < Nymax; ++yidx)
-            {
-                if(yidx > printlimit)
-                {
-                    std::cout << "... ";
-                    yidx = Nymax - 1;
-                }
-                int pos = xidx * Nymax + yidx;
-                std::cout << hbuf[pos] << " ";
-            }
-            std::cout << "\n";
-        }
+        printarraylimit(hbuf, Nxmax, Nymax, printlimit);
         std::cout << "\n";
     }
 
@@ -243,7 +162,7 @@ int main()
     // Sneakily do a reverse FFT so that we can get identifiable data
     if(true)
     {
-        sneaky(cinput, Nx, Ny, direction);
+        sneakyc2c(cinput, Nx, Ny, direction);
         hipfft_rt = hipfftXtMemcpy(plan,
                                    reinterpret_cast<void*>(inoutdesc),
                                    reinterpret_cast<void*>(cinput.data()),
@@ -283,26 +202,7 @@ int main()
         {
             throw std::runtime_error("hipMemcpy failed.");
         }
-        for(int xidx = 0; xidx < Nxmax; ++xidx)
-        {
-            if(xidx > printlimit)
-            {
-                std::cout << "...\n";
-                xidx = Nxmax - 1;
-            }
-
-            for(int yidx = 0; yidx < Nymax; ++yidx)
-            {
-                if(yidx > printlimit)
-                {
-                    std::cout << "... ";
-                    yidx = Nymax - 1;
-                }
-                int pos = xidx * Nymax + yidx;
-                std::cout << hbuf[pos] << " ";
-            }
-            std::cout << "\n";
-        }
+        printarraylimit(hbuf, Nxmax, Nymax, printlimit);
         std::cout << "\n";
     }
 
@@ -317,25 +217,7 @@ int main()
         throw std::runtime_error("hipfftXtMemcpy D2H failed.");
 
     std::cout << "Collected output:\n";
-    for(size_t xidx = 0; xidx < Nx; ++xidx)
-    {
-        if(xidx > printlimit)
-        {
-            std::cout << "...\n";
-            xidx = Nx - 1;
-        }
-        for(size_t yidx = 0; yidx < Ny; ++yidx)
-        {
-            if(yidx > printlimit)
-            {
-                std::cout << "... ";
-                yidx = Ny - 1;
-            }
-            auto pos = xidx * Ny + yidx;
-            std::cout << cinput[pos] << " ";
-        }
-        std::cout << "\n";
-    }
+    printarraylimit(cinput, Nx, Ny, printlimit);
     std::cout << std::endl;
 
     // Clean up

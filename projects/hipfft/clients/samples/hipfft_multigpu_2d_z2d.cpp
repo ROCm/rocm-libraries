@@ -37,7 +37,7 @@ DISABLE_WARNING_POP
 
 int main()
 {
-    std::cout << "Multi-gpu hipFFT in-place 2D double-precision real-to-complex transform\n";
+    std::cout << "Multi-gpu hipFFT in-place 2D double-precision complex-to-real transform\n";
 
     // 2D FFTs are encountered in diverse applications of image processing,
     // examples range from image denoising to RTM seismic imaging.
@@ -48,13 +48,12 @@ int main()
     // for single precision, and 2048 for double precision.
     const int  Nx              = 32;
     const int  Ny              = 32;
-    int        direction       = HIPFFT_FORWARD; // forward=-1, backward=1
-    hipfftType transform_type  = HIPFFT_D2Z;     // double to std::complex<double>
-    hipfftXtSubFormat_t format = HIPFFT_XT_FORMAT_INPLACE;
+    int        direction       = HIPFFT_BACKWARD; // forward=-1, backward=1
+    hipfftType transform_type  = HIPFFT_Z2D;     // std::complex<double> to double
+    hipfftXtSubFormat_t format = HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
     size_t     ngpus           = 2;
 
-
-    const size_t Nyp = Ny / 2 + 1;
+    const int Nyp = Ny / 2 + 1;
     
     // We only want to print a subset of the data:
     const int printlimit = 8;
@@ -71,18 +70,22 @@ int main()
     std::cout << "\n";
 
     // Initialize reference data
-    std::vector<double> rinput(Nx * (Ny + 2)); 
+    std::vector<std::complex<double>> cinput(Nx * Nyp);
     for(size_t xidx = 0; xidx < Nx; ++xidx)
     {
-        for(size_t yidx = 0; yidx < Ny; ++yidx)
+        for(size_t yidx = 0; yidx < Nyp; ++yidx)
         {
-            const size_t pos = xidx * (Ny + 2) + yidx;
-            rinput[pos] = xidx * Nx + yidx;
+            cinput[xidx * Nyp + yidx] = std::complex<double>(xidx,yidx);
         }
     }
 
+    // Impost Hermitian symmetry:
+    hsymmetrize(cinput, Nx, Ny);
+
+    sneakyc2r(cinput, Nx, Ny);
+    
     std::cout << "Input:\n";
-    printarraylimit(rinput, Nx, Ny + 2, printlimit);
+    printarraylimit(cinput, Nx, Nyp, printlimit);
     std::cout << "\n";
         
     hipfftHandle plan;
@@ -124,7 +127,7 @@ int main()
     for(size_t idx = 0; idx < ngpus; ++idx)
     {
         const size_t vsize
-            = inoutdesc->descriptor->size[idx] / sizeof(decltype(rinput)::value_type);
+            = inoutdesc->descriptor->size[idx] / sizeof(decltype(cinput)::value_type);
         std::cout << "\tbuffer " << idx << ": " << inoutdesc->descriptor->size[idx] << " bytes, "
                   << vsize << " values\n";
     }
@@ -132,7 +135,7 @@ int main()
 
     hipfft_rt = hipfftXtMemcpy(plan,
                                reinterpret_cast<void*>(inoutdesc),
-                               reinterpret_cast<void*>(rinput.data()),
+                               reinterpret_cast<void*>(cinput.data()),
                                HIPFFT_COPY_HOST_TO_DEVICE);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftXtMemcpy failed withd code " + std::to_string(hipfft_rt));
@@ -140,11 +143,11 @@ int main()
     std::cout << "Distributed input data on the GPUs:\n";
     for(size_t idx = 0; idx < ngpus; ++idx)
     {
-        const int Nxmax = Nx / ngpus + ((idx < Nx % ngpus) ? 1 : 0);
-        const int Nymax = Ny + 2;
+        const int Nxmax = Nx;
+        const int Nymax = Nyp  / ngpus  + ((idx < Nyp % ngpus) ? 1 : 0);
         const size_t vsize
-            = inoutdesc->descriptor->size[idx] / sizeof(decltype(rinput)::value_type);
-        std::vector<decltype(rinput)::value_type> hbuf(vsize);
+            = inoutdesc->descriptor->size[idx] / sizeof(decltype(cinput)::value_type);
+        std::vector<decltype(cinput)::value_type> hbuf(vsize);
         std::cout << "buffer " << idx << ": "
                   << Nxmax << " x " << Nymax << ": "
                   << Nxmax * Nymax <<" elements, buffer holds " << vsize << " elements\n";;
@@ -163,7 +166,8 @@ int main()
         {
             for(size_t hidx = 0; hidx < hbuf.size(); ++ hidx)
             {
-                //std::cout << hidx << "\t" << hbuf[hidx] << "\t" << (hbuf[hidx] - hidx) << "\n";
+                // std::cout << hidx << "\t" << hbuf[hidx] << "\t" //<< (hbuf[hidx] - hidx)
+                //           << "\n";
             }
         }
         std::cout << "\n";
@@ -177,22 +181,22 @@ int main()
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftXtExecDescriptor failed.");
 
-    std::cout << "inoutdesc->subFormat: " << inoutdesc->subFormat << "\n";
+    std::cout << "inoutdesc->subFormat: " << inoutdesc->subFormat << "\n\n";
 
-    std::vector<std::complex<double>> coutput(Nx * Nyp);
+    std::vector<double> routput(Nx * (Ny + 2));
     
     std::cout << "Distributed output data on the GPUs:\n";
     for(size_t idx = 0; idx < ngpus; ++idx)
     {
-        const int Nxmax = Nx;
-        const int Nymax = Nyp / ngpus + ((idx < Nyp % ngpus) ? 1 : 0);
+        const int Nxmax = Nx / ngpus + ((idx < Nx % ngpus) ? 1 : 0);
+        const int Nymax = Ny;
         std::cout << "buffer " << idx << ": "
                   << Nxmax << " x " << Nymax << ": "
                   << Nxmax * Nymax <<" elements\n";
         const size_t vsize
-            = inoutdesc->descriptor->size[idx] / sizeof(decltype(coutput)::value_type);
+            = inoutdesc->descriptor->size[idx] / sizeof(decltype(routput)::value_type);
 
-        std::vector<decltype(coutput)::value_type> hbuf(vsize);
+        std::vector<decltype(routput)::value_type> hbuf(vsize);
         if(hipMemcpy(hbuf.data(),
                      inoutdesc->descriptor->data[idx],
                      inoutdesc->descriptor->size[idx],
@@ -203,18 +207,28 @@ int main()
         }
         printarraylimit(hbuf, Nxmax, Nymax, printlimit);
         std::cout << "\n";
+
+        if(idx == 0)
+        {
+            for(size_t hidx = 0; hidx < hbuf.size(); ++ hidx)
+            {
+                std::cout << hidx << "\t" << hbuf[hidx] << "\t" //<< (hbuf[hidx] - hidx)
+                          << "\n";
+            }
+        }
+        std::cout << "\n";
     }
     
     // Move result to the host
     hipfft_rt = hipfftXtMemcpy(plan,
-                               reinterpret_cast<void*>(coutput.data()),
+                               reinterpret_cast<void*>(routput.data()),
                                reinterpret_cast<void*>(inoutdesc),
                                HIPFFT_COPY_DEVICE_TO_HOST);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftXtMemcpy D2H failed.");
 
     std::cout << "Collected output:\n";
-    printarraylimit(coutput, Nx, Nyp, printlimit);
+    printarraylimit(routput, Nx, Ny + 2, printlimit);
     
     // Clean up
     if(hipfftXtFree(inoutdesc) != HIPFFT_SUCCESS)

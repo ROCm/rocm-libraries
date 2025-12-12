@@ -42,6 +42,8 @@ set( sample_list
   hipfft_planmany_2d_r2c
   hipfft_multigpu_2d_z2z
   hipfft_multigpu_2d_d2z
+  hipfft_multigpu_2d_z2d
+  hipfft_multigpu_3d_d2z
   hipfft_setworkarea
   )
 
