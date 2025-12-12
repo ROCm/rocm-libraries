@@ -181,10 +181,10 @@ size_t GemmBwd1x1_stride2::GetWorkspaceSize(const ExecutionContext& context,
     const auto dy_t_size  = dyDesc.GetElementSize() * GetTypeSize(dyDesc.GetType());
     const auto gemm_trans = dx_t_size + dy_t_size;
 
-    if(gemm_trans > gemm::MaxMemAllocSz(handle, problem))
+    if(gemm_trans > handle.GetMaxMemoryAllocSize())
     {
         MIOPEN_LOG_I2("GemmBwd1x1_stride2: " << gemm_trans << " > "
-                                             << gemm::MaxMemAllocSz(handle, problem));
+                                             << handle.GetMaxMemoryAllocSize());
         return 0;
     }
     return gemm_trans;
@@ -568,10 +568,9 @@ size_t GemmBwdRest::GetWorkspaceSize(const ExecutionContext& context,
                                            std::multiplies<std::size_t>()) *
                            GetTypeSize(dyDesc.GetType()) * conv.group_count;
 
-    if(gemm_size > gemm::MaxMemAllocSz(handle, problem, true))
+    if(gemm_size > handle.GetMaxMemoryAllocSize())
     {
-        MIOPEN_LOG_I2("GemmBwdRest: " << gemm_size << " > "
-                                      << gemm::MaxMemAllocSz(handle, problem, true));
+        MIOPEN_LOG_I2("GemmBwdRest: " << gemm_size << " > " << handle.GetMaxMemoryAllocSize());
         return 0;
     }
     return gemm_size;

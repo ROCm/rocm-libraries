@@ -522,7 +522,7 @@ std::unique_ptr<TreeNode> NodeFactory::CreateExplicitNode(NodeMetaData& nodeData
             throw std::runtime_error("solution map error for L1D sub-problem");
     }
 
-    // createing tree without solution map, must call DecideNodeScheme
+    // creating tree without solution map, must call DecideNodeScheme
     if(determined_scheme == CS_NONE)
         determined_scheme = DecideNodeScheme(pool, nodeData, parent);
 
@@ -699,7 +699,7 @@ ComputeScheme
             // get largest pow2 1D length
             auto largest = pool.get_largest_pow2_length(nodeData.precision);
 
-            // need to ignore len 1, or we're going into a infinity decompostion loop
+            // need to ignore len 1, or we're going into a infinity decomposition loop
             // basically not gonna happen unless someone builds only a len1 kernel...
             if(largest <= 1)
             {
@@ -775,11 +775,11 @@ ComputeScheme
                 if(divLength1 == 0)
                 {
                     // We need to recurse.  Note, for CS_L1D_TRTRT,
-                    // divLength0 has to be explictly supported
+                    // divLength0 has to be explicitly supported
                     auto divLength0 = get_largest_supported_factor(
                         pool, nodeData.precision, nodeData.length[0]);
 
-                    // should ignore factor 1 or we're going into a infinity decompostion loop,
+                    // should ignore factor 1 or we're going into a infinity decomposition loop,
                     // (an example is to run len-81 when we build only pow2 kernels, we'll be here)
                     divLength1 = (divLength0 <= 1) ? 0 : nodeData.length[0] / divLength0;
                 }

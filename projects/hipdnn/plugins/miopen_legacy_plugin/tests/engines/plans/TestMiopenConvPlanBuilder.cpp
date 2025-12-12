@@ -149,6 +149,19 @@ TEST_F(TestMiopenConvPlanBuilder, BuildPlanThrowsForUnsupportedGraph)
     EXPECT_FALSE(ctx.hasValidPlan());
 }
 
+TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForUnsupportedComputeType)
+{
+    flatbuffers::FlatBufferBuilder builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+
+    auto mutableGraph = hipdnn_sdk::data_objects::GetMutableGraph(builder.GetBufferPointer());
+    mutableGraph->mutable_nodes()->GetMutableObject(0)->mutate_compute_data_type(
+        hipdnn_sdk::data_objects::DataType::HALF);
+
+    hipdnn_plugin::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
 TEST_F(TestGpuMiopenConvPlanBuilder, BuildPlanCreatesValidPlanForSupportedGraph)
 {
     {

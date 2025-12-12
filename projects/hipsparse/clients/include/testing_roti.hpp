@@ -86,7 +86,7 @@ void testing_roti_bad_arg(const Arguments& argus)
 }
 
 template <typename T>
-hipsparseStatus_t testing_roti(Arguments argus)
+void testing_roti(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  N        = argus.N;
@@ -227,8 +227,6 @@ hipsparseStatus_t testing_roti(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_ROTI_HPP

@@ -108,7 +108,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     //
     // arguments
     //
-    // global input/ouput buffer
+    // global input/output buffer
     Variable buf{"buf", "scalar_type", true, true};
 
     // global twiddle table (stacked)
