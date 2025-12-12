@@ -22,6 +22,7 @@
 #define ROCPRIM_DEVICE_CONFIG_TYPES_HPP_
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <limits>
 #include <optional>
@@ -172,6 +173,8 @@ enum class target_arch : unsigned int
     gfx1030 = 1030,
     gfx1100 = 1100,
     gfx1102 = 1102,
+    gfx1152 = 1152,
+    gfx1153 = 1153,
     gfx1200 = 1200,
     gfx1201 = 1201,
     unknown = std::numeric_limits<unsigned int>::max(),
@@ -203,46 +206,38 @@ constexpr bool prefix_equals(const char* lhs, const char* rhs, std::size_t n)
     return i == n && *lhs == '\0';
 }
 
-constexpr const char* target_names[] = {"gfx803",
-                                        "gfx900",
-                                        "gfx906",
-                                        "gfx908",
-                                        "gfx90a",
-                                        "gfx942",
-                                        "gfx950",
-                                        "gfx1030",
-                                        "gfx1100",
-                                        "gfx1102",
-                                        "gfx1200",
-                                        "gfx1201"};
-
-constexpr target_arch target_architectures[] = {
-    target_arch::gfx803,
-    target_arch::gfx900,
-    target_arch::gfx906,
-    target_arch::gfx908,
-    target_arch::gfx90a,
-    target_arch::gfx942,
-    target_arch::gfx950,
-    target_arch::gfx1030,
-    target_arch::gfx1100,
-    target_arch::gfx1102,
-    target_arch::gfx1200,
-    target_arch::gfx1201,
+struct target_arch_descriptor
+{
+    target_arch arch;
+    const char *arch_name;
 };
+
+#define X(ID) target_arch_descriptor{target_arch::ID, #ID}
+constexpr auto target_arch_descriptors = std::array{
+    X(gfx803),
+    X(gfx900),
+    X(gfx906),
+    X(gfx908),
+    X(gfx90a),
+    X(gfx942),
+    X(gfx950),
+    X(gfx1030),
+    X(gfx1100),
+    X(gfx1102),
+    X(gfx1152),
+    X(gfx1153),
+    X(gfx1200),
+    X(gfx1201),
+};
+#undef X
 
 constexpr target_arch get_target_arch_from_name(const char* const arch_name, const std::size_t n)
 {
-    static_assert(sizeof(target_names) / sizeof(target_names[0])
-                      == sizeof(target_architectures) / sizeof(target_architectures[0]),
-                  "target_names and target_architectures should have the same number of elements");
-    constexpr auto num_architectures = sizeof(target_names) / sizeof(target_names[0]);
-
-    for(unsigned int i = 0; i < num_architectures; ++i)
+    for (const auto& desc : target_arch_descriptors)
     {
-        if(prefix_equals(target_names[i], arch_name, n))
+        if(prefix_equals(desc.arch_name, arch_name, n))
         {
-            return target_architectures[i];
+            return desc.arch;
         }
     }
     return target_arch::unknown;
@@ -251,14 +246,14 @@ constexpr target_arch get_target_arch_from_name(const char* const arch_name, con
 template<class F, std::size_t... Is>
 constexpr void for_each_arch_impl(F&& f, std::index_sequence<Is...>)
 {
-    (f(std::integral_constant<target_arch, target_architectures[Is]>{}), ...);
+    (f(std::integral_constant<target_arch, target_arch_descriptors[Is].arch>{}), ...);
 }
 
 template<class F>
 constexpr void for_each_arch(F&& f)
 {
     for_each_arch_impl(std::forward<F>(f),
-                       std::make_index_sequence<std::size(target_architectures)>{});
+                       std::make_index_sequence<std::size(target_arch_descriptors)>{});
 }
 
 constexpr arch::wavefront::target arch_wavefront_size(const target_arch target_arch)
@@ -276,6 +271,8 @@ constexpr arch::wavefront::target arch_wavefront_size(const target_arch target_a
         case target_arch::gfx1030: return arch::wavefront::target::size32;
         case target_arch::gfx1100: return arch::wavefront::target::size32;
         case target_arch::gfx1102: return arch::wavefront::target::size32;
+        case target_arch::gfx1152: return arch::wavefront::target::size32;
+        case target_arch::gfx1153: return arch::wavefront::target::size32;
         case target_arch::gfx1200: return arch::wavefront::target::size32;
         case target_arch::gfx1201: return arch::wavefront::target::size32;
 
@@ -493,35 +490,26 @@ auto dispatch_target_arch([[maybe_unused]] const target_arch target_arch)
     {
         switch(target_arch)
         {
-
-            case target_arch::unknown:
-                return Config::template architecture_config<target_arch::unknown>::params;
-            case target_arch::gfx803:
-                return Config::template architecture_config<target_arch::gfx803>::params;
-            case target_arch::gfx900:
-                return Config::template architecture_config<target_arch::gfx900>::params;
-            case target_arch::gfx906:
-                return Config::template architecture_config<target_arch::gfx906>::params;
-            case target_arch::gfx908:
-                return Config::template architecture_config<target_arch::gfx908>::params;
-            case target_arch::gfx90a:
-                return Config::template architecture_config<target_arch::gfx90a>::params;
-            case target_arch::gfx942:
-                return Config::template architecture_config<target_arch::gfx942>::params;
-            case target_arch::gfx950:
-                return Config::template architecture_config<target_arch::gfx950>::params;
-            case target_arch::gfx1030:
-                return Config::template architecture_config<target_arch::gfx1030>::params;
-            case target_arch::gfx1100:
-                return Config::template architecture_config<target_arch::gfx1100>::params;
-            case target_arch::gfx1102:
-                return Config::template architecture_config<target_arch::gfx1102>::params;
-            case target_arch::gfx1200:
-                return Config::template architecture_config<target_arch::gfx1200>::params;
-            case target_arch::gfx1201:
-                return Config::template architecture_config<target_arch::gfx1201>::params;
-            case target_arch::invalid:
-                assert(false && "Invalid target architecture selected at runtime.");
+        case target_arch::invalid:
+            assert(false && "Invalid target architecture selected at runtime.");
+            break;
+#define X(ID) case target_arch::ID: return Config::template architecture_config<target_arch::ID>::params
+            X(unknown);
+            X(gfx803);
+            X(gfx900);
+            X(gfx906);
+            X(gfx908);
+            X(gfx90a);
+            X(gfx942);
+            X(gfx950);
+            X(gfx1030);
+            X(gfx1100);
+            X(gfx1102);
+            X(gfx1152);
+            X(gfx1153);
+            X(gfx1200);
+            X(gfx1201);
+#undef X
         }
     }
     return Config::template architecture_config<target_arch::unknown>::params;
