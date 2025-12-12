@@ -6,11 +6,11 @@
 #include <unordered_map>
 
 #include <hipdnn_frontend.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceBatchnorm.hpp>
-#include <hipdnn_sdk/test_utilities/CpuFpReferenceValidation.hpp>
-#include <hipdnn_sdk/test_utilities/TestTolerances.hpp>
 #include <hipdnn_sdk/utilities/Constants.hpp>
 #include <hipdnn_sdk/utilities/Tensor.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
 
@@ -189,7 +189,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
             utilities::Tensor<IntermediateType> nextMeanRefTensor(nextRunningMean->get_dim());
             utilities::Tensor<IntermediateType> nextVarRefTensor(nextRunningVariance->get_dim());
 
-            test_utilities::CpuFpReferenceBatchnorm::fwdTraining<
+            hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::fwdTraining<
                 InputType, // XDataType
                 IntermediateType, // ScaleBiasDataType
                 IntermediateType, // MeanVarianceDataType
@@ -208,11 +208,14 @@ void SampleRunner::operator()(const TensorLayout& layout)
                   &nextVarRefTensor // used
             );
 
-            auto tolerance = test_utilities::batchnorm::getToleranceTraining<InputType>();
-            auto yValidator
-                = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
-            auto statsValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
-                static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
+            auto tolerance
+                = hipdnn_test_sdk::utilities::batchnorm::getToleranceTraining<InputType>();
+            auto yValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
+                tolerance, tolerance);
+            auto statsValidator
+                = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
+                    static_cast<IntermediateType>(tolerance),
+                    static_cast<IntermediateType>(tolerance));
 
             bool yValid = yValidator.allClose(yRefTensor, yTensor);
             bool meanValid = statsValidator.allClose(savedMeanRefTensor, savedMeanTensor);
@@ -232,7 +235,7 @@ void SampleRunner::operator()(const TensorLayout& layout)
         else
         {
             // BATCH_STATS_ONLY mode validation
-            test_utilities::CpuFpReferenceBatchnorm::fwdTraining<
+            hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::fwdTraining<
                 InputType, // XDataType
                 IntermediateType, // ScaleBiasDataType
                 IntermediateType, // MeanVarianceDataType
@@ -251,11 +254,14 @@ void SampleRunner::operator()(const TensorLayout& layout)
                   nullptr // nextRunningVariance (not used)
             );
 
-            auto tolerance = test_utilities::batchnorm::getToleranceTraining<InputType>();
-            auto yValidator
-                = test_utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
-            auto statsValidator = test_utilities::CpuFpReferenceValidation<IntermediateType>(
-                static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
+            auto tolerance
+                = hipdnn_test_sdk::utilities::batchnorm::getToleranceTraining<InputType>();
+            auto yValidator = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(
+                tolerance, tolerance);
+            auto statsValidator
+                = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
+                    static_cast<IntermediateType>(tolerance),
+                    static_cast<IntermediateType>(tolerance));
 
             bool yValid = yValidator.allClose(yRefTensor, yTensor);
             bool meanValid = statsValidator.allClose(savedMeanRefTensor, savedMeanTensor);
