@@ -107,8 +107,8 @@ public:
         auto shallowDbiasTensor = createShallowTensor<ScaleBiasDataType>(
             _params.dbiasTensor, variantPack.at(_params.dbiasTensor.uid));
 
-        std::unique_ptr<utilities::TensorBase<MeanVarianceDataType>> shallowMeanTensor;
-        std::unique_ptr<utilities::TensorBase<MeanVarianceDataType>> shallowInvVarianceTensor;
+        std::unique_ptr<hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>> shallowMeanTensor;
+        std::unique_ptr<hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>> shallowInvVarianceTensor;
         if(_params.meanTensor.has_value() && _params.invVarianceTensor.has_value())
         {
             shallowMeanTensor = createShallowTensor<MeanVarianceDataType>(

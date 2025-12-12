@@ -357,14 +357,14 @@ public:
               class MeanVarianceDataType = ScaleBiasDataType,
               class DxDataType = XDataType,
               class ComputeDataType = MeanVarianceDataType>
-    static void backward(const utilities::TensorBase<DyDataType>& dy,
-                         const utilities::TensorBase<XDataType>& x,
-                         const utilities::TensorBase<MeanVarianceDataType>& mean,
-                         const utilities::TensorBase<MeanVarianceDataType>& invVariance,
-                         const utilities::TensorBase<ScaleBiasDataType>& scale,
-                         utilities::TensorBase<DxDataType>& dx,
-                         utilities::TensorBase<ScaleBiasDataType>& dscale,
-                         utilities::TensorBase<ScaleBiasDataType>& dbias)
+    static void backward(const hipdnn_sdk::utilities::TensorBase<DyDataType>& dy,
+                         const hipdnn_sdk::utilities::TensorBase<XDataType>& x,
+                         const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& mean,
+                         const hipdnn_sdk::utilities::TensorBase<MeanVarianceDataType>& invVariance,
+                         const hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
+                         hipdnn_sdk::utilities::TensorBase<DxDataType>& dx,
+                         hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& dscale,
+                         hipdnn_sdk::utilities::TensorBase<ScaleBiasDataType>& dbias)
     {
         backward<DyDataType,
                  XDataType,
