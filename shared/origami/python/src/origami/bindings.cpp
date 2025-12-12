@@ -238,12 +238,6 @@ NB_MODULE(origami, m) {
   m.def("check_lds_capacity",
         &origami::check_lds_capacity,
         "Check if MT fits in LDS");
-  m.def("compute_A_loads",
-        &origami::compute_A_loads,
-        "Compute the amount of data loaded from A");
-  m.def("compute_B_loads",
-        &origami::compute_B_loads,
-        "Compute the amount of data loaded from B");
   m.def("estimate_l2_hit",
         &origami::estimate_l2_hit,
         "Estimate L2 hit rate");

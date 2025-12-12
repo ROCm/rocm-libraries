@@ -29,10 +29,20 @@ test = [
 wheel.packages = ["src/origami"]
 cmake.version = ">=3.15"
 build.verbose = true
+# CMake source directory - use current directory (python/) which contains CMakeLists.txt
+# The python/CMakeLists.txt will automatically build origami from parent directory
+cmake.source-dir = "."
+# CMake minimum version required
+cmake.minimum-version = "3.15"
+# CMake arguments
+# CMAKE_PREFIX_PATH and CMAKE_CXX_COMPILER should be set via environment variables
+# or passed via CMAKE_ARGS environment variable
 cmake.args = [
     "-DCMAKE_BUILD_TYPE=Release",
-    "-G", "Ninja",
 ]
+# CMake defines - these can be overridden via environment
+# ROCM_PATH will be detected automatically by python/CMakeLists.txt
+cmake.define = { }
 sdist.exclude = [
     "../../*",
     "../*",

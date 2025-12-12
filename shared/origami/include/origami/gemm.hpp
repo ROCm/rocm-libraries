@@ -79,23 +79,6 @@ bool check_lds_capacity(const hardware_t& hardware,
                         data_type_t a_dtype,
                         data_type_t b_dtype);
 
-/**
- * @brief Compute the amount of data loaded from A to produce a MT_MxMT_NxMT_K tile.
- *
- * @param MT_M Macro tile dimension M
- * @param MT_K Macro tile dimension K
- * @return size_t Amount of data loaded from A
- */
-size_t compute_A_loads(size_t MT_M, size_t MT_K);
-
-/**
- * @brief Compute the amount of data loaded from B to produce a MT_MxMT_NxMT_K tile.
- *
- * @param MT_N Macro tile dimension N
- * @param MT_K Macro tile dimension K
- * @return size_t Amount of data loaded from B
- */
-size_t compute_B_loads(size_t MT_N, size_t MT_K);
 
 /**
  * @brief A linear-estimation method for estimating L2-hitrate.
