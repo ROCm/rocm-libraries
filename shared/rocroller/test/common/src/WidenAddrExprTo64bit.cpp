@@ -61,8 +61,8 @@ namespace rocRollerTest
                     return convert(expr.destinationType, cpy.arg);
                 else
                 {
-                    AssertFatal(false,
-                                "Expected Destination type for a convert is either (u)int{32,64}");
+                    Throw<FatalError>(
+                        "Expected Destination type for a convert is either (u)int{32,64}");
                     return nullptr;
                 }
             }
@@ -85,7 +85,7 @@ namespace rocRollerTest
         Expression::ExpressionPtr operator()(Expr const& expr) const
         {
             // Only Expression::Convert and perhaps negates are expected.
-            AssertFatal(false, "Unexpected Unary expression", ShowValue(expr));
+            Throw<FatalError>("Unexpected Unary expression", ShowValue(expr));
             return nullptr;
         }
 
@@ -137,13 +137,13 @@ namespace rocRollerTest
         {
             if constexpr(std::same_as<Expr, Expression::Subtract>)
             {
-                AssertFatal(false, "Subtracts are not expected");
+                Throw<FatalError>("Subtracts are not expected");
                 return nullptr;
             }
 
             if constexpr(Expression::CLogical<Expr>)
             {
-                AssertFatal(false, "logicals are not expected");
+                Throw<FatalError>("logicals are not expected");
                 return nullptr;
             }
 
@@ -162,7 +162,7 @@ namespace rocRollerTest
         requires(Expression::CBinary<Expr>) Expression::ExpressionPtr
             operator()(Expr const& expr) const
         {
-            AssertFatal(false, "Not expected expr : ", ShowValue(expr));
+            Throw<FatalError>("Not expected expr : ", ShowValue(expr));
             return nullptr;
         }
 
@@ -185,7 +185,7 @@ namespace rocRollerTest
         requires(Expression::CTernary<Expr>) Expression::ExpressionPtr
             operator()(Expr const& expr) const
         {
-            AssertFatal(false, "Not expected expr : ", ShowValue(expr));
+            Throw<FatalError>("Not expected expr : ", ShowValue(expr));
             return nullptr;
         }
 
@@ -253,7 +253,7 @@ namespace rocRollerTest
 
         Expression::ExpressionPtr operator()(Expression::Expression const& expr) const
         {
-            AssertFatal(false, "No expectation to meet this type of Expression: ", ShowValue(expr));
+            Throw<FatalError>("No expectation to meet this type of Expression: ", ShowValue(expr));
             return nullptr;
         }
 

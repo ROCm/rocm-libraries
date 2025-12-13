@@ -122,7 +122,7 @@ Generator<Instruction> simple_mi(ContextPtr m_context)
     }
     else
     {
-        AssertFatal(false, concatenate("Arch not supported: ", arch.target().toString()));
+        Throw<FatalError>(concatenate("Arch not supported: ", arch.target().toString()));
     }
     auto v = createRegisters(m_context, Register::Type::Vector, DataType::Float, 4);
     while(true)
@@ -146,7 +146,7 @@ Generator<Instruction> complex_mi_with_coop(ContextPtr m_context)
     }
     else
     {
-        AssertFatal(false, concatenate("Arch not supported: ", arch.target().toString()));
+        Throw<FatalError>(concatenate("Arch not supported: ", arch.target().toString()));
     }
     auto mi_v = createRegisters(m_context, Register::Type::Vector, DataType::Float, 16);
     auto or_v = createRegisters(m_context, Register::Type::Vector, DataType::Float, 4);
@@ -216,7 +216,7 @@ CodeGenResult CodeGen(CodeGenProblem const& prob)
     }
     else
     {
-        AssertFatal(false, "Invalid instructions selection.");
+        Throw<FatalError>("Invalid instructions selection.");
     }
 
     auto Program = [&](ContextPtr m_context) -> Generator<Instruction> {

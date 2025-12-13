@@ -36,7 +36,7 @@ namespace rocRoller
         NoneCost::NoneCost(ContextPtr ctx)
             : Cost{ctx}
         {
-            AssertFatal(false, "Cannot use None cost.");
+            Throw<FatalError>("Cannot use None cost.");
         }
 
         bool NoneCost::Match(Argument arg)

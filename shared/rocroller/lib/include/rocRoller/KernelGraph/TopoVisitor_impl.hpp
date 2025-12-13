@@ -140,7 +140,7 @@ namespace rocRoller::KernelGraph
     template <typename Derived>
     void TopoControlGraphVisitor<Derived>::errorCondition(std::string const& message)
     {
-        AssertFatal(false, message);
+        Throw<FatalError>(message);
     }
 
     template <typename Derived>
