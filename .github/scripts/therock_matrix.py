@@ -26,7 +26,7 @@ subtree_to_project_map = {
     "projects/rocwmma": "rocwmma",
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
-    "shared/rocroller": "rocroller",
+    "shared/rocroller": "blas",
     "shared/tensile": "blas",
 }
 
@@ -41,7 +41,7 @@ project_map = {
     },
     "blas": {
         "cmake_options": ["-DTHEROCK_ENABLE_BLAS=ON"],
-        "project_to_test": ["hipblaslt", "rocblas", "hipblas"],
+        "project_to_test": ["hipblaslt", "rocblas", "hipblas", "rocroller"],
     },
     "miopen": {
         "cmake_options": [
@@ -93,11 +93,6 @@ additional_options = {
     "solver": {
         "cmake_options": ["-DTHEROCK_ENABLE_SOLVER=ON"],
         "project_to_test": ["rocsolver", "hipsolver"],
-        "project_to_add": "blas",
-    },
-    "rocroller": {
-        "cmake_options": [],
-        "project_to_test": ["rocroller"],
         "project_to_add": "blas",
     },
 }
