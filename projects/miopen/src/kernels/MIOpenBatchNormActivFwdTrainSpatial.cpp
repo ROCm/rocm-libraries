@@ -276,7 +276,7 @@ struct MIOpenBatchNormActivFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccum
                 nidx                = remkey / mio_bn_config::hw;
                 hwidx               = remkey - (nidx * mio_bn_config::hw);
                 index               = nidx * mio_bn_config::chw + chwid + hwidx;
-                if(index < mio_bn_config::nchw - 3)
+                if(index + 3 < mio_bn_config::nchw)
                 {
                     read4 = *(reinterpret_cast<const fp_type4*>(in + index));
                     miopen::batchnorm::_accumulate4(mean, read4);
