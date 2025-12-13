@@ -663,20 +663,20 @@ TEST_CASE("GEMM: compute_mem_bw_from_occupancy unit test", "[gemm]") {
       REQUIRE(result_different_mem_bw_per_wg_coefficients == 1.0);
 
       // Test 3: Test with values less than 1
-      hardware.mem_bw_per_wg_coefficients = std::make_tuple(-1, 0.008, -1);
+      hardware.mem_bw_per_wg_coefficients = std::make_tuple(0.000001, 0.001, 0);
       auto result_value_less_than_one =
           origami::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
       if (gpu_arch == 942)
-        REQUIRE(result_value_less_than_one == Approx(-92414.5679).epsilon(1e-3));
+        REQUIRE(result_value_less_than_one == Approx(0.3964).epsilon(1e-3));
       else if (gpu_arch == 950)
-        REQUIRE(result_value_less_than_one == Approx(-65534.9519).epsilon(1e-3));
+        REQUIRE(result_value_less_than_one == Approx(0.32153).epsilon(1e-3));
 
-      hardware.mem_bw_per_wg_coefficients = std::make_tuple(0, -1, 0);
+      hardware.mem_bw_per_wg_coefficients = std::make_tuple(0.000002, 0.002, 0);
       result_value_less_than_one = origami::compute_mem_bw_from_occupancy(hardware, hardware.N_CU);
       if (gpu_arch == 942)
-        REQUIRE(result_value_less_than_one == -304);
+        REQUIRE(result_value_less_than_one == Approx(0.7928).epsilon(1e-3));
       else if (gpu_arch == 950)
-        REQUIRE(result_value_less_than_one == -256);
+        REQUIRE(result_value_less_than_one == Approx(0.64307).epsilon(1e-3));
 
       // Reset the value of mem_bw_per_wg_coefficients back
       if (gpu_arch == 942)
@@ -773,8 +773,24 @@ TEST_CASE("GEMM: compute_cvt_overhead unit test", "[gemm]") {
       auto result_test_with_Float = origami::compute_cvt_overhead(problem_Float, hardware, config);
       REQUIRE(result_test_with_Float == 0.0);
 
-      // Test 2: Test conversion overhead calculation (TODO) (Need more clarification)
-      // Test 3: Test with different tile sizes
+      // Test 2: Test with XFloat32 as mi_dtype and BFloat16 as a_dtype and b_dtype
+      origami::problem_t problem_XFloat32 = {
+          .size            = {8097, 8001, 4096},
+          .batch           = 1,
+          .a_transpose     = origami::transpose_t::N,
+          .b_transpose     = origami::transpose_t::T,
+          .a_dtype         = origami::data_type_t::BFloat16,
+          .b_dtype         = origami::data_type_t::BFloat16,
+          .mi_dtype        = origami::data_type_t::XFloat32,
+          .a_mx_block_size = 0,
+          .b_mx_block_size = 0,
+      };
+      auto result_test_with_XFloat32 =
+          origami::compute_cvt_overhead(problem_XFloat32, hardware, config);
+      REQUIRE(result_test_with_XFloat32 == 0.0);
+
+      // Test 3: Test conversion overhead calculation (TODO) (Need more clarification)
+      // Test 4: Test with different tile sizes
       auto result_with_different_tile_sizes =
           origami::compute_cvt_overhead(problem, hardware, config);
       REQUIRE(result_test_with_Float == 0.0);
