@@ -152,14 +152,25 @@ If you have cloned the repository:
 
 ```bash
 cd shared/origami/python
-pip install --user -e .
+pip install -e .
 ```
+
+The build system uses `pyproject.toml` with scikit-build-core, which integrates with CMake for building the Python bindings.
 
 #### CMake Build (Alternative)
 
+Build Python bindings using CMake from the `shared/origami` directory:
+
 ```bash
+cd shared/origami
+
 # configure with python bindings and tests enabled 
-cmake -S . -B build/ -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ -DCMAKE_INSTALL_PREFIX=/opt/rocm -D ORIGAMI_ENABLE_PYTHON=ON -D ORIGAMI_BUILD_TESTING=ON
+cmake -S . -B build/ \
+  -DCMAKE_PREFIX_PATH=/opt/rocm \
+  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+  -DCMAKE_INSTALL_PREFIX=/opt/rocm \
+  -DORIGAMI_ENABLE_PYTHON=ON \
+  -DORIGAMI_BUILD_TESTING=ON
 
 # build 
 cmake --build build/ --parallel
@@ -171,11 +182,17 @@ ctest --output-on-failure
 
 ### Build and Install Origami (C++)
 
-Assuming you are in the repository root, run:
+Build the C++ library from the `shared/origami` directory:
 
 ```bash
+cd shared/origami
+
 # configure
-cmake -S . -B build/ -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ -DCMAKE_INSTALL_PREFIX=/opt/rocm 
+cmake -S . -B build/ \
+  -DCMAKE_PREFIX_PATH=/opt/rocm \
+  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+  -DCMAKE_INSTALL_PREFIX=/opt/rocm
+
 # build
 cmake --build build/ --parallel
 ```
@@ -200,22 +217,23 @@ cmake --install build/
 
 ## Origami Tests
 
-Use CMake to configure the build system and compile Origami with testing enabled. From origami root `<rocm-libraries-root>/shared/origami`:
-
 ```bash
+cd shared/origami
+
 cmake -S . -B build/ \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
   -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
   -DCMAKE_INSTALL_PREFIX=/opt/rocm \
-  -D ORIGAMI_BUILD_TESTING=ON -D ORIGAMI_ENABLE_PYTHON=ON
+  -DORIGAMI_BUILD_TESTING=ON
 
 cmake --build build/ --parallel
-```
 
-```bash
-cd build/
+# Run tests
 ctest --output-on-failure
 ```
+
+> [!NOTE]
+> Python tests are automatically added when `ORIGAMI_BUILD_TESTING=ON` and `ORIGAMI_ENABLE_PYTHON=ON`.
 
 ## Contribute
 
