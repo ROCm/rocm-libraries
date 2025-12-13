@@ -501,12 +501,12 @@ set(rocsparse_source
   src/precond/bsric0/rocsparse_bsric0_analysis.cpp
   src/precond/bsric0/rocsparse_bsric0_buffer_size.cpp
   src/precond/bsric0/rocsparse_bsric0_clear.cpp
-  src/precond/bsric0/rocsparse_bsric0_strided_batched_kernel.cpp
-  src/precond/bsric0/rocsparse_bsric0_strided_batched_kernel_2_8_unrolled.cpp
-  src/precond/bsric0/rocsparse_bsric0_strided_batched_kernel_2_8.cpp
-  src/precond/bsric0/rocsparse_bsric0_strided_batched_kernel_9_16.cpp
-  src/precond/bsric0/rocsparse_bsric0_strided_batched_kernel_17_32.cpp
-  src/precond/bsric0/rocsparse_bsric0_strided_batched_kernel_general.cpp
+  src/precond/bsric0/rocsparse_bsric0_kernel_launch.cpp
+  src/precond/bsric0/rocsparse_bsric0_kernel_2_8_unrolled.cpp
+  src/precond/bsric0/rocsparse_bsric0_kernel_2_8.cpp
+  src/precond/bsric0/rocsparse_bsric0_kernel_9_16.cpp
+  src/precond/bsric0/rocsparse_bsric0_kernel_17_32.cpp
+  src/precond/bsric0/rocsparse_bsric0_kernel_general.cpp
   src/precond/bsric0/rocsparse_bsric0_zero_pivot.cpp
   src/precond/bsric0/rocsparse_xbsric0.cpp
   src/precond/bsric0/rocsparse_xbsric0_analysis.cpp

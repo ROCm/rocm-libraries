@@ -111,8 +111,8 @@ namespace rocsparse
                                    descr,
                                    info);
 
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::bsric0(handle, &bsr, policy, bsric0_info, temp_buffer));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsric0(
+            handle, bsric0_info, &bsr, std::numeric_limits<size_t>::max(), temp_buffer));
 
         return rocsparse_status_success;
     }

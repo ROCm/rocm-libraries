@@ -23,7 +23,6 @@
  * ************************************************************************ */
 
 #include "rocsparse_bsric0.hpp"
-#include "rocsparse_bsric0_strided_batched_kernel_launch.hpp"
 #include "rocsparse_utility.hpp"
 
 rocsparse_status rocsparse::bsric0_analysis(rocsparse_handle          handle,

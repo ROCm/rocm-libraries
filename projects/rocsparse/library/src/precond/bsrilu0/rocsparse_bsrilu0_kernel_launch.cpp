@@ -52,10 +52,6 @@ rocsparse_status rocsparse::bsrilu0_kernel_launch(rocsparse_handle       handle,
     {
         launch = find_bsrilu0_kernel_2_8_launch(handle, bsrilu0_info, A);
     }
-    else if(block_dim <= 16)
-    {
-        launch = find_bsrilu0_kernel_9_32_launch(handle, bsrilu0_info, A);
-    }
     else if(block_dim <= 32)
     {
         launch = find_bsrilu0_kernel_9_32_launch(handle, bsrilu0_info, A);
