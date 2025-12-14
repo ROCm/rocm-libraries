@@ -1557,7 +1557,7 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     optSchedule = {
-    'SYNC': [[-1, 6, 10, 10, 27,27, 41, 41]], 
+    'SYNC': [[-1, 6, 10, 10, 27,27, 47, 47]], 
     'LRA0': [[0,1, 2,3,6,6,7]],
     'GRIncA': [[0, 0, 0, 1, 1, 1, 2, 3, 4]],
     'LRB0': [[9, 11,14, 19]],
@@ -1565,10 +1565,10 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     'GRA': [[12,12,13, 13, 16,16,18,18,20,20, 26,26, 27, 27]], 
     'LRSA': [[26]],
     'LRSB': [[26]],
-    'GRB': [[29,31,33,34,36,36,39,39]],
+    'GRB': [[29,29,33,34,36,36,40,40]],
     'LWSA': [[54]],
     'LWSB': [[54]],
-    'LRA1': [[32,43,44, 45, 46, 48,51]],
+    'LRA1': [[30,35,44, 45, 46, 48,51]],
     'LRB1': [[47,52,54,55]],
     'LCC': [[55, 55]],
     }
