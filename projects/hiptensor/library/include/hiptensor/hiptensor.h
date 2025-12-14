@@ -43,7 +43,7 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle);
 //! @brief Deallocates a hipTensor library handle.
 //! @param[out] handle The `hiptensorHandle_t` to be deallocated.
 //! @returns `HIPTENSOR_STATUS_SUCCESS` on successful deallocation, otherwise an error code.
-hiptensorStatus_t hiptensorDestroy(hiptensorHandle_t handle);
+hiptensorStatus_t hiptensorDestroy(hiptensorHandle_t& handle);
 
 //! @brief Resizes the plan cache associated with a hipTensor handle.
 //! @param[in] handle The hipTensor handle.

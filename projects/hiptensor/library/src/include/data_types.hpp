@@ -99,7 +99,11 @@ struct hiptensorHandle
     {
         planCache = pt_PlanCache;
     }
-
+    ~hiptensorHandle()
+    {
+        delete planCache;   // RAII cleanup
+        planCache = nullptr;
+    }
 private:
     hiptensor::HipDevice  mDevice;
     hiptensor::PlanCache* planCache = nullptr;

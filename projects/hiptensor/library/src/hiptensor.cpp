@@ -37,6 +37,10 @@
 hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
 {
     using hiptensor::Logger;
+
+    if(handle == nullptr)
+        return HIPTENSOR_STATUS_INVALID_VALUE;
+
     auto& logger = Logger::instance();
 
     // Log API access
@@ -45,19 +49,22 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         msg, sizeof(msg), "handle=0x%0*llX", 2 * (int)sizeof(void*), (unsigned long long)handle);
     logger->logAPITrace("hiptensorCreate", msg);
 
-    (*handle) = new hiptensorHandle;
-
-    if(*handle == nullptr)
+    // Strong exception safety during creation
+    std::unique_ptr<hiptensorHandle> tmpHandle;
+    try
+    {
+        tmpHandle = std::make_unique<hiptensorHandle>();
+    }
+    catch(const std::bad_alloc&)
     {
         auto errorCode = HIPTENSOR_STATUS_ALLOC_FAILED;
-        snprintf(msg,
-                 sizeof(msg),
-                 "Initialization Error : handle = nullptr (%s)",
-                 hiptensorGetErrorString(errorCode));
+        std::snprintf(msg,
+                      sizeof(msg),
+                      "Allocation failed (%s)",
+                      hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreate", msg);
-        return HIPTENSOR_STATUS_ALLOC_FAILED;
+        return errorCode;
     }
-
     auto hip_status = hipInit(0);
 
     if(hip_status == hipErrorInvalidDevice)
@@ -93,12 +100,18 @@ hiptensorStatus_t hiptensorCreate(hiptensorHandle_t* handle)
         logger->logAPITrace("hiptensorCreate", msg);
     }
 
+    // Transfer ownership to caller
+    *handle = tmpHandle.release();
     return HIPTENSOR_STATUS_SUCCESS;
 }
 
-hiptensorStatus_t hiptensorDestroy(hiptensorHandle_t handle)
+hiptensorStatus_t hiptensorDestroy(hiptensorHandle_t& handle)
 {
     using hiptensor::Logger;
+
+    if(handle == nullptr)
+        return HIPTENSOR_STATUS_SUCCESS;
+
     auto& logger = Logger::instance();
 
     // Log API access
