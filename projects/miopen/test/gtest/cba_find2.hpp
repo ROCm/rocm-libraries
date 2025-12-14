@@ -162,6 +162,7 @@ private:
                 }
                 MIOPEN_THROW(miopenStatusInternalError);
             },
+            []() { return miopen::FindOptions::Workspace{nullptr, 0}; },
             params);
     }
 
