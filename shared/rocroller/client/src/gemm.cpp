@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "rocRoller/Serialization/YAML.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -344,14 +345,18 @@ namespace rocRoller::Client::GEMMClient
         auto runtimeArgs = commandArgs.runtimeArguments();
 
         // Note: the lifetime of deviceScratch needs to exceed kernel executions
-        std::shared_ptr<uint8_t> deviceScratch;
+        std::shared_ptr<uint8_t>
+            deviceScratch[static_cast<size_t>(Operations::ScratchPolicy::Count)];
+
+        for(int i = 0; i < static_cast<int>(Operations::ScratchPolicy::Count); ++i)
         {
-            auto scratchSpaceRequired = commandKernel->scratchSpaceRequired(runtimeArgs);
+            auto policy               = static_cast<Operations::ScratchPolicy>(i);
+            auto scratchSpaceRequired = commandKernel->scratchSpaceRequired(policy, runtimeArgs);
             if(scratchSpaceRequired > 0)
             {
-                deviceScratch = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
+                deviceScratch[i] = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
                 commandArgs.setArgument(
-                    gemm->getScratchTag(), ArgumentType::Value, deviceScratch.get());
+                    gemm->getScratchTag(policy), ArgumentType::Value, deviceScratch[i].get());
             }
         }
 
@@ -456,6 +461,24 @@ namespace rocRoller::Client::GEMMClient
 
             auto [correct, rnorm] = validate<A, B, C, D>(
                 hostA, hostB, hostC, hostD, hostScaleA, hostScaleB, problemParams, arch);
+
+            // Verify ZeroedBeforeAndAfter scratch is all zeros after kernel
+            auto zeroedIdx = static_cast<size_t>(Operations::ScratchPolicy::ZeroedBeforeAndAfter);
+            if(deviceScratch[zeroedIdx])
+            {
+                auto zeroedSize = commandKernel->scratchSpaceRequired(
+                    Operations::ScratchPolicy::ZeroedBeforeAndAfter, runtimeArgs);
+                std::vector<uint8_t> zeroedResult(zeroedSize);
+                AssertFatal(hipMemcpy(zeroedResult.data(),
+                                      deviceScratch[zeroedIdx].get(),
+                                      zeroedSize,
+                                      hipMemcpyDeviceToHost)
+                            == (hipError_t)HIP_SUCCESS);
+                AssertFatal(
+                    std::all_of(
+                        zeroedResult.begin(), zeroedResult.end(), [](uint8_t v) { return v == 0; }),
+                    "ZeroedBeforeAndAfter scratch should be all zeros after kernel execution");
+            }
 
             result.checked = true;
             result.correct = correct;
