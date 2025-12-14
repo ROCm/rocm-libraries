@@ -254,6 +254,10 @@ TEST_P(IntegrationGpuBatchnormBackwardNhwcFp16, Correctness)
     runGraphTest(batchnorm::getToleranceBackward<half>(), TensorLayout::NHWC);
 }
 
+
+
+
+
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuBatchnormBackwardNhwcFp16,
                          testing::ValuesIn(getBnBwdTestCases()));
