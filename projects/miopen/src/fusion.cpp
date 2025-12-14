@@ -820,8 +820,17 @@ struct FusionFindParameters : PrimitiveFindParameters
 {
 };
 
+class FusionSolverFinderBase : public SolversFinderMixin<FusionDescription, FusionFindParameters>
+{
+public:
+    ~FusionSolverFinderBase() override = default;
+
+    virtual std::size_t GetWorkspaceSize(const ExecutionContext& ctx,
+                                         const FusionDescription& problem) const = 0;
+};
+
 template <class SolverContainer>
-class FusionSolverFinder : public SolversFinderMixin<FusionDescription, FusionFindParameters>
+class FusionSolverFinder : public FusionSolverFinderBase
 {
 public:
     explicit FusionSolverFinder(SolverContainer solvers_, const std::string& algo_name)
@@ -853,6 +862,22 @@ protected:
                                              invoke_ctx,
                                              std::numeric_limits<std::size_t>::max(),
                                              options);
+    }
+
+    std::size_t GetWorkspaceSize(const ExecutionContext& ctx,
+                                 const FusionDescription& problem) const override
+    {
+        const auto fusion_ctx = FusionContext(ctx);
+
+        auto workspace_sizes = solvers.GetWorkspaceSizes(fusion_ctx, problem);
+
+        return workspace_sizes.empty() ? 0
+                                       : std::max_element(workspace_sizes.begin(),
+                                                          workspace_sizes.end(),
+                                                          [](const auto& a, const auto& b) {
+                                                              return a.second < b.second;
+                                                          })
+                                             ->second;
     }
 
 private:
@@ -889,12 +914,28 @@ FindFusion(const ExecutionContext& ctx,
         [&]() {
             // fusion_ctx.use_dynamic_solutions_only = findMode.IsDynamicHybrid(fusion_ctx);
 
+            // During fusion search, workspace size is not constrained.
+            // To avoid allocating all available memory upfront, we calculate the required
+            // workspace size based on applicable solvers and allocate only what's needed.
+
+            const auto& finders = GetFusionSolverFinders();
+            auto workspace_size = std::size_t{0};
+            for(const auto& finder : finders)
+            {
+                if(const auto* fusion_finder =
+                       dynamic_cast<const FusionSolverFinderBase*>(finder.get()))
+                {
+                    workspace_size = std::max(workspace_size,
+                                              fusion_finder->GetWorkspaceSize(ctx, fusion_problem));
+                }
+            }
+
             // We need buffers for find, thus we lazily get them, possibly allocating.
             return FindCore(invoke_params(workspace_size),
                             ctx,
                             fusion_problem,
                             FusionFindParameters{},
-                            GetFusionSolverFinders(),
+                            finders,
                             options);
         },
         "fusion");
