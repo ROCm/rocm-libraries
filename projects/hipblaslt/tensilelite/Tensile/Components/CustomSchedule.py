@@ -1565,10 +1565,10 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
     'GRA': [[12,12,13, 13, 16,16,18,18,20,20, 26,26, 27, 27]], 
     'LRSA': [[26]],
     'LRSB': [[26]],
-    'GRB': [[29,31,33,34,36,38,40,40]],
+    'GRB': [[29,31,33,34,36,36,39,39]],
     'LWSA': [[54]],
     'LWSB': [[54]],
-    'LRA1': [[42,43,44, 45, 46, 48,51]],
+    'LRA1': [[32,43,44, 45, 46, 48,51]],
     'LRB1': [[47,52,54,55]],
     'LCC': [[55, 55]],
     }
@@ -1578,7 +1578,7 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
         SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write"),
         SWaitCnt(dscnt=1, vlcnt=-1, vscnt=-1, comment=""), # This is for GRA
         SBarrier(comment=""),
-        SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
+        SWaitCnt(dscnt=0, vlcnt=10, vscnt=-1, comment="wait for prior local read local write old=0, new=0 newLW=0 newLR=0"),
         SBarrier(comment=""),
         SWaitCnt(dscnt=-1, vlcnt=11, vscnt=-1, comment="wait for previous set of global reads"),
         SBarrier(comment="")
