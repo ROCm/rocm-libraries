@@ -71,6 +71,7 @@ struct SolutionIndexParameters
 {
     WorkGroupTileSize workgroupTile;
     bool              workgroupMapping;
+    bool              streamK;
 
     auto operator<=>(const SolutionIndexParameters& other) const = default;
 };

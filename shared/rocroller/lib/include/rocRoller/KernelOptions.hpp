@@ -33,6 +33,7 @@
 #include <string>
 
 #include <rocRoller/AssertOpKinds_fwd.hpp>
+#include <rocRoller/Operations/Scratch_fwd.hpp>
 #include <rocRoller/Utilities/EnumBitset.hpp>
 #include <rocRoller/Utilities/Settings_fwd.hpp>
 
@@ -48,6 +49,12 @@ namespace rocRoller
     const std::string SCRATCH = "SCRATCH";
     const std::string NUMWGS  = "numWGs";
     const std::string WGM     = "WGM";
+
+    // Helper to get scratch argument name for a specific policy
+    inline std::string getScratchName(Operations::ScratchPolicy policy)
+    {
+        return rocRoller::SCRATCH + "_" + Operations::toString(policy);
+    }
 
     class KernelOptions
     {

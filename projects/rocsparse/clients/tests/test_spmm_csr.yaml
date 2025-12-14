@@ -722,6 +722,8 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_csr_row_split]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
+  host_memory_gb: 16
+  device_memory_gb: 16
 
 - name: spmm_csr_file
   category: stress
@@ -744,6 +746,8 @@ Tests:
   orderC: [rocsparse_order_row, rocsparse_order_column]
   filename: [sme3Dc,
              bmwcra_1]
+  host_memory_gb: 32
+  device_memory_gb: 16
 
 - name: spmm_csr_file
   category: stress
@@ -765,3 +769,5 @@ Tests:
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row, rocsparse_order_column]
   filename: [shipsec1]
+  host_memory_gb: 32
+  device_memory_gb: 16
