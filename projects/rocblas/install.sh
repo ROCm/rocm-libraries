@@ -132,6 +132,10 @@ install_packages( )
                                       "make" "rpm-build"
                                       "python39" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" )
+  local library_dependencies_rhel_10=( "epel-release" "openssl-devel"
+                                      "make" "rpm-build"
+                                      "python3" "python3*-PyYAML" "python3-virtualenv"
+                                      "gcc-c++" )
   local library_dependencies_fedora=( "make" "rpm-build"
                                       "python34" "python3*-PyYAML" "python3-virtualenv"
                                       "gcc-c++" "libcxx-devel" )
@@ -158,6 +162,7 @@ install_packages( )
       library_dependencies_centos_8+=("wget" "openssl-devel")
       library_dependencies_rhel_8+=("wget" "openssl-devel")
       library_dependencies_rhel_9+=("wget" "openssl-devel")
+      library_dependencies_rhel_10+=("wget", "openssl-devel")
       library_dependencies_fedora+=("wget")
       library_dependencies_sles+=("wget" "libopenssl-devel")
     fi
@@ -170,6 +175,7 @@ install_packages( )
     library_dependencies_centos_8+=( "gcc-gfortran" "libgomp" )
     library_dependencies_rhel_8+=( "gcc-gfortran" "libgomp" )
     library_dependencies_rhel_9+=( "gcc-gfortran" "libgomp" )
+    library_dependencies_rhel_10+=( "gcc-gfortran" "libgomp" )
     library_dependencies_fedora+=( "gcc-gfortran" "libgomp" )
     library_dependencies_sles+=( "gcc-fortran" "libgomp1" )
 
@@ -180,6 +186,7 @@ install_packages( )
       library_dependencies_centos_8+=("wget")
       library_dependencies_rhel_8+=("wget")
       library_dependencies_rhel_9+=("wget")
+      library_dependencies_rhel_10+=("wget")
       library_dependencies_fedora+=("wget")
       library_dependencies_sles+=("wget")
     fi
@@ -203,7 +210,9 @@ install_packages( )
       ;;
 
     rhel)
-      if (( "${VERSION_ID%%.*}" >= "9" )); then
+      if (( "${VERSION_ID%%.*}" >= "10" )); then
+        install_yum_packages "${library_dependencies_rhel_10[@]}"
+      elif (( "${VERSION_ID%%.*}" >= "9" )); then
         install_yum_packages "${library_dependencies_rhel_9[@]}"
       elif (( "${VERSION_ID%%.*}" >= "8" )); then
         install_yum_packages "${library_dependencies_rhel_8[@]}"
