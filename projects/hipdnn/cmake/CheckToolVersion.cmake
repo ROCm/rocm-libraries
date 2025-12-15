@@ -25,8 +25,8 @@ endfunction()
 if(NOT WIN32)
     # Common search paths
     set(LLVM_TOOL_PATHS /usr/bin /usr/local/bin /opt/rocm/llvm/bin)
-    if(DEFINED ROCKM_PATH)
-        list(APPEND LLVM_TOOLS_PATHS ${ROCM_PATH}/llvm/bin)
+    if(DEFINED ROCM_PATH)
+        list(APPEND LLVM_TOOL_PATHS ${ROCM_PATH}/llvm/bin)
     endif()
 endif()
 

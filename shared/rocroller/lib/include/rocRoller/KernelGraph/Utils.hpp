@@ -319,11 +319,15 @@ namespace rocRoller
          *
          * @param size
          * @param varType
+         * @param policy The scratch policy to use for allocation
          * @param context
          * @return User
          */
-        rocRoller::KernelGraph::CoordinateGraph::User newScratchCoordinate(
-            Expression::ExpressionPtr size, VariableType varType, ContextPtr context);
+        rocRoller::KernelGraph::CoordinateGraph::User
+            newScratchCoordinate(Expression::ExpressionPtr size,
+                                 VariableType              varType,
+                                 Operations::ScratchPolicy policy,
+                                 ContextPtr                context);
 
         /**
          * @brief Replace operation with a new operation.

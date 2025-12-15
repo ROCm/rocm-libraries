@@ -358,7 +358,7 @@ void solution_map::generate_link_info()
 //////////////////////
 void solution_map::setup(const std::string& arch_name)
 {
-    // if we have speicified an explicit file-path, then read from it,
+    // if we have specified an explicit file-path, then read from it,
     std::string explict_read_path_str = rocfft_getenv("ROCFFT_READ_EXPLICIT_SOL_MAP_FILE");
     if(!explict_read_path_str.empty())
     {
