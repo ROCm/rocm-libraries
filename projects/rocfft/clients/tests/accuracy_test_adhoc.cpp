@@ -566,7 +566,7 @@ inline auto param_even_real_odd_base_index()
         {225, 225, 194},
     };
 
-    for(auto precision : precision_range_full)
+    for(auto precision : precision_range_sp_dp)
     {
         for(const auto& len : test_lengths)
         {
@@ -635,7 +635,7 @@ inline auto param_even_real_odd_base_index()
     return params;
 }
 
-INSTANTIATE_TEST_SUITE_P(DISABLED_adhoc_real_even_length_odd_base_index,
+INSTANTIATE_TEST_SUITE_P(adhoc_real_even_length_odd_base_index,
                          accuracy_test,
                          ::testing::ValuesIn(param_even_real_odd_base_index()),
                          accuracy_test::TestName);
