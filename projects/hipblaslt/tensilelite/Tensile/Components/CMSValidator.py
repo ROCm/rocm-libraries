@@ -1069,6 +1069,13 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
     is invalid. It may be a false positive.
     """
 
+    # Cases where validation is not currently possible.
+    if context.get("kernel", {}).get("UseF32XEmulation", False):
+        message = "CMS validation is currently disabled for F32X emulation"
+        printWarning(f"{message}")
+        return True, message
+
+    # Case where there was an explicit request to skip validation.
     if scheduleInfo.__skipValidation__:
         mt0 = context.get("kernel", {}).get("MacroTile0", "?")
         mt1 = context.get("kernel", {}).get("MacroTile1", "?")
@@ -1078,7 +1085,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
         transA = "T" if transA else "N"
         transB = "T" if transB else "N"
         message = f"CMS validation explicitly disabled. Running on kernel with MT0xMT1xDepthU = {mt0}x{mt1}x{du} {transA}{transB}"
-        print(f"WARNING: {message}")
+        printWarning(f"{message}")
 
         # All rules bypassed, considered valid.
         return True, message

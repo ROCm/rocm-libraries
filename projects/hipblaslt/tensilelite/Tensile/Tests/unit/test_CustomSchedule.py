@@ -211,7 +211,7 @@ class TestCustomSchedule:
         ( False,  False,        True,       1),
         ( False,   True,        True,       0)
         # fmt: on
-        ])        
+        ])
     def test_schedule_256x192x64_16bit(self, transA, transB, lds_tr_inst, tr_lds):
 
         """Tests the 256x192x64 16-bit TN schedule."""
@@ -456,7 +456,7 @@ class TestCustomSchedule:
         ( False,   True,       False,       0),
         ( False,  False,        True,       1)
         # fmt: on
-        ])  
+        ])
     def test_schedule_240x256x64_16bit(self, transA, transB, lds_tr_inst,  tr_lds):
         """Tests the 240x256x64 16-bit schedule."""
         NT = not transA and transB
@@ -490,7 +490,7 @@ class TestCustomSchedule:
         ( False,  False,        True,       1),
         ( False,   True,        True,       0)
         # fmt: on
-        ])        
+        ])
     def test_schedule_208x256x64_16bit(self, transA, transB, lds_tr_inst,  tr_lds):
         """Tests the 208x256x64 16-bit schedule."""
         kernel = create_base_kernel()
@@ -520,7 +520,7 @@ class TestCustomSchedule:
         "transA, transB, lds_tr_inst,  tr_lds", [
         (  True,  False,       False,       1),
         # fmt: on
-        ])        
+        ])
     def test_schedule_128x224x64_16bit(self, transA, transB, lds_tr_inst,  tr_lds):
         """Tests the 208x256x64 16-bit schedule."""
         kernel = create_base_kernel()
@@ -569,3 +569,18 @@ class TestCustomScheduleValidation:
             ScheduleInfo(None, None, invalid_schedule, None, None, None, None), {}
         )
         assert status == False
+
+    def test_f32_emulation_disabled(self):
+        kernel = create_base_kernel()
+        # Create what should be an invalid schedule:
+        invalid_schedule = {"P": [[3, 2, 1]]}
+        scheduleInfo = ScheduleInfo(
+            None, None, invalid_schedule, None, None, None, None
+        )
+        # Verify that this invalid schedule passes when this specific flag is true.
+        # Currently a warning message is printed.
+        status, message = isValid(scheduleInfo, {"kernel": {"UseF32XEmulation": True}})
+        assert status == True
+        assert message == "CMS validation is currently disabled for F32X emulation"
+
+
