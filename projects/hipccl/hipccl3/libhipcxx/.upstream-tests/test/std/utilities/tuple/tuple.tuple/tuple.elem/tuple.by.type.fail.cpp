@@ -34,7 +34,10 @@
 // However, other errors are expected, consider the expected-error and expected-note.
 // We found _LIBCUDACXX_HAS_STRING guard in other tests that include the header,
 // indicating that the header is not implemented yet.
-#include <cuda/std/string>
+#if defined(_LIBCUDACXX_HAS_STRING)
+#   include <cuda/std/string>
+#endif
+#include <cuda/std/__memory_>
 #include <cuda/std/tuple>
 
 #include "test_macros.h"
@@ -44,21 +47,25 @@ struct UserType
 
 void test_bad_index()
 {
-  cuda::std::tuple<long, long, char, cuda::std::string, char, UserType, char> t1;
-  TEST_IGNORE_NODISCARD cuda::std::get<int>(t1); // expected-error@tuple:* {{type not found}}
+  cuda::std::tuple<long, long, char,
+  #if defined(_LIBCUDACXX_HAS_STRING)
+    cuda::std::string,
+  #endif
+    char, UserType, char> t1;
+  TEST_IGNORE_NODISCARD cuda::std::get<int>(t1); // expected-error-re@tuple:* {{type not found}}
   TEST_IGNORE_NODISCARD cuda::std::get<long>(t1); // expected-note {{requested here}}
   TEST_IGNORE_NODISCARD cuda::std::get<char>(t1); // expected-note {{requested here}}
-                                                  // expected-error@tuple:* 2 {{type occurs more than once}}
+                                                  // expected-error-re@tuple:* 2 {{type occurs more than once}}
   cuda::std::tuple<> t0;
   TEST_IGNORE_NODISCARD cuda::std::get<char*>(t0); // expected-node {{requested here}}
-                                                   // expected-error@tuple:* 1 {{type not in empty type list}}
+                                                   // expected-error-re@tuple:* 1 {{type not in empty type list}}
 }
 
 void test_bad_return_type()
 {
   typedef cuda::std::unique_ptr<int> upint;
   cuda::std::tuple<upint> t;
-  upint p = cuda::std::get<upint>(t); // expected-error{{deleted copy constructor}}
+  upint p = cuda::std::get<upint>(t); // expected-error {{deleted constructor}}
 }
 
 int main(int, char**)

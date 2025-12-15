@@ -36,7 +36,7 @@
 // template <class ...Types> class variant;
 
 #include <cuda/std/cassert>
-#include <cuda/std/string>
+// #include <cuda/std/string>
 #include <cuda/std/type_traits>
 #include <cuda/std/variant>
 
@@ -46,7 +46,7 @@
 
 int main(int, char**)
 {
-  // expected-error-re@variant:* 3 {{{{(static_assert|static assertion)}} failed}}
+  // expected-error-re@variant:* 3 {{(static assert|static assertion) failed}}
   cuda::std::variant<int, void> v; // expected-note
   cuda::std::variant<int, const void> v2; // expected-note
   cuda::std::variant<const volatile void, int> v3; // expected-note
