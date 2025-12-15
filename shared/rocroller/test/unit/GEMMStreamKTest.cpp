@@ -94,15 +94,11 @@ namespace GEMMTests
         gemm.workgroupSizeX = 128;
         gemm.workgroupSizeY = 2;
 
-        auto isas = rocRoller::GPUArchitectureLibrary::getInstance()->getAllSupportedISAs();
-        for(auto isa : isas)
+        if(m_context->targetArchitecture().target().isRDNAGPU())
         {
-            if(isa.isRDNAGPU())
-            {
-                gemm.waveM = 16;
-                gemm.waveN = 16;
-                gemm.waveK = 16;
-            }
+            gemm.waveM = 16;
+            gemm.waveN = 16;
+            gemm.waveK = 16;
         }
 
         // assert that the number of output tiles is smaller than number of WGs
@@ -139,15 +135,11 @@ namespace GEMMTests
         gemm.m = gemm.macM * 8;
         gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
 
-        auto isas = rocRoller::GPUArchitectureLibrary::getInstance()->getAllSupportedISAs();
-        for(auto isa : isas)
+        if(m_context->targetArchitecture().target().isRDNAGPU())
         {
-            if(isa.isRDNAGPU())
-            {
-                gemm.waveM = 16;
-                gemm.waveN = 16;
-                gemm.waveK = 16;
-            }
+            gemm.waveM = 16;
+            gemm.waveN = 16;
+            gemm.waveK = 16;
         }
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
@@ -184,15 +176,11 @@ namespace GEMMTests
         gemm.m = gemm.macM * 8;
         gemm.n = gemm.macN * gemm.numWGs / 2 + gemm.macN * 2;
 
-        auto isas = rocRoller::GPUArchitectureLibrary::getInstance()->getAllSupportedISAs();
-        for(auto isa : isas)
+        if(m_context->targetArchitecture().target().isRDNAGPU())
         {
-            if(isa.isRDNAGPU())
-            {
-                gemm.waveM = 16;
-                gemm.waveN = 16;
-                gemm.waveK = 16;
-            }
+            gemm.waveM = 16;
+            gemm.waveN = 16;
+            gemm.waveK = 16;
         }
 
         ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, gemm.numWGs);
