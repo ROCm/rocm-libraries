@@ -29,6 +29,7 @@ function(hipdnn_add_dependency dep_name)
     set(multiValueArgs FIND_PACKAGE_ARGS PACKAGE_NAME COMPONENTS)
     cmake_parse_arguments(PARSE "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
     if(dep_name IN_LIST _hipdnn_all_local_deps)
+        message(VERBOSE "----------- Finding ${dep_name} -----------")
         if(NOT PARSE_NO_LOCAL)
             find_package(${dep_name} ${PARSE_VERSION} QUIET ${PARSE_FIND_PACKAGE_ARGS})
         endif()
@@ -56,16 +57,12 @@ endfunction()
 # Builds a dependency locally
 macro(_build_local)
     cmake_policy(PUSH)
-    if(BUILD_VERBOSE)
-        message(STATUS "=========== Adding ${dep_name} ===========")
-    endif()
+    message(VERBOSE "=========== Adding ${dep_name} ===========")
     _pushstate()
     set(CMAKE_MESSAGE_INDENT "${CMAKE_MESSAGE_INDENT}[${dep_name}] ")
     cmake_language(CALL _fetch_${dep_name} "${PARSE_VERSION}" "${PARSE_HASH}")
     _popstate()
-    if(BUILD_VERBOSE)
-        message(STATUS "=========== Added ${dep_name} ===========")
-    endif()
+    message(VERBOSE "=========== Added ${dep_name} ===========")
     cmake_policy(POP)
     foreach(VAR IN LISTS ${dep_name}_EXPORT_VARS)
         set(${VAR} ${${VAR}} PARENT_SCOPE)
@@ -102,7 +99,7 @@ endfunction()
 
 # Fetches FlatBuffers
 function(_fetch_flatbuffers VERSION HASH)
-    _determine_git_tag(v 23.1.21)
+    _determine_git_tag(v 25.9.23)
 
     _save_var(FLATBUFFERS_BUILD_FLATC)
     _save_var(FLATBUFFERS_INSTALL)
@@ -145,7 +142,7 @@ endfunction()
 
 # Fetches spdlog
 function(_fetch_spdlog VERSION HASH)
-    _determine_git_tag(v v1.15.2)
+    _determine_git_tag(v v1.15.3)
 
     fetchcontent_declare(
         spdlog
